@@ -1,15 +1,5 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
 interface DateRangePickerProps {
   startDate: string;
   endDate: string;
@@ -19,12 +9,6 @@ interface DateRangePickerProps {
   onViewTypeChange: (viewType: string) => void;
   onUpdate: () => void;
   onQuickRange: (range: string) => void;
-}
-
-function wrapOnChange(fn: (val: string) => void) {
-  return (value: string | null) => {
-    if (value) fn(value);
-  };
 }
 
 export function DateRangePicker({
@@ -37,57 +21,65 @@ export function DateRangePicker({
   onUpdate,
   onQuickRange,
 }: DateRangePickerProps) {
+  const quickRanges = [
+    { value: "7d", label: "7d" },
+    { value: "30d", label: "30d" },
+    { value: "90d", label: "90d" },
+    { value: "this-quarter", label: "This Q" },
+    { value: "last-quarter", label: "Last Q" },
+  ];
+
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-700">Interval:</span>
-        <Select value={viewType} onValueChange={wrapOnChange(onViewTypeChange)}>
-          <SelectTrigger className="w-[100px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="weekly">Weekly</SelectItem>
-            <SelectItem value="daily">Daily</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Interval</span>
+        <select
+          value={viewType}
+          onChange={(e) => onViewTypeChange(e.target.value)}
+          className="h-8 px-2 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="weekly">Weekly</option>
+          <option value="daily">Daily</option>
+        </select>
       </div>
 
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-700">From:</span>
-        <Input
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">From</span>
+        <input
           type="date"
           value={startDate}
           onChange={(e) => onStartDateChange(e.target.value)}
-          className="w-[150px]"
+          className="h-8 px-2 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
 
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-700">To:</span>
-        <Input
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">To</span>
+        <input
           type="date"
           value={endDate}
           onChange={(e) => onEndDateChange(e.target.value)}
-          className="w-[150px]"
+          className="h-8 px-2 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
 
-      <Button onClick={onUpdate}>Update</Button>
+      <button
+        onClick={onUpdate}
+        className="h-8 px-4 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+      >
+        Update
+      </button>
 
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-700">Quick:</span>
-        <Select onValueChange={wrapOnChange(onQuickRange)}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Select range" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="7d">Last 7 Days</SelectItem>
-            <SelectItem value="30d">Last 30 Days</SelectItem>
-            <SelectItem value="90d">Last 90 Days</SelectItem>
-            <SelectItem value="this-quarter">This Quarter</SelectItem>
-            <SelectItem value="last-quarter">Last Quarter</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex items-center gap-1 ml-2">
+        {quickRanges.map((range) => (
+          <button
+            key={range.value}
+            onClick={() => onQuickRange(range.value)}
+            className="h-7 px-2.5 text-xs font-medium rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            {range.label}
+          </button>
+        ))}
       </div>
     </div>
   );

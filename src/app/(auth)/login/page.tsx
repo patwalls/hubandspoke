@@ -2,10 +2,6 @@
 
 import { useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
 
 function getSupabase() {
@@ -43,45 +39,58 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Hub & Spoke</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Content Command Center
-          </p>
-        </CardHeader>
-        <CardContent>
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center mx-auto mb-4">
+            <span className="text-primary-foreground text-lg font-bold">H</span>
+          </div>
+          <h1 className="text-xl font-semibold text-foreground">Hub & Spoke</h1>
+          <p className="text-sm text-muted-foreground mt-1">Content Command Center</p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-6">
           <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
+            <div className="space-y-1.5">
+              <label htmlFor="email" className="text-xs font-medium text-foreground">
+                Email
+              </label>
+              <input
                 id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                className="w-full h-9 px-3 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder="you@example.com"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
+            <div className="space-y-1.5">
+              <label htmlFor="password" className="text-xs font-medium text-foreground">
+                Password
+              </label>
+              <input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                className="w-full h-9 px-3 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Your password"
               />
             </div>
             {error && (
-              <p className="text-sm text-red-600">{error}</p>
+              <p className="text-xs text-destructive">{error}</p>
             )}
-            <Button type="submit" className="w-full" disabled={loading}>
+            <button
+              type="submit"
+              className="w-full h-9 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              disabled={loading}
+            >
               {loading ? "Signing in..." : "Sign In"}
-            </Button>
+            </button>
           </form>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

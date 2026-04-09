@@ -24,16 +24,6 @@ function formatValue(value: number, metricKey: MetricKey): string {
   return value.toString();
 }
 
-function getCellColor(value: number, metricKey: MetricKey): string {
-  if (value === 0) return "text-gray-300";
-  if (metricKey === "production") {
-    if (value >= 5) return "text-green-600 font-semibold";
-    if (value >= 3) return "text-blue-600";
-    return "text-gray-700";
-  }
-  return "text-gray-700";
-}
-
 export function PeriodTable({
   title,
   description,
@@ -46,10 +36,8 @@ export function PeriodTable({
   const data = metrics[activeTab] || {};
   const rows = Object.keys(data).sort();
 
-  // Calculate totals per row
   const rowTotals: Record<string, number> = {};
   rows.forEach((row) => {
-    const values = Object.values(data[row] || {});
     if (activeTab === "viewsPerPost") {
       const prodData = metrics["production"]?.[row] || {};
       const viewsData = metrics["views"]?.[row] || {};
@@ -57,40 +45,33 @@ export function PeriodTable({
       const totalViews = Object.values(viewsData).reduce((a, b) => a + b, 0);
       rowTotals[row] = totalProd > 0 ? Math.round(totalViews / totalProd) : 0;
     } else {
-      rowTotals[row] = values.reduce((a, b) => a + b, 0);
+      rowTotals[row] = Object.values(data[row] || {}).reduce((a, b) => a + b, 0);
     }
   });
 
-  // Calculate period totals (column totals)
   const periodTotals: Record<string, number> = {};
   periods.forEach((p) => {
     if (activeTab === "viewsPerPost") {
       const totalProd = rows.reduce(
-        (sum, row) => sum + (metrics["production"]?.[row]?.[p.label] || 0),
-        0
+        (sum, row) => sum + (metrics["production"]?.[row]?.[p.label] || 0), 0
       );
       const totalViews = rows.reduce(
-        (sum, row) => sum + (metrics["views"]?.[row]?.[p.label] || 0),
-        0
+        (sum, row) => sum + (metrics["views"]?.[row]?.[p.label] || 0), 0
       );
       periodTotals[p.label] = totalProd > 0 ? Math.round(totalViews / totalProd) : 0;
     } else {
       periodTotals[p.label] = rows.reduce(
-        (sum, row) => sum + (data[row]?.[p.label] || 0),
-        0
+        (sum, row) => sum + (data[row]?.[p.label] || 0), 0
       );
     }
   });
 
-  // Grand total
   let grandTotal: number;
   if (activeTab === "viewsPerPost") {
-    const totalProd = Object.values(rowTotals).length > 0
-      ? rows.reduce((sum, row) => {
-          const prodData = metrics["production"]?.[row] || {};
-          return sum + Object.values(prodData).reduce((a, b) => a + b, 0);
-        }, 0)
-      : 0;
+    const totalProd = rows.reduce((sum, row) => {
+      const prodData = metrics["production"]?.[row] || {};
+      return sum + Object.values(prodData).reduce((a, b) => a + b, 0);
+    }, 0);
     const totalViews = rows.reduce((sum, row) => {
       const viewsData = metrics["views"]?.[row] || {};
       return sum + Object.values(viewsData).reduce((a, b) => a + b, 0);
@@ -101,21 +82,21 @@ export function PeriodTable({
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-        <p className="text-sm text-gray-500">{description}</p>
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="px-5 py-4 border-b border-border">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
 
-      <div className="px-4 py-2 border-b border-gray-100 flex gap-1">
+      <div className="px-5 py-2 border-b border-border flex gap-1 bg-accent/30">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
               activeTab === tab.key
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent"
             }`}
           >
             {tab.label}
@@ -124,21 +105,21 @@ export function PeriodTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50">
-              <th className="sticky left-0 bg-gray-50 px-4 py-2 text-left font-medium text-gray-600 min-w-[160px] z-10">
+            <tr className="border-b border-border bg-accent/50">
+              <th className="sticky left-0 bg-accent/50 px-4 py-2.5 text-left font-medium text-muted-foreground min-w-[180px] z-10 font-mono uppercase tracking-wider text-[10px]">
                 Metric
               </th>
               {periods.map((p) => (
                 <th
                   key={p.label}
-                  className="px-3 py-2 text-center font-medium text-gray-600 min-w-[60px]"
+                  className="px-2 py-2.5 text-center font-medium text-muted-foreground min-w-[52px] font-mono uppercase tracking-wider text-[10px]"
                 >
                   {p.label}
                 </th>
               ))}
-              <th className="px-3 py-2 text-center font-semibold text-gray-800 min-w-[70px] bg-gray-100">
+              <th className="px-3 py-2.5 text-center font-medium text-foreground min-w-[64px] bg-accent font-mono uppercase tracking-wider text-[10px]">
                 Total
               </th>
             </tr>
@@ -147,9 +128,9 @@ export function PeriodTable({
             {rows.map((row) => (
               <tr
                 key={row}
-                className="border-b border-gray-100 hover:bg-gray-50"
+                className="border-b border-border/50 hover:bg-accent/30 transition-colors"
               >
-                <td className="sticky left-0 bg-white px-4 py-2 font-medium text-gray-800 z-10">
+                <td className="sticky left-0 bg-card px-4 py-2 text-sm font-medium text-foreground z-10">
                   {row}
                 </td>
                 {periods.map((p) => {
@@ -157,31 +138,34 @@ export function PeriodTable({
                   return (
                     <td
                       key={p.label}
-                      className={`px-3 py-2 text-center tabular-nums ${getCellColor(value, activeTab)}`}
+                      className={`px-2 py-2 text-center tabular-nums ${
+                        value === 0
+                          ? "text-border"
+                          : "text-foreground"
+                      }`}
                     >
                       {formatValue(value, activeTab)}
                     </td>
                   );
                 })}
-                <td className="px-3 py-2 text-center font-semibold text-gray-900 bg-gray-50 tabular-nums">
+                <td className="px-3 py-2 text-center font-semibold text-foreground bg-accent/30 tabular-nums">
                   {formatValue(rowTotals[row], activeTab)}
                 </td>
               </tr>
             ))}
-            {/* Totals row */}
-            <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
-              <td className="sticky left-0 bg-gray-50 px-4 py-2 text-gray-800 z-10">
+            <tr className="border-t-2 border-border bg-accent/50 font-semibold">
+              <td className="sticky left-0 bg-accent/50 px-4 py-2 text-sm text-foreground z-10 font-mono uppercase tracking-wider text-[10px]">
                 Total
               </td>
               {periods.map((p) => (
                 <td
                   key={p.label}
-                  className="px-3 py-2 text-center text-gray-800 tabular-nums"
+                  className="px-2 py-2 text-center text-foreground tabular-nums"
                 >
                   {formatValue(periodTotals[p.label], activeTab)}
                 </td>
               ))}
-              <td className="px-3 py-2 text-center text-gray-900 bg-gray-100 tabular-nums">
+              <td className="px-3 py-2 text-center text-foreground bg-accent tabular-nums">
                 {formatValue(grandTotal, activeTab)}
               </td>
             </tr>

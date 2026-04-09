@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export function DashboardNav({ userEmail }: { userEmail: string }) {
   const pathname = usePathname();
+
   async function handleSignOut() {
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -23,23 +23,33 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
   ];
 
   return (
-    <header className="bg-white border-b border-gray-200">
-      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-14">
-          <div className="flex items-center gap-8">
-            <Link href="/" className="text-lg font-bold text-gray-900">
-              Hub & Spoke
+    <header className="border-b border-border bg-card">
+      <div className="max-w-[1600px] mx-auto px-6">
+        <div className="flex items-center justify-between h-12">
+          <div className="flex items-center gap-6">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded bg-primary flex items-center justify-center">
+                <span className="text-primary-foreground text-xs font-bold">H</span>
+              </div>
+              <span className="text-sm font-semibold text-foreground">
+                Hub & Spoke
+              </span>
             </Link>
+            <span className="text-border">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <path d="M16 3.549L7.12 20.600" />
+              </svg>
+            </span>
             <nav className="flex items-center gap-1">
               {links.map((link) => (
                 <Link
                   key={link.href}
                   href={link.href}
                   className={cn(
-                    "px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                    "px-3 py-1.5 rounded-md text-sm transition-colors",
                     pathname === link.href
-                      ? "bg-gray-100 text-gray-900"
-                      : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+                      ? "bg-accent text-foreground font-medium"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent"
                   )}
                 >
                   {link.label}
@@ -47,11 +57,14 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-500">{userEmail}</span>
-            <Button variant="ghost" size="sm" onClick={handleSignOut}>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">{userEmail}</span>
+            <button
+              onClick={handleSignOut}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
               Sign Out
-            </Button>
+            </button>
           </div>
         </div>
       </div>

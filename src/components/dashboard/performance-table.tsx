@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import type { ProductionItem } from "@/types";
-import { Badge } from "@/components/ui/badge";
 
 interface PerformanceTableProps {
   items: ProductionItem[];
@@ -38,54 +37,47 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
     if (aVal == null) return 1;
     if (bVal == null) return -1;
     if (typeof aVal === "string" && typeof bVal === "string") {
-      return sortDir === "asc"
-        ? aVal.localeCompare(bVal)
-        : bVal.localeCompare(aVal);
+      return sortDir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
     }
     return sortDir === "asc"
       ? (aVal as number) - (bVal as number)
       : (bVal as number) - (aVal as number);
   });
 
-  function SortHeader({
-    label,
-    sortKeyName,
-  }: {
-    label: string;
-    sortKeyName: SortKey;
-  }) {
+  function SortHeader({ label, sortKeyName }: { label: string; sortKeyName: SortKey }) {
+    const isActive = sortKey === sortKeyName;
     return (
       <th
-        className="px-3 py-2 text-left font-medium text-gray-600 cursor-pointer hover:text-gray-900 select-none whitespace-nowrap"
+        className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground cursor-pointer hover:text-foreground select-none whitespace-nowrap transition-colors"
         onClick={() => handleSort(sortKeyName)}
       >
-        {label}
-        {sortKey === sortKeyName && (
-          <span className="ml-1">{sortDir === "asc" ? "\u2191" : "\u2193"}</span>
-        )}
+        <span className="inline-flex items-center gap-1">
+          {label}
+          {isActive && (
+            <span className="text-foreground">{sortDir === "asc" ? "\u2191" : "\u2193"}</span>
+          )}
+        </span>
       </th>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900">
-          Content Performance
-        </h3>
-        <p className="text-sm text-gray-500">
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="px-5 py-4 border-b border-border">
+        <h3 className="text-sm font-semibold text-foreground">Content Performance</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
           Individual content items with detailed metrics
         </p>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50">
+            <tr className="border-b border-border bg-accent/50">
               <SortHeader label="Title" sortKeyName="title" />
-              <th className="px-3 py-2 text-left font-medium text-gray-600">
+              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                 Platform
               </th>
-              <th className="px-3 py-2 text-left font-medium text-gray-600">
+              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                 Format
               </th>
               <SortHeader label="Published" sortKeyName="publishedDate" />
@@ -101,17 +93,17 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
             {sorted.map((item) => (
               <tr
                 key={item.id}
-                className="border-b border-gray-100 hover:bg-gray-50"
+                className="border-b border-border/50 hover:bg-accent/30 transition-colors"
               >
-                <td className="px-3 py-2 max-w-[300px]">
-                  <div className="flex flex-col">
-                    <span className="font-medium text-gray-900 truncate">
+                <td className="px-3 py-2 max-w-[280px]">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium text-foreground truncate">
                       {item.publishedLink ? (
                         <a
                           href={item.publishedLink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="hover:text-indigo-600 hover:underline"
+                          className="hover:text-primary hover:underline transition-colors"
                         >
                           {item.title || "(Untitled)"}
                         </a>
@@ -120,7 +112,7 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
                       )}
                     </span>
                     {item.utmCampaign && (
-                      <span className="text-xs text-gray-400">
+                      <span className="text-[10px] text-muted-foreground font-mono">
                         {item.utmCampaign}
                       </span>
                     )}
@@ -129,41 +121,42 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-1">
                     {item.platform?.map((p) => (
-                      <Badge key={p} variant="secondary" className="text-xs">
+                      <span
+                        key={p}
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                      >
                         {p}
-                      </Badge>
+                      </span>
                     ))}
                   </div>
                 </td>
-                <td className="px-3 py-2 text-gray-600">{item.format || "-"}</td>
-                <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                <td className="px-3 py-2 text-sm text-muted-foreground">{item.format || "-"}</td>
+                <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
                   {item.publishedDate || "-"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
                   {item.views?.toLocaleString() || "-"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
                   {item.likes?.toLocaleString() || "-"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
                   {item.comments?.toLocaleString() || "-"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
                   {item.clicks?.toLocaleString() || "-"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
                   {item.leads || "-"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-700">
-                  {item.salesAmount
-                    ? `$${item.salesAmount.toLocaleString()}`
-                    : "-"}
+                <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                  {item.salesAmount ? `$${item.salesAmount.toLocaleString()}` : "-"}
                 </td>
               </tr>
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground text-sm">
                   No content items found for the selected filters.
                 </td>
               </tr>

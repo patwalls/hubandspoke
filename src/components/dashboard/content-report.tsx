@@ -8,7 +8,6 @@ import { Filters } from "./filters";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable } from "./period-table";
 import { PerformanceTable } from "./performance-table";
-import { Button } from "@/components/ui/button";
 import { getQuickRange } from "@/lib/utils/dates";
 import type { ContentReportData } from "@/types";
 
@@ -125,28 +124,51 @@ export function ContentReport() {
     }
   }
 
-  // Find the current period label (last period that includes today)
   const currentPeriodLabel = data?.periods?.length
     ? data.periods[data.periods.length - 1]?.label
     : null;
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">
-          Content Command Center
-        </h1>
-        <Button
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">
+            Content Command Center
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Track content production across all platforms
+          </p>
+        </div>
+        <button
           onClick={handleSync}
           disabled={syncing}
-          variant="outline"
-          size="sm"
+          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md border border-border bg-card text-foreground hover:bg-accent transition-colors disabled:opacity-50"
         >
-          {syncing ? "Syncing..." : "Sync from Notion"}
-        </Button>
+          {syncing ? (
+            <>
+              <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Syncing...
+            </>
+          ) : (
+            <>
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                <path d="M16 16h5v5" />
+              </svg>
+              Sync from Notion
+            </>
+          )}
+        </button>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+      {/* Controls */}
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <DateRangePicker
           startDate={startDate}
           endDate={endDate}
@@ -164,22 +186,22 @@ export function ContentReport() {
             selectedPlatform={selectedPlatform}
             selectedFormat={selectedFormat}
             selectedSource={selectedSource}
-            onPlatformChange={(p) => {
-              setSelectedPlatform(p);
-            }}
-            onFormatChange={(f) => {
-              setSelectedFormat(f);
-            }}
-            onSourceChange={(s) => {
-              setSelectedSource(s);
-            }}
+            onPlatformChange={setSelectedPlatform}
+            onFormatChange={setSelectedFormat}
+            onSourceChange={setSelectedSource}
           />
         )}
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="text-gray-400">Loading report...</div>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <span className="text-sm">Loading report...</span>
+          </div>
         </div>
       ) : data ? (
         <>
@@ -196,7 +218,7 @@ export function ContentReport() {
                 ? "Content Production (by Format)"
                 : "Content Production (by Platform)"
             }
-            description="Track content created across all platforms. Weekly goal: 77 posts."
+            description="Track content created across all platforms."
             periods={data.periods}
             metrics={data.byPlatform}
             tabs={PLATFORM_TABS}
@@ -215,8 +237,10 @@ export function ContentReport() {
           <PerformanceTable items={data.items} />
         </>
       ) : (
-        <div className="text-center py-20 text-gray-400">
-          No data available. Try syncing from Notion.
+        <div className="text-center py-20">
+          <p className="text-muted-foreground text-sm">
+            No data available. Try syncing from Notion.
+          </p>
         </div>
       )}
     </div>

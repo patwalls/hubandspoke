@@ -1,19 +1,5 @@
 "use client";
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-function wrapOnChange(fn: (val: string) => void) {
-  return (value: string | null) => {
-    if (value) fn(value);
-  };
-}
-
 interface FiltersProps {
   platforms: string[];
   formats: string[];
@@ -36,53 +22,46 @@ export function Filters({
   onSourceChange,
 }: FiltersProps) {
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-700">Platform:</span>
-        <Select value={selectedPlatform} onValueChange={wrapOnChange(onPlatformChange)}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Platforms</SelectItem>
-            {platforms.map((p) => (
-              <SelectItem key={p} value={p}>
-                {p}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border/50">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Platform</span>
+        <select
+          value={selectedPlatform}
+          onChange={(e) => onPlatformChange(e.target.value)}
+          className="h-8 px-2 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring min-w-[160px]"
+        >
+          <option value="all">All Platforms</option>
+          {platforms.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
       </div>
 
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-700">Format:</span>
-        <Select value={selectedFormat} onValueChange={wrapOnChange(onFormatChange)}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Formats</SelectItem>
-            {formats.map((f) => (
-              <SelectItem key={f} value={f}>
-                {f}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Format</span>
+        <select
+          value={selectedFormat}
+          onChange={(e) => onFormatChange(e.target.value)}
+          className="h-8 px-2 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring min-w-[160px]"
+        >
+          <option value="all">All Formats</option>
+          {formats.map((f) => (
+            <option key={f} value={f}>{f}</option>
+          ))}
+        </select>
       </div>
 
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-700">Source:</span>
-        <Select value={selectedSource} onValueChange={wrapOnChange(onSourceChange)}>
-          <SelectTrigger className="w-[130px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="internal">Internal</SelectItem>
-            <SelectItem value="external">External</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Source</span>
+        <select
+          value={selectedSource}
+          onChange={(e) => onSourceChange(e.target.value)}
+          className="h-8 px-2 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="all">All</option>
+          <option value="internal">Internal</option>
+          <option value="external">External</option>
+        </select>
       </div>
     </div>
   );
