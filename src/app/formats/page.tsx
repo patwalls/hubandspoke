@@ -234,7 +234,7 @@ export default function FormatsPage() {
 
       <div className="flex items-center gap-2">
         <Label className="text-sm text-gray-600">Filter by channel:</Label>
-        <Select value={channelFilter} onValueChange={setChannelFilter}>
+        <Select value={channelFilter} onValueChange={(v) => setChannelFilter(v ?? 'all')}>
           <SelectTrigger className="w-[200px]">
             <SelectValue />
           </SelectTrigger>
