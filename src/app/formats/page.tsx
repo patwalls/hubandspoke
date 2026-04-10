@@ -12,6 +12,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface FormatRow {
   id: string;
@@ -44,6 +51,7 @@ export default function FormatsPage() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFormat, setEditingFormat] = useState<FormatRow | null>(null);
+  const [channelFilter, setChannelFilter] = useState<string>("all");
 
   // Form state
   const [name, setName] = useState("");
@@ -130,6 +138,11 @@ export default function FormatsPage() {
         : [...prev, formatId]
     );
   }
+
+  const filteredFormats =
+    channelFilter === "all"
+      ? formats
+      : formats.filter((f) => f.channels?.includes(channelFilter));
 
   if (loading) {
     return (
@@ -219,6 +232,23 @@ export default function FormatsPage() {
         </Dialog>
       </div>
 
+      <div className="flex items-center gap-2">
+        <Label className="text-sm text-gray-600">Filter by channel:</Label>
+        <Select value={channelFilter} onValueChange={setChannelFilter}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All channels</SelectItem>
+            {ALL_CHANNELS.map((ch) => (
+              <SelectItem key={ch} value={ch}>
+                {ch}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -241,7 +271,7 @@ export default function FormatsPage() {
             </tr>
           </thead>
           <tbody>
-            {formats.map((f) => (
+            {filteredFormats.map((f) => (
               <tr
                 key={f.id}
                 className="border-b border-gray-100 hover:bg-gray-50"
@@ -296,13 +326,15 @@ export default function FormatsPage() {
                 </td>
               </tr>
             ))}
-            {formats.length === 0 && (
+            {filteredFormats.length === 0 && (
               <tr>
                 <td
                   colSpan={5}
                   className="px-4 py-8 text-center text-gray-400"
                 >
-                  No formats yet. Click "Add Format" to create one.
+                  {formats.length === 0
+                    ? 'No formats yet. Click "Add Format" to create one.'
+                    : `No formats for ${channelFilter}.`}
                 </td>
               </tr>
             )}
