@@ -63,7 +63,7 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <div className="px-5 py-4 border-b border-border">
+      <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
         <h3 className="text-sm font-semibold text-foreground">Content Performance</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
           Individual content items with detailed metrics
@@ -95,7 +95,7 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
                 key={item.id}
                 className="border-b border-border/50 hover:bg-accent/30 transition-colors"
               >
-                <td className="px-3 py-2 max-w-[280px]">
+                <td className="px-3 py-2 max-w-[200px] sm:max-w-[280px]">
                   <div className="flex flex-col gap-0.5">
                     <span className="text-sm font-medium text-foreground truncate">
                       {item.publishedLink ? (

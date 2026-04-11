@@ -83,12 +83,12 @@ export function PeriodTable({
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <div className="px-5 py-4 border-b border-border">
+      <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
         <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
 
-      <div className="px-5 py-2 border-b border-border flex gap-1 bg-accent/30">
+      <div className="px-3 sm:px-5 py-2 border-b border-border flex gap-1 bg-accent/30 overflow-x-auto">
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -108,7 +108,7 @@ export function PeriodTable({
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-border bg-accent/50">
-              <th className="sticky left-0 bg-accent/50 px-4 py-2.5 text-left font-medium text-muted-foreground min-w-[180px] z-10 font-mono uppercase tracking-wider text-[10px]">
+              <th className="sticky left-0 bg-accent/50 px-3 sm:px-4 py-2.5 text-left font-medium text-muted-foreground min-w-[120px] sm:min-w-[180px] z-10 font-mono uppercase tracking-wider text-[10px]">
                 Metric
               </th>
               {periods.map((p) => (
@@ -130,7 +130,7 @@ export function PeriodTable({
                 key={row}
                 className="border-b border-border/50 hover:bg-accent/30 transition-colors"
               >
-                <td className="sticky left-0 bg-card px-4 py-2 text-sm font-medium text-foreground z-10">
+                <td className="sticky left-0 bg-card px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-foreground z-10">
                   {row}
                 </td>
                 {periods.map((p) => {
@@ -154,7 +154,7 @@ export function PeriodTable({
               </tr>
             ))}
             <tr className="border-t-2 border-border bg-accent/50 font-semibold">
-              <td className="sticky left-0 bg-accent/50 px-4 py-2 text-sm text-foreground z-10 font-mono uppercase tracking-wider text-[10px]">
+              <td className="sticky left-0 bg-accent/50 px-3 sm:px-4 py-2 text-xs sm:text-sm text-foreground z-10 font-mono uppercase tracking-wider text-[10px]">
                 Total
               </td>
               {periods.map((p) => (

@@ -24,18 +24,18 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
 
   return (
     <header className="border-b border-border bg-card">
-      <div className="max-w-[1600px] mx-auto px-6">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-12">
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3 sm:gap-6">
             <Link href="/" className="flex items-center gap-2">
               <div className="w-6 h-6 rounded bg-primary flex items-center justify-center">
                 <span className="text-primary-foreground text-xs font-bold">H</span>
               </div>
-              <span className="text-sm font-semibold text-foreground">
+              <span className="text-sm font-semibold text-foreground hidden sm:inline">
                 Hub & Spoke
               </span>
             </Link>
-            <span className="text-border">
+            <span className="text-border hidden sm:inline">
               <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" fill="none">
                 <path d="M16 3.549L7.12 20.600" />
               </svg>
@@ -57,8 +57,8 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">{userEmail}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[150px]">{userEmail}</span>
             <button
               onClick={handleSignOut}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors"

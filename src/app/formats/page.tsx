@@ -153,19 +153,19 @@ export default function FormatsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Formats</h1>
-          <p className="text-sm text-gray-500">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Formats</h1>
+          <p className="text-xs sm:text-sm text-gray-500">
             Manage content format templates and repurpose chains.
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger>
-            <Button onClick={openCreate}>Add Format</Button>
+            <Button onClick={openCreate} className="w-full sm:w-auto">Add Format</Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {editingFormat ? "Edit Format" : "New Format"}
@@ -232,10 +232,10 @@ export default function FormatsPage() {
         </Dialog>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
         <Label className="text-sm text-gray-600">Filter by channel:</Label>
         <Select value={channelFilter} onValueChange={(v) => setChannelFilter(v ?? 'all')}>
-          <SelectTrigger className="w-[200px]">
+          <SelectTrigger className="w-full sm:w-[200px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -249,7 +249,44 @@ export default function FormatsPage() {
         </Select>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      {/* Mobile card view */}
+      <div className="sm:hidden space-y-3">
+        {filteredFormats.map((f) => (
+          <div key={f.id} className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+            <div className="flex items-start justify-between">
+              <span className="font-medium text-gray-900">{f.name}</span>
+              <div className="flex gap-1">
+                <Button variant="ghost" size="sm" onClick={() => openEdit(f)}>Edit</Button>
+                <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(f.id)}>Delete</Button>
+              </div>
+            </div>
+            {f.channels?.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {f.channels.map((ch) => (
+                  <Badge key={ch} variant="secondary" className="text-xs">{ch}</Badge>
+                ))}
+              </div>
+            )}
+            {f.event && <p className="text-xs text-gray-500">Event: {f.event}</p>}
+            {f.repurposeTargetIds?.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {f.repurposeTargetIds.map((targetId) => {
+                  const target = formats.find((ff) => ff.id === targetId);
+                  return target ? <Badge key={targetId} variant="outline" className="text-xs">{target.name}</Badge> : null;
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+        {filteredFormats.length === 0 && (
+          <div className="py-8 text-center text-gray-400 text-sm">
+            {formats.length === 0 ? 'No formats yet. Click "Add Format" to create one.' : `No formats for ${channelFilter}.`}
+          </div>
+        )}
+      </div>
+
+      {/* Desktop table view */}
+      <div className="hidden sm:block bg-white rounded-lg border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
