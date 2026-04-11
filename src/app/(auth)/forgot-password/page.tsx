@@ -1,0 +1,95 @@
+"use client";
+
+import { useState } from "react";
+import { createBrowserClient } from "@supabase/ssr";
+import Link from "next/link";
+
+function getSupabase() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+  );
+}
+
+export default function ForgotPasswordPage() {
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  async function handleReset(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const supabase = getSupabase();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+    });
+
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+    } else {
+      setSent(true);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center mx-auto mb-4">
+            <span className="text-primary-foreground text-lg font-bold">H</span>
+          </div>
+          <h1 className="text-xl font-semibold text-foreground">Hub & Spoke</h1>
+          <p className="text-sm text-muted-foreground mt-1">Reset your password</p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-6">
+          {sent ? (
+            <div className="text-center space-y-3">
+              <p className="text-sm text-foreground">Check your email for a password reset link.</p>
+              <Link href="/login" className="text-xs text-primary hover:underline">
+                Back to sign in
+              </Link>
+            </div>
+          ) : (
+            <form onSubmit={handleReset} className="space-y-4">
+              <div className="space-y-1.5">
+                <label htmlFor="email" className="text-xs font-medium text-foreground">
+                  Email
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="w-full h-9 px-3 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  placeholder="you@example.com"
+                />
+              </div>
+              {error && (
+                <p className="text-xs text-destructive">{error}</p>
+              )}
+              <button
+                type="submit"
+                className="w-full h-9 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                disabled={loading}
+              >
+                {loading ? "Sending..." : "Send Reset Link"}
+              </button>
+              <p className="text-xs text-center text-muted-foreground">
+                Remember your password?{" "}
+                <Link href="/login" className="text-primary hover:underline">
+                  Sign in
+                </Link>
+              </p>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

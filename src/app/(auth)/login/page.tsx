@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 function getSupabase() {
   return createBrowserClient(
@@ -88,6 +89,14 @@ export default function LoginPage() {
             >
               {loading ? "Signing in..." : "Sign In"}
             </button>
+            <div className="flex items-center justify-between">
+              <Link href="/forgot-password" className="text-xs text-muted-foreground hover:text-primary">
+                Forgot password?
+              </Link>
+              <Link href="/signup" className="text-xs text-primary hover:underline">
+                Create account
+              </Link>
+            </div>
           </form>
         </div>
       </div>
