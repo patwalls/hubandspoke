@@ -24,7 +24,7 @@ export default function ForgotPasswordPage() {
 
     const supabase = getSupabase();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+      redirectTo: `https://hubandspoke-production.up.railway.app/auth/callback?next=/reset-password`,
     });
 
     if (error) {
