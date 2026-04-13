@@ -539,7 +539,7 @@ export function MATGDashboard() {
                 />
               )}
 
-              <PerformanceTable items={data.items} />
+              <PerformanceTable items={data.items} brand="matg" formats={data.formats} onPostCreated={fetchReport} />
             </>
           ) : (
             <div className="text-center py-20">

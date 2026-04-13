@@ -234,7 +234,7 @@ export function ContentReport() {
             />
           )}
 
-          <PerformanceTable items={data.items} />
+          <PerformanceTable items={data.items} brand="starter-story" formats={data.formats} onPostCreated={fetchReport} />
         </>
       ) : (
         <div className="text-center py-20">
