@@ -160,6 +160,7 @@ export async function syncMATGYouTube(): Promise<YouTubeSyncResult> {
           publishedDate,
           status: "Published",
           platform: ["YouTube"] as string[],
+          format: "Business Interview", // default pillar format — editable in dashboard
           brand: "matg" as const,
           publishedLink: video.url,
           views: video.viewCountInt || 0,

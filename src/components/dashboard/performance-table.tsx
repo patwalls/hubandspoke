@@ -18,6 +18,7 @@ type SortKey =
   | "salesAmount";
 
 export function PerformanceTable({ items }: PerformanceTableProps) {
+  const hasThumbnails = items.some((item) => item.thumbnail);
   const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -95,27 +96,36 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
                 key={item.id}
                 className="border-b border-border/50 hover:bg-accent/30 transition-colors"
               >
-                <td className="px-3 py-2 max-w-[200px] sm:max-w-[280px]">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium text-foreground truncate">
-                      {item.publishedLink ? (
-                        <a
-                          href={item.publishedLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:text-primary hover:underline transition-colors"
-                        >
-                          {item.title || "(Untitled)"}
-                        </a>
-                      ) : (
-                        item.title || "(Untitled)"
-                      )}
-                    </span>
-                    {item.utmCampaign && (
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        {item.utmCampaign}
-                      </span>
+                <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
+                  <div className="flex items-center gap-3">
+                    {hasThumbnails && item.thumbnail && (
+                      <img
+                        src={item.thumbnail}
+                        alt=""
+                        className="w-20 h-12 rounded object-cover shrink-0"
+                      />
                     )}
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <span className="text-sm font-medium text-foreground truncate">
+                        {item.publishedLink ? (
+                          <a
+                            href={item.publishedLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:text-primary hover:underline transition-colors"
+                          >
+                            {item.title || "(Untitled)"}
+                          </a>
+                        ) : (
+                          item.title || "(Untitled)"
+                        )}
+                      </span>
+                      {item.utmCampaign && (
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {item.utmCampaign}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </td>
                 <td className="px-3 py-2">

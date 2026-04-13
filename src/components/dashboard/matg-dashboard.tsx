@@ -1,8 +1,21 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { format, subDays } from "date-fns";
+import { DateRangePicker } from "./date-range-picker";
+import { Filters } from "./filters";
+import { MetricTiles } from "./metric-tiles";
+import { PeriodTable } from "./period-table";
+import { PerformanceTable } from "./performance-table";
+import { getQuickRange } from "@/lib/utils/dates";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import type { ContentReportData } from "@/types";
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
 interface FormatRow {
   id: string;
@@ -15,29 +28,6 @@ interface FormatRow {
   instructions: string | null;
   contentType: string | null;
   repurposeTargetIds: string[];
-}
-
-interface VideoItem {
-  id: string;
-  title: string;
-  youtubeId: string | null;
-  youtubeUrl: string | null;
-  thumbnail: string | null;
-  publishedDate: string | null;
-  views: number | null;
-  likes: number | null;
-  comments: number | null;
-  status: string | null;
-  platform: string[] | null;
-}
-
-interface MATGReport {
-  items: VideoItem[];
-  stats: {
-    totalVideos: number;
-    totalViews: number;
-    avgViews: number;
-  };
 }
 
 interface TriggerResult {
@@ -61,7 +51,20 @@ interface LastSyncInfo {
   itemsUpdated: number | null;
 }
 
-type SortKey = "title" | "publishedDate" | "views" | "likes" | "comments";
+const PLATFORM_TABS = [
+  { key: "production" as const, label: "Production" },
+  { key: "views" as const, label: "Views" },
+  { key: "leads" as const, label: "Leads" },
+  { key: "viewsPerPost" as const, label: "Views Per Post" },
+  { key: "sales" as const, label: "Sales" },
+];
+
+const FORMAT_TABS = [
+  { key: "production" as const, label: "Production" },
+  { key: "views" as const, label: "Views" },
+  { key: "leads" as const, label: "Leads" },
+  { key: "viewsPerPost" as const, label: "Views Per Post" },
+];
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -74,86 +77,110 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
+
 export function MATGDashboard() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const today = new Date();
+  const defaultStart = format(subDays(today, 90), "yyyy-MM-dd");
+  const defaultEnd = format(today, "yyyy-MM-dd");
+
+  // Report filter state
+  const [startDate, setStartDate] = useState(searchParams.get("startDate") || defaultStart);
+  const [endDate, setEndDate] = useState(searchParams.get("endDate") || defaultEnd);
+  const [viewType, setViewType] = useState(searchParams.get("viewType") || "weekly");
+  const [selectedPlatform, setSelectedPlatform] = useState(searchParams.get("platform") || "all");
+  const [selectedFormat, setSelectedFormat] = useState(searchParams.get("format") || "all");
+  const [selectedSource, setSelectedSource] = useState(searchParams.get("source") || "all");
+
+  // Data
+  const [data, setData] = useState<ContentReportData | null>(null);
   const [formats, setFormats] = useState<FormatRow[]>([]);
-  const [report, setReport] = useState<MATGReport | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Sync
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<LastSyncInfo | null>(null);
+
+  // Trigger
   const [triggering, setTriggering] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<TriggerResult | null>(null);
-  const [activeTab, setActiveTab] = useState<"content" | "pipeline">("content");
-  const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  const fetchData = useCallback(async () => {
+  // Tabs
+  const [activeTab, setActiveTab] = useState<"report" | "pipeline">("report");
+
+  /* ---------------------------------------------------------------- */
+  /*  Data fetching                                                    */
+  /* ---------------------------------------------------------------- */
+
+  const fetchReport = useCallback(async () => {
+    setLoading(true);
     try {
-      const [formatsRes, reportRes, syncInfoRes] = await Promise.all([
+      const params = new URLSearchParams({
+        startDate,
+        endDate,
+        viewType,
+        platform: selectedPlatform,
+        format: selectedFormat,
+        source: selectedSource,
+      });
+
+      const [reportRes, formatsRes, syncInfoRes] = await Promise.all([
+        fetch(`/api/reports/matg?${params}`),
         fetch("/api/formats?brand=matg"),
-        fetch("/api/reports/matg"),
         fetch("/api/sync/youtube"),
       ]);
-      const formatsData = await formatsRes.json();
       const reportData = await reportRes.json();
+      const formatsData = await formatsRes.json();
       const syncInfoData = await syncInfoRes.json();
+
+      setData(reportData);
       setFormats(formatsData);
-      setReport(reportData);
       setLastSync(syncInfoData.lastSync || null);
     } catch (err) {
       console.error("Failed to fetch data:", err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [startDate, endDate, viewType, selectedPlatform, selectedFormat, selectedSource]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchReport();
+  }, [fetchReport]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Helpers                                                          */
+  /* ---------------------------------------------------------------- */
 
   const pillarFormats = formats.filter((f) => (f.contentType || "pillar") === "pillar");
   const spokeFormats = formats.filter((f) => f.contentType === "repurposed");
 
-  function handleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDir(sortDir === "asc" ? "desc" : "asc");
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
+  function handleUpdate() {
+    const params = new URLSearchParams({
+      startDate,
+      endDate,
+      viewType,
+      platform: selectedPlatform,
+      format: selectedFormat,
+      source: selectedSource,
+    });
+    router.push(`/matg?${params.toString()}`);
+    fetchReport();
   }
 
-  function SortHeader({ label, sortKeyName, align }: { label: string; sortKeyName: SortKey; align?: string }) {
-    const isActive = sortKey === sortKeyName;
-    return (
-      <th
-        className={`px-3 py-2.5 font-mono uppercase tracking-wider text-[10px] text-muted-foreground cursor-pointer hover:text-foreground select-none whitespace-nowrap transition-colors ${align === "right" ? "text-right" : "text-left"}`}
-        onClick={() => handleSort(sortKeyName)}
-      >
-        <span className="inline-flex items-center gap-1">
-          {label}
-          {isActive && (
-            <span className="text-foreground">{sortDir === "asc" ? "↑" : "↓"}</span>
-          )}
-        </span>
-      </th>
-    );
-  }
-
-  const sortedVideos = [...(report?.items || [])].sort((a, b) => {
-    const aVal = a[sortKey];
-    const bVal = b[sortKey];
-    if (aVal == null && bVal == null) return 0;
-    if (aVal == null) return 1;
-    if (bVal == null) return -1;
-    if (typeof aVal === "string" && typeof bVal === "string") {
-      return sortDir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+  function handleQuickRange(range: string) {
+    const result = getQuickRange(range);
+    if (result) {
+      setStartDate(format(result.startDate, "yyyy-MM-dd"));
+      setEndDate(format(result.endDate, "yyyy-MM-dd"));
     }
-    return sortDir === "asc"
-      ? (aVal as number) - (bVal as number)
-      : (bVal as number) - (aVal as number);
-  });
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -161,21 +188,13 @@ export function MATGDashboard() {
     setSyncMessage(null);
     try {
       const res = await fetch("/api/sync/youtube", { method: "POST" });
-      const data = await res.json();
+      const result = await res.json();
 
-      if (data.skipped) {
-        setSyncMessage(data.message);
+      if (result.skipped) {
+        setSyncMessage(result.message);
       } else {
-        setSyncResult(data);
-        // Refresh report data and last sync info
-        const [reportRes, syncInfoRes] = await Promise.all([
-          fetch("/api/reports/matg"),
-          fetch("/api/sync/youtube"),
-        ]);
-        const reportData = await reportRes.json();
-        const syncInfoData = await syncInfoRes.json();
-        setReport(reportData);
-        setLastSync(syncInfoData.lastSync || null);
+        setSyncResult(result);
+        await fetchReport();
       }
     } catch (err) {
       console.error("Sync failed:", err);
@@ -197,8 +216,8 @@ export function MATGDashboard() {
           views: views || 0,
         }),
       });
-      const data = await res.json();
-      setLastResult(data);
+      const result = await res.json();
+      setLastResult(result);
     } catch (err) {
       console.error("Trigger failed:", err);
     } finally {
@@ -206,26 +225,24 @@ export function MATGDashboard() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-gray-400">
-        Loading...
-      </div>
-    );
-  }
+  const currentPeriodLabel = data?.periods?.length
+    ? data.periods[data.periods.length - 1]?.label
+    : null;
 
-  const stats = report?.stats || { totalVideos: 0, totalViews: 0, avgViews: 0 };
+  /* ---------------------------------------------------------------- */
+  /*  Render                                                           */
+  /* ---------------------------------------------------------------- */
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">
-            🎙️ MATG Dashboard
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
+            🎙️ MATG Content Command Center
           </h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">
-            Content performance &amp; repurpose pipeline
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            Track content production &amp; repurpose pipeline
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -234,21 +251,31 @@ export function MATGDashboard() {
               Last synced {timeAgo(lastSync.completedAt)}
             </span>
           )}
-          <Button
+          <button
             onClick={handleSync}
             disabled={syncing}
-            variant="outline"
-            size="sm"
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 sm:py-1.5 text-sm font-medium rounded-md border border-border bg-card text-foreground hover:bg-accent transition-colors disabled:opacity-50"
           >
             {syncing ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              <>
+                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
                 Syncing...
-              </span>
+              </>
             ) : (
-              "🔄 Sync YouTube Data"
+              <>
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                  <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                  <path d="M16 16h5v5" />
+                </svg>
+                Sync from YouTube
+              </>
             )}
-          </Button>
+          </button>
         </div>
       </div>
 
@@ -286,191 +313,121 @@ export function MATGDashboard() {
         </div>
       )}
 
-      {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-2xl font-bold text-gray-900">{stats.totalVideos}</div>
-          <div className="text-xs text-gray-500 mt-1">Total Videos</div>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-2xl font-bold text-blue-600">{stats.totalViews.toLocaleString()}</div>
-          <div className="text-xs text-gray-500 mt-1">Total Views</div>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-2xl font-bold text-green-600">{stats.avgViews.toLocaleString()}</div>
-          <div className="text-xs text-gray-500 mt-1">Avg Views</div>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-2xl font-bold text-purple-600">
-            {pillarFormats.reduce((sum, f) => sum + (f.repurposeTargetIds?.length || 0), 0)}
-          </div>
-          <div className="text-xs text-gray-500 mt-1">Repurpose Chains</div>
-        </div>
-      </div>
-
       {/* Tab switcher */}
-      <div className="flex border-b border-gray-200">
+      <div className="flex border-b border-border">
         <button
-          onClick={() => setActiveTab("content")}
+          onClick={() => setActiveTab("report")}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "content"
-              ? "border-gray-900 text-gray-900"
-              : "border-transparent text-gray-500 hover:text-gray-700"
+            activeTab === "report"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
-          📊 Content Performance
+          📊 Content Report
         </button>
         <button
           onClick={() => setActiveTab("pipeline")}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
             activeTab === "pipeline"
-              ? "border-gray-900 text-gray-900"
-              : "border-transparent text-gray-500 hover:text-gray-700"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
           🔄 Repurpose Pipeline
         </button>
       </div>
 
-      {/* Content Performance Tab */}
-      {activeTab === "content" && (
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">Content Performance</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Individual content items with detailed metrics
-            </p>
+      {/* ============================================================ */}
+      {/*  Content Report Tab (matches Starter Story)                   */}
+      {/* ============================================================ */}
+      {activeTab === "report" && (
+        <div className="space-y-6">
+          {/* Controls */}
+          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+            <DateRangePicker
+              startDate={startDate}
+              endDate={endDate}
+              viewType={viewType}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+              onViewTypeChange={setViewType}
+              onUpdate={handleUpdate}
+              onQuickRange={handleQuickRange}
+            />
+            {data && (
+              <Filters
+                platforms={data.platforms}
+                formats={data.formats}
+                selectedPlatform={selectedPlatform}
+                selectedFormat={selectedFormat}
+                selectedSource={selectedSource}
+                onPlatformChange={setSelectedPlatform}
+                onFormatChange={setSelectedFormat}
+                onSourceChange={setSelectedSource}
+              />
+            )}
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border bg-accent/50">
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground w-8" />
-                  <SortHeader label="Title" sortKeyName="title" />
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Platform
-                  </th>
-                  <SortHeader label="Published" sortKeyName="publishedDate" />
-                  <SortHeader label="Views" sortKeyName="views" align="right" />
-                  <SortHeader label="Likes" sortKeyName="likes" align="right" />
-                  <SortHeader label="Comments" sortKeyName="comments" align="right" />
-                  <th className="px-3 py-2.5 text-right font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedVideos.map((v) => {
-                  const thresholdCrossed = pillarFormats.find(
-                    (f) => f.viewThreshold && (v.views || 0) >= f.viewThreshold
-                  );
 
-                  return (
-                    <tr key={v.id} className="border-b border-border/50 hover:bg-accent/30 transition-colors">
-                      {/* Thumbnail */}
-                      <td className="px-3 py-2">
-                        {v.thumbnail && (
-                          <img
-                            src={v.thumbnail}
-                            alt=""
-                            className="w-16 h-9 rounded object-cover shrink-0"
-                          />
-                        )}
-                      </td>
-                      {/* Title */}
-                      <td className="px-3 py-2 max-w-[200px] sm:max-w-[320px]">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-sm font-medium text-foreground truncate">
-                            {v.youtubeUrl ? (
-                              <a
-                                href={v.youtubeUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="hover:text-primary hover:underline transition-colors"
-                              >
-                                {v.title || "(Untitled)"}
-                              </a>
-                            ) : (
-                              v.title || "(Untitled)"
-                            )}
-                          </span>
-                          {v.youtubeId && (
-                            <span className="text-[10px] text-muted-foreground font-mono">
-                              {v.youtubeId}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      {/* Platform */}
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap gap-1">
-                          {(v.platform || ["YouTube"]).map((p) => (
-                            <span
-                              key={p}
-                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
-                            >
-                              {p}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      {/* Published date */}
-                      <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
-                        {v.publishedDate || "-"}
-                      </td>
-                      {/* Views */}
-                      <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                        {v.views?.toLocaleString() || "-"}
-                      </td>
-                      {/* Likes */}
-                      <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                        {v.likes?.toLocaleString() || "-"}
-                      </td>
-                      {/* Comments */}
-                      <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                        {v.comments?.toLocaleString() || "-"}
-                      </td>
-                      {/* Action / Threshold */}
-                      <td className="px-3 py-2 text-right">
-                        {thresholdCrossed ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-xs border-green-300 text-green-700 hover:bg-green-50"
-                            onClick={() => handleTrigger(thresholdCrossed.id, v.title || undefined, v.views || 0)}
-                            disabled={triggering === thresholdCrossed.id}
-                          >
-                            {triggering === thresholdCrossed.id ? "..." : "⚡ Trigger"}
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {pillarFormats[0]?.viewThreshold
-                              ? `${Math.round(((v.views || 0) / pillarFormats[0].viewThreshold) * 100)}%`
-                              : "-"}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {sortedVideos.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground text-sm">
-                      No videos synced yet. Click &ldquo;Sync YouTube Data&rdquo; to get started.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <span className="text-sm">Loading report...</span>
+              </div>
+            </div>
+          ) : data ? (
+            <>
+              <MetricTiles
+                productionData={data.byPlatform.production}
+                weekProgress={data.weekProgress}
+                currentPeriodLabel={currentPeriodLabel}
+                weeklyGoal={77}
+              />
+
+              <PeriodTable
+                title={
+                  data.showingFormats
+                    ? "Content Production (by Format)"
+                    : "Content Production (by Platform)"
+                }
+                description="Track content created across all platforms."
+                periods={data.periods}
+                metrics={data.byPlatform}
+                tabs={PLATFORM_TABS}
+              />
+
+              {!data.showingFormats && (
+                <PeriodTable
+                  title="Content by Format"
+                  description="Content production broken down by format type."
+                  periods={data.periods}
+                  metrics={data.byFormat}
+                  tabs={FORMAT_TABS}
+                />
+              )}
+
+              <PerformanceTable items={data.items} />
+            </>
+          ) : (
+            <div className="text-center py-20">
+              <p className="text-muted-foreground text-sm">
+                No data available. Try syncing from YouTube.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Pipeline Tab */}
+      {/* ============================================================ */}
+      {/*  Repurpose Pipeline Tab                                       */}
+      {/* ============================================================ */}
       {activeTab === "pipeline" && (
         <div className="space-y-4">
           {pillarFormats.length === 0 ? (
-            <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-400">
+            <div className="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground">
               No pillar formats yet. Create one on the Formats page to get started.
             </div>
           ) : (
@@ -480,14 +437,14 @@ export function MATGDashboard() {
                 .filter(Boolean) as FormatRow[];
 
               return (
-                <div key={pillar.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div key={pillar.id} className="rounded-lg border border-border bg-card overflow-hidden">
                   <div className="bg-blue-50 border-b border-blue-100 px-4 sm:px-6 py-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex items-start gap-3">
                         <span className="text-2xl">🎯</span>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-semibold text-gray-900">{pillar.name}</h3>
+                            <h3 className="font-semibold text-foreground">{pillar.name}</h3>
                             <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">Hub</Badge>
                           </div>
                           <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -496,8 +453,8 @@ export function MATGDashboard() {
                             ))}
                           </div>
                           {pillar.viewThreshold && (
-                            <p className="text-xs text-gray-500 mt-1.5">
-                              Triggers at <span className="font-medium text-gray-700">{pillar.viewThreshold.toLocaleString()} views</span>
+                            <p className="text-xs text-muted-foreground mt-1.5">
+                              Triggers at <span className="font-medium text-foreground">{pillar.viewThreshold.toLocaleString()} views</span>
                             </p>
                           )}
                         </div>
@@ -513,18 +470,18 @@ export function MATGDashboard() {
                     </div>
                   </div>
                   {targets.length > 0 ? (
-                    <div className="divide-y divide-gray-100">
+                    <div className="divide-y divide-border/50">
                       {targets.map((spoke) => (
-                        <div key={spoke.id} className="px-4 sm:px-6 py-3 flex items-center gap-3 hover:bg-gray-50">
+                        <div key={spoke.id} className="px-4 sm:px-6 py-3 flex items-center gap-3 hover:bg-accent/30 transition-colors">
                           <span className="text-lg">🔄</span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium text-gray-900">{spoke.name}</span>
+                              <span className="text-sm font-medium text-foreground">{spoke.name}</span>
                               <Badge variant="outline" className="text-[10px] border-purple-200 text-purple-600">Spoke</Badge>
                             </div>
                             <div className="flex flex-wrap gap-1 mt-1">
                               {spoke.channels?.map((ch) => (
-                                <span key={ch} className="text-[11px] text-gray-500">{ch}</span>
+                                <span key={ch} className="text-[11px] text-muted-foreground">{ch}</span>
                               ))}
                             </div>
                           </div>
@@ -533,14 +490,14 @@ export function MATGDashboard() {
                               <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium">
                                 {spoke.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
                               </span>
-                              <span className="text-xs text-gray-500 hidden sm:inline">{spoke.contentOwner}</span>
+                              <span className="text-xs text-muted-foreground hidden sm:inline">{spoke.contentOwner}</span>
                             </div>
                           )}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="px-6 py-4 text-sm text-gray-400 text-center">
+                    <div className="px-6 py-4 text-sm text-muted-foreground text-center">
                       No repurpose targets configured.
                     </div>
                   )}
