@@ -67,12 +67,73 @@ export interface TriggerResult {
 }
 
 /**
+ * Look up an Asana workspace member by name and return their GID.
+ * Uses fuzzy matching: checks if the Asana name contains the search name
+ * or shares a last name (e.g. "Sam Walls" matches "Samantha Walls").
+ */
+async function findAsanaMemberGid(name: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${ASANA_BASE}/workspaces/1200382537239879/users?opt_fields=name,email`,
+      { headers: headers() }
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const members = json.data as Array<{ name: string; gid: string }>;
+
+    const searchLower = name.toLowerCase();
+    const searchParts = searchLower.split(/\s+/);
+    const searchLast = searchParts[searchParts.length - 1];
+
+    // Try exact match first
+    const exact = members.find((m) => m.name.toLowerCase() === searchLower);
+    if (exact) return exact.gid;
+
+    // Try last name + first initial match (e.g. "Sam Walls" → "Samantha Walls")
+    const fuzzy = members.find((m) => {
+      const memberLower = m.name.toLowerCase();
+      const memberParts = memberLower.split(/\s+/);
+      const memberLast = memberParts[memberParts.length - 1];
+      return (
+        memberLast === searchLast &&
+        searchParts[0] &&
+        memberParts[0]?.startsWith(searchParts[0].charAt(0))
+      );
+    });
+    if (fuzzy) return fuzzy.gid;
+
+    // Try partial match — name contains search or vice versa
+    const partial = members.find(
+      (m) =>
+        m.name.toLowerCase().includes(searchLower) ||
+        searchLower.includes(m.name.toLowerCase())
+    );
+    return partial?.gid || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve an assignee GID: use stored GID if available,
+ * otherwise look up by owner name in Asana workspace.
+ */
+async function resolveAssigneeGid(
+  storedGid: string | null,
+  ownerName: string | null
+): Promise<string | null> {
+  if (storedGid) return storedGid;
+  if (!ownerName) return null;
+  return findAsanaMemberGid(ownerName);
+}
+
+/**
  * Given a source format ID, look up its repurpose targets and create
  * one Asana task per target.  Returns a summary of what was created.
  */
 export async function triggerRepurposeTasks(
   sourceFormatId: string,
-  meta?: { videoTitle?: string; views?: number }
+  meta?: { videoTitle?: string; views?: number; contentLink?: string }
 ): Promise<TriggerResult> {
   // 1. Fetch the source format
   const [source] = await db
@@ -101,6 +162,10 @@ export async function triggerRepurposeTasks(
   // 4. Create one Asana task per target format
   const tasksCreated: TriggerResult["tasksCreated"] = [];
 
+  const hubContentName = meta?.videoTitle || source.name;
+  const viewsFormatted = meta?.views ? meta.views.toLocaleString() : "N/A";
+  const contentLink = meta?.contentLink || "";
+
   for (const target of targetFormats) {
     if (!target) continue;
 
@@ -108,33 +173,38 @@ export async function triggerRepurposeTasks(
       ? `[Repurpose] ${target.name}: ${meta.videoTitle}`
       : `[Repurpose] ${target.name} from ${source.name}`;
 
-    const notesSections = [
-      `Source format: ${source.name}`,
-      `Target format: ${target.name}`,
-      target.channels?.length
-        ? `Channel(s): ${(target.channels as string[]).join(", ")}`
-        : null,
-      target.contentOwner ? `Assigned to: ${target.contentOwner}` : null,
-      meta?.videoTitle ? `Video: ${meta.videoTitle}` : null,
-      meta?.views ? `Views at trigger: ${meta.views.toLocaleString()}` : null,
-      source.viewThreshold
-        ? `Threshold: ${source.viewThreshold.toLocaleString()}`
-        : null,
-    ].filter(Boolean);
+    const channels = (target.channels as string[])?.join(", ") || "N/A";
+    const assigneeName = target.contentOwner || "Unassigned";
 
-    // Include format instructions if the target has them
+    // Build description with the template
+    const noteLines = [
+      contentLink
+        ? `${hubContentName} just hit ${viewsFormatted} views! ${contentLink}`
+        : `${hubContentName} just hit ${viewsFormatted} views!`,
+      "",
+      `• Task: Create ${target.name}`,
+      `• Channel: ${channels}`,
+      `• Editor: ${assigneeName}`,
+      `• Producer: ${assigneeName}`,
+    ];
+
+    // Add content instructions from the format if they exist
     if (target.instructions) {
-      notesSections.push("", "--- Format Instructions ---", target.instructions);
+      noteLines.push("", "Content Instructions:", "", target.instructions);
     }
 
-    notesSections.push("", "Created automatically by Hub & Spoke");
+    const notes = noteLines.join("\n");
 
-    const notes = notesSections.join("\n");
+    // Resolve assignee — try stored GID first, then look up by name
+    const assigneeGid = await resolveAssigneeGid(
+      target.contentOwnerAsanaGid,
+      target.contentOwner
+    );
 
     const task = await createAsanaTask({
       name: taskName,
       notes,
-      assigneeGid: target.contentOwnerAsanaGid,
+      assigneeGid,
     });
 
     tasksCreated.push({

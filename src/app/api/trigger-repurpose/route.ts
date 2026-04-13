@@ -14,7 +14,7 @@ import { triggerRepurposeTasks } from "@/lib/services/asana";
  */
 export async function POST(request: NextRequest) {
   try {
-    const { formatId, videoTitle, views } = await request.json();
+    const { formatId, videoTitle, views, contentLink } = await request.json();
 
     if (!formatId) {
       return NextResponse.json(
@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
     const result = await triggerRepurposeTasks(formatId, {
       videoTitle,
       views,
+      contentLink,
     });
 
     return NextResponse.json(result, { status: 201 });

@@ -257,7 +257,7 @@ export function MATGDashboard() {
     }
   }
 
-  async function handleTrigger(formatId: string, videoTitle?: string, views?: number) {
+  async function handleTrigger(formatId: string, videoTitle?: string, views?: number, contentLink?: string) {
     setTriggering(formatId);
     setLastResult(null);
     try {
@@ -268,6 +268,7 @@ export function MATGDashboard() {
           formatId,
           videoTitle: videoTitle || "Business Interview Episode",
           views: views || 0,
+          contentLink: contentLink || "",
         }),
       });
       const result = await res.json();
