@@ -1,11 +1,15 @@
 export interface ProductionItem {
   id: string;
-  notionId: string;
+  notionId: string | null;
+  youtubeId: string | null;
+  youtubeUrl: string | null;
+  thumbnail: string | null;
   title: string | null;
   publishedDate: string | null;
   status: string | null;
   platform: string[] | null;
   format: string | null;
+  brand: string;
   campaign: string | null;
   utmCampaign: string | null;
   publishedLink: string | null;

@@ -16,12 +16,16 @@ export const productionItems = pgTable(
   "production_items",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    notionId: text("notion_id").notNull().unique(),
+    notionId: text("notion_id").unique(),
+    youtubeId: text("youtube_id").unique(),
+    youtubeUrl: text("youtube_url"),
+    thumbnail: text("thumbnail"),
     title: text("title"),
     publishedDate: date("published_date"),
     status: text("status"),
     platform: jsonb("platform").$type<string[]>(),
     format: text("format"),
+    brand: text("brand").default("starter-story").notNull(),
     campaign: text("campaign"),
     utmCampaign: text("utm_campaign"),
     publishedLink: text("published_link"),
@@ -50,6 +54,7 @@ export const productionItems = pgTable(
   (table) => [
     index("idx_production_items_published_date").on(table.publishedDate),
     index("idx_production_items_status").on(table.status),
+    index("idx_production_items_brand").on(table.brand),
   ]
 );
 
