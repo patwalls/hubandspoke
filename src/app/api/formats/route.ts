@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, channels, event, brand, viewThreshold, contentOwner, contentOwnerAsanaGid, instructions, contentType, repurposeTargetIds } = body;
+    const { name, channels, brand, viewThreshold, editor, editorAsanaGid, producer, producerAsanaGid, instructions, contentType, repurposeTargetIds } = body;
 
     const [created] = await db
       .insert(formats)
@@ -44,10 +44,11 @@ export async function POST(request: NextRequest) {
         name,
         brand: brand || "starter-story",
         channels: channels || [],
-        event: event || null,
         viewThreshold: viewThreshold || null,
-        contentOwner: contentOwner || null,
-        contentOwnerAsanaGid: contentOwnerAsanaGid || null,
+        editor: editor || null,
+        editorAsanaGid: editorAsanaGid || null,
+        producer: producer || null,
+        producerAsanaGid: producerAsanaGid || null,
         instructions: instructions || null,
         contentType: contentType || "pillar",
       })
@@ -76,17 +77,18 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, channels, event, viewThreshold, contentOwner, contentOwnerAsanaGid, instructions, contentType, repurposeTargetIds } = body;
+    const { id, name, channels, viewThreshold, editor, editorAsanaGid, producer, producerAsanaGid, instructions, contentType, repurposeTargetIds } = body;
 
     const [updated] = await db
       .update(formats)
       .set({
         name,
         channels: channels || [],
-        event: event || null,
         viewThreshold: viewThreshold || null,
-        contentOwner: contentOwner || null,
-        contentOwnerAsanaGid: contentOwnerAsanaGid || null,
+        editor: editor || null,
+        editorAsanaGid: editorAsanaGid || null,
+        producer: producer || null,
+        producerAsanaGid: producerAsanaGid || null,
         instructions: instructions || null,
         contentType: contentType || "pillar",
         updatedAt: new Date(),

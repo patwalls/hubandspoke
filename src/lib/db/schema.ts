@@ -66,8 +66,12 @@ export const formats = pgTable("formats", {
   channels: jsonb("channels").$type<string[]>().default([]),
   event: text("event"),
   viewThreshold: integer("view_threshold"),
-  contentOwner: text("content_owner"),
-  contentOwnerAsanaGid: text("content_owner_asana_gid"),
+  contentOwner: text("content_owner"), // deprecated — use editor/producer
+  contentOwnerAsanaGid: text("content_owner_asana_gid"), // deprecated
+  editor: text("editor"),
+  editorAsanaGid: text("editor_asana_gid"),
+  producer: text("producer"),
+  producerAsanaGid: text("producer_asana_gid"),
   instructions: text("instructions"),
   contentType: text("content_type").default("pillar"), // "pillar" (hub) or "repurposed" (spoke)
   createdAt: timestamp("created_at", { withTimezone: true })

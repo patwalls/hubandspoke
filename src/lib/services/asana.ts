@@ -174,7 +174,8 @@ export async function triggerRepurposeTasks(
       : `[Repurpose] ${target.name} from ${source.name}`;
 
     const channels = (target.channels as string[])?.join(", ") || "N/A";
-    const assigneeName = target.contentOwner || "Unassigned";
+    const editorName = target.editor || "Unassigned";
+    const producerName = target.producer || "Unassigned";
 
     // Build description with the template
     const noteLines = [
@@ -184,8 +185,8 @@ export async function triggerRepurposeTasks(
       "",
       `• Task: Create ${target.name}`,
       `• Channel: ${channels}`,
-      `• Editor: ${assigneeName}`,
-      `• Producer: ${assigneeName}`,
+      `• Editor: ${editorName}`,
+      `• Producer: ${producerName}`,
     ];
 
     // Add content instructions from the format if they exist
@@ -195,10 +196,10 @@ export async function triggerRepurposeTasks(
 
     const notes = noteLines.join("\n");
 
-    // Resolve assignee — try stored GID first, then look up by name
+    // Resolve assignee — assign to editor (content creator) by default
     const assigneeGid = await resolveAssigneeGid(
-      target.contentOwnerAsanaGid,
-      target.contentOwner
+      target.editorAsanaGid,
+      target.editor
     );
 
     const task = await createAsanaTask({
@@ -210,7 +211,7 @@ export async function triggerRepurposeTasks(
     tasksCreated.push({
       formatName: target.name,
       asanaGid: task.gid,
-      assignee: target.contentOwner || undefined,
+      assignee: target.editor || undefined,
     });
   }
 

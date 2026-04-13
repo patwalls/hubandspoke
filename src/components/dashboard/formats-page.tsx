@@ -44,10 +44,11 @@ interface FormatRow {
   id: string;
   name: string;
   channels: string[];
-  event: string | null;
   viewThreshold: number | null;
-  contentOwner: string | null;
-  contentOwnerAsanaGid: string | null;
+  editor: string | null;
+  editorAsanaGid: string | null;
+  producer: string | null;
+  producerAsanaGid: string | null;
   instructions: string | null;
   contentType: string | null;
   repurposeTargetIds: string[];
@@ -106,7 +107,7 @@ function MobileFormatCard({
           <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
             isSpoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
           }`}>
-            {isSpoke ? "Spoke" : "Hub"}
+            {isSpoke ? "Repurposed" : "Pillar"}
           </span>
         </div>
         <div className="flex gap-1">
@@ -121,15 +122,26 @@ function MobileFormatCard({
           ))}
         </div>
       )}
-      {f.event && <p className="text-xs text-gray-500">Event: {f.event}</p>}
       {f.viewThreshold != null && <p className="text-xs text-gray-500">View Threshold: {f.viewThreshold.toLocaleString()}</p>}
-      {f.contentOwner && (
-        <p className="text-xs text-gray-500 flex items-center gap-1">
-          <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium inline-flex">
-            {f.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
-          </span>
-          {f.contentOwner}
-        </p>
+      {(f.editor || f.producer) && (
+        <div className="flex flex-wrap gap-3 text-xs text-gray-500">
+          {f.editor && (
+            <span className="flex items-center gap-1">
+              <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium inline-flex">
+                {f.editor.split(" ").map(n => n[0]).join("").slice(0, 2)}
+              </span>
+              Editor: {f.editor}
+            </span>
+          )}
+          {f.producer && (
+            <span className="flex items-center gap-1">
+              <span className="w-4 h-4 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium inline-flex">
+                {f.producer.split(" ").map(n => n[0]).join("").slice(0, 2)}
+              </span>
+              Producer: {f.producer}
+            </span>
+          )}
+        </div>
       )}
       {f.instructions && (
         <p className="text-xs text-gray-500 line-clamp-2">Instructions: {f.instructions}</p>
@@ -162,7 +174,7 @@ function FormatTableRow({
           <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
             isSpoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
           }`}>
-            {isSpoke ? "Spoke" : "Hub"}
+            {isSpoke ? "Repurposed" : "Pillar"}
           </span>
         </div>
       </td>
@@ -173,15 +185,24 @@ function FormatTableRow({
           ))}
         </div>
       </td>
-      <td className="px-4 py-3 text-gray-600">{f.event || "-"}</td>
       <td className="px-4 py-3 text-gray-600">{f.viewThreshold != null ? f.viewThreshold.toLocaleString() : "-"}</td>
       <td className="px-4 py-3 text-gray-600">
-        {f.contentOwner ? (
+        {f.editor ? (
           <span className="flex items-center gap-1.5">
-            <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-              {f.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+            <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+              {f.editor.split(" ").map(n => n[0]).join("").slice(0, 2)}
             </span>
-            <span className="truncate">{f.contentOwner}</span>
+            <span className="truncate">{f.editor}</span>
+          </span>
+        ) : "-"}
+      </td>
+      <td className="px-4 py-3 text-gray-600">
+        {f.producer ? (
+          <span className="flex items-center gap-1.5">
+            <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+              {f.producer.split(" ").map(n => n[0]).join("").slice(0, 2)}
+            </span>
+            <span className="truncate">{f.producer}</span>
           </span>
         ) : "-"}
       </td>
@@ -231,7 +252,7 @@ function HubGroup({
             </button>
             <span className="font-semibold text-gray-900">{hub.name}</span>
             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
-              Hub
+              Pillar
             </span>
             {spokes.length > 0 && (
               <span className="text-[10px] text-gray-400 font-medium bg-gray-100 px-1.5 py-0.5 rounded-full">
@@ -247,15 +268,24 @@ function HubGroup({
             ))}
           </div>
         </td>
-        <td className="px-4 py-3 text-gray-600">{hub.event || "-"}</td>
         <td className="px-4 py-3 text-gray-600">{hub.viewThreshold != null ? hub.viewThreshold.toLocaleString() : "-"}</td>
         <td className="px-4 py-3 text-gray-600">
-          {hub.contentOwner ? (
+          {hub.editor ? (
             <span className="flex items-center gap-1.5">
-              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-                {hub.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+              <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                {hub.editor.split(" ").map(n => n[0]).join("").slice(0, 2)}
               </span>
-              <span className="truncate">{hub.contentOwner}</span>
+              <span className="truncate">{hub.editor}</span>
+            </span>
+          ) : "-"}
+        </td>
+        <td className="px-4 py-3 text-gray-600">
+          {hub.producer ? (
+            <span className="flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                {hub.producer.split(" ").map(n => n[0]).join("").slice(0, 2)}
+              </span>
+              <span className="truncate">{hub.producer}</span>
             </span>
           ) : "-"}
         </td>
@@ -291,15 +321,17 @@ export function FormatsPageContent({ brand }: { brand: string }) {
 
   // Asana members
   const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
-  const [ownerPopoverOpen, setOwnerPopoverOpen] = useState(false);
+  const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
+  const [producerPopoverOpen, setProducerPopoverOpen] = useState(false);
 
   // Form state
   const [name, setName] = useState("");
   const [channels, setChannels] = useState<string[]>([]);
-  const [event, setEvent] = useState("");
   const [viewThreshold, setViewThreshold] = useState("");
-  const [contentOwner, setContentOwner] = useState("");
-  const [contentOwnerAsanaGid, setContentOwnerAsanaGid] = useState("");
+  const [editor, setEditor] = useState("");
+  const [editorAsanaGid, setEditorAsanaGid] = useState("");
+  const [producer, setProducer] = useState("");
+  const [producerAsanaGid, setProducerAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
   const [contentType, setContentType] = useState<string>("pillar");
   const [repurposeTargetIds, setRepurposeTargetIds] = useState<string[]>([]);
@@ -340,10 +372,11 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setEditingFormat(null);
     setName("");
     setChannels([]);
-    setEvent("");
     setViewThreshold("");
-    setContentOwner("");
-    setContentOwnerAsanaGid("");
+    setEditor("");
+    setEditorAsanaGid("");
+    setProducer("");
+    setProducerAsanaGid("");
     setInstructions("");
     setContentType("pillar");
     setRepurposeTargetIds([]);
@@ -354,10 +387,11 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setEditingFormat(f);
     setName(f.name);
     setChannels(f.channels || []);
-    setEvent(f.event || "");
     setViewThreshold(f.viewThreshold != null ? String(f.viewThreshold) : "");
-    setContentOwner(f.contentOwner || "");
-    setContentOwnerAsanaGid(f.contentOwnerAsanaGid || "");
+    setEditor(f.editor || "");
+    setEditorAsanaGid(f.editorAsanaGid || "");
+    setProducer(f.producer || "");
+    setProducerAsanaGid(f.producerAsanaGid || "");
     setInstructions(f.instructions || "");
     setContentType(f.contentType || "pillar");
     setRepurposeTargetIds(f.repurposeTargetIds || []);
@@ -370,10 +404,11 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       name,
       brand,
       channels,
-      event: event || null,
       viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
-      contentOwner: contentOwner || null,
-      contentOwnerAsanaGid: contentOwnerAsanaGid || null,
+      editor: editor || null,
+      editorAsanaGid: editorAsanaGid || null,
+      producer: producer || null,
+      producerAsanaGid: producerAsanaGid || null,
       instructions: instructions || null,
       contentType,
       repurposeTargetIds,
@@ -416,16 +451,28 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     );
   }
 
-  function selectOwner(member: AsanaMember) {
-    setContentOwner(member.name);
-    setContentOwnerAsanaGid(member.gid);
-    setOwnerPopoverOpen(false);
+  function selectEditor(member: AsanaMember) {
+    setEditor(member.name);
+    setEditorAsanaGid(member.gid);
+    setEditorPopoverOpen(false);
   }
 
-  function clearOwner() {
-    setContentOwner("");
-    setContentOwnerAsanaGid("");
-    setOwnerPopoverOpen(false);
+  function clearEditor() {
+    setEditor("");
+    setEditorAsanaGid("");
+    setEditorPopoverOpen(false);
+  }
+
+  function selectProducer(member: AsanaMember) {
+    setProducer(member.name);
+    setProducerAsanaGid(member.gid);
+    setProducerPopoverOpen(false);
+  }
+
+  function clearProducer() {
+    setProducer("");
+    setProducerAsanaGid("");
+    setProducerPopoverOpen(false);
   }
 
   const [expandedHubs, setExpandedHubs] = useState<Set<string>>(new Set());
@@ -590,14 +637,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Event</Label>
-                <Input
-                  value={event}
-                  onChange={(e) => setEvent(e.target.value)}
-                  placeholder="e.g. Database Published"
-                />
-              </div>
-              <div className="space-y-2">
                 <Label>View Threshold</Label>
                 <Input
                   type="number"
@@ -607,19 +646,19 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 />
               </div>
 
-              {/* Content Owner - Asana member combobox */}
+              {/* Editor - Asana member combobox */}
               <div className="space-y-2">
-                <Label>Content Owner</Label>
-                <Popover open={ownerPopoverOpen} onOpenChange={setOwnerPopoverOpen}>
+                <Label>Editor (Content Creator)</Label>
+                <Popover open={editorPopoverOpen} onOpenChange={setEditorPopoverOpen}>
                   <PopoverTrigger
                     className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer"
                   >
-                    {contentOwner ? (
+                    {editor ? (
                       <span className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-medium">
-                          {contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                        <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium">
+                          {editor.split(" ").map(n => n[0]).join("").slice(0, 2)}
                         </span>
-                        {contentOwner}
+                        {editor}
                       </span>
                     ) : (
                       <span className="text-muted-foreground">Search team members...</span>
@@ -632,8 +671,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                       <CommandList>
                         <CommandEmpty>No team members found.</CommandEmpty>
                         <CommandGroup>
-                          {contentOwner && (
-                            <CommandItem onSelect={clearOwner} className="text-muted-foreground">
+                          {editor && (
+                            <CommandItem onSelect={clearEditor} className="text-muted-foreground">
                               <span className="text-sm">Clear selection</span>
                             </CommandItem>
                           )}
@@ -641,11 +680,66 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                             <CommandItem
                               key={member.gid}
                               value={`${member.name} ${member.email}`}
-                              onSelect={() => selectOwner(member)}
-                              data-checked={contentOwnerAsanaGid === member.gid ? "true" : undefined}
+                              onSelect={() => selectEditor(member)}
+                              data-checked={editorAsanaGid === member.gid ? "true" : undefined}
                             >
                               <span className="flex items-center gap-2">
-                                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-medium shrink-0">
+                                <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
+                                  {member.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                                </span>
+                                <span className="flex flex-col">
+                                  <span className="text-sm font-medium">{member.name}</span>
+                                  <span className="text-xs text-muted-foreground">{member.email}</span>
+                                </span>
+                              </span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Producer - Asana member combobox */}
+              <div className="space-y-2">
+                <Label>Producer (Reviewer + Publisher)</Label>
+                <Popover open={producerPopoverOpen} onOpenChange={setProducerPopoverOpen}>
+                  <PopoverTrigger
+                    className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer"
+                  >
+                    {producer ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium">
+                          {producer.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                        </span>
+                        {producer}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Search team members...</span>
+                    )}
+                    <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search by name or email..." />
+                      <CommandList>
+                        <CommandEmpty>No team members found.</CommandEmpty>
+                        <CommandGroup>
+                          {producer && (
+                            <CommandItem onSelect={clearProducer} className="text-muted-foreground">
+                              <span className="text-sm">Clear selection</span>
+                            </CommandItem>
+                          )}
+                          {asanaMembers.map((member) => (
+                            <CommandItem
+                              key={member.gid}
+                              value={`${member.name} ${member.email}`}
+                              onSelect={() => selectProducer(member)}
+                              data-checked={producerAsanaGid === member.gid ? "true" : undefined}
+                            >
+                              <span className="flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium shrink-0">
                                   {member.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
                                 </span>
                                 <span className="flex flex-col">
@@ -661,7 +755,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                   </PopoverContent>
                 </Popover>
                 <p className="text-xs text-muted-foreground">
-                  Synced from Asana workspace. This person will be auto-assigned when repurpose tasks are created.
+                  Synced from Asana workspace. These roles will be included in Asana task descriptions.
                 </p>
               </div>
 
@@ -798,15 +892,26 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                       ))}
                     </div>
                   )}
-                  {hub.event && <p className="text-xs text-gray-500">Event: {hub.event}</p>}
                   {hub.viewThreshold != null && <p className="text-xs text-gray-500">View Threshold: {hub.viewThreshold.toLocaleString()}</p>}
-                  {hub.contentOwner && (
-                    <p className="text-xs text-gray-500 flex items-center gap-1">
-                      <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium inline-flex">
-                        {hub.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                      </span>
-                      {hub.contentOwner}
-                    </p>
+                  {(hub.editor || hub.producer) && (
+                    <div className="flex flex-wrap gap-3 text-xs text-gray-500">
+                      {hub.editor && (
+                        <span className="flex items-center gap-1">
+                          <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium inline-flex">
+                            {hub.editor.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                          </span>
+                          Editor: {hub.editor}
+                        </span>
+                      )}
+                      {hub.producer && (
+                        <span className="flex items-center gap-1">
+                          <span className="w-4 h-4 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium inline-flex">
+                            {hub.producer.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                          </span>
+                          Producer: {hub.producer}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
                 {/* Spoke cards nested under hub */}
@@ -839,9 +944,9 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Channels</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Event</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">View Threshold</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Owner</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-600">Editor</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-600">Producer</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Instructions</th>
               <th className="px-4 py-3 text-right font-medium text-gray-600">Actions</th>
             </tr>
@@ -873,7 +978,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             )}
             {totalVisible === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
                   {formats.length === 0
                     ? 'No formats yet. Click "Add Format" to create one.'
                     : "No formats match the current filters."}

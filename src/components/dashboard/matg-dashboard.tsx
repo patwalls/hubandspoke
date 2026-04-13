@@ -23,8 +23,10 @@ interface FormatRow {
   channels: string[];
   event: string | null;
   viewThreshold: number | null;
-  contentOwner: string | null;
-  contentOwnerAsanaGid: string | null;
+  editor: string | null;
+  editorAsanaGid: string | null;
+  producer: string | null;
+  producerAsanaGid: string | null;
   instructions: string | null;
   contentType: string | null;
   repurposeTargetIds: string[];
@@ -573,7 +575,7 @@ export function MATGDashboard() {
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="font-semibold text-foreground">{pillar.name}</h3>
-                            <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">Hub</Badge>
+                            <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">Pillar</Badge>
                           </div>
                           <div className="flex flex-wrap gap-1.5 mt-1.5">
                             {pillar.channels?.map((ch) => (
@@ -605,7 +607,7 @@ export function MATGDashboard() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-sm font-medium text-foreground">{spoke.name}</span>
-                              <Badge variant="outline" className="text-[10px] border-purple-200 text-purple-600">Spoke</Badge>
+                              <Badge variant="outline" className="text-[10px] border-purple-200 text-purple-600">Repurposed</Badge>
                             </div>
                             <div className="flex flex-wrap gap-1 mt-1">
                               {spoke.channels?.map((ch) => (
@@ -613,12 +615,12 @@ export function MATGDashboard() {
                               ))}
                             </div>
                           </div>
-                          {spoke.contentOwner && (
+                          {spoke.editor && (
                             <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium">
-                                {spoke.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                              <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium">
+                                {spoke.editor.split(" ").map(n => n[0]).join("").slice(0, 2)}
                               </span>
-                              <span className="text-xs text-muted-foreground hidden sm:inline">{spoke.contentOwner}</span>
+                              <span className="text-xs text-muted-foreground hidden sm:inline">{spoke.editor}</span>
                             </div>
                           )}
                         </div>
