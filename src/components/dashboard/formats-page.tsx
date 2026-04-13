@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -82,6 +82,202 @@ const MATG_CHANNELS = [
   "TikTok",
   "Threads",
 ];
+
+/* ------------------------------------------------------------------ */
+/*  Sub-components for hierarchical layout                             */
+/* ------------------------------------------------------------------ */
+
+function MobileFormatCard({
+  f,
+  onEdit,
+  onDelete,
+  isSpoke,
+}: {
+  f: FormatRow;
+  onEdit: (f: FormatRow) => void;
+  onDelete: (id: string) => void;
+  isSpoke?: boolean;
+}) {
+  return (
+    <div className={`rounded-lg border p-3 space-y-2 ${isSpoke ? "bg-gray-50 border-gray-200" : "bg-white border-gray-200"}`}>
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2">
+          <span className={`font-medium text-gray-900 ${isSpoke ? "text-sm" : ""}`}>{f.name}</span>
+          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+            isSpoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
+          }`}>
+            {isSpoke ? "Spoke" : "Hub"}
+          </span>
+        </div>
+        <div className="flex gap-1">
+          <Button variant="ghost" size="sm" onClick={() => onEdit(f)}>Edit</Button>
+          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(f.id)}>Delete</Button>
+        </div>
+      </div>
+      {f.channels?.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {f.channels.map((ch) => (
+            <Badge key={ch} variant="secondary" className="text-xs">{ch}</Badge>
+          ))}
+        </div>
+      )}
+      {f.event && <p className="text-xs text-gray-500">Event: {f.event}</p>}
+      {f.viewThreshold != null && <p className="text-xs text-gray-500">View Threshold: {f.viewThreshold.toLocaleString()}</p>}
+      {f.contentOwner && (
+        <p className="text-xs text-gray-500 flex items-center gap-1">
+          <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium inline-flex">
+            {f.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+          </span>
+          {f.contentOwner}
+        </p>
+      )}
+      {f.instructions && (
+        <p className="text-xs text-gray-500 line-clamp-2">Instructions: {f.instructions}</p>
+      )}
+    </div>
+  );
+}
+
+function FormatTableRow({
+  f,
+  isSpoke,
+  onEdit,
+  onDelete,
+}: {
+  f: FormatRow;
+  isSpoke?: boolean;
+  onEdit: (f: FormatRow) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <tr className={`border-b border-gray-100 ${isSpoke ? "bg-gray-50/50" : "hover:bg-gray-50"}`}>
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          {isSpoke && (
+            <span className="text-gray-300 text-xs ml-4">└</span>
+          )}
+          <span className={`${isSpoke ? "text-gray-700 text-sm" : "font-medium text-gray-900"}`}>
+            {f.name}
+          </span>
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
+            isSpoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
+          }`}>
+            {isSpoke ? "Spoke" : "Hub"}
+          </span>
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex flex-wrap gap-1">
+          {f.channels?.map((ch) => (
+            <Badge key={ch} variant="secondary" className="text-xs">{ch}</Badge>
+          ))}
+        </div>
+      </td>
+      <td className="px-4 py-3 text-gray-600">{f.event || "-"}</td>
+      <td className="px-4 py-3 text-gray-600">{f.viewThreshold != null ? f.viewThreshold.toLocaleString() : "-"}</td>
+      <td className="px-4 py-3 text-gray-600">
+        {f.contentOwner ? (
+          <span className="flex items-center gap-1.5">
+            <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+              {f.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+            </span>
+            <span className="truncate">{f.contentOwner}</span>
+          </span>
+        ) : "-"}
+      </td>
+      <td className="px-4 py-3 text-gray-600 max-w-[200px]">
+        {f.instructions ? (
+          <span className="line-clamp-2 text-xs">{f.instructions}</span>
+        ) : "-"}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={() => onEdit(f)}>Edit</Button>
+          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(f.id)}>Delete</Button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function HubGroup({
+  hub,
+  spokes,
+  expanded,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  hub: FormatRow;
+  spokes: FormatRow[];
+  expanded: boolean;
+  onToggle: () => void;
+  onEdit: (f: FormatRow) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <>
+      {/* Hub row */}
+      <tr className="border-b border-gray-100 hover:bg-blue-50/30" style={{ borderLeft: "4px solid #3b82f6" }}>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            <button onClick={onToggle} className="text-gray-400 hover:text-gray-600 -ml-1 p-0.5">
+              <svg
+                className={`w-4 h-4 transition-transform ${expanded ? "rotate-90" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            <span className="font-semibold text-gray-900">{hub.name}</span>
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
+              Hub
+            </span>
+            {spokes.length > 0 && (
+              <span className="text-[10px] text-gray-400 font-medium bg-gray-100 px-1.5 py-0.5 rounded-full">
+                {spokes.length} spoke{spokes.length !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex flex-wrap gap-1">
+            {hub.channels?.map((ch) => (
+              <Badge key={ch} variant="secondary" className="text-xs">{ch}</Badge>
+            ))}
+          </div>
+        </td>
+        <td className="px-4 py-3 text-gray-600">{hub.event || "-"}</td>
+        <td className="px-4 py-3 text-gray-600">{hub.viewThreshold != null ? hub.viewThreshold.toLocaleString() : "-"}</td>
+        <td className="px-4 py-3 text-gray-600">
+          {hub.contentOwner ? (
+            <span className="flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                {hub.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+              </span>
+              <span className="truncate">{hub.contentOwner}</span>
+            </span>
+          ) : "-"}
+        </td>
+        <td className="px-4 py-3 text-gray-600 max-w-[200px]">
+          {hub.instructions ? (
+            <span className="line-clamp-2 text-xs">{hub.instructions}</span>
+          ) : "-"}
+        </td>
+        <td className="px-4 py-3 text-right">
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => onEdit(hub)}>Edit</Button>
+            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(hub.id)}>Delete</Button>
+          </div>
+        </td>
+      </tr>
+      {/* Spoke rows */}
+      {expanded && spokes.map((s) => (
+        <FormatTableRow key={s.id} f={s} isSpoke onEdit={onEdit} onDelete={onDelete} />
+      ))}
+    </>
+  );
+}
 
 export function FormatsPageContent({ brand }: { brand: string }) {
   const ALL_CHANNELS = brand === "matg" ? MATG_CHANNELS : SS_CHANNELS;
@@ -232,11 +428,80 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setOwnerPopoverOpen(false);
   }
 
-  const filteredFormats = formats.filter((f) => {
-    if (channelFilter !== "all" && !f.channels?.includes(channelFilter)) return false;
-    if (typeFilter !== "all" && (f.contentType || "pillar") !== typeFilter) return false;
-    return true;
-  });
+  const [expandedHubs, setExpandedHubs] = useState<Set<string>>(new Set());
+
+  // Initialize all hubs as expanded when formats load
+  useEffect(() => {
+    const hubIds = formats
+      .filter((f) => (f.contentType || "pillar") === "pillar")
+      .map((f) => f.id);
+    setExpandedHubs(new Set(hubIds));
+  }, [formats]);
+
+  function toggleHub(hubId: string) {
+    setExpandedHubs((prev) => {
+      const next = new Set(prev);
+      if (next.has(hubId)) next.delete(hubId);
+      else next.add(hubId);
+      return next;
+    });
+  }
+
+  // Build grouped hierarchy: hubs with their spokes, then orphan spokes
+  const { hubGroups, orphanSpokes } = useMemo(() => {
+    // Build reverse lookup: spokeId → hubId
+    const spokeToHub = new Map<string, string>();
+    formats.forEach((f) => {
+      if ((f.contentType || "pillar") === "pillar" && f.repurposeTargetIds?.length) {
+        f.repurposeTargetIds.forEach((tid) => spokeToHub.set(tid, f.id));
+      }
+    });
+
+    // Apply filters
+    const filtered = formats.filter((f) => {
+      if (channelFilter !== "all" && !f.channels?.includes(channelFilter)) return false;
+      if (typeFilter !== "all" && (f.contentType || "pillar") !== typeFilter) return false;
+      return true;
+    });
+
+    const filteredIds = new Set(filtered.map((f) => f.id));
+
+    // Hubs with their visible spokes
+    const hubs = filtered.filter((f) => (f.contentType || "pillar") === "pillar");
+    const groups = hubs.map((hub) => {
+      const spokeIds = hub.repurposeTargetIds || [];
+      const spokes = spokeIds
+        .map((sid) => formats.find((f) => f.id === sid))
+        .filter((s): s is FormatRow => {
+          if (!s) return false;
+          // Apply channel filter to spokes too
+          if (channelFilter !== "all" && !s.channels?.includes(channelFilter)) return false;
+          return true;
+        });
+      return { hub, spokes };
+    });
+
+    // Orphan spokes: repurposed formats not claimed by any hub, that pass filters
+    const orphans = filtered.filter(
+      (f) => f.contentType === "repurposed" && !spokeToHub.has(f.id)
+    );
+
+    return { hubGroups: groups, orphanSpokes: orphans };
+  }, [formats, channelFilter, typeFilter]);
+
+  // For type filter "repurposed" — show all spokes flat
+  const allFilteredSpokes = useMemo(() => {
+    if (typeFilter !== "repurposed") return [];
+    return formats.filter((f) => {
+      if ((f.contentType || "pillar") !== "repurposed") return false;
+      if (channelFilter !== "all" && !f.channels?.includes(channelFilter)) return false;
+      return true;
+    });
+  }, [formats, channelFilter, typeFilter]);
+
+  const totalVisible = typeFilter === "repurposed"
+    ? allFilteredSpokes.length
+    : hubGroups.length + orphanSpokes.length;
 
   if (loading) {
     return (
@@ -487,57 +752,82 @@ export function FormatsPageContent({ brand }: { brand: string }) {
 
       {/* Mobile card view */}
       <div className="sm:hidden space-y-3">
-        {filteredFormats.map((f) => (
-          <div key={f.id} className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-gray-900">{f.name}</span>
-                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                  (f.contentType || "pillar") === "pillar"
-                    ? "bg-blue-50 text-blue-700"
-                    : "bg-purple-50 text-purple-700"
-                }`}>
-                  {(f.contentType || "pillar") === "pillar" ? "🎯 Hub" : "🔄 Spoke"}
-                </span>
+        {typeFilter === "repurposed" ? (
+          // Flat spoke list when filtering to repurposed only
+          allFilteredSpokes.map((f) => (
+            <MobileFormatCard key={f.id} f={f} onEdit={openEdit} onDelete={handleDelete} isSpoke />
+          ))
+        ) : (
+          <>
+            {hubGroups.map(({ hub, spokes }) => (
+              <div key={hub.id} className="space-y-0">
+                {/* Hub card */}
+                <div className="bg-white rounded-lg border-2 border-blue-200 p-4 space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleHub(hub.id)}
+                        className="text-gray-400 hover:text-gray-600 -ml-1"
+                      >
+                        <svg
+                          className={`w-4 h-4 transition-transform ${expandedHubs.has(hub.id) ? "rotate-90" : ""}`}
+                          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                      <span className="font-semibold text-gray-900">{hub.name}</span>
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
+                        Hub
+                      </span>
+                      {spokes.length > 0 && (
+                        <span className="text-[10px] text-gray-400 font-medium">
+                          {spokes.length} spoke{spokes.length !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => openEdit(hub)}>Edit</Button>
+                      <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(hub.id)}>Delete</Button>
+                    </div>
+                  </div>
+                  {hub.channels?.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {hub.channels.map((ch) => (
+                        <Badge key={ch} variant="secondary" className="text-xs">{ch}</Badge>
+                      ))}
+                    </div>
+                  )}
+                  {hub.event && <p className="text-xs text-gray-500">Event: {hub.event}</p>}
+                  {hub.viewThreshold != null && <p className="text-xs text-gray-500">View Threshold: {hub.viewThreshold.toLocaleString()}</p>}
+                  {hub.contentOwner && (
+                    <p className="text-xs text-gray-500 flex items-center gap-1">
+                      <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium inline-flex">
+                        {hub.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                      </span>
+                      {hub.contentOwner}
+                    </p>
+                  )}
+                </div>
+                {/* Spoke cards nested under hub */}
+                {expandedHubs.has(hub.id) && spokes.length > 0 && (
+                  <div className="ml-4 border-l-2 border-blue-100 space-y-2 pt-2 pl-3">
+                    {spokes.map((s) => (
+                      <MobileFormatCard key={s.id} f={s} onEdit={openEdit} onDelete={handleDelete} isSpoke />
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="flex gap-1">
-                <Button variant="ghost" size="sm" onClick={() => openEdit(f)}>Edit</Button>
-                <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(f.id)}>Delete</Button>
-              </div>
-            </div>
-            {f.channels?.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {f.channels.map((ch) => (
-                  <Badge key={ch} variant="secondary" className="text-xs">{ch}</Badge>
-                ))}
-              </div>
-            )}
-            {f.event && <p className="text-xs text-gray-500">Event: {f.event}</p>}
-            {f.viewThreshold != null && <p className="text-xs text-gray-500">View Threshold: {f.viewThreshold.toLocaleString()}</p>}
-            {f.contentOwner && (
-              <p className="text-xs text-gray-500 flex items-center gap-1">
-                <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium inline-flex">
-                  {f.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                </span>
-                {f.contentOwner}
-              </p>
-            )}
-            {f.instructions && (
-              <p className="text-xs text-gray-500 line-clamp-2">Instructions: {f.instructions}</p>
-            )}
-            {f.repurposeTargetIds?.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {f.repurposeTargetIds.map((targetId) => {
-                  const target = formats.find((ff) => ff.id === targetId);
-                  return target ? <Badge key={targetId} variant="outline" className="text-xs">{target.name}</Badge> : null;
-                })}
-              </div>
-            )}
-          </div>
-        ))}
-        {filteredFormats.length === 0 && (
+            ))}
+            {/* Orphan spokes */}
+            {orphanSpokes.map((f) => (
+              <MobileFormatCard key={f.id} f={f} onEdit={openEdit} onDelete={handleDelete} isSpoke />
+            ))}
+          </>
+        )}
+        {totalVisible === 0 && (
           <div className="py-8 text-center text-gray-400 text-sm">
-            {formats.length === 0 ? 'No formats yet. Click "Add Format" to create one.' : `No formats for ${channelFilter}.`}
+            {formats.length === 0 ? 'No formats yet. Click "Add Format" to create one.' : "No formats match the current filters."}
           </div>
         )}
       </div>
@@ -548,77 +838,45 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Type</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Channels</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Event</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">View Threshold</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Owner</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Instructions</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Repurpose Targets</th>
               <th className="px-4 py-3 text-right font-medium text-gray-600">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filteredFormats.map((f) => (
-              <tr key={f.id} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="px-4 py-3 font-medium text-gray-900">{f.name}</td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                    (f.contentType || "pillar") === "pillar"
-                      ? "bg-blue-50 text-blue-700"
-                      : "bg-purple-50 text-purple-700"
-                  }`}>
-                    {(f.contentType || "pillar") === "pillar" ? "🎯 Hub" : "🔄 Spoke"}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {f.channels?.map((ch) => (
-                      <Badge key={ch} variant="secondary" className="text-xs">{ch}</Badge>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-gray-600">{f.event || "-"}</td>
-                <td className="px-4 py-3 text-gray-600">{f.viewThreshold != null ? f.viewThreshold.toLocaleString() : "-"}</td>
-                <td className="px-4 py-3 text-gray-600">
-                  {f.contentOwner ? (
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-                        {f.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                      </span>
-                      <span className="truncate">{f.contentOwner}</span>
-                    </span>
-                  ) : "-"}
-                </td>
-                <td className="px-4 py-3 text-gray-600 max-w-[200px]">
-                  {f.instructions ? (
-                    <span className="line-clamp-2 text-xs">{f.instructions}</span>
-                  ) : "-"}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {f.repurposeTargetIds?.map((targetId) => {
-                      const target = formats.find((ff) => ff.id === targetId);
-                      return target ? (
-                        <Badge key={targetId} variant="outline" className="text-xs">{target.name}</Badge>
-                      ) : null;
-                    })}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(f)}>Edit</Button>
-                    <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(f.id)}>Delete</Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {filteredFormats.length === 0 && (
+            {typeFilter === "repurposed" ? (
+              // Flat spoke list when filtering to repurposed only
+              allFilteredSpokes.map((f) => (
+                <FormatTableRow key={f.id} f={f} isSpoke onEdit={openEdit} onDelete={handleDelete} />
+              ))
+            ) : (
+              <>
+                {hubGroups.map(({ hub, spokes }) => (
+                  <HubGroup
+                    key={hub.id}
+                    hub={hub}
+                    spokes={spokes}
+                    expanded={expandedHubs.has(hub.id)}
+                    onToggle={() => toggleHub(hub.id)}
+                    onEdit={openEdit}
+                    onDelete={handleDelete}
+                  />
+                ))}
+                {/* Orphan spokes */}
+                {orphanSpokes.map((f) => (
+                  <FormatTableRow key={f.id} f={f} isSpoke onEdit={openEdit} onDelete={handleDelete} />
+                ))}
+              </>
+            )}
+            {totalVisible === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                   {formats.length === 0
                     ? 'No formats yet. Click "Add Format" to create one.'
-                    : `No formats for ${channelFilter}.`}
+                    : "No formats match the current filters."}
                 </td>
               </tr>
             )}
