@@ -61,6 +61,8 @@ export const formats = pgTable("formats", {
   event: text("event"),
   viewThreshold: integer("view_threshold"),
   contentOwner: text("content_owner"),
+  contentOwnerAsanaGid: text("content_owner_asana_gid"),
+  instructions: text("instructions"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

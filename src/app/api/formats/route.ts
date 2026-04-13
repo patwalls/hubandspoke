@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, channels, event, brand, viewThreshold, contentOwner, repurposeTargetIds } = body;
+    const { name, channels, event, brand, viewThreshold, contentOwner, contentOwnerAsanaGid, instructions, repurposeTargetIds } = body;
 
     const [created] = await db
       .insert(formats)
@@ -47,6 +47,8 @@ export async function POST(request: NextRequest) {
         event: event || null,
         viewThreshold: viewThreshold || null,
         contentOwner: contentOwner || null,
+        contentOwnerAsanaGid: contentOwnerAsanaGid || null,
+        instructions: instructions || null,
       })
       .returning();
 
@@ -73,7 +75,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, channels, event, viewThreshold, contentOwner, repurposeTargetIds } = body;
+    const { id, name, channels, event, viewThreshold, contentOwner, contentOwnerAsanaGid, instructions, repurposeTargetIds } = body;
 
     const [updated] = await db
       .update(formats)
@@ -83,6 +85,8 @@ export async function PUT(request: NextRequest) {
         event: event || null,
         viewThreshold: viewThreshold || null,
         contentOwner: contentOwner || null,
+        contentOwnerAsanaGid: contentOwnerAsanaGid || null,
+        instructions: instructions || null,
         updatedAt: new Date(),
       })
       .where(eq(formats.id, id))

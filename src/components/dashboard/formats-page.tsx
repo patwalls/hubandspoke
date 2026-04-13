@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+
+interface AsanaMember {
+  gid: string;
+  name: string;
+  email: string;
+}
 
 interface FormatRow {
   id: string;
@@ -27,6 +47,8 @@ interface FormatRow {
   event: string | null;
   viewThreshold: number | null;
   contentOwner: string | null;
+  contentOwnerAsanaGid: string | null;
+  instructions: string | null;
   repurposeTargetIds: string[];
 }
 
@@ -69,12 +91,18 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [editingFormat, setEditingFormat] = useState<FormatRow | null>(null);
   const [channelFilter, setChannelFilter] = useState<string>("all");
 
+  // Asana members
+  const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
+  const [ownerPopoverOpen, setOwnerPopoverOpen] = useState(false);
+
   // Form state
   const [name, setName] = useState("");
   const [channels, setChannels] = useState<string[]>([]);
   const [event, setEvent] = useState("");
   const [viewThreshold, setViewThreshold] = useState("");
   const [contentOwner, setContentOwner] = useState("");
+  const [contentOwnerAsanaGid, setContentOwnerAsanaGid] = useState("");
+  const [instructions, setInstructions] = useState("");
   const [repurposeTargetIds, setRepurposeTargetIds] = useState<string[]>([]);
 
   const fetchFormats = useCallback(async () => {
@@ -93,6 +121,22 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     fetchFormats();
   }, [fetchFormats]);
 
+  // Fetch Asana workspace members once
+  useEffect(() => {
+    async function loadMembers() {
+      try {
+        const res = await fetch("/api/asana-members");
+        if (res.ok) {
+          const data = await res.json();
+          setAsanaMembers(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch Asana members:", err);
+      }
+    }
+    loadMembers();
+  }, []);
+
   function openCreate() {
     setEditingFormat(null);
     setName("");
@@ -100,6 +144,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setEvent("");
     setViewThreshold("");
     setContentOwner("");
+    setContentOwnerAsanaGid("");
+    setInstructions("");
     setRepurposeTargetIds([]);
     setDialogOpen(true);
   }
@@ -111,6 +157,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setEvent(f.event || "");
     setViewThreshold(f.viewThreshold != null ? String(f.viewThreshold) : "");
     setContentOwner(f.contentOwner || "");
+    setContentOwnerAsanaGid(f.contentOwnerAsanaGid || "");
+    setInstructions(f.instructions || "");
     setRepurposeTargetIds(f.repurposeTargetIds || []);
     setDialogOpen(true);
   }
@@ -124,6 +172,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       event: event || null,
       viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
       contentOwner: contentOwner || null,
+      contentOwnerAsanaGid: contentOwnerAsanaGid || null,
+      instructions: instructions || null,
       repurposeTargetIds,
     };
 
@@ -162,6 +212,18 @@ export function FormatsPageContent({ brand }: { brand: string }) {
         ? prev.filter((id) => id !== formatId)
         : [...prev, formatId]
     );
+  }
+
+  function selectOwner(member: AsanaMember) {
+    setContentOwner(member.name);
+    setContentOwnerAsanaGid(member.gid);
+    setOwnerPopoverOpen(false);
+  }
+
+  function clearOwner() {
+    setContentOwner("");
+    setContentOwnerAsanaGid("");
+    setOwnerPopoverOpen(false);
   }
 
   const filteredFormats =
@@ -237,14 +299,79 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                   placeholder="e.g. 50000"
                 />
               </div>
+
+              {/* Content Owner - Asana member combobox */}
               <div className="space-y-2">
                 <Label>Content Owner</Label>
-                <Input
-                  value={contentOwner}
-                  onChange={(e) => setContentOwner(e.target.value)}
-                  placeholder="e.g. John Smith"
-                />
+                <Popover open={ownerPopoverOpen} onOpenChange={setOwnerPopoverOpen}>
+                  <PopoverTrigger
+                    className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer"
+                  >
+                    {contentOwner ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-medium">
+                          {contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                        </span>
+                        {contentOwner}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Search team members...</span>
+                    )}
+                    <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search by name or email..." />
+                      <CommandList>
+                        <CommandEmpty>No team members found.</CommandEmpty>
+                        <CommandGroup>
+                          {contentOwner && (
+                            <CommandItem onSelect={clearOwner} className="text-muted-foreground">
+                              <span className="text-sm">Clear selection</span>
+                            </CommandItem>
+                          )}
+                          {asanaMembers.map((member) => (
+                            <CommandItem
+                              key={member.gid}
+                              value={`${member.name} ${member.email}`}
+                              onSelect={() => selectOwner(member)}
+                              data-checked={contentOwnerAsanaGid === member.gid ? "true" : undefined}
+                            >
+                              <span className="flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-medium shrink-0">
+                                  {member.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                                </span>
+                                <span className="flex flex-col">
+                                  <span className="text-sm font-medium">{member.name}</span>
+                                  <span className="text-xs text-muted-foreground">{member.email}</span>
+                                </span>
+                              </span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                <p className="text-xs text-muted-foreground">
+                  Synced from Asana workspace. This person will be auto-assigned when repurpose tasks are created.
+                </p>
               </div>
+
+              {/* Instructions / Format Notes */}
+              <div className="space-y-2">
+                <Label>Format Instructions</Label>
+                <Textarea
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  placeholder="Add instructions, loom links, style guides, etc. This will be included in Asana tasks."
+                  rows={4}
+                />
+                <p className="text-xs text-muted-foreground">
+                  These instructions will be added to the Asana task notes when repurpose tasks are triggered.
+                </p>
+              </div>
+
               <div className="space-y-2">
                 <Label>Repurpose Targets</Label>
                 <div className="flex flex-wrap gap-2">
@@ -311,7 +438,17 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             )}
             {f.event && <p className="text-xs text-gray-500">Event: {f.event}</p>}
             {f.viewThreshold != null && <p className="text-xs text-gray-500">View Threshold: {f.viewThreshold.toLocaleString()}</p>}
-            {f.contentOwner && <p className="text-xs text-gray-500">Content Owner: {f.contentOwner}</p>}
+            {f.contentOwner && (
+              <p className="text-xs text-gray-500 flex items-center gap-1">
+                <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium inline-flex">
+                  {f.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                </span>
+                {f.contentOwner}
+              </p>
+            )}
+            {f.instructions && (
+              <p className="text-xs text-gray-500 line-clamp-2">Instructions: {f.instructions}</p>
+            )}
             {f.repurposeTargetIds?.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {f.repurposeTargetIds.map((targetId) => {
@@ -338,7 +475,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
               <th className="px-4 py-3 text-left font-medium text-gray-600">Channels</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Event</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">View Threshold</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Content Owner</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-600">Owner</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-600">Instructions</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Repurpose Targets</th>
               <th className="px-4 py-3 text-right font-medium text-gray-600">Actions</th>
             </tr>
@@ -356,7 +494,21 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 </td>
                 <td className="px-4 py-3 text-gray-600">{f.event || "-"}</td>
                 <td className="px-4 py-3 text-gray-600">{f.viewThreshold != null ? f.viewThreshold.toLocaleString() : "-"}</td>
-                <td className="px-4 py-3 text-gray-600">{f.contentOwner || "-"}</td>
+                <td className="px-4 py-3 text-gray-600">
+                  {f.contentOwner ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                        {f.contentOwner.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                      </span>
+                      <span className="truncate">{f.contentOwner}</span>
+                    </span>
+                  ) : "-"}
+                </td>
+                <td className="px-4 py-3 text-gray-600 max-w-[200px]">
+                  {f.instructions ? (
+                    <span className="line-clamp-2 text-xs">{f.instructions}</span>
+                  ) : "-"}
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
                     {f.repurposeTargetIds?.map((targetId) => {
@@ -377,7 +529,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             ))}
             {filteredFormats.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
                   {formats.length === 0
                     ? 'No formats yet. Click "Add Format" to create one.'
                     : `No formats for ${channelFilter}.`}

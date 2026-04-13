@@ -1,6 +1,8 @@
 export const BRANDS = [
-  { slug: "starter-story", label: "Starter Story" },
-  { slug: "matg", label: "MATG" },
+  { slug: "starter-story", label: "Starter Story", emoji: "🚀" },
+  { slug: "matg", label: "MATG", emoji: "🎙️" },
 ] as const;
 
-export const DEFAULT_BRAND = "starter-story";
+export type BrandSlug = (typeof BRANDS)[number]["slug"];
+
+export const DEFAULT_BRAND: BrandSlug = "starter-story";

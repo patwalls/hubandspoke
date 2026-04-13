@@ -69,7 +69,10 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
               <SelectContent>
                 {BRANDS.map((brand) => (
                   <SelectItem key={brand.slug} value={brand.slug}>
-                    {brand.label}
+                    <span className="flex items-center gap-2">
+                      <span>{brand.emoji}</span>
+                      <span>{brand.label}</span>
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
