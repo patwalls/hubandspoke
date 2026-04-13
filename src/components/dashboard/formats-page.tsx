@@ -54,6 +54,14 @@ interface FormatRow {
   repurposeTargetIds: string[];
 }
 
+interface TopPerformer {
+  title: string | null;
+  views: number;
+  publishedLink: string | null;
+  publishedDate: string | null;
+  thumbnail: string | null;
+}
+
 const SS_CHANNELS = [
   "YouTube (SS)",
   "YouTube (SS Build)",
@@ -93,16 +101,34 @@ function MobileFormatCard({
   onEdit,
   onDelete,
   isSpoke,
+  topPerformers,
 }: {
   f: FormatRow;
   onEdit: (f: FormatRow) => void;
   onDelete: (id: string) => void;
   isSpoke?: boolean;
+  topPerformers?: TopPerformer[];
 }) {
+  const [showPerformers, setShowPerformers] = useState(false);
+  const hasPerformers = topPerformers && topPerformers.length > 0;
+
   return (
     <div className={`rounded-lg border p-3 space-y-2 ${isSpoke ? "bg-gray-50 border-gray-200" : "bg-white border-gray-200"}`}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-2">
+          {isSpoke && hasPerformers && (
+            <button
+              onClick={() => setShowPerformers(!showPerformers)}
+              className="text-gray-400 hover:text-gray-600 -ml-1"
+            >
+              <svg
+                className={`w-3.5 h-3.5 transition-transform ${showPerformers ? "rotate-90" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
           <span className={`font-medium text-gray-900 ${isSpoke ? "text-sm" : ""}`}>{f.name}</span>
           <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
             isSpoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
@@ -146,6 +172,14 @@ function MobileFormatCard({
       {f.instructions && (
         <p className="text-xs text-gray-500 line-clamp-2">Instructions: {f.instructions}</p>
       )}
+      {/* Top performers dropdown */}
+      {isSpoke && showPerformers && hasPerformers && (
+        <div className="border-t border-gray-200 pt-2 space-y-1.5">
+          {topPerformers.map((p, i) => (
+            <TopPerformerRow key={i} performer={p} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -155,19 +189,37 @@ function FormatTableRow({
   isSpoke,
   onEdit,
   onDelete,
+  topPerformers,
 }: {
   f: FormatRow;
   isSpoke?: boolean;
   onEdit: (f: FormatRow) => void;
   onDelete: (id: string) => void;
+  topPerformers?: TopPerformer[];
 }) {
+  const [showPerformers, setShowPerformers] = useState(false);
+  const hasPerformers = topPerformers && topPerformers.length > 0;
+
   return (
+    <>
     <tr className={`border-b border-gray-100 ${isSpoke ? "bg-gray-50/50" : "hover:bg-gray-50"}`}>
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
-          {isSpoke && (
+          {isSpoke && hasPerformers ? (
+            <button
+              onClick={() => setShowPerformers(!showPerformers)}
+              className="text-gray-400 hover:text-gray-600 ml-4"
+            >
+              <svg
+                className={`w-3.5 h-3.5 transition-transform ${showPerformers ? "rotate-90" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          ) : isSpoke ? (
             <span className="text-gray-300 text-xs ml-4">└</span>
-          )}
+          ) : null}
           <span className={`${isSpoke ? "text-gray-700 text-sm" : "font-medium text-gray-900"}`}>
             {f.name}
           </span>
@@ -176,6 +228,11 @@ function FormatTableRow({
           }`}>
             {isSpoke ? "Repurposed" : "Pillar"}
           </span>
+          {isSpoke && hasPerformers && (
+            <span className="text-[10px] text-gray-400 font-medium">
+              {topPerformers.length} top post{topPerformers.length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
       </td>
       <td className="px-4 py-3">
@@ -218,6 +275,47 @@ function FormatTableRow({
         </div>
       </td>
     </tr>
+    {/* Top performers rows */}
+    {isSpoke && showPerformers && hasPerformers && topPerformers.map((p, i) => (
+      <tr key={i} className="border-b border-gray-50 bg-purple-50/30">
+        <td colSpan={8} className="px-4 py-2 pl-16">
+          <TopPerformerRow performer={p} />
+        </td>
+      </tr>
+    ))}
+    </>
+  );
+}
+
+function TopPerformerRow({ performer }: { performer: TopPerformer }) {
+  return (
+    <div className="flex items-center gap-3 text-xs">
+      <span className="text-purple-400">★</span>
+      {performer.thumbnail && (
+        <img
+          src={performer.thumbnail}
+          alt=""
+          className="w-8 h-8 rounded object-cover shrink-0"
+        />
+      )}
+      <div className="flex-1 min-w-0">
+        {performer.publishedLink ? (
+          <a
+            href={performer.publishedLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-purple-700 hover:text-purple-900 hover:underline truncate block"
+          >
+            {performer.title || performer.publishedLink}
+          </a>
+        ) : (
+          <span className="text-gray-600 truncate block">{performer.title || "Untitled"}</span>
+        )}
+      </div>
+      <span className="text-gray-500 shrink-0 tabular-nums">
+        {performer.views.toLocaleString()} views
+      </span>
+    </div>
   );
 }
 
@@ -228,6 +326,7 @@ function HubGroup({
   onToggle,
   onEdit,
   onDelete,
+  topPerformers,
 }: {
   hub: FormatRow;
   spokes: FormatRow[];
@@ -235,6 +334,7 @@ function HubGroup({
   onToggle: () => void;
   onEdit: (f: FormatRow) => void;
   onDelete: (id: string) => void;
+  topPerformers: Record<string, TopPerformer[]>;
 }) {
   return (
     <>
@@ -256,7 +356,7 @@ function HubGroup({
             </span>
             {spokes.length > 0 && (
               <span className="text-[10px] text-gray-400 font-medium bg-gray-100 px-1.5 py-0.5 rounded-full">
-                {spokes.length} spoke{spokes.length !== 1 ? "s" : ""}
+                {spokes.length} repurposed
               </span>
             )}
           </div>
@@ -303,7 +403,7 @@ function HubGroup({
       </tr>
       {/* Spoke rows */}
       {expanded && spokes.map((s) => (
-        <FormatTableRow key={s.id} f={s} isSpoke onEdit={onEdit} onDelete={onDelete} />
+        <FormatTableRow key={s.id} f={s} isSpoke onEdit={onEdit} onDelete={onDelete} topPerformers={topPerformers[s.name]} />
       ))}
     </>
   );
@@ -313,6 +413,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const ALL_CHANNELS = brand === "matg" ? MATG_CHANNELS : SS_CHANNELS;
 
   const [formats, setFormats] = useState<FormatRow[]>([]);
+  const [topPerformers, setTopPerformers] = useState<Record<string, TopPerformer[]>>({});
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFormat, setEditingFormat] = useState<FormatRow | null>(null);
@@ -338,9 +439,16 @@ export function FormatsPageContent({ brand }: { brand: string }) {
 
   const fetchFormats = useCallback(async () => {
     try {
-      const res = await fetch(`/api/formats?brand=${brand}`);
-      const data = await res.json();
+      const [fmtRes, perfRes] = await Promise.all([
+        fetch(`/api/formats?brand=${brand}`),
+        fetch(`/api/formats/top-performers?brand=${brand}`),
+      ]);
+      const data = await fmtRes.json();
       setFormats(data);
+      if (perfRes.ok) {
+        const perfData = await perfRes.json();
+        setTopPerformers(perfData);
+      }
     } catch (err) {
       console.error("Failed to fetch formats:", err);
     } finally {
@@ -849,7 +957,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
         {typeFilter === "repurposed" ? (
           // Flat spoke list when filtering to repurposed only
           allFilteredSpokes.map((f) => (
-            <MobileFormatCard key={f.id} f={f} onEdit={openEdit} onDelete={handleDelete} isSpoke />
+            <MobileFormatCard key={f.id} f={f} onEdit={openEdit} onDelete={handleDelete} isSpoke topPerformers={topPerformers[f.name]} />
           ))
         ) : (
           <>
@@ -872,11 +980,11 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                       </button>
                       <span className="font-semibold text-gray-900">{hub.name}</span>
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
-                        Hub
+                        Pillar
                       </span>
                       {spokes.length > 0 && (
                         <span className="text-[10px] text-gray-400 font-medium">
-                          {spokes.length} spoke{spokes.length !== 1 ? "s" : ""}
+                          {spokes.length} repurposed
                         </span>
                       )}
                     </div>
@@ -918,7 +1026,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 {expandedHubs.has(hub.id) && spokes.length > 0 && (
                   <div className="ml-4 border-l-2 border-blue-100 space-y-2 pt-2 pl-3">
                     {spokes.map((s) => (
-                      <MobileFormatCard key={s.id} f={s} onEdit={openEdit} onDelete={handleDelete} isSpoke />
+                      <MobileFormatCard key={s.id} f={s} onEdit={openEdit} onDelete={handleDelete} isSpoke topPerformers={topPerformers[s.name]} />
                     ))}
                   </div>
                 )}
@@ -926,7 +1034,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             ))}
             {/* Orphan spokes */}
             {orphanSpokes.map((f) => (
-              <MobileFormatCard key={f.id} f={f} onEdit={openEdit} onDelete={handleDelete} isSpoke />
+              <MobileFormatCard key={f.id} f={f} onEdit={openEdit} onDelete={handleDelete} isSpoke topPerformers={topPerformers[f.name]} />
             ))}
           </>
         )}
@@ -955,7 +1063,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             {typeFilter === "repurposed" ? (
               // Flat spoke list when filtering to repurposed only
               allFilteredSpokes.map((f) => (
-                <FormatTableRow key={f.id} f={f} isSpoke onEdit={openEdit} onDelete={handleDelete} />
+                <FormatTableRow key={f.id} f={f} isSpoke onEdit={openEdit} onDelete={handleDelete} topPerformers={topPerformers[f.name]} />
               ))
             ) : (
               <>
@@ -968,11 +1076,12 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                     onToggle={() => toggleHub(hub.id)}
                     onEdit={openEdit}
                     onDelete={handleDelete}
+                    topPerformers={topPerformers}
                   />
                 ))}
                 {/* Orphan spokes */}
                 {orphanSpokes.map((f) => (
-                  <FormatTableRow key={f.id} f={f} isSpoke onEdit={openEdit} onDelete={handleDelete} />
+                  <FormatTableRow key={f.id} f={f} isSpoke onEdit={openEdit} onDelete={handleDelete} topPerformers={topPerformers[f.name]} />
                 ))}
               </>
             )}
