@@ -25,6 +25,8 @@ interface FormatRow {
   name: string;
   channels: string[];
   event: string | null;
+  viewThreshold: number | null;
+  contentOwner: string | null;
   repurposeTargetIds: string[];
 }
 
@@ -71,6 +73,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [name, setName] = useState("");
   const [channels, setChannels] = useState<string[]>([]);
   const [event, setEvent] = useState("");
+  const [viewThreshold, setViewThreshold] = useState("");
+  const [contentOwner, setContentOwner] = useState("");
   const [repurposeTargetIds, setRepurposeTargetIds] = useState<string[]>([]);
 
   const fetchFormats = useCallback(async () => {
@@ -94,6 +98,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setName("");
     setChannels([]);
     setEvent("");
+    setViewThreshold("");
+    setContentOwner("");
     setRepurposeTargetIds([]);
     setDialogOpen(true);
   }
@@ -103,6 +109,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setName(f.name);
     setChannels(f.channels || []);
     setEvent(f.event || "");
+    setViewThreshold(f.viewThreshold != null ? String(f.viewThreshold) : "");
+    setContentOwner(f.contentOwner || "");
     setRepurposeTargetIds(f.repurposeTargetIds || []);
     setDialogOpen(true);
   }
@@ -114,6 +122,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       brand,
       channels,
       event: event || null,
+      viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
+      contentOwner: contentOwner || null,
       repurposeTargetIds,
     };
 
@@ -219,6 +229,23 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 />
               </div>
               <div className="space-y-2">
+                <Label>View Threshold</Label>
+                <Input
+                  type="number"
+                  value={viewThreshold}
+                  onChange={(e) => setViewThreshold(e.target.value)}
+                  placeholder="e.g. 50000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Content Owner</Label>
+                <Input
+                  value={contentOwner}
+                  onChange={(e) => setContentOwner(e.target.value)}
+                  placeholder="e.g. John Smith"
+                />
+              </div>
+              <div className="space-y-2">
                 <Label>Repurpose Targets</Label>
                 <div className="flex flex-wrap gap-2">
                   {formats
@@ -283,6 +310,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
               </div>
             )}
             {f.event && <p className="text-xs text-gray-500">Event: {f.event}</p>}
+            {f.viewThreshold != null && <p className="text-xs text-gray-500">View Threshold: {f.viewThreshold.toLocaleString()}</p>}
+            {f.contentOwner && <p className="text-xs text-gray-500">Content Owner: {f.contentOwner}</p>}
             {f.repurposeTargetIds?.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {f.repurposeTargetIds.map((targetId) => {
@@ -308,6 +337,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
               <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Channels</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Event</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-600">View Threshold</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-600">Content Owner</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Repurpose Targets</th>
               <th className="px-4 py-3 text-right font-medium text-gray-600">Actions</th>
             </tr>
@@ -324,6 +355,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-gray-600">{f.event || "-"}</td>
+                <td className="px-4 py-3 text-gray-600">{f.viewThreshold != null ? f.viewThreshold.toLocaleString() : "-"}</td>
+                <td className="px-4 py-3 text-gray-600">{f.contentOwner || "-"}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
                     {f.repurposeTargetIds?.map((targetId) => {
@@ -344,7 +377,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             ))}
             {filteredFormats.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                   {formats.length === 0
                     ? 'No formats yet. Click "Add Format" to create one.'
                     : `No formats for ${channelFilter}.`}

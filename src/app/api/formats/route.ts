@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, channels, event, brand, repurposeTargetIds } = body;
+    const { name, channels, event, brand, viewThreshold, contentOwner, repurposeTargetIds } = body;
 
     const [created] = await db
       .insert(formats)
@@ -45,6 +45,8 @@ export async function POST(request: NextRequest) {
         brand: brand || "starter-story",
         channels: channels || [],
         event: event || null,
+        viewThreshold: viewThreshold || null,
+        contentOwner: contentOwner || null,
       })
       .returning();
 
@@ -71,7 +73,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, channels, event, repurposeTargetIds } = body;
+    const { id, name, channels, event, viewThreshold, contentOwner, repurposeTargetIds } = body;
 
     const [updated] = await db
       .update(formats)
@@ -79,6 +81,8 @@ export async function PUT(request: NextRequest) {
         name,
         channels: channels || [],
         event: event || null,
+        viewThreshold: viewThreshold || null,
+        contentOwner: contentOwner || null,
         updatedAt: new Date(),
       })
       .where(eq(formats.id, id))

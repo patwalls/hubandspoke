@@ -59,6 +59,8 @@ export const formats = pgTable("formats", {
   brand: text("brand").default("starter-story").notNull(),
   channels: jsonb("channels").$type<string[]>().default([]),
   event: text("event"),
+  viewThreshold: integer("view_threshold"),
+  contentOwner: text("content_owner"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
