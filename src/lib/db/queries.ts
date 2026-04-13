@@ -25,8 +25,9 @@ export async function getContentReport(
     viewType
   );
 
-  // Build query conditions
+  // Build query conditions — scoped to starter-story brand only
   const conditions = [
+    eq(productionItems.brand, "starter-story"),
     isNotNull(productionItems.publishedDate),
     eq(productionItems.status, "Published"),
     gte(productionItems.publishedDate, startDate),
