@@ -63,6 +63,7 @@ export const formats = pgTable("formats", {
   contentOwner: text("content_owner"),
   contentOwnerAsanaGid: text("content_owner_asana_gid"),
   instructions: text("instructions"),
+  contentType: text("content_type").default("pillar"), // "pillar" (hub) or "repurposed" (spoke)
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

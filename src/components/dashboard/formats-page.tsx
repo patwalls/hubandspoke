@@ -49,6 +49,7 @@ interface FormatRow {
   contentOwner: string | null;
   contentOwnerAsanaGid: string | null;
   instructions: string | null;
+  contentType: string | null;
   repurposeTargetIds: string[];
 }
 
@@ -90,6 +91,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFormat, setEditingFormat] = useState<FormatRow | null>(null);
   const [channelFilter, setChannelFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
 
   // Asana members
   const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
@@ -103,6 +105,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [contentOwner, setContentOwner] = useState("");
   const [contentOwnerAsanaGid, setContentOwnerAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
+  const [contentType, setContentType] = useState<string>("pillar");
   const [repurposeTargetIds, setRepurposeTargetIds] = useState<string[]>([]);
 
   const fetchFormats = useCallback(async () => {
@@ -146,6 +149,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setContentOwner("");
     setContentOwnerAsanaGid("");
     setInstructions("");
+    setContentType("pillar");
     setRepurposeTargetIds([]);
     setDialogOpen(true);
   }
@@ -159,6 +163,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setContentOwner(f.contentOwner || "");
     setContentOwnerAsanaGid(f.contentOwnerAsanaGid || "");
     setInstructions(f.instructions || "");
+    setContentType(f.contentType || "pillar");
     setRepurposeTargetIds(f.repurposeTargetIds || []);
     setDialogOpen(true);
   }
@@ -174,6 +179,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       contentOwner: contentOwner || null,
       contentOwnerAsanaGid: contentOwnerAsanaGid || null,
       instructions: instructions || null,
+      contentType,
       repurposeTargetIds,
     };
 
@@ -226,10 +232,11 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setOwnerPopoverOpen(false);
   }
 
-  const filteredFormats =
-    channelFilter === "all"
-      ? formats
-      : formats.filter((f) => f.channels?.includes(channelFilter));
+  const filteredFormats = formats.filter((f) => {
+    if (channelFilter !== "all" && !f.channels?.includes(channelFilter)) return false;
+    if (typeFilter !== "all" && (f.contentType || "pillar") !== typeFilter) return false;
+    return true;
+  });
 
   if (loading) {
     return (
@@ -266,6 +273,41 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Business Breakdown"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>Content Type</Label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setContentType("pillar")}
+                    className={`flex-1 flex items-center gap-2 rounded-lg border-2 px-3 py-2.5 text-sm transition-all ${
+                      contentType === "pillar"
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                    }`}
+                  >
+                    <span className="text-base">🎯</span>
+                    <span>
+                      <span className="font-medium block">Pillar</span>
+                      <span className="text-xs opacity-75">Hub content</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setContentType("repurposed")}
+                    className={`flex-1 flex items-center gap-2 rounded-lg border-2 px-3 py-2.5 text-sm transition-all ${
+                      contentType === "repurposed"
+                        ? "border-purple-500 bg-purple-50 text-purple-700"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                    }`}
+                  >
+                    <span className="text-base">🔄</span>
+                    <span>
+                      <span className="font-medium block">Repurposed</span>
+                      <span className="text-xs opacity-75">Spoke content</span>
+                    </span>
+                  </button>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Channels</Label>
@@ -401,21 +443,46 @@ export function FormatsPageContent({ brand }: { brand: string }) {
         </Dialog>
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-        <Label className="text-sm text-gray-600">Filter by channel:</Label>
-        <Select value={channelFilter} onValueChange={(v) => setChannelFilter(v ?? "all")}>
-          <SelectTrigger className="w-full sm:w-[200px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All channels</SelectItem>
-            {ALL_CHANNELS.map((ch) => (
-              <SelectItem key={ch} value={ch}>
-                {ch}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-2">
+          <Label className="text-sm text-gray-600 whitespace-nowrap">Type:</Label>
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+            <button
+              onClick={() => setTypeFilter("all")}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                typeFilter === "all" ? "bg-gray-900 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >All</button>
+            <button
+              onClick={() => setTypeFilter("pillar")}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 ${
+                typeFilter === "pillar" ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >🎯 Pillar</button>
+            <button
+              onClick={() => setTypeFilter("repurposed")}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 ${
+                typeFilter === "repurposed" ? "bg-purple-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >🔄 Repurposed</button>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-sm text-gray-600 whitespace-nowrap">Channel:</Label>
+          <Select value={channelFilter} onValueChange={(v) => setChannelFilter(v ?? "all")}>
+            <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All channels</SelectItem>
+              {ALL_CHANNELS.map((ch) => (
+                <SelectItem key={ch} value={ch}>
+                  {ch}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Mobile card view */}
@@ -423,7 +490,16 @@ export function FormatsPageContent({ brand }: { brand: string }) {
         {filteredFormats.map((f) => (
           <div key={f.id} className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
             <div className="flex items-start justify-between">
-              <span className="font-medium text-gray-900">{f.name}</span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">{f.name}</span>
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                  (f.contentType || "pillar") === "pillar"
+                    ? "bg-blue-50 text-blue-700"
+                    : "bg-purple-50 text-purple-700"
+                }`}>
+                  {(f.contentType || "pillar") === "pillar" ? "🎯 Hub" : "🔄 Spoke"}
+                </span>
+              </div>
               <div className="flex gap-1">
                 <Button variant="ghost" size="sm" onClick={() => openEdit(f)}>Edit</Button>
                 <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(f.id)}>Delete</Button>
@@ -472,6 +548,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-600">Type</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Channels</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Event</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">View Threshold</th>
@@ -485,6 +562,15 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             {filteredFormats.map((f) => (
               <tr key={f.id} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="px-4 py-3 font-medium text-gray-900">{f.name}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                    (f.contentType || "pillar") === "pillar"
+                      ? "bg-blue-50 text-blue-700"
+                      : "bg-purple-50 text-purple-700"
+                  }`}>
+                    {(f.contentType || "pillar") === "pillar" ? "🎯 Hub" : "🔄 Spoke"}
+                  </span>
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
                     {f.channels?.map((ch) => (
@@ -529,7 +615,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             ))}
             {filteredFormats.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                   {formats.length === 0
                     ? 'No formats yet. Click "Add Format" to create one.'
                     : `No formats for ${channelFilter}.`}

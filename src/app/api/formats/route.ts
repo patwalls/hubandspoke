@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, channels, event, brand, viewThreshold, contentOwner, contentOwnerAsanaGid, instructions, repurposeTargetIds } = body;
+    const { name, channels, event, brand, viewThreshold, contentOwner, contentOwnerAsanaGid, instructions, contentType, repurposeTargetIds } = body;
 
     const [created] = await db
       .insert(formats)
@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
         contentOwner: contentOwner || null,
         contentOwnerAsanaGid: contentOwnerAsanaGid || null,
         instructions: instructions || null,
+        contentType: contentType || "pillar",
       })
       .returning();
 
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, channels, event, viewThreshold, contentOwner, contentOwnerAsanaGid, instructions, repurposeTargetIds } = body;
+    const { id, name, channels, event, viewThreshold, contentOwner, contentOwnerAsanaGid, instructions, contentType, repurposeTargetIds } = body;
 
     const [updated] = await db
       .update(formats)
@@ -87,6 +88,7 @@ export async function PUT(request: NextRequest) {
         contentOwner: contentOwner || null,
         contentOwnerAsanaGid: contentOwnerAsanaGid || null,
         instructions: instructions || null,
+        contentType: contentType || "pillar",
         updatedAt: new Date(),
       })
       .where(eq(formats.id, id))
