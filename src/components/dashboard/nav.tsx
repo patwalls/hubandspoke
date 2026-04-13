@@ -60,7 +60,7 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
                 <path d="M16 3.549L7.12 20.600" />
               </svg>
             </span>
-            <Select value={currentBrand} onValueChange={handleBrandChange}>
+            <Select value={currentBrand} onValueChange={(v) => handleBrandChange(v ?? DEFAULT_BRAND)}>
               <SelectTrigger className="w-[160px] border-none shadow-none font-medium text-foreground px-2 h-8 text-sm">
                 <SelectValue />
               </SelectTrigger>
