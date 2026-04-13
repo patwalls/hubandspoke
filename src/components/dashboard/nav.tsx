@@ -1,12 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { cn } from "@/lib/utils";
+import { BRANDS, DEFAULT_BRAND } from "@/lib/config/brands";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+function getBrandFromPath(pathname: string): string {
+  const segment = pathname.split("/")[1];
+  const match = BRANDS.find((b) => b.slug === segment);
+  return match ? match.slug : DEFAULT_BRAND;
+}
 
 export function DashboardNav({ userEmail }: { userEmail: string }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const currentBrand = getBrandFromPath(pathname);
 
   async function handleSignOut() {
     const supabase = createBrowserClient(
@@ -17,8 +33,12 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
     window.location.href = "/login";
   }
 
+  function handleBrandChange(slug: string) {
+    router.push(`/${slug}`);
+  }
+
   const links = [
-    { href: "/", label: "Dashboard" },
+    { href: `/${currentBrand}`, label: "Dashboard" },
     { href: "/formats", label: "Formats" },
   ];
 
@@ -40,6 +60,18 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
                 <path d="M16 3.549L7.12 20.600" />
               </svg>
             </span>
+            <Select value={currentBrand} onValueChange={handleBrandChange}>
+              <SelectTrigger className="w-[160px] border-none shadow-none font-medium text-foreground px-2 h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BRANDS.map((brand) => (
+                  <SelectItem key={brand.slug} value={brand.slug}>
+                    {brand.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <nav className="flex items-center gap-1">
               {links.map((link) => (
                 <Link
@@ -47,7 +79,8 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
                   href={link.href}
                   className={cn(
                     "px-3 py-1.5 rounded-md text-sm transition-colors",
-                    pathname === link.href
+                    pathname === link.href ||
+                      (link.label === "Dashboard" && pathname === "/")
                       ? "bg-accent text-foreground font-medium"
                       : "text-muted-foreground hover:text-foreground hover:bg-accent"
                   )}

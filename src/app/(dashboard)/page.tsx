@@ -1,16 +1,6 @@
-import { Suspense } from "react";
-import { ContentReport } from "@/components/dashboard/content-report";
+import { redirect } from "next/navigation";
+import { DEFAULT_BRAND } from "@/lib/config/brands";
 
-export default function DashboardPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center py-20">
-          <div className="text-gray-400">Loading...</div>
-        </div>
-      }
-    >
-      <ContentReport />
-    </Suspense>
-  );
+export default function RootPage() {
+  redirect(`/${DEFAULT_BRAND}`);
 }
