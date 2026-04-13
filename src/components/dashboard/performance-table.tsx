@@ -17,8 +17,29 @@ type SortKey =
   | "leads"
   | "salesAmount";
 
+function getFreshness(item: ProductionItem): {
+  color: string;
+  label: string;
+  dotClass: string;
+} {
+  if (!item.lastPerformanceSyncAt) {
+    return { color: "text-red-500", label: "Never", dotClass: "bg-red-400" };
+  }
+  const elapsed = Date.now() - new Date(item.lastPerformanceSyncAt).getTime();
+  const hours = elapsed / (1000 * 60 * 60);
+  const days = hours / 24;
+
+  if (hours < 1) return { color: "text-green-600", label: "Just now", dotClass: "bg-green-400" };
+  if (hours < 6) return { color: "text-green-600", label: `${Math.floor(hours)}h ago`, dotClass: "bg-green-400" };
+  if (hours < 24) return { color: "text-green-600", label: `${Math.floor(hours)}h ago`, dotClass: "bg-green-400" };
+  if (days < 3) return { color: "text-yellow-600", label: `${Math.floor(days)}d ago`, dotClass: "bg-yellow-400" };
+  if (days < 7) return { color: "text-yellow-600", label: `${Math.floor(days)}d ago`, dotClass: "bg-yellow-400" };
+  return { color: "text-muted-foreground", label: `${Math.floor(days)}d ago`, dotClass: "bg-gray-400" };
+}
+
 export function PerformanceTable({ items }: PerformanceTableProps) {
   const hasThumbnails = items.some((item) => item.thumbnail);
+  const hasPerformanceSync = items.some((item) => item.lastPerformanceSyncAt);
   const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -82,6 +103,11 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
                 Format
               </th>
               <SortHeader label="Published" sortKeyName="publishedDate" />
+              {hasPerformanceSync && (
+                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                  Synced
+                </th>
+              )}
               <SortHeader label="Views" sortKeyName="views" />
               <SortHeader label="Likes" sortKeyName="likes" />
               <SortHeader label="Comments" sortKeyName="comments" />
@@ -144,6 +170,17 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
                 <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
                   {item.publishedDate || "-"}
                 </td>
+                {hasPerformanceSync && (() => {
+                  const freshness = getFreshness(item);
+                  return (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className={`inline-flex items-center gap-1.5 text-[11px] ${freshness.color}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${freshness.dotClass}`} />
+                        {freshness.label}
+                      </span>
+                    </td>
+                  );
+                })()}
                 <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
                   {item.views?.toLocaleString() || "-"}
                 </td>
@@ -166,7 +203,7 @@ export function PerformanceTable({ items }: PerformanceTableProps) {
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                <td colSpan={hasPerformanceSync ? 11 : 10} className="px-4 py-12 text-center text-muted-foreground text-sm">
                   No content items found for the selected filters.
                 </td>
               </tr>

@@ -89,8 +89,16 @@ export async function GET(request: NextRequest) {
       .from(productionItems)
       .where(and(...conditions));
 
-    // Get all platforms and formats
-    const allPlatforms = new Set<string>();
+    // Always show all MATG platforms, even those with 0 output
+    const MATG_PLATFORMS = [
+      "YouTube",
+      "YouTube Shorts",
+      "Instagram Reel",
+      "Instagram Post",
+      "Twitter",
+    ];
+
+    const allPlatforms = new Set<string>(MATG_PLATFORMS);
     const allFormats = new Set<string>();
 
     items.forEach((item) => {

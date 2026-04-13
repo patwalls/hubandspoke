@@ -55,6 +55,7 @@ export const productionItems = pgTable(
     index("idx_production_items_published_date").on(table.publishedDate),
     index("idx_production_items_status").on(table.status),
     index("idx_production_items_brand").on(table.brand),
+    index("idx_production_items_last_perf_sync").on(table.lastPerformanceSyncAt),
   ]
 );
 

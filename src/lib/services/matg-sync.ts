@@ -173,7 +173,10 @@ function unixToDate(ts: number): string | null {
 /*  Fetch functions (1 API credit each)                                */
 /* ------------------------------------------------------------------ */
 
-async function fetchYouTubeVideos(): Promise<SCVideo[]> {
+export { SC_BASE, headers };
+export type { SCVideo, SCShort };
+
+export async function fetchYouTubeVideos(): Promise<SCVideo[]> {
   const url = `${SC_BASE}/v1/youtube/channel-videos?handle=${MATG_YT_HANDLE}&sort=latest`;
   const res = await fetch(url, { headers: headers() });
   if (!res.ok) throw new Error(`YT videos error (${res.status}): ${await res.text()}`);
@@ -181,12 +184,29 @@ async function fetchYouTubeVideos(): Promise<SCVideo[]> {
   return data.videos || [];
 }
 
-async function fetchYouTubeShorts(): Promise<SCShort[]> {
+export async function fetchYouTubeShorts(): Promise<SCShort[]> {
   const url = `${SC_BASE}/v1/youtube/channel/shorts?handle=${MATG_YT_HANDLE}`;
   const res = await fetch(url, { headers: headers() });
   if (!res.ok) throw new Error(`YT shorts error (${res.status}): ${await res.text()}`);
   const data = await res.json();
   return data.shorts || [];
+}
+
+export interface SCVideoDetail {
+  id: string;
+  url: string;
+  title: string;
+  viewCountInt: number;
+  likeCountInt: number;
+  commentCountInt: number;
+  thumbnail?: string;
+}
+
+export async function fetchSingleVideo(videoUrl: string): Promise<SCVideoDetail> {
+  const url = `${SC_BASE}/v1/youtube/video?url=${encodeURIComponent(videoUrl)}`;
+  const res = await fetch(url, { headers: headers() });
+  if (!res.ok) throw new Error(`Video detail error (${res.status}): ${await res.text()}`);
+  return res.json();
 }
 
 async function fetchInstagramPosts(): Promise<SCInstagramPost[]> {
@@ -255,6 +275,7 @@ async function syncYouTubeVideos(): Promise<SyncResult> {
         publishedLink: video.url,
         views: video.viewCountInt || 0,
         isExternal: false,
+        lastPerformanceSyncAt: new Date(),
         updatedAt: new Date(),
       };
 
@@ -305,6 +326,7 @@ async function syncYouTubeShorts(): Promise<SyncResult> {
         likes: short.likeCountInt || null,
         comments: short.commentCountInt || null,
         isExternal: false,
+        lastPerformanceSyncAt: new Date(),
         updatedAt: new Date(),
       };
 
@@ -447,11 +469,12 @@ export async function syncAllMATG(): Promise<MultiSyncResult> {
   let creditsUsed = 0;
 
   // Run each sync, catching errors per-source so one failure doesn't block others
+  // NOTE: Instagram and Twitter are currently inactive for MATG — re-add when they start posting again
   const syncFns: Array<{ name: string; fn: () => Promise<SyncResult> }> = [
     { name: "YouTube", fn: syncYouTubeVideos },
     { name: "YouTube Shorts", fn: syncYouTubeShorts },
-    { name: "Instagram", fn: syncInstagram },
-    { name: "Twitter", fn: syncTwitter },
+    // { name: "Instagram", fn: syncInstagram },
+    // { name: "Twitter", fn: syncTwitter },
   ];
 
   for (const { name, fn } of syncFns) {

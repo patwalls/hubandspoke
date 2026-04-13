@@ -57,6 +57,22 @@ interface SyncResult {
   errors?: number;
 }
 
+interface PerfSyncResult {
+  creditsUsed: number;
+  itemsUpdated: number;
+  shortsUpdated: number;
+  videosUpdated: number;
+  individualFetches: number;
+  byTier: Record<string, number>;
+  skippedReason?: string;
+}
+
+interface PerformanceDue {
+  totalDue: number;
+  estimatedCredits: number;
+  byTier: Record<string, number>;
+}
+
 interface LastSyncInfo {
   status: string;
   startedAt: string;
@@ -123,6 +139,11 @@ export function MATGDashboard() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<LastSyncInfo | null>(null);
 
+  // Performance sync
+  const [perfSyncing, setPerfSyncing] = useState(false);
+  const [perfResult, setPerfResult] = useState<PerfSyncResult | null>(null);
+  const [performanceDue, setPerformanceDue] = useState<PerformanceDue | null>(null);
+
   // Trigger
   const [triggering, setTriggering] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<TriggerResult | null>(null);
@@ -158,6 +179,7 @@ export function MATGDashboard() {
       setData(reportData);
       setFormats(formatsData);
       setLastSync(syncInfoData.lastSync || null);
+      setPerformanceDue(syncInfoData.performanceDue || null);
     } catch (err) {
       console.error("Failed to fetch data:", err);
     } finally {
@@ -218,6 +240,23 @@ export function MATGDashboard() {
     }
   }
 
+  async function handlePerfSync() {
+    setPerfSyncing(true);
+    setPerfResult(null);
+    try {
+      const res = await fetch("/api/sync/youtube?mode=performance", { method: "POST" });
+      const result = await res.json();
+      setPerfResult(result);
+      if (result.itemsUpdated > 0) {
+        await fetchReport();
+      }
+    } catch (err) {
+      console.error("Performance sync failed:", err);
+    } finally {
+      setPerfSyncing(false);
+    }
+  }
+
   async function handleTrigger(formatId: string, videoTitle?: string, views?: number) {
     setTriggering(formatId);
     setLastResult(null);
@@ -260,12 +299,39 @@ export function MATGDashboard() {
             Track content production &amp; repurpose pipeline
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {lastSync?.completedAt && (
             <span className="text-xs text-muted-foreground">
               Last synced {timeAgo(lastSync.completedAt)}
             </span>
           )}
+          <button
+            onClick={handlePerfSync}
+            disabled={perfSyncing}
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 sm:py-1.5 text-sm font-medium rounded-md border border-border bg-card text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+          >
+            {perfSyncing ? (
+              <>
+                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Updating...
+              </>
+            ) : (
+              <>
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                </svg>
+                Update Performance
+                {performanceDue && performanceDue.totalDue > 0 && (
+                  <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">
+                    {performanceDue.totalDue} due
+                  </span>
+                )}
+              </>
+            )}
+          </button>
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -287,7 +353,7 @@ export function MATGDashboard() {
                   <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
                   <path d="M16 16h5v5" />
                 </svg>
-                Sync All Platforms
+                Full Sync
               </>
             )}
           </button>
@@ -318,6 +384,32 @@ export function MATGDashboard() {
               Synced {syncResult.videosFetched} videos — {syncResult.created} new, {syncResult.updated} updated
               {(syncResult.errors || 0) > 0 && `, ${syncResult.errors} errors`}
             </>
+          )}
+        </div>
+      )}
+
+      {/* Performance sync result banner */}
+      {perfResult && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+          {perfResult.skippedReason ? (
+            <span>✓ {perfResult.skippedReason}</span>
+          ) : (
+            <div className="space-y-1">
+              <div className="font-medium">
+                Performance updated: {perfResult.itemsUpdated} items
+                {perfResult.individualFetches > 0 && ` (${perfResult.individualFetches} detailed)`}
+                {` — ${perfResult.creditsUsed} credit${perfResult.creditsUsed !== 1 ? "s" : ""} used`}
+              </div>
+              {Object.keys(perfResult.byTier).length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {Object.entries(perfResult.byTier).map(([tier, count]) => (
+                    <span key={tier} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
+                      {tier}: {count}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
