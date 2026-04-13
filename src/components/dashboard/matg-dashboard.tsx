@@ -25,7 +25,10 @@ interface VideoItem {
   thumbnail: string | null;
   publishedDate: string | null;
   views: number | null;
+  likes: number | null;
+  comments: number | null;
   status: string | null;
+  platform: string[] | null;
 }
 
 interface MATGReport {
@@ -49,26 +52,55 @@ interface SyncResult {
   errors: number;
 }
 
+interface LastSyncInfo {
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+  itemsFetched: number | null;
+  itemsCreated: number | null;
+  itemsUpdated: number | null;
+}
+
+type SortKey = "title" | "publishedDate" | "views" | "likes" | "comments";
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 export function MATGDashboard() {
   const [formats, setFormats] = useState<FormatRow[]>([]);
   const [report, setReport] = useState<MATGReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [lastSync, setLastSync] = useState<LastSyncInfo | null>(null);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<TriggerResult | null>(null);
   const [activeTab, setActiveTab] = useState<"content" | "pipeline">("content");
+  const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const fetchData = useCallback(async () => {
     try {
-      const [formatsRes, reportRes] = await Promise.all([
+      const [formatsRes, reportRes, syncInfoRes] = await Promise.all([
         fetch("/api/formats?brand=matg"),
         fetch("/api/reports/matg"),
+        fetch("/api/sync/youtube"),
       ]);
       const formatsData = await formatsRes.json();
       const reportData = await reportRes.json();
+      const syncInfoData = await syncInfoRes.json();
       setFormats(formatsData);
       setReport(reportData);
+      setLastSync(syncInfoData.lastSync || null);
     } catch (err) {
       console.error("Failed to fetch data:", err);
     } finally {
@@ -83,17 +115,68 @@ export function MATGDashboard() {
   const pillarFormats = formats.filter((f) => (f.contentType || "pillar") === "pillar");
   const spokeFormats = formats.filter((f) => f.contentType === "repurposed");
 
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
+
+  function SortHeader({ label, sortKeyName, align }: { label: string; sortKeyName: SortKey; align?: string }) {
+    const isActive = sortKey === sortKeyName;
+    return (
+      <th
+        className={`px-3 py-2.5 font-mono uppercase tracking-wider text-[10px] text-muted-foreground cursor-pointer hover:text-foreground select-none whitespace-nowrap transition-colors ${align === "right" ? "text-right" : "text-left"}`}
+        onClick={() => handleSort(sortKeyName)}
+      >
+        <span className="inline-flex items-center gap-1">
+          {label}
+          {isActive && (
+            <span className="text-foreground">{sortDir === "asc" ? "↑" : "↓"}</span>
+          )}
+        </span>
+      </th>
+    );
+  }
+
+  const sortedVideos = [...(report?.items || [])].sort((a, b) => {
+    const aVal = a[sortKey];
+    const bVal = b[sortKey];
+    if (aVal == null && bVal == null) return 0;
+    if (aVal == null) return 1;
+    if (bVal == null) return -1;
+    if (typeof aVal === "string" && typeof bVal === "string") {
+      return sortDir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    }
+    return sortDir === "asc"
+      ? (aVal as number) - (bVal as number)
+      : (bVal as number) - (aVal as number);
+  });
+
   async function handleSync() {
     setSyncing(true);
     setSyncResult(null);
+    setSyncMessage(null);
     try {
       const res = await fetch("/api/sync/youtube", { method: "POST" });
       const data = await res.json();
-      setSyncResult(data);
-      // Refresh report data
-      const reportRes = await fetch("/api/reports/matg");
-      const reportData = await reportRes.json();
-      setReport(reportData);
+
+      if (data.skipped) {
+        setSyncMessage(data.message);
+      } else {
+        setSyncResult(data);
+        // Refresh report data and last sync info
+        const [reportRes, syncInfoRes] = await Promise.all([
+          fetch("/api/reports/matg"),
+          fetch("/api/sync/youtube"),
+        ]);
+        const reportData = await reportRes.json();
+        const syncInfoData = await syncInfoRes.json();
+        setReport(reportData);
+        setLastSync(syncInfoData.lastSync || null);
+      }
     } catch (err) {
       console.error("Sync failed:", err);
     } finally {
@@ -132,7 +215,6 @@ export function MATGDashboard() {
   }
 
   const stats = report?.stats || { totalVideos: 0, totalViews: 0, avgViews: 0 };
-  const videos = report?.items || [];
 
   return (
     <div className="space-y-6">
@@ -146,21 +228,28 @@ export function MATGDashboard() {
             Content performance &amp; repurpose pipeline
           </p>
         </div>
-        <Button
-          onClick={handleSync}
-          disabled={syncing}
-          variant="outline"
-          size="sm"
-        >
-          {syncing ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              Syncing YouTube...
+        <div className="flex items-center gap-3">
+          {lastSync?.completedAt && (
+            <span className="text-xs text-muted-foreground">
+              Last synced {timeAgo(lastSync.completedAt)}
             </span>
-          ) : (
-            "🔄 Sync YouTube Data"
           )}
-        </Button>
+          <Button
+            onClick={handleSync}
+            disabled={syncing}
+            variant="outline"
+            size="sm"
+          >
+            {syncing ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                Syncing...
+              </span>
+            ) : (
+              "🔄 Sync YouTube Data"
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Sync result banner */}
@@ -168,6 +257,14 @@ export function MATGDashboard() {
         <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">
           Synced {syncResult.videosFetched} videos — {syncResult.created} new, {syncResult.updated} updated
           {syncResult.errors > 0 && `, ${syncResult.errors} errors`}
+        </div>
+      )}
+
+      {/* Sync cooldown message */}
+      {syncMessage && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 flex items-center gap-2">
+          <span>⏳</span>
+          {syncMessage}
         </div>
       )}
 
@@ -237,115 +334,135 @@ export function MATGDashboard() {
 
       {/* Content Performance Tab */}
       {activeTab === "content" && (
-        <div className="space-y-4">
-          {videos.length === 0 ? (
-            <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-              <p className="text-gray-400 mb-3">No videos synced yet.</p>
-              <Button onClick={handleSync} disabled={syncing} size="sm">
-                {syncing ? "Syncing..." : "Sync YouTube Data"}
-              </Button>
-            </div>
-          ) : (
-            <>
-              {/* Desktop table */}
-              <div className="hidden sm:block bg-white rounded-lg border border-gray-200 overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">Video</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-600">Published</th>
-                      <th className="px-4 py-3 text-right font-medium text-gray-600">Views</th>
-                      <th className="px-4 py-3 text-right font-medium text-gray-600">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {videos.map((v) => {
-                      // Check if any pillar format threshold is crossed
-                      const thresholdCrossed = pillarFormats.find(
-                        (f) => f.viewThreshold && (v.views || 0) >= f.viewThreshold
-                      );
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground">Content Performance</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Individual content items with detailed metrics
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-accent/50">
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground w-8" />
+                  <SortHeader label="Title" sortKeyName="title" />
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Platform
+                  </th>
+                  <SortHeader label="Published" sortKeyName="publishedDate" />
+                  <SortHeader label="Views" sortKeyName="views" align="right" />
+                  <SortHeader label="Likes" sortKeyName="likes" align="right" />
+                  <SortHeader label="Comments" sortKeyName="comments" align="right" />
+                  <th className="px-3 py-2.5 text-right font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
+                    Action
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedVideos.map((v) => {
+                  const thresholdCrossed = pillarFormats.find(
+                    (f) => f.viewThreshold && (v.views || 0) >= f.viewThreshold
+                  );
 
-                      return (
-                        <tr key={v.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              {v.thumbnail && (
-                                <img
-                                  src={v.thumbnail}
-                                  alt=""
-                                  className="w-24 h-14 rounded object-cover shrink-0"
-                                />
-                              )}
-                              <div className="min-w-0">
-                                <a
-                                  href={v.youtubeUrl || "#"}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-medium text-gray-900 hover:text-blue-600 line-clamp-2"
-                                >
-                                  {v.title}
-                                </a>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{v.publishedDate || "-"}</td>
-                          <td className="px-4 py-3 text-right font-medium text-gray-900">
-                            {(v.views || 0).toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            {thresholdCrossed ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-xs border-green-300 text-green-700 hover:bg-green-50"
-                                onClick={() => handleTrigger(thresholdCrossed.id, v.title || undefined, v.views || 0)}
-                                disabled={triggering === thresholdCrossed.id}
+                  return (
+                    <tr key={v.id} className="border-b border-border/50 hover:bg-accent/30 transition-colors">
+                      {/* Thumbnail */}
+                      <td className="px-3 py-2">
+                        {v.thumbnail && (
+                          <img
+                            src={v.thumbnail}
+                            alt=""
+                            className="w-16 h-9 rounded object-cover shrink-0"
+                          />
+                        )}
+                      </td>
+                      {/* Title */}
+                      <td className="px-3 py-2 max-w-[200px] sm:max-w-[320px]">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-sm font-medium text-foreground truncate">
+                            {v.youtubeUrl ? (
+                              <a
+                                href={v.youtubeUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:text-primary hover:underline transition-colors"
                               >
-                                {triggering === thresholdCrossed.id ? "..." : "⚡ Trigger"}
-                              </Button>
+                                {v.title || "(Untitled)"}
+                              </a>
                             ) : (
-                              <span className="text-xs text-gray-400">
-                                {pillarFormats[0]?.viewThreshold
-                                  ? `${Math.round(((v.views || 0) / pillarFormats[0].viewThreshold) * 100)}%`
-                                  : "—"}
-                              </span>
+                              v.title || "(Untitled)"
                             )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile card view */}
-              <div className="sm:hidden space-y-3">
-                {videos.map((v) => (
-                  <div key={v.id} className="bg-white rounded-lg border border-gray-200 p-3">
-                    <div className="flex gap-3">
-                      {v.thumbnail && (
-                        <img src={v.thumbnail} alt="" className="w-28 h-16 rounded object-cover shrink-0" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <a
-                          href={v.youtubeUrl || "#"}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm font-medium text-gray-900 line-clamp-2"
-                        >
-                          {v.title}
-                        </a>
-                        <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-500">
-                          <span>{(v.views || 0).toLocaleString()} views</span>
-                          <span>{v.publishedDate}</span>
+                          </span>
+                          {v.youtubeId && (
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              {v.youtubeId}
+                            </span>
+                          )}
                         </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+                      </td>
+                      {/* Platform */}
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {(v.platform || ["YouTube"]).map((p) => (
+                            <span
+                              key={p}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                            >
+                              {p}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      {/* Published date */}
+                      <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
+                        {v.publishedDate || "-"}
+                      </td>
+                      {/* Views */}
+                      <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                        {v.views?.toLocaleString() || "-"}
+                      </td>
+                      {/* Likes */}
+                      <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                        {v.likes?.toLocaleString() || "-"}
+                      </td>
+                      {/* Comments */}
+                      <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                        {v.comments?.toLocaleString() || "-"}
+                      </td>
+                      {/* Action / Threshold */}
+                      <td className="px-3 py-2 text-right">
+                        {thresholdCrossed ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-xs border-green-300 text-green-700 hover:bg-green-50"
+                            onClick={() => handleTrigger(thresholdCrossed.id, v.title || undefined, v.views || 0)}
+                            disabled={triggering === thresholdCrossed.id}
+                          >
+                            {triggering === thresholdCrossed.id ? "..." : "⚡ Trigger"}
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {pillarFormats[0]?.viewThreshold
+                              ? `${Math.round(((v.views || 0) / pillarFormats[0].viewThreshold) * 100)}%`
+                              : "-"}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {sortedVideos.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                      No videos synced yet. Click &ldquo;Sync YouTube Data&rdquo; to get started.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
