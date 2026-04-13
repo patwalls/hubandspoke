@@ -56,6 +56,7 @@ export const productionItems = pgTable(
 export const formats = pgTable("formats", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull().unique(),
+  brand: text("brand").default("starter-story").notNull(),
   channels: jsonb("channels").$type<string[]>().default([]),
   event: text("event"),
   createdAt: timestamp("created_at", { withTimezone: true })

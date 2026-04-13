@@ -3,9 +3,15 @@ import { db } from "@/lib/db";
 import { formats, formatRepurposeMappings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const allFormats = await db.select().from(formats).orderBy(formats.name);
+    const brand =
+      request.nextUrl.searchParams.get("brand") || "starter-story";
+    const allFormats = await db
+      .select()
+      .from(formats)
+      .where(eq(formats.brand, brand))
+      .orderBy(formats.name);
 
     // Get repurpose mappings
     const mappings = await db.select().from(formatRepurposeMappings);
@@ -30,12 +36,13 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, channels, event, repurposeTargetIds } = body;
+    const { name, channels, event, brand, repurposeTargetIds } = body;
 
     const [created] = await db
       .insert(formats)
       .values({
         name,
+        brand: brand || "starter-story",
         channels: channels || [],
         event: event || null,
       })

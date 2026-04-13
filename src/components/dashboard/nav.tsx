@@ -34,12 +34,14 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
   }
 
   function handleBrandChange(slug: string) {
-    router.push(`/${slug}`);
+    // Preserve current page when switching brands
+    const isOnFormats = pathname.endsWith("/formats");
+    router.push(isOnFormats ? `/${slug}/formats` : `/${slug}`);
   }
 
   const links = [
     { href: `/${currentBrand}`, label: "Dashboard" },
-    { href: "/formats", label: "Formats" },
+    { href: `/${currentBrand}/formats`, label: "Formats" },
   ];
 
   return (
@@ -80,7 +82,8 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
                   className={cn(
                     "px-3 py-1.5 rounded-md text-sm transition-colors",
                     pathname === link.href ||
-                      (link.label === "Dashboard" && pathname === "/")
+                      (link.label === "Dashboard" && pathname === "/") ||
+                      (link.label === "Formats" && pathname === "/formats")
                       ? "bg-accent text-foreground font-medium"
                       : "text-muted-foreground hover:text-foreground hover:bg-accent"
                   )}
