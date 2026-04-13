@@ -35,11 +35,26 @@ interface TriggerResult {
   tasksCreated: { formatName: string; asanaGid: string; assignee?: string }[];
 }
 
-interface SyncResult {
-  videosFetched: number;
+interface SourceResult {
+  source: string;
+  fetched: number;
   created: number;
   updated: number;
   errors: number;
+}
+
+interface SyncResult {
+  sources?: SourceResult[];
+  totalFetched?: number;
+  totalCreated?: number;
+  totalUpdated?: number;
+  totalErrors?: number;
+  creditsUsed?: number;
+  // Legacy single-source fields
+  videosFetched?: number;
+  created?: number;
+  updated?: number;
+  errors?: number;
 }
 
 interface LastSyncInfo {
@@ -272,7 +287,7 @@ export function MATGDashboard() {
                   <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
                   <path d="M16 16h5v5" />
                 </svg>
-                Sync from YouTube
+                Sync All Platforms
               </>
             )}
           </button>
@@ -282,8 +297,28 @@ export function MATGDashboard() {
       {/* Sync result banner */}
       {syncResult && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">
-          Synced {syncResult.videosFetched} videos — {syncResult.created} new, {syncResult.updated} updated
-          {syncResult.errors > 0 && `, ${syncResult.errors} errors`}
+          {syncResult.sources ? (
+            <div className="space-y-1">
+              <div className="font-medium">
+                Synced {syncResult.totalFetched} items — {syncResult.totalCreated} new, {syncResult.totalUpdated} updated
+                {(syncResult.totalErrors || 0) > 0 && `, ${syncResult.totalErrors} errors`}
+                {` (${syncResult.creditsUsed} credits used)`}
+              </div>
+              <div className="flex flex-wrap gap-2 mt-1.5">
+                {syncResult.sources.map((s) => (
+                  <span key={s.source} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700">
+                    {s.source}: {s.fetched} items
+                    {s.errors > 0 && <span className="text-amber-600">({s.errors} err)</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <>
+              Synced {syncResult.videosFetched} videos — {syncResult.created} new, {syncResult.updated} updated
+              {(syncResult.errors || 0) > 0 && `, ${syncResult.errors} errors`}
+            </>
+          )}
         </div>
       )}
 

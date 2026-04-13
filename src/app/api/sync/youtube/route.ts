@@ -1,28 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncMATGYouTube } from "@/lib/services/youtube-sync";
+import { syncAllMATG, syncMATGYouTube } from "@/lib/services/matg-sync";
 import { db } from "@/lib/db";
 import { syncLogs } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, or } from "drizzle-orm";
 
 const COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
 /**
  * GET /api/sync/youtube
  *
- * Returns the last sync time for the YouTube sync.
+ * Returns the last sync time (checks both legacy youtube-matg and new matg-all).
  */
 export async function GET() {
   try {
     const [lastSync] = await db
       .select()
       .from(syncLogs)
-      .where(eq(syncLogs.syncType, "youtube-matg"))
+      .where(
+        or(
+          eq(syncLogs.syncType, "matg-all"),
+          eq(syncLogs.syncType, "youtube-matg")
+        )
+      )
       .orderBy(desc(syncLogs.startedAt))
       .limit(1);
 
     return NextResponse.json({
       lastSync: lastSync
         ? {
+            syncType: lastSync.syncType,
             status: lastSync.status,
             startedAt: lastSync.startedAt,
             completedAt: lastSync.completedAt,
@@ -40,20 +46,29 @@ export async function GET() {
 /**
  * POST /api/sync/youtube
  *
- * Triggers a YouTube sync for the MATG channel.
- * Has a 1-hour cooldown to prevent excessive API usage.
- * Pass ?force=true to bypass cooldown.
+ * Triggers a multi-platform sync for MATG (YouTube + Shorts + Instagram + Twitter).
+ * Uses ~4 API credits per sync. Has a 1-hour cooldown.
+ *
+ * Query params:
+ *   ?force=true   — bypass cooldown
+ *   ?youtube-only=true — only sync YouTube videos (1 credit, legacy mode)
  */
 export async function POST(request: NextRequest) {
   try {
     const force = request.nextUrl.searchParams.get("force") === "true";
+    const youtubeOnly = request.nextUrl.searchParams.get("youtube-only") === "true";
 
     // Check cooldown
     if (!force) {
       const [lastSync] = await db
         .select()
         .from(syncLogs)
-        .where(eq(syncLogs.syncType, "youtube-matg"))
+        .where(
+          or(
+            eq(syncLogs.syncType, "matg-all"),
+            eq(syncLogs.syncType, "youtube-matg")
+          )
+        )
         .orderBy(desc(syncLogs.startedAt))
         .limit(1);
 
@@ -78,10 +93,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const result = await syncMATGYouTube();
+    if (youtubeOnly) {
+      const result = await syncMATGYouTube();
+      return NextResponse.json(result, { status: 200 });
+    }
+
+    const result = await syncAllMATG();
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
-    console.error("YouTube sync failed:", error);
+    console.error("MATG sync failed:", error);
     return NextResponse.json(
       { error: String(error) },
       { status: 500 }

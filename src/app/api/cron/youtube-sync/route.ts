@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncMATGYouTube } from "@/lib/services/youtube-sync";
+import { syncAllMATG } from "@/lib/services/matg-sync";
 
 /**
  * GET /api/cron/youtube-sync
  *
- * Daily cron endpoint to sync MATG YouTube data.
+ * Daily cron endpoint to sync all MATG platforms (YouTube, Shorts, Instagram, Twitter).
  * Protected by CRON_SECRET. Set up a daily cron (e.g. Railway cron or external)
  * to call: GET /api/cron/youtube-sync with Authorization: Bearer <CRON_SECRET>
  *
- * This uses 1 Scrape Creators API credit per run.
+ * This uses ~4 Scrape Creators API credits per run.
  */
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -19,10 +19,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const result = await syncMATGYouTube();
+    const result = await syncAllMATG();
     return NextResponse.json(result);
   } catch (error) {
-    console.error("Cron YouTube sync error:", error);
+    console.error("Cron MATG sync error:", error);
     return NextResponse.json(
       { error: "Sync failed", success: false },
       { status: 500 }
