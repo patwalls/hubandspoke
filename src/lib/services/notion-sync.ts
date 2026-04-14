@@ -252,11 +252,20 @@ export async function syncFromNotion(): Promise<{
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const properties = (item as any).properties || {};
       const notionId = item.id;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const notionLastEdited = (item as any).last_edited_time
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? new Date((item as any).last_edited_time)
+        : null;
       notionIds.push(notionId);
 
       const platform = extractPlatform(properties);
       const publishedLink = extractPublishedLink(properties);
       const formatName = await extractFormat(properties, notion);
+
+      const notionViews = extractNumber(properties, "Views");
+      const notionLikes = extractNumber(properties, "Likes");
+      const notionComments = extractNumber(properties, "Comments");
 
       const data = {
         notionId,
@@ -269,9 +278,9 @@ export async function syncFromNotion(): Promise<{
         utmCampaign: extractUtmCampaign(properties),
         publishedLink,
         isExternal: detectExternal(publishedLink, platform),
-        views: extractNumber(properties, "Views"),
-        likes: extractNumber(properties, "Likes"),
-        comments: extractNumber(properties, "Comments"),
+        views: notionViews,
+        likes: notionLikes,
+        comments: notionComments,
         clicks: extractNumber(properties, "Clicks"),
         leads: extractNumber(properties, "Leads"),
         salesNum: extractNumber(properties, "Sales Num"),
@@ -291,10 +300,28 @@ export async function syncFromNotion(): Promise<{
         .limit(1);
 
       if (existing.length > 0) {
-        await db
-          .update(productionItems)
-          .set(data)
-          .where(eq(productionItems.notionId, notionId));
+        const existingItem = existing[0];
+
+        // Preserve API-sourced metrics (Scrape Creators) if they're fresher than Notion data.
+        // If lastPerformanceSyncAt is set and is newer than Notion's last edit,
+        // the API data is more accurate — don't overwrite views/likes/comments.
+        if (
+          existingItem.lastPerformanceSyncAt &&
+          notionLastEdited &&
+          existingItem.lastPerformanceSyncAt > notionLastEdited
+        ) {
+          // Skip overwriting performance metrics — API data is fresher
+          const { views, likes, comments, ...dataWithoutMetrics } = data;
+          await db
+            .update(productionItems)
+            .set(dataWithoutMetrics)
+            .where(eq(productionItems.notionId, notionId));
+        } else {
+          await db
+            .update(productionItems)
+            .set(data)
+            .where(eq(productionItems.notionId, notionId));
+        }
         totalUpdated++;
       } else {
         await db.insert(productionItems).values(data);

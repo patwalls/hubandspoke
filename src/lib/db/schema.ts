@@ -74,6 +74,9 @@ export const formats = pgTable("formats", {
   producerAsanaGid: text("producer_asana_gid"),
   instructions: text("instructions"),
   contentType: text("content_type").default("pillar"), // "pillar" (hub) or "repurposed" (spoke)
+  notionPageId: text("notion_page_id"), // Notion page ID for format relation
+  editorNotionUserId: text("editor_notion_user_id"), // Notion user ID for editor/creator
+  producerNotionUserId: text("producer_notion_user_id"), // Notion user ID for producer/reviewer
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -101,6 +104,35 @@ export const formatRepurposeMappings = pgTable(
       table.sourceFormatId,
       table.targetFormatId
     ),
+  ]
+);
+
+export const repurposeTriggers = pgTable(
+  "repurpose_triggers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    productionItemId: uuid("production_item_id")
+      .references(() => productionItems.id)
+      .notNull(),
+    sourceFormatId: uuid("source_format_id")
+      .references(() => formats.id)
+      .notNull(),
+    targetFormatId: uuid("target_format_id")
+      .references(() => formats.id)
+      .notNull(),
+    notionTaskPageId: text("notion_task_page_id"),
+    viewsAtTrigger: integer("views_at_trigger"),
+    triggeredAt: timestamp("triggered_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_repurpose_trigger_unique").on(
+      table.productionItemId,
+      table.sourceFormatId,
+      table.targetFormatId
+    ),
+    index("idx_repurpose_triggers_item").on(table.productionItemId),
   ]
 );
 
