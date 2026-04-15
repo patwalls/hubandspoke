@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { productionItems } from "@/lib/db/schema";
+import { productionItems, formats } from "@/lib/db/schema";
 import { and, eq, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
@@ -66,6 +66,13 @@ export async function getContentReport(
     platforms?.forEach((p) => allPlatforms.add(p));
     if (item.format) allFormats.add(item.format);
   });
+
+  // Also include all SS format names (pillar + repurposed) from the formats table
+  const dbFormats = await db
+    .select({ name: formats.name })
+    .from(formats)
+    .where(eq(formats.brand, "starter-story"));
+  dbFormats.forEach((f) => allFormats.add(f.name));
 
   const platformList = Array.from(allPlatforms).sort();
   const formatList = Array.from(allFormats).sort();

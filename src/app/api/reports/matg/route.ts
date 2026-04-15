@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { productionItems } from "@/lib/db/schema";
+import { productionItems, formats } from "@/lib/db/schema";
 import { and, eq, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
 import { format, subDays } from "date-fns";
@@ -106,6 +106,13 @@ export async function GET(request: NextRequest) {
       platforms?.forEach((p) => allPlatforms.add(p));
       if (item.format) allFormats.add(item.format);
     });
+
+    // Also include all MATG format names (pillar + repurposed) from the formats table
+    const dbFormats = await db
+      .select({ name: formats.name })
+      .from(formats)
+      .where(eq(formats.brand, "matg"));
+    dbFormats.forEach((f) => allFormats.add(f.name));
 
     const platformList = Array.from(allPlatforms).sort();
     const formatList = Array.from(allFormats).sort();
