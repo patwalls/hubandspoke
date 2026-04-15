@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { formats, formatRepurposeMappings } from "@/lib/db/schema";
+import { formats, formatRepurposeMappings, productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
@@ -79,6 +79,12 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const { id, name, channels, viewThreshold, editor, editorAsanaGid, producer, producerAsanaGid, instructions, contentType, repurposeTargetIds } = body;
 
+    // Get the old name before updating so we can cascade the rename
+    const [existing] = await db
+      .select({ name: formats.name })
+      .from(formats)
+      .where(eq(formats.id, id));
+
     const [updated] = await db
       .update(formats)
       .set({
@@ -95,6 +101,14 @@ export async function PUT(request: NextRequest) {
       })
       .where(eq(formats.id, id))
       .returning();
+
+    // If the name changed, update all production items that use the old name
+    if (existing && existing.name !== name) {
+      await db
+        .update(productionItems)
+        .set({ format: name, updatedAt: new Date() })
+        .where(eq(productionItems.format, existing.name));
+    }
 
     // Replace repurpose mappings
     await db
