@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 function getSupabase() {
@@ -18,8 +17,6 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const router = useRouter();
-
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -46,8 +43,7 @@ export default function ResetPasswordPage() {
     } else {
       setSuccess(true);
       setTimeout(() => {
-        router.push("/");
-        router.refresh();
+        window.location.href = "/";
       }, 2000);
     }
   }

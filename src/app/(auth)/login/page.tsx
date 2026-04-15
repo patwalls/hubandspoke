@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 function getSupabase() {
@@ -17,8 +16,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
-
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -34,8 +31,7 @@ export default function LoginPage() {
       setError(error.message);
       setLoading(false);
     } else {
-      router.push("/");
-      router.refresh();
+      window.location.href = "/";
     }
   }
 
