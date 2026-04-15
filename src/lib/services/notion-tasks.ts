@@ -4,15 +4,15 @@
  * Creates task pages in the SS Production Items Notion database
  * when content crosses view thresholds.
  *
- * All tasks are initially assigned to Evgeny (QC triage) with status "Idea".
- * Evgeny reviews the idea and reassigns to the correct editor.
+ * Editor/Creator comes from the target format's owner.
+ * Producer is always Evgeny (QC triage). Status starts as "Idea".
  */
 
 import { Client } from "@notionhq/client";
 
 const DATABASE_ID = "8cb6cee4163d4282a5c87991ea689bde";
 
-// Evgeny Timofeev — all SS tasks go to him first for QC triage
+// Evgeny Timofeev — always the producer (QC triage) on auto-created tasks
 const EVGENY_NOTION_USER_ID = "19ed872b-594c-8153-b3dd-000224b2adfb";
 
 function getNotionClient() {
@@ -89,17 +89,17 @@ export async function createNotionRepurposeTask(
       };
     }
 
-    // Producer (people) — reviewer from the target format
-    if (opts.producerNotionUserId) {
-      properties["Producer"] = {
-        people: [{ id: opts.producerNotionUserId }],
-      };
-    }
-
-    // Editor/Creator (people) — always Evgeny for QC triage
-    properties["Editor/Creator"] = {
+    // Producer (people) — always Evgeny for QC triage
+    properties["Producer"] = {
       people: [{ id: EVGENY_NOTION_USER_ID }],
     };
+
+    // Editor/Creator (people) — format's editor/owner
+    if (opts.editorNotionUserId) {
+      properties["Editor/Creator"] = {
+        people: [{ id: opts.editorNotionUserId }],
+      };
+    }
 
     const page = await notion.pages.create({
       parent: { database_id: DATABASE_ID },
