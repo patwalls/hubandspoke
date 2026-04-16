@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
 
 /**
  * POST /api/production-items
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest) {
     let finalViews = views ?? null;
     let finalLikes = likes ?? null;
     let finalComments = comments ?? null;
+    let finalViewsEstimated = false;
     let thumbnail: string | null = null;
     let youtubeId: string | null = null;
     let youtubeUrl: string | null = null;
@@ -73,6 +75,13 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.warn("Auto-fetch failed for YouTube URL, using manual values:", err);
       }
+    } else if (platform && shouldEstimate(platform) && finalLikes && !finalViews) {
+      // Estimate views from likes for platforms without real view data
+      const estimation = estimateViewsFromLikes(platform, finalLikes);
+      if (estimation.estimated) {
+        finalViews = estimation.views;
+        finalViewsEstimated = true;
+      }
     }
 
     const [created] = await db
@@ -88,6 +97,7 @@ export async function POST(request: NextRequest) {
         views: finalViews,
         likes: finalLikes,
         comments: finalComments,
+        viewsEstimated: finalViewsEstimated,
         thumbnail,
         youtubeId,
         youtubeUrl,
@@ -144,12 +154,32 @@ export async function PUT(request: NextRequest) {
     if (format !== undefined) updateData.format = format || null;
     if (publishedLink !== undefined) updateData.publishedLink = publishedLink || null;
     if (publishedDate !== undefined) updateData.publishedDate = publishedDate;
-    if (views !== undefined) updateData.views = views === "" || views === null ? null : Number(views);
-    if (likes !== undefined) updateData.likes = likes === "" || likes === null ? null : Number(likes);
     if (comments !== undefined) updateData.comments = comments === "" || comments === null ? null : Number(comments);
     if (clicks !== undefined) updateData.clicks = clicks === "" || clicks === null ? null : Number(clicks);
     if (leads !== undefined) updateData.leads = leads === "" || leads === null ? null : Number(leads);
     if (salesAmount !== undefined) updateData.salesAmount = salesAmount === "" || salesAmount === null ? null : String(salesAmount);
+
+    // Handle views + likes together so estimation stays in sync
+    const incomingViews = views !== undefined ? (views === "" || views === null ? null : Number(views)) : undefined;
+    const incomingLikes = likes !== undefined ? (likes === "" || likes === null ? null : Number(likes)) : undefined;
+
+    if (incomingViews !== undefined) {
+      // User explicitly set views — treat as real, not estimated
+      updateData.views = incomingViews;
+      updateData.viewsEstimated = false;
+    }
+
+    if (incomingLikes !== undefined) {
+      updateData.likes = incomingLikes;
+      // Re-estimate views from new likes value if: no explicit views provided, platform uses estimation
+      if (incomingViews === undefined && platform && shouldEstimate(platform) && incomingLikes && incomingLikes > 0) {
+        const estimation = estimateViewsFromLikes(platform, incomingLikes);
+        if (estimation.estimated) {
+          updateData.views = estimation.views;
+          updateData.viewsEstimated = true;
+        }
+      }
+    }
 
     const [updated] = await db
       .update(productionItems)

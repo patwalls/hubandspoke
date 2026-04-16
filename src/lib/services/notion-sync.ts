@@ -2,6 +2,7 @@ import { Client } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
 import { eq, notInArray } from "drizzle-orm";
+import { estimateViewsFromLikes, shouldEstimate } from "./view-estimator";
 
 const DATABASE_ID = "8cb6cee4163d4282a5c87991ea689bde";
 
@@ -267,6 +268,18 @@ export async function syncFromNotion(): Promise<{
       const notionLikes = extractNumber(properties, "Likes");
       const notionComments = extractNumber(properties, "Comments");
 
+      // Apply view estimation for platforms that don't return real view counts.
+      // Only estimates if: platform needs it, likes > 0, and views aren't already real (API-sourced).
+      let finalViews = notionViews;
+      let viewsEstimated = false;
+      if (platform && shouldEstimate(platform) && notionLikes && notionLikes > 0 && !notionViews) {
+        const estimation = estimateViewsFromLikes(platform, notionLikes);
+        if (estimation.estimated) {
+          finalViews = estimation.views;
+          viewsEstimated = true;
+        }
+      }
+
       const data = {
         notionId,
         title: extractTitle(properties),
@@ -278,7 +291,7 @@ export async function syncFromNotion(): Promise<{
         utmCampaign: extractUtmCampaign(properties),
         publishedLink,
         isExternal: detectExternal(publishedLink, platform),
-        views: notionViews,
+        views: finalViews,
         likes: notionLikes,
         comments: notionComments,
         clicks: extractNumber(properties, "Clicks"),
@@ -289,6 +302,7 @@ export async function syncFromNotion(): Promise<{
         apvFirst24Hours: extractNumber(properties, "APV (First 24 Hours)")?.toString() ?? null,
         producerEmail: extractProducerEmail(properties),
         producerNotionUserId: extractProducerUserId(properties),
+        viewsEstimated,
         updatedAt: new Date(),
       };
 
@@ -311,10 +325,18 @@ export async function syncFromNotion(): Promise<{
           existingItem.lastPerformanceSyncAt > notionLastEdited
         ) {
           // Skip overwriting performance metrics — API data is fresher
-          const { views, likes, comments, ...dataWithoutMetrics } = data;
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { views, likes, comments, viewsEstimated: _ve, ...dataWithoutMetrics } = data;
           await db
             .update(productionItems)
             .set(dataWithoutMetrics)
+            .where(eq(productionItems.notionId, notionId));
+        } else if (existingItem.viewsEstimated && platform && shouldEstimate(platform) && notionLikes && notionLikes > 0) {
+          // Re-estimate views as likes may have changed since last sync
+          const reEstimation = estimateViewsFromLikes(platform, notionLikes);
+          await db
+            .update(productionItems)
+            .set({ ...data, views: reEstimation.views ?? data.views, viewsEstimated: reEstimation.estimated })
             .where(eq(productionItems.notionId, notionId));
         } else {
           await db

@@ -586,7 +586,11 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                   );
                 })()}
                 <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                  {item.views?.toLocaleString() || "-"}
+                  {item.views != null ? (
+                    <span title={item.viewsEstimated ? "Estimated from likes" : undefined}>
+                      {item.viewsEstimated ? "~" : ""}{item.views.toLocaleString()}
+                    </span>
+                  ) : "-"}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
                   {item.likes?.toLocaleString() || "-"}

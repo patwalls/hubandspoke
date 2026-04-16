@@ -204,6 +204,7 @@ export async function getContentReport(
       ? parseFloat(item.apvFirst24Hours)
       : null,
     producerEmail: item.producerEmail,
+    viewsEstimated: item.viewsEstimated ?? false,
     lastPerformanceSyncAt: item.lastPerformanceSyncAt?.toISOString() ?? null,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),

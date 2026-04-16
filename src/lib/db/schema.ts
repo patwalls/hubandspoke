@@ -41,6 +41,7 @@ export const productionItems = pgTable(
     apvFirst24Hours: decimal("apv_first_24_hours"),
     producerEmail: text("producer_email"),
     producerNotionUserId: text("producer_notion_user_id"),
+    viewsEstimated: boolean("views_estimated").default(false),
     lastPerformanceSyncAt: timestamp("last_performance_sync_at", {
       withTimezone: true,
     }),
