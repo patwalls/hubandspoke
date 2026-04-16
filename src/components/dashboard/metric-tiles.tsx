@@ -3,32 +3,40 @@ import type { MetricData } from "@/types";
 
 interface MetricTilesProps {
   productionData: MetricData;
+  viewsData: MetricData;
+  formatData: MetricData;
   weekProgress: { day: number; percent: number } | null;
   currentPeriodLabel: string | null;
   weeklyGoal: number | null;
   brand: string;
 }
 
+function formatCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return n.toLocaleString();
+}
+
+function sumPeriod(metric: MetricData, periodLabel: string | null): number {
+  if (!periodLabel) return 0;
+  let total = 0;
+  Object.values(metric).forEach((pd) => {
+    total += pd[periodLabel] || 0;
+  });
+  return total;
+}
+
 export function MetricTiles({
   productionData,
+  viewsData,
+  formatData,
   weekProgress,
   currentPeriodLabel,
   weeklyGoal,
   brand,
 }: MetricTilesProps) {
-  let currentPeriodTotal = 0;
-  if (currentPeriodLabel) {
-    Object.values(productionData).forEach((periodData) => {
-      currentPeriodTotal += periodData[currentPeriodLabel] || 0;
-    });
-  }
-
-  let totalProduction = 0;
-  Object.values(productionData).forEach((periodData) => {
-    Object.values(periodData).forEach((val) => {
-      totalProduction += val;
-    });
-  });
+  const currentPeriodTotal = sumPeriod(productionData, currentPeriodLabel);
+  const viewsThisWeek = sumPeriod(viewsData, currentPeriodLabel);
 
   const projection =
     weekProgress && weekProgress.percent > 0
@@ -45,6 +53,10 @@ export function MetricTiles({
     : onTrack
     ? "border-primary/30 bg-primary/5"
     : "border-amber-300 bg-amber-50";
+
+  const activeFormats = Object.keys(formatData).filter((k) =>
+    Object.values(formatData[k]).some((v) => v > 0)
+  ).length;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -93,31 +105,29 @@ export function MetricTiles({
 
       <div className="rounded-lg border border-border bg-card p-4">
         <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-          Total Production
+          Views This Week
         </p>
         <div className="mt-2">
           <span className="text-3xl font-semibold text-foreground tabular-nums">
-            {totalProduction.toLocaleString()}
+            {formatCompact(viewsThisWeek)}
           </span>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          All platforms in date range
+          Across all platforms
         </p>
       </div>
 
       <div className="rounded-lg border border-border bg-card p-4">
         <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-          Platforms Active
+          Active Formats
         </p>
         <div className="mt-2">
           <span className="text-3xl font-semibold text-foreground tabular-nums">
-            {Object.keys(productionData).filter(k =>
-              Object.values(productionData[k]).some(v => v > 0)
-            ).length}
+            {activeFormats}
           </span>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          With at least 1 post
+          Distinct formats in date range
         </p>
       </div>
     </div>

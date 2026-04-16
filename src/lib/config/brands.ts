@@ -14,6 +14,13 @@ export const BRANDS = [
     disabled: false,
   },
   {
+    slug: "my-first-million",
+    label: "My First Million",
+    avatar: "/brands/my-first-million.jpg",
+    color: "from-amber-500 to-yellow-600",
+    disabled: true,
+  },
+  {
     slug: "science-of-scaling",
     label: "Science Of Scaling",
     avatar: "/brands/science-of-scaling.jpg",

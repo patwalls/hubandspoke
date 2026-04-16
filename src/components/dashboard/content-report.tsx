@@ -135,6 +135,8 @@ export function ContentReport() {
       {data ? (
         <MetricTiles
           productionData={data.byPlatform.production}
+          viewsData={data.byPlatform.views}
+          formatData={data.byFormat.production}
           weekProgress={data.weekProgress}
           currentPeriodLabel={currentPeriodLabel}
           weeklyGoal={data.weeklyGoal}

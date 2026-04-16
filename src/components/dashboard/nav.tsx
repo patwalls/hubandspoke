@@ -71,14 +71,30 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-12">
           <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-            <Link href="/" className="flex items-center gap-2 shrink-0">
-              <div className="w-6 h-6 rounded bg-primary flex items-center justify-center">
-                <span className="text-primary-foreground text-xs font-bold">H</span>
-              </div>
-              <span className="text-sm font-semibold text-foreground hidden sm:inline">
-                Hub & Spoke
+            <Link href="/" className="flex items-center gap-2 shrink-0 group">
+              <span className="w-6 h-6 rounded-md bg-gradient-to-br from-[#ff7a59] to-[#ff5c35] flex items-center justify-center shadow-sm ring-1 ring-[#ff5c35]/20">
+                <span className="text-white text-[11px] font-bold leading-none tracking-tight">H</span>
+              </span>
+              <span className="text-sm font-semibold text-foreground hidden sm:inline tracking-tight">
+                Hub &amp; Spoke
               </span>
             </Link>
+            <span className="hidden sm:inline-block h-4 w-px bg-border shrink-0" />
+            <a
+              href="https://www.hubspot.com/podcast-network"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden sm:inline-flex items-center shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+              title="by HubSpot Media"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/hubspot-media.png"
+                alt="by HubSpot Media"
+                className="h-3.5 w-auto"
+                style={{ filter: "brightness(0)" }}
+              />
+            </a>
             <span className="text-border hidden sm:inline shrink-0">
               <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" fill="none">
                 <path d="M16 3.549L7.12 20.600" />

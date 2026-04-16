@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,6 +34,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { SS_CHANNELS, MATG_CHANNELS } from "@/lib/config/channels";
 
 interface AsanaMember {
   gid: string;
@@ -54,92 +56,38 @@ interface FormatRow {
   repurposeTargetIds: string[];
 }
 
-interface TopPerformer {
-  title: string | null;
-  views: number;
-  publishedLink: string | null;
-  publishedDate: string | null;
-  thumbnail: string | null;
-}
-
-const SS_CHANNELS = [
-  "YouTube (SS)",
-  "YouTube (SS Build)",
-  "YouTube Shorts",
-  "YouTube Community",
-  "Instagram Post",
-  "Instagram Reel",
-  "Instagram Story",
-  "Twitter",
-  "LinkedIn",
-  "TikTok",
-  "Threads",
-  "Newsletter",
-  "SS Case Study",
-  "SS Database",
-  "Paid Ad",
-];
-
-const MATG_CHANNELS = [
-  "YouTube",
-  "YouTube Shorts",
-  "Instagram Post",
-  "Instagram Reel",
-  "Instagram Story",
-  "Twitter",
-  "LinkedIn",
-  "TikTok",
-  "Threads",
-];
-
 /* ------------------------------------------------------------------ */
 /*  Sub-components for hierarchical layout                             */
 /* ------------------------------------------------------------------ */
 
 function MobileFormatCard({
   f,
-  onEdit,
+  brand,
   onDelete,
   isSpoke,
-  topPerformers,
 }: {
   f: FormatRow;
-  onEdit: (f: FormatRow) => void;
+  brand: string;
   onDelete: (id: string) => void;
   isSpoke?: boolean;
-  topPerformers?: TopPerformer[];
 }) {
-  const [showPerformers, setShowPerformers] = useState(false);
-  const hasPerformers = topPerformers && topPerformers.length > 0;
-
   return (
     <div className={`rounded-lg border p-3 space-y-2 ${isSpoke ? "bg-gray-50 border-gray-200" : "bg-white border-gray-200"}`}>
       <div className="flex items-start justify-between">
-        <div className="flex items-center gap-2">
-          {isSpoke && hasPerformers && (
-            <button
-              onClick={() => setShowPerformers(!showPerformers)}
-              className="text-gray-400 hover:text-gray-600 -ml-1"
-            >
-              <svg
-                className={`w-3.5 h-3.5 transition-transform ${showPerformers ? "rotate-90" : ""}`}
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          )}
-          <span className={`font-medium text-gray-900 ${isSpoke ? "text-sm" : ""}`}>{f.name}</span>
-          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+        <div className="flex items-center gap-2 min-w-0">
+          <Link
+            href={`/${brand}/formats/${f.id}`}
+            className={`font-medium text-gray-900 hover:underline truncate ${isSpoke ? "text-sm" : ""}`}
+          >
+            {f.name}
+          </Link>
+          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
             isSpoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
           }`}>
             {isSpoke ? "Repurposed" : "Pillar"}
           </span>
         </div>
-        <div className="flex gap-1">
-          <Button variant="ghost" size="sm" onClick={() => onEdit(f)}>Edit</Button>
-          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(f.id)}>Delete</Button>
-        </div>
+        <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 shrink-0" onClick={() => onDelete(f.id)}>Delete</Button>
       </div>
       {f.channels?.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -172,67 +120,37 @@ function MobileFormatCard({
       {f.instructions && (
         <p className="text-xs text-gray-500 line-clamp-2">Instructions: {f.instructions}</p>
       )}
-      {/* Top performers dropdown */}
-      {isSpoke && showPerformers && hasPerformers && (
-        <div className="border-t border-gray-200 pt-2 space-y-1.5">
-          {topPerformers.map((p, i) => (
-            <TopPerformerRow key={i} performer={p} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
 function FormatTableRow({
   f,
+  brand,
   isSpoke,
-  onEdit,
   onDelete,
-  topPerformers,
 }: {
   f: FormatRow;
+  brand: string;
   isSpoke?: boolean;
-  onEdit: (f: FormatRow) => void;
   onDelete: (id: string) => void;
-  topPerformers?: TopPerformer[];
 }) {
-  const [showPerformers, setShowPerformers] = useState(false);
-  const hasPerformers = topPerformers && topPerformers.length > 0;
-
   return (
-    <>
     <tr className={`border-b border-gray-100 ${isSpoke ? "bg-gray-50/50" : "hover:bg-gray-50"}`}>
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
-          {isSpoke && hasPerformers ? (
-            <button
-              onClick={() => setShowPerformers(!showPerformers)}
-              className="text-gray-400 hover:text-gray-600 ml-4"
-            >
-              <svg
-                className={`w-3.5 h-3.5 transition-transform ${showPerformers ? "rotate-90" : ""}`}
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          ) : isSpoke ? (
-            <span className="text-gray-300 text-xs ml-4">└</span>
-          ) : null}
-          <span className={`${isSpoke ? "text-gray-700 text-sm" : "font-medium text-gray-900"}`}>
+          {isSpoke && <span className="text-gray-300 text-xs ml-4">└</span>}
+          <Link
+            href={`/${brand}/formats/${f.id}`}
+            className={`hover:underline ${isSpoke ? "text-gray-700 text-sm" : "font-medium text-gray-900"}`}
+          >
             {f.name}
-          </span>
+          </Link>
           <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
             isSpoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
           }`}>
             {isSpoke ? "Repurposed" : "Pillar"}
           </span>
-          {isSpoke && hasPerformers && (
-            <span className="text-[10px] text-gray-400 font-medium">
-              {topPerformers.length} top post{topPerformers.length !== 1 ? "s" : ""}
-            </span>
-          )}
         </div>
       </td>
       <td className="px-4 py-3">
@@ -269,72 +187,26 @@ function FormatTableRow({
         ) : "-"}
       </td>
       <td className="px-4 py-3 text-right">
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onEdit(f)}>Edit</Button>
-          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(f.id)}>Delete</Button>
-        </div>
+        <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(f.id)}>Delete</Button>
       </td>
     </tr>
-    {/* Top performers rows */}
-    {isSpoke && showPerformers && hasPerformers && topPerformers.map((p, i) => (
-      <tr key={i} className="border-b border-gray-50 bg-purple-50/30">
-        <td colSpan={8} className="px-4 py-2 pl-16">
-          <TopPerformerRow performer={p} />
-        </td>
-      </tr>
-    ))}
-    </>
-  );
-}
-
-function TopPerformerRow({ performer }: { performer: TopPerformer }) {
-  return (
-    <div className="flex items-center gap-3 text-xs">
-      <span className="text-purple-400">★</span>
-      {performer.thumbnail && (
-        <img
-          src={performer.thumbnail}
-          alt=""
-          className="w-8 h-8 rounded object-cover shrink-0"
-        />
-      )}
-      <div className="flex-1 min-w-0">
-        {performer.publishedLink ? (
-          <a
-            href={performer.publishedLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-purple-700 hover:text-purple-900 hover:underline truncate block"
-          >
-            {performer.title || performer.publishedLink}
-          </a>
-        ) : (
-          <span className="text-gray-600 truncate block">{performer.title || "Untitled"}</span>
-        )}
-      </div>
-      <span className="text-gray-500 shrink-0 tabular-nums">
-        {performer.views.toLocaleString()} views
-      </span>
-    </div>
   );
 }
 
 function HubGroup({
   hub,
   spokes,
+  brand,
   expanded,
   onToggle,
-  onEdit,
   onDelete,
-  topPerformers,
 }: {
   hub: FormatRow;
   spokes: FormatRow[];
+  brand: string;
   expanded: boolean;
   onToggle: () => void;
-  onEdit: (f: FormatRow) => void;
   onDelete: (id: string) => void;
-  topPerformers: Record<string, TopPerformer[]>;
 }) {
   return (
     <>
@@ -350,7 +222,12 @@ function HubGroup({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
             </button>
-            <span className="font-semibold text-gray-900">{hub.name}</span>
+            <Link
+              href={`/${brand}/formats/${hub.id}`}
+              className="font-semibold text-gray-900 hover:underline"
+            >
+              {hub.name}
+            </Link>
             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
               Pillar
             </span>
@@ -395,15 +272,12 @@ function HubGroup({
           ) : "-"}
         </td>
         <td className="px-4 py-3 text-right">
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => onEdit(hub)}>Edit</Button>
-            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(hub.id)}>Delete</Button>
-          </div>
+          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(hub.id)}>Delete</Button>
         </td>
       </tr>
       {/* Spoke rows */}
       {expanded && spokes.map((s) => (
-        <FormatTableRow key={s.id} f={s} isSpoke onEdit={onEdit} onDelete={onDelete} topPerformers={topPerformers[s.name]} />
+        <FormatTableRow key={s.id} f={s} brand={brand} isSpoke onDelete={onDelete} />
       ))}
     </>
   );
@@ -413,10 +287,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const ALL_CHANNELS = brand === "matg" ? MATG_CHANNELS : SS_CHANNELS;
 
   const [formats, setFormats] = useState<FormatRow[]>([]);
-  const [topPerformers, setTopPerformers] = useState<Record<string, TopPerformer[]>>({});
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingFormat, setEditingFormat] = useState<FormatRow | null>(null);
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
 
@@ -439,16 +311,9 @@ export function FormatsPageContent({ brand }: { brand: string }) {
 
   const fetchFormats = useCallback(async () => {
     try {
-      const [fmtRes, perfRes] = await Promise.all([
-        fetch(`/api/formats?brand=${brand}`),
-        fetch(`/api/formats/top-performers?brand=${brand}`),
-      ]);
+      const fmtRes = await fetch(`/api/formats?brand=${brand}`);
       const data = await fmtRes.json();
       setFormats(data);
-      if (perfRes.ok) {
-        const perfData = await perfRes.json();
-        setTopPerformers(perfData);
-      }
     } catch (err) {
       console.error("Failed to fetch formats:", err);
     } finally {
@@ -477,7 +342,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   }, []);
 
   function openCreate() {
-    setEditingFormat(null);
     setName("");
     setChannels([]);
     setViewThreshold("");
@@ -491,24 +355,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setDialogOpen(true);
   }
 
-  function openEdit(f: FormatRow) {
-    setEditingFormat(f);
-    setName(f.name);
-    setChannels(f.channels || []);
-    setViewThreshold(f.viewThreshold != null ? String(f.viewThreshold) : "");
-    setEditor(f.editor || "");
-    setEditorAsanaGid(f.editorAsanaGid || "");
-    setProducer(f.producer || "");
-    setProducerAsanaGid(f.producerAsanaGid || "");
-    setInstructions(f.instructions || "");
-    setContentType(f.contentType || "pillar");
-    setRepurposeTargetIds(f.repurposeTargetIds || []);
-    setDialogOpen(true);
-  }
-
   async function handleSave() {
     const body = {
-      id: editingFormat?.id,
       name,
       brand,
       channels,
@@ -522,9 +370,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       repurposeTargetIds,
     };
 
-    const method = editingFormat ? "PUT" : "POST";
     await fetch("/api/formats", {
-      method,
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -681,9 +528,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           </DialogTrigger>
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>
-                {editingFormat ? "Edit Format" : "New Format"}
-              </DialogTitle>
+              <DialogTitle>New Format</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
@@ -884,9 +729,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
               <div className="space-y-2">
                 <Label>Repurpose Targets</Label>
                 <div className="flex flex-wrap gap-2">
-                  {formats
-                    .filter((f) => f.id !== editingFormat?.id)
-                    .map((f) => (
+                  {formats.map((f) => (
                       <Badge
                         key={f.id}
                         variant={
@@ -902,9 +745,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                     ))}
                 </div>
               </div>
-              <Button onClick={handleSave} className="w-full">
-                {editingFormat ? "Update" : "Create"}
-              </Button>
+              <Button onClick={handleSave} className="w-full">Create</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -957,7 +798,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
         {typeFilter === "repurposed" ? (
           // Flat spoke list when filtering to repurposed only
           allFilteredSpokes.map((f) => (
-            <MobileFormatCard key={f.id} f={f} onEdit={openEdit} onDelete={handleDelete} isSpoke topPerformers={topPerformers[f.name]} />
+            <MobileFormatCard key={f.id} f={f} brand={brand} onDelete={handleDelete} isSpoke />
           ))
         ) : (
           <>
@@ -978,7 +819,12 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                         </svg>
                       </button>
-                      <span className="font-semibold text-gray-900">{hub.name}</span>
+                      <Link
+                        href={`/${brand}/formats/${hub.id}`}
+                        className="font-semibold text-gray-900 hover:underline"
+                      >
+                        {hub.name}
+                      </Link>
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
                         Pillar
                       </span>
@@ -988,10 +834,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                         </span>
                       )}
                     </div>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(hub)}>Edit</Button>
-                      <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(hub.id)}>Delete</Button>
-                    </div>
+                    <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(hub.id)}>Delete</Button>
                   </div>
                   {hub.channels?.length > 0 && (
                     <div className="flex flex-wrap gap-1">
@@ -1026,7 +869,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 {expandedHubs.has(hub.id) && spokes.length > 0 && (
                   <div className="ml-4 border-l-2 border-blue-100 space-y-2 pt-2 pl-3">
                     {spokes.map((s) => (
-                      <MobileFormatCard key={s.id} f={s} onEdit={openEdit} onDelete={handleDelete} isSpoke topPerformers={topPerformers[s.name]} />
+                      <MobileFormatCard key={s.id} f={s} brand={brand} onDelete={handleDelete} isSpoke />
                     ))}
                   </div>
                 )}
@@ -1034,7 +877,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             ))}
             {/* Orphan spokes */}
             {orphanSpokes.map((f) => (
-              <MobileFormatCard key={f.id} f={f} onEdit={openEdit} onDelete={handleDelete} isSpoke topPerformers={topPerformers[f.name]} />
+              <MobileFormatCard key={f.id} f={f} brand={brand} onDelete={handleDelete} isSpoke />
             ))}
           </>
         )}
@@ -1063,7 +906,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             {typeFilter === "repurposed" ? (
               // Flat spoke list when filtering to repurposed only
               allFilteredSpokes.map((f) => (
-                <FormatTableRow key={f.id} f={f} isSpoke onEdit={openEdit} onDelete={handleDelete} topPerformers={topPerformers[f.name]} />
+                <FormatTableRow key={f.id} f={f} brand={brand} isSpoke onDelete={handleDelete} />
               ))
             ) : (
               <>
@@ -1072,16 +915,15 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                     key={hub.id}
                     hub={hub}
                     spokes={spokes}
+                    brand={brand}
                     expanded={expandedHubs.has(hub.id)}
                     onToggle={() => toggleHub(hub.id)}
-                    onEdit={openEdit}
                     onDelete={handleDelete}
-                    topPerformers={topPerformers}
                   />
                 ))}
                 {/* Orphan spokes */}
                 {orphanSpokes.map((f) => (
-                  <FormatTableRow key={f.id} f={f} isSpoke onEdit={openEdit} onDelete={handleDelete} topPerformers={topPerformers[f.name]} />
+                  <FormatTableRow key={f.id} f={f} brand={brand} isSpoke onDelete={handleDelete} />
                 ))}
               </>
             )}
