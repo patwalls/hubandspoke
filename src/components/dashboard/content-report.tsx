@@ -1,13 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { format, subDays } from "date-fns";
-import { DateRangePicker } from "./date-range-picker";
-import { Filters } from "./filters";
+import { FilterPills } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable } from "./period-table";
-import { getQuickRange } from "@/lib/utils/dates";
 import type { ContentReportData } from "@/types";
 
 const PLATFORM_TABS = [
@@ -19,7 +17,6 @@ const PLATFORM_TABS = [
 ];
 
 export function ContentReport() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const today = new Date();
@@ -73,31 +70,6 @@ export function ContentReport() {
   useEffect(() => {
     fetchReport();
   }, [fetchReport]);
-
-  function updateUrl() {
-    const params = new URLSearchParams({
-      startDate,
-      endDate,
-      viewType,
-      platform: selectedPlatform,
-      format: selectedFormat,
-      source: selectedSource,
-    });
-    router.push(`/?${params.toString()}`);
-  }
-
-  function handleUpdate() {
-    updateUrl();
-    fetchReport();
-  }
-
-  function handleQuickRange(range: string) {
-    const result = getQuickRange(range);
-    if (result) {
-      setStartDate(format(result.startDate, "yyyy-MM-dd"));
-      setEndDate(format(result.endDate, "yyyy-MM-dd"));
-    }
-  }
 
   async function handleSync() {
     setSyncing(true);
@@ -165,7 +137,8 @@ export function ContentReport() {
           productionData={data.byPlatform.production}
           weekProgress={data.weekProgress}
           currentPeriodLabel={currentPeriodLabel}
-          weeklyGoal={77}
+          weeklyGoal={data.weeklyGoal}
+          brand="starter-story"
         />
       ) : (
         <div className="flex items-center justify-center py-12">
@@ -179,31 +152,22 @@ export function ContentReport() {
         </div>
       )}
 
-      {/* Controls */}
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-        <DateRangePicker
-          startDate={startDate}
-          endDate={endDate}
-          viewType={viewType}
-          onStartDateChange={setStartDate}
-          onEndDateChange={setEndDate}
-          onViewTypeChange={setViewType}
-          onUpdate={handleUpdate}
-          onQuickRange={handleQuickRange}
-        />
-        {data && (
-          <Filters
-            platforms={data.platforms}
-            formats={data.formats}
-            selectedPlatform={selectedPlatform}
-            selectedFormat={selectedFormat}
-            selectedSource={selectedSource}
-            onPlatformChange={setSelectedPlatform}
-            onFormatChange={setSelectedFormat}
-            onSourceChange={setSelectedSource}
-          />
-        )}
-      </div>
+      <FilterPills
+        startDate={startDate}
+        endDate={endDate}
+        viewType={viewType}
+        selectedPlatform={selectedPlatform}
+        selectedFormat={selectedFormat}
+        selectedSource={selectedSource}
+        platforms={data?.platforms ?? []}
+        formats={data?.formats ?? []}
+        onStartDateChange={setStartDate}
+        onEndDateChange={setEndDate}
+        onViewTypeChange={setViewType}
+        onPlatformChange={setSelectedPlatform}
+        onFormatChange={setSelectedFormat}
+        onSourceChange={setSelectedSource}
+      />
 
       {/* By-platform table */}
       {data ? (

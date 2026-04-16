@@ -62,6 +62,7 @@ export interface ContentReportData {
   platforms: string[];
   formats: string[];
   showingFormats: boolean;
+  weeklyGoal: number | null;
 }
 
 export interface SyncLog {

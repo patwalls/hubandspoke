@@ -1,10 +1,12 @@
+import Link from "next/link";
 import type { MetricData } from "@/types";
 
 interface MetricTilesProps {
   productionData: MetricData;
   weekProgress: { day: number; percent: number } | null;
   currentPeriodLabel: string | null;
-  weeklyGoal: number;
+  weeklyGoal: number | null;
+  brand: string;
 }
 
 export function MetricTiles({
@@ -12,6 +14,7 @@ export function MetricTiles({
   weekProgress,
   currentPeriodLabel,
   weeklyGoal,
+  brand,
 }: MetricTilesProps) {
   let currentPeriodTotal = 0;
   if (currentPeriodLabel) {
@@ -32,11 +35,20 @@ export function MetricTiles({
       ? Math.round(currentPeriodTotal / (weekProgress.percent / 100))
       : 0;
 
-  const onTrack = currentPeriodTotal >= weeklyGoal * (weekProgress?.percent ?? 0) / 100;
+  const hasGoal = weeklyGoal != null && weeklyGoal > 0;
+  const onTrack =
+    hasGoal &&
+    currentPeriodTotal >= (weeklyGoal * (weekProgress?.percent ?? 0)) / 100;
+
+  const tileBorder = !hasGoal
+    ? "border-border bg-card"
+    : onTrack
+    ? "border-primary/30 bg-primary/5"
+    : "border-amber-300 bg-amber-50";
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div className={`rounded-lg border p-4 ${onTrack ? 'border-primary/30 bg-primary/5' : 'border-amber-300 bg-amber-50'}`}>
+      <div className={`rounded-lg border p-4 ${tileBorder}`}>
         <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
           Production This Week
         </p>
@@ -44,25 +56,39 @@ export function MetricTiles({
           <span className="text-3xl font-semibold text-foreground tabular-nums">
             {currentPeriodTotal}
           </span>
-          <span className="text-lg text-muted-foreground">/ {weeklyGoal}</span>
+          {hasGoal && (
+            <span className="text-lg text-muted-foreground">/ {weeklyGoal}</span>
+          )}
         </div>
-        <div className="mt-3">
-          <div className="w-full bg-border rounded-full h-1.5">
-            <div
-              className={`h-1.5 rounded-full transition-all ${onTrack ? 'bg-primary' : 'bg-amber-500'}`}
-              style={{
-                width: `${Math.min(100, (currentPeriodTotal / weeklyGoal) * 100)}%`,
-              }}
-            />
+        {hasGoal ? (
+          <div className="mt-3">
+            <div className="w-full bg-border rounded-full h-1.5">
+              <div
+                className={`h-1.5 rounded-full transition-all ${onTrack ? 'bg-primary' : 'bg-amber-500'}`}
+                style={{
+                  width: `${Math.min(100, (currentPeriodTotal / weeklyGoal) * 100)}%`,
+                }}
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {weekProgress
+                ? `Day ${weekProgress.day} of 7 (${weekProgress.percent}%)`
+                : ""}
+              {" · "}
+              Proj: {projection}
+            </p>
           </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            {weekProgress
-              ? `Day ${weekProgress.day} of 7 (${weekProgress.percent}%)`
-              : ""}
-            {" · "}
-            Proj: {projection}
-          </p>
-        </div>
+        ) : (
+          <div className="mt-3">
+            <Link
+              href={`/${brand}/settings`}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            >
+              Set goal
+              <span aria-hidden="true">→</span>
+            </Link>
+          </div>
+        )}
       </div>
 
       <div className="rounded-lg border border-border bg-card p-4">

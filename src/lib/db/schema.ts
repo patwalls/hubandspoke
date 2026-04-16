@@ -137,6 +137,17 @@ export const repurposeTriggers = pgTable(
   ]
 );
 
+export const brandSettings = pgTable("brand_settings", {
+  brand: text("brand").primaryKey(),
+  weeklyGoal: integer("weekly_goal"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export const syncLogs = pgTable("sync_logs", {
   id: uuid("id").defaultRandom().primaryKey(),
   syncType: text("sync_type").notNull(),

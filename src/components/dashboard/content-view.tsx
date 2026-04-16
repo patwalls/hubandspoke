@@ -1,12 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { format, subDays } from "date-fns";
-import { DateRangePicker } from "./date-range-picker";
-import { Filters } from "./filters";
+import { FilterPills } from "./filter-pills";
 import { PerformanceTable } from "./performance-table";
-import { getQuickRange } from "@/lib/utils/dates";
 import type { ContentReportData } from "@/types";
 
 interface ContentViewProps {
@@ -19,7 +17,6 @@ const REPORT_API: Record<string, string> = {
 };
 
 export function ContentView({ brand }: ContentViewProps) {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const today = new Date();
@@ -63,27 +60,6 @@ export function ContentView({ brand }: ContentViewProps) {
     fetchReport();
   }, [fetchReport]);
 
-  function handleUpdate() {
-    const params = new URLSearchParams({
-      startDate,
-      endDate,
-      viewType,
-      platform: selectedPlatform,
-      format: selectedFormat,
-      source: selectedSource,
-    });
-    router.push(`/${brand}/content?${params.toString()}`);
-    fetchReport();
-  }
-
-  function handleQuickRange(range: string) {
-    const result = getQuickRange(range);
-    if (result) {
-      setStartDate(format(result.startDate, "yyyy-MM-dd"));
-      setEndDate(format(result.endDate, "yyyy-MM-dd"));
-    }
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -93,30 +69,22 @@ export function ContentView({ brand }: ContentViewProps) {
         </p>
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-        <DateRangePicker
-          startDate={startDate}
-          endDate={endDate}
-          viewType={viewType}
-          onStartDateChange={setStartDate}
-          onEndDateChange={setEndDate}
-          onViewTypeChange={setViewType}
-          onUpdate={handleUpdate}
-          onQuickRange={handleQuickRange}
-        />
-        {data && (
-          <Filters
-            platforms={data.platforms}
-            formats={data.formats}
-            selectedPlatform={selectedPlatform}
-            selectedFormat={selectedFormat}
-            selectedSource={selectedSource}
-            onPlatformChange={setSelectedPlatform}
-            onFormatChange={setSelectedFormat}
-            onSourceChange={setSelectedSource}
-          />
-        )}
-      </div>
+      <FilterPills
+        startDate={startDate}
+        endDate={endDate}
+        viewType={viewType}
+        selectedPlatform={selectedPlatform}
+        selectedFormat={selectedFormat}
+        selectedSource={selectedSource}
+        platforms={data?.platforms ?? []}
+        formats={data?.formats ?? []}
+        onStartDateChange={setStartDate}
+        onEndDateChange={setEndDate}
+        onViewTypeChange={setViewType}
+        onPlatformChange={setSelectedPlatform}
+        onFormatChange={setSelectedFormat}
+        onSourceChange={setSelectedSource}
+      />
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

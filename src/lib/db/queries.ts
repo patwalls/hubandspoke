@@ -1,6 +1,15 @@
 import { db } from "@/lib/db";
-import { productionItems, formats } from "@/lib/db/schema";
+import { productionItems, formats, brandSettings } from "@/lib/db/schema";
 import { and, eq, gte, lte, isNotNull, sql } from "drizzle-orm";
+
+export async function getWeeklyGoal(brand: string): Promise<number | null> {
+  const [row] = await db
+    .select({ weeklyGoal: brandSettings.weeklyGoal })
+    .from(brandSettings)
+    .where(eq(brandSettings.brand, brand))
+    .limit(1);
+  return row?.weeklyGoal ?? null;
+}
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
 
@@ -175,6 +184,8 @@ export async function getContentReport(
   const primaryViewsPerPost = calcViewsPerPost(primaryProduction, primaryViews);
   const formatViewsPerPost = calcViewsPerPost(formatProduction, formatViews);
 
+  const weeklyGoal = await getWeeklyGoal("starter-story");
+
   // Map items for the detail table
   const mappedItems: ProductionItem[] = items.map((item) => ({
     id: item.id,
@@ -230,5 +241,6 @@ export async function getContentReport(
     platforms: platformList,
     formats: formatList,
     showingFormats,
+    weeklyGoal,
   };
 }

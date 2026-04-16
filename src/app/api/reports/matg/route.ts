@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { productionItems, formats } from "@/lib/db/schema";
 import { and, eq, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
+import { getWeeklyGoal } from "@/lib/db/queries";
 import { format, subDays } from "date-fns";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
 
@@ -209,6 +210,8 @@ export async function GET(request: NextRequest) {
     const primaryViewsPerPost = calcViewsPerPost(primaryProduction, primaryViews);
     const formatViewsPerPost = calcViewsPerPost(formatProduction, formatViews);
 
+    const weeklyGoal = await getWeeklyGoal("matg");
+
     // Map items
     const mappedItems: ProductionItem[] = items.map((item) => ({
       id: item.id,
@@ -262,6 +265,7 @@ export async function GET(request: NextRequest) {
       platforms: platformList,
       formats: formatList,
       showingFormats,
+      weeklyGoal,
     };
 
     return NextResponse.json(data);

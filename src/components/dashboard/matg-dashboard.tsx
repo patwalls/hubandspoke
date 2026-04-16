@@ -1,14 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { format, subDays } from "date-fns";
-import { DateRangePicker } from "./date-range-picker";
-import { Filters } from "./filters";
+import { FilterPills } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable } from "./period-table";
-import { PerformanceTable } from "./performance-table";
-import { getQuickRange } from "@/lib/utils/dates";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { ContentReportData } from "@/types";
@@ -100,13 +97,6 @@ const PLATFORM_TABS = [
   { key: "sales" as const, label: "Sales" },
 ];
 
-const FORMAT_TABS = [
-  { key: "production" as const, label: "Production" },
-  { key: "views" as const, label: "Views" },
-  { key: "leads" as const, label: "Leads" },
-  { key: "viewsPerPost" as const, label: "Views Per Post" },
-];
-
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -123,7 +113,6 @@ function timeAgo(dateStr: string): string {
 /* ------------------------------------------------------------------ */
 
 export function MATGDashboard() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const today = new Date();
@@ -141,7 +130,7 @@ export function MATGDashboard() {
   // Data
   const [data, setData] = useState<ContentReportData | null>(null);
   const [formats, setFormats] = useState<FormatRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   // Sync
   const [syncing, setSyncing] = useState(false);
@@ -163,9 +152,6 @@ export function MATGDashboard() {
 
   // Pipeline expand state
   const [expandedSpokes, setExpandedSpokes] = useState<Set<string>>(new Set());
-
-  // Tabs
-  const [activeTab, setActiveTab] = useState<"report" | "pipeline">("report");
 
   /* ---------------------------------------------------------------- */
   /*  Data fetching                                                    */
@@ -218,27 +204,6 @@ export function MATGDashboard() {
 
   const pillarFormats = formats.filter((f) => (f.contentType || "pillar") === "pillar");
   const spokeFormats = formats.filter((f) => f.contentType === "repurposed");
-
-  function handleUpdate() {
-    const params = new URLSearchParams({
-      startDate,
-      endDate,
-      viewType,
-      platform: selectedPlatform,
-      format: selectedFormat,
-      source: selectedSource,
-    });
-    router.push(`/matg?${params.toString()}`);
-    fetchReport();
-  }
-
-  function handleQuickRange(range: string) {
-    const result = getQuickRange(range);
-    if (result) {
-      setStartDate(format(result.startDate, "yyyy-MM-dd"));
-      setEndDate(format(result.endDate, "yyyy-MM-dd"));
-    }
-  }
 
   async function handleSync() {
     setSyncing(true);
@@ -315,10 +280,10 @@ export function MATGDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-            🎙️ MATG Content Command Center
+            Content Command Center
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Track content production &amp; repurpose pipeline
+            Track content production across all platforms
           </p>
         </div>
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
@@ -462,118 +427,68 @@ export function MATGDashboard() {
         </div>
       )}
 
-      {/* Tab switcher */}
-      <div className="flex border-b border-border">
-        <button
-          onClick={() => setActiveTab("report")}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "report"
-              ? "border-foreground text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          📊 Content Report
-        </button>
-        <button
-          onClick={() => setActiveTab("pipeline")}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "pipeline"
-              ? "border-foreground text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          🔄 Repurpose Pipeline
-        </button>
-      </div>
-
-      {/* ============================================================ */}
-      {/*  Content Report Tab (matches Starter Story)                   */}
-      {/* ============================================================ */}
-      {activeTab === "report" && (
-        <div className="space-y-6">
-          {/* Controls */}
-          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-            <DateRangePicker
-              startDate={startDate}
-              endDate={endDate}
-              viewType={viewType}
-              onStartDateChange={setStartDate}
-              onEndDateChange={setEndDate}
-              onViewTypeChange={setViewType}
-              onUpdate={handleUpdate}
-              onQuickRange={handleQuickRange}
-            />
-            {data && (
-              <Filters
-                platforms={data.platforms}
-                formats={data.formats}
-                selectedPlatform={selectedPlatform}
-                selectedFormat={selectedFormat}
-                selectedSource={selectedSource}
-                onPlatformChange={setSelectedPlatform}
-                onFormatChange={setSelectedFormat}
-                onSourceChange={setSelectedSource}
-              />
-            )}
+      {/* Goal tiles */}
+      {data ? (
+        <MetricTiles
+          productionData={data.byPlatform.production}
+          weekProgress={data.weekProgress}
+          currentPeriodLabel={currentPeriodLabel}
+          weeklyGoal={data.weeklyGoal}
+          brand="matg"
+        />
+      ) : (
+        <div className="flex items-center justify-center py-12">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <span className="text-sm">Loading report...</span>
           </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                <span className="text-sm">Loading report...</span>
-              </div>
-            </div>
-          ) : data ? (
-            <>
-              <MetricTiles
-                productionData={data.byPlatform.production}
-                weekProgress={data.weekProgress}
-                currentPeriodLabel={currentPeriodLabel}
-                weeklyGoal={77}
-              />
-
-              <PeriodTable
-                title={
-                  data.showingFormats
-                    ? "Content Production (by Format)"
-                    : "Content Production (by Platform)"
-                }
-                description="Track content created across all platforms."
-                periods={data.periods}
-                metrics={data.byPlatform}
-                tabs={PLATFORM_TABS}
-              />
-
-              {!data.showingFormats && (
-                <PeriodTable
-                  title="Content by Format"
-                  description="Content production broken down by format type."
-                  periods={data.periods}
-                  metrics={data.byFormat}
-                  tabs={FORMAT_TABS}
-                />
-              )}
-
-              <PerformanceTable items={data.items} brand="matg" formats={data.formats} onPostCreated={fetchReport} />
-            </>
-          ) : (
-            <div className="text-center py-20">
-              <p className="text-muted-foreground text-sm">
-                No data available. Try syncing from YouTube.
-              </p>
-            </div>
-          )}
         </div>
       )}
 
-      {/* ============================================================ */}
-      {/*  Repurpose Pipeline Tab                                       */}
-      {/* ============================================================ */}
-      {activeTab === "pipeline" && (
+      {/* Filters */}
+      <FilterPills
+        startDate={startDate}
+        endDate={endDate}
+        viewType={viewType}
+        selectedPlatform={selectedPlatform}
+        selectedFormat={selectedFormat}
+        selectedSource={selectedSource}
+        platforms={data?.platforms ?? []}
+        formats={data?.formats ?? []}
+        onStartDateChange={setStartDate}
+        onEndDateChange={setEndDate}
+        onViewTypeChange={setViewType}
+        onPlatformChange={setSelectedPlatform}
+        onFormatChange={setSelectedFormat}
+        onSourceChange={setSelectedSource}
+      />
+
+      {/* By-platform table */}
+      {data && (
+        <PeriodTable
+          title={
+            data.showingFormats
+              ? "Content Production (by Format)"
+              : "Content Production (by Platform)"
+          }
+          description="Track content created across all platforms."
+          periods={data.periods}
+          metrics={data.byPlatform}
+          tabs={PLATFORM_TABS}
+        />
+      )}
+
+      {/* Repurpose Pipeline */}
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Repurpose Pipeline</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Pillar formats and the spokes they fan out to.
+          </p>
+        </div>
         <div className="space-y-4">
           {pillarFormats.length === 0 ? (
             <div className="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground">
@@ -680,6 +595,7 @@ export function MATGDashboard() {
                                     <div className="flex items-center gap-3 text-xs">
                                       <span className="text-purple-400">★</span>
                                       {p.thumbnail && (
+                                        // eslint-disable-next-line @next/next/no-img-element
                                         <img src={p.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
                                       )}
                                       <div className="flex-1 min-w-0">
@@ -744,7 +660,7 @@ export function MATGDashboard() {
             );
           })()}
         </div>
-      )}
+      </div>
     </div>
   );
 }
