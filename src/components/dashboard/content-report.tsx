@@ -7,7 +7,6 @@ import { DateRangePicker } from "./date-range-picker";
 import { Filters } from "./filters";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable } from "./period-table";
-import { PerformanceTable } from "./performance-table";
 import { getQuickRange } from "@/lib/utils/dates";
 import type { ContentReportData } from "@/types";
 
@@ -17,13 +16,6 @@ const PLATFORM_TABS = [
   { key: "leads" as const, label: "Leads" },
   { key: "viewsPerPost" as const, label: "Views Per Post" },
   { key: "sales" as const, label: "Sales" },
-];
-
-const FORMAT_TABS = [
-  { key: "production" as const, label: "Production" },
-  { key: "views" as const, label: "Views" },
-  { key: "leads" as const, label: "Leads" },
-  { key: "viewsPerPost" as const, label: "Views Per Post" },
 ];
 
 export function ContentReport() {
@@ -167,6 +159,26 @@ export function ContentReport() {
         </button>
       </div>
 
+      {/* Goal tiles — show first */}
+      {data ? (
+        <MetricTiles
+          productionData={data.byPlatform.production}
+          weekProgress={data.weekProgress}
+          currentPeriodLabel={currentPeriodLabel}
+          weeklyGoal={77}
+        />
+      ) : (
+        <div className="flex items-center justify-center py-12">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <span className="text-sm">Loading report...</span>
+          </div>
+        </div>
+      )}
+
       {/* Controls */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <DateRangePicker
@@ -193,56 +205,26 @@ export function ContentReport() {
         )}
       </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            <span className="text-sm">Loading report...</span>
-          </div>
-        </div>
-      ) : data ? (
-        <>
-          <MetricTiles
-            productionData={data.byPlatform.production}
-            weekProgress={data.weekProgress}
-            currentPeriodLabel={currentPeriodLabel}
-            weeklyGoal={77}
-          />
-
-          <PeriodTable
-            title={
-              data.showingFormats
-                ? "Content Production (by Format)"
-                : "Content Production (by Platform)"
-            }
-            description="Track content created across all platforms."
-            periods={data.periods}
-            metrics={data.byPlatform}
-            tabs={PLATFORM_TABS}
-          />
-
-          {!data.showingFormats && (
-            <PeriodTable
-              title="Content by Format"
-              description="Content production broken down by format type."
-              periods={data.periods}
-              metrics={data.byFormat}
-              tabs={FORMAT_TABS}
-            />
-          )}
-
-          <PerformanceTable items={data.items} brand="starter-story" formats={data.formats} onPostCreated={fetchReport} />
-        </>
-      ) : (
+      {/* By-platform table */}
+      {data ? (
+        <PeriodTable
+          title={
+            data.showingFormats
+              ? "Content Production (by Format)"
+              : "Content Production (by Platform)"
+          }
+          description="Track content created across all platforms."
+          periods={data.periods}
+          metrics={data.byPlatform}
+          tabs={PLATFORM_TABS}
+        />
+      ) : !loading ? (
         <div className="text-center py-20">
           <p className="text-muted-foreground text-sm">
             No data available. Try syncing from Notion.
           </p>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

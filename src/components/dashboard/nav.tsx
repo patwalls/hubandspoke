@@ -153,6 +153,7 @@ export function SectionTabs() {
 
   const tabs = [
     { href: `/${currentBrand}`, label: "Dashboard" },
+    { href: `/${currentBrand}/content`, label: "Content" },
     { href: `/${currentBrand}/formats`, label: "Formats" },
   ];
 
@@ -162,6 +163,7 @@ export function SectionTabs() {
         const isActive =
           pathname === tab.href ||
           (tab.label === "Dashboard" && pathname === "/") ||
+          (tab.label === "Content" && pathname === "/content") ||
           (tab.label === "Formats" && pathname === "/formats");
         return (
           <Link
