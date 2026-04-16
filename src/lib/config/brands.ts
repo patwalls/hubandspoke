@@ -1,6 +1,25 @@
 export const BRANDS = [
-  { slug: "starter-story", label: "Starter Story", emoji: "🚀" },
-  { slug: "matg", label: "MATG", emoji: "🎙️" },
+  {
+    slug: "starter-story",
+    label: "Starter Story",
+    avatar: "/brands/starter-story.jpg",
+    color: "from-emerald-500 to-emerald-700",
+    disabled: false,
+  },
+  {
+    slug: "matg",
+    label: "Marketing Against The Grain",
+    avatar: "/brands/matg.jpg",
+    color: "from-orange-500 to-rose-600",
+    disabled: false,
+  },
+  {
+    slug: "science-of-scaling",
+    label: "Science Of Scaling",
+    avatar: "/brands/science-of-scaling.jpg",
+    color: "from-sky-500 to-indigo-600",
+    disabled: true,
+  },
 ] as const;
 
 export type BrandSlug = (typeof BRANDS)[number]["slug"];
