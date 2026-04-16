@@ -32,6 +32,14 @@ interface FormatRow {
   repurposeTargetIds: string[];
 }
 
+interface TopPerformer {
+  title: string | null;
+  views: number;
+  publishedLink: string | null;
+  publishedDate: string | null;
+  thumbnail: string | null;
+}
+
 interface TriggerResult {
   sourceFormat: string;
   tasksCreated: { formatName: string; asanaGid: string; assignee?: string }[];
@@ -150,6 +158,12 @@ export function MATGDashboard() {
   const [triggering, setTriggering] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<TriggerResult | null>(null);
 
+  // Top performers
+  const [topPerformers, setTopPerformers] = useState<Record<string, TopPerformer[]>>({});
+
+  // Pipeline expand state
+  const [expandedSpokes, setExpandedSpokes] = useState<Set<string>>(new Set());
+
   // Tabs
   const [activeTab, setActiveTab] = useState<"report" | "pipeline">("report");
 
@@ -169,10 +183,11 @@ export function MATGDashboard() {
         source: selectedSource,
       });
 
-      const [reportRes, formatsRes, syncInfoRes] = await Promise.all([
+      const [reportRes, formatsRes, syncInfoRes, perfRes] = await Promise.all([
         fetch(`/api/reports/matg?${params}`),
         fetch("/api/formats?brand=matg"),
         fetch("/api/sync/youtube"),
+        fetch("/api/formats/top-performers?brand=matg"),
       ]);
       const reportData = await reportRes.json();
       const formatsData = await formatsRes.json();
@@ -182,6 +197,10 @@ export function MATGDashboard() {
       setFormats(formatsData);
       setLastSync(syncInfoData.lastSync || null);
       setPerformanceDue(syncInfoData.performanceDue || null);
+      if (perfRes.ok) {
+        const perfData = await perfRes.json();
+        setTopPerformers(perfData);
+      }
     } catch (err) {
       console.error("Failed to fetch data:", err);
     } finally {
@@ -601,30 +620,94 @@ export function MATGDashboard() {
                   </div>
                   {targets.length > 0 ? (
                     <div className="divide-y divide-border/50">
-                      {targets.map((spoke) => (
-                        <div key={spoke.id} className="px-4 sm:px-6 py-3 flex items-center gap-3 hover:bg-accent/30 transition-colors">
-                          <span className="text-lg">🔄</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium text-foreground">{spoke.name}</span>
-                              <Badge variant="outline" className="text-[10px] border-purple-200 text-purple-600">Repurposed</Badge>
+                      {targets.map((spoke) => {
+                        const spokePerformers = topPerformers[spoke.name] || [];
+                        const isExpanded = expandedSpokes.has(spoke.id);
+                        return (
+                          <div key={spoke.id}>
+                            <div
+                              className={`px-4 sm:px-6 py-3 flex items-center gap-3 hover:bg-accent/30 transition-colors ${spokePerformers.length > 0 ? "cursor-pointer" : ""}`}
+                              onClick={() => {
+                                if (spokePerformers.length === 0) return;
+                                setExpandedSpokes((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(spoke.id)) next.delete(spoke.id);
+                                  else next.add(spoke.id);
+                                  return next;
+                                });
+                              }}
+                            >
+                              {spokePerformers.length > 0 ? (
+                                <svg
+                                  className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+                                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                </svg>
+                              ) : (
+                                <span className="w-3.5 shrink-0" />
+                              )}
+                              <span className="text-lg">🔄</span>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-sm font-medium text-foreground">{spoke.name}</span>
+                                  <Badge variant="outline" className="text-[10px] border-purple-200 text-purple-600">Repurposed</Badge>
+                                  {spoke.viewThreshold && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                      ≥ {spoke.viewThreshold.toLocaleString()} views
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {spoke.channels?.map((ch) => (
+                                    <span key={ch} className="text-[11px] text-muted-foreground">{ch}</span>
+                                  ))}
+                                </div>
+                              </div>
+                              {spoke.editor && (
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium">
+                                    {spoke.editor.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground hidden sm:inline">{spoke.editor}</span>
+                                </div>
+                              )}
                             </div>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {spoke.channels?.map((ch) => (
-                                <span key={ch} className="text-[11px] text-muted-foreground">{ch}</span>
-                              ))}
-                            </div>
+                            {isExpanded && spokePerformers.length > 0 && (
+                              <div className="bg-purple-50/40 border-t border-purple-100/50 divide-y divide-purple-100/30">
+                                {spokePerformers.map((p, i) => (
+                                  <div key={i} className="px-4 sm:px-6 py-2 pl-16 sm:pl-20">
+                                    <div className="flex items-center gap-3 text-xs">
+                                      <span className="text-purple-400">★</span>
+                                      {p.thumbnail && (
+                                        <img src={p.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                                      )}
+                                      <div className="flex-1 min-w-0">
+                                        {p.publishedLink ? (
+                                          <a
+                                            href={p.publishedLink}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-purple-700 hover:text-purple-900 hover:underline truncate block"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            {p.title || p.publishedLink}
+                                          </a>
+                                        ) : (
+                                          <span className="text-gray-600 truncate block">{p.title || "Untitled"}</span>
+                                        )}
+                                      </div>
+                                      <span className="text-gray-500 shrink-0 tabular-nums">
+                                        {p.views.toLocaleString()} views
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                          {spoke.editor && (
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium">
-                                {spoke.editor.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                              </span>
-                              <span className="text-xs text-muted-foreground hidden sm:inline">{spoke.editor}</span>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="px-6 py-4 text-sm text-muted-foreground text-center">

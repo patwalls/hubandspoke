@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 /**
  * POST /api/production-items
@@ -98,6 +99,105 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ...created, autoFetched }, { status: 201 });
   } catch (error) {
     console.error("Error creating production item:", error);
+    return NextResponse.json(
+      { error: String(error) },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * PUT /api/production-items
+ *
+ * Update an existing production item.
+ * Body: { id: string, ...fields to update }
+ */
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const {
+      id,
+      title,
+      platform,
+      format,
+      publishedLink,
+      publishedDate,
+      views,
+      likes,
+      comments,
+      clicks,
+      leads,
+      salesAmount,
+    } = body;
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "id is required" },
+        { status: 400 }
+      );
+    }
+
+    const updateData: Record<string, unknown> = { updatedAt: new Date() };
+
+    if (title !== undefined) updateData.title = title;
+    if (platform !== undefined) updateData.platform = platform;
+    if (format !== undefined) updateData.format = format || null;
+    if (publishedLink !== undefined) updateData.publishedLink = publishedLink || null;
+    if (publishedDate !== undefined) updateData.publishedDate = publishedDate;
+    if (views !== undefined) updateData.views = views === "" || views === null ? null : Number(views);
+    if (likes !== undefined) updateData.likes = likes === "" || likes === null ? null : Number(likes);
+    if (comments !== undefined) updateData.comments = comments === "" || comments === null ? null : Number(comments);
+    if (clicks !== undefined) updateData.clicks = clicks === "" || clicks === null ? null : Number(clicks);
+    if (leads !== undefined) updateData.leads = leads === "" || leads === null ? null : Number(leads);
+    if (salesAmount !== undefined) updateData.salesAmount = salesAmount === "" || salesAmount === null ? null : String(salesAmount);
+
+    const [updated] = await db
+      .update(productionItems)
+      .set(updateData)
+      .where(eq(productionItems.id, id))
+      .returning();
+
+    if (!updated) {
+      return NextResponse.json(
+        { error: "Item not found" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    console.error("Error updating production item:", error);
+    return NextResponse.json(
+      { error: String(error) },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/production-items
+ *
+ * Delete a production item by id.
+ * Body: { id: string }
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const { id } = await request.json();
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "id is required" },
+        { status: 400 }
+      );
+    }
+
+    await db
+      .delete(productionItems)
+      .where(eq(productionItems.id, id));
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting production item:", error);
     return NextResponse.json(
       { error: String(error) },
       { status: 500 }

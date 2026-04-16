@@ -90,81 +90,165 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
   const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  // Add post dialog state
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  // Dialog state — shared for add and edit
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<ProductionItem | null>(null);
   const [saving, setSaving] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newPlatforms, setNewPlatforms] = useState<string[]>([]);
-  const [newFormat, setNewFormat] = useState("");
-  const [newLink, setNewLink] = useState("");
-  const [newDate, setNewDate] = useState(new Date().toISOString().split("T")[0]);
-  const [newViews, setNewViews] = useState("");
-  const [newLikes, setNewLikes] = useState("");
-  const [newComments, setNewComments] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  // Form fields
+  const [formTitle, setFormTitle] = useState("");
+  const [formPlatforms, setFormPlatforms] = useState<string[]>([]);
+  const [formFormat, setFormFormat] = useState("");
+  const [formLink, setFormLink] = useState("");
+  const [formDate, setFormDate] = useState(new Date().toISOString().split("T")[0]);
+  const [formViews, setFormViews] = useState("");
+  const [formLikes, setFormLikes] = useState("");
+  const [formComments, setFormComments] = useState("");
+  const [formClicks, setFormClicks] = useState("");
+  const [formLeads, setFormLeads] = useState("");
+  const [formSalesAmount, setFormSalesAmount] = useState("");
   const [saveResult, setSaveResult] = useState<{ success: boolean; autoFetched?: boolean; message: string } | null>(null);
 
   const platformOptions = brand === "matg" ? MATG_PLATFORMS : SS_PLATFORMS;
 
   const isYouTubeLink =
-    newLink.includes("youtube.com") || newLink.includes("youtu.be");
+    formLink.includes("youtube.com") || formLink.includes("youtu.be");
+
+  const isEditing = editingItem !== null;
 
   function openAddDialog() {
-    setNewTitle("");
-    setNewPlatforms([]);
-    setNewFormat("");
-    setNewLink("");
-    setNewDate(new Date().toISOString().split("T")[0]);
-    setNewViews("");
-    setNewLikes("");
-    setNewComments("");
+    setEditingItem(null);
+    setFormTitle("");
+    setFormPlatforms([]);
+    setFormFormat("");
+    setFormLink("");
+    setFormDate(new Date().toISOString().split("T")[0]);
+    setFormViews("");
+    setFormLikes("");
+    setFormComments("");
+    setFormClicks("");
+    setFormLeads("");
+    setFormSalesAmount("");
     setSaveResult(null);
-    setAddDialogOpen(true);
+    setDialogOpen(true);
+  }
+
+  function openEditDialog(item: ProductionItem) {
+    setEditingItem(item);
+    setFormTitle(item.title || "");
+    setFormPlatforms(item.platform || []);
+    setFormFormat(item.format || "");
+    setFormLink(item.publishedLink || "");
+    setFormDate(item.publishedDate || "");
+    setFormViews(item.views != null ? String(item.views) : "");
+    setFormLikes(item.likes != null ? String(item.likes) : "");
+    setFormComments(item.comments != null ? String(item.comments) : "");
+    setFormClicks(item.clicks != null ? String(item.clicks) : "");
+    setFormLeads(item.leads != null ? String(item.leads) : "");
+    setFormSalesAmount(item.salesAmount != null ? String(item.salesAmount) : "");
+    setSaveResult(null);
+    setDialogOpen(true);
   }
 
   function togglePlatform(p: string) {
-    setNewPlatforms((prev) =>
+    setFormPlatforms((prev) =>
       prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]
     );
   }
 
-  async function handleAddPost() {
+  async function handleSave() {
     setSaving(true);
     setSaveResult(null);
     try {
-      const res = await fetch("/api/production-items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: newTitle,
-          platform: newPlatforms,
-          format: newFormat || null,
-          publishedLink: newLink || null,
-          publishedDate: newDate,
-          brand,
-          views: newViews ? parseInt(newViews, 10) : null,
-          likes: newLikes ? parseInt(newLikes, 10) : null,
-          comments: newComments ? parseInt(newComments, 10) : null,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        setSaveResult({ success: false, message: err.error || "Failed to create post" });
-        return;
+      if (isEditing) {
+        // Update existing item
+        const res = await fetch("/api/production-items", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: editingItem!.id,
+            title: formTitle,
+            platform: formPlatforms,
+            format: formFormat || null,
+            publishedLink: formLink || null,
+            publishedDate: formDate,
+            views: formViews ? parseInt(formViews, 10) : null,
+            likes: formLikes ? parseInt(formLikes, 10) : null,
+            comments: formComments ? parseInt(formComments, 10) : null,
+            clicks: formClicks ? parseInt(formClicks, 10) : null,
+            leads: formLeads ? parseInt(formLeads, 10) : null,
+            salesAmount: formSalesAmount || null,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          setSaveResult({ success: false, message: err.error || "Failed to update post" });
+          return;
+        }
+        setSaveResult({ success: true, message: "Post updated successfully." });
+      } else {
+        // Create new item
+        const res = await fetch("/api/production-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: formTitle,
+            platform: formPlatforms,
+            format: formFormat || null,
+            publishedLink: formLink || null,
+            publishedDate: formDate,
+            brand,
+            views: formViews ? parseInt(formViews, 10) : null,
+            likes: formLikes ? parseInt(formLikes, 10) : null,
+            comments: formComments ? parseInt(formComments, 10) : null,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          setSaveResult({ success: false, message: err.error || "Failed to create post" });
+          return;
+        }
+        const data = await res.json();
+        setSaveResult({
+          success: true,
+          autoFetched: data.autoFetched,
+          message: data.autoFetched
+            ? "Post created! Metrics auto-fetched from YouTube (1 credit)."
+            : "Post created successfully.",
+        });
       }
-      const data = await res.json();
-      setSaveResult({
-        success: true,
-        autoFetched: data.autoFetched,
-        message: data.autoFetched
-          ? "Post created! Metrics auto-fetched from YouTube (1 credit)."
-          : "Post created successfully.",
-      });
       onPostCreated?.();
-      setTimeout(() => setAddDialogOpen(false), 1500);
+      setTimeout(() => setDialogOpen(false), 1200);
     } catch (err) {
       setSaveResult({ success: false, message: String(err) });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!editingItem) return;
+    if (!confirm("Delete this post? This cannot be undone.")) return;
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/production-items", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingItem.id }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        setSaveResult({ success: false, message: err.error || "Failed to delete post" });
+        return;
+      }
+      setSaveResult({ success: true, message: "Post deleted." });
+      onPostCreated?.();
+      setTimeout(() => setDialogOpen(false), 800);
+    } catch (err) {
+      setSaveResult({ success: false, message: String(err) });
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -222,18 +306,18 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
         </Button>
       </div>
 
-      {/* Add Post Dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+      {/* Add / Edit Post Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add New Post</DialogTitle>
+            <DialogTitle>{isEditing ? "Edit Post" : "Add New Post"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Title</Label>
               <Input
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
                 placeholder="Post title"
               />
             </div>
@@ -243,7 +327,7 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                 {platformOptions.map((p) => (
                   <Badge
                     key={p}
-                    variant={newPlatforms.includes(p) ? "default" : "outline"}
+                    variant={formPlatforms.includes(p) ? "default" : "outline"}
                     className="cursor-pointer"
                     onClick={() => togglePlatform(p)}
                   >
@@ -255,7 +339,7 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
             {formats && formats.length > 0 && (
               <div className="space-y-2">
                 <Label>Format</Label>
-                <Select value={newFormat} onValueChange={(v) => setNewFormat(v || "")}>
+                <Select value={formFormat} onValueChange={(v) => setFormFormat(v || "")}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select format..." />
                   </SelectTrigger>
@@ -272,11 +356,11 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
             <div className="space-y-2">
               <Label>Published Link</Label>
               <Input
-                value={newLink}
-                onChange={(e) => setNewLink(e.target.value)}
+                value={formLink}
+                onChange={(e) => setFormLink(e.target.value)}
                 placeholder="https://..."
               />
-              {isYouTubeLink && (
+              {!isEditing && isYouTubeLink && (
                 <p className="text-xs text-blue-600">
                   YouTube link detected — views, likes, and comments will be auto-fetched.
                 </p>
@@ -286,24 +370,24 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
               <Label>Published Date</Label>
               <Input
                 type="date"
-                value={newDate}
-                onChange={(e) => setNewDate(e.target.value)}
+                value={formDate}
+                onChange={(e) => setFormDate(e.target.value)}
               />
             </div>
 
-            {/* Manual metrics — hidden for YouTube links */}
-            {!isYouTubeLink && (
+            {/* Metrics section */}
+            {(isEditing || !isYouTubeLink) && (
               <div className="space-y-3 rounded-lg border border-dashed border-gray-300 p-3">
                 <p className="text-xs text-muted-foreground font-medium">
-                  Manual Metrics (optional)
+                  Metrics {!isEditing && "(optional)"}
                 </p>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <Label className="text-xs">Views</Label>
                     <Input
                       type="number"
-                      value={newViews}
-                      onChange={(e) => setNewViews(e.target.value)}
+                      value={formViews}
+                      onChange={(e) => setFormViews(e.target.value)}
                       placeholder="0"
                     />
                   </div>
@@ -311,8 +395,8 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                     <Label className="text-xs">Likes</Label>
                     <Input
                       type="number"
-                      value={newLikes}
-                      onChange={(e) => setNewLikes(e.target.value)}
+                      value={formLikes}
+                      onChange={(e) => setFormLikes(e.target.value)}
                       placeholder="0"
                     />
                   </div>
@@ -320,9 +404,39 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                     <Label className="text-xs">Comments</Label>
                     <Input
                       type="number"
-                      value={newComments}
-                      onChange={(e) => setNewComments(e.target.value)}
+                      value={formComments}
+                      onChange={(e) => setFormComments(e.target.value)}
                       placeholder="0"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Clicks</Label>
+                    <Input
+                      type="number"
+                      value={formClicks}
+                      onChange={(e) => setFormClicks(e.target.value)}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Leads</Label>
+                    <Input
+                      type="number"
+                      value={formLeads}
+                      onChange={(e) => setFormLeads(e.target.value)}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Sales $</Label>
+                    <Input
+                      type="number"
+                      value={formSalesAmount}
+                      onChange={(e) => setFormSalesAmount(e.target.value)}
+                      placeholder="0"
+                      step="0.01"
                     />
                   </div>
                 </div>
@@ -341,13 +455,32 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
               </div>
             )}
 
-            <Button
-              onClick={handleAddPost}
-              className="w-full"
-              disabled={saving || !newTitle || !newPlatforms.length || !newDate}
-            >
-              {saving ? "Creating..." : isYouTubeLink ? "Create & Fetch Metrics" : "Create Post"}
-            </Button>
+            <div className="flex gap-2">
+              {isEditing && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleDelete}
+                  disabled={saving || deleting}
+                  className="mr-auto"
+                >
+                  {deleting ? "Deleting..." : "Delete"}
+                </Button>
+              )}
+              <Button
+                onClick={handleSave}
+                className={isEditing ? "flex-1" : "w-full"}
+                disabled={saving || deleting || !formTitle || !formPlatforms.length || !formDate}
+              >
+                {saving
+                  ? (isEditing ? "Saving..." : "Creating...")
+                  : isEditing
+                    ? "Save Changes"
+                    : isYouTubeLink
+                      ? "Create & Fetch Metrics"
+                      : "Create Post"}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -355,6 +488,7 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-border bg-accent/50">
+              <th className="px-3 py-2.5 w-12"></th>
               <SortHeader label="Title" sortKeyName="title" />
               <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                 Platform
@@ -382,6 +516,16 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                 key={item.id}
                 className="border-b border-border/50 hover:bg-accent/30 transition-colors"
               >
+                <td className="px-2 py-2 whitespace-nowrap">
+                  {!item.youtubeId && (
+                    <button
+                      onClick={() => openEditDialog(item)}
+                      className="text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:underline px-1.5 py-0.5 rounded"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </td>
                 <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                   <div className="flex items-center gap-3">
                     {hasThumbnails && item.thumbnail && (
@@ -463,7 +607,7 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={hasPerformanceSync ? 11 : 10} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                <td colSpan={hasPerformanceSync ? 12 : 11} className="px-4 py-12 text-center text-muted-foreground text-sm">
                   No content items found for the selected filters.
                 </td>
               </tr>
