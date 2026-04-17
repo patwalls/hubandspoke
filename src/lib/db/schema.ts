@@ -46,6 +46,11 @@ export const productionItems = pgTable(
     lastPerformanceSyncAt: timestamp("last_performance_sync_at", {
       withTimezone: true,
     }),
+    descriptProjectId: text("descript_project_id"),
+    descriptProjectUrl: text("descript_project_url"),
+    descriptImportedAt: timestamp("descript_imported_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

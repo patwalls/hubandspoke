@@ -1,10 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { productionItems } from "@/lib/db/schema";
 import {
   createDescriptProjectFromUrl,
   createDescriptProjectForUpload,
   toGoogleDriveDirectUrl,
 } from "@/lib/descript";
+
+async function persistDescriptProject(
+  itemId: string | undefined,
+  projectId: string,
+  projectUrl: string
+) {
+  if (!itemId) return;
+  try {
+    await db
+      .update(productionItems)
+      .set({
+        descriptProjectId: projectId,
+        descriptProjectUrl: projectUrl,
+        descriptImportedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, itemId));
+  } catch (err) {
+    console.error("Failed to persist Descript project to item:", err);
+  }
+}
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -19,6 +43,7 @@ export async function POST(request: NextRequest) {
     fileName?: string;
     contentType?: string;
     fileSize?: number;
+    itemId?: string;
   };
   try {
     body = await request.json();
@@ -28,6 +53,7 @@ export async function POST(request: NextRequest) {
 
   const projectName = body.projectName?.trim() || "Imported video";
   const mode = body.mode || (body.url ? "url" : "upload");
+  const itemId = body.itemId?.trim();
 
   try {
     if (mode === "url") {
@@ -39,6 +65,7 @@ export async function POST(request: NextRequest) {
         projectName,
         mediaUrl: toGoogleDriveDirectUrl(rawUrl),
       });
+      await persistDescriptProject(itemId, result.project_id, result.project_url);
       return NextResponse.json({
         mode: "url",
         projectUrl: result.project_url,
@@ -63,6 +90,7 @@ export async function POST(request: NextRequest) {
       contentType,
       fileSize,
     });
+    await persistDescriptProject(itemId, result.projectId, result.projectUrl);
     return NextResponse.json({
       mode: "upload",
       projectUrl: result.projectUrl,

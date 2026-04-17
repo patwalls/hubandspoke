@@ -77,6 +77,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         salesAmount: i.salesAmount ? parseFloat(i.salesAmount) : null,
         status: i.status,
         viewsEstimated: i.viewsEstimated ?? false,
+        descriptProjectUrl: i.descriptProjectUrl,
       })),
       metrics: {
         totalPosts,

@@ -70,6 +70,7 @@ interface ContentItem {
   salesAmount: number | null;
   status: string | null;
   viewsEstimated: boolean;
+  descriptProjectUrl: string | null;
 }
 
 interface DetailMetrics {
@@ -180,6 +181,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           mode: "url",
           url: descriptUrl.trim(),
           projectName: descriptItem.title || "Imported video",
+          itemId: descriptItem.id,
         }),
       });
       const json = await res.json();
@@ -189,6 +191,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
       } else {
         setDescriptResult({ projectUrl: json.projectUrl });
         setDescriptStage("done");
+        load();
       }
     } catch (err) {
       setDescriptError(err instanceof Error ? err.message : "Request failed");
@@ -214,6 +217,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           fileName: descriptFile.name,
           contentType: descriptFile.type || "video/mp4",
           fileSize: descriptFile.size,
+          itemId: descriptItem.id,
         }),
       });
       const json = await res.json();
@@ -255,6 +259,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
       });
       setDescriptResult({ projectUrl });
       setDescriptStage("done");
+      load();
     } catch (err) {
       setDescriptError(err instanceof Error ? err.message : "Upload failed");
       setDescriptStage("idle");
@@ -811,6 +816,18 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                               {item.status}
                             </span>
                           )}
+                          {item.descriptProjectUrl && (
+                            <a
+                              href={item.descriptProjectUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[10px] font-medium text-purple-700 hover:underline mt-0.5"
+                              title="Open in Descript"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                              Descript →
+                            </a>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -843,10 +860,22 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          {isPillar && (
+                          {isPillar && !item.descriptProjectUrl && (
                             <DropdownMenuItem onClick={() => openDescriptModal(item)}>
                               Add to Descript
                             </DropdownMenuItem>
+                          )}
+                          {isPillar && item.descriptProjectUrl && (
+                            <>
+                              <DropdownMenuItem
+                                onClick={() => window.open(item.descriptProjectUrl!, "_blank", "noopener,noreferrer")}
+                              >
+                                Open in Descript
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openDescriptModal(item)}>
+                                Re-import to Descript
+                              </DropdownMenuItem>
+                            </>
                           )}
                           {item.publishedLink && (
                             <DropdownMenuItem
