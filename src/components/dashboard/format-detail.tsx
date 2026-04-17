@@ -14,6 +14,18 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Command,
   CommandEmpty,
   CommandGroup,
@@ -120,6 +132,56 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [descriptItem, setDescriptItem] = useState<ContentItem | null>(null);
+  const [descriptUrl, setDescriptUrl] = useState("");
+  const [descriptLoading, setDescriptLoading] = useState(false);
+  const [descriptError, setDescriptError] = useState<string | null>(null);
+  const [descriptResult, setDescriptResult] = useState<
+    { projectUrl: string } | null
+  >(null);
+
+  function openDescriptModal(item: ContentItem) {
+    setDescriptItem(item);
+    setDescriptUrl(item.publishedLink || "");
+    setDescriptError(null);
+    setDescriptResult(null);
+  }
+
+  function closeDescriptModal() {
+    setDescriptItem(null);
+    setDescriptUrl("");
+    setDescriptError(null);
+    setDescriptResult(null);
+    setDescriptLoading(false);
+  }
+
+  async function submitDescript() {
+    if (!descriptItem || !descriptUrl.trim()) return;
+    setDescriptLoading(true);
+    setDescriptError(null);
+    setDescriptResult(null);
+    try {
+      const res = await fetch("/api/descript/create-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: descriptUrl.trim(),
+          projectName: descriptItem.title || "Imported video",
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setDescriptError(json.error || `HTTP ${res.status}`);
+      } else {
+        setDescriptResult({ projectUrl: json.projectUrl });
+      }
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setDescriptLoading(false);
+    }
+  }
 
   function applyFormat(f: FormatRow) {
     setName(f.name);
@@ -635,6 +697,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                   <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
                     Leads
                   </th>
+                  <th className="px-3 py-2 w-10" />
                 </tr>
               </thead>
               <tbody>
@@ -693,6 +756,30 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
                       {item.leads != null ? formatCompact(item.leads) : "—"}
                     </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                          aria-label="Row actions"
+                        >
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          {isPillar && (
+                            <DropdownMenuItem onClick={() => openDescriptModal(item)}>
+                              Add to Descript
+                            </DropdownMenuItem>
+                          )}
+                          {item.publishedLink && (
+                            <DropdownMenuItem
+                              onClick={() => window.open(item.publishedLink!, "_blank", "noopener,noreferrer")}
+                            >
+                              Open original
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -700,6 +787,76 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           </div>
         )}
       </div>
+
+      {/* Add to Descript modal */}
+      <Dialog open={!!descriptItem} onOpenChange={(o) => { if (!o) closeDescriptModal(); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add to Descript</DialogTitle>
+          </DialogHeader>
+          {descriptItem && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-foreground truncate">
+                  {descriptItem.title || "Untitled"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Creates a new Descript project importing this video.
+                </p>
+              </div>
+              {descriptResult ? (
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm space-y-2">
+                  <div className="font-medium text-foreground">Project created.</div>
+                  <a
+                    href={descriptResult.projectUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline break-all"
+                  >
+                    {descriptResult.projectUrl}
+                  </a>
+                  <p className="text-xs text-muted-foreground">
+                    Descript is still importing the video — open the link to watch progress in Descript.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="descript-url">Video URL</Label>
+                    <Input
+                      id="descript-url"
+                      type="url"
+                      value={descriptUrl}
+                      onChange={(e) => setDescriptUrl(e.target.value)}
+                      placeholder="https://drive.google.com/file/d/…"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Google Drive shared link, or any public direct-download video URL.
+                      YouTube URLs generally won&apos;t work — Descript needs a direct media file.
+                    </p>
+                  </div>
+                  {descriptError && (
+                    <p className="text-xs text-destructive">{descriptError}</p>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={closeDescriptModal} disabled={descriptLoading}>
+                      Cancel
+                    </Button>
+                    <Button onClick={submitDescript} disabled={descriptLoading || !descriptUrl.trim()}>
+                      {descriptLoading ? "Creating…" : "Create project"}
+                    </Button>
+                  </div>
+                </>
+              )}
+              {descriptResult && (
+                <div className="flex justify-end">
+                  <Button variant="outline" onClick={closeDescriptModal}>Close</Button>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
