@@ -5,8 +5,9 @@ import { syncAllMATG } from "@/lib/services/matg-sync";
  * GET /api/cron/youtube-sync
  *
  * Daily cron endpoint to sync all MATG platforms (YouTube, Shorts, Instagram, Twitter).
- * Protected by CRON_SECRET. Set up a daily cron (e.g. Railway cron or external)
- * to call: GET /api/cron/youtube-sync with Authorization: Bearer <CRON_SECRET>
+ * Protected by CRON_SECRET. Dispatched by the unified scheduler in
+ * `src/lib/cron/jobs.ts` via `/api/cron/tick`. Manual trigger:
+ *   curl -H "Authorization: Bearer $CRON_SECRET" .../api/cron/youtube-sync
  *
  * This uses ~4 Scrape Creators API credits per run.
  */

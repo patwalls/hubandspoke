@@ -6,21 +6,31 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 ## Tech Stack
 - Next.js 16 (App Router, TypeScript)
 - Tailwind CSS + shadcn/ui
-- Supabase (Auth + PostgreSQL)
+- Auth.js v5 (Credentials provider, JWT sessions, bcrypt)
+- Heroku Postgres (PG 17)
 - Drizzle ORM
-- Deployed on Railway
+- Postmark for transactional email
+- Deployed on Heroku (auto-deploy on push to `main` via GitHub Actions)
 
 ## Development
 - `npm run dev` - Start dev server
 - `npm run build` - Production build
-- `npx drizzle-kit push` - Push schema to database
 - `npx drizzle-kit generate` - Generate migrations
+- `node --env-file=.env.local scripts/seed-user.mjs <email> <pass> [name]` - Seed a user
 
 ## Key Files
 - `src/lib/db/schema.ts` - Database schema (Drizzle)
 - `src/lib/services/notion-sync.ts` - Notion sync service
 - `src/lib/db/queries.ts` - Report aggregation logic
 - `src/components/dashboard/` - Dashboard UI components
+- `src/lib/auth.ts` - Auth.js config
+- `src/lib/email.ts` - Postmark client
+- `src/lib/cron/jobs.ts` - Scheduled job registry (dispatched by `/api/cron/tick`)
+
+## Cron / Scheduled Jobs
+- One Heroku Scheduler entry hits `GET /api/cron/tick` every 10 minutes.
+- The tick endpoint dispatches whichever entries in `src/lib/cron/jobs.ts` match the current 10-minute window.
+- Add a job = add an entry to `CRON_JOBS` and deploy.
 
 ## Notion Integration
 - Database ID: `8cb6cee4163d4282a5c87991ea689bde`
