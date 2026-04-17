@@ -6,40 +6,84 @@ function authHeader(): string {
   return `Bearer ${token}`;
 }
 
-interface ImportProjectArgs {
+interface ImportProjectUrlArgs {
   projectName: string;
   mediaUrl: string;
 }
 
+interface ImportProjectUploadArgs {
+  projectName: string;
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+}
+
 interface ImportProjectResponse {
   job_id: string;
-  drive_id: string;
+  drive_id?: string;
   project_id: string;
   project_url: string;
+  upload_urls?: Record<string, { upload_url: string; asset_id?: string }>;
 }
 
 export async function createDescriptProjectFromUrl(
-  args: ImportProjectArgs
+  args: ImportProjectUrlArgs
 ): Promise<ImportProjectResponse> {
   const mediaKey = "main";
+  return postImportProjectMedia({
+    project_name: args.projectName,
+    add_media: { [mediaKey]: { url: args.mediaUrl } },
+    add_compositions: [
+      { name: args.projectName, clips: [{ media: mediaKey }] },
+    ],
+  });
+}
+
+export async function createDescriptProjectForUpload(
+  args: ImportProjectUploadArgs
+): Promise<{
+  projectId: string;
+  projectUrl: string;
+  jobId: string;
+  uploadUrl: string;
+  mediaKey: string;
+}> {
+  const mediaKey = args.fileName;
+  const result = await postImportProjectMedia({
+    project_name: args.projectName,
+    add_media: {
+      [mediaKey]: {
+        content_type: args.contentType,
+        file_size: args.fileSize,
+      },
+    },
+    add_compositions: [
+      { name: args.projectName, clips: [{ media: mediaKey }] },
+    ],
+  });
+  const uploadUrl = result.upload_urls?.[mediaKey]?.upload_url;
+  if (!uploadUrl) {
+    throw new Error("Descript did not return an upload URL");
+  }
+  return {
+    projectId: result.project_id,
+    projectUrl: result.project_url,
+    jobId: result.job_id,
+    uploadUrl,
+    mediaKey,
+  };
+}
+
+async function postImportProjectMedia(
+  body: Record<string, unknown>
+): Promise<ImportProjectResponse> {
   const res = await fetch(`${BASE_URL}/jobs/import/project_media`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: authHeader(),
     },
-    body: JSON.stringify({
-      project_name: args.projectName,
-      add_media: {
-        [mediaKey]: { url: args.mediaUrl },
-      },
-      add_compositions: [
-        {
-          name: args.projectName,
-          clips: [{ media: mediaKey }],
-        },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
   const json = await res.json();
   if (!res.ok) {
