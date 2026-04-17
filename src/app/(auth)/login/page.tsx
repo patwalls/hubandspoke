@@ -1,15 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { createBrowserClient } from "@supabase/ssr";
+import { signIn } from "next-auth/react";
 import Link from "next/link";
-
-function getSupabase() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-  );
-}
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -21,14 +14,14 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
-    const supabase = getSupabase();
-    const { error } = await supabase.auth.signInWithPassword({
+    const result = await signIn("credentials", {
       email,
       password,
+      redirect: false,
     });
 
-    if (error) {
-      setError(error.message);
+    if (!result || result.error) {
+      setError("Invalid email or password");
       setLoading(false);
     } else {
       window.location.href = "/";

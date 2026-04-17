@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { createBrowserClient } from "@supabase/ssr";
+import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { BRANDS, DEFAULT_BRAND } from "@/lib/config/brands";
 
@@ -58,12 +58,7 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
   const isOnFormats = pathname.endsWith("/formats");
 
   async function handleSignOut() {
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-    );
-    await supabase.auth.signOut();
-    window.location.href = "/login";
+    await signOut({ callbackUrl: "/login" });
   }
 
   return (

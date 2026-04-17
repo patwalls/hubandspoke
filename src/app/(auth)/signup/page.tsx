@@ -1,49 +1,50 @@
 "use client";
 
 import { useState } from "react";
-import { createBrowserClient } from "@supabase/ssr";
-import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import Link from "next/link";
-
-function getSupabase() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-  );
-}
 
 export default function SignUpPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const router = useRouter();
 
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
       setLoading(false);
       return;
     }
 
-    const supabase = getSupabase();
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
+    const res = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
     });
 
-    if (error) {
-      setError(error.message);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error || "Sign up failed");
       setLoading(false);
-    } else {
-      setSuccess(true);
-      setLoading(false);
+      return;
     }
+
+    const result = await signIn("credentials", {
+      email,
+      password,
+      redirect: false,
+    });
+    if (!result || result.error) {
+      setError("Account created but sign-in failed. Try logging in.");
+      setLoading(false);
+      return;
+    }
+    window.location.href = "/";
   }
 
   return (
@@ -57,15 +58,7 @@ export default function SignUpPage() {
           <p className="text-sm text-muted-foreground mt-1">Create your account</p>
         </div>
         <div className="rounded-lg border border-border bg-card p-6">
-          {success ? (
-            <div className="text-center space-y-3">
-              <p className="text-sm text-foreground">Check your email for a confirmation link.</p>
-              <Link href="/login" className="text-xs text-primary hover:underline">
-                Back to sign in
-              </Link>
-            </div>
-          ) : (
-            <form onSubmit={handleSignUp} className="space-y-4">
+          <form onSubmit={handleSignUp} className="space-y-4">
               <div className="space-y-1.5">
                 <label htmlFor="email" className="text-xs font-medium text-foreground">
                   Email
@@ -90,9 +83,9 @@ export default function SignUpPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={8}
                   className="w-full h-9 px-3 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="Min 6 characters"
+                  placeholder="Min 8 characters"
                 />
               </div>
               {error && (
@@ -112,7 +105,6 @@ export default function SignUpPage() {
                 </Link>
               </p>
             </form>
-          )}
         </div>
       </div>
     </div>
