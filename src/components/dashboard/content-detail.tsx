@@ -15,13 +15,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { detectRepurposeCapability } from "@/lib/repurpose";
 
 interface BrandFormat {
   id: string;
   name: string;
   contentType: string | null;
-  descriptClipPrompt: string | null;
+  instructions: string | null;
 }
 
 interface DetailResponse {
@@ -92,41 +91,58 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     message: string;
   } | null>(null);
 
-  // Per-format clip-out state, keyed by format id
-  const [clipStatus, setClipStatus] = useState<
-    Record<
-      string,
-      { state: "running" | "done" | "error"; message?: string; projectUrl?: string }
-    >
-  >({});
+  // Per-format repurpose state, keyed by format id
+  type RepurposeState = {
+    state: "running" | "clipped" | "no_action" | "error";
+    message?: string;
+    projectUrl?: string;
+  };
+  const [clipStatus, setClipStatus] = useState<Record<string, RepurposeState>>(
+    {}
+  );
 
-  async function clipOutTo(targetFormatId: string) {
+  async function repurposeTo(targetFormatId: string) {
     setClipStatus((prev) => ({ ...prev, [targetFormatId]: { state: "running" } }));
     try {
       const res = await fetch("/api/descript/clip-out", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          itemId: contentId,
-          targetFormatId,
-        }),
+        body: JSON.stringify({ itemId: contentId, targetFormatId }),
       });
       const json = await res.json();
       if (!res.ok) {
         setClipStatus((prev) => ({
           ...prev,
-          [targetFormatId]: { state: "error", message: json.error || `HTTP ${res.status}` },
+          [targetFormatId]: {
+            state: "error",
+            message: json.error || `HTTP ${res.status}`,
+          },
         }));
         return;
       }
-      setClipStatus((prev) => ({
-        ...prev,
-        [targetFormatId]: {
-          state: "done",
-          message: `Clip queued (${json.window?.startSec ?? "?"}s–${json.window?.endSec ?? "?"}s)`,
-          projectUrl: json.projectUrl,
-        },
-      }));
+      if (json.mode === "descript_clip") {
+        setClipStatus((prev) => ({
+          ...prev,
+          [targetFormatId]: {
+            state: "clipped",
+            message: `Clip queued (${json.window?.startSec ?? "?"}s–${json.window?.endSec ?? "?"}s)`,
+            projectUrl: json.projectUrl,
+          },
+        }));
+      } else if (json.mode === "no_action") {
+        setClipStatus((prev) => ({
+          ...prev,
+          [targetFormatId]: {
+            state: "no_action",
+            message: json.message || "No automation for this prompt yet.",
+          },
+        }));
+      } else {
+        setClipStatus((prev) => ({
+          ...prev,
+          [targetFormatId]: { state: "error", message: "Unexpected response" },
+        }));
+      }
     } catch (err) {
       setClipStatus((prev) => ({
         ...prev,
@@ -476,51 +492,58 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <div className="flex flex-wrap gap-2">
             {repurposeTargets.map((f) => {
               const st = clipStatus[f.id];
-              const capability = detectRepurposeCapability(f.descriptClipPrompt);
-              const automated = capability === "descript-clip";
-              const disabled =
-                !automated || !hasDescriptProject || st?.state === "running";
-              const title = automated
-                ? (hasDescriptProject
-                    ? "Creates a new composition in this item's Descript project"
-                    : "Add this item to Descript first to enable")
-                : "This format's prompt doesn't describe a Descript clip — edit the format's prompt to enable";
+              const disabled = !hasDescriptProject || st?.state === "running";
+              const title = hasDescriptProject
+                ? "Claude reads this format's prompt and decides which automation to run."
+                : "Add this item to Descript first to enable clipping actions.";
               return (
-                <div key={f.id} className="flex flex-col gap-1">
+                <div key={f.id} className="flex flex-col gap-1 max-w-xs">
                   <button
                     type="button"
                     disabled={disabled}
-                    onClick={() => clipOutTo(f.id)}
+                    onClick={() => repurposeTo(f.id)}
                     title={title}
                     className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border bg-card text-sm hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        automated ? "bg-purple-500" : "bg-border"
-                      }`}
-                    />
                     <span className="text-foreground">{f.name}</span>
-                    {automated && !hasDescriptProject && (
-                      <span className="text-[10px] text-muted-foreground">· needs Descript</span>
-                    )}
-                    {!automated && (
-                      <span className="text-[10px] text-muted-foreground">· manual</span>
-                    )}
                     {st?.state === "running" && (
-                      <span className="text-xs text-muted-foreground">· clipping…</span>
+                      <span className="text-xs text-muted-foreground">· thinking…</span>
                     )}
-                    {st?.state === "done" && (
-                      <span className="text-xs text-primary">· queued</span>
+                    {st?.state === "clipped" && (
+                      <span className="text-xs text-primary">· clip queued</span>
+                    )}
+                    {st?.state === "no_action" && (
+                      <span className="text-xs text-muted-foreground">· no action</span>
                     )}
                     {st?.state === "error" && (
                       <span className="text-xs text-destructive">· failed</span>
                     )}
                   </button>
+                  {st?.state === "clipped" && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {st.message}
+                      {st.projectUrl && (
+                        <>
+                          {" · "}
+                          <a
+                            href={st.projectUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline"
+                          >
+                            open in Descript
+                          </a>
+                        </>
+                      )}
+                    </span>
+                  )}
+                  {st?.state === "no_action" && (
+                    <span className="text-[10px] text-muted-foreground whitespace-normal">
+                      {st.message}
+                    </span>
+                  )}
                   {st?.state === "error" && (
                     <span className="text-[10px] text-destructive">{st.message}</span>
-                  )}
-                  {st?.state === "done" && (
-                    <span className="text-[10px] text-muted-foreground">{st.message}</span>
                   )}
                 </div>
               );
@@ -529,11 +552,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         )}
 
         <p className="text-[11px] text-muted-foreground">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 align-middle mr-1" />
-          Automated via Descript (prompt mentions &ldquo;Descript&rdquo; or &ldquo;clip&rdquo;).
-          {" "}
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-border align-middle mr-1 ml-3" />
-          Manual — no automation wired up. Edit the format to add a Descript clip prompt.
+          Every click asks Claude (Haiku) to read the target format&apos;s prompt and decide which automation to run. Today the only wired-up capability is Descript clipping; other prompts come back with a short &ldquo;no action&rdquo; explanation.
         </p>
       </div>
 

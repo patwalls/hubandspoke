@@ -40,7 +40,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         id: formats.id,
         name: formats.name,
         contentType: formats.contentType,
-        descriptClipPrompt: formats.descriptClipPrompt,
+        instructions: formats.instructions,
       })
       .from(formats)
       .where(eq(formats.brand, item.brand))

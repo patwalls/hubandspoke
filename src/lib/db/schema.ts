@@ -80,7 +80,6 @@ export const formats = pgTable("formats", {
   producer: text("producer"),
   producerAsanaGid: text("producer_asana_gid"),
   instructions: text("instructions"),
-  descriptClipPrompt: text("descript_clip_prompt"),
   contentType: text("content_type").default("pillar"), // "pillar" (hub) or "repurposed" (spoke)
   notionPageId: text("notion_page_id"), // Notion page ID for format relation
   editorNotionUserId: text("editor_notion_user_id"), // Notion user ID for editor/creator

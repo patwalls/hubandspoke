@@ -3,8 +3,8 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems, formats } from "@/lib/db/schema";
-import { invokeDescriptAgent, DEFAULT_CLIP_PROMPT } from "@/lib/descript";
-import { detectRepurposeCapability } from "@/lib/repurpose";
+import { invokeDescriptAgent } from "@/lib/descript";
+import { dispatchRepurpose } from "@/lib/repurpose-agent";
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0");
@@ -71,35 +71,47 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const capability = detectRepurposeCapability(target.descriptClipPrompt);
-  if (capability !== "descript-clip") {
-    return NextResponse.json(
-      {
-        error:
-          "This format's prompt doesn't describe a Descript clip. Add language like \"create a clip in Descript\" to the format's prompt to enable one-click clipping.",
-      },
-      { status: 400 }
-    );
+  let action;
+  try {
+    action = await dispatchRepurpose({
+      itemTitle: item.title || "Untitled",
+      targetFormatName: target.name,
+      targetPrompt: target.instructions || "",
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Claude dispatch failed";
+    return NextResponse.json({ error: message }, { status: 502 });
   }
 
-  // Random 30-second window starting 30–90s into the video
-  const startSec = Math.floor(Math.random() * 60) + 30;
-  const endSec = startSec + 30;
+  if (action.kind === "no_action") {
+    return NextResponse.json({
+      mode: "no_action",
+      message: action.message,
+      targetFormatName: target.name,
+    });
+  }
 
-  const preamble = target.descriptClipPrompt?.trim() || DEFAULT_CLIP_PROMPT;
-  const directive = `Create a new composition named '${target.name}' containing a 30-second highlight from ${mmss(startSec)} to ${mmss(endSec)} of the main composition.`;
-  const prompt = `${preamble}\n\n${directive}`;
+  const { startSec, endSec, compositionName } = action;
+  const promptToDescript = [
+    target.instructions?.trim() || "",
+    "",
+    `Create a new composition named '${compositionName}' containing a clip from ${mmss(startSec)} to ${mmss(endSec)} of the main composition.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   try {
     const result = await invokeDescriptAgent({
       projectId: item.descriptProjectId,
-      prompt,
+      prompt: promptToDescript,
     });
     return NextResponse.json({
+      mode: "descript_clip",
       jobId: result.jobId,
       projectUrl: result.projectUrl,
-      prompt,
+      prompt: promptToDescript,
       window: { startSec, endSec },
+      compositionName,
       targetFormatName: target.name,
     });
   } catch (err) {

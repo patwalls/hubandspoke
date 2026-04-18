@@ -52,7 +52,6 @@ interface FormatRow {
   producer: string | null;
   producerAsanaGid: string | null;
   instructions: string | null;
-  descriptClipPrompt: string | null;
   contentType: string | null;
   repurposeTargetIds: string[];
 }
@@ -126,7 +125,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [producer, setProducer] = useState("");
   const [producerAsanaGid, setProducerAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [descriptClipPrompt, setDescriptClipPrompt] = useState("");
   const [contentType, setContentType] = useState<string>("pillar");
   const [repurposeTargetIds, setRepurposeTargetIds] = useState<string[]>([]);
 
@@ -332,7 +330,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     setProducer(f.producer || "");
     setProducerAsanaGid(f.producerAsanaGid || "");
     setInstructions(f.instructions || "");
-    setDescriptClipPrompt(f.descriptClipPrompt || "");
     setContentType(f.contentType || "pillar");
     setRepurposeTargetIds(f.repurposeTargetIds || []);
   }
@@ -407,7 +404,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         producer: producer || null,
         producerAsanaGid: producerAsanaGid || null,
         instructions: instructions || null,
-        descriptClipPrompt: descriptClipPrompt || null,
         contentType,
         repurposeTargetIds,
       };
@@ -751,25 +747,15 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         </div>
 
         <div className="space-y-2">
-          <Label>Format Instructions</Label>
+          <Label>Prompt</Label>
           <Textarea
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
-            rows={4}
-            placeholder="Add instructions, loom links, style guides, etc. Included in Asana tasks."
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label>Descript clip prompt</Label>
-          <Textarea
-            value={descriptClipPrompt}
-            onChange={(e) => setDescriptClipPrompt(e.target.value)}
-            rows={4}
-            placeholder="Guides the Descript agent when turning a pillar video into a clip of this format. Leave blank to use the default."
+            rows={6}
+            placeholder="Describe what this format is and how to produce it. e.g. 'Create a 30-second vertical highlight clip from the pillar interview, starting on a clean sentence boundary.' Claude reads this when you click Repurpose and picks the right automation."
           />
           <p className="text-xs text-muted-foreground">
-            Used by the &ldquo;Clip out&rdquo; action on pillar content to spawn a new composition in the pillar&apos;s Descript project.
+            One prompt for everything. Included in Asana tasks, and read by Claude to dispatch Repurpose actions (e.g. Descript clipping).
           </p>
         </div>
 
@@ -1023,14 +1009,14 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                     </select>
                     {clipTargetId && (() => {
                       const t = descriptClipTargets.find((f) => f.id === clipTargetId);
-                      const preview = t?.descriptClipPrompt?.trim();
+                      const preview = t?.instructions?.trim();
                       return (
                         <div className="text-xs text-muted-foreground rounded-md bg-muted/50 border border-border p-2.5 mt-1">
                           <div className="font-medium text-foreground mb-1">Prompt</div>
                           {preview ? (
                             <p className="whitespace-pre-wrap">{preview}</p>
                           ) : (
-                            <p className="italic">Using the default clip prompt — set one on this format to customize.</p>
+                            <p className="italic">No prompt on this format — Claude will likely respond with a no-action message. Add a prompt that describes a Descript clip to enable.</p>
                           )}
                         </div>
                       );

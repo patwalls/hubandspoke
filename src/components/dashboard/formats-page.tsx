@@ -306,7 +306,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [producer, setProducer] = useState("");
   const [producerAsanaGid, setProducerAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [descriptClipPrompt, setDescriptClipPrompt] = useState("");
   const [contentType, setContentType] = useState<string>("pillar");
   const [repurposeTargetIds, setRepurposeTargetIds] = useState<string[]>([]);
 
@@ -351,7 +350,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setProducer("");
     setProducerAsanaGid("");
     setInstructions("");
-    setDescriptClipPrompt("");
     setContentType("pillar");
     setRepurposeTargetIds([]);
     setDialogOpen(true);
@@ -368,7 +366,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       producer: producer || null,
       producerAsanaGid: producerAsanaGid || null,
       instructions: instructions || null,
-      descriptClipPrompt: descriptClipPrompt || null,
       contentType,
       repurposeTargetIds,
     };
@@ -715,30 +712,17 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 </p>
               </div>
 
-              {/* Instructions / Format Notes */}
+              {/* Prompt / Instructions */}
               <div className="space-y-2">
-                <Label>Format Instructions</Label>
+                <Label>Prompt</Label>
                 <Textarea
                   value={instructions}
                   onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="Add instructions, loom links, style guides, etc. This will be included in Asana tasks."
-                  rows={4}
+                  placeholder="Describe what this format is and how to produce it. e.g. 'Create a 30-second vertical highlight clip from the pillar interview.' Claude reads this when Repurpose fires and picks the right automation."
+                  rows={5}
                 />
                 <p className="text-xs text-muted-foreground">
-                  These instructions will be added to the Asana task notes when repurpose tasks are triggered.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Descript clip prompt</Label>
-                <Textarea
-                  value={descriptClipPrompt}
-                  onChange={(e) => setDescriptClipPrompt(e.target.value)}
-                  placeholder="Guides the Descript agent when turning a pillar video into a clip of this format. Leave blank for default."
-                  rows={3}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Used by the &ldquo;Clip out&rdquo; action on pillar content.
+                  One prompt for everything. Added to Asana task notes, and read by Claude to dispatch Repurpose actions.
                 </p>
               </div>
 
