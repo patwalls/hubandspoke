@@ -16,10 +16,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+interface BrandFormat {
+  id: string;
+  name: string;
+  contentType: string | null;
+  descriptClipPrompt: string | null;
+}
+
 interface DetailResponse {
   item: ProductionItem;
   related: ProductionItem[];
-  formats: string[];
+  formatNames: string[];
+  formats: BrandFormat[];
 }
 
 interface ContentDetailProps {
@@ -82,6 +90,52 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     success: boolean;
     message: string;
   } | null>(null);
+
+  // Per-format clip-out state, keyed by format id
+  const [clipStatus, setClipStatus] = useState<
+    Record<
+      string,
+      { state: "running" | "done" | "error"; message?: string; projectUrl?: string }
+    >
+  >({});
+
+  async function clipOutTo(targetFormatId: string) {
+    setClipStatus((prev) => ({ ...prev, [targetFormatId]: { state: "running" } }));
+    try {
+      const res = await fetch("/api/descript/clip-out", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: contentId,
+          targetFormatId,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setClipStatus((prev) => ({
+          ...prev,
+          [targetFormatId]: { state: "error", message: json.error || `HTTP ${res.status}` },
+        }));
+        return;
+      }
+      setClipStatus((prev) => ({
+        ...prev,
+        [targetFormatId]: {
+          state: "done",
+          message: `Clip queued (${json.window?.startSec ?? "?"}s–${json.window?.endSec ?? "?"}s)`,
+          projectUrl: json.projectUrl,
+        },
+      }));
+    } catch (err) {
+      setClipStatus((prev) => ({
+        ...prev,
+        [targetFormatId]: {
+          state: "error",
+          message: err instanceof Error ? err.message : "Request failed",
+        },
+      }));
+    }
+  }
 
   // Form state
   const [title, setTitle] = useState("");
@@ -231,8 +285,15 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     );
   }
 
-  const { item, related, formats: brandFormats } = data;
+  const { item, related, formatNames, formats: brandFormatDetails } = data;
+  const brandFormats = formatNames;
   const isYouTube = !!item.youtubeId;
+
+  const repurposeTargets = brandFormatDetails.filter(
+    (f) => f.contentType === "repurposed"
+  );
+  const hasDescriptProject = !!item.descriptProjectId;
+  const descriptProjectUrl = item.descriptProjectUrl;
 
   return (
     <div className="space-y-6">
@@ -363,6 +424,104 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               : "Link clicks"}
           </p>
         </div>
+      </div>
+
+      {/* Repurpose to format */}
+      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">
+              Repurpose to format
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Click a target format to create a new composition in this post&apos;s Descript
+              project using that format&apos;s clip prompt. A random 30-second window is used
+              for this MVP.
+            </p>
+          </div>
+          {descriptProjectUrl && (
+            <a
+              href={descriptProjectUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-purple-700 hover:underline inline-flex items-center gap-1"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+              Open Descript project →
+            </a>
+          )}
+        </div>
+
+        {!hasDescriptProject && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+            This post doesn&apos;t have a Descript project yet. Open it on its format page
+            and use <span className="font-medium">Add to Descript</span> first, then the
+            clip-out buttons here will work.
+          </div>
+        )}
+
+        {repurposeTargets.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No repurposed-type formats for this brand yet.{" "}
+            <Link
+              href={`/${brand}/formats`}
+              className="text-primary hover:underline"
+            >
+              Add a format
+            </Link>{" "}
+            with content type <span className="font-mono">Repurposed</span> to see it here.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {repurposeTargets.map((f) => {
+              const st = clipStatus[f.id];
+              const hasCustomPrompt = !!f.descriptClipPrompt?.trim();
+              const disabled = !hasDescriptProject || st?.state === "running";
+              return (
+                <div key={f.id} className="flex flex-col gap-1">
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => clipOutTo(f.id)}
+                    title={
+                      hasCustomPrompt
+                        ? "Uses this format's custom Descript prompt"
+                        : "Uses the default Descript prompt"
+                    }
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border bg-card text-sm hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        hasCustomPrompt ? "bg-purple-500" : "bg-border"
+                      }`}
+                    />
+                    <span className="text-foreground">{f.name}</span>
+                    {st?.state === "running" && (
+                      <span className="text-xs text-muted-foreground">· clipping…</span>
+                    )}
+                    {st?.state === "done" && (
+                      <span className="text-xs text-primary">· queued</span>
+                    )}
+                    {st?.state === "error" && (
+                      <span className="text-xs text-destructive">· failed</span>
+                    )}
+                  </button>
+                  {st?.state === "error" && (
+                    <span className="text-[10px] text-destructive">{st.message}</span>
+                  )}
+                  {st?.state === "done" && (
+                    <span className="text-[10px] text-muted-foreground">{st.message}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <p className="text-[11px] text-muted-foreground">
+          Purple dot = format has a custom Descript clip prompt. Grey dot = default prompt
+          will be used.
+        </p>
       </div>
 
       {/* Edit form */}

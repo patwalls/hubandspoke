@@ -26,6 +26,9 @@ export interface ProductionItem {
   producerEmail: string | null;
   viewsEstimated: boolean | null;
   lastPerformanceSyncAt: string | null;
+  descriptProjectId?: string | null;
+  descriptProjectUrl?: string | null;
+  descriptImportedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -36,7 +36,12 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       : [];
 
     const brandFormats = await db
-      .select({ name: formats.name })
+      .select({
+        id: formats.id,
+        name: formats.name,
+        contentType: formats.contentType,
+        descriptClipPrompt: formats.descriptClipPrompt,
+      })
       .from(formats)
       .where(eq(formats.brand, item.brand))
       .orderBy(formats.name);
@@ -58,7 +63,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           ? parseFloat(r.apvFirst24Hours)
           : null,
       })),
-      formats: brandFormats.map((f) => f.name),
+      formatNames: brandFormats.map((f) => f.name),
+      formats: brandFormats,
     });
   } catch (error) {
     console.error("Error fetching production item:", error);
