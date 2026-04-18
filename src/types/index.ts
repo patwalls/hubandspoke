@@ -28,6 +28,7 @@ export interface ProductionItem {
   lastPerformanceSyncAt: string | null;
   descriptProjectId?: string | null;
   descriptProjectUrl?: string | null;
+  descriptCompositionId?: string | null;
   descriptImportedAt?: string | null;
   pillarContentNotionId?: string | null;
   pillarContentItemId?: string | null;
