@@ -15,6 +15,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface BrandFormat {
   id: string;
@@ -105,6 +111,20 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     {}
   );
 
+  // Descript upload modal state
+  const [descriptModalOpen, setDescriptModalOpen] = useState(false);
+  const [descriptMode, setDescriptMode] = useState<"upload" | "url">("upload");
+  const [descriptUrl, setDescriptUrl] = useState("");
+  const [descriptFile, setDescriptFile] = useState<File | null>(null);
+  const [descriptStage, setDescriptStage] = useState<
+    "idle" | "creating" | "uploading" | "done"
+  >("idle");
+  const [descriptProgress, setDescriptProgress] = useState(0);
+  const [descriptError, setDescriptError] = useState<string | null>(null);
+  const [descriptResult, setDescriptResult] = useState<
+    { projectUrl: string } | null
+  >(null);
+
   async function callRepurpose(targetFormatId: string, mode: "preview" | "real") {
     setClipStatus((prev) => ({
       ...prev,
@@ -172,6 +192,122 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           message: err instanceof Error ? err.message : "Request failed",
         },
       }));
+    }
+  }
+
+  function openDescriptModal() {
+    setDescriptMode("upload");
+    setDescriptFile(null);
+    setDescriptStage("idle");
+    setDescriptProgress(0);
+    setDescriptError(null);
+    setDescriptResult(null);
+    setDescriptModalOpen(true);
+  }
+
+  function closeDescriptModal() {
+    setDescriptModalOpen(false);
+    setDescriptFile(null);
+    setDescriptError(null);
+    setDescriptResult(null);
+    setDescriptStage("idle");
+    setDescriptProgress(0);
+  }
+
+  async function submitDescriptUrl() {
+    if (!data || !descriptUrl.trim()) return;
+    setDescriptStage("creating");
+    setDescriptError(null);
+    setDescriptResult(null);
+    try {
+      const res = await fetch("/api/descript/create-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "url",
+          url: descriptUrl.trim(),
+          projectName: data.item.title || "Imported video",
+          itemId: contentId,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setDescriptError(json.error || `HTTP ${res.status}`);
+        setDescriptStage("idle");
+      } else {
+        setDescriptResult({ projectUrl: json.projectUrl });
+        setDescriptStage("done");
+        load();
+      }
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Request failed");
+      setDescriptStage("idle");
+    }
+  }
+
+  async function submitDescriptUpload() {
+    if (!data || !descriptFile) return;
+    setDescriptStage("creating");
+    setDescriptError(null);
+    setDescriptResult(null);
+    setDescriptProgress(0);
+
+    let uploadUrl: string, projectUrl: string;
+    try {
+      const res = await fetch("/api/descript/create-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "upload",
+          projectName: data.item.title || "Imported video",
+          fileName: descriptFile.name,
+          contentType: descriptFile.type || "video/mp4",
+          fileSize: descriptFile.size,
+          itemId: contentId,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setDescriptError(json.error || `HTTP ${res.status}`);
+        setDescriptStage("idle");
+        return;
+      }
+      uploadUrl = json.uploadUrl;
+      projectUrl = json.projectUrl;
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Request failed");
+      setDescriptStage("idle");
+      return;
+    }
+
+    setDescriptStage("uploading");
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) {
+            setDescriptProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        });
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+        });
+        xhr.addEventListener("error", () => reject(new Error("Upload failed")));
+        xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
+        xhr.open("PUT", uploadUrl);
+        xhr.setRequestHeader(
+          "Content-Type",
+          descriptFile!.type || "application/octet-stream"
+        );
+        xhr.send(descriptFile);
+      });
+      setDescriptResult({ projectUrl });
+      setDescriptStage("done");
+      load();
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Upload failed");
+      setDescriptStage("idle");
     }
   }
 
@@ -800,10 +936,19 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
 
         {!hasDescriptProject && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
-            This post doesn&apos;t have a Descript project yet. Open it on its format page
-            and use <span className="font-medium">Add to Descript</span> first, then the
-            clip-out buttons here will work.
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 flex items-center justify-between gap-3 flex-wrap">
+            <span>
+              This post doesn&apos;t have a Descript project yet. Add one so the
+              clip-out buttons below can run.
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openDescriptModal}
+              className="shrink-0"
+            >
+              Add to Descript
+            </Button>
           </div>
         )}
 
@@ -901,6 +1046,158 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <span className="font-medium">Repurpose</span> does the same and then fires the clip job. Descript&apos;s own agent picks the moment from the transcript.
         </p>
       </div>
+
+      {/* Add to Descript modal */}
+      <Dialog open={descriptModalOpen} onOpenChange={(o) => { if (!o) closeDescriptModal(); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add to Descript</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm font-medium text-foreground truncate">
+                {item.title || "Untitled"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Creates a new Descript project for this post so you can clip it
+                into other formats.
+              </p>
+            </div>
+            {descriptResult ? (
+              <>
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm space-y-2">
+                  <div className="font-medium text-foreground">Project created.</div>
+                  <a
+                    href={descriptResult.projectUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline break-all"
+                  >
+                    {descriptResult.projectUrl}
+                  </a>
+                  <p className="text-xs text-muted-foreground">
+                    {descriptMode === "upload"
+                      ? "Upload complete. Descript is processing — open the link to watch progress."
+                      : "Descript is still importing the video — open the link to watch progress."}
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <Button variant="outline" onClick={closeDescriptModal}>Close</Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="inline-flex items-center gap-1 rounded-lg bg-muted/60 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setDescriptMode("upload")}
+                    className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
+                      descriptMode === "upload"
+                        ? "bg-card text-foreground font-medium shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Upload file
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDescriptMode("url")}
+                    className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
+                      descriptMode === "url"
+                        ? "bg-card text-foreground font-medium shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Paste URL
+                  </button>
+                </div>
+
+                {descriptMode === "upload" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="descript-file">Video file</Label>
+                    <Input
+                      id="descript-file"
+                      type="file"
+                      accept="video/*,audio/*"
+                      onChange={(e) => setDescriptFile(e.target.files?.[0] || null)}
+                      disabled={descriptStage === "uploading" || descriptStage === "creating"}
+                    />
+                    {descriptFile && (
+                      <p className="text-xs text-muted-foreground">
+                        {descriptFile.name} · {(descriptFile.size / (1024 * 1024)).toFixed(1)} MB
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Uploaded directly from your browser to Descript. No middleman.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="descript-url">Video URL</Label>
+                    <Input
+                      id="descript-url"
+                      type="url"
+                      value={descriptUrl}
+                      onChange={(e) => setDescriptUrl(e.target.value)}
+                      placeholder="https://drive.google.com/file/d/…"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Google Drive share link (set to &ldquo;anyone with the link&rdquo;), or
+                      any public direct-download video URL. YouTube URLs won&apos;t work.
+                    </p>
+                  </div>
+                )}
+
+                {descriptStage === "uploading" && (
+                  <div className="space-y-1.5">
+                    <div className="w-full bg-border rounded-full h-1.5">
+                      <div
+                        className="h-1.5 rounded-full bg-primary transition-all"
+                        style={{ width: `${descriptProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Uploading to Descript… {descriptProgress}%
+                    </p>
+                  </div>
+                )}
+
+                {descriptError && (
+                  <p className="text-xs text-destructive">{descriptError}</p>
+                )}
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={closeDescriptModal}
+                    disabled={descriptStage === "uploading" || descriptStage === "creating"}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={
+                      descriptMode === "upload" ? submitDescriptUpload : submitDescriptUrl
+                    }
+                    disabled={
+                      descriptStage === "creating" ||
+                      descriptStage === "uploading" ||
+                      (descriptMode === "upload" ? !descriptFile : !descriptUrl.trim())
+                    }
+                  >
+                    {descriptStage === "creating"
+                      ? "Creating…"
+                      : descriptStage === "uploading"
+                      ? "Uploading…"
+                      : descriptMode === "upload"
+                      ? "Upload & create"
+                      : "Create project"}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );
