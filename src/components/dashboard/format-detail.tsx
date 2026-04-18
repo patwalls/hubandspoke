@@ -131,6 +131,8 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
 
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
   const [producerPopoverOpen, setProducerPopoverOpen] = useState(false);
+  const [channelsPopoverOpen, setChannelsPopoverOpen] = useState(false);
+  const [addDerivativeOpen, setAddDerivativeOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -592,23 +594,64 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label>Channels</Label>
-          <div className="flex flex-wrap gap-2">
-            {ALL_CHANNELS.map((ch) => (
-              <Badge
-                key={ch}
-                variant={channels.includes(ch) ? "default" : "outline"}
-                className="cursor-pointer"
-                onClick={() => toggleChannel(ch)}
-              >
-                {ch}
-              </Badge>
-            ))}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="space-y-2">
+            <Label>Channels</Label>
+            <Popover open={channelsPopoverOpen} onOpenChange={setChannelsPopoverOpen}>
+              <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+                {channels.length === 0 ? (
+                  <span className="text-muted-foreground">Select channels…</span>
+                ) : (
+                  <span className="flex items-center gap-1 overflow-hidden">
+                    <span className="truncate">
+                      {channels.slice(0, 2).join(", ")}
+                    </span>
+                    {channels.length > 2 && (
+                      <span className="shrink-0 rounded bg-muted text-[10px] font-medium text-muted-foreground px-1.5 py-0.5">
+                        +{channels.length - 2}
+                      </span>
+                    )}
+                  </span>
+                )}
+                <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search channels…" />
+                  <CommandList>
+                    <CommandEmpty>No channels found.</CommandEmpty>
+                    <CommandGroup>
+                      {ALL_CHANNELS.map((ch) => {
+                        const selected = channels.includes(ch);
+                        return (
+                          <CommandItem
+                            key={ch}
+                            value={ch}
+                            onSelect={() => toggleChannel(ch)}
+                          >
+                            <span className="flex items-center gap-2 w-full">
+                              <span
+                                className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                                  selected
+                                    ? "bg-primary border-primary"
+                                    : "border-input"
+                                }`}
+                              >
+                                {selected && (
+                                  <svg className="w-3 h-3 text-primary-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                )}
+                              </span>
+                              <span className="text-sm">{ch}</span>
+                            </span>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label>View Threshold</Label>
             <Input
@@ -617,9 +660,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
               onChange={(e) => setViewThreshold(e.target.value)}
               placeholder="e.g. 50000"
             />
-            <p className="text-xs text-muted-foreground">
-              Triggers repurpose tasks when a post hits this view count.
-            </p>
           </div>
           <div className="space-y-2">
             <Label>Editor (Content Creator)</Label>
@@ -749,7 +789,13 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>Prompt</Label>
+            <div className="flex items-center gap-2">
+              <Label className="text-sm">Skill</Label>
+              <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-indigo-700">
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.5 6.5L21 11l-6.5 2.5L12 20l-2.5-6.5L3 11l6.5-2.5L12 2z"/></svg>
+                Claude-powered
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => setInstructions(applyStarterTemplate(instructions))}
@@ -762,11 +808,11 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
             rows={10}
-            placeholder="Describe this format as a Claude-style skill: what it is, why it works, how to pick the moment, what to avoid. Click “Load starter template” for the structure."
+            placeholder="Teach Claude this format: what it is, why it works, how to pick the moment, what to avoid. Click “Load starter template” for the structure."
             className="font-mono text-xs"
           />
           <p className="text-xs text-muted-foreground">
-            One prompt for everything. Read by Claude to dispatch Repurpose actions (e.g. Descript clipping) and included in Asana tasks.
+            A single skill definition. Claude reads it to dispatch Repurpose actions (e.g. Descript clipping) and it&apos;s attached to every Asana task.
           </p>
         </div>
 
@@ -781,36 +827,177 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
       </div>
 
       {/* Repurpose targets / automations */}
-      <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">
-            Repurpose &amp; automations
-          </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            When a post in this format hits the view threshold, Asana tasks are
-            created for each selected target.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {allFormats
-            .filter((f) => f.id !== formatId)
-            .map((f) => (
-              <Badge
-                key={f.id}
-                variant={
-                  repurposeTargetIds.includes(f.id) ? "default" : "outline"
-                }
-                className="cursor-pointer"
-                onClick={() => toggleRepurpose(f.id)}
-              >
-                {f.name}
-              </Badge>
-            ))}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Click Save changes above to apply.
-        </p>
-      </div>
+      {(() => {
+        const selectedDerivatives = repurposeTargetIds
+          .map((id) => allFormats.find((f) => f.id === id))
+          .filter((f): f is FormatRow => !!f && f.id !== formatId);
+        const unselectedDerivatives = allFormats.filter(
+          (f) => f.id !== formatId && !repurposeTargetIds.includes(f.id)
+        );
+        return (
+          <div className="rounded-lg border border-border bg-card overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">
+                  Repurpose &amp; automations
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  When a post in this format hits the view threshold, Asana
+                  tasks are created for each derivative format below.
+                </p>
+              </div>
+              <Popover open={addDerivativeOpen} onOpenChange={setAddDerivativeOpen}>
+                <PopoverTrigger
+                  disabled={unselectedDerivatives.length === 0}
+                  className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-xs hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  + Add
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0" align="end">
+                  <Command>
+                    <CommandInput placeholder="Search formats…" />
+                    <CommandList>
+                      <CommandEmpty>No formats to add.</CommandEmpty>
+                      <CommandGroup>
+                        {unselectedDerivatives.map((f) => {
+                          const spoke = (f.contentType || "pillar") === "repurposed";
+                          return (
+                            <CommandItem
+                              key={f.id}
+                              value={f.name}
+                              onSelect={() => {
+                                setRepurposeTargetIds((prev) => [...prev, f.id]);
+                                setAddDerivativeOpen(false);
+                              }}
+                            >
+                              <span className="flex items-center gap-2 w-full">
+                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
+                                  spoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
+                                }`}>
+                                  {spoke ? "Repurposed" : "Pillar"}
+                                </span>
+                                <span className="text-sm truncate">{f.name}</span>
+                              </span>
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+            {selectedDerivatives.length === 0 ? (
+              <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+                No derivative formats yet. Click <span className="font-medium text-foreground">+ Add</span> to link one.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30 text-left">
+                      <th className="px-5 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                        Name
+                      </th>
+                      <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                        Channels
+                      </th>
+                      <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
+                        Threshold
+                      </th>
+                      <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                        Editor
+                      </th>
+                      <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                        Producer
+                      </th>
+                      <th className="px-3 py-2 w-10" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedDerivatives.map((f) => {
+                      const spoke = (f.contentType || "pillar") === "repurposed";
+                      return (
+                        <tr
+                          key={f.id}
+                          className="border-b border-border/50 last:border-b-0 hover:bg-accent/30"
+                        >
+                          <td className="px-5 py-2.5">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Link
+                                href={`/${brand}/formats/${f.id}`}
+                                className="text-foreground hover:underline truncate block max-w-[260px] font-medium"
+                              >
+                                {f.name}
+                              </Link>
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
+                                spoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
+                              }`}>
+                                {spoke ? "Repurposed" : "Pillar"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex flex-wrap gap-1 max-w-[220px]">
+                              {(f.channels || []).slice(0, 3).map((ch) => (
+                                <Badge key={ch} variant="secondary" className="text-xs">
+                                  {ch}
+                                </Badge>
+                              ))}
+                              {(f.channels || []).length > 3 && (
+                                <span className="text-xs text-muted-foreground">
+                                  +{(f.channels || []).length - 3}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+                            {f.viewThreshold != null ? f.viewThreshold.toLocaleString() : "—"}
+                          </td>
+                          <td className="px-3 py-2.5 text-muted-foreground">
+                            {f.editor ? (
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                                  {f.editor.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                                </span>
+                                <span className="truncate max-w-[120px]">{f.editor}</span>
+                              </span>
+                            ) : "—"}
+                          </td>
+                          <td className="px-3 py-2.5 text-muted-foreground">
+                            {f.producer ? (
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                                  {f.producer.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                                </span>
+                                <span className="truncate max-w-[120px]">{f.producer}</span>
+                              </span>
+                            ) : "—"}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => toggleRepurpose(f.id)}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-red-600"
+                              aria-label="Remove derivative"
+                              title="Remove"
+                            >
+                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="px-5 py-3 border-t border-border text-xs text-muted-foreground">
+              Click <span className="font-medium text-foreground">Save changes</span> above to apply.
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Content list */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
