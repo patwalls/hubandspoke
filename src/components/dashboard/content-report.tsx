@@ -60,15 +60,34 @@ export function ContentReport() {
         source: selectedSource,
       });
       const res = await fetch(`/api/reports/content?${params}`);
-      const json = await res.json();
-      if (!res.ok || !json?.byPlatform) {
+      const text = await res.text();
+      const contentType = res.headers.get("content-type") || "";
+      const looksJson = contentType.includes("application/json") || text.trim().startsWith("{");
+
+      if (!looksJson) {
+        // Typical cause: Heroku / router HTML error page (timeout, 503, auth redirect).
         setData(null);
         setFetchError(
-          json?.error || `Report API returned HTTP ${res.status}`
+          `Report API returned HTTP ${res.status} (non-JSON response). The server likely timed out or crashed — try Retry in a moment.`
         );
         return;
       }
-      setData(json);
+
+      let json: { error?: string; byPlatform?: unknown } | null = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        setData(null);
+        setFetchError(`Report API returned HTTP ${res.status} with malformed JSON.`);
+        return;
+      }
+
+      if (!res.ok || !json?.byPlatform) {
+        setData(null);
+        setFetchError(json?.error || `Report API returned HTTP ${res.status}`);
+        return;
+      }
+      setData(json as ContentReportData);
     } catch (err) {
       console.error("Failed to fetch report:", err);
       setFetchError(err instanceof Error ? err.message : "Failed to fetch report");
