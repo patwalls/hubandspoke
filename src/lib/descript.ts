@@ -1,5 +1,12 @@
 const BASE_URL = "https://descriptapi.com/v1";
 
+export const DEFAULT_CLIP_PROMPT = [
+  "Create a short-form clip from this long-form video.",
+  "Pick a single standout moment — an insight, a reaction, or a key explanation.",
+  "The clip should start on a natural beat and end on a punctuating thought.",
+  "Aim for 30–60 seconds.",
+].join(" ");
+
 function authHeader(): string {
   const token = process.env.DESCRIPT_API_TOKEN;
   if (!token) throw new Error("DESCRIPT_API_TOKEN not set");
@@ -71,6 +78,42 @@ export async function createDescriptProjectForUpload(
     jobId: result.job_id,
     uploadUrl,
     mediaKey,
+  };
+}
+
+interface AgentResponse {
+  job_id: string;
+  drive_id?: string;
+  project_id: string;
+  project_url: string;
+}
+
+export async function invokeDescriptAgent(args: {
+  projectId: string;
+  prompt: string;
+}): Promise<{ jobId: string; projectUrl: string; projectId: string }> {
+  const res = await fetch(`${BASE_URL}/jobs/agent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: authHeader(),
+    },
+    body: JSON.stringify({
+      project_id: args.projectId,
+      prompt: args.prompt,
+    }),
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    const msg =
+      (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    throw new Error(`Descript agent failed: ${msg}`);
+  }
+  const body = json as AgentResponse;
+  return {
+    jobId: body.job_id,
+    projectUrl: body.project_url,
+    projectId: body.project_id,
   };
 }
 

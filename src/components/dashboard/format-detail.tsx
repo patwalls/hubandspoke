@@ -52,6 +52,7 @@ interface FormatRow {
   producer: string | null;
   producerAsanaGid: string | null;
   instructions: string | null;
+  descriptClipPrompt: string | null;
   contentType: string | null;
   repurposeTargetIds: string[];
 }
@@ -125,6 +126,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [producer, setProducer] = useState("");
   const [producerAsanaGid, setProducerAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
+  const [descriptClipPrompt, setDescriptClipPrompt] = useState("");
   const [contentType, setContentType] = useState<string>("pillar");
   const [repurposeTargetIds, setRepurposeTargetIds] = useState<string[]>([]);
 
@@ -133,6 +135,61 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [clipItem, setClipItem] = useState<ContentItem | null>(null);
+  const [clipTargetId, setClipTargetId] = useState<string>("");
+  const [clipLoading, setClipLoading] = useState(false);
+  const [clipError, setClipError] = useState<string | null>(null);
+  const [clipResult, setClipResult] = useState<
+    { jobId: string; projectUrl: string; prompt: string; targetFormatName: string; window: { startSec: number; endSec: number } } | null
+  >(null);
+
+  function openClipModal(item: ContentItem) {
+    setClipItem(item);
+    setClipTargetId("");
+    setClipError(null);
+    setClipResult(null);
+    setClipLoading(false);
+  }
+
+  function closeClipModal() {
+    setClipItem(null);
+    setClipTargetId("");
+    setClipError(null);
+    setClipResult(null);
+    setClipLoading(false);
+  }
+
+  async function submitClip() {
+    if (!clipItem || !clipTargetId) return;
+    setClipLoading(true);
+    setClipError(null);
+    setClipResult(null);
+    try {
+      const res = await fetch("/api/descript/clip-out", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: clipItem.id,
+          targetFormatId: clipTargetId,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setClipError(json.error || `HTTP ${res.status}`);
+      } else {
+        setClipResult(json);
+      }
+    } catch (err) {
+      setClipError(err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setClipLoading(false);
+    }
+  }
+
+  const descriptClipTargets = allFormats.filter((f) =>
+    (repurposeTargetIds || []).includes(f.id)
+  );
 
   const [descriptItem, setDescriptItem] = useState<ContentItem | null>(null);
   const [descriptMode, setDescriptMode] = useState<"upload" | "url">("upload");
@@ -275,6 +332,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     setProducer(f.producer || "");
     setProducerAsanaGid(f.producerAsanaGid || "");
     setInstructions(f.instructions || "");
+    setDescriptClipPrompt(f.descriptClipPrompt || "");
     setContentType(f.contentType || "pillar");
     setRepurposeTargetIds(f.repurposeTargetIds || []);
   }
@@ -349,6 +407,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         producer: producer || null,
         producerAsanaGid: producerAsanaGid || null,
         instructions: instructions || null,
+        descriptClipPrompt: descriptClipPrompt || null,
         contentType,
         repurposeTargetIds,
       };
@@ -701,6 +760,19 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           />
         </div>
 
+        <div className="space-y-2">
+          <Label>Descript clip prompt</Label>
+          <Textarea
+            value={descriptClipPrompt}
+            onChange={(e) => setDescriptClipPrompt(e.target.value)}
+            rows={4}
+            placeholder="Guides the Descript agent when turning a pillar video into a clip of this format. Leave blank to use the default."
+          />
+          <p className="text-xs text-muted-foreground">
+            Used by the &ldquo;Clip out&rdquo; action on pillar content to spawn a new composition in the pillar&apos;s Descript project.
+          </p>
+        </div>
+
         <div className="flex items-center gap-2 pt-1">
           <Button onClick={handleSave} disabled={saving}>
             {saving ? "Saving…" : "Save changes"}
@@ -872,6 +944,11 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                               >
                                 Open in Descript
                               </DropdownMenuItem>
+                              {descriptClipTargets.length > 0 && (
+                                <DropdownMenuItem onClick={() => openClipModal(item)}>
+                                  Clip out…
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem onClick={() => openDescriptModal(item)}>
                                 Re-import to Descript
                               </DropdownMenuItem>
@@ -894,6 +971,96 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           </div>
         )}
       </div>
+
+      {/* Clip out modal */}
+      <Dialog open={!!clipItem} onOpenChange={(o) => { if (!o) closeClipModal(); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Clip out</DialogTitle>
+          </DialogHeader>
+          {clipItem && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-foreground truncate">
+                  {clipItem.title || "Untitled"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Creates a new composition in this pillar&apos;s Descript project based on the target format&apos;s clip prompt. For MVP the timestamps are a random 30-second window.
+                </p>
+              </div>
+              {clipResult ? (
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm space-y-2">
+                  <div className="font-medium text-foreground">
+                    Clip queued for &ldquo;{clipResult.targetFormatName}&rdquo;.
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Clip window: {Math.floor(clipResult.window.startSec / 60)}:{String(clipResult.window.startSec % 60).padStart(2, "0")} –
+                    {" "}{Math.floor(clipResult.window.endSec / 60)}:{String(clipResult.window.endSec % 60).padStart(2, "0")}.
+                    Descript is processing (~35 seconds). Refresh the project in Descript to see the new composition.
+                  </p>
+                  <a
+                    href={clipResult.projectUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline break-all"
+                  >
+                    {clipResult.projectUrl}
+                  </a>
+                  <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer">Prompt sent</summary>
+                    <pre className="mt-2 whitespace-pre-wrap">{clipResult.prompt}</pre>
+                  </details>
+                  <div className="flex justify-end pt-2">
+                    <Button variant="outline" onClick={closeClipModal}>Close</Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="clip-target">Target format</Label>
+                    <select
+                      id="clip-target"
+                      value={clipTargetId}
+                      onChange={(e) => setClipTargetId(e.target.value)}
+                      className="flex h-9 w-full items-center rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="">Pick a target format…</option>
+                      {descriptClipTargets.map((f) => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                      ))}
+                    </select>
+                    {clipTargetId && (() => {
+                      const t = descriptClipTargets.find((f) => f.id === clipTargetId);
+                      const preview = t?.descriptClipPrompt?.trim();
+                      return (
+                        <div className="text-xs text-muted-foreground rounded-md bg-muted/50 border border-border p-2.5 mt-1">
+                          <div className="font-medium text-foreground mb-1">Prompt</div>
+                          {preview ? (
+                            <p className="whitespace-pre-wrap">{preview}</p>
+                          ) : (
+                            <p className="italic">Using the default clip prompt — set one on this format to customize.</p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  {clipError && (
+                    <p className="text-xs text-destructive">{clipError}</p>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={closeClipModal} disabled={clipLoading}>
+                      Cancel
+                    </Button>
+                    <Button onClick={submitClip} disabled={clipLoading || !clipTargetId}>
+                      {clipLoading ? "Clipping…" : "Clip out"}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Add to Descript modal */}
       <Dialog open={!!descriptItem} onOpenChange={(o) => { if (!o) closeDescriptModal(); }}>

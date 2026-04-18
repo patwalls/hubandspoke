@@ -306,6 +306,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [producer, setProducer] = useState("");
   const [producerAsanaGid, setProducerAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
+  const [descriptClipPrompt, setDescriptClipPrompt] = useState("");
   const [contentType, setContentType] = useState<string>("pillar");
   const [repurposeTargetIds, setRepurposeTargetIds] = useState<string[]>([]);
 
@@ -350,6 +351,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setProducer("");
     setProducerAsanaGid("");
     setInstructions("");
+    setDescriptClipPrompt("");
     setContentType("pillar");
     setRepurposeTargetIds([]);
     setDialogOpen(true);
@@ -366,6 +368,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       producer: producer || null,
       producerAsanaGid: producerAsanaGid || null,
       instructions: instructions || null,
+      descriptClipPrompt: descriptClipPrompt || null,
       contentType,
       repurposeTargetIds,
     };
@@ -723,6 +726,19 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 />
                 <p className="text-xs text-muted-foreground">
                   These instructions will be added to the Asana task notes when repurpose tasks are triggered.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Descript clip prompt</Label>
+                <Textarea
+                  value={descriptClipPrompt}
+                  onChange={(e) => setDescriptClipPrompt(e.target.value)}
+                  placeholder="Guides the Descript agent when turning a pillar video into a clip of this format. Leave blank for default."
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Used by the &ldquo;Clip out&rdquo; action on pillar content.
                 </p>
               </div>
 
