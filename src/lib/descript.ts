@@ -88,6 +88,41 @@ interface AgentResponse {
   project_url: string;
 }
 
+interface DescriptJobResponse {
+  job_id: string;
+  job_state: string;
+  result?: {
+    status?: string;
+    project_changed?: boolean;
+    agent_response?: string;
+  };
+  project_url?: string;
+  project_id?: string;
+  stopped_at?: string;
+}
+
+export async function fetchDescriptJob(
+  jobId: string
+): Promise<DescriptJobResponse> {
+  const res = await fetch(`${BASE_URL}/jobs/${jobId}`, {
+    headers: { Authorization: authHeader() },
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    const msg = (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    throw new Error(`Descript job fetch failed: ${msg}`);
+  }
+  return json as DescriptJobResponse;
+}
+
+export function extractCompositionIdFromAgentResponse(
+  agentResponse: string | undefined
+): string | null {
+  if (!agentResponse) return null;
+  const m = agentResponse.match(/compositionId="([^"]+)"/);
+  return m ? m[1] : null;
+}
+
 export async function invokeDescriptAgent(args: {
   projectId: string;
   prompt: string;

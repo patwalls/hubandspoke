@@ -2,9 +2,39 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { productionItems, formats } from "@/lib/db/schema";
-import { invokeDescriptAgent } from "@/lib/descript";
+import { productionItems, formats, repurposeTriggers } from "@/lib/db/schema";
+import {
+  invokeDescriptAgent,
+  fetchDescriptJob,
+  extractCompositionIdFromAgentResponse,
+} from "@/lib/descript";
 import { dispatchRepurpose } from "@/lib/repurpose-agent";
+
+async function resolveCompositionInBackground(
+  triggerId: string,
+  jobId: string
+) {
+  const deadline = Date.now() + 2 * 60 * 1000;
+  while (Date.now() < deadline) {
+    try {
+      const job = await fetchDescriptJob(jobId);
+      if (job.job_state === "stopped") {
+        const compositionId = extractCompositionIdFromAgentResponse(
+          job.result?.agent_response
+        );
+        await db
+          .update(repurposeTriggers)
+          .set({ descriptCompositionId: compositionId })
+          .where(eq(repurposeTriggers.id, triggerId));
+        return;
+      }
+    } catch (err) {
+      console.error("resolveCompositionInBackground error:", err);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+}
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -86,8 +116,26 @@ export async function POST(request: NextRequest) {
       projectId: item.descriptProjectId,
       prompt: action.descriptPrompt,
     });
+
+    const [trigger] = await db
+      .insert(repurposeTriggers)
+      .values({
+        productionItemId: item.id,
+        targetFormatId: target.id,
+        descriptJobId: result.jobId,
+        descriptProjectUrl: result.projectUrl,
+        descriptPrompt: action.descriptPrompt,
+        compositionName: action.compositionName,
+      })
+      .returning({ id: repurposeTriggers.id });
+
+    // Fire and forget — resolves the compositionId once Descript finishes.
+    // Heroku keeps the Node process alive; works fine after the response.
+    resolveCompositionInBackground(trigger.id, result.jobId).catch(() => {});
+
     return NextResponse.json({
       mode: "descript_clip",
+      triggerId: trigger.id,
       jobId: result.jobId,
       projectUrl: result.projectUrl,
       descriptPrompt: action.descriptPrompt,

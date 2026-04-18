@@ -23,11 +23,24 @@ interface BrandFormat {
   instructions: string | null;
 }
 
+interface RepurposeTriggerRow {
+  id: string;
+  targetFormatId: string;
+  targetFormatName: string | null;
+  descriptCompositionId: string | null;
+  descriptProjectUrl: string | null;
+  descriptJobId: string | null;
+  descriptPrompt: string | null;
+  compositionName: string | null;
+  triggeredAt: string;
+}
+
 interface DetailResponse {
   item: ProductionItem;
   related: ProductionItem[];
   formatNames: string[];
   formats: BrandFormat[];
+  triggers: RepurposeTriggerRow[];
 }
 
 interface ContentDetailProps {
@@ -68,6 +81,27 @@ function formatCompact(n: number | null | undefined): string {
     return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   return n.toLocaleString();
+}
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function descriptCompositionUrl(
+  projectUrl: string | null,
+  compositionId: string | null
+): string | null {
+  if (!projectUrl) return null;
+  if (!compositionId) return projectUrl;
+  // Descript composition URLs: web.descript.com/<project>/<composition>
+  return `${projectUrl}/${compositionId}`;
 }
 
 function formatDate(d: string | null): string {
@@ -143,6 +177,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             projectUrl: json.projectUrl,
           },
         }));
+        if (mode === "real") {
+          // Pull the new trigger row in. Refresh again a bit later so the
+          // composition ID resolves from the background poll.
+          load();
+          setTimeout(() => load(), 40_000);
+        }
       } else if (json.mode === "no_action") {
         setClipStatus((prev) => ({
           ...prev,
@@ -316,7 +356,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     );
   }
 
-  const { item, related, formatNames, formats: brandFormatDetails } = data;
+  const { item, related, formatNames, formats: brandFormatDetails, triggers } = data;
   const brandFormats = formatNames;
   const isYouTube = !!item.youtubeId;
 
@@ -455,6 +495,90 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               : "Link clicks"}
           </p>
         </div>
+      </div>
+
+      {/* Repurposed clips from this pillar */}
+      <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">
+              Repurposed clips
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Every time you click Repurpose below, a new clip is created in this
+              item&apos;s Descript project and a record is logged here. This is
+              Descript-only for now — Notion-synced production items are separate
+              (see the note after the list).
+            </p>
+          </div>
+          {descriptProjectUrl && (
+            <a
+              href={descriptProjectUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-purple-700 hover:underline inline-flex items-center gap-1 shrink-0"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+              Open Descript project →
+            </a>
+          )}
+        </div>
+
+        {triggers && triggers.length > 0 ? (
+          <div className="divide-y divide-border/70 border border-border rounded-md overflow-hidden">
+            {triggers.map((t) => {
+              const url = descriptCompositionUrl(
+                t.descriptProjectUrl,
+                t.descriptCompositionId
+              );
+              const resolving = !t.descriptCompositionId;
+              return (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-accent/30"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm text-foreground truncate">
+                      {t.compositionName || t.targetFormatName || "(unknown)"}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {t.targetFormatName && t.compositionName &&
+                        t.compositionName !== t.targetFormatName
+                        ? `${t.targetFormatName} · `
+                        : ""}
+                      {timeAgo(t.triggeredAt)}
+                      {resolving && " · processing in Descript…"}
+                    </div>
+                  </div>
+                  {url && (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline shrink-0"
+                    >
+                      {resolving ? "Open project" : "Open clip"} →
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No clips created from this pillar yet. Click Repurpose on any format
+            below to make the first one.
+          </p>
+        )}
+
+        <p className="text-[11px] text-muted-foreground">
+          <span className="font-medium">Heads up:</span> these are Descript
+          compositions only. Notion is still the source of truth for
+          production items, so clips here don&apos;t yet appear as child posts
+          in the main dashboard. Next step: also create a Notion page per
+          clip so it syncs back into our DB — ping me when you want that
+          wired up.
+        </p>
       </div>
 
       {/* Repurpose to format */}

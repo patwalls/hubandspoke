@@ -121,24 +121,22 @@ export const repurposeTriggers = pgTable(
     productionItemId: uuid("production_item_id")
       .references(() => productionItems.id)
       .notNull(),
-    sourceFormatId: uuid("source_format_id")
-      .references(() => formats.id)
-      .notNull(),
+    sourceFormatId: uuid("source_format_id").references(() => formats.id),
     targetFormatId: uuid("target_format_id")
       .references(() => formats.id)
       .notNull(),
     notionTaskPageId: text("notion_task_page_id"),
     viewsAtTrigger: integer("views_at_trigger"),
+    descriptCompositionId: text("descript_composition_id"),
+    descriptProjectUrl: text("descript_project_url"),
+    descriptJobId: text("descript_job_id"),
+    descriptPrompt: text("descript_prompt"),
+    compositionName: text("composition_name"),
     triggeredAt: timestamp("triggered_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
   (table) => [
-    uniqueIndex("idx_repurpose_trigger_unique").on(
-      table.productionItemId,
-      table.sourceFormatId,
-      table.targetFormatId
-    ),
     index("idx_repurpose_triggers_item").on(table.productionItemId),
   ]
 );
