@@ -869,20 +869,12 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                           />
                         )}
                         <div className="min-w-0">
-                          {item.publishedLink ? (
-                            <a
-                              href={item.publishedLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-foreground hover:underline truncate block max-w-[420px]"
-                            >
-                              {item.title || item.publishedLink}
-                            </a>
-                          ) : (
-                            <span className="text-foreground truncate block max-w-[420px]">
-                              {item.title || "Untitled"}
-                            </span>
-                          )}
+                          <Link
+                            href={`/${brand}/content/${item.id}`}
+                            className="text-foreground hover:underline truncate block max-w-[420px]"
+                          >
+                            {item.title || item.publishedLink || "Untitled"}
+                          </Link>
                           {item.status && item.status !== "Published" && (
                             <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
                               {item.status}
