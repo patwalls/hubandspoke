@@ -1,11 +1,18 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { ContentReport } from "@/components/dashboard/content-report";
 import { MATGDashboard } from "@/components/dashboard/matg-dashboard";
 import { BRANDS } from "@/lib/config/brands";
 
 interface BrandPageProps {
   params: Promise<{ brand: string }>;
+}
+
+export async function generateMetadata({ params }: BrandPageProps): Promise<Metadata> {
+  const { brand } = await params;
+  const brandConfig = BRANDS.find((b) => b.slug === brand);
+  return { title: brandConfig ? `Dashboard · ${brandConfig.label}` : "Dashboard" };
 }
 
 export default async function BrandDashboardPage({ params }: BrandPageProps) {
