@@ -44,10 +44,12 @@ export function ContentReport() {
 
   const [data, setData] = useState<ContentReportData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const params = new URLSearchParams({
         startDate,
@@ -59,9 +61,18 @@ export function ContentReport() {
       });
       const res = await fetch(`/api/reports/content?${params}`);
       const json = await res.json();
+      if (!res.ok || !json?.byPlatform) {
+        setData(null);
+        setFetchError(
+          json?.error || `Report API returned HTTP ${res.status}`
+        );
+        return;
+      }
       setData(json);
     } catch (err) {
       console.error("Failed to fetch report:", err);
+      setFetchError(err instanceof Error ? err.message : "Failed to fetch report");
+      setData(null);
     } finally {
       setLoading(false);
     }
@@ -131,6 +142,20 @@ export function ContentReport() {
         </button>
       </div>
 
+      {/* Error banner */}
+      {fetchError && !loading && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          <div className="font-medium">Failed to load dashboard data</div>
+          <div className="mt-0.5 text-xs break-words">{fetchError}</div>
+          <button
+            onClick={() => fetchReport()}
+            className="mt-2 text-xs underline hover:no-underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Goal tiles — show first */}
       {data ? (
         <MetricTiles
@@ -142,7 +167,7 @@ export function ContentReport() {
           weeklyGoal={data.weeklyGoal}
           brand="starter-story"
         />
-      ) : (
+      ) : !fetchError ? (
         <div className="flex items-center justify-center py-12">
           <div className="flex items-center gap-2 text-muted-foreground">
             <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
@@ -152,7 +177,7 @@ export function ContentReport() {
             <span className="text-sm">Loading report...</span>
           </div>
         </div>
-      )}
+      ) : null}
 
       <FilterPills
         startDate={startDate}
