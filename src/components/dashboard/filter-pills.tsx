@@ -36,6 +36,7 @@ const PRESETS = [
   { value: "this-quarter", label: "This quarter" },
   { value: "last-quarter", label: "Last quarter" },
   { value: "ytd", label: "Year to date" },
+  { value: "all-time", label: "All time" },
 ] as const;
 
 const INTERVALS = [
@@ -55,6 +56,7 @@ function resolvePreset(
   const today = new Date();
   if (value === "today") return { startDate: today, endDate: today };
   if (value === "ytd") return { startDate: startOfYear(today), endDate: today };
+  if (value === "all-time") return { startDate: new Date(2010, 0, 1), endDate: today };
   return getQuickRange(value);
 }
 
