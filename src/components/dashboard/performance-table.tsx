@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { ProductionItem } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -536,18 +537,24 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                       />
                     )}
                     <div className="flex flex-col gap-0.5 min-w-0">
-                      <span className="text-sm font-medium text-foreground truncate">
-                        {item.publishedLink ? (
+                      <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
+                        <Link
+                          href={`/${brand}/content/${item.id}`}
+                          className="hover:text-primary hover:underline transition-colors truncate"
+                        >
+                          {item.title || "(Untitled)"}
+                        </Link>
+                        {item.publishedLink && (
                           <a
                             href={item.publishedLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="hover:text-primary hover:underline transition-colors"
+                            className="text-muted-foreground hover:text-foreground shrink-0"
+                            title="Open published post"
+                            aria-label="Open published post"
                           >
-                            {item.title || "(Untitled)"}
+                            ↗
                           </a>
-                        ) : (
-                          item.title || "(Untitled)"
                         )}
                       </span>
                       {item.utmCampaign && (
