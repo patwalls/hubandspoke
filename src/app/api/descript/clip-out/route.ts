@@ -13,7 +13,8 @@ import { createNotionRepurposeTask } from "@/lib/services/notion-tasks";
 
 async function resolveCompositionInBackground(
   triggerId: string,
-  jobId: string
+  jobId: string,
+  derivativeItemId?: string
 ) {
   const deadline = Date.now() + 2 * 60 * 1000;
   while (Date.now() < deadline) {
@@ -23,10 +24,24 @@ async function resolveCompositionInBackground(
         const compositionId = extractCompositionIdFromAgentResponse(
           job.result?.agent_response
         );
-        await db
-          .update(repurposeTriggers)
-          .set({ descriptCompositionId: compositionId })
-          .where(eq(repurposeTriggers.id, triggerId));
+        try {
+          await db
+            .update(repurposeTriggers)
+            .set({ descriptCompositionId: compositionId })
+            .where(eq(repurposeTriggers.id, triggerId));
+        } catch (err) {
+          console.error("resolveCompositionInBackground trigger update failed:", err);
+        }
+        if (derivativeItemId && compositionId) {
+          try {
+            await db
+              .update(productionItems)
+              .set({ descriptCompositionId: compositionId })
+              .where(eq(productionItems.id, derivativeItemId));
+          } catch (err) {
+            console.error("resolveCompositionInBackground derivative update failed:", err);
+          }
+        }
         return;
       }
     } catch (err) {
@@ -142,6 +157,32 @@ export async function POST(request: NextRequest) {
       console.error("Notion page creation threw:", err);
     }
 
+    // Insert the derivative production_items row immediately so it shows up
+    // in the pillar's Derivatives section without waiting for the next Notion
+    // sync. Keyed on notionId so the sync upserts rather than duplicates.
+    let derivativeItemId: string | undefined;
+    if (notionPageId) {
+      try {
+        const [derivative] = await db
+          .insert(productionItems)
+          .values({
+            brand: item.brand,
+            notionId: notionPageId,
+            title: action.compositionName,
+            format: target.name,
+            status: "Idea",
+            pillarContentNotionId: item.notionId,
+            pillarContentItemId: item.id,
+            descriptProjectId: item.descriptProjectId,
+            descriptProjectUrl: result.projectUrl,
+          })
+          .returning({ id: productionItems.id });
+        derivativeItemId = derivative.id;
+      } catch (err) {
+        console.error("Derivative production_item insert failed:", err);
+      }
+    }
+
     const [trigger] = await db
       .insert(repurposeTriggers)
       .values({
@@ -157,7 +198,7 @@ export async function POST(request: NextRequest) {
 
     // Fire and forget — resolves the compositionId once Descript finishes.
     // Heroku keeps the Node process alive; works fine after the response.
-    resolveCompositionInBackground(trigger.id, result.jobId).catch(() => {});
+    resolveCompositionInBackground(trigger.id, result.jobId, derivativeItemId).catch(() => {});
 
     return NextResponse.json({
       mode: "descript_clip",
