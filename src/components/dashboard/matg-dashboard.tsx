@@ -6,41 +6,11 @@ import { format, subDays } from "date-fns";
 import { FilterPills } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable } from "./period-table";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import type { ContentReportData } from "@/types";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-
-interface FormatRow {
-  id: string;
-  name: string;
-  channels: string[];
-  event: string | null;
-  viewThreshold: number | null;
-  editor: string | null;
-  editorAsanaGid: string | null;
-  producer: string | null;
-  producerAsanaGid: string | null;
-  instructions: string | null;
-  contentType: string | null;
-  repurposeTargetIds: string[];
-}
-
-interface TopPerformer {
-  title: string | null;
-  views: number;
-  publishedLink: string | null;
-  publishedDate: string | null;
-  thumbnail: string | null;
-}
-
-interface TriggerResult {
-  sourceFormat: string;
-  tasksCreated: { formatName: string; asanaGid: string; assignee?: string }[];
-}
 
 interface SourceResult {
   source: string;
@@ -129,7 +99,6 @@ export function MATGDashboard() {
 
   // Data
   const [data, setData] = useState<ContentReportData | null>(null);
-  const [formats, setFormats] = useState<FormatRow[]>([]);
   const [, setLoading] = useState(true);
 
   // Sync
@@ -142,16 +111,6 @@ export function MATGDashboard() {
   const [perfSyncing, setPerfSyncing] = useState(false);
   const [perfResult, setPerfResult] = useState<PerfSyncResult | null>(null);
   const [performanceDue, setPerformanceDue] = useState<PerformanceDue | null>(null);
-
-  // Trigger
-  const [triggering, setTriggering] = useState<string | null>(null);
-  const [lastResult, setLastResult] = useState<TriggerResult | null>(null);
-
-  // Top performers
-  const [topPerformers, setTopPerformers] = useState<Record<string, TopPerformer[]>>({});
-
-  // Pipeline expand state
-  const [expandedSpokes, setExpandedSpokes] = useState<Set<string>>(new Set());
 
   /* ---------------------------------------------------------------- */
   /*  Data fetching                                                    */
@@ -169,24 +128,16 @@ export function MATGDashboard() {
         source: selectedSource,
       });
 
-      const [reportRes, formatsRes, syncInfoRes, perfRes] = await Promise.all([
+      const [reportRes, syncInfoRes] = await Promise.all([
         fetch(`/api/reports/matg?${params}`),
-        fetch("/api/formats?brand=matg"),
         fetch("/api/sync/youtube"),
-        fetch("/api/formats/top-performers?brand=matg"),
       ]);
       const reportData = await reportRes.json();
-      const formatsData = await formatsRes.json();
       const syncInfoData = await syncInfoRes.json();
 
       setData(reportData);
-      setFormats(formatsData);
       setLastSync(syncInfoData.lastSync || null);
       setPerformanceDue(syncInfoData.performanceDue || null);
-      if (perfRes.ok) {
-        const perfData = await perfRes.json();
-        setTopPerformers(perfData);
-      }
     } catch (err) {
       console.error("Failed to fetch data:", err);
     } finally {
@@ -201,9 +152,6 @@ export function MATGDashboard() {
   /* ---------------------------------------------------------------- */
   /*  Helpers                                                          */
   /* ---------------------------------------------------------------- */
-
-  const pillarFormats = formats.filter((f) => (f.contentType || "pillar") === "pillar");
-  const spokeFormats = formats.filter((f) => f.contentType === "repurposed");
 
   async function handleSync() {
     setSyncing(true);
@@ -240,29 +188,6 @@ export function MATGDashboard() {
       console.error("Performance sync failed:", err);
     } finally {
       setPerfSyncing(false);
-    }
-  }
-
-  async function handleTrigger(formatId: string, videoTitle?: string, views?: number, contentLink?: string) {
-    setTriggering(formatId);
-    setLastResult(null);
-    try {
-      const res = await fetch("/api/trigger-repurpose", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          formatId,
-          videoTitle: videoTitle || "Business Interview Episode",
-          views: views || 0,
-          contentLink: contentLink || "",
-        }),
-      });
-      const result = await res.json();
-      setLastResult(result);
-    } catch (err) {
-      console.error("Trigger failed:", err);
-    } finally {
-      setTriggering(null);
     }
   }
 
@@ -409,24 +334,6 @@ export function MATGDashboard() {
         </div>
       )}
 
-      {/* Asana trigger result banner */}
-      {lastResult && lastResult.tasksCreated.length > 0 && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-          <div className="flex items-center gap-2 text-green-800 font-medium text-sm">
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>
-            Created {lastResult.tasksCreated.length} Asana tasks from &ldquo;{lastResult.sourceFormat}&rdquo;
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {lastResult.tasksCreated.map((t) => (
-              <Badge key={t.asanaGid} variant="secondary" className="text-xs bg-green-100 text-green-800">
-                {t.formatName}
-                {t.assignee && ` → ${t.assignee}`}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Goal tiles */}
       {data ? (
         <MetricTiles
@@ -482,187 +389,6 @@ export function MATGDashboard() {
           tabs={PLATFORM_TABS}
         />
       )}
-
-      {/* Repurpose Pipeline */}
-      <div className="space-y-3">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">Repurpose Pipeline</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Pillar formats and the spokes they fan out to.
-          </p>
-        </div>
-        <div className="space-y-4">
-          {pillarFormats.length === 0 ? (
-            <div className="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground">
-              No pillar formats yet. Create one on the Formats page to get started.
-            </div>
-          ) : (
-            pillarFormats.map((pillar) => {
-              const targets = (pillar.repurposeTargetIds || [])
-                .map((id) => formats.find((f) => f.id === id))
-                .filter(Boolean) as FormatRow[];
-
-              return (
-                <div key={pillar.id} className="rounded-lg border border-border bg-card overflow-hidden">
-                  <div className="bg-blue-50 border-b border-blue-100 px-4 sm:px-6 py-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <span className="text-2xl">🎯</span>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-semibold text-foreground">{pillar.name}</h3>
-                            <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">Pillar</Badge>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5 mt-1.5">
-                            {pillar.channels?.map((ch) => (
-                              <span key={ch} className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">{ch}</span>
-                            ))}
-                          </div>
-                          {pillar.viewThreshold && (
-                            <p className="text-xs text-muted-foreground mt-1.5">
-                              Triggers at <span className="font-medium text-foreground">{pillar.viewThreshold.toLocaleString()} views</span>
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() => handleTrigger(pillar.id)}
-                        disabled={triggering === pillar.id || targets.length === 0}
-                        className="whitespace-nowrap"
-                      >
-                        {triggering === pillar.id ? "Creating..." : `Trigger Repurpose (${targets.length})`}
-                      </Button>
-                    </div>
-                  </div>
-                  {targets.length > 0 ? (
-                    <div className="divide-y divide-border/50">
-                      {targets.map((spoke) => {
-                        const spokePerformers = topPerformers[spoke.name] || [];
-                        const isExpanded = expandedSpokes.has(spoke.id);
-                        return (
-                          <div key={spoke.id}>
-                            <div
-                              className={`px-4 sm:px-6 py-3 flex items-center gap-3 hover:bg-accent/30 transition-colors ${spokePerformers.length > 0 ? "cursor-pointer" : ""}`}
-                              onClick={() => {
-                                if (spokePerformers.length === 0) return;
-                                setExpandedSpokes((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(spoke.id)) next.delete(spoke.id);
-                                  else next.add(spoke.id);
-                                  return next;
-                                });
-                              }}
-                            >
-                              {spokePerformers.length > 0 ? (
-                                <svg
-                                  className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${isExpanded ? "rotate-90" : ""}`}
-                                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                                >
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                                </svg>
-                              ) : (
-                                <span className="w-3.5 shrink-0" />
-                              )}
-                              <span className="text-lg">🔄</span>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-sm font-medium text-foreground">{spoke.name}</span>
-                                  <Badge variant="outline" className="text-[10px] border-purple-200 text-purple-600">Repurposed</Badge>
-                                  {spoke.viewThreshold && (
-                                    <span className="text-[10px] text-muted-foreground">
-                                      ≥ {spoke.viewThreshold.toLocaleString()} views
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {spoke.channels?.map((ch) => (
-                                    <span key={ch} className="text-[11px] text-muted-foreground">{ch}</span>
-                                  ))}
-                                </div>
-                              </div>
-                              {spoke.editor && (
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium">
-                                    {spoke.editor.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground hidden sm:inline">{spoke.editor}</span>
-                                </div>
-                              )}
-                            </div>
-                            {isExpanded && spokePerformers.length > 0 && (
-                              <div className="bg-purple-50/40 border-t border-purple-100/50 divide-y divide-purple-100/30">
-                                {spokePerformers.map((p, i) => (
-                                  <div key={i} className="px-4 sm:px-6 py-2 pl-16 sm:pl-20">
-                                    <div className="flex items-center gap-3 text-xs">
-                                      <span className="text-purple-400">★</span>
-                                      {p.thumbnail && (
-                                        // eslint-disable-next-line @next/next/no-img-element
-                                        <img src={p.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
-                                      )}
-                                      <div className="flex-1 min-w-0">
-                                        {p.publishedLink ? (
-                                          <a
-                                            href={p.publishedLink}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-purple-700 hover:text-purple-900 hover:underline truncate block"
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            {p.title || p.publishedLink}
-                                          </a>
-                                        ) : (
-                                          <span className="text-gray-600 truncate block">{p.title || "Untitled"}</span>
-                                        )}
-                                      </div>
-                                      <span className="text-gray-500 shrink-0 tabular-nums">
-                                        {p.views.toLocaleString()} views
-                                      </span>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="px-6 py-4 text-sm text-muted-foreground text-center">
-                      No repurpose targets configured.
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-
-          {/* Unconnected spokes */}
-          {(() => {
-            const connectedSpokeIds = new Set(
-              pillarFormats.flatMap((p) => p.repurposeTargetIds || [])
-            );
-            const unconnectedSpokes = spokeFormats.filter(
-              (f) => !connectedSpokeIds.has(f.id)
-            );
-            if (unconnectedSpokes.length === 0) return null;
-            return (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                <p className="text-xs text-amber-700 mb-2">
-                  These spoke formats aren&apos;t connected to any pillar:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {unconnectedSpokes.map((f) => (
-                    <Badge key={f.id} variant="outline" className="text-xs border-amber-300 text-amber-700">
-                      {f.name}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      </div>
     </div>
   );
 }
