@@ -133,10 +133,82 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [producerPopoverOpen, setProducerPopoverOpen] = useState(false);
   const [channelsPopoverOpen, setChannelsPopoverOpen] = useState(false);
   const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
-  const [addDerivativeOpen, setAddDerivativeOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // New-derivative dialog state.
+  const [addChildOpen, setAddChildOpen] = useState(false);
+  const [childName, setChildName] = useState("");
+  const [childChannels, setChildChannels] = useState<string[]>([]);
+  const [childViewThreshold, setChildViewThreshold] = useState("");
+  const [childEditor, setChildEditor] = useState("");
+  const [childEditorGid, setChildEditorGid] = useState("");
+  const [childProducer, setChildProducer] = useState("");
+  const [childProducerGid, setChildProducerGid] = useState("");
+  const [childInstructions, setChildInstructions] = useState("");
+  const [childEditorOpen, setChildEditorOpen] = useState(false);
+  const [childProducerOpen, setChildProducerOpen] = useState(false);
+  const [childChannelsOpen, setChildChannelsOpen] = useState(false);
+  const [savingChild, setSavingChild] = useState(false);
+  const [childError, setChildError] = useState<string | null>(null);
+
+  function openAddChild() {
+    setChildName("");
+    setChildChannels([]);
+    setChildViewThreshold("");
+    setChildEditor("");
+    setChildEditorGid("");
+    setChildProducer("");
+    setChildProducerGid("");
+    setChildInstructions("");
+    setChildError(null);
+    setAddChildOpen(true);
+  }
+
+  function toggleChildChannel(ch: string) {
+    setChildChannels((prev) =>
+      prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
+    );
+  }
+
+  async function submitAddChild() {
+    if (!childName.trim()) {
+      setChildError("Name is required");
+      return;
+    }
+    setSavingChild(true);
+    setChildError(null);
+    try {
+      const res = await fetch("/api/formats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: childName.trim(),
+          brand,
+          channels: childChannels,
+          viewThreshold: childViewThreshold ? parseInt(childViewThreshold, 10) : null,
+          editor: childEditor || null,
+          editorAsanaGid: childEditorGid || null,
+          producer: childProducer || null,
+          producerAsanaGid: childProducerGid || null,
+          instructions: childInstructions || null,
+          parentFormatId: formatId,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setChildError(body.error || `HTTP ${res.status}`);
+        return;
+      }
+      setAddChildOpen(false);
+      await load();
+    } catch (err) {
+      setChildError(err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setSavingChild(false);
+    }
+  }
 
   const [clipItem, setClipItem] = useState<ContentItem | null>(null);
   const [clipTargetId, setClipTargetId] = useState<string>("");
@@ -504,15 +576,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const selectedParent = parentFormatId
     ? allFormats.find((f) => f.id === parentFormatId) ?? null
     : null;
-
-  // Formats that could be reparented under this format (root + not self + not descendant).
-  const reparentCandidates = allFormats.filter(
-    (f) =>
-      f.id !== formatId &&
-      !descendantIds.has(f.id) &&
-      !f.parentFormatId &&
-      !children.some((c) => c.id === f.id)
-  );
 
   return (
     <div className="space-y-6">
@@ -922,45 +985,13 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
               Direct children in the repurpose tree. When a post in this format hits one of these children&apos;s thresholds, an Asana task is created for that child.
             </p>
           </div>
-          <Popover open={addDerivativeOpen} onOpenChange={setAddDerivativeOpen}>
-            <PopoverTrigger
-              disabled={reparentCandidates.length === 0}
-              className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-xs hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            >
-              + Reparent a root
-            </PopoverTrigger>
-            <PopoverContent className="w-80 p-0" align="end">
-              <Command>
-                <CommandInput placeholder="Search root formats…" />
-                <CommandList>
-                  <CommandEmpty>No eligible root formats.</CommandEmpty>
-                  <CommandGroup>
-                    {reparentCandidates.map((f) => (
-                      <CommandItem
-                        key={f.id}
-                        value={f.name}
-                        onSelect={async () => {
-                          setAddDerivativeOpen(false);
-                          await setChildParent(f.id, formatId);
-                        }}
-                      >
-                        <span className="flex items-center gap-2 w-full">
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-blue-50 text-blue-700">
-                            Root
-                          </span>
-                          <span className="text-sm truncate">{f.name}</span>
-                        </span>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
+          <Button size="sm" onClick={openAddChild}>
+            + Add
+          </Button>
         </div>
         {children.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-muted-foreground">
-            No derivatives yet. Create a new format and choose this one as its parent, or reparent an existing root above.
+            No derivatives yet. Click <span className="font-medium text-foreground">+ Add</span> to create one.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -1309,6 +1340,240 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add derivative modal */}
+      <Dialog open={addChildOpen} onOpenChange={(o) => { if (!o) setAddChildOpen(false); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>New derivative of &ldquo;{name}&rdquo;</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input
+                value={childName}
+                onChange={(e) => setChildName(e.target.value)}
+                placeholder="e.g. Twitter clip"
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Channels</Label>
+              <Popover open={childChannelsOpen} onOpenChange={setChildChannelsOpen}>
+                <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+                  {childChannels.length === 0 ? (
+                    <span className="text-muted-foreground">Select channels…</span>
+                  ) : (
+                    <span className="flex items-center gap-1 overflow-hidden">
+                      <span className="truncate">{childChannels.slice(0, 2).join(", ")}</span>
+                      {childChannels.length > 2 && (
+                        <span className="shrink-0 rounded bg-muted text-[10px] font-medium text-muted-foreground px-1.5 py-0.5">
+                          +{childChannels.length - 2}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search channels…" />
+                    <CommandList>
+                      <CommandEmpty>No channels found.</CommandEmpty>
+                      <CommandGroup>
+                        {ALL_CHANNELS.map((ch) => {
+                          const selected = childChannels.includes(ch);
+                          return (
+                            <CommandItem key={ch} value={ch} onSelect={() => toggleChildChannel(ch)}>
+                              <span className="flex items-center gap-2 w-full">
+                                <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${selected ? "bg-primary border-primary" : "border-input"}`}>
+                                  {selected && (
+                                    <svg className="w-3 h-3 text-primary-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                  )}
+                                </span>
+                                <span className="text-sm">{ch}</span>
+                              </span>
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div className="space-y-2">
+              <Label>View Threshold</Label>
+              <Input
+                type="number"
+                value={childViewThreshold}
+                onChange={(e) => setChildViewThreshold(e.target.value)}
+                placeholder="e.g. 50000"
+              />
+              <p className="text-xs text-muted-foreground">
+                When a &ldquo;{name}&rdquo; post hits this number of views, an Asana task is created for this derivative.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Editor (Content Creator)</Label>
+              <Popover open={childEditorOpen} onOpenChange={setChildEditorOpen}>
+                <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+                  {childEditor ? (
+                    <span className="flex items-center gap-2 truncate">
+                      <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
+                        {childEditor.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                      </span>
+                      <span className="truncate">{childEditor}</span>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Search team members…</span>
+                  )}
+                  <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search by name or email..." />
+                    <CommandList>
+                      <CommandEmpty>No team members found.</CommandEmpty>
+                      <CommandGroup>
+                        {childEditor && (
+                          <CommandItem
+                            onSelect={() => {
+                              setChildEditor("");
+                              setChildEditorGid("");
+                              setChildEditorOpen(false);
+                            }}
+                            className="text-muted-foreground"
+                          >
+                            <span className="text-sm">Clear selection</span>
+                          </CommandItem>
+                        )}
+                        {asanaMembers.map((m) => (
+                          <CommandItem
+                            key={m.gid}
+                            value={`${m.name} ${m.email}`}
+                            onSelect={() => {
+                              setChildEditor(m.name);
+                              setChildEditorGid(m.gid);
+                              setChildEditorOpen(false);
+                            }}
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
+                                {m.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                              </span>
+                              <span className="flex flex-col">
+                                <span className="text-sm font-medium">{m.name}</span>
+                                <span className="text-xs text-muted-foreground">{m.email}</span>
+                              </span>
+                            </span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Producer (Reviewer + Publisher)</Label>
+              <Popover open={childProducerOpen} onOpenChange={setChildProducerOpen}>
+                <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+                  {childProducer ? (
+                    <span className="flex items-center gap-2 truncate">
+                      <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium shrink-0">
+                        {childProducer.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                      </span>
+                      <span className="truncate">{childProducer}</span>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Search team members…</span>
+                  )}
+                  <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search by name or email..." />
+                    <CommandList>
+                      <CommandEmpty>No team members found.</CommandEmpty>
+                      <CommandGroup>
+                        {childProducer && (
+                          <CommandItem
+                            onSelect={() => {
+                              setChildProducer("");
+                              setChildProducerGid("");
+                              setChildProducerOpen(false);
+                            }}
+                            className="text-muted-foreground"
+                          >
+                            <span className="text-sm">Clear selection</span>
+                          </CommandItem>
+                        )}
+                        {asanaMembers.map((m) => (
+                          <CommandItem
+                            key={m.gid}
+                            value={`${m.name} ${m.email}`}
+                            onSelect={() => {
+                              setChildProducer(m.name);
+                              setChildProducerGid(m.gid);
+                              setChildProducerOpen(false);
+                            }}
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium shrink-0">
+                                {m.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                              </span>
+                              <span className="flex flex-col">
+                                <span className="text-sm font-medium">{m.name}</span>
+                                <span className="text-xs text-muted-foreground">{m.email}</span>
+                              </span>
+                            </span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Prompt</Label>
+                <button
+                  type="button"
+                  onClick={() => setChildInstructions(applyStarterTemplate(childInstructions))}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Load starter template
+                </button>
+              </div>
+              <Textarea
+                value={childInstructions}
+                onChange={(e) => setChildInstructions(e.target.value)}
+                placeholder="Describe this derivative as a Claude-style skill."
+                rows={6}
+                className="font-mono text-xs"
+              />
+            </div>
+
+            {childError && <p className="text-xs text-destructive">{childError}</p>}
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setAddChildOpen(false)} disabled={savingChild}>
+                Cancel
+              </Button>
+              <Button onClick={submitAddChild} disabled={savingChild || !childName.trim()}>
+                {savingChild ? "Creating…" : "Create derivative"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
