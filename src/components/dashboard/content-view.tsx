@@ -47,7 +47,15 @@ export function ContentView({ brand }: ContentViewProps) {
         source: selectedSource,
       });
       const res = await fetch(`${apiBase}?${params}`);
-      const json = await res.json();
+      const text = await res.text();
+      const contentType = res.headers.get("content-type") || "";
+      const looksJson = contentType.includes("application/json") || text.trim().startsWith("{");
+      if (!looksJson) {
+        console.error(`Content API returned HTTP ${res.status} (non-JSON response).`);
+        setData(null);
+        return;
+      }
+      const json = JSON.parse(text);
       setData(json);
     } catch (err) {
       console.error("Failed to fetch content:", err);
