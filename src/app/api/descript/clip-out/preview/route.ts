@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems, formats } from "@/lib/db/schema";
-import { invokeDescriptAgent } from "@/lib/descript";
 import { dispatchRepurpose } from "@/lib/repurpose-agent";
 
 export async function POST(request: NextRequest) {
@@ -36,12 +35,6 @@ export async function POST(request: NextRequest) {
   if (!item) {
     return NextResponse.json({ error: "Item not found" }, { status: 404 });
   }
-  if (!item.descriptProjectId) {
-    return NextResponse.json(
-      { error: "This content has no Descript project yet" },
-      { status: 400 }
-    );
-  }
 
   const [target] = await db
     .select()
@@ -61,41 +54,27 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let action;
   try {
-    action = await dispatchRepurpose({
+    const action = await dispatchRepurpose({
       itemTitle: item.title || "Untitled",
       targetFormatName: target.name,
       targetPrompt: target.instructions || "",
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Claude dispatch failed";
-    return NextResponse.json({ error: message }, { status: 502 });
-  }
-
-  if (action.kind === "no_action") {
-    return NextResponse.json({
-      mode: "no_action",
-      message: action.message,
-      targetFormatName: target.name,
-    });
-  }
-
-  try {
-    const result = await invokeDescriptAgent({
-      projectId: item.descriptProjectId,
-      prompt: action.descriptPrompt,
-    });
+    if (action.kind === "no_action") {
+      return NextResponse.json({
+        mode: "no_action",
+        message: action.message,
+        targetFormatName: target.name,
+      });
+    }
     return NextResponse.json({
       mode: "descript_clip",
-      jobId: result.jobId,
-      projectUrl: result.projectUrl,
       descriptPrompt: action.descriptPrompt,
       compositionName: action.compositionName,
       targetFormatName: target.name,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+    const message = err instanceof Error ? err.message : "Claude dispatch failed";
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }

@@ -35,6 +35,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { SS_CHANNELS, MATG_CHANNELS } from "@/lib/config/channels";
+import { applyStarterTemplate } from "@/lib/format-skill";
 
 interface AsanaMember {
   gid: string;
@@ -714,15 +715,25 @@ export function FormatsPageContent({ brand }: { brand: string }) {
 
               {/* Prompt / Instructions */}
               <div className="space-y-2">
-                <Label>Prompt</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Prompt</Label>
+                  <button
+                    type="button"
+                    onClick={() => setInstructions(applyStarterTemplate(instructions))}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Load starter template
+                  </button>
+                </div>
                 <Textarea
                   value={instructions}
                   onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="Describe what this format is and how to produce it. e.g. 'Create a 30-second vertical highlight clip from the pillar interview.' Claude reads this when Repurpose fires and picks the right automation."
-                  rows={5}
+                  placeholder="Describe this format as a Claude-style skill. Click “Load starter template” for the structure."
+                  rows={8}
+                  className="font-mono text-xs"
                 />
                 <p className="text-xs text-muted-foreground">
-                  One prompt for everything. Added to Asana task notes, and read by Claude to dispatch Repurpose actions.
+                  One prompt for everything. Read by Claude when Repurpose fires.
                 </p>
               </div>
 

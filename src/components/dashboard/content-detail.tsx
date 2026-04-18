@@ -93,18 +93,28 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
 
   // Per-format repurpose state, keyed by format id
   type RepurposeState = {
-    state: "running" | "clipped" | "no_action" | "error";
-    message?: string;
+    state: "running" | "previewed" | "clipped" | "no_action" | "error";
+    label?: string;          // short status pill text on the button
+    message?: string;        // longer explanation under the button
+    descriptPrompt?: string; // composed directive (preview or actual)
     projectUrl?: string;
+    firedAt?: "preview" | "real";
   };
   const [clipStatus, setClipStatus] = useState<Record<string, RepurposeState>>(
     {}
   );
 
-  async function repurposeTo(targetFormatId: string) {
-    setClipStatus((prev) => ({ ...prev, [targetFormatId]: { state: "running" } }));
+  async function callRepurpose(targetFormatId: string, mode: "preview" | "real") {
+    setClipStatus((prev) => ({
+      ...prev,
+      [targetFormatId]: { state: "running", firedAt: mode },
+    }));
+    const url =
+      mode === "preview"
+        ? "/api/descript/clip-out/preview"
+        : "/api/descript/clip-out";
     try {
-      const res = await fetch("/api/descript/clip-out", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemId: contentId, targetFormatId }),
@@ -124,8 +134,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         setClipStatus((prev) => ({
           ...prev,
           [targetFormatId]: {
-            state: "clipped",
-            message: `Clip queued (${json.window?.startSec ?? "?"}s–${json.window?.endSec ?? "?"}s)`,
+            state: mode === "preview" ? "previewed" : "clipped",
+            label:
+              mode === "preview"
+                ? "preview ready"
+                : "clip queued",
+            descriptPrompt: json.descriptPrompt,
             projectUrl: json.projectUrl,
           },
         }));
@@ -489,62 +503,77 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             with content type <span className="font-mono">Repurposed</span> to see it here.
           </p>
         ) : (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2">
             {repurposeTargets.map((f) => {
               const st = clipStatus[f.id];
-              const disabled = !hasDescriptProject || st?.state === "running";
-              const title = hasDescriptProject
-                ? "Claude reads this format's prompt and decides which automation to run."
-                : "Add this item to Descript first to enable clipping actions.";
+              const busy = st?.state === "running";
+              const disabled = !hasDescriptProject || busy;
               return (
-                <div key={f.id} className="flex flex-col gap-1 max-w-xs">
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => repurposeTo(f.id)}
-                    title={title}
-                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border bg-card text-sm hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="text-foreground">{f.name}</span>
-                    {st?.state === "running" && (
-                      <span className="text-xs text-muted-foreground">· thinking…</span>
-                    )}
-                    {st?.state === "clipped" && (
-                      <span className="text-xs text-primary">· clip queued</span>
+                <div
+                  key={f.id}
+                  className="flex items-start gap-2 flex-wrap border border-border rounded-lg p-2.5 bg-card/50"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-foreground">
+                      {f.name}
+                    </div>
+                    {(st?.state === "previewed" || st?.state === "clipped") &&
+                      st.descriptPrompt && (
+                        <div className="mt-1.5 text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
+                          {st.descriptPrompt}
+                        </div>
+                      )}
+                    {st?.state === "clipped" && st.projectUrl && (
+                      <div className="mt-1">
+                        <a
+                          href={st.projectUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] text-primary hover:underline"
+                        >
+                          Open in Descript →
+                        </a>
+                      </div>
                     )}
                     {st?.state === "no_action" && (
-                      <span className="text-xs text-muted-foreground">· no action</span>
+                      <p className="mt-1.5 text-[11px] text-muted-foreground">
+                        {st.message}
+                      </p>
                     )}
                     {st?.state === "error" && (
-                      <span className="text-xs text-destructive">· failed</span>
+                      <p className="mt-1.5 text-[11px] text-destructive">
+                        {st.message}
+                      </p>
                     )}
-                  </button>
-                  {st?.state === "clipped" && (
-                    <span className="text-[10px] text-muted-foreground">
-                      {st.message}
-                      {st.projectUrl && (
-                        <>
-                          {" · "}
-                          <a
-                            href={st.projectUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline"
-                          >
-                            open in Descript
-                          </a>
-                        </>
-                      )}
-                    </span>
-                  )}
-                  {st?.state === "no_action" && (
-                    <span className="text-[10px] text-muted-foreground whitespace-normal">
-                      {st.message}
-                    </span>
-                  )}
-                  {st?.state === "error" && (
-                    <span className="text-[10px] text-destructive">{st.message}</span>
-                  )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => callRepurpose(f.id, "preview")}
+                      disabled={busy}
+                      title="Ask Claude what directive it would send — no Descript call."
+                      className="inline-flex items-center h-7 px-2.5 rounded-full border border-border bg-card text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {busy && st?.firedAt === "preview"
+                        ? "Previewing…"
+                        : "Preview"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => callRepurpose(f.id, "real")}
+                      disabled={disabled}
+                      title={
+                        hasDescriptProject
+                          ? "Claude reads this format's prompt, composes a directive, and sends it to Descript."
+                          : "Add this item to Descript first."
+                      }
+                      className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {busy && st?.firedAt === "real"
+                        ? "Repurposing…"
+                        : "Repurpose"}
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -552,7 +581,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         )}
 
         <p className="text-[11px] text-muted-foreground">
-          Every click asks Claude (Haiku) to read the target format&apos;s prompt and decide which automation to run. Today the only wired-up capability is Descript clipping; other prompts come back with a short &ldquo;no action&rdquo; explanation.
+          <span className="font-medium">Preview</span> asks Claude (Haiku) what directive it would send to Descript, without spending Descript credits.{" "}
+          <span className="font-medium">Repurpose</span> does the same and then fires the clip job. Descript&apos;s own agent picks the moment from the transcript.
         </p>
       </div>
 
