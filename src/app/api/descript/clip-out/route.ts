@@ -9,6 +9,7 @@ import {
   extractCompositionIdFromAgentResponse,
 } from "@/lib/descript";
 import { dispatchRepurpose } from "@/lib/repurpose-agent";
+import { createNotionRepurposeTask } from "@/lib/services/notion-tasks";
 
 async function resolveCompositionInBackground(
   triggerId: string,
@@ -117,6 +118,30 @@ export async function POST(request: NextRequest) {
       prompt: action.descriptPrompt,
     });
 
+    // Create a matching Notion page so the clip flows back into our DB
+    // via the next Notion sync — Notion stays the source of truth for
+    // content items, and freelancers discuss each clip on its Notion page.
+    let notionPageId: string | undefined;
+    try {
+      const notionResult = await createNotionRepurposeTask({
+        pillarContentTitle: item.title || "Untitled",
+        targetFormatName: target.name,
+        title: action.compositionName,
+        channel: Array.isArray(target.channels) ? target.channels[0] : undefined,
+        pillarContentNotionId: item.notionId || undefined,
+        targetFormatNotionPageId: target.notionPageId || undefined,
+        editorNotionUserId: target.editorNotionUserId || undefined,
+        descriptProjectUrl: result.projectUrl,
+      });
+      if (notionResult.success) {
+        notionPageId = notionResult.notionPageId;
+      } else {
+        console.error("Notion page creation failed:", notionResult.error);
+      }
+    } catch (err) {
+      console.error("Notion page creation threw:", err);
+    }
+
     const [trigger] = await db
       .insert(repurposeTriggers)
       .values({
@@ -126,6 +151,7 @@ export async function POST(request: NextRequest) {
         descriptProjectUrl: result.projectUrl,
         descriptPrompt: action.descriptPrompt,
         compositionName: action.compositionName,
+        notionTaskPageId: notionPageId,
       })
       .returning({ id: repurposeTriggers.id });
 
@@ -141,6 +167,7 @@ export async function POST(request: NextRequest) {
       descriptPrompt: action.descriptPrompt,
       compositionName: action.compositionName,
       targetFormatName: target.name,
+      notionPageId,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

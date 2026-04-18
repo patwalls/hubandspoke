@@ -34,6 +34,11 @@ export interface CreateRepurposeTaskOpts {
   editorNotionUserId?: string;
   /** Notion user ID of the format's producer (reviewer) */
   producerNotionUserId?: string;
+  /** If set, the Descript project URL is appended to the page body so
+   *  freelancers can find the clip the auto-repurpose flow produced. */
+  descriptProjectUrl?: string;
+  /** Override the default title. Defaults to "{formatName} ({pillarTitle})". */
+  title?: string;
 }
 
 export interface CreateRepurposeTaskResult {
@@ -48,7 +53,8 @@ export async function createNotionRepurposeTask(
   const notion = getNotionClient();
 
   // Title pattern: "{formatName} ({pillarContentTitle})"
-  const taskTitle = `${opts.targetFormatName} (${opts.pillarContentTitle})`;
+  const taskTitle =
+    opts.title || `${opts.targetFormatName} (${opts.pillarContentTitle})`;
 
   try {
     // Build properties object
@@ -101,9 +107,45 @@ export async function createNotionRepurposeTask(
       };
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const children: any[] = [];
+    if (opts.descriptProjectUrl) {
+      children.push(
+        {
+          object: "block",
+          type: "heading_3",
+          heading_3: {
+            rich_text: [{ type: "text", text: { content: "Descript clip" } }],
+          },
+        },
+        {
+          object: "block",
+          type: "paragraph",
+          paragraph: {
+            rich_text: [
+              {
+                type: "text",
+                text: {
+                  content: "Open in Descript: ",
+                },
+              },
+              {
+                type: "text",
+                text: {
+                  content: opts.descriptProjectUrl,
+                  link: { url: opts.descriptProjectUrl },
+                },
+              },
+            ],
+          },
+        }
+      );
+    }
+
     const page = await notion.pages.create({
       parent: { database_id: DATABASE_ID },
       properties,
+      ...(children.length ? { children } : {}),
     });
 
     return {

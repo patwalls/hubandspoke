@@ -56,6 +56,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         descriptJobId: repurposeTriggers.descriptJobId,
         descriptPrompt: repurposeTriggers.descriptPrompt,
         compositionName: repurposeTriggers.compositionName,
+        notionTaskPageId: repurposeTriggers.notionTaskPageId,
         triggeredAt: repurposeTriggers.triggeredAt,
       })
       .from(repurposeTriggers)

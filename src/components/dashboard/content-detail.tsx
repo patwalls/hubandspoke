@@ -32,6 +32,7 @@ interface RepurposeTriggerRow {
   descriptJobId: string | null;
   descriptPrompt: string | null;
   compositionName: string | null;
+  notionTaskPageId: string | null;
   triggeredAt: string;
 }
 
@@ -527,10 +528,13 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         {triggers && triggers.length > 0 ? (
           <div className="divide-y divide-border/70 border border-border rounded-md overflow-hidden">
             {triggers.map((t) => {
-              const url = descriptCompositionUrl(
+              const descriptUrl = descriptCompositionUrl(
                 t.descriptProjectUrl,
                 t.descriptCompositionId
               );
+              const notionUrl = t.notionTaskPageId
+                ? `https://www.notion.so/${t.notionTaskPageId.replace(/-/g, "")}`
+                : null;
               const resolving = !t.descriptCompositionId;
               return (
                 <div
@@ -547,19 +551,31 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                         ? `${t.targetFormatName} · `
                         : ""}
                       {timeAgo(t.triggeredAt)}
-                      {resolving && " · processing in Descript…"}
+                      {resolving && " · clip processing in Descript…"}
                     </div>
                   </div>
-                  {url && (
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-primary hover:underline shrink-0"
-                    >
-                      {resolving ? "Open project" : "Open clip"} →
-                    </a>
-                  )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {notionUrl && (
+                      <a
+                        href={notionUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      >
+                        Notion →
+                      </a>
+                    )}
+                    {descriptUrl && (
+                      <a
+                        href={descriptUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline"
+                      >
+                        {resolving ? "Open project" : "Open clip"} →
+                      </a>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -572,12 +588,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         )}
 
         <p className="text-[11px] text-muted-foreground">
-          <span className="font-medium">Heads up:</span> these are Descript
-          compositions only. Notion is still the source of truth for
-          production items, so clips here don&apos;t yet appear as child posts
-          in the main dashboard. Next step: also create a Notion page per
-          clip so it syncs back into our DB — ping me when you want that
-          wired up.
+          Each clip creates a Descript composition <em>and</em> a matching
+          Notion page (status: Idea, linked back to this pillar). On the next
+          Notion sync it appears as a child production item in the dashboard.
         </p>
       </div>
 
