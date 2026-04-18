@@ -13,10 +13,26 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 - Deployed on Heroku (auto-deploy on push to `main` via GitHub Actions)
 
 ## Development
-- `npm run dev` - Start dev server
+- `npm run dev` - Start dev server (main worktree uses port 3000)
 - `npm run build` - Production build
 - `npx drizzle-kit generate` - Generate migrations
 - `node --env-file=.env.local scripts/seed-user.mjs <email> <pass> [name]` - Seed a user
+
+## Worktree Workflow
+All feature work happens in a git worktree, not the main checkout. Set one up with:
+
+```
+./scripts/worktree-up.sh <branch-name> [port]
+```
+
+This creates `../hubandspoke-<branch-name>` off `origin/main`, symlinks `.env.local`
+from the main checkout (secrets never get duplicated), runs `npm install`, and picks
+the first free port ≥ 3001. It prints the exact `PORT=… npm run dev` command to run.
+
+Notes:
+- Turbopack rejects a symlinked `node_modules`, so each worktree needs a real install
+  (~9s). Don't try to share `node_modules` via symlink.
+- Delete the worktree after merge: `git worktree remove ../hubandspoke-<branch-name>`.
 
 ## Key Files
 - `src/lib/db/schema.ts` - Database schema (Drizzle)
