@@ -13,7 +13,10 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Hub & Spoke",
+  title: {
+    template: "%s | Hub & Spoke",
+    default: "Hub & Spoke",
+  },
   description: "Content Command Center",
 };
 
