@@ -90,6 +90,7 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
   const hasPerformanceSync = items.some((item) => item.lastPerformanceSyncAt);
   const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [search, setSearch] = useState("");
 
   // Dialog state — shared for add and edit
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -262,7 +263,21 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
     }
   }
 
-  const sorted = [...items].sort((a, b) => {
+  const query = search.trim().toLowerCase();
+  const filtered = query
+    ? items.filter((item) => {
+        const title = item.title?.toLowerCase() ?? "";
+        const format = item.format?.toLowerCase() ?? "";
+        const platforms = item.platform?.join(" ").toLowerCase() ?? "";
+        return (
+          title.includes(query) ||
+          format.includes(query) ||
+          platforms.includes(query)
+        );
+      })
+    : items;
+
+  const sorted = [...filtered].sort((a, b) => {
     const aVal = a[sortKey];
     const bVal = b[sortKey];
     if (aVal == null && bVal == null) return 0;
@@ -295,16 +310,25 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
-        <div>
+      <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold text-foreground">Content Performance</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Individual content items with detailed metrics
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={openAddDialog}>
-          + Add Post
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search title, format, platform…"
+            className="h-8 w-48 sm:w-64 text-xs"
+          />
+          <Button variant="outline" size="sm" onClick={openAddDialog}>
+            + Add Post
+          </Button>
+        </div>
       </div>
 
       {/* Add / Edit Post Dialog */}
@@ -619,7 +643,9 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={hasPerformanceSync ? 12 : 11} className="px-4 py-12 text-center text-muted-foreground text-sm">
-                  No content items found for the selected filters.
+                  {query
+                    ? `No content items match “${search}”.`
+                    : "No content items found for the selected filters."}
                 </td>
               </tr>
             )}
