@@ -49,6 +49,7 @@ export const productionItems = pgTable(
     }),
     descriptProjectId: text("descript_project_id"),
     descriptProjectUrl: text("descript_project_url"),
+    descriptCompositionId: text("descript_composition_id"),
     descriptImportedAt: timestamp("descript_imported_at", {
       withTimezone: true,
     }),
