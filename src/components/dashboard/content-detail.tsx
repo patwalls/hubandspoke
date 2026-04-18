@@ -23,26 +23,12 @@ interface BrandFormat {
   instructions: string | null;
 }
 
-interface RepurposeTriggerRow {
-  id: string;
-  targetFormatId: string;
-  targetFormatName: string | null;
-  descriptCompositionId: string | null;
-  descriptProjectUrl: string | null;
-  descriptJobId: string | null;
-  descriptPrompt: string | null;
-  compositionName: string | null;
-  notionTaskPageId: string | null;
-  triggeredAt: string;
-}
-
 interface DetailResponse {
   item: ProductionItem;
-  related: ProductionItem[];
   derivatives: ProductionItem[];
   formatNames: string[];
   formats: BrandFormat[];
-  triggers: RepurposeTriggerRow[];
+  repurposeTargets: BrandFormat[];
 }
 
 interface ContentDetailProps {
@@ -83,27 +69,6 @@ function formatCompact(n: number | null | undefined): string {
     return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   return n.toLocaleString();
-}
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function descriptCompositionUrl(
-  projectUrl: string | null,
-  compositionId: string | null
-): string | null {
-  if (!projectUrl) return null;
-  if (!compositionId) return projectUrl;
-  // Descript composition URLs: web.descript.com/<project>/<composition>
-  return `${projectUrl}/${compositionId}`;
 }
 
 function formatDate(d: string | null): string {
@@ -358,13 +323,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     );
   }
 
-  const { item, related, derivatives, formatNames, formats: brandFormatDetails, triggers } = data;
+  const { item, derivatives, formatNames, repurposeTargets } = data;
   const brandFormats = formatNames;
   const isYouTube = !!item.youtubeId;
 
-  const repurposeTargets = brandFormatDetails.filter(
-    (f) => f.contentType === "repurposed"
-  );
   const hasDescriptProject = !!item.descriptProjectId;
   const descriptProjectUrl = item.descriptProjectUrl;
 
@@ -499,322 +461,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       </div>
 
-      {/* Derivative content — every Notion item with this post set as Pillar */}
-      <div className="rounded-lg border border-border bg-card overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-base font-semibold text-foreground">
-            Derivative content
-            <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
-              {derivatives.length}
-            </span>
-          </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Everything in Notion with this post set as Pillar Content — every
-            status, every format.
-          </p>
-        </div>
-        {derivatives.length === 0 ? (
-          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-            No derivatives linked in Notion yet.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30 text-left">
-                  <th className="px-5 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Title
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Format
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Published
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
-                    Views
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {derivatives.map((d) => (
-                  <tr
-                    key={d.id}
-                    className="border-b border-border/50 last:border-b-0 hover:bg-accent/30"
-                  >
-                    <td className="px-5 py-2.5 min-w-0">
-                      <Link
-                        href={`/${brand}/content/${d.id}`}
-                        className="text-foreground hover:underline"
-                      >
-                        {d.title || "(Untitled)"}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {d.format || "—"}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {d.status ? (
-                        <Badge
-                          variant="secondary"
-                          className="bg-accent text-muted-foreground border border-border font-normal"
-                        >
-                          {d.status}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground tabular-nums">
-                      {formatDate(d.publishedDate)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      <span
-                        className={
-                          d.viewsEstimated
-                            ? "text-muted-foreground"
-                            : "text-foreground"
-                        }
-                      >
-                        {formatCompact(d.views)}
-                        {d.viewsEstimated && (
-                          <span className="ml-1 text-[10px] text-muted-foreground">
-                            est
-                          </span>
-                        )}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Recent Descript jobs — log of auto-created clips, separate from the
-          Notion-synced derivatives above (appears here instantly; shows up in
-          Derivative content after the next Notion sync) */}
-      <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              Recent Descript jobs
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Clip jobs fired from Repurpose below. Each one creates a Descript
-              composition and a Notion page — on the next sync that Notion page
-              appears in Derivative content above.
-            </p>
-          </div>
-          {descriptProjectUrl && (
-            <a
-              href={descriptProjectUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-purple-700 hover:underline inline-flex items-center gap-1 shrink-0"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-              Open Descript project →
-            </a>
-          )}
-        </div>
-
-        {triggers && triggers.length > 0 ? (
-          <div className="divide-y divide-border/70 border border-border rounded-md overflow-hidden">
-            {triggers.slice(0, 5).map((t) => {
-              const descriptUrl = descriptCompositionUrl(
-                t.descriptProjectUrl,
-                t.descriptCompositionId
-              );
-              const notionUrl = t.notionTaskPageId
-                ? `https://www.notion.so/${t.notionTaskPageId.replace(/-/g, "")}`
-                : null;
-              const resolving = !t.descriptCompositionId;
-              return (
-                <div
-                  key={t.id}
-                  className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-accent/30"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm text-foreground truncate">
-                      {t.compositionName || t.targetFormatName || "(unknown)"}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {t.targetFormatName && t.compositionName &&
-                        t.compositionName !== t.targetFormatName
-                        ? `${t.targetFormatName} · `
-                        : ""}
-                      {timeAgo(t.triggeredAt)}
-                      {resolving && " · clip processing in Descript…"}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {notionUrl && (
-                      <a
-                        href={notionUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-muted-foreground hover:text-foreground hover:underline"
-                      >
-                        Notion →
-                      </a>
-                    )}
-                    {descriptUrl && (
-                      <a
-                        href={descriptUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary hover:underline"
-                      >
-                        {resolving ? "Open project" : "Open clip"} →
-                      </a>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            No Descript jobs fired yet. Click Repurpose on any format below.
-          </p>
-        )}
-      </div>
-
-      {/* Repurpose to format */}
-      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              Repurpose to format
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Click a target format to create a new composition in this post&apos;s Descript
-              project using that format&apos;s clip prompt. A random 30-second window is used
-              for this MVP.
-            </p>
-          </div>
-          {descriptProjectUrl && (
-            <a
-              href={descriptProjectUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-purple-700 hover:underline inline-flex items-center gap-1"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-              Open Descript project →
-            </a>
-          )}
-        </div>
-
-        {!hasDescriptProject && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
-            This post doesn&apos;t have a Descript project yet. Open it on its format page
-            and use <span className="font-medium">Add to Descript</span> first, then the
-            clip-out buttons here will work.
-          </div>
-        )}
-
-        {repurposeTargets.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No repurposed-type formats for this brand yet.{" "}
-            <Link
-              href={`/${brand}/formats`}
-              className="text-primary hover:underline"
-            >
-              Add a format
-            </Link>{" "}
-            with content type <span className="font-mono">Repurposed</span> to see it here.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {repurposeTargets.map((f) => {
-              const st = clipStatus[f.id];
-              const busy = st?.state === "running";
-              const disabled = !hasDescriptProject || busy;
-              return (
-                <div
-                  key={f.id}
-                  className="flex items-start gap-2 flex-wrap border border-border rounded-lg p-2.5 bg-card/50"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-foreground">
-                      {f.name}
-                    </div>
-                    {(st?.state === "previewed" || st?.state === "clipped") &&
-                      st.descriptPrompt && (
-                        <div className="mt-1.5 text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
-                          {st.descriptPrompt}
-                        </div>
-                      )}
-                    {st?.state === "clipped" && st.projectUrl && (
-                      <div className="mt-1">
-                        <a
-                          href={st.projectUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[11px] text-primary hover:underline"
-                        >
-                          Open in Descript →
-                        </a>
-                      </div>
-                    )}
-                    {st?.state === "no_action" && (
-                      <p className="mt-1.5 text-[11px] text-muted-foreground">
-                        {st.message}
-                      </p>
-                    )}
-                    {st?.state === "error" && (
-                      <p className="mt-1.5 text-[11px] text-destructive">
-                        {st.message}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => callRepurpose(f.id, "preview")}
-                      disabled={busy}
-                      title="Ask Claude what directive it would send — no Descript call."
-                      className="inline-flex items-center h-7 px-2.5 rounded-full border border-border bg-card text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {busy && st?.firedAt === "preview"
-                        ? "Previewing…"
-                        : "Preview"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => callRepurpose(f.id, "real")}
-                      disabled={disabled}
-                      title={
-                        hasDescriptProject
-                          ? "Claude reads this format's prompt, composes a directive, and sends it to Descript."
-                          : "Add this item to Descript first."
-                      }
-                      className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {busy && st?.firedAt === "real"
-                        ? "Repurposing…"
-                        : "Repurpose"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <p className="text-[11px] text-muted-foreground">
-          <span className="font-medium">Preview</span> asks Claude (Haiku) what directive it would send to Descript, without spending Descript credits.{" "}
-          <span className="font-medium">Repurpose</span> does the same and then fires the clip job. Descript&apos;s own agent picks the moment from the transcript.
-        </p>
-      </div>
-
-      {/* Edit form */}
+      {/* Post details — edit form (above derivatives so editing is one scroll) */}
       <div className="rounded-lg border border-border bg-card p-5 space-y-5">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
@@ -986,88 +633,275 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         )}
       </div>
 
-      {/* Other platforms */}
+      {/* Derivative content — same look/feel as Content Performance table */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-base font-semibold text-foreground">
-            Other platforms
-          </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Other posts with this same title.
-          </p>
-        </div>
-        {related.length === 0 ? (
-          <div className="px-5 py-12 text-center text-sm text-muted-foreground">
-            This post isn&apos;t cross-posted anywhere else.
+        <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Derivative content
+              <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
+                {derivatives.length}
+              </span>
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Everything in Notion with this post set as Pillar Content — every
+              status, every format.
+            </p>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30 text-left">
-                  <th className="px-5 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Platform
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Published
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
-                    Views
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
-                    Likes
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
-                    Comments
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {related.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="border-b border-border/50 last:border-b-0 hover:bg-accent/30"
-                  >
-                    <td className="px-5 py-2.5">
-                      <Link
-                        href={`/${brand}/content/${r.id}`}
-                        className="text-foreground hover:underline"
-                      >
-                        {(r.platform || []).join(", ") || "—"}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground tabular-nums">
-                      {formatDate(r.publishedDate)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      <span
-                        className={
-                          r.viewsEstimated
-                            ? "text-muted-foreground"
-                            : "text-foreground"
-                        }
-                      >
-                        {formatCompact(r.views)}
-                        {r.viewsEstimated && (
-                          <span className="ml-1 text-[10px] text-muted-foreground">
-                            est
-                          </span>
-                        )}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border bg-accent/50">
+                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                  Title
+                </th>
+                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                  Platform
+                </th>
+                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                  Format
+                </th>
+                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                  Status
+                </th>
+                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
+                  Published
+                </th>
+                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                  Views
+                </th>
+                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                  Likes
+                </th>
+                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                  Comments
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {derivatives.map((d) => (
+                <tr
+                  key={d.id}
+                  className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                >
+                  <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
+                    <div className="flex items-center gap-3">
+                      {d.thumbnail && (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={d.thumbnail}
+                          alt=""
+                          className="w-20 h-12 rounded object-cover shrink-0"
+                        />
+                      )}
+                      <div className="flex flex-col gap-0.5 min-w-0">
+                        <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
+                          <Link
+                            href={`/${brand}/content/${d.id}`}
+                            className="hover:text-primary hover:underline transition-colors truncate"
+                          >
+                            {d.title || "(Untitled)"}
+                          </Link>
+                          {d.publishedLink && (
+                            <a
+                              href={d.publishedLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-muted-foreground hover:text-foreground shrink-0"
+                              title="Open published post"
+                              aria-label="Open published post"
+                            >
+                              ↗
+                            </a>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {d.platform?.map((p) => (
+                        <span
+                          key={p}
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                        >
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-sm text-muted-foreground">
+                    {d.format || "-"}
+                  </td>
+                  <td className="px-3 py-2">
+                    {d.status ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border">
+                        {d.status}
                       </span>
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-                      {formatCompact(r.likes)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-                      {formatCompact(r.comments)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
+                    {d.publishedDate || "-"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                    {d.views != null ? (
+                      <span title={d.viewsEstimated ? "Estimated from likes" : undefined}>
+                        {d.viewsEstimated ? "~" : ""}{d.views.toLocaleString()}
+                      </span>
+                    ) : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                    {d.likes?.toLocaleString() || "-"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                    {d.comments?.toLocaleString() || "-"}
+                  </td>
+                </tr>
+              ))}
+              {derivatives.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                    No derivatives linked in Notion yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Repurpose to format */}
+      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">
+              Repurpose to format
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Click a target format to create a new composition in this post&apos;s Descript
+              project using that format&apos;s clip prompt. A random 30-second window is used
+              for this MVP.
+            </p>
+          </div>
+          {descriptProjectUrl && (
+            <a
+              href={descriptProjectUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-purple-700 hover:underline inline-flex items-center gap-1"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+              Open Descript project →
+            </a>
+          )}
+        </div>
+
+        {!hasDescriptProject && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+            This post doesn&apos;t have a Descript project yet. Open it on its format page
+            and use <span className="font-medium">Add to Descript</span> first, then the
+            clip-out buttons here will work.
           </div>
         )}
+
+        {repurposeTargets.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No repurposed-type formats for this brand yet.{" "}
+            <Link
+              href={`/${brand}/formats`}
+              className="text-primary hover:underline"
+            >
+              Add a format
+            </Link>{" "}
+            with content type <span className="font-mono">Repurposed</span> to see it here.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {repurposeTargets.map((f) => {
+              const st = clipStatus[f.id];
+              const busy = st?.state === "running";
+              const disabled = !hasDescriptProject || busy;
+              return (
+                <div
+                  key={f.id}
+                  className="flex items-start gap-2 flex-wrap border border-border rounded-lg p-2.5 bg-card/50"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-foreground">
+                      {f.name}
+                    </div>
+                    {(st?.state === "previewed" || st?.state === "clipped") &&
+                      st.descriptPrompt && (
+                        <div className="mt-1.5 text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
+                          {st.descriptPrompt}
+                        </div>
+                      )}
+                    {st?.state === "clipped" && st.projectUrl && (
+                      <div className="mt-1">
+                        <a
+                          href={st.projectUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] text-primary hover:underline"
+                        >
+                          Open in Descript →
+                        </a>
+                      </div>
+                    )}
+                    {st?.state === "no_action" && (
+                      <p className="mt-1.5 text-[11px] text-muted-foreground">
+                        {st.message}
+                      </p>
+                    )}
+                    {st?.state === "error" && (
+                      <p className="mt-1.5 text-[11px] text-destructive">
+                        {st.message}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => callRepurpose(f.id, "preview")}
+                      disabled={busy}
+                      title="Ask Claude what directive it would send — no Descript call."
+                      className="inline-flex items-center h-7 px-2.5 rounded-full border border-border bg-card text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {busy && st?.firedAt === "preview"
+                        ? "Previewing…"
+                        : "Preview"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => callRepurpose(f.id, "real")}
+                      disabled={disabled}
+                      title={
+                        hasDescriptProject
+                          ? "Claude reads this format's prompt, composes a directive, and sends it to Descript."
+                          : "Add this item to Descript first."
+                      }
+                      className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {busy && st?.firedAt === "real"
+                        ? "Repurposing…"
+                        : "Repurpose"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <p className="text-[11px] text-muted-foreground">
+          <span className="font-medium">Preview</span> asks Claude (Haiku) what directive it would send to Descript, without spending Descript credits.{" "}
+          <span className="font-medium">Repurpose</span> does the same and then fires the clip job. Descript&apos;s own agent picks the moment from the transcript.
+        </p>
       </div>
+
     </div>
   );
 }

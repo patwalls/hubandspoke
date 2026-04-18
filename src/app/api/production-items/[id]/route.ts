@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { productionItems, formats, repurposeTriggers } from "@/lib/db/schema";
-import { and, desc, eq, ne } from "drizzle-orm";
+import {
+  productionItems,
+  formats,
+  formatRepurposeMappings,
+} from "@/lib/db/schema";
+import { desc, eq } from "drizzle-orm";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -20,20 +24,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     if (!item) {
       return NextResponse.json({ error: "Item not found" }, { status: 404 });
     }
-
-    const related = item.title
-      ? await db
-          .select()
-          .from(productionItems)
-          .where(
-            and(
-              eq(productionItems.brand, item.brand),
-              eq(productionItems.title, item.title),
-              ne(productionItems.id, id)
-            )
-          )
-          .orderBy(desc(productionItems.publishedDate))
-      : [];
 
     // Derivatives: every production item whose "Pillar Content" relation in
     // Notion points at this item. Includes all statuses (Idea, Draft,
@@ -55,23 +45,23 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .where(eq(formats.brand, item.brand))
       .orderBy(formats.name);
 
-    const triggerRows = await db
-      .select({
-        id: repurposeTriggers.id,
-        targetFormatId: repurposeTriggers.targetFormatId,
-        targetFormatName: formats.name,
-        descriptCompositionId: repurposeTriggers.descriptCompositionId,
-        descriptProjectUrl: repurposeTriggers.descriptProjectUrl,
-        descriptJobId: repurposeTriggers.descriptJobId,
-        descriptPrompt: repurposeTriggers.descriptPrompt,
-        compositionName: repurposeTriggers.compositionName,
-        notionTaskPageId: repurposeTriggers.notionTaskPageId,
-        triggeredAt: repurposeTriggers.triggeredAt,
-      })
-      .from(repurposeTriggers)
-      .leftJoin(formats, eq(formats.id, repurposeTriggers.targetFormatId))
-      .where(eq(repurposeTriggers.productionItemId, id))
-      .orderBy(desc(repurposeTriggers.triggeredAt));
+    // Scope Repurpose targets to formats explicitly mapped from this item's
+    // source format. The item stores its format as a text name, so resolve
+    // the name to an id via this brand's formats.
+    const sourceFormat = item.format
+      ? brandFormats.find((f) => f.name === item.format)
+      : undefined;
+    let repurposeTargetIds: string[] = [];
+    if (sourceFormat) {
+      const mappings = await db
+        .select({ targetFormatId: formatRepurposeMappings.targetFormatId })
+        .from(formatRepurposeMappings)
+        .where(eq(formatRepurposeMappings.sourceFormatId, sourceFormat.id));
+      repurposeTargetIds = mappings.map((m) => m.targetFormatId);
+    }
+    const repurposeTargets = repurposeTargetIds.length
+      ? brandFormats.filter((f) => repurposeTargetIds.includes(f.id))
+      : [];
 
     return NextResponse.json({
       item: {
@@ -82,18 +72,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           ? parseFloat(item.apvFirst24Hours)
           : null,
       },
-      triggers: triggerRows.map((t) => ({
-        ...t,
-        triggeredAt: t.triggeredAt.toISOString(),
-      })),
-      related: related.map((r) => ({
-        ...r,
-        salesAmount: r.salesAmount ? parseFloat(r.salesAmount) : null,
-        ctrFirstHour: r.ctrFirstHour ? parseFloat(r.ctrFirstHour) : null,
-        apvFirst24Hours: r.apvFirst24Hours
-          ? parseFloat(r.apvFirst24Hours)
-          : null,
-      })),
       derivatives: derivatives.map((d) => ({
         ...d,
         salesAmount: d.salesAmount ? parseFloat(d.salesAmount) : null,
@@ -104,6 +82,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       })),
       formatNames: brandFormats.map((f) => f.name),
       formats: brandFormats,
+      repurposeTargets,
     });
   } catch (error) {
     console.error("Error fetching production item:", error);
