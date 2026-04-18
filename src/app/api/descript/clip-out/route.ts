@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems, formats } from "@/lib/db/schema";
 import { invokeDescriptAgent, DEFAULT_CLIP_PROMPT } from "@/lib/descript";
+import { detectRepurposeCapability } from "@/lib/repurpose";
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0");
@@ -66,6 +67,17 @@ export async function POST(request: NextRequest) {
   if (target.brand !== item.brand) {
     return NextResponse.json(
       { error: "Target format must belong to the same brand" },
+      { status: 400 }
+    );
+  }
+
+  const capability = detectRepurposeCapability(target.descriptClipPrompt);
+  if (capability !== "descript-clip") {
+    return NextResponse.json(
+      {
+        error:
+          "This format's prompt doesn't describe a Descript clip. Add language like \"create a clip in Descript\" to the format's prompt to enable one-click clipping.",
+      },
       { status: 400 }
     );
   }

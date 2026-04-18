@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { detectRepurposeCapability } from "@/lib/repurpose";
 
 interface BrandFormat {
   id: string;
@@ -475,27 +476,36 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <div className="flex flex-wrap gap-2">
             {repurposeTargets.map((f) => {
               const st = clipStatus[f.id];
-              const hasCustomPrompt = !!f.descriptClipPrompt?.trim();
-              const disabled = !hasDescriptProject || st?.state === "running";
+              const capability = detectRepurposeCapability(f.descriptClipPrompt);
+              const automated = capability === "descript-clip";
+              const disabled =
+                !automated || !hasDescriptProject || st?.state === "running";
+              const title = automated
+                ? (hasDescriptProject
+                    ? "Creates a new composition in this item's Descript project"
+                    : "Add this item to Descript first to enable")
+                : "This format's prompt doesn't describe a Descript clip — edit the format's prompt to enable";
               return (
                 <div key={f.id} className="flex flex-col gap-1">
                   <button
                     type="button"
                     disabled={disabled}
                     onClick={() => clipOutTo(f.id)}
-                    title={
-                      hasCustomPrompt
-                        ? "Uses this format's custom Descript prompt"
-                        : "Uses the default Descript prompt"
-                    }
+                    title={title}
                     className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border bg-card text-sm hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <span
                       className={`w-1.5 h-1.5 rounded-full ${
-                        hasCustomPrompt ? "bg-purple-500" : "bg-border"
+                        automated ? "bg-purple-500" : "bg-border"
                       }`}
                     />
                     <span className="text-foreground">{f.name}</span>
+                    {automated && !hasDescriptProject && (
+                      <span className="text-[10px] text-muted-foreground">· needs Descript</span>
+                    )}
+                    {!automated && (
+                      <span className="text-[10px] text-muted-foreground">· manual</span>
+                    )}
                     {st?.state === "running" && (
                       <span className="text-xs text-muted-foreground">· clipping…</span>
                     )}
@@ -519,8 +529,11 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         )}
 
         <p className="text-[11px] text-muted-foreground">
-          Purple dot = format has a custom Descript clip prompt. Grey dot = default prompt
-          will be used.
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 align-middle mr-1" />
+          Automated via Descript (prompt mentions &ldquo;Descript&rdquo; or &ldquo;clip&rdquo;).
+          {" "}
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-border align-middle mr-1 ml-3" />
+          Manual — no automation wired up. Edit the format to add a Descript clip prompt.
         </p>
       </div>
 
