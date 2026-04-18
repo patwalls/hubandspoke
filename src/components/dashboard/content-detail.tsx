@@ -39,6 +39,7 @@ interface RepurposeTriggerRow {
 interface DetailResponse {
   item: ProductionItem;
   related: ProductionItem[];
+  derivatives: ProductionItem[];
   formatNames: string[];
   formats: BrandFormat[];
   triggers: RepurposeTriggerRow[];
@@ -357,7 +358,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     );
   }
 
-  const { item, related, formatNames, formats: brandFormatDetails, triggers } = data;
+  const { item, related, derivatives, formatNames, formats: brandFormatDetails, triggers } = data;
   const brandFormats = formatNames;
   const isYouTube = !!item.youtubeId;
 
@@ -498,18 +499,115 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       </div>
 
-      {/* Repurposed clips from this pillar */}
+      {/* Derivative content — every Notion item with this post set as Pillar */}
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <div className="px-5 py-4 border-b border-border">
+          <h2 className="text-base font-semibold text-foreground">
+            Derivative content
+            <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
+              {derivatives.length}
+            </span>
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Everything in Notion with this post set as Pillar Content — every
+            status, every format.
+          </p>
+        </div>
+        {derivatives.length === 0 ? (
+          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+            No derivatives linked in Notion yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30 text-left">
+                  <th className="px-5 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Title
+                  </th>
+                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Format
+                  </th>
+                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Status
+                  </th>
+                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Published
+                  </th>
+                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
+                    Views
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {derivatives.map((d) => (
+                  <tr
+                    key={d.id}
+                    className="border-b border-border/50 last:border-b-0 hover:bg-accent/30"
+                  >
+                    <td className="px-5 py-2.5 min-w-0">
+                      <Link
+                        href={`/${brand}/content/${d.id}`}
+                        className="text-foreground hover:underline"
+                      >
+                        {d.title || "(Untitled)"}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2.5 text-muted-foreground">
+                      {d.format || "—"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {d.status ? (
+                        <Badge
+                          variant="secondary"
+                          className="bg-accent text-muted-foreground border border-border font-normal"
+                        >
+                          {d.status}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-muted-foreground tabular-nums">
+                      {formatDate(d.publishedDate)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      <span
+                        className={
+                          d.viewsEstimated
+                            ? "text-muted-foreground"
+                            : "text-foreground"
+                        }
+                      >
+                        {formatCompact(d.views)}
+                        {d.viewsEstimated && (
+                          <span className="ml-1 text-[10px] text-muted-foreground">
+                            est
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Recent Descript jobs — log of auto-created clips, separate from the
+          Notion-synced derivatives above (appears here instantly; shows up in
+          Derivative content after the next Notion sync) */}
       <div className="rounded-lg border border-border bg-card p-5 space-y-3">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-base font-semibold text-foreground">
-              Repurposed clips
+              Recent Descript jobs
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Every time you click Repurpose below, a new clip is created in this
-              item&apos;s Descript project and a record is logged here. This is
-              Descript-only for now — Notion-synced production items are separate
-              (see the note after the list).
+              Clip jobs fired from Repurpose below. Each one creates a Descript
+              composition and a Notion page — on the next sync that Notion page
+              appears in Derivative content above.
             </p>
           </div>
           {descriptProjectUrl && (
@@ -527,7 +625,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
 
         {triggers && triggers.length > 0 ? (
           <div className="divide-y divide-border/70 border border-border rounded-md overflow-hidden">
-            {triggers.map((t) => {
+            {triggers.slice(0, 5).map((t) => {
               const descriptUrl = descriptCompositionUrl(
                 t.descriptProjectUrl,
                 t.descriptCompositionId
@@ -582,16 +680,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            No clips created from this pillar yet. Click Repurpose on any format
-            below to make the first one.
+            No Descript jobs fired yet. Click Repurpose on any format below.
           </p>
         )}
-
-        <p className="text-[11px] text-muted-foreground">
-          Each clip creates a Descript composition <em>and</em> a matching
-          Notion page (status: Idea, linked back to this pillar). On the next
-          Notion sync it appears as a child production item in the dashboard.
-        </p>
       </div>
 
       {/* Repurpose to format */}

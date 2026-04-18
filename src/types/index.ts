@@ -29,6 +29,8 @@ export interface ProductionItem {
   descriptProjectId?: string | null;
   descriptProjectUrl?: string | null;
   descriptImportedAt?: string | null;
+  pillarContentNotionId?: string | null;
+  pillarContentItemId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

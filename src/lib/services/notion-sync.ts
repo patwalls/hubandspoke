@@ -1,7 +1,7 @@
 import { Client } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
-import { eq, notInArray } from "drizzle-orm";
+import { eq, notInArray, sql } from "drizzle-orm";
 import { estimateViewsFromLikes, shouldEstimate } from "./view-estimator";
 
 const DATABASE_ID = "8cb6cee4163d4282a5c87991ea689bde";
@@ -156,6 +156,13 @@ function extractCampaign(properties: any): string | null {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractPillarContentNotionId(properties: any): string | null {
+  const rel = properties["Pillar Content"]?.relation;
+  if (!Array.isArray(rel) || rel.length === 0) return null;
+  return rel[0]?.id || null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractProducerEmail(properties: any): string | null {
   const people = properties["Producer"]?.people;
   if (!Array.isArray(people) || people.length === 0) return null;
@@ -302,6 +309,7 @@ export async function syncFromNotion(): Promise<{
         apvFirst24Hours: extractNumber(properties, "APV (First 24 Hours)")?.toString() ?? null,
         producerEmail: extractProducerEmail(properties),
         producerNotionUserId: extractProducerUserId(properties),
+        pillarContentNotionId: extractPillarContentNotionId(properties),
         viewsEstimated,
         updatedAt: new Date(),
       };
@@ -359,6 +367,26 @@ export async function syncFromNotion(): Promise<{
         .returning();
       totalDeleted = deleted.length;
     }
+
+    // Resolve pillar_content_item_id from pillar_content_notion_id in a single
+    // indexed UPDATE. Done after the main loop so order-of-insert doesn't
+    // matter — every derivative and its pillar are both in the table by now.
+    await db.execute(sql`
+      UPDATE production_items AS derivative
+      SET pillar_content_item_id = pillar.id
+      FROM production_items AS pillar
+      WHERE derivative.pillar_content_notion_id = pillar.notion_id
+        AND (
+          derivative.pillar_content_item_id IS NULL
+          OR derivative.pillar_content_item_id <> pillar.id
+        )
+    `);
+    await db.execute(sql`
+      UPDATE production_items
+      SET pillar_content_item_id = NULL
+      WHERE pillar_content_notion_id IS NULL
+        AND pillar_content_item_id IS NOT NULL
+    `);
 
     // Update sync log
     await db

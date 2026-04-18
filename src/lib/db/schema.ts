@@ -10,6 +10,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -51,6 +52,17 @@ export const productionItems = pgTable(
     descriptImportedAt: timestamp("descript_imported_at", {
       withTimezone: true,
     }),
+    // Raw Notion page ID of the pillar (captured directly from the "Pillar
+    // Content" relation during sync). Kept alongside the resolved FK so we can
+    // still reconcile if a pillar is re-synced out of order.
+    pillarContentNotionId: text("pillar_content_notion_id"),
+    // Resolved self-referencing FK to this table's id. Populated by a single
+    // UPDATE at the end of each Notion sync by joining on notion_id. This is
+    // what derivative queries hit — indexed for fast lookup.
+    pillarContentItemId: uuid("pillar_content_item_id").references(
+      (): AnyPgColumn => productionItems.id,
+      { onDelete: "set null" }
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -63,6 +75,8 @@ export const productionItems = pgTable(
     index("idx_production_items_status").on(table.status),
     index("idx_production_items_brand").on(table.brand),
     index("idx_production_items_last_perf_sync").on(table.lastPerformanceSyncAt),
+    index("idx_production_items_pillar_notion").on(table.pillarContentNotionId),
+    index("idx_production_items_pillar_item").on(table.pillarContentItemId),
   ]
 );
 

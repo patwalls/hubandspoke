@@ -35,6 +35,15 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           .orderBy(desc(productionItems.publishedDate))
       : [];
 
+    // Derivatives: every production item whose "Pillar Content" relation in
+    // Notion points at this item. Includes all statuses (Idea, Draft,
+    // Published, anything). Indexed lookup on pillar_content_item_id FK.
+    const derivatives = await db
+      .select()
+      .from(productionItems)
+      .where(eq(productionItems.pillarContentItemId, id))
+      .orderBy(desc(productionItems.publishedDate));
+
     const brandFormats = await db
       .select({
         id: formats.id,
@@ -83,6 +92,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         ctrFirstHour: r.ctrFirstHour ? parseFloat(r.ctrFirstHour) : null,
         apvFirst24Hours: r.apvFirst24Hours
           ? parseFloat(r.apvFirst24Hours)
+          : null,
+      })),
+      derivatives: derivatives.map((d) => ({
+        ...d,
+        salesAmount: d.salesAmount ? parseFloat(d.salesAmount) : null,
+        ctrFirstHour: d.ctrFirstHour ? parseFloat(d.ctrFirstHour) : null,
+        apvFirst24Hours: d.apvFirst24Hours
+          ? parseFloat(d.apvFirst24Hours)
           : null,
       })),
       formatNames: brandFormats.map((f) => f.name),
