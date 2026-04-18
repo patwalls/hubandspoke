@@ -53,8 +53,7 @@ interface FormatRow {
   producer: string | null;
   producerAsanaGid: string | null;
   instructions: string | null;
-  contentType: string | null;
-  repurposeTargetIds: string[];
+  parentFormatId: string | null;
 }
 
 interface ContentItem {
@@ -83,6 +82,8 @@ interface DetailMetrics {
 
 interface DetailResponse {
   format: FormatRow;
+  children: FormatRow[];
+  ancestors: { id: string; name: string }[];
   items: ContentItem[];
   metrics: DetailMetrics;
 }
@@ -126,12 +127,12 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [producer, setProducer] = useState("");
   const [producerAsanaGid, setProducerAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [contentType, setContentType] = useState<string>("pillar");
-  const [repurposeTargetIds, setRepurposeTargetIds] = useState<string[]>([]);
+  const [parentFormatId, setParentFormatId] = useState<string | null>(null);
 
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
   const [producerPopoverOpen, setProducerPopoverOpen] = useState(false);
   const [channelsPopoverOpen, setChannelsPopoverOpen] = useState(false);
+  const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
   const [addDerivativeOpen, setAddDerivativeOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -188,8 +189,8 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     }
   }
 
-  const descriptClipTargets = allFormats.filter((f) =>
-    (repurposeTargetIds || []).includes(f.id)
+  const descriptClipTargets = (data?.children ?? []).filter(
+    (f) => f.id !== formatId
   );
 
   const [descriptItem, setDescriptItem] = useState<ContentItem | null>(null);
@@ -333,8 +334,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     setProducer(f.producer || "");
     setProducerAsanaGid(f.producerAsanaGid || "");
     setInstructions(f.instructions || "");
-    setContentType(f.contentType || "pillar");
-    setRepurposeTargetIds(f.repurposeTargetIds || []);
+    setParentFormatId(f.parentFormatId ?? null);
   }
 
   const load = useCallback(async () => {
@@ -386,10 +386,26 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     );
   }
 
-  function toggleRepurpose(id: string) {
-    setRepurposeTargetIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+  async function setChildParent(childId: string, newParentId: string | null) {
+    const child = allFormats.find((f) => f.id === childId);
+    if (!child) return;
+    await fetch("/api/formats", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: child.id,
+        name: child.name,
+        channels: child.channels || [],
+        viewThreshold: child.viewThreshold ?? null,
+        editor: child.editor ?? null,
+        editorAsanaGid: child.editorAsanaGid ?? null,
+        producer: child.producer ?? null,
+        producerAsanaGid: child.producerAsanaGid ?? null,
+        instructions: child.instructions ?? null,
+        parentFormatId: newParentId,
+      }),
+    });
+    await load();
   }
 
   async function handleSave() {
@@ -407,8 +423,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         producer: producer || null,
         producerAsanaGid: producerAsanaGid || null,
         instructions: instructions || null,
-        contentType,
-        repurposeTargetIds,
+        parentFormatId,
       };
       const res = await fetch("/api/formats", {
         method: "PUT",
@@ -466,8 +481,38 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     );
   }
 
-  const { items, metrics } = data;
-  const isPillar = (contentType || "pillar") === "pillar";
+  const { items, metrics, children, ancestors } = data;
+  const isPillar = !parentFormatId;
+
+  // Build descendant set to prevent cycles in parent picker.
+  const descendantIds = new Set<string>();
+  const collectDescendants = (id: string) => {
+    for (const f of allFormats) {
+      if (f.parentFormatId === id && !descendantIds.has(f.id)) {
+        descendantIds.add(f.id);
+        collectDescendants(f.id);
+      }
+    }
+  };
+  collectDescendants(formatId);
+
+  const parentOptions = allFormats
+    .filter((f) => f.id !== formatId && !descendantIds.has(f.id))
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const selectedParent = parentFormatId
+    ? allFormats.find((f) => f.id === parentFormatId) ?? null
+    : null;
+
+  // Formats that could be reparented under this format (root + not self + not descendant).
+  const reparentCandidates = allFormats.filter(
+    (f) =>
+      f.id !== formatId &&
+      !descendantIds.has(f.id) &&
+      !f.parentFormatId &&
+      !children.some((c) => c.id === f.id)
+  );
 
   return (
     <div className="space-y-6">
@@ -564,33 +609,73 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label>Content Type</Label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setContentType("pillar")}
-                className={`flex-1 flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm transition-all ${
-                  isPillar
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                }`}
-              >
-                <span className="text-base">🎯</span>
-                <span className="font-medium">Pillar</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setContentType("repurposed")}
-                className={`flex-1 flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm transition-all ${
-                  !isPillar
-                    ? "border-purple-500 bg-purple-50 text-purple-700"
-                    : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                }`}
-              >
-                <span className="text-base">🔄</span>
-                <span className="font-medium">Repurposed</span>
-              </button>
-            </div>
+            <Label>Parent Format</Label>
+            <Popover open={parentPopoverOpen} onOpenChange={setParentPopoverOpen}>
+              <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+                {selectedParent ? (
+                  <span className="flex items-center gap-2 truncate">
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 shrink-0">
+                      Child of
+                    </span>
+                    <span className="truncate">{selectedParent.name}</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
+                      No parent
+                    </span>
+                    <span className="text-muted-foreground">root / pillar</span>
+                  </span>
+                )}
+                <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search formats…" />
+                  <CommandList>
+                    <CommandEmpty>No matching format.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        onSelect={() => {
+                          setParentFormatId(null);
+                          setParentPopoverOpen(false);
+                        }}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
+                            No parent
+                          </span>
+                          <span className="text-sm">Root / pillar</span>
+                        </span>
+                      </CommandItem>
+                      {parentOptions.map((opt) => (
+                        <CommandItem
+                          key={opt.id}
+                          value={opt.name}
+                          onSelect={() => {
+                            setParentFormatId(opt.id);
+                            setParentPopoverOpen(false);
+                          }}
+                          data-checked={parentFormatId === opt.id ? "true" : undefined}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="text-xs text-gray-400">
+                              {opt.parentFormatId ? "derivative" : "root"}
+                            </span>
+                            <span className="text-sm">{opt.name}</span>
+                          </span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            {ancestors.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Chain: {ancestors.map((a) => a.name).join(" → ")} → <strong>{name}</strong>
+              </p>
+            )}
           </div>
         </div>
 
@@ -826,178 +911,167 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         </div>
       </div>
 
-      {/* Repurpose targets / automations */}
-      {(() => {
-        const selectedDerivatives = repurposeTargetIds
-          .map((id) => allFormats.find((f) => f.id === id))
-          .filter((f): f is FormatRow => !!f && f.id !== formatId);
-        const unselectedDerivatives = allFormats.filter(
-          (f) => f.id !== formatId && !repurposeTargetIds.includes(f.id)
-        );
-        return (
-          <div className="rounded-lg border border-border bg-card overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <h2 className="text-base font-semibold text-foreground">
-                  Repurpose &amp; automations
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  When a post in this format hits the view threshold, Asana
-                  tasks are created for each derivative format below.
-                </p>
-              </div>
-              <Popover open={addDerivativeOpen} onOpenChange={setAddDerivativeOpen}>
-                <PopoverTrigger
-                  disabled={unselectedDerivatives.length === 0}
-                  className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-xs hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  + Add
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-0" align="end">
-                  <Command>
-                    <CommandInput placeholder="Search formats…" />
-                    <CommandList>
-                      <CommandEmpty>No formats to add.</CommandEmpty>
-                      <CommandGroup>
-                        {unselectedDerivatives.map((f) => {
-                          const spoke = (f.contentType || "pillar") === "repurposed";
-                          return (
-                            <CommandItem
-                              key={f.id}
-                              value={f.name}
-                              onSelect={() => {
-                                setRepurposeTargetIds((prev) => [...prev, f.id]);
-                                setAddDerivativeOpen(false);
-                              }}
-                            >
-                              <span className="flex items-center gap-2 w-full">
-                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
-                                  spoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
-                                }`}>
-                                  {spoke ? "Repurposed" : "Pillar"}
-                                </span>
-                                <span className="text-sm truncate">{f.name}</span>
-                              </span>
-                            </CommandItem>
-                          );
-                        })}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-            {selectedDerivatives.length === 0 ? (
-              <div className="px-5 py-12 text-center text-sm text-muted-foreground">
-                No derivative formats yet. Click <span className="font-medium text-foreground">+ Add</span> to link one.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/30 text-left">
-                      <th className="px-5 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                        Name
-                      </th>
-                      <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                        Channels
-                      </th>
-                      <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
-                        Threshold
-                      </th>
-                      <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                        Editor
-                      </th>
-                      <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                        Producer
-                      </th>
-                      <th className="px-3 py-2 w-10" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedDerivatives.map((f) => {
-                      const spoke = (f.contentType || "pillar") === "repurposed";
-                      return (
-                        <tr
-                          key={f.id}
-                          className="border-b border-border/50 last:border-b-0 hover:bg-accent/30"
-                        >
-                          <td className="px-5 py-2.5">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Link
-                                href={`/${brand}/formats/${f.id}`}
-                                className="text-foreground hover:underline truncate block max-w-[260px] font-medium"
-                              >
-                                {f.name}
-                              </Link>
-                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
-                                spoke ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"
-                              }`}>
-                                {spoke ? "Repurposed" : "Pillar"}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <div className="flex flex-wrap gap-1 max-w-[220px]">
-                              {(f.channels || []).slice(0, 3).map((ch) => (
-                                <Badge key={ch} variant="secondary" className="text-xs">
-                                  {ch}
-                                </Badge>
-                              ))}
-                              {(f.channels || []).length > 3 && (
-                                <span className="text-xs text-muted-foreground">
-                                  +{(f.channels || []).length - 3}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-                            {f.viewThreshold != null ? f.viewThreshold.toLocaleString() : "—"}
-                          </td>
-                          <td className="px-3 py-2.5 text-muted-foreground">
-                            {f.editor ? (
-                              <span className="flex items-center gap-1.5">
-                                <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-                                  {f.editor.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                                </span>
-                                <span className="truncate max-w-[120px]">{f.editor}</span>
-                              </span>
-                            ) : "—"}
-                          </td>
-                          <td className="px-3 py-2.5 text-muted-foreground">
-                            {f.producer ? (
-                              <span className="flex items-center gap-1.5">
-                                <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-                                  {f.producer.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                                </span>
-                                <span className="truncate max-w-[120px]">{f.producer}</span>
-                              </span>
-                            ) : "—"}
-                          </td>
-                          <td className="px-3 py-2.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() => toggleRepurpose(f.id)}
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-red-600"
-                              aria-label="Remove derivative"
-                              title="Remove"
-                            >
-                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <div className="px-5 py-3 border-t border-border text-xs text-muted-foreground">
-              Click <span className="font-medium text-foreground">Save changes</span> above to apply.
-            </div>
+      {/* Derivatives — direct children in the repurpose tree */}
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">
+              Derivatives
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Direct children in the repurpose tree. When a post in this format hits one of these children&apos;s thresholds, an Asana task is created for that child.
+            </p>
           </div>
-        );
-      })()}
+          <Popover open={addDerivativeOpen} onOpenChange={setAddDerivativeOpen}>
+            <PopoverTrigger
+              disabled={reparentCandidates.length === 0}
+              className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-xs hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              + Reparent a root
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-0" align="end">
+              <Command>
+                <CommandInput placeholder="Search root formats…" />
+                <CommandList>
+                  <CommandEmpty>No eligible root formats.</CommandEmpty>
+                  <CommandGroup>
+                    {reparentCandidates.map((f) => (
+                      <CommandItem
+                        key={f.id}
+                        value={f.name}
+                        onSelect={async () => {
+                          setAddDerivativeOpen(false);
+                          await setChildParent(f.id, formatId);
+                        }}
+                      >
+                        <span className="flex items-center gap-2 w-full">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-blue-50 text-blue-700">
+                            Root
+                          </span>
+                          <span className="text-sm truncate">{f.name}</span>
+                        </span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        </div>
+        {children.length === 0 ? (
+          <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+            No derivatives yet. Create a new format and choose this one as its parent, or reparent an existing root above.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30 text-left">
+                  <th className="px-5 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Name
+                  </th>
+                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Channels
+                  </th>
+                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
+                    Threshold
+                  </th>
+                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Editor
+                  </th>
+                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    Producer
+                  </th>
+                  <th className="px-3 py-2 w-10" />
+                </tr>
+              </thead>
+              <tbody>
+                {children.map((f) => (
+                  <tr
+                    key={f.id}
+                    className="border-b border-border/50 last:border-b-0 hover:bg-accent/30"
+                  >
+                    <td className="px-5 py-2.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Link
+                          href={`/${brand}/formats/${f.id}`}
+                          className="text-foreground hover:underline truncate block max-w-[260px] font-medium"
+                        >
+                          {f.name}
+                        </Link>
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-purple-50 text-purple-700">
+                          Derivative
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-wrap gap-1 max-w-[220px]">
+                        {(f.channels || []).slice(0, 3).map((ch) => (
+                          <Badge key={ch} variant="secondary" className="text-xs">
+                            {ch}
+                          </Badge>
+                        ))}
+                        {(f.channels || []).length > 3 && (
+                          <span className="text-xs text-muted-foreground">
+                            +{(f.channels || []).length - 3}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+                      {f.viewThreshold != null ? f.viewThreshold.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-muted-foreground">
+                      {f.editor ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                            {f.editor.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                          </span>
+                          <span className="truncate max-w-[120px]">{f.editor}</span>
+                        </span>
+                      ) : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-muted-foreground">
+                      {f.producer ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                            {f.producer.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                          </span>
+                          <span className="truncate max-w-[120px]">{f.producer}</span>
+                        </span>
+                      ) : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                          aria-label="Row actions"
+                        >
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => router.push(`/${brand}/formats/${f.id}`)}>
+                            Edit derivative
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={async () => {
+                              if (!confirm(`Unlink "${f.name}" from this parent? It will become a root format.`)) return;
+                              await setChildParent(f.id, null);
+                            }}
+                            className="text-red-600 focus:text-red-700"
+                          >
+                            Unlink (promote to root)
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Content list */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">

@@ -13,13 +13,8 @@ const formats = pgTable('formats', {
   brand: text('brand').notNull(),
   channels: jsonb('channels'),
   viewThreshold: integer('view_threshold'),
+  parentFormatId: uuid('parent_format_id'),
   contentOwner: text('content_owner'),
-});
-
-const formatRepurposeMappings = pgTable('format_repurpose_mappings', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  sourceFormatId: uuid('source_format_id').notNull(),
-  targetFormatId: uuid('target_format_id').notNull(),
 });
 
 async function createAsanaTask(name, notes) {
@@ -53,16 +48,10 @@ async function main() {
   const [source] = await db.select().from(formats).where(eq(formats.id, sourceFormatId));
   console.log(`Source format: ${source.name} | Threshold: ${source.viewThreshold}`);
 
-  // Fetch repurpose mappings
-  const mappings = await db.select().from(formatRepurposeMappings)
-    .where(eq(formatRepurposeMappings.sourceFormatId, sourceFormatId));
-  console.log(`Repurpose targets: ${mappings.length}`);
-
-  // Fetch target formats
-  const allFormats = await db.select().from(formats);
-  const targets = mappings
-    .map(m => allFormats.find(f => f.id === m.targetFormatId))
-    .filter(Boolean);
+  // Direct children of this source format
+  const targets = await db.select().from(formats)
+    .where(eq(formats.parentFormatId, sourceFormatId));
+  console.log(`Repurpose targets: ${targets.length}`);
 
   // Create Asana tasks
   const results = [];

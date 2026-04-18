@@ -26,7 +26,7 @@ import {
 interface BrandFormat {
   id: string;
   name: string;
-  contentType: string | null;
+  parentFormatId: string | null;
   instructions: string | null;
 }
 

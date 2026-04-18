@@ -2,10 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
   formats,
-  formatRepurposeMappings,
   productionItems,
 } from "@/lib/db/schema";
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -25,10 +24,26 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Format not found" }, { status: 404 });
     }
 
-    const mappings = await db
+    const children = await db
       .select()
-      .from(formatRepurposeMappings)
-      .where(eq(formatRepurposeMappings.sourceFormatId, id));
+      .from(formats)
+      .where(eq(formats.parentFormatId, id))
+      .orderBy(formats.name);
+
+    // Walk up the chain to build an ancestors breadcrumb.
+    const ancestors: { id: string; name: string }[] = [];
+    let cursor = format.parentFormatId;
+    const seen = new Set<string>();
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      const [row] = await db
+        .select({ id: formats.id, name: formats.name, parentFormatId: formats.parentFormatId })
+        .from(formats)
+        .where(eq(formats.id, cursor));
+      if (!row) break;
+      ancestors.unshift({ id: row.id, name: row.name });
+      cursor = row.parentFormatId;
+    }
 
     const items = await db
       .select()
@@ -59,10 +74,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     });
 
     return NextResponse.json({
-      format: {
-        ...format,
-        repurposeTargetIds: mappings.map((m) => m.targetFormatId),
-      },
+      format,
+      children,
+      ancestors,
       items: items.map((i) => ({
         id: i.id,
         title: i.title,

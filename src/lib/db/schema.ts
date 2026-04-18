@@ -81,52 +81,39 @@ export const productionItems = pgTable(
   ]
 );
 
-export const formats = pgTable("formats", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  name: text("name").notNull().unique(),
-  brand: text("brand").default("starter-story").notNull(),
-  channels: jsonb("channels").$type<string[]>().default([]),
-  event: text("event"),
-  viewThreshold: integer("view_threshold"),
-  contentOwner: text("content_owner"), // deprecated — use editor/producer
-  contentOwnerAsanaGid: text("content_owner_asana_gid"), // deprecated
-  editor: text("editor"),
-  editorAsanaGid: text("editor_asana_gid"),
-  producer: text("producer"),
-  producerAsanaGid: text("producer_asana_gid"),
-  instructions: text("instructions"),
-  contentType: text("content_type").default("pillar"), // "pillar" (hub) or "repurposed" (spoke)
-  notionPageId: text("notion_page_id"), // Notion page ID for format relation
-  editorNotionUserId: text("editor_notion_user_id"), // Notion user ID for editor/creator
-  producerNotionUserId: text("producer_notion_user_id"), // Notion user ID for producer/reviewer
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
-
-export const formatRepurposeMappings = pgTable(
-  "format_repurpose_mappings",
+export const formats = pgTable(
+  "formats",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    sourceFormatId: uuid("source_format_id")
-      .references(() => formats.id, { onDelete: "cascade" })
-      .notNull(),
-    targetFormatId: uuid("target_format_id")
-      .references(() => formats.id, { onDelete: "cascade" })
-      .notNull(),
+    name: text("name").notNull().unique(),
+    brand: text("brand").default("starter-story").notNull(),
+    channels: jsonb("channels").$type<string[]>().default([]),
+    event: text("event"),
+    viewThreshold: integer("view_threshold"),
+    contentOwner: text("content_owner"), // deprecated — use editor/producer
+    contentOwnerAsanaGid: text("content_owner_asana_gid"), // deprecated
+    editor: text("editor"),
+    editorAsanaGid: text("editor_asana_gid"),
+    producer: text("producer"),
+    producerAsanaGid: text("producer_asana_gid"),
+    instructions: text("instructions"),
+    // NULL parent = root (pillar). ON DELETE SET NULL promotes direct children
+    // to roots so we don't silently wipe entire subtrees.
+    parentFormatId: uuid("parent_format_id").references(
+      (): AnyPgColumn => formats.id,
+      { onDelete: "set null" }
+    ),
+    notionPageId: text("notion_page_id"), // Notion page ID for format relation
+    editorNotionUserId: text("editor_notion_user_id"), // Notion user ID for editor/creator
+    producerNotionUserId: text("producer_notion_user_id"), // Notion user ID for producer/reviewer
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
-  (table) => [
-    uniqueIndex("idx_format_repurpose_unique").on(
-      table.sourceFormatId,
-      table.targetFormatId
-    ),
-  ]
+  (table) => [index("idx_formats_parent_format_id").on(table.parentFormatId)]
 );
 
 export const repurposeTriggers = pgTable(

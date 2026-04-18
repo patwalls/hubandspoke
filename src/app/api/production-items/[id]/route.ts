@@ -3,9 +3,8 @@ import { db } from "@/lib/db";
 import {
   productionItems,
   formats,
-  formatRepurposeMappings,
 } from "@/lib/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -38,29 +37,34 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .select({
         id: formats.id,
         name: formats.name,
-        contentType: formats.contentType,
+        parentFormatId: formats.parentFormatId,
         instructions: formats.instructions,
       })
       .from(formats)
       .where(eq(formats.brand, item.brand))
       .orderBy(formats.name);
 
-    // Scope Repurpose targets to formats explicitly mapped from this item's
-    // source format. The item stores its format as a text name, so resolve
-    // the name to an id via this brand's formats.
+    // Scope Repurpose targets to direct children of this item's source format.
+    // The item stores its format as a text name, so resolve it via brandFormats.
     const sourceFormat = item.format
       ? brandFormats.find((f) => f.name === item.format)
       : undefined;
-    let repurposeTargetIds: string[] = [];
-    if (sourceFormat) {
-      const mappings = await db
-        .select({ targetFormatId: formatRepurposeMappings.targetFormatId })
-        .from(formatRepurposeMappings)
-        .where(eq(formatRepurposeMappings.sourceFormatId, sourceFormat.id));
-      repurposeTargetIds = mappings.map((m) => m.targetFormatId);
-    }
-    const repurposeTargets = repurposeTargetIds.length
-      ? brandFormats.filter((f) => repurposeTargetIds.includes(f.id))
+    const repurposeTargets = sourceFormat
+      ? await db
+          .select({
+            id: formats.id,
+            name: formats.name,
+            parentFormatId: formats.parentFormatId,
+            instructions: formats.instructions,
+          })
+          .from(formats)
+          .where(
+            and(
+              eq(formats.parentFormatId, sourceFormat.id),
+              eq(formats.brand, item.brand)
+            )
+          )
+          .orderBy(formats.name)
       : [];
 
     return NextResponse.json({

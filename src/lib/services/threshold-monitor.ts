@@ -1,12 +1,10 @@
 /**
  * Threshold monitor for Starter Story content repurpose automation.
  *
- * The view threshold lives on the REPURPOSED (target) format, not the pillar.
- * Logic: "When pillar content exceeds the target format's Repurpose View Minimum,
- * create a task for that repurposed format."
- *
- * Example: "Business Breakdown → Full Video On X" has viewThreshold=50,000.
- * When a Business Breakdown video hits 50K views → create a "Full Video On X" task.
+ * Formats form a tree via parentFormatId. When a production item's views
+ * exceed any of its format's CHILDREN's viewThreshold, we create a task for
+ * that child format — then when the child's own content eventually hits its
+ * grandchild's threshold, the chain continues.
  *
  * Ships with DRY_RUN = true by default for safety.
  */
@@ -15,11 +13,10 @@ import { db } from "@/lib/db";
 import {
   productionItems,
   formats,
-  formatRepurposeMappings,
   repurposeTriggers,
   syncLogs,
 } from "@/lib/db/schema";
-import { eq, and, gt, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, gt, isNotNull } from "drizzle-orm";
 import { createNotionRepurposeTask } from "./notion-tasks";
 
 // Safety: dry-run by default. Set env SS_AUTOMATION_LIVE=true to go live.
@@ -87,48 +84,28 @@ export async function checkSSThresholds(): Promise<ThresholdCheckResult> {
 
     result.itemsChecked = ssItems.length;
 
-    // 2. Get ALL SS pillar formats (source side of mappings)
-    const pillarFormats = await db
+    // 2. Get every SS format; build a parent → direct-children index and
+    //    a name → format lookup. Any format can now be a source.
+    const brandFormats = await db
       .select()
       .from(formats)
-      .where(
-        and(
-          eq(formats.brand, "starter-story"),
-          eq(formats.contentType, "pillar")
-        )
-      );
+      .where(eq(formats.brand, "starter-story"));
 
-    if (pillarFormats.length === 0) return result;
+    if (brandFormats.length === 0) return result;
 
-    // Build format name → format lookup (case-insensitive)
     const formatByName = new Map(
-      pillarFormats.map((f) => [f.name.toLowerCase().trim(), f])
+      brandFormats.map((f) => [f.name.toLowerCase().trim(), f])
     );
 
-    // 3. Get repurpose mappings for these pillar formats
-    const pillarFormatIds = pillarFormats.map((f) => f.id);
-    const mappings = await db
-      .select({
-        sourceFormatId: formatRepurposeMappings.sourceFormatId,
-        targetFormatId: formatRepurposeMappings.targetFormatId,
-      })
-      .from(formatRepurposeMappings)
-      .where(
-        inArray(formatRepurposeMappings.sourceFormatId, pillarFormatIds)
-      );
+    const childrenByParent = new Map<string, typeof brandFormats>();
+    for (const f of brandFormats) {
+      if (!f.parentFormatId) continue;
+      const arr = childrenByParent.get(f.parentFormatId) ?? [];
+      arr.push(f);
+      childrenByParent.set(f.parentFormatId, arr);
+    }
 
-    if (mappings.length === 0) return result;
-
-    // 4. Get target (repurposed) formats — threshold lives HERE
-    const targetFormatIds = [...new Set(mappings.map((m) => m.targetFormatId))];
-    const targetFormats = await db
-      .select()
-      .from(formats)
-      .where(inArray(formats.id, targetFormatIds));
-
-    const targetFormatMap = new Map(targetFormats.map((f) => [f.id, f]));
-
-    // 5. Get existing triggers for dedup
+    // 3. Get existing triggers for dedup
     const existingTriggers = await db
       .select({
         productionItemId: repurposeTriggers.productionItemId,
@@ -143,31 +120,23 @@ export async function checkSSThresholds(): Promise<ThresholdCheckResult> {
       )
     );
 
-    // 6. Check each item against target format thresholds
+    // 4. Check each item against its format's direct-children thresholds
     let tasksCreatedThisRun = 0;
 
     for (const item of ssItems) {
       if (!item.format || !item.views) continue;
 
-      // Match item to its pillar (source) format
       const sourceFormat = formatByName.get(item.format.toLowerCase().trim());
       if (!sourceFormat) continue;
 
-      // Get all repurpose mappings from this pillar format
-      const itemMappings = mappings.filter(
-        (m) => m.sourceFormatId === sourceFormat.id
-      );
+      const children = childrenByParent.get(sourceFormat.id) ?? [];
 
-      for (const mapping of itemMappings) {
-        const targetFormat = targetFormatMap.get(mapping.targetFormatId);
-        if (!targetFormat) continue;
-
-        // Threshold lives on the TARGET (repurposed) format
+      for (const targetFormat of children) {
         if (!targetFormat.viewThreshold) continue;
         if (item.views < targetFormat.viewThreshold) continue;
 
         // Dedup check
-        const dedupKey = `${item.id}|${mapping.sourceFormatId}|${mapping.targetFormatId}`;
+        const dedupKey = `${item.id}|${sourceFormat.id}|${targetFormat.id}`;
         if (triggerSet.has(dedupKey)) {
           result.skippedDuplicate++;
           continue;
@@ -195,7 +164,6 @@ export async function checkSSThresholds(): Promise<ThresholdCheckResult> {
 
         if (DRY_RUN) continue;
 
-        // Safety cap
         if (tasksCreatedThisRun >= MAX_TASKS_PER_RUN) {
           result.errors.push(
             `Hit max tasks cap (${MAX_TASKS_PER_RUN}), stopping`
@@ -203,7 +171,6 @@ export async function checkSSThresholds(): Promise<ThresholdCheckResult> {
           break;
         }
 
-        // Create Notion task
         try {
           const taskResult = await createNotionRepurposeTask({
             pillarContentTitle: item.title || "(Untitled)",
@@ -216,16 +183,14 @@ export async function checkSSThresholds(): Promise<ThresholdCheckResult> {
           });
 
           if (taskResult.success) {
-            // Record trigger for dedup
             await db.insert(repurposeTriggers).values({
               productionItemId: item.id,
-              sourceFormatId: mapping.sourceFormatId,
-              targetFormatId: mapping.targetFormatId,
+              sourceFormatId: sourceFormat.id,
+              targetFormatId: targetFormat.id,
               notionTaskPageId: taskResult.notionPageId || null,
               viewsAtTrigger: item.views,
             });
 
-            // Add to dedup set so we don't double-trigger in same run
             triggerSet.add(dedupKey);
             tasksCreatedThisRun++;
             result.tasksCreated++;

@@ -195,38 +195,41 @@ async function main() {
 
   console.log(`Formats: ${created} created, ${updated} updated`);
 
-  // Rebuild format_repurpose_mappings from the Notion "Repurpose" relation.
-  // Clear first (only for the formats we just imported), then re-insert.
-  const sourceIds = [...notionIdToLocalId.values()];
-  if (sourceIds.length > 0) {
-    await sql`
-      DELETE FROM format_repurpose_mappings
-      WHERE source_format_id = ANY(${sourceIds}::uuid[])
-    `;
-  }
-
-  let mappingsCreated = 0;
+  // Set parent_format_id on each target based on the Notion "Repurpose" relation.
+  // Each format has at most one parent: if Notion lists the same target under multiple
+  // sources, last-writer-wins (we warn when overwriting an existing parent).
+  let parentsSet = 0;
+  let parentsOverwritten = 0;
   for (const r of unique) {
     const sourceId = notionIdToLocalId.get(r.notionId);
     if (!sourceId) continue;
     for (const targetNotionId of r.repurposeTargetIds) {
       const targetId = notionIdToLocalId.get(targetNotionId);
-      if (!targetId) continue; // target wasn't imported, skip
+      if (!targetId) continue;
+      if (targetId === sourceId) continue; // skip self-refs
       try {
-        await sql`
-          INSERT INTO format_repurpose_mappings (source_format_id, target_format_id)
-          VALUES (${sourceId}, ${targetId})
-          ON CONFLICT DO NOTHING
+        const [existing] = await sql`
+          SELECT parent_format_id FROM formats WHERE id = ${targetId}
         `;
-        mappingsCreated++;
+        if (existing?.parent_format_id && existing.parent_format_id !== sourceId) {
+          console.warn(
+            `  Overwriting parent for target ${targetId}: was ${existing.parent_format_id}, now ${sourceId}`
+          );
+          parentsOverwritten++;
+        }
+        await sql`
+          UPDATE formats SET parent_format_id = ${sourceId}, updated_at = NOW()
+          WHERE id = ${targetId}
+        `;
+        parentsSet++;
       } catch (err) {
         console.warn(
-          `  Skipped mapping ${sourceId} → ${targetId}: ${err.message}`
+          `  Skipped parent assignment ${targetId} -> ${sourceId}: ${err.message}`
         );
       }
     }
   }
-  console.log(`Repurpose mappings: ${mappingsCreated} created`);
+  console.log(`Parent assignments: ${parentsSet} set (${parentsOverwritten} overwritten)`);
 
   // Log the sync
   await sql`

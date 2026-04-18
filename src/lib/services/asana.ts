@@ -58,7 +58,7 @@ export async function createAsanaTask(opts: {
 /* ------------------------------------------------------------------ */
 
 import { db } from "@/lib/db";
-import { formats, formatRepurposeMappings } from "@/lib/db/schema";
+import { formats } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 export interface TriggerResult {
@@ -143,21 +143,15 @@ export async function triggerRepurposeTasks(
 
   if (!source) throw new Error(`Format ${sourceFormatId} not found`);
 
-  // 2. Fetch repurpose mappings for this source
-  const mappings = await db
+  // 2. Direct children of this source format are the repurpose targets.
+  const targetFormats = await db
     .select()
-    .from(formatRepurposeMappings)
-    .where(eq(formatRepurposeMappings.sourceFormatId, sourceFormatId));
+    .from(formats)
+    .where(eq(formats.parentFormatId, sourceFormatId));
 
-  if (mappings.length === 0) {
+  if (targetFormats.length === 0) {
     return { sourceFormat: source.name, tasksCreated: [] };
   }
-
-  // 3. Fetch all target formats in one query
-  const allFormats = await db.select().from(formats);
-  const targetFormats = mappings
-    .map((m) => allFormats.find((f) => f.id === m.targetFormatId))
-    .filter(Boolean);
 
   // 4. Create one Asana task per target format
   const tasksCreated: TriggerResult["tasksCreated"] = [];

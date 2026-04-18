@@ -45,26 +45,15 @@ try {
   console.log(`Pillar: ${pillar.name} (${pillar.id}, brand=${pillar.brand})`);
 
   const [clip] = await sql`
-    INSERT INTO formats (name, brand, channels, content_type, descript_clip_prompt)
-    VALUES (${TEST_CLIP_NAME}, ${pillar.brand}, ${sql.json(["Instagram Reel"])}, 'repurposed', ${TEST_CLIP_PROMPT})
+    INSERT INTO formats (name, brand, channels, parent_format_id, descript_clip_prompt)
+    VALUES (${TEST_CLIP_NAME}, ${pillar.brand}, ${sql.json(["Instagram Reel"])}, ${pillar.id}, ${TEST_CLIP_PROMPT})
     ON CONFLICT (name) DO UPDATE
       SET descript_clip_prompt = EXCLUDED.descript_clip_prompt,
+          parent_format_id = EXCLUDED.parent_format_id,
           updated_at = now()
     RETURNING id, name
   `;
-  console.log(`Test Clip format: ${clip.name} (${clip.id})`);
-
-  const [mapping] = await sql`
-    INSERT INTO format_repurpose_mappings (source_format_id, target_format_id)
-    VALUES (${pillar.id}, ${clip.id})
-    ON CONFLICT (source_format_id, target_format_id) DO NOTHING
-    RETURNING id
-  `;
-  console.log(
-    mapping
-      ? `Mapping created: ${pillar.name} → ${clip.name}`
-      : `Mapping already existed: ${pillar.name} → ${clip.name}`
-  );
+  console.log(`Test Clip format: ${clip.name} (${clip.id}) — parent=${pillar.name}`);
 } catch (err) {
   console.error("Error:", err.message);
   process.exit(1);

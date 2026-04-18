@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { pgTable, uuid, text, jsonb, integer, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, jsonb, integer } from 'drizzle-orm/pg-core';
 import { eq } from 'drizzle-orm';
 
 /* ---- Schema fragments ---- */
@@ -13,16 +13,10 @@ const formats = pgTable('formats', {
   brand: text('brand').notNull(),
   channels: jsonb('channels'),
   viewThreshold: integer('view_threshold'),
-  contentType: text('content_type'),
+  parentFormatId: uuid('parent_format_id'),
   contentOwner: text('content_owner'),
   contentOwnerAsanaGid: text('content_owner_asana_gid'),
   instructions: text('instructions'),
-});
-
-const formatRepurposeMappings = pgTable('format_repurpose_mappings', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  sourceFormatId: uuid('source_format_id').notNull(),
-  targetFormatId: uuid('target_format_id').notNull(),
 });
 
 /* ---- DB connection ---- */
@@ -74,16 +68,10 @@ console.log('──────────────────────�
 const [source] = await db.select().from(formats).where(eq(formats.id, SOURCE_FORMAT_ID));
 console.log(`\n📌 Source format: ${source.name} (threshold: ${source.viewThreshold?.toLocaleString()})`);
 
-// 2. Fetch repurpose mappings
-const mappings = await db.select().from(formatRepurposeMappings)
-  .where(eq(formatRepurposeMappings.sourceFormatId, SOURCE_FORMAT_ID));
-console.log(`🔗 Found ${mappings.length} repurpose targets\n`);
-
-// 3. Fetch all target formats
-const allFormats = await db.select().from(formats);
-const targets = mappings
-  .map(m => allFormats.find(f => f.id === m.targetFormatId))
-  .filter(Boolean);
+// 2. Fetch direct children (repurpose targets)
+const targets = await db.select().from(formats)
+  .where(eq(formats.parentFormatId, SOURCE_FORMAT_ID));
+console.log(`🔗 Found ${targets.length} repurpose targets\n`);
 
 // 4. Create Asana tasks
 console.log('Creating Asana tasks...\n');

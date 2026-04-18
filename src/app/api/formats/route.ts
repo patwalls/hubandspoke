@@ -1,7 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { formats, formatRepurposeMappings, productionItems } from "@/lib/db/schema";
+import { formats, productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+
+async function isAncestor(candidateAncestorId: string, descendantId: string): Promise<boolean> {
+  // Walk up from candidateAncestorId. Return true if we reach descendantId.
+  let cursor: string | null = candidateAncestorId;
+  const seen = new Set<string>();
+  while (cursor) {
+    if (cursor === descendantId) return true;
+    if (seen.has(cursor)) return false; // safety — shouldn't happen with clean data
+    seen.add(cursor);
+    const [row] = await db
+      .select({ parentFormatId: formats.parentFormatId })
+      .from(formats)
+      .where(eq(formats.id, cursor));
+    cursor = row?.parentFormatId ?? null;
+  }
+  return false;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,17 +30,7 @@ export async function GET(request: NextRequest) {
       .where(eq(formats.brand, brand))
       .orderBy(formats.name);
 
-    // Get repurpose mappings
-    const mappings = await db.select().from(formatRepurposeMappings);
-
-    const formatsWithRepurpose = allFormats.map((f) => ({
-      ...f,
-      repurposeTargetIds: mappings
-        .filter((m) => m.sourceFormatId === f.id)
-        .map((m) => m.targetFormatId),
-    }));
-
-    return NextResponse.json(formatsWithRepurpose);
+    return NextResponse.json(allFormats);
   } catch (error) {
     console.error("Error fetching formats:", error);
     return NextResponse.json(
@@ -36,13 +43,28 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, channels, brand, viewThreshold, editor, editorAsanaGid, producer, producerAsanaGid, instructions, contentType, repurposeTargetIds } = body;
+    const { name, channels, brand, viewThreshold, editor, editorAsanaGid, producer, producerAsanaGid, instructions, parentFormatId } = body;
+
+    const resolvedBrand = brand || "starter-story";
+
+    if (parentFormatId) {
+      const [parent] = await db
+        .select({ brand: formats.brand })
+        .from(formats)
+        .where(eq(formats.id, parentFormatId));
+      if (!parent) {
+        return NextResponse.json({ error: "Parent format not found" }, { status: 400 });
+      }
+      if (parent.brand !== resolvedBrand) {
+        return NextResponse.json({ error: "Parent format must be in the same brand" }, { status: 400 });
+      }
+    }
 
     const [created] = await db
       .insert(formats)
       .values({
         name,
-        brand: brand || "starter-story",
+        brand: resolvedBrand,
         channels: channels || [],
         viewThreshold: viewThreshold || null,
         editor: editor || null,
@@ -50,19 +72,9 @@ export async function POST(request: NextRequest) {
         producer: producer || null,
         producerAsanaGid: producerAsanaGid || null,
         instructions: instructions || null,
-        contentType: contentType || "pillar",
+        parentFormatId: parentFormatId || null,
       })
       .returning();
-
-    // Create repurpose mappings
-    if (repurposeTargetIds?.length) {
-      await db.insert(formatRepurposeMappings).values(
-        repurposeTargetIds.map((targetId: string) => ({
-          sourceFormatId: created.id,
-          targetFormatId: targetId,
-        }))
-      );
-    }
 
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
@@ -77,7 +89,31 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, channels, viewThreshold, editor, editorAsanaGid, producer, producerAsanaGid, instructions, contentType, repurposeTargetIds } = body;
+    const { id, name, channels, viewThreshold, editor, editorAsanaGid, producer, producerAsanaGid, instructions, parentFormatId } = body;
+
+    // Validate parent: existence, same brand, not self, not descendant (cycle).
+    if (parentFormatId) {
+      if (parentFormatId === id) {
+        return NextResponse.json({ error: "A format cannot be its own parent" }, { status: 400 });
+      }
+      const [selfRow] = await db
+        .select({ brand: formats.brand })
+        .from(formats)
+        .where(eq(formats.id, id));
+      const [parent] = await db
+        .select({ brand: formats.brand })
+        .from(formats)
+        .where(eq(formats.id, parentFormatId));
+      if (!parent) {
+        return NextResponse.json({ error: "Parent format not found" }, { status: 400 });
+      }
+      if (selfRow && parent.brand !== selfRow.brand) {
+        return NextResponse.json({ error: "Parent format must be in the same brand" }, { status: 400 });
+      }
+      if (await isAncestor(parentFormatId, id)) {
+        return NextResponse.json({ error: "Cycle detected: parent is a descendant of this format" }, { status: 400 });
+      }
+    }
 
     // Get the old name before updating so we can cascade the rename
     const [existing] = await db
@@ -96,7 +132,7 @@ export async function PUT(request: NextRequest) {
         producer: producer || null,
         producerAsanaGid: producerAsanaGid || null,
         instructions: instructions || null,
-        contentType: contentType || "pillar",
+        parentFormatId: parentFormatId || null,
         updatedAt: new Date(),
       })
       .where(eq(formats.id, id))
@@ -108,20 +144,6 @@ export async function PUT(request: NextRequest) {
         .update(productionItems)
         .set({ format: name, updatedAt: new Date() })
         .where(eq(productionItems.format, existing.name));
-    }
-
-    // Replace repurpose mappings
-    await db
-      .delete(formatRepurposeMappings)
-      .where(eq(formatRepurposeMappings.sourceFormatId, id));
-
-    if (repurposeTargetIds?.length) {
-      await db.insert(formatRepurposeMappings).values(
-        repurposeTargetIds.map((targetId: string) => ({
-          sourceFormatId: id,
-          targetFormatId: targetId,
-        }))
-      );
     }
 
     return NextResponse.json(updated);
