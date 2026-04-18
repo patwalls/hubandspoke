@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ExternalLinkIcon, FileTextIcon, FilmIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -365,12 +366,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     load();
   }, [load]);
 
-  function togglePlatform(p: string) {
-    setPlatforms((prev) =>
-      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]
-    );
-  }
-
   async function handleSave() {
     setSaving(true);
     setSaveResult(null);
@@ -462,6 +457,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const { item, derivatives, formatNames, repurposeTargets } = data;
   const brandFormats = formatNames;
   const isYouTube = !!item.youtubeId;
+  const isPublished = !!item.publishedLink;
+  const notionUrl = item.notionId
+    ? `https://www.notion.so/${item.notionId.replace(/-/g, "")}`
+    : null;
 
   const hasDescriptProject = !!item.descriptProjectId;
   const descriptProjectUrl = item.descriptProjectUrl;
@@ -531,19 +530,45 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             </p>
           )}
         </div>
-        {item.publishedLink && (
-          <a
-            href={item.publishedLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            View published ↗
-          </a>
-        )}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {item.publishedLink && (
+            <a
+              href={item.publishedLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              title="Open the live post"
+            >
+              <ExternalLinkIcon className="size-3.5" /> Published
+            </a>
+          )}
+          {notionUrl && (
+            <a
+              href={notionUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              title="Open the Notion page for this post"
+            >
+              <FileTextIcon className="size-3.5" /> Notion
+            </a>
+          )}
+          {item.descriptProjectUrl && (
+            <a
+              href={item.descriptProjectUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              title="Open the Descript project"
+            >
+              <FilmIcon className="size-3.5" /> Descript
+            </a>
+          )}
+        </div>
       </div>
 
-      {/* Metrics */}
+      {/* Metrics — only shown once the post is actually live */}
+      {isPublished && (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
@@ -596,6 +621,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </p>
         </div>
       </div>
+      )}
 
       {/* Post details — edit form (above derivatives so editing is one scroll) */}
       <div className="rounded-lg border border-border bg-card p-5 space-y-5">
@@ -626,45 +652,49 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           />
         </div>
 
-        <div className="space-y-2">
-          <Label>Platform</Label>
-          <div className="flex flex-wrap gap-2">
-            {platformOptions.map((p) => (
-              <Badge
-                key={p}
-                variant={platforms.includes(p) ? "default" : "outline"}
-                className={isYouTube ? "" : "cursor-pointer"}
-                onClick={() => {
-                  if (!isYouTube) togglePlatform(p);
-                }}
-              >
-                {p}
-              </Badge>
-            ))}
-          </div>
-        </div>
-
-        {brandFormats.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label>Format</Label>
+            <Label>Platform</Label>
             <Select
-              value={format}
-              onValueChange={(v) => setFormat(v || "")}
+              value={platforms[0] || ""}
+              onValueChange={(v) => setPlatforms(v ? [v] : [])}
               disabled={isYouTube}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select format…" />
+                <SelectValue placeholder="Select platform…" />
               </SelectTrigger>
               <SelectContent>
-                {brandFormats.map((f) => (
-                  <SelectItem key={f} value={f}>
-                    {f}
+                {platformOptions.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {p}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-        )}
+
+          {brandFormats.length > 0 && (
+            <div className="space-y-2">
+              <Label>Format</Label>
+              <Select
+                value={format}
+                onValueChange={(v) => setFormat(v || "")}
+                disabled={isYouTube}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select format…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {brandFormats.map((f) => (
+                    <SelectItem key={f} value={f}>
+                      {f}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
