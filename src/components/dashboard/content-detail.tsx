@@ -30,9 +30,12 @@ interface BrandFormat {
   instructions: string | null;
 }
 
+type DerivativeRow = ProductionItem & { depth: number };
+
 interface DetailResponse {
   item: ProductionItem;
-  derivatives: ProductionItem[];
+  derivatives: DerivativeRow[];
+  descendantViewsTotal: number;
   formatNames: string[];
   formats: BrandFormat[];
   repurposeTargets: BrandFormat[];
@@ -696,22 +699,24 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            Total Views
+          </p>
+          <div className="mt-2">
+            <span className="text-3xl font-semibold text-foreground tabular-nums">
+              {formatCompact(data?.descendantViewsTotal ?? 0)}
+            </span>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Across all derivatives
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             Likes
           </p>
           <div className="mt-2">
             <span className="text-3xl font-semibold text-foreground tabular-nums">
               {formatCompact(item.likes)}
-            </span>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">On this post</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Comments
-          </p>
-          <div className="mt-2">
-            <span className="text-3xl font-semibold text-foreground tabular-nums">
-              {formatCompact(item.comments)}
             </span>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">On this post</p>
@@ -921,8 +926,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               </span>
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Everything in Notion with this post set as Pillar Content — every
-              status, every format.
+              Every descendant — direct children, grandchildren, and deeper —
+              across every status and format.
             </p>
           </div>
         </div>
@@ -974,6 +979,20 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       )}
                       <div className="flex flex-col gap-0.5 min-w-0">
                         <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
+                          {d.depth > 1 && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-accent text-muted-foreground border border-border shrink-0"
+                              title={
+                                d.depth === 2
+                                  ? "Grandchild"
+                                  : d.depth === 3
+                                  ? "Great-grandchild"
+                                  : `${d.depth} levels deep`
+                              }
+                            >
+                              L{d.depth}
+                            </span>
+                          )}
                           <Link
                             href={`/${brand}/content/${d.id}`}
                             className="hover:text-primary hover:underline transition-colors truncate"
@@ -1118,7 +1137,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             with content type <span className="font-mono">Repurposed</span> to see it here.
           </p>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="divide-y divide-border border border-border rounded-lg overflow-hidden">
             {repurposeTargets.map((f) => {
               const st = clipStatus[f.id];
               const busy = st?.state === "running";
@@ -1129,81 +1148,91 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   st?.state === "clipped" ||
                   st?.state === "created") &&
                 !!directiveText;
+              const hasDetails =
+                showDirective ||
+                st?.state === "clipped" ||
+                st?.state === "created" ||
+                st?.state === "error";
               return (
-                <div
-                  key={f.id}
-                  className="flex items-start gap-2 flex-wrap border border-border rounded-lg p-2.5 bg-card/50"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="text-sm font-medium text-foreground">
+                <div key={f.id} className="px-3 py-2 bg-card">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                      <Link
+                        href={`/${brand}/formats/${f.id}`}
+                        className="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors"
+                        title="Edit this format's skill / prompt"
+                      >
                         {f.name}
-                      </div>
+                      </Link>
                       {st?.label && (
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-accent text-muted-foreground border border-border">
                           {st.label}
                         </span>
                       )}
                     </div>
-                    {showDirective && (
-                      <div className="mt-1.5 text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
-                        {directiveText}
-                      </div>
-                    )}
-                    {(st?.state === "clipped" || st?.state === "created") && (
-                      <div className="mt-1 flex items-center gap-3 flex-wrap">
-                        {st.state === "clipped" && st.projectUrl && (
-                          <a
-                            href={st.projectUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[11px] text-primary hover:underline"
-                          >
-                            Open in Descript →
-                          </a>
-                        )}
-                        {st.notionPageUrl && (
-                          <a
-                            href={st.notionPageUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[11px] text-primary hover:underline"
-                          >
-                            Open Notion task →
-                          </a>
-                        )}
-                      </div>
-                    )}
-                    {st?.state === "error" && (
-                      <p className="mt-1.5 text-[11px] text-destructive">
-                        {st.message}
-                      </p>
-                    )}
+                    <div className="flex items-center gap-3 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => callRepurpose(f.id, "preview")}
+                        disabled={busy || repurposingAll}
+                        title="Ask Claude what it would do — no Notion or Descript writes."
+                        className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {busy && st?.firedAt === "preview"
+                          ? "Dry running…"
+                          : "Dry run"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => callRepurpose(f.id, "real")}
+                        disabled={busy || repurposingAll}
+                        title="Creates a Notion task and, for clip-style skills, fires the Descript job."
+                        className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {busy && st?.firedAt === "real"
+                          ? "Repurposing…"
+                          : "Repurpose →"}
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => callRepurpose(f.id, "preview")}
-                      disabled={busy || repurposingAll}
-                      title="Ask Claude what it would do — no Descript or Notion writes."
-                      className="inline-flex items-center h-7 px-2.5 rounded-full border border-border bg-card text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {busy && st?.firedAt === "preview"
-                        ? "Previewing…"
-                        : "Preview"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => callRepurpose(f.id, "real")}
-                      disabled={busy || repurposingAll}
-                      title="Claude reads this format's skill, creates a Notion task, and fires Descript if the skill is a clip."
-                      className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {busy && st?.firedAt === "real"
-                        ? "Repurposing…"
-                        : "Repurpose"}
-                    </button>
-                  </div>
+                  {hasDetails && (
+                    <div className="mt-2 space-y-1.5">
+                      {showDirective && (
+                        <div className="text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
+                          {directiveText}
+                        </div>
+                      )}
+                      {(st?.state === "clipped" || st?.state === "created") && (
+                        <div className="flex items-center gap-3 flex-wrap">
+                          {st.state === "clipped" && st.projectUrl && (
+                            <a
+                              href={st.projectUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] text-primary hover:underline"
+                            >
+                              Open in Descript →
+                            </a>
+                          )}
+                          {st.notionPageUrl && (
+                            <a
+                              href={st.notionPageUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] text-primary hover:underline"
+                            >
+                              Open Notion task →
+                            </a>
+                          )}
+                        </div>
+                      )}
+                      {st?.state === "error" && (
+                        <p className="text-[11px] text-destructive">
+                          {st.message}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1211,8 +1240,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         )}
 
         <p className="text-[11px] text-muted-foreground">
-          <span className="font-medium">Preview</span> asks Claude (Haiku) what it would do — no Notion or Descript writes.{" "}
-          <span className="font-medium">Repurpose</span> creates the Notion task and, for clip-style skills, also fires the Descript job.
+          <span className="font-medium">Dry run</span> asks Claude (Haiku) what it would do — no writes.{" "}
+          <span className="font-medium">Repurpose</span> creates the Notion task and, for clip-style skills, fires the Descript job. Click a format name to edit its skill.
         </p>
       </div>
 
