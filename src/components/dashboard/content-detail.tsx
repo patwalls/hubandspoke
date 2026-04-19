@@ -559,16 +559,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     : null;
 
   const hasDescriptProject = !!item.descriptProjectId;
-  const descriptProjectUrl = item.descriptProjectUrl;
-  // If this item is a derivative with a known composition, deep-link to the
-  // composition inside the project instead of the project root.
-  const descriptLinkUrl =
-    descriptProjectUrl && item.descriptCompositionId
-      ? `${descriptProjectUrl.replace(/\/$/, "")}/${item.descriptCompositionId}`
-      : descriptProjectUrl;
-  const descriptLinkLabel = item.descriptCompositionId
-    ? "Open Descript composition →"
-    : "Open Descript project →";
 
   return (
     <div className="space-y-6">
@@ -1093,17 +1083,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               >
                 {repurposingAll ? "Repurposing all…" : "Repurpose all"}
               </button>
-            )}
-            {descriptLinkUrl && (
-              <a
-                href={descriptLinkUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-purple-700 hover:underline inline-flex items-center gap-1"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                {descriptLinkLabel}
-              </a>
             )}
           </div>
         </div>
