@@ -60,10 +60,11 @@ export async function POST(request: NextRequest) {
       targetFormatName: target.name,
       targetPrompt: target.instructions || "",
     });
-    if (action.kind === "no_action") {
+    if (action.kind === "manual_task") {
       return NextResponse.json({
-        mode: "no_action",
-        message: action.message,
+        mode: "manual_task",
+        taskName: action.taskName,
+        guidance: action.guidance,
         targetFormatName: target.name,
       });
     }

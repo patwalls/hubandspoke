@@ -100,17 +100,22 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   } | null>(null);
 
   // Per-format repurpose state, keyed by format id
+  type RepurposeKind = "descript_clip" | "manual_task";
   type RepurposeState = {
-    state: "running" | "previewed" | "clipped" | "no_action" | "error";
+    state: "running" | "previewed" | "clipped" | "created" | "error";
+    kind?: RepurposeKind;
     label?: string;          // short status pill text on the button
-    message?: string;        // longer explanation under the button
-    descriptPrompt?: string; // composed directive (preview or actual)
-    projectUrl?: string;
+    message?: string;        // error / info text under the button
+    descriptPrompt?: string; // clip directive (when kind === descript_clip)
+    guidance?: string;       // editor brief (when kind === manual_task)
+    projectUrl?: string;     // Descript project URL
+    notionPageUrl?: string;  // Notion task URL (set on successful real run)
     firedAt?: "preview" | "real";
   };
   const [clipStatus, setClipStatus] = useState<Record<string, RepurposeState>>(
     {}
   );
+  const [repurposingAll, setRepurposingAll] = useState(false);
 
   // Descript upload modal state
   const [descriptModalOpen, setDescriptModalOpen] = useState(false);
@@ -157,12 +162,11 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           ...prev,
           [targetFormatId]: {
             state: mode === "preview" ? "previewed" : "clipped",
-            label:
-              mode === "preview"
-                ? "preview ready"
-                : "clip queued",
+            kind: "descript_clip",
+            label: mode === "preview" ? "preview ready" : "clip queued",
             descriptPrompt: json.descriptPrompt,
             projectUrl: json.projectUrl,
+            notionPageUrl: json.notionPageUrl,
           },
         }));
         if (mode === "real") {
@@ -171,14 +175,21 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           load();
           setTimeout(() => load(), 40_000);
         }
-      } else if (json.mode === "no_action") {
+      } else if (json.mode === "manual_task") {
         setClipStatus((prev) => ({
           ...prev,
           [targetFormatId]: {
-            state: "no_action",
-            message: json.message || "No automation for this prompt yet.",
+            state: mode === "preview" ? "previewed" : "created",
+            kind: "manual_task",
+            label: mode === "preview" ? "preview ready" : "task created",
+            guidance: json.guidance,
+            notionPageUrl: json.notionPageUrl,
           },
         }));
+        if (mode === "real") {
+          load();
+          setTimeout(() => load(), 40_000);
+        }
       } else {
         setClipStatus((prev) => ({
           ...prev,
@@ -193,6 +204,20 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           message: err instanceof Error ? err.message : "Request failed",
         },
       }));
+    }
+  }
+
+  async function repurposeAll(targetFormatIds: string[]) {
+    if (repurposingAll || targetFormatIds.length === 0) return;
+    setRepurposingAll(true);
+    try {
+      // Fire sequentially — Claude + Notion + Descript calls are rate-sensitive
+      // and this keeps per-format state transitions readable in the UI.
+      for (const id of targetFormatIds) {
+        await callRepurpose(id, "real");
+      }
+    } finally {
+      setRepurposingAll(false);
     }
   }
 
@@ -1033,29 +1058,42 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               Repurpose to format
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Click a target format to create a new composition in this post&apos;s Descript
-              project using that format&apos;s clip prompt. A random 30-second window is used
-              for this MVP.
+              Claude reads each target format&apos;s skill, creates a Notion
+              task for the editor, and fires a Descript clip if the skill
+              calls for one.
             </p>
           </div>
-          {descriptLinkUrl && (
-            <a
-              href={descriptLinkUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-purple-700 hover:underline inline-flex items-center gap-1"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-              {descriptLinkLabel}
-            </a>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {repurposeTargets.length > 0 && (
+              <button
+                type="button"
+                onClick={() => repurposeAll(repurposeTargets.map((f) => f.id))}
+                disabled={repurposingAll}
+                title="Run Repurpose on every target format, one after another."
+                className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {repurposingAll ? "Repurposing all…" : "Repurpose all"}
+              </button>
+            )}
+            {descriptLinkUrl && (
+              <a
+                href={descriptLinkUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-purple-700 hover:underline inline-flex items-center gap-1"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                {descriptLinkLabel}
+              </a>
+            )}
+          </div>
         </div>
 
         {!hasDescriptProject && (
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 flex items-center justify-between gap-3 flex-wrap">
             <span>
-              This post doesn&apos;t have a Descript project yet. Add one so the
-              clip-out buttons below can run.
+              This post doesn&apos;t have a Descript project. Clip-style
+              formats will fall back to manual Notion tasks until you add one.
             </span>
             <Button
               variant="outline"
@@ -1084,38 +1122,57 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             {repurposeTargets.map((f) => {
               const st = clipStatus[f.id];
               const busy = st?.state === "running";
-              const disabled = !hasDescriptProject || busy;
+              const directiveText =
+                st?.kind === "manual_task" ? st.guidance : st?.descriptPrompt;
+              const showDirective =
+                (st?.state === "previewed" ||
+                  st?.state === "clipped" ||
+                  st?.state === "created") &&
+                !!directiveText;
               return (
                 <div
                   key={f.id}
                   className="flex items-start gap-2 flex-wrap border border-border rounded-lg p-2.5 bg-card/50"
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-foreground">
-                      {f.name}
-                    </div>
-                    {(st?.state === "previewed" || st?.state === "clipped") &&
-                      st.descriptPrompt && (
-                        <div className="mt-1.5 text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
-                          {st.descriptPrompt}
-                        </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="text-sm font-medium text-foreground">
+                        {f.name}
+                      </div>
+                      {st?.label && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-accent text-muted-foreground border border-border">
+                          {st.label}
+                        </span>
                       )}
-                    {st?.state === "clipped" && st.projectUrl && (
-                      <div className="mt-1">
-                        <a
-                          href={st.projectUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[11px] text-primary hover:underline"
-                        >
-                          Open in Descript →
-                        </a>
+                    </div>
+                    {showDirective && (
+                      <div className="mt-1.5 text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
+                        {directiveText}
                       </div>
                     )}
-                    {st?.state === "no_action" && (
-                      <p className="mt-1.5 text-[11px] text-muted-foreground">
-                        {st.message}
-                      </p>
+                    {(st?.state === "clipped" || st?.state === "created") && (
+                      <div className="mt-1 flex items-center gap-3 flex-wrap">
+                        {st.state === "clipped" && st.projectUrl && (
+                          <a
+                            href={st.projectUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-primary hover:underline"
+                          >
+                            Open in Descript →
+                          </a>
+                        )}
+                        {st.notionPageUrl && (
+                          <a
+                            href={st.notionPageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-primary hover:underline"
+                          >
+                            Open Notion task →
+                          </a>
+                        )}
+                      </div>
                     )}
                     {st?.state === "error" && (
                       <p className="mt-1.5 text-[11px] text-destructive">
@@ -1127,8 +1184,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                     <button
                       type="button"
                       onClick={() => callRepurpose(f.id, "preview")}
-                      disabled={busy}
-                      title="Ask Claude what directive it would send — no Descript call."
+                      disabled={busy || repurposingAll}
+                      title="Ask Claude what it would do — no Descript or Notion writes."
                       className="inline-flex items-center h-7 px-2.5 rounded-full border border-border bg-card text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {busy && st?.firedAt === "preview"
@@ -1138,12 +1195,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                     <button
                       type="button"
                       onClick={() => callRepurpose(f.id, "real")}
-                      disabled={disabled}
-                      title={
-                        hasDescriptProject
-                          ? "Claude reads this format's prompt, composes a directive, and sends it to Descript."
-                          : "Add this item to Descript first."
-                      }
+                      disabled={busy || repurposingAll}
+                      title="Claude reads this format's skill, creates a Notion task, and fires Descript if the skill is a clip."
                       className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {busy && st?.firedAt === "real"
@@ -1158,8 +1211,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         )}
 
         <p className="text-[11px] text-muted-foreground">
-          <span className="font-medium">Preview</span> asks Claude (Haiku) what directive it would send to Descript, without spending Descript credits.{" "}
-          <span className="font-medium">Repurpose</span> does the same and then fires the clip job. Descript&apos;s own agent picks the moment from the transcript.
+          <span className="font-medium">Preview</span> asks Claude (Haiku) what it would do — no Notion or Descript writes.{" "}
+          <span className="font-medium">Repurpose</span> creates the Notion task and, for clip-style skills, also fires the Descript job.
         </p>
       </div>
 

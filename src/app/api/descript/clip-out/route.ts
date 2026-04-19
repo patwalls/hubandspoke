@@ -8,7 +8,7 @@ import {
   fetchDescriptJob,
   extractCompositionIdFromAgentResponse,
 } from "@/lib/descript";
-import { dispatchRepurpose } from "@/lib/repurpose-agent";
+import { dispatchRepurpose, type RepurposeAction } from "@/lib/repurpose-agent";
 import { createNotionRepurposeTask } from "@/lib/services/notion-tasks";
 
 async function resolveCompositionInBackground(
@@ -82,12 +82,6 @@ export async function POST(request: NextRequest) {
   if (!item) {
     return NextResponse.json({ error: "Item not found" }, { status: 404 });
   }
-  if (!item.descriptProjectId) {
-    return NextResponse.json(
-      { error: "This content has no Descript project yet" },
-      { status: 400 }
-    );
-  }
 
   const [target] = await db
     .select()
@@ -107,7 +101,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let action;
+  let action: RepurposeAction;
   try {
     action = await dispatchRepurpose({
       itemTitle: item.title || "Untitled",
@@ -119,99 +113,163 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 502 });
   }
 
-  if (action.kind === "no_action") {
-    return NextResponse.json({
-      mode: "no_action",
-      message: action.message,
-      targetFormatName: target.name,
-    });
+  // If Claude picked a Descript clip but the pillar has no Descript project,
+  // downgrade to a manual task so the editor can do the clip by hand. The
+  // user gets a Notion page every time.
+  if (action.kind === "descript_clip" && !item.descriptProjectId) {
+    action = {
+      kind: "manual_task",
+      taskName: action.compositionName,
+      guidance:
+        "This format is a Descript clip, but the pillar has no Descript project yet — do this one by hand.\n\nClip directive Claude would have sent:\n" +
+        action.descriptPrompt,
+    };
   }
 
-  try {
-    const result = await invokeDescriptAgent({
-      projectId: item.descriptProjectId,
-      prompt: action.descriptPrompt,
-    });
+  const channel = Array.isArray(target.channels) ? target.channels[0] : undefined;
 
-    // Create a matching Notion page so the clip flows back into our DB
-    // via the next Notion sync — Notion stays the source of truth for
-    // content items, and freelancers discuss each clip on its Notion page.
-    let notionPageId: string | undefined;
+  if (action.kind === "descript_clip") {
     try {
+      const result = await invokeDescriptAgent({
+        projectId: item.descriptProjectId!,
+        prompt: action.descriptPrompt,
+      });
+
       const notionResult = await createNotionRepurposeTask({
         pillarContentTitle: item.title || "Untitled",
         targetFormatName: target.name,
         title: action.compositionName,
-        channel: Array.isArray(target.channels) ? target.channels[0] : undefined,
+        channel,
         pillarContentNotionId: item.notionId || undefined,
         targetFormatNotionPageId: target.notionPageId || undefined,
         editorNotionUserId: target.editorNotionUserId || undefined,
         descriptProjectUrl: result.projectUrl,
       });
-      if (notionResult.success) {
-        notionPageId = notionResult.notionPageId;
-      } else {
-        console.error("Notion page creation failed:", notionResult.error);
+      if (!notionResult.success) {
+        return NextResponse.json(
+          {
+            error:
+              "Descript clip started, but Notion task creation failed: " +
+              (notionResult.error || "unknown error"),
+          },
+          { status: 502 }
+        );
       }
-    } catch (err) {
-      console.error("Notion page creation threw:", err);
-    }
+      const notionPageId = notionResult.notionPageId;
+      const notionPageUrl = notionResult.notionPageUrl;
 
-    // Insert the derivative production_items row immediately so it shows up
-    // in the pillar's Derivatives section without waiting for the next Notion
-    // sync. Keyed on notionId so the sync upserts rather than duplicates.
-    let derivativeItemId: string | undefined;
-    if (notionPageId) {
-      try {
-        const [derivative] = await db
-          .insert(productionItems)
-          .values({
-            brand: item.brand,
-            notionId: notionPageId,
-            title: action.compositionName,
-            format: target.name,
-            status: "Idea",
-            pillarContentNotionId: item.notionId,
-            pillarContentItemId: item.id,
-            descriptProjectId: item.descriptProjectId,
-            descriptProjectUrl: result.projectUrl,
-          })
-          .returning({ id: productionItems.id });
-        derivativeItemId = derivative.id;
-      } catch (err) {
-        console.error("Derivative production_item insert failed:", err);
+      let derivativeItemId: string | undefined;
+      if (notionPageId) {
+        try {
+          const [derivative] = await db
+            .insert(productionItems)
+            .values({
+              brand: item.brand,
+              notionId: notionPageId,
+              title: action.compositionName,
+              format: target.name,
+              status: "Idea",
+              pillarContentNotionId: item.notionId,
+              pillarContentItemId: item.id,
+              descriptProjectId: item.descriptProjectId,
+              descriptProjectUrl: result.projectUrl,
+            })
+            .returning({ id: productionItems.id });
+          derivativeItemId = derivative.id;
+        } catch (err) {
+          console.error("Derivative production_item insert failed:", err);
+        }
       }
-    }
 
-    const [trigger] = await db
-      .insert(repurposeTriggers)
-      .values({
-        productionItemId: item.id,
-        targetFormatId: target.id,
-        descriptJobId: result.jobId,
-        descriptProjectUrl: result.projectUrl,
+      const [trigger] = await db
+        .insert(repurposeTriggers)
+        .values({
+          productionItemId: item.id,
+          targetFormatId: target.id,
+          descriptJobId: result.jobId,
+          descriptProjectUrl: result.projectUrl,
+          descriptPrompt: action.descriptPrompt,
+          compositionName: action.compositionName,
+          notionTaskPageId: notionPageId,
+        })
+        .returning({ id: repurposeTriggers.id });
+
+      resolveCompositionInBackground(
+        trigger.id,
+        result.jobId,
+        derivativeItemId
+      ).catch(() => {});
+
+      return NextResponse.json({
+        mode: "descript_clip",
+        triggerId: trigger.id,
+        jobId: result.jobId,
+        projectUrl: result.projectUrl,
         descriptPrompt: action.descriptPrompt,
         compositionName: action.compositionName,
-        notionTaskPageId: notionPageId,
-      })
-      .returning({ id: repurposeTriggers.id });
-
-    // Fire and forget — resolves the compositionId once Descript finishes.
-    // Heroku keeps the Node process alive; works fine after the response.
-    resolveCompositionInBackground(trigger.id, result.jobId, derivativeItemId).catch(() => {});
-
-    return NextResponse.json({
-      mode: "descript_clip",
-      triggerId: trigger.id,
-      jobId: result.jobId,
-      projectUrl: result.projectUrl,
-      descriptPrompt: action.descriptPrompt,
-      compositionName: action.compositionName,
-      targetFormatName: target.name,
-      notionPageId,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 502 });
+        targetFormatName: target.name,
+        notionPageId,
+        notionPageUrl,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
   }
+
+  // manual_task
+  const notionResult = await createNotionRepurposeTask({
+    pillarContentTitle: item.title || "Untitled",
+    targetFormatName: target.name,
+    title: action.taskName,
+    channel,
+    pillarContentNotionId: item.notionId || undefined,
+    targetFormatNotionPageId: target.notionPageId || undefined,
+    editorNotionUserId: target.editorNotionUserId || undefined,
+    guidanceMarkdown: action.guidance,
+  });
+  if (!notionResult.success) {
+    return NextResponse.json(
+      { error: notionResult.error || "Notion task creation failed" },
+      { status: 502 }
+    );
+  }
+  const notionPageId = notionResult.notionPageId;
+  const notionPageUrl = notionResult.notionPageUrl;
+
+  if (notionPageId) {
+    try {
+      await db.insert(productionItems).values({
+        brand: item.brand,
+        notionId: notionPageId,
+        title: action.taskName,
+        format: target.name,
+        status: "Idea",
+        pillarContentNotionId: item.notionId,
+        pillarContentItemId: item.id,
+      });
+    } catch (err) {
+      console.error("Derivative production_item insert failed:", err);
+    }
+  }
+
+  const [trigger] = await db
+    .insert(repurposeTriggers)
+    .values({
+      productionItemId: item.id,
+      targetFormatId: target.id,
+      compositionName: action.taskName,
+      notionTaskPageId: notionPageId,
+    })
+    .returning({ id: repurposeTriggers.id });
+
+  return NextResponse.json({
+    mode: "manual_task",
+    triggerId: trigger.id,
+    taskName: action.taskName,
+    guidance: action.guidance,
+    targetFormatName: target.name,
+    notionPageId,
+    notionPageUrl,
+  });
 }

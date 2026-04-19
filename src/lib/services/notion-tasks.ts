@@ -37,6 +37,10 @@ export interface CreateRepurposeTaskOpts {
   /** If set, the Descript project URL is appended to the page body so
    *  freelancers can find the clip the auto-repurpose flow produced. */
   descriptProjectUrl?: string;
+  /** If set, Claude's editor brief is appended as a block in the page body
+   *  so the editor knows what to make. Used for manual-task repurposes
+   *  (Canva, Figma, written posts — anything that isn't a Descript clip). */
+  guidanceMarkdown?: string;
   /** Override the default title. Defaults to "{formatName} ({pillarTitle})". */
   title?: string;
 }
@@ -44,6 +48,7 @@ export interface CreateRepurposeTaskOpts {
 export interface CreateRepurposeTaskResult {
   success: boolean;
   notionPageId?: string;
+  notionPageUrl?: string;
   error?: string;
 }
 
@@ -109,6 +114,26 @@ export async function createNotionRepurposeTask(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const children: any[] = [];
+    if (opts.guidanceMarkdown) {
+      children.push(
+        {
+          object: "block",
+          type: "heading_3",
+          heading_3: {
+            rich_text: [{ type: "text", text: { content: "Editor brief" } }],
+          },
+        },
+        {
+          object: "block",
+          type: "paragraph",
+          paragraph: {
+            rich_text: [
+              { type: "text", text: { content: opts.guidanceMarkdown } },
+            ],
+          },
+        }
+      );
+    }
     if (opts.descriptProjectUrl) {
       children.push(
         {
@@ -148,9 +173,13 @@ export async function createNotionRepurposeTask(
       ...(children.length ? { children } : {}),
     });
 
+    const notionPageUrl =
+      "url" in page && typeof page.url === "string" ? page.url : undefined;
+
     return {
       success: true,
       notionPageId: page.id,
+      notionPageUrl,
     };
   } catch (err) {
     console.error("Failed to create Notion repurpose task:", err);
