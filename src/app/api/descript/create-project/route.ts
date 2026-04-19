@@ -5,9 +5,9 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import {
   createDescriptProjectFromUrl,
-  createDescriptProjectForUpload,
   toGoogleDriveDirectUrl,
 } from "@/lib/descript";
+import { getPresignedGetUrl } from "@/lib/s3";
 
 async function persistDescriptProject(
   itemId: string | undefined,
@@ -37,12 +37,10 @@ export async function POST(request: NextRequest) {
   }
 
   let body: {
-    mode?: "url" | "upload";
+    mode?: "url" | "s3";
     url?: string;
+    s3Key?: string;
     projectName?: string;
-    fileName?: string;
-    contentType?: string;
-    fileSize?: number;
     itemId?: string;
   };
   try {
@@ -52,8 +50,15 @@ export async function POST(request: NextRequest) {
   }
 
   const projectName = body.projectName?.trim() || "Imported video";
-  const mode = body.mode || (body.url ? "url" : "upload");
   const itemId = body.itemId?.trim();
+  const mode = body.mode || (body.url ? "url" : body.s3Key ? "s3" : null);
+
+  if (!mode) {
+    return NextResponse.json(
+      { error: "mode required (url or s3)" },
+      { status: 400 }
+    );
+  }
 
   try {
     if (mode === "url") {
@@ -74,30 +79,23 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // upload mode
-    const fileName = body.fileName?.trim();
-    const contentType = body.contentType?.trim();
-    const fileSize = Number(body.fileSize);
-    if (!fileName || !contentType || !fileSize || fileSize <= 0) {
-      return NextResponse.json(
-        { error: "fileName, contentType, and fileSize required for upload" },
-        { status: 400 }
-      );
+    // s3 mode — fetch presigned GET URL for the saved object, hand to Descript.
+    const s3Key = body.s3Key?.trim();
+    if (!s3Key) {
+      return NextResponse.json({ error: "s3Key required" }, { status: 400 });
     }
-    const result = await createDescriptProjectForUpload({
+    // Descript fetches the file shortly after; 2 hours covers slow imports.
+    const mediaUrl = await getPresignedGetUrl(s3Key, 60 * 60 * 2);
+    const result = await createDescriptProjectFromUrl({
       projectName,
-      fileName,
-      contentType,
-      fileSize,
+      mediaUrl,
     });
-    await persistDescriptProject(itemId, result.projectId, result.projectUrl);
+    await persistDescriptProject(itemId, result.project_id, result.project_url);
     return NextResponse.json({
-      mode: "upload",
-      projectUrl: result.projectUrl,
-      projectId: result.projectId,
-      jobId: result.jobId,
-      uploadUrl: result.uploadUrl,
-      mediaKey: result.mediaKey,
+      mode: "s3",
+      projectUrl: result.project_url,
+      projectId: result.project_id,
+      jobId: result.job_id,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

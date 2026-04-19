@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ExternalLinkIcon, FileTextIcon, FilmIcon } from "lucide-react";
+import { DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -213,6 +213,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     setDescriptResult(null);
     setDescriptStage("idle");
     setDescriptProgress(0);
+    setS3KeyForRetry(null);
   }
 
   async function submitDescriptUrl() {
@@ -246,25 +247,55 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     }
   }
 
+  const [s3KeyForRetry, setS3KeyForRetry] = useState<string | null>(null);
+
+  async function callDescriptForS3Key(key: string, projectName: string) {
+    const res = await fetch("/api/descript/create-project", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "s3", s3Key: key, projectName, itemId: contentId }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+    return json.projectUrl as string;
+  }
+
+  async function retryDescriptImport() {
+    if (!data || !s3KeyForRetry) return;
+    setDescriptError(null);
+    setDescriptStage("creating");
+    try {
+      const projectUrl = await callDescriptForS3Key(
+        s3KeyForRetry,
+        data.item.title || "Imported video"
+      );
+      setDescriptResult({ projectUrl });
+      setDescriptStage("done");
+      load();
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Descript import failed");
+      setDescriptStage("idle");
+    }
+  }
+
   async function submitDescriptUpload() {
     if (!data || !descriptFile) return;
     setDescriptStage("creating");
     setDescriptError(null);
     setDescriptResult(null);
     setDescriptProgress(0);
+    setS3KeyForRetry(null);
 
-    let uploadUrl: string, projectUrl: string;
+    let uploadUrl: string, key: string, bucket: string;
     try {
-      const res = await fetch("/api/descript/create-project", {
+      const res = await fetch("/api/uploads/s3-presign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode: "upload",
-          projectName: data.item.title || "Imported video",
+          itemId: contentId,
           fileName: descriptFile.name,
           contentType: descriptFile.type || "video/mp4",
           fileSize: descriptFile.size,
-          itemId: contentId,
         }),
       });
       const json = await res.json();
@@ -274,7 +305,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         return;
       }
       uploadUrl = json.uploadUrl;
-      projectUrl = json.projectUrl;
+      key = json.key;
+      bucket = json.bucket;
     } catch (err) {
       setDescriptError(err instanceof Error ? err.message : "Request failed");
       setDescriptStage("idle");
@@ -282,6 +314,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     }
 
     setDescriptStage("uploading");
+    const contentType = descriptFile.type || "video/mp4";
     try {
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -294,20 +327,55 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           if (xhr.status >= 200 && xhr.status < 300) resolve();
           else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
         });
-        xhr.addEventListener("error", () => reject(new Error("Upload failed")));
+        xhr.addEventListener("error", () => reject(new Error("Upload failed (network)")));
         xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
         xhr.open("PUT", uploadUrl);
-        xhr.setRequestHeader(
-          "Content-Type",
-          descriptFile!.type || "application/octet-stream"
-        );
+        xhr.setRequestHeader("Content-Type", contentType);
         xhr.send(descriptFile);
       });
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Upload failed");
+      setDescriptStage("idle");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/uploads/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: contentId,
+          key,
+          bucket,
+          contentType,
+          fileSize: descriptFile.size,
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setDescriptError(json.error || `Confirm failed: HTTP ${res.status}`);
+        setDescriptStage("idle");
+        return;
+      }
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Confirm failed");
+      setDescriptStage("idle");
+      return;
+    }
+
+    setS3KeyForRetry(key);
+
+    setDescriptStage("creating");
+    try {
+      const projectUrl = await callDescriptForS3Key(
+        key,
+        data.item.title || "Imported video"
+      );
       setDescriptResult({ projectUrl });
       setDescriptStage("done");
       load();
     } catch (err) {
-      setDescriptError(err instanceof Error ? err.message : "Upload failed");
+      setDescriptError(err instanceof Error ? err.message : "Descript import failed");
       setDescriptStage("idle");
     }
   }
@@ -571,6 +639,15 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               title="Open the Descript project"
             >
               <FilmIcon className="size-3.5" /> Descript
+            </a>
+          )}
+          {item.mediaS3Key && (
+            <a
+              href={`/api/uploads/download?itemId=${item.id}`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              title={`Download original media from S3${item.mediaSizeBytes ? ` (${(item.mediaSizeBytes / 1024 / 1024).toFixed(1)} MB)` : ""}`}
+            >
+              <DownloadIcon className="size-3.5" /> Download
             </a>
           )}
         </div>
@@ -1196,13 +1273,20 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Uploading to Descript… {descriptProgress}%
+                      Uploading to S3… {descriptProgress}%
                     </p>
                   </div>
                 )}
 
                 {descriptError && (
-                  <p className="text-xs text-destructive">{descriptError}</p>
+                  <div className="space-y-1">
+                    <p className="text-xs text-destructive">{descriptError}</p>
+                    {s3KeyForRetry && (
+                      <p className="text-[10px] text-muted-foreground">
+                        File is uploaded — retry sends it to Descript without re-uploading.
+                      </p>
+                    )}
+                  </div>
                 )}
 
                 <div className="flex justify-end gap-2">
@@ -1213,6 +1297,14 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   >
                     Cancel
                   </Button>
+                  {s3KeyForRetry && descriptError ? (
+                    <Button
+                      onClick={retryDescriptImport}
+                      disabled={descriptStage === "creating"}
+                    >
+                      {descriptStage === "creating" ? "Retrying…" : "Retry Descript import"}
+                    </Button>
+                  ) : (
                   <Button
                     onClick={
                       descriptMode === "upload" ? submitDescriptUpload : submitDescriptUrl
@@ -1231,6 +1323,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       ? "Upload & create"
                       : "Create project"}
                   </Button>
+                  )}
                 </div>
               </>
             )}

@@ -18,13 +18,6 @@ interface ImportProjectUrlArgs {
   mediaUrl: string;
 }
 
-interface ImportProjectUploadArgs {
-  projectName: string;
-  fileName: string;
-  contentType: string;
-  fileSize: number;
-}
-
 interface ImportProjectResponse {
   job_id: string;
   drive_id?: string;
@@ -44,41 +37,6 @@ export async function createDescriptProjectFromUrl(
       { name: args.projectName, clips: [{ media: mediaKey }] },
     ],
   });
-}
-
-export async function createDescriptProjectForUpload(
-  args: ImportProjectUploadArgs
-): Promise<{
-  projectId: string;
-  projectUrl: string;
-  jobId: string;
-  uploadUrl: string;
-  mediaKey: string;
-}> {
-  const mediaKey = args.fileName;
-  const result = await postImportProjectMedia({
-    project_name: args.projectName,
-    add_media: {
-      [mediaKey]: {
-        content_type: args.contentType,
-        file_size: args.fileSize,
-      },
-    },
-    add_compositions: [
-      { name: args.projectName, clips: [{ media: mediaKey }] },
-    ],
-  });
-  const uploadUrl = result.upload_urls?.[mediaKey]?.upload_url;
-  if (!uploadUrl) {
-    throw new Error("Descript did not return an upload URL");
-  }
-  return {
-    projectId: result.project_id,
-    projectUrl: result.project_url,
-    jobId: result.job_id,
-    uploadUrl,
-    mediaKey,
-  };
 }
 
 interface AgentResponse {

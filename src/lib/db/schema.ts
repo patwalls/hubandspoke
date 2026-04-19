@@ -5,6 +5,7 @@ import {
   date,
   boolean,
   integer,
+  bigint,
   decimal,
   timestamp,
   jsonb,
@@ -53,6 +54,16 @@ export const productionItems = pgTable(
     descriptImportedAt: timestamp("descript_imported_at", {
       withTimezone: true,
     }),
+    // Permanent media archive: source video uploaded to S3 before being
+    // handed to Descript via a presigned GET URL. Lets us re-import to
+    // Descript without re-uploading from the browser.
+    mediaS3Bucket: text("media_s3_bucket"),
+    mediaS3Key: text("media_s3_key"),
+    mediaS3UploadedAt: timestamp("media_s3_uploaded_at", {
+      withTimezone: true,
+    }),
+    mediaSizeBytes: bigint("media_size_bytes", { mode: "number" }),
+    mediaContentType: text("media_content_type"),
     // Raw Notion page ID of the pillar (captured directly from the "Pillar
     // Content" relation during sync). Kept alongside the resolved FK so we can
     // still reconcile if a pillar is re-synced out of order.

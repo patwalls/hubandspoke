@@ -297,6 +297,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     setDescriptResult(null);
     setDescriptStage("idle");
     setDescriptProgress(0);
+    setS3KeyForRetry(null);
   }
 
   async function submitDescriptUrl() {
@@ -330,25 +331,59 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     }
   }
 
+  // After S3 upload succeeds we keep the key around so a Descript-step
+  // failure can be retried without re-uploading the file.
+  const [s3KeyForRetry, setS3KeyForRetry] = useState<string | null>(null);
+
+  async function callDescriptForS3Key(key: string, projectName: string, itemId: string) {
+    const res = await fetch("/api/descript/create-project", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "s3", s3Key: key, projectName, itemId }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+    return json.projectUrl as string;
+  }
+
+  async function retryDescriptImport() {
+    if (!descriptItem || !s3KeyForRetry) return;
+    setDescriptError(null);
+    setDescriptStage("creating");
+    try {
+      const projectUrl = await callDescriptForS3Key(
+        s3KeyForRetry,
+        descriptItem.title || "Imported video",
+        descriptItem.id
+      );
+      setDescriptResult({ projectUrl });
+      setDescriptStage("done");
+      load();
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Descript import failed");
+      setDescriptStage("idle");
+    }
+  }
+
   async function submitDescriptUpload() {
     if (!descriptItem || !descriptFile) return;
     setDescriptStage("creating");
     setDescriptError(null);
     setDescriptResult(null);
     setDescriptProgress(0);
+    setS3KeyForRetry(null);
 
-    let uploadUrl: string, projectUrl: string;
+    // Step 1: ask our server for a presigned PUT URL into our S3 bucket.
+    let uploadUrl: string, key: string, bucket: string;
     try {
-      const res = await fetch("/api/descript/create-project", {
+      const res = await fetch("/api/uploads/s3-presign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode: "upload",
-          projectName: descriptItem.title || "Imported video",
+          itemId: descriptItem.id,
           fileName: descriptFile.name,
           contentType: descriptFile.type || "video/mp4",
           fileSize: descriptFile.size,
-          itemId: descriptItem.id,
         }),
       });
       const json = await res.json();
@@ -358,15 +393,17 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         return;
       }
       uploadUrl = json.uploadUrl;
-      projectUrl = json.projectUrl;
+      key = json.key;
+      bucket = json.bucket;
     } catch (err) {
       setDescriptError(err instanceof Error ? err.message : "Request failed");
       setDescriptStage("idle");
       return;
     }
 
-    // Upload the file directly from the browser to Descript's signed URL.
+    // Step 2: PUT the file directly from the browser to S3.
     setDescriptStage("uploading");
+    const contentType = descriptFile.type || "video/mp4";
     try {
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -379,20 +416,60 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           if (xhr.status >= 200 && xhr.status < 300) resolve();
           else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
         });
-        xhr.addEventListener("error", () => reject(new Error("Upload failed")));
+        xhr.addEventListener("error", () => reject(new Error("Upload failed (network)")));
         xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
         xhr.open("PUT", uploadUrl);
-        xhr.setRequestHeader(
-          "Content-Type",
-          descriptFile!.type || "application/octet-stream"
-        );
+        // Must match the ContentType signed into the URL.
+        xhr.setRequestHeader("Content-Type", contentType);
         xhr.send(descriptFile);
       });
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Upload failed");
+      setDescriptStage("idle");
+      return;
+    }
+
+    // Step 3: confirm to our server that the upload landed (persists key on the item).
+    try {
+      const res = await fetch("/api/uploads/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: descriptItem.id,
+          key,
+          bucket,
+          contentType,
+          fileSize: descriptFile.size,
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setDescriptError(json.error || `Confirm failed: HTTP ${res.status}`);
+        setDescriptStage("idle");
+        return;
+      }
+    } catch (err) {
+      setDescriptError(err instanceof Error ? err.message : "Confirm failed");
+      setDescriptStage("idle");
+      return;
+    }
+
+    // Stash the key in case the Descript step fails — retry won't re-upload.
+    setS3KeyForRetry(key);
+
+    // Step 4: kick off Descript URL-mode import using a presigned GET URL.
+    setDescriptStage("creating");
+    try {
+      const projectUrl = await callDescriptForS3Key(
+        key,
+        descriptItem.title || "Imported video",
+        descriptItem.id
+      );
       setDescriptResult({ projectUrl });
       setDescriptStage("done");
       load();
     } catch (err) {
-      setDescriptError(err instanceof Error ? err.message : "Upload failed");
+      setDescriptError(err instanceof Error ? err.message : "Descript import failed");
       setDescriptStage("idle");
     }
   }
@@ -1694,7 +1771,14 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                   )}
 
                   {descriptError && (
-                    <p className="text-xs text-destructive">{descriptError}</p>
+                    <div className="space-y-1">
+                      <p className="text-xs text-destructive">{descriptError}</p>
+                      {s3KeyForRetry && (
+                        <p className="text-[10px] text-muted-foreground">
+                          File is uploaded — retry sends it to Descript without re-uploading.
+                        </p>
+                      )}
+                    </div>
                   )}
 
                   <div className="flex justify-end gap-2">
@@ -1705,24 +1789,33 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                     >
                       Cancel
                     </Button>
-                    <Button
-                      onClick={
-                        descriptMode === "upload" ? submitDescriptUpload : submitDescriptUrl
-                      }
-                      disabled={
-                        descriptStage === "creating" ||
-                        descriptStage === "uploading" ||
-                        (descriptMode === "upload" ? !descriptFile : !descriptUrl.trim())
-                      }
-                    >
-                      {descriptStage === "creating"
-                        ? "Creating…"
-                        : descriptStage === "uploading"
-                        ? "Uploading…"
-                        : descriptMode === "upload"
-                        ? "Upload & create"
-                        : "Create project"}
-                    </Button>
+                    {s3KeyForRetry && descriptError ? (
+                      <Button
+                        onClick={retryDescriptImport}
+                        disabled={descriptStage === "creating"}
+                      >
+                        {descriptStage === "creating" ? "Retrying…" : "Retry Descript import"}
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={
+                          descriptMode === "upload" ? submitDescriptUpload : submitDescriptUrl
+                        }
+                        disabled={
+                          descriptStage === "creating" ||
+                          descriptStage === "uploading" ||
+                          (descriptMode === "upload" ? !descriptFile : !descriptUrl.trim())
+                        }
+                      >
+                        {descriptStage === "creating"
+                          ? "Creating…"
+                          : descriptStage === "uploading"
+                          ? "Uploading…"
+                          : descriptMode === "upload"
+                          ? "Upload & create"
+                          : "Create project"}
+                      </Button>
+                    )}
                   </div>
                 </>
               )}

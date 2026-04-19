@@ -32,6 +32,11 @@ export interface ProductionItem {
   descriptImportedAt?: string | null;
   pillarContentNotionId?: string | null;
   pillarContentItemId?: string | null;
+  mediaS3Bucket?: string | null;
+  mediaS3Key?: string | null;
+  mediaS3UploadedAt?: string | null;
+  mediaSizeBytes?: number | null;
+  mediaContentType?: string | null;
   createdAt: string;
   updatedAt: string;
 }
