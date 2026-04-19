@@ -1,6 +1,55 @@
 import { db } from "@/lib/db";
 import { productionItems, formats, brandSettings } from "@/lib/db/schema";
-import { and, eq, gte, lte, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gte, lte, isNotNull, inArray, sql } from "drizzle-orm";
+
+export const PIPELINE_STATUSES = [
+  "Ready To Publish",
+  "Final Review",
+  "Review",
+  "Assigned",
+  "Idea",
+] as const;
+
+type ProductionItemRow = typeof productionItems.$inferSelect;
+
+function mapProductionItem(item: ProductionItemRow): ProductionItem {
+  return {
+    id: item.id,
+    notionId: item.notionId,
+    youtubeId: item.youtubeId,
+    youtubeUrl: item.youtubeUrl,
+    thumbnail: item.thumbnail,
+    title: item.title,
+    publishedDate: item.publishedDate,
+    status: item.status,
+    platform: item.platform as string[] | null,
+    format: item.format,
+    brand: item.brand,
+    campaign: item.campaign,
+    utmCampaign: item.utmCampaign,
+    publishedLink: item.publishedLink,
+    isExternal: item.isExternal,
+    views: item.views,
+    likes: item.likes,
+    comments: item.comments,
+    clicks: item.clicks,
+    leads: item.leads,
+    salesNum: item.salesNum,
+    salesAmount: item.salesAmount ? parseFloat(item.salesAmount) : null,
+    ctrFirstHour: item.ctrFirstHour ? parseFloat(item.ctrFirstHour) : null,
+    apvFirst24Hours: item.apvFirst24Hours
+      ? parseFloat(item.apvFirst24Hours)
+      : null,
+    producerEmail: item.producerEmail,
+    producerName: item.producerName,
+    editorEmail: item.editorEmail,
+    editorName: item.editorName,
+    viewsEstimated: item.viewsEstimated ?? false,
+    lastPerformanceSyncAt: item.lastPerformanceSyncAt?.toISOString() ?? null,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
+  };
+}
 
 export async function getWeeklyGoal(brand: string): Promise<number | null> {
   const [row] = await db
@@ -186,40 +235,7 @@ export async function getContentReport(
 
   const weeklyGoal = await getWeeklyGoal("starter-story");
 
-  // Map items for the detail table
-  const mappedItems: ProductionItem[] = items.map((item) => ({
-    id: item.id,
-    notionId: item.notionId,
-    youtubeId: item.youtubeId,
-    youtubeUrl: item.youtubeUrl,
-    thumbnail: item.thumbnail,
-    title: item.title,
-    publishedDate: item.publishedDate,
-    status: item.status,
-    platform: item.platform as string[] | null,
-    format: item.format,
-    brand: item.brand,
-    campaign: item.campaign,
-    utmCampaign: item.utmCampaign,
-    publishedLink: item.publishedLink,
-    isExternal: item.isExternal,
-    views: item.views,
-    likes: item.likes,
-    comments: item.comments,
-    clicks: item.clicks,
-    leads: item.leads,
-    salesNum: item.salesNum,
-    salesAmount: item.salesAmount ? parseFloat(item.salesAmount) : null,
-    ctrFirstHour: item.ctrFirstHour ? parseFloat(item.ctrFirstHour) : null,
-    apvFirst24Hours: item.apvFirst24Hours
-      ? parseFloat(item.apvFirst24Hours)
-      : null,
-    producerEmail: item.producerEmail,
-    viewsEstimated: item.viewsEstimated ?? false,
-    lastPerformanceSyncAt: item.lastPerformanceSyncAt?.toISOString() ?? null,
-    createdAt: item.createdAt.toISOString(),
-    updatedAt: item.updatedAt.toISOString(),
-  }));
+  const mappedItems: ProductionItem[] = items.map(mapProductionItem);
 
   return {
     periods,
@@ -243,4 +259,20 @@ export async function getContentReport(
     showingFormats,
     weeklyGoal,
   };
+}
+
+export async function getProductionPipeline(
+  brand: string
+): Promise<ProductionItem[]> {
+  const items = await db
+    .select()
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.brand, brand),
+        inArray(productionItems.status, PIPELINE_STATUSES as unknown as string[])
+      )
+    );
+
+  return items.map(mapProductionItem);
 }

@@ -24,6 +24,9 @@ export interface ProductionItem {
   ctrFirstHour: number | null;
   apvFirst24Hours: number | null;
   producerEmail: string | null;
+  producerName: string | null;
+  editorEmail: string | null;
+  editorName: string | null;
   viewsEstimated: boolean | null;
   lastPerformanceSyncAt: string | null;
   descriptProjectId?: string | null;

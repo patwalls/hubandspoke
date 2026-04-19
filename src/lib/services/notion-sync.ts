@@ -163,17 +163,21 @@ function extractPillarContentNotionId(properties: any): string | null {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractProducerEmail(properties: any): string | null {
-  const people = properties["Producer"]?.people;
-  if (!Array.isArray(people) || people.length === 0) return null;
-  return people[0]?.person?.email || null;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractProducerUserId(properties: any): string | null {
-  const people = properties["Producer"]?.people;
-  if (!Array.isArray(people) || people.length === 0) return null;
-  return people[0]?.id || null;
+function extractPerson(properties: any, field: string): {
+  email: string | null;
+  userId: string | null;
+  name: string | null;
+} {
+  const people = properties[field]?.people;
+  if (!Array.isArray(people) || people.length === 0) {
+    return { email: null, userId: null, name: null };
+  }
+  const p = people[0];
+  return {
+    email: p?.person?.email || null,
+    userId: p?.id || null,
+    name: p?.name || null,
+  };
 }
 
 async function extractFormat(
@@ -287,6 +291,9 @@ export async function syncFromNotion(): Promise<{
         }
       }
 
+      const producer = extractPerson(properties, "Producer");
+      const editor = extractPerson(properties, "Editor/Creator");
+
       const data = {
         notionId,
         title: extractTitle(properties),
@@ -307,8 +314,12 @@ export async function syncFromNotion(): Promise<{
         salesAmount: extractNumber(properties, "Sales Amount")?.toString() ?? null,
         ctrFirstHour: extractNumber(properties, "CTR (First Hour)")?.toString() ?? null,
         apvFirst24Hours: extractNumber(properties, "APV (First 24 Hours)")?.toString() ?? null,
-        producerEmail: extractProducerEmail(properties),
-        producerNotionUserId: extractProducerUserId(properties),
+        producerEmail: producer.email,
+        producerNotionUserId: producer.userId,
+        producerName: producer.name,
+        editorEmail: editor.email,
+        editorNotionUserId: editor.userId,
+        editorName: editor.name,
         pillarContentNotionId: extractPillarContentNotionId(properties),
         viewsEstimated,
         updatedAt: new Date(),
