@@ -167,7 +167,7 @@ export function SectionTabs() {
     { href: `/${currentBrand}/content`, label: "Content" },
     { href: `/${currentBrand}/production`, label: "Production" },
     { href: `/${currentBrand}/formats`, label: "Formats" },
-    { href: `/${currentBrand}/settings`, label: "Settings" },
+    { href: `/settings`, label: "Settings" },
   ];
 
   return (
@@ -179,7 +179,8 @@ export function SectionTabs() {
           (tab.label === "Content" && pathname === "/content") ||
           (tab.label === "Production" && pathname === "/production") ||
           (tab.label === "Formats" && pathname === "/formats") ||
-          (tab.label === "Settings" && pathname === "/settings");
+          (tab.label === "Settings" && pathname.startsWith("/settings")) ||
+          (tab.label === "Settings" && pathname.endsWith("/settings"));
         return (
           <Link
             key={tab.href}

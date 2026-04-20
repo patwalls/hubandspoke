@@ -82,9 +82,6 @@ export default function LoginPage() {
               <Link href="/forgot-password" className="text-xs text-muted-foreground hover:text-primary">
                 Forgot password?
               </Link>
-              <Link href="/signup" className="text-xs text-primary hover:underline">
-                Create account
-              </Link>
             </div>
           </form>
         </div>

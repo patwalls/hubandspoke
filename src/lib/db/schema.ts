@@ -177,6 +177,12 @@ export const users = pgTable(
     passwordHash: text("password_hash"),
     name: text("name"),
     avatarUrl: text("avatar_url"),
+    role: text("role", { enum: ["admin", "creator"] })
+      .notNull()
+      .default("creator"),
+    invitedBy: uuid("invited_by").references((): AnyPgColumn => users.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -185,6 +191,38 @@ export const users = pgTable(
       .notNull(),
   },
   (table) => [uniqueIndex("idx_users_email_lower").on(sql`lower(${table.email})`)]
+);
+
+export const invites = pgTable(
+  "invites",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    email: text("email").notNull(),
+    role: text("role", { enum: ["admin", "creator"] })
+      .notNull()
+      .default("creator"),
+    invitedByUserId: uuid("invited_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    acceptedByUserId: uuid("accepted_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_invites_email_lower").on(sql`lower(${table.email})`),
+    index("idx_invites_status").on(
+      table.acceptedAt,
+      table.revokedAt,
+      table.expiresAt
+    ),
+  ]
 );
 
 export const passwordResetTokens = pgTable(

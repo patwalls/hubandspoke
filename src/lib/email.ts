@@ -44,3 +44,47 @@ export async function sendPasswordResetEmail(opts: {
     MessageStream: "outbound",
   });
 }
+
+export async function sendInviteEmail(opts: {
+  to: string;
+  inviteUrl: string;
+  inviterName?: string | null;
+  inviterEmail: string;
+  role: "admin" | "creator";
+  expiresAt: Date;
+}) {
+  const inviter = opts.inviterName || opts.inviterEmail;
+  const roleLabel = opts.role === "admin" ? "an admin" : "a member";
+  const expiresDate = opts.expiresAt.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  return getClient().sendEmail({
+    From: from,
+    To: opts.to,
+    Subject: "You're invited to Hub & Spoke",
+    TextBody: [
+      "Hi,",
+      "",
+      `${inviter} invited you to join Hub & Spoke as ${roleLabel}.`,
+      "",
+      "Click the link below to accept the invite and set your password:",
+      "",
+      opts.inviteUrl,
+      "",
+      `This invite expires ${expiresDate}. If you weren't expecting this, you can ignore this email.`,
+      "",
+      "— Hub & Spoke",
+    ].join("\n"),
+    HtmlBody: `
+      <p>Hi,</p>
+      <p><strong>${inviter}</strong> invited you to join Hub &amp; Spoke as <strong>${roleLabel}</strong>.</p>
+      <p><a href="${opts.inviteUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Accept invite</a></p>
+      <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.inviteUrl}">${opts.inviteUrl}</a></p>
+      <p style="color:#999;font-size:12px;">This invite expires ${expiresDate}. If you weren't expecting this, you can ignore this email.</p>
+      <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
+    `,
+    MessageStream: "outbound",
+  });
+}

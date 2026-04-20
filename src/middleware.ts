@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 
 const PUBLIC_PAGES = new Set([
   "/login",
-  "/signup",
   "/forgot-password",
   "/reset-password",
+  "/accept-invite",
 ]);
 
 export default auth((req) => {
