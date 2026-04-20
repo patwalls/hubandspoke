@@ -1091,7 +1091,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       )}
       </div>
 
-      {isPrePublish && <ContentComments contentId={item.id} />}
+      <ContentComments contentId={item.id} />
 
       {!isPrePublish && (
       <>
