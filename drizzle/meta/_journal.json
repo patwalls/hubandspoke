@@ -15,6 +15,13 @@
       "when": 1776655173996,
       "tag": "0001_uniq_pillar_format",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776656615437,
+      "tag": "0002_add_content_comments_if_missing",
+      "breakpoints": true
     }
   ]
 }
