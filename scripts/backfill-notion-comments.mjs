@@ -186,13 +186,16 @@ async function main() {
           continue;
         }
 
+        // ON CONFLICT target must match the partial unique index predicate
+        // (WHERE notion_comment_id IS NOT NULL) in drizzle/0003_*.sql.
         const result = await sql`
           INSERT INTO content_comments
             (notion_comment_id, content_item_id, user_id, body, created_at, edited_at)
           VALUES
             (${c.id}, ${item.id}, ${userId}, ${body},
              ${c.created_time}, ${editedAt})
-          ON CONFLICT (notion_comment_id) DO UPDATE SET
+          ON CONFLICT (notion_comment_id) WHERE notion_comment_id IS NOT NULL
+          DO UPDATE SET
             body = EXCLUDED.body,
             edited_at = EXCLUDED.edited_at,
             user_id = EXCLUDED.user_id
