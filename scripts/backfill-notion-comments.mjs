@@ -37,9 +37,15 @@ const ssl =
 const sql = postgres(process.env.DATABASE_URL, { prepare: false, ssl });
 const notion = new Client({ auth: process.env.NOTION_API_SECRET });
 
-// Notion rate limit is ~3 req/sec; 400ms keeps us under even with bursts.
-const SLEEP_MS = 400;
+// Notion rate limit is ~3 req/sec in theory but enforcement is bursty —
+// 400ms triggered sustained rate_limited responses across 5k+ calls.
+// 900ms ≈ 1.1 req/sec: plenty of headroom for a one-off backfill.
+const SLEEP_MS = 900;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// When a call fails even after per-call backoff, pause the whole script
+// for this long before the next item. Gives Notion's rolling window time
+// to drain.
+const COOLDOWN_MS = 5 * 60 * 1000;
 
 function richToPlain(rich) {
   if (!Array.isArray(rich)) return "";
@@ -47,7 +53,7 @@ function richToPlain(rich) {
 }
 
 async function withRetry(fn, label) {
-  const MAX = 6;
+  const MAX = 8;
   for (let attempt = 1; ; attempt++) {
     try {
       return await fn();
@@ -62,7 +68,7 @@ async function withRetry(fn, label) {
       const retryAfter = Number(err?.headers?.["retry-after"]);
       const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
         ? retryAfter * 1000
-        : Math.min(60000, 2 ** attempt * 1000);
+        : Math.min(300000, 2 ** attempt * 1000);
       console.log(`   ⏳ ${label}: ${err.code ?? err.status} — sleeping ${Math.round(waitMs / 1000)}s (attempt ${attempt}/${MAX})`);
       await sleep(waitMs);
     }
@@ -213,6 +219,10 @@ async function main() {
     } catch (err) {
       itemsFailed++;
       console.error(`✗  FAIL  ${item.notion_id}: ${err.message}`);
+      if (err?.code === "rate_limited" || err?.status === 429) {
+        console.log(`   💤 cooldown ${Math.round(COOLDOWN_MS / 1000)}s to let Notion rate-limit window drain`);
+        await sleep(COOLDOWN_MS);
+      }
     }
   }
 
