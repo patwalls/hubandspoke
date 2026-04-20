@@ -40,6 +40,13 @@ interface PillarRef {
   format: string | null;
 }
 
+interface AssignableUser {
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
 interface DetailResponse {
   item: ProductionItem;
   derivatives: DerivativeRow[];
@@ -48,6 +55,8 @@ interface DetailResponse {
   formats: BrandFormat[];
   repurposeTargets: BrandFormat[];
   pillar: PillarRef | null;
+  producer: AssignableUser | null;
+  editor: AssignableUser | null;
 }
 
 interface ContentDetailProps {
@@ -175,6 +184,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     message: string;
   } | null>(null);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [statusSaveError, setStatusSaveError] = useState<string | null>(null);
 
   // Per-format repurpose state, keyed by format id
   type RepurposeKind = "descript_clip" | "manual_task";
@@ -488,6 +499,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [format, setFormat] = useState("");
   const [status, setStatus] = useState("");
   const [pillar, setPillar] = useState<PillarOption | null>(null);
+  const [producerUserId, setProducerUserId] = useState<string>("");
+  const [editorUserId, setEditorUserId] = useState<string>("");
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
   const [views, setViews] = useState("");
@@ -497,6 +511,23 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [leads, setLeads] = useState("");
   const [salesAmount, setSalesAmount] = useState("");
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/users/assignable");
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!cancelled) setAssignableUsers(json.users || []);
+      } catch {
+        // Non-fatal: the form still works without suggestions.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const platformOptions = brand === "matg" ? MATG_PLATFORMS : SS_PLATFORMS;
 
   const applyItem = useCallback((item: ProductionItem, pillarRef: PillarRef | null) => {
@@ -505,6 +536,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     setFormat(item.format || "");
     setStatus(item.status || "");
     setPillar(pillarRef);
+    setProducerUserId(item.producerUserId || "");
+    setEditorUserId(item.editorUserId || "");
     setPublishedLink(item.publishedLink || "");
     setPublishedDate(item.publishedDate || "");
     setViews(item.views != null ? String(item.views) : "");
@@ -540,6 +573,39 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     load();
   }, [load]);
 
+  // Status is the one field that saves on change — the activity feed relies on
+  // status transitions being captured immediately, and users shouldn't have to
+  // click Save just to advance a post through the pipeline.
+  async function handleStatusChange(nextStatus: string | null) {
+    const prev = status;
+    const normalized = nextStatus ?? "";
+    if (normalized === prev) return;
+    setStatus(normalized);
+    setStatusSaving(true);
+    setStatusSaveError(null);
+    try {
+      const res = await fetch("/api/production-items", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: contentId, status: normalized || null }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const payload = await res.json();
+      if (payload.notionSyncWarning) {
+        setStatusSaveError(`Saved locally. Notion: ${payload.notionSyncWarning}`);
+      }
+      setActivityRefreshKey((k) => k + 1);
+    } catch (e) {
+      setStatus(prev);
+      setStatusSaveError(e instanceof Error ? e.message : "Failed to save status");
+    } finally {
+      setStatusSaving(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaveResult(null);
@@ -554,6 +620,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           format: format || null,
           status: status || null,
           pillarContentItemId: pillar?.id ?? null,
+          producerUserId: producerUserId || null,
+          editorUserId: editorUserId || null,
           publishedLink: publishedLink || null,
           publishedDate,
           views: views ? parseInt(views, 10) : null,
@@ -901,10 +969,16 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
 
         <div className="space-y-2">
-          <Label>Status</Label>
+          <div className="flex items-center gap-2">
+            <Label>Status</Label>
+            {statusSaving && (
+              <span className="text-[11px] text-muted-foreground">Saving…</span>
+            )}
+          </div>
           <Select
             value={status}
-            onValueChange={(v) => setStatus(v || "")}
+            onValueChange={handleStatusChange}
+            disabled={statusSaving}
           >
             <SelectTrigger className="md:w-[280px]">
               <SelectValue placeholder="Select status…" />
@@ -917,9 +991,11 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               ))}
             </SelectContent>
           </Select>
-          {data?.item.notionId ? (
+          {statusSaveError ? (
+            <p className="text-[11px] text-red-600">{statusSaveError}</p>
+          ) : data?.item.notionId ? (
             <p className="text-[11px] text-muted-foreground">
-              Changes sync back to Notion on save.
+              Saves instantly and syncs to Notion.
             </p>
           ) : (
             <p className="text-[11px] text-muted-foreground">
@@ -940,6 +1016,55 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             The root post this derivative rolls up to. Syncs to Notion on save.
           </p>
         </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Producer</Label>
+            <Select
+              value={producerUserId || "__unassigned"}
+              onValueChange={(v) =>
+                setProducerUserId(v === "__unassigned" ? "" : v)
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Unassigned" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__unassigned">Unassigned</SelectItem>
+                {assignableUsers.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.name || u.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Editor</Label>
+            <Select
+              value={editorUserId || "__unassigned"}
+              onValueChange={(v) =>
+                setEditorUserId(v === "__unassigned" ? "" : v)
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Unassigned" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__unassigned">Unassigned</SelectItem>
+                {assignableUsers.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.name || u.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <p className="text-[11px] text-muted-foreground -mt-2">
+          Assignments are managed in Hub &amp; Spoke. Changes notify the new
+          assignee by email.
+        </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">

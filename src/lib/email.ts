@@ -45,6 +45,97 @@ export async function sendPasswordResetEmail(opts: {
   });
 }
 
+export async function sendAssignmentEmail(opts: {
+  to: string;
+  name?: string | null;
+  itemTitle: string | null;
+  role: "producer" | "editor";
+  assignedByName?: string | null;
+  itemUrl: string;
+}) {
+  const greeting = opts.name ? `Hi ${opts.name},` : "Hi,";
+  const title = opts.itemTitle || "(Untitled)";
+  const roleLabel = opts.role === "producer" ? "producer" : "editor";
+  const assigner = opts.assignedByName || "A teammate";
+  const subject = `You were assigned as ${roleLabel} on "${title}"`;
+  return getClient().sendEmail({
+    From: from,
+    To: opts.to,
+    Subject: subject,
+    TextBody: [
+      greeting,
+      "",
+      `${assigner} assigned you as ${roleLabel} on:`,
+      "",
+      title,
+      "",
+      opts.itemUrl,
+      "",
+      "— Hub & Spoke",
+    ].join("\n"),
+    HtmlBody: `
+      <p>${greeting}</p>
+      <p><strong>${escapeHtml(assigner)}</strong> assigned you as <strong>${roleLabel}</strong> on:</p>
+      <p style="margin:16px 0;padding:12px 14px;border-left:3px solid #16a34a;background:#f6fbf7;font-weight:500;">${escapeHtml(title)}</p>
+      <p><a href="${opts.itemUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Open in Hub &amp; Spoke</a></p>
+      <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.itemUrl}">${opts.itemUrl}</a></p>
+      <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
+    `,
+    MessageStream: "outbound",
+  });
+}
+
+export async function sendCommentEmail(opts: {
+  to: string;
+  name?: string | null;
+  itemTitle: string | null;
+  commentAuthor: string | null;
+  commentBody: string;
+  itemUrl: string;
+}) {
+  const greeting = opts.name ? `Hi ${opts.name},` : "Hi,";
+  const title = opts.itemTitle || "(Untitled)";
+  const author = opts.commentAuthor || "A teammate";
+  const excerpt = opts.commentBody.length > 400
+    ? opts.commentBody.slice(0, 400) + "…"
+    : opts.commentBody;
+  const subject = `${author} commented on "${title}"`;
+  return getClient().sendEmail({
+    From: from,
+    To: opts.to,
+    Subject: subject,
+    TextBody: [
+      greeting,
+      "",
+      `${author} commented on "${title}":`,
+      "",
+      excerpt,
+      "",
+      opts.itemUrl,
+      "",
+      "— Hub & Spoke",
+    ].join("\n"),
+    HtmlBody: `
+      <p>${greeting}</p>
+      <p><strong>${escapeHtml(author)}</strong> commented on <strong>${escapeHtml(title)}</strong>:</p>
+      <blockquote style="margin:16px 0;padding:10px 14px;border-left:3px solid #d4d4d4;background:#fafafa;color:#333;white-space:pre-wrap;">${escapeHtml(excerpt)}</blockquote>
+      <p><a href="${opts.itemUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Reply in Hub &amp; Spoke</a></p>
+      <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.itemUrl}">${opts.itemUrl}</a></p>
+      <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
+    `,
+    MessageStream: "outbound",
+  });
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function sendInviteEmail(opts: {
   to: string;
   inviteUrl: string;

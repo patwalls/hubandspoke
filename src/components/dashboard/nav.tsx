@@ -6,6 +6,7 @@ import { useState } from "react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { BRANDS, DEFAULT_BRAND } from "@/lib/config/brands";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 
 type Brand = (typeof BRANDS)[number];
 
@@ -144,6 +145,13 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <Link
+              href="/my-work"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors hidden sm:inline"
+            >
+              My Work
+            </Link>
+            <NotificationBell />
             <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[150px]">{userEmail}</span>
             <button
               onClick={handleSignOut}

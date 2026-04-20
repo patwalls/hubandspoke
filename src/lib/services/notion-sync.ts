@@ -188,8 +188,15 @@ type NotionPerson = {
   avatarUrl: string | null;
 };
 
+type PersonRow = {
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  notionUserId: string | null;
+};
+
 function collectPerson(
-  bucket: Map<string, { email: string; name: string | null; avatarUrl: string | null }>,
+  bucket: Map<string, PersonRow>,
   p: NotionPerson
 ): void {
   if (!p.email) return;
@@ -197,15 +204,22 @@ function collectPerson(
   if (!email) return;
   // Last write wins for name/avatar — the full-sync pass sees every page, so
   // later entries for the same email tend to be just as good as earlier ones.
-  bucket.set(email, { email, name: p.name, avatarUrl: p.avatarUrl });
+  bucket.set(email, {
+    email,
+    name: p.name,
+    avatarUrl: p.avatarUrl,
+    notionUserId: p.userId,
+  });
 }
 
 async function flushUserUpserts(
-  bucket: Map<string, { email: string; name: string | null; avatarUrl: string | null }>
+  bucket: Map<string, PersonRow>
 ): Promise<number> {
   const rows = [...bucket.values()];
   if (rows.length === 0) return 0;
-  // Single INSERT ... ON CONFLICT for all collected people.
+  // Single INSERT ... ON CONFLICT for all collected people. notion_user_id is
+  // only set when NULL so a later row claiming a different notion_user_id for
+  // the same email doesn't collide with the table's UNIQUE(notion_user_id).
   await db
     .insert(users)
     .values(rows)
@@ -214,6 +228,7 @@ async function flushUserUpserts(
       set: {
         name: sql`COALESCE(${users.name}, EXCLUDED.name)`,
         avatarUrl: sql`EXCLUDED.avatar_url`,
+        notionUserId: sql`COALESCE(${users.notionUserId}, EXCLUDED.notion_user_id)`,
         updatedAt: new Date(),
       },
     });
@@ -320,7 +335,9 @@ export async function syncFromNotion(): Promise<{
       collectPerson(peopleBucket, producer);
       collectPerson(peopleBucket, editor);
 
-      const data = {
+      // Fields every sync row writes. Producer/editor are deliberately absent:
+      // assignments are app-owned post-insert (see below for INSERT-only seed).
+      const commonData = {
         notionId,
         title: extractTitle(properties),
         publishedDate: extractPublishDate(properties),
@@ -339,12 +356,6 @@ export async function syncFromNotion(): Promise<{
         salesAmount: extractNumber(properties, "Sales Amount")?.toString() ?? null,
         ctrFirstHour: extractNumber(properties, "CTR (First Hour)")?.toString() ?? null,
         apvFirst24Hours: extractNumber(properties, "APV (First 24 Hours)")?.toString() ?? null,
-        producerEmail: producer.email,
-        producerNotionUserId: producer.userId,
-        producerName: producer.name,
-        editorEmail: editor.email,
-        editorNotionUserId: editor.userId,
-        editorName: editor.name,
         pillarContentNotionId: extractPillarContentNotionId(properties),
         updatedAt: new Date(),
       };
@@ -357,19 +368,55 @@ export async function syncFromNotion(): Promise<{
         .limit(1);
 
       if (existing.length > 0) {
+        // UPDATE path: skip producer/editor entirely. Hub & Spoke is now the
+        // source of truth for assignments — Notion edits to Producer/Editor
+        // after first sync are intentionally ignored.
         await db
           .update(productionItems)
-          .set(data)
+          .set(commonData)
           .where(eq(productionItems.notionId, notionId));
         totalUpdated++;
       } else {
-        await db.insert(productionItems).values(data);
+        // INSERT path: seed the legacy email/name columns so the first render
+        // has something to show. producer_user_id/editor_user_id get resolved
+        // by the single UPDATE after flushUserUpserts, so we don't need to
+        // block per-item on a user lookup here.
+        await db.insert(productionItems).values({
+          ...commonData,
+          producerEmail: producer.email,
+          producerNotionUserId: producer.userId,
+          producerName: producer.name,
+          editorEmail: editor.email,
+          editorNotionUserId: editor.userId,
+          editorName: editor.name,
+        });
         totalCreated++;
       }
     }
 
     // Upsert users directory from the producers/editors we saw.
     await flushUserUpserts(peopleBucket);
+
+    // Resolve producer_user_id / editor_user_id on freshly-inserted rows whose
+    // FKs are still NULL. Idempotent: WHERE producer_user_id IS NULL means we
+    // never clobber an app-side assignment edit, and pre-existing rows already
+    // had their FKs set by migration 0006's backfill.
+    await db.execute(sql`
+      UPDATE production_items
+      SET producer_user_id = u.id
+      FROM users u
+      WHERE production_items.producer_user_id IS NULL
+        AND production_items.producer_email IS NOT NULL
+        AND lower(u.email) = lower(production_items.producer_email)
+    `);
+    await db.execute(sql`
+      UPDATE production_items
+      SET editor_user_id = u.id
+      FROM users u
+      WHERE production_items.editor_user_id IS NULL
+        AND production_items.editor_email IS NOT NULL
+        AND lower(u.email) = lower(production_items.editor_email)
+    `);
 
     // Delete orphaned records
     if (completedFetch && notionIds.length > 0) {

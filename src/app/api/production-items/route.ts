@@ -5,6 +5,7 @@ import { contentEvents, productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
+import { enqueueNotification } from "@/lib/services/notifications";
 
 function getNotion(): Client {
   const auth = process.env.NOTION_API_SECRET;
@@ -168,6 +169,8 @@ export async function PUT(request: NextRequest) {
       publishedDate,
       status,
       pillarContentItemId,
+      producerUserId,
+      editorUserId,
       views,
       likes,
       comments,
@@ -236,6 +239,50 @@ export async function PUT(request: NextRequest) {
       if (existing && existing.status !== nextStatus) {
         statusTransition = { from: existing.status, to: nextStatus };
       }
+    }
+
+    // Capture assignment diffs before the UPDATE so we can fire a notification
+    // for each new assignee after the write commits. Empty string coerces to
+    // null so the UI can clear an assignment.
+    let assignmentDiff: {
+      producerChanged: boolean;
+      editorChanged: boolean;
+      nextProducerUserId: string | null;
+      nextEditorUserId: string | null;
+    } | null = null;
+    if (producerUserId !== undefined || editorUserId !== undefined) {
+      const [existing] = await db
+        .select({
+          producerUserId: productionItems.producerUserId,
+          editorUserId: productionItems.editorUserId,
+        })
+        .from(productionItems)
+        .where(eq(productionItems.id, id))
+        .limit(1);
+      const nextProducer: string | null =
+        producerUserId === undefined
+          ? existing?.producerUserId ?? null
+          : producerUserId || null;
+      const nextEditor: string | null =
+        editorUserId === undefined
+          ? existing?.editorUserId ?? null
+          : editorUserId || null;
+      if (producerUserId !== undefined) {
+        updateData.producerUserId = nextProducer;
+      }
+      if (editorUserId !== undefined) {
+        updateData.editorUserId = nextEditor;
+      }
+      assignmentDiff = {
+        producerChanged:
+          producerUserId !== undefined &&
+          (existing?.producerUserId ?? null) !== nextProducer,
+        editorChanged:
+          editorUserId !== undefined &&
+          (existing?.editorUserId ?? null) !== nextEditor,
+        nextProducerUserId: nextProducer,
+        nextEditorUserId: nextEditor,
+      };
     }
 
     // Handle views + likes together so estimation stays in sync
@@ -308,6 +355,42 @@ export async function PUT(request: NextRequest) {
             `pillar: ${err instanceof Error ? err.message : "Notion update failed"}`
           );
         }
+      }
+    }
+
+    // Fire assignment notifications after the write commits. Fire-and-forget —
+    // email send is handled inside enqueueNotification and must not block the
+    // save response.
+    if (assignmentDiff) {
+      if (assignmentDiff.producerChanged && assignmentDiff.nextProducerUserId) {
+        void enqueueNotification({
+          userId: assignmentDiff.nextProducerUserId,
+          kind: "assigned",
+          contentItemId: id,
+          actorUserId: actorUserId,
+          payload: {
+            kind: "assigned",
+            role: "producer",
+            title: updated.title,
+          },
+        }).catch((err) =>
+          console.error("[assignment] producer notify failed", err)
+        );
+      }
+      if (assignmentDiff.editorChanged && assignmentDiff.nextEditorUserId) {
+        void enqueueNotification({
+          userId: assignmentDiff.nextEditorUserId,
+          kind: "assigned",
+          contentItemId: id,
+          actorUserId: actorUserId,
+          payload: {
+            kind: "assigned",
+            role: "editor",
+            title: updated.title,
+          },
+        }).catch((err) =>
+          console.error("[assignment] editor notify failed", err)
+        );
       }
     }
 

@@ -43,6 +43,13 @@
       "when": 1776705195025,
       "tag": "0005_striped_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776706695783,
+      "tag": "0006_worthless_rockslide",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import {
   productionItems,
   formats,
+  users,
 } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -88,6 +89,28 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       if (p) pillar = p;
     }
 
+    // Resolve producer + editor user records for the assignee pickers.
+    // Separate queries keep the main item query simple and each is indexed.
+    const assigneeIds = [item.producerUserId, item.editorUserId].filter(
+      (v): v is string => !!v
+    );
+    const assigneeRows = assigneeIds.length
+      ? await db
+          .select({
+            id: users.id,
+            email: users.email,
+            name: users.name,
+            avatarUrl: users.avatarUrl,
+          })
+          .from(users)
+          .where(inArray(users.id, assigneeIds))
+      : [];
+    const byId = new Map(assigneeRows.map((u) => [u.id, u]));
+    const producer = item.producerUserId
+      ? byId.get(item.producerUserId) ?? null
+      : null;
+    const editor = item.editorUserId ? byId.get(item.editorUserId) ?? null : null;
+
     // Scope Repurpose targets to direct children of this item's source format.
     // The item stores its format as a text name, so resolve it via brandFormats.
     const sourceFormat = item.format
@@ -133,6 +156,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       formats: brandFormats,
       repurposeTargets,
       pillar,
+      producer,
+      editor,
     });
   } catch (error) {
     console.error("Error fetching production item:", error);

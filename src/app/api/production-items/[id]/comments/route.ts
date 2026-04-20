@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { enqueueNotification } from "@/lib/services/notifications";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -91,7 +92,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const [item] = await db
-      .select({ id: productionItems.id })
+      .select({
+        id: productionItems.id,
+        title: productionItems.title,
+        producerUserId: productionItems.producerUserId,
+        editorUserId: productionItems.editorUserId,
+      })
       .from(productionItems)
       .where(eq(productionItems.id, id))
       .limit(1);
@@ -113,6 +119,30 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .from(users)
       .where(eq(users.id, session.user.id))
       .limit(1);
+
+    // Notify producer and editor (minus commenter). Self-notification is
+    // filtered inside enqueueNotification. Fire-and-forget so a Postmark or
+    // DB hiccup never breaks the comment POST.
+    const excerpt = text.slice(0, 240);
+    const authorName = user?.name || user?.email || null;
+    const recipientIds = new Set<string>();
+    if (item.producerUserId) recipientIds.add(item.producerUserId);
+    if (item.editorUserId) recipientIds.add(item.editorUserId);
+    for (const recipientId of recipientIds) {
+      void enqueueNotification({
+        userId: recipientId,
+        kind: "comment",
+        contentItemId: id,
+        commentId: inserted.id,
+        actorUserId: session.user.id,
+        payload: {
+          kind: "comment",
+          title: item.title,
+          excerpt,
+          authorName,
+        },
+      }).catch((err) => console.error("[comment] notify failed", err));
+    }
 
     return NextResponse.json(
       { comment: shape({ comment: inserted, user: user ?? null }, session.user.id) },

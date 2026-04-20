@@ -26,9 +26,11 @@ export interface ProductionItem {
   producerEmail: string | null;
   producerName: string | null;
   producerAvatarUrl: string | null;
+  producerUserId: string | null;
   editorEmail: string | null;
   editorName: string | null;
   editorAvatarUrl: string | null;
+  editorUserId: string | null;
   viewsEstimated: boolean | null;
   lastPerformanceSyncAt: string | null;
   descriptProjectId?: string | null;

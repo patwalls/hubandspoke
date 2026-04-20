@@ -48,6 +48,16 @@ export const productionItems = pgTable(
     editorEmail: text("editor_email"),
     editorNotionUserId: text("editor_notion_user_id"),
     editorName: text("editor_name"),
+    // App-owned assignment FKs. Seeded from the legacy email columns on insert
+    // and backfilled once. Notion sync stops touching these on update — edits
+    // happen only in-app. Legacy email/name columns remain for historical
+    // display on archived items whose people aren't in our users directory.
+    producerUserId: uuid("producer_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    editorUserId: uuid("editor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     viewsEstimated: boolean("views_estimated").default(false),
     lastPerformanceSyncAt: timestamp("last_performance_sync_at", {
       withTimezone: true,
@@ -93,6 +103,8 @@ export const productionItems = pgTable(
     index("idx_production_items_last_perf_sync").on(table.lastPerformanceSyncAt),
     index("idx_production_items_pillar_notion").on(table.pillarContentNotionId),
     index("idx_production_items_pillar_item").on(table.pillarContentItemId),
+    index("idx_production_items_producer_user").on(table.producerUserId),
+    index("idx_production_items_editor_user").on(table.editorUserId),
     uniqueIndex("uniq_production_items_pillar_format")
       .on(table.pillarContentItemId, sql`lower(${table.format})`)
       .where(
@@ -188,6 +200,10 @@ export const users = pgTable(
     invitedBy: uuid("invited_by").references((): AnyPgColumn => users.id, {
       onDelete: "set null",
     }),
+    // Notion-side identity. Populated during sync so we can resolve Notion
+    // comment authors + assignments back to our user rows even when the email
+    // isn't exposed to integrations (Notion redacts it for some accounts).
+    notionUserId: text("notion_user_id").unique(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -302,6 +318,56 @@ export const contentEvents = pgTable(
       table.contentItemId,
       table.createdAt,
     ),
+  ],
+);
+
+// Per-recipient inbox of collaboration events. One row per (event, recipient)
+// so unread counts are an indexed partial scan and each user marks their copy
+// independently. Polymorphic via `kind` + `payload`; today we emit 'assigned'
+// and 'comment'. `emailed_at` is stamped fire-and-forget after we ship the
+// email so we don't double-send if a row gets requeued.
+export type NotificationPayload =
+  | { kind: "assigned"; role: "producer" | "editor"; title: string | null }
+  | {
+      kind: "comment";
+      title: string | null;
+      excerpt: string;
+      authorName: string | null;
+    };
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    kind: text("kind").notNull(),
+    contentItemId: uuid("content_item_id").references(
+      () => productionItems.id,
+      { onDelete: "cascade" },
+    ),
+    commentId: uuid("comment_id").references(() => contentComments.id, {
+      onDelete: "set null",
+    }),
+    actorUserId: uuid("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    payload: jsonb("payload").$type<NotificationPayload>().notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    emailedAt: timestamp("emailed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_notifications_user_created").on(
+      table.userId,
+      table.createdAt,
+    ),
+    index("idx_notifications_user_unread")
+      .on(table.userId)
+      .where(sql`${table.readAt} IS NULL`),
   ],
 );
 
