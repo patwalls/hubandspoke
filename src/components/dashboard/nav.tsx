@@ -173,8 +173,8 @@ export function SectionTabs() {
   const tabs = [
     { href: `/${currentBrand}`, label: "Dashboard" },
     { href: `/${currentBrand}/content`, label: "Content" },
-    { href: `/${currentBrand}/queue`, label: "Queue" },
     { href: `/${currentBrand}/production`, label: "Production" },
+    { href: `/${currentBrand}/queue`, label: "Queue" },
     { href: `/${currentBrand}/formats`, label: "Formats" },
     { href: `/settings`, label: "Settings" },
   ];
