@@ -78,6 +78,38 @@ async function withRetry(fn, label) {
   }
 }
 
+// Notion comments only return a Partial User on created_by (`{object, id}`).
+// Full details (name, email, avatar) require notion.users.retrieve() per user.
+// Cache results so we don't hit the API more than once per unique commenter.
+// Workspace members resolve; guests/external users return object_not_found.
+const userInfoCache = new Map();
+async function fetchNotionUser(userId) {
+  if (!userId) return null;
+  if (userInfoCache.has(userId)) return userInfoCache.get(userId);
+  try {
+    const u = await withRetry(
+      () => notion.users.retrieve({ user_id: userId }),
+      `users.retrieve ${userId}`,
+    );
+    await sleep(SLEEP_MS); // pace after a real API call
+    const info = {
+      name: u.name ?? null,
+      email: u.person?.email ?? null,
+      avatarUrl: u.avatar_url ?? null,
+    };
+    userInfoCache.set(userId, info);
+    return info;
+  } catch (err) {
+    // object_not_found = external/guest user the integration can't see.
+    // Cache the miss so we don't retry on every comment from that user.
+    if (err?.code === "object_not_found") {
+      userInfoCache.set(userId, null);
+      return null;
+    }
+    throw err;
+  }
+}
+
 async function listPageComments(pageId) {
   const all = [];
   let cursor;
@@ -184,9 +216,10 @@ async function main() {
         }
 
         const createdBy = c.created_by ?? {};
-        const email = createdBy.person?.email ?? null;
-        const authorName = createdBy.name ?? null;
-        const authorAvatarUrl = createdBy.avatar_url ?? null;
+        const info = await fetchNotionUser(createdBy.id);
+        const email = info?.email ?? createdBy.person?.email ?? null;
+        const authorName = info?.name ?? createdBy.name ?? null;
+        const authorAvatarUrl = info?.avatarUrl ?? createdBy.avatar_url ?? null;
 
         let userId = null;
         if (email) {
