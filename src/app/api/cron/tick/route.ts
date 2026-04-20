@@ -12,10 +12,23 @@ export async function GET(request: NextRequest) {
   }
 
   const now = new Date();
-  const due = CRON_JOBS.filter((j) => shouldRunNow(j.schedule, now));
-  const skipped = CRON_JOBS.filter((j) => !shouldRunNow(j.schedule, now)).map(
-    (j) => j.name
-  );
+  // Ad-hoc override: `?name=<jobName>` runs that job regardless of schedule.
+  // Same CRON_SECRET gate applies. Useful for re-running a daily scan after
+  // a deploy or for validating a job end-to-end without waiting.
+  const forceName = request.nextUrl.searchParams.get("name");
+  const due = forceName
+    ? CRON_JOBS.filter((j) => j.name === forceName)
+    : CRON_JOBS.filter((j) => shouldRunNow(j.schedule, now));
+  const skipped = forceName
+    ? CRON_JOBS.filter((j) => j.name !== forceName).map((j) => j.name)
+    : CRON_JOBS.filter((j) => !shouldRunNow(j.schedule, now)).map((j) => j.name);
+
+  if (forceName && due.length === 0) {
+    return NextResponse.json(
+      { error: `Unknown job: ${forceName}` },
+      { status: 404 }
+    );
+  }
 
   const results = await Promise.allSettled(
     due.map(async (j) => {
