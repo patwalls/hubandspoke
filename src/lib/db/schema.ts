@@ -89,6 +89,24 @@ export const productionItems = pgTable(
       (): AnyPgColumn => productionItems.id,
       { onDelete: "set null" }
     ),
+    // How this item entered the system. "original" is user-authored or
+    // Notion-synced; "repost" is a same-content/same-channel re-run of an
+    // earlier item; "cross_post" is (reserved) a one-to-one sibling post on a
+    // different channel. Distinct from pillarContentItemId (format-derivative
+    // tree) so repost rollups and repurpose queries don't collide.
+    sourceType: text("source_type").notNull().default("original"),
+    repostedFromItemId: uuid("reposted_from_item_id").references(
+      (): AnyPgColumn => productionItems.id,
+      { onDelete: "set null" }
+    ),
+    // Populated once by the evergreen classifier on an original item. null =
+    // not yet evaluated; true/false = AI verdict. Reasoning is copied onto
+    // generated repost rows so the triage UI has context without re-fetching.
+    isEvergreen: boolean("is_evergreen"),
+    evergreenEvaluatedAt: timestamp("evergreen_evaluated_at", {
+      withTimezone: true,
+    }),
+    evergreenReasoning: text("evergreen_reasoning"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -103,6 +121,7 @@ export const productionItems = pgTable(
     index("idx_production_items_last_perf_sync").on(table.lastPerformanceSyncAt),
     index("idx_production_items_pillar_notion").on(table.pillarContentNotionId),
     index("idx_production_items_pillar_item").on(table.pillarContentItemId),
+    index("idx_production_items_reposted_from").on(table.repostedFromItemId),
     index("idx_production_items_producer_user").on(table.producerUserId),
     index("idx_production_items_editor_user").on(table.editorUserId),
     uniqueIndex("uniq_production_items_pillar_format")

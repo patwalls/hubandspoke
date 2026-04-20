@@ -5,7 +5,7 @@ import {
   formats,
   users,
 } from "@/lib/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -89,6 +89,46 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       if (p) pillar = p;
     }
 
+    // Reposts: other items whose repostedFromItemId points back at THIS item.
+    // Used by the detail page to render the "reposted 12× in 12 months" strip
+    // on originals, and to show the source item on a repost.
+    const reposts = await db
+      .select({
+        id: productionItems.id,
+        title: productionItems.title,
+        status: productionItems.status,
+        platform: productionItems.platform,
+        publishedDate: productionItems.publishedDate,
+        createdAt: productionItems.createdAt,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.repostedFromItemId, id))
+      .orderBy(desc(productionItems.createdAt));
+
+    let repostedFrom:
+      | {
+          id: string;
+          title: string | null;
+          publishedDate: string | null;
+          views: number | null;
+          evergreenReasoning: string | null;
+        }
+      | null = null;
+    if (item.sourceType === "repost" && item.repostedFromItemId) {
+      const [src] = await db
+        .select({
+          id: productionItems.id,
+          title: productionItems.title,
+          publishedDate: productionItems.publishedDate,
+          views: productionItems.views,
+          evergreenReasoning: productionItems.evergreenReasoning,
+        })
+        .from(productionItems)
+        .where(eq(productionItems.id, item.repostedFromItemId))
+        .limit(1);
+      if (src) repostedFrom = src;
+    }
+
     // Resolve producer + editor user records for the assignee pickers.
     // Separate queries keep the main item query simple and each is indexed.
     const assigneeIds = [item.producerUserId, item.editorUserId].filter(
@@ -158,6 +198,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       pillar,
       producer,
       editor,
+      reposts: reposts.map((r) => ({
+        ...r,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      repostedFrom,
     });
   } catch (error) {
     console.error("Error fetching production item:", error);

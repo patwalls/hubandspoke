@@ -127,13 +127,23 @@ function IdeaQueueRow({
         </div>
       </td>
       <td className="px-3 py-2">
-        <Link
-          href={`/${brand}/content/${item.id}`}
-          className="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors truncate block"
-          title={item.title || "(Untitled)"}
-        >
-          {item.title || "(Untitled)"}
-        </Link>
+        <div className="flex items-center gap-2 min-w-0">
+          {item.sourceType === "repost" && (
+            <span
+              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-900 border border-amber-200 shrink-0"
+              title="Reposting an existing piece of content"
+            >
+              Repost
+            </span>
+          )}
+          <Link
+            href={`/${brand}/content/${item.id}`}
+            className="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors truncate block"
+            title={item.title || "(Untitled)"}
+          >
+            {item.title || "(Untitled)"}
+          </Link>
+        </div>
       </td>
       <td className="px-3 py-2 text-sm text-muted-foreground">
         <div className="truncate" title={item.format || ""}>

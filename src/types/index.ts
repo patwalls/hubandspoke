@@ -39,6 +39,8 @@ export interface ProductionItem {
   descriptImportedAt?: string | null;
   pillarContentNotionId?: string | null;
   pillarContentItemId?: string | null;
+  sourceType?: "original" | "repost" | "cross_post" | null;
+  repostedFromItemId?: string | null;
   mediaS3Bucket?: string | null;
   mediaS3Key?: string | null;
   mediaS3UploadedAt?: string | null;

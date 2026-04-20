@@ -48,6 +48,23 @@ interface AssignableUser {
   avatarUrl: string | null;
 }
 
+interface RepostRow {
+  id: string;
+  title: string | null;
+  status: string | null;
+  platform: string[] | null;
+  publishedDate: string | null;
+  createdAt: string;
+}
+
+interface RepostedFromRef {
+  id: string;
+  title: string | null;
+  publishedDate: string | null;
+  views: number | null;
+  evergreenReasoning: string | null;
+}
+
 interface DetailResponse {
   item: ProductionItem;
   derivatives: DerivativeRow[];
@@ -58,6 +75,8 @@ interface DetailResponse {
   pillar: PillarRef | null;
   producer: AssignableUser | null;
   editor: AssignableUser | null;
+  reposts: RepostRow[];
+  repostedFrom: RepostedFromRef | null;
 }
 
 interface ContentDetailProps {
@@ -803,6 +822,43 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       </div>
 
+      {/* Repost context — shown when this item was generated as a repost
+          suggestion. The reasoning is copied from the source item at scan
+          time so producers don't have to go hunting for the why. */}
+      {item.sourceType === "repost" && data.repostedFrom && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start gap-3">
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-900 border border-amber-200 shrink-0 mt-0.5">
+              Repost
+            </span>
+            <div className="flex-1 min-w-0 text-sm text-amber-900">
+              <div>
+                Reposting{" "}
+                <Link
+                  href={`/${brand}/content/${data.repostedFrom.id}`}
+                  className="font-medium underline hover:no-underline"
+                >
+                  {data.repostedFrom.title || "(untitled)"}
+                </Link>
+                {data.repostedFrom.publishedDate && (
+                  <> from {formatDate(data.repostedFrom.publishedDate)}</>
+                )}
+                {data.repostedFrom.views != null && (
+                  <> · {formatCompact(data.repostedFrom.views)} views</>
+                )}
+                .
+              </div>
+              {data.repostedFrom.evergreenReasoning && (
+                <p className="mt-1 text-xs text-amber-800">
+                  <span className="font-medium">Why this was recommended:</span>{" "}
+                  {data.repostedFrom.evergreenReasoning}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Metrics — only shown once the post is actually live */}
       {isPublished && (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1392,6 +1448,104 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </table>
         </div>
       </div>
+
+      {/* Repost history — only rendered on items that have been reposted.
+          Shows the cadence at a glance ("3 reposts · last on Mar 15") so you
+          can see whether a piece is in rotation. */}
+      {data.reposts.length > 0 && (
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground">
+              Repost history
+              <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
+                {data.reposts.length}
+              </span>
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {data.reposts.filter((r) => r.status === "Published").length}{" "}
+              posted · {data.reposts.filter((r) => r.status !== "Published" && r.status !== "Killed").length}{" "}
+              in flight
+              {(() => {
+                const lastPosted = data.reposts.find(
+                  (r) => r.status === "Published" && r.publishedDate
+                );
+                return lastPosted
+                  ? ` · last posted ${formatDate(lastPosted.publishedDate)}`
+                  : "";
+              })()}
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-accent/50">
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Suggested
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Channel
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Status
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
+                    Posted on
+                  </th>
+                  <th className="px-3 py-2.5 text-right font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Open
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.reposts.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                  >
+                    <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
+                      {new Date(r.createdAt).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {r.platform?.map((p) => (
+                          <span
+                            key={p}
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                          >
+                            {p}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      {r.status && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border">
+                          {r.status}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
+                      {r.publishedDate ? formatDate(r.publishedDate) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Link
+                        href={`/${brand}/content/${r.id}`}
+                        className="text-xs font-medium text-foreground hover:text-primary hover:underline"
+                      >
+                        Open →
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Repurpose to format */}
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">

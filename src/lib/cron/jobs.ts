@@ -1,6 +1,7 @@
 import { syncFromNotion } from "@/lib/services/notion-sync";
 import { syncPerformanceData } from "@/lib/services/performance-decay";
 import { checkSSThresholds } from "@/lib/services/threshold-monitor";
+import { runEvergreenScan } from "@/lib/services/evergreen-scan";
 
 type TenMinSlot = 0 | 10 | 20 | 30 | 40 | 50;
 
@@ -40,6 +41,11 @@ export const CRON_JOBS: CronJob[] = [
     name: "ss-threshold-check",
     schedule: { every: "day", atUtcHour: 14 },
     run: () => checkSSThresholds(),
+  },
+  {
+    name: "evergreen-scan",
+    schedule: { every: "day", atUtcHour: 15 },
+    run: () => runEvergreenScan(),
   },
 ];
 
