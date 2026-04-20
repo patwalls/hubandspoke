@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PillarPicker, type PillarOption } from "./pillar-picker";
-import { ContentComments } from "./content-comments";
+import { ContentActivity } from "./content-activity";
 
 interface BrandFormat {
   id: string;
@@ -174,6 +174,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     success: boolean;
     message: string;
   } | null>(null);
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0);
 
   // Per-format repurpose state, keyed by format id
   type RepurposeKind = "descript_clip" | "manual_task";
@@ -579,6 +580,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           : "Saved.",
       });
       await load();
+      setActivityRefreshKey((k) => k + 1);
     } catch (err) {
       setSaveResult({ success: false, message: String(err) });
     } finally {
@@ -1091,7 +1093,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       )}
       </div>
 
-      <ContentComments contentId={item.id} />
+      <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
 
       {!isPrePublish && (
       <>

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Client } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { productionItems } from "@/lib/db/schema";
+import { contentEvents, productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { auth } from "@/lib/auth";
 import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
 
 function getNotion(): Client {
@@ -222,6 +223,21 @@ export async function PUT(request: NextRequest) {
     if (leads !== undefined) updateData.leads = leads === "" || leads === null ? null : Number(leads);
     if (salesAmount !== undefined) updateData.salesAmount = salesAmount === "" || salesAmount === null ? null : String(salesAmount);
 
+    // If status is changing, capture from/to so we can write a content_events row.
+    // Fetched before the UPDATE so the diff is accurate.
+    let statusTransition: { from: string | null; to: string | null } | null = null;
+    if (status !== undefined) {
+      const [existing] = await db
+        .select({ status: productionItems.status })
+        .from(productionItems)
+        .where(eq(productionItems.id, id))
+        .limit(1);
+      const nextStatus: string | null = status || null;
+      if (existing && existing.status !== nextStatus) {
+        statusTransition = { from: existing.status, to: nextStatus };
+      }
+    }
+
     // Handle views + likes together so estimation stays in sync
     const incomingViews = views !== undefined ? (views === "" || views === null ? null : Number(views)) : undefined;
     const incomingLikes = likes !== undefined ? (likes === "" || likes === null ? null : Number(likes)) : undefined;
@@ -244,11 +260,25 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    const [updated] = await db
-      .update(productionItems)
-      .set(updateData)
-      .where(eq(productionItems.id, id))
-      .returning();
+    const session = await auth();
+    const actorUserId = session?.user?.id ?? null;
+
+    const [updated] = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(productionItems)
+        .set(updateData)
+        .where(eq(productionItems.id, id))
+        .returning();
+      if (row && statusTransition) {
+        await tx.insert(contentEvents).values({
+          contentItemId: id,
+          userId: actorUserId,
+          eventType: "status_change",
+          payload: { type: "status_change", ...statusTransition },
+        });
+      }
+      return [row];
+    });
 
     if (!updated) {
       return NextResponse.json(

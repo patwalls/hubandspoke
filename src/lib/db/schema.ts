@@ -276,6 +276,35 @@ export const contentComments = pgTable(
   ],
 );
 
+// Activity feed events alongside content_comments. One generic table holds every
+// non-comment event type (status change today, field changes / lifecycle events
+// tomorrow). Type + jsonb payload keeps future additions to inserts + a new
+// payload shape + a new renderer branch — no schema migration per event.
+export type ContentEventPayload =
+  | { type: "status_change"; from: string | null; to: string | null };
+
+export const contentEvents = pgTable(
+  "content_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    contentItemId: uuid("content_item_id")
+      .references(() => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").$type<ContentEventPayload>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_content_events_item_created").on(
+      table.contentItemId,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const syncLogs = pgTable("sync_logs", {
   id: uuid("id").defaultRandom().primaryKey(),
   syncType: text("sync_type").notNull(),

@@ -36,6 +36,13 @@
       "when": 1776703445000,
       "tag": "0004_add_comment_author_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776705195025,
+      "tag": "0005_striped_masque",
+      "breakpoints": true
     }
   ]
 }
