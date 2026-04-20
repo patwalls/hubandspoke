@@ -260,6 +260,7 @@ export const contentComments = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    notionCommentId: text("notion_comment_id").unique(),
   },
   (table) => [
     index("idx_content_comments_item_created").on(
