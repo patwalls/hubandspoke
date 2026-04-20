@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -80,30 +82,57 @@ function initialsFor(name: string): string {
   return (name[0] ?? "?").toUpperCase();
 }
 
-const URL_RE = /(https?:\/\/[^\s)]+)/g;
+const MARKDOWN_LINK_CLASS =
+  "text-blue-600 underline hover:text-blue-700 break-all";
 
-function linkify(text: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  let last = 0;
-  let i = 0;
-  text.replace(URL_RE, (url, _g1, offset: number) => {
-    if (offset > last) parts.push(text.slice(last, offset));
-    parts.push(
-      <a
-        key={`l-${i++}`}
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-600 underline hover:text-blue-700"
+function CommentBody({ body }: { body: string }) {
+  return (
+    <div className="mt-0.5 text-sm text-foreground break-words space-y-2 leading-relaxed">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ ...props }) => (
+            <a
+              {...props}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={MARKDOWN_LINK_CLASS}
+            />
+          ),
+          p: ({ ...props }) => <p {...props} className="whitespace-pre-wrap" />,
+          ul: ({ ...props }) => (
+            <ul {...props} className="list-disc pl-5 space-y-0.5" />
+          ),
+          ol: ({ ...props }) => (
+            <ol {...props} className="list-decimal pl-5 space-y-0.5" />
+          ),
+          h1: ({ ...props }) => (
+            <h1 {...props} className="text-base font-semibold" />
+          ),
+          h2: ({ ...props }) => (
+            <h2 {...props} className="text-sm font-semibold" />
+          ),
+          h3: ({ ...props }) => (
+            <h3 {...props} className="text-sm font-semibold" />
+          ),
+          code: ({ ...props }) => (
+            <code
+              {...props}
+              className="bg-accent px-1 py-0.5 rounded text-xs font-mono"
+            />
+          ),
+          blockquote: ({ ...props }) => (
+            <blockquote
+              {...props}
+              className="border-l-2 border-border pl-3 text-muted-foreground"
+            />
+          ),
+        }}
       >
-        {url}
-      </a>,
-    );
-    last = offset + url.length;
-    return url;
-  });
-  if (last < text.length) parts.push(text.slice(last));
-  return parts;
+        {body}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityProps) {
@@ -403,9 +432,7 @@ function CommentRow({
             </div>
           </div>
         ) : (
-          <div className="mt-0.5 text-sm text-foreground whitespace-pre-wrap break-words">
-            {linkify(c.body)}
-          </div>
+          <CommentBody body={c.body} />
         )}
       </div>
     </div>
