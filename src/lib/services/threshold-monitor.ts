@@ -21,7 +21,7 @@ import { createNotionRepurposeTask } from "./notion-tasks";
 
 // Safety: dry-run by default. Set env SS_AUTOMATION_LIVE=true to go live.
 const DRY_RUN = process.env.SS_AUTOMATION_LIVE !== "true";
-const MAX_TASKS_PER_RUN = 10;
+const MAX_TASKS_PER_RUN = 50;
 
 export interface ThresholdMatch {
   itemId: string;
@@ -120,6 +120,30 @@ export async function checkSSThresholds(): Promise<ThresholdCheckResult> {
       )
     );
 
+    // 3b. Load existing (pillar, format) pairs so we don't create a Notion
+    //     task for a derivative a human already made manually — the DB's
+    //     uniq_production_items_pillar_format index would reject it on sync.
+    const existingChildren = await db
+      .select({
+        pillarContentItemId: productionItems.pillarContentItemId,
+        format: productionItems.format,
+      })
+      .from(productionItems)
+      .where(
+        and(
+          isNotNull(productionItems.pillarContentItemId),
+          isNotNull(productionItems.format)
+        )
+      );
+
+    const childPairSet = new Set(
+      existingChildren
+        .filter((c) => c.pillarContentItemId && c.format)
+        .map(
+          (c) => `${c.pillarContentItemId}|${c.format!.toLowerCase().trim()}`
+        )
+    );
+
     // 4. Check each item against its format's direct-children thresholds
     let tasksCreatedThisRun = 0;
 
@@ -135,10 +159,34 @@ export async function checkSSThresholds(): Promise<ThresholdCheckResult> {
         if (!targetFormat.viewThreshold) continue;
         if (item.views < targetFormat.viewThreshold) continue;
 
-        // Dedup check
+        // Dedup check — trigger row from a prior run
         const dedupKey = `${item.id}|${sourceFormat.id}|${targetFormat.id}`;
         if (triggerSet.has(dedupKey)) {
           result.skippedDuplicate++;
+          continue;
+        }
+
+        // Dedup check — a child with this (pillar, format) already exists.
+        // Record a trigger row so we don't re-query this pair on every run.
+        const childPairKey = `${item.id}|${targetFormat.name.toLowerCase().trim()}`;
+        if (childPairSet.has(childPairKey)) {
+          result.skippedDuplicate++;
+          if (!DRY_RUN) {
+            try {
+              await db.insert(repurposeTriggers).values({
+                productionItemId: item.id,
+                sourceFormatId: sourceFormat.id,
+                targetFormatId: targetFormat.id,
+                notionTaskPageId: null,
+                viewsAtTrigger: item.views,
+              });
+              triggerSet.add(dedupKey);
+            } catch (err) {
+              result.errors.push(
+                `Failed to backfill trigger for existing child "${item.title}" / ${targetFormat.name}: ${String(err)}`
+              );
+            }
+          }
           continue;
         }
 

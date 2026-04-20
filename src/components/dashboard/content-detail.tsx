@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentComments } from "./content-comments";
 
 interface BrandFormat {
@@ -33,6 +34,12 @@ interface BrandFormat {
 
 type DerivativeRow = ProductionItem & { depth: number };
 
+interface PillarRef {
+  id: string;
+  title: string | null;
+  format: string | null;
+}
+
 interface DetailResponse {
   item: ProductionItem;
   derivatives: DerivativeRow[];
@@ -40,6 +47,7 @@ interface DetailResponse {
   formatNames: string[];
   formats: BrandFormat[];
   repurposeTargets: BrandFormat[];
+  pillar: PillarRef | null;
 }
 
 interface ContentDetailProps {
@@ -72,6 +80,16 @@ const MATG_PLATFORMS = [
   "LinkedIn",
   "TikTok",
   "Threads",
+];
+
+const STATUS_OPTIONS = [
+  "Idea",
+  "Assigned",
+  "Review",
+  "Final Review",
+  "Ready To Publish",
+  "Published",
+  "Killed",
 ];
 
 function formatCompact(n: number | null | undefined): string {
@@ -413,6 +431,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [title, setTitle] = useState("");
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [format, setFormat] = useState("");
+  const [status, setStatus] = useState("");
+  const [pillar, setPillar] = useState<PillarOption | null>(null);
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
   const [views, setViews] = useState("");
@@ -424,10 +444,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
 
   const platformOptions = brand === "matg" ? MATG_PLATFORMS : SS_PLATFORMS;
 
-  const applyItem = useCallback((item: ProductionItem) => {
+  const applyItem = useCallback((item: ProductionItem, pillarRef: PillarRef | null) => {
     setTitle(item.title || "");
     setPlatforms(item.platform || []);
     setFormat(item.format || "");
+    setStatus(item.status || "");
+    setPillar(pillarRef);
     setPublishedLink(item.publishedLink || "");
     setPublishedDate(item.publishedDate || "");
     setViews(item.views != null ? String(item.views) : "");
@@ -450,7 +472,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       }
       const json = (await res.json()) as DetailResponse;
       setData(json);
-      applyItem(json.item);
+      applyItem(json.item, json.pillar ?? null);
     } catch (err) {
       console.error("Failed to load content detail:", err);
       setData(null);
@@ -475,6 +497,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           title,
           platform: platforms,
           format: format || null,
+          status: status || null,
+          pillarContentItemId: pillar?.id ?? null,
           publishedLink: publishedLink || null,
           publishedDate,
           views: views ? parseInt(views, 10) : null,
@@ -493,7 +517,13 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         });
         return;
       }
-      setSaveResult({ success: true, message: "Saved." });
+      const payload = await res.json();
+      setSaveResult({
+        success: true,
+        message: payload.notionSyncWarning
+          ? `Saved locally. Notion update failed: ${payload.notionSyncWarning}`
+          : "Saved.",
+      });
       await load();
     } catch (err) {
       setSaveResult({ success: false, message: String(err) });
@@ -812,6 +842,47 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               </Select>
             </div>
           )}
+        </div>
+
+        <div className="space-y-2">
+          <Label>Status</Label>
+          <Select
+            value={status}
+            onValueChange={(v) => setStatus(v || "")}
+          >
+            <SelectTrigger className="md:w-[280px]">
+              <SelectValue placeholder="Select status…" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {data?.item.notionId ? (
+            <p className="text-[11px] text-muted-foreground">
+              Changes sync back to Notion on save.
+            </p>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              Local-only — this post isn&apos;t linked to a Notion page.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <Label>Pillar Content</Label>
+          <PillarPicker
+            brand={brand}
+            excludeId={contentId}
+            value={pillar}
+            onChange={setPillar}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            The root post this derivative rolls up to. Syncs to Notion on save.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

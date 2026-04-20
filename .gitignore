@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+.claude/scheduled_tasks.lock
 
 # debug
 npm-debug.log*

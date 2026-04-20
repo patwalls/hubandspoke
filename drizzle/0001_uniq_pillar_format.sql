@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uniq_production_items_pillar_format" ON "production_items" USING btree ("pillar_content_item_id",lower("format")) WHERE "production_items"."pillar_content_item_id" IS NOT NULL AND "production_items"."format" IS NOT NULL;

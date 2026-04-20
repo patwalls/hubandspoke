@@ -1,8 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Client } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
+
+function getNotion(): Client {
+  const auth = process.env.NOTION_API_SECRET;
+  if (!auth) throw new Error("NOTION_API_SECRET not set");
+  return new Client({ auth });
+}
+
+async function pushStatusToNotion(
+  notionId: string,
+  status: string
+): Promise<void> {
+  await getNotion().pages.update({
+    page_id: notionId,
+    properties: {
+      Status: { select: { name: status } },
+    },
+  });
+}
+
+async function pushPillarToNotion(
+  notionId: string,
+  pillarNotionId: string | null
+): Promise<void> {
+  await getNotion().pages.update({
+    page_id: notionId,
+    properties: {
+      "Pillar Content": {
+        relation: pillarNotionId ? [{ id: pillarNotionId }] : [],
+      },
+    },
+  });
+}
 
 /**
  * POST /api/production-items
@@ -132,6 +165,8 @@ export async function PUT(request: NextRequest) {
       format,
       publishedLink,
       publishedDate,
+      status,
+      pillarContentItemId,
       views,
       likes,
       comments,
@@ -154,6 +189,34 @@ export async function PUT(request: NextRequest) {
     if (format !== undefined) updateData.format = format || null;
     if (publishedLink !== undefined) updateData.publishedLink = publishedLink || null;
     if (publishedDate !== undefined) updateData.publishedDate = publishedDate;
+    if (status !== undefined) updateData.status = status || null;
+
+    // Pillar: accept itemId (or null to clear). Resolve target's notionId so we
+    // keep both foreign keys in sync, and so we can push the relation to Notion.
+    let resolvedPillarNotionId: string | null | undefined = undefined;
+    if (pillarContentItemId !== undefined) {
+      if (pillarContentItemId) {
+        const [target] = await db
+          .select({ notionId: productionItems.notionId })
+          .from(productionItems)
+          .where(eq(productionItems.id, pillarContentItemId))
+          .limit(1);
+        if (!target) {
+          return NextResponse.json(
+            { error: "Pillar target not found" },
+            { status: 400 }
+          );
+        }
+        updateData.pillarContentItemId = pillarContentItemId;
+        updateData.pillarContentNotionId = target.notionId;
+        resolvedPillarNotionId = target.notionId;
+      } else {
+        updateData.pillarContentItemId = null;
+        updateData.pillarContentNotionId = null;
+        resolvedPillarNotionId = null;
+      }
+    }
+
     if (comments !== undefined) updateData.comments = comments === "" || comments === null ? null : Number(comments);
     if (clicks !== undefined) updateData.clicks = clicks === "" || clicks === null ? null : Number(clicks);
     if (leads !== undefined) updateData.leads = leads === "" || leads === null ? null : Number(leads);
@@ -194,7 +257,34 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(updated);
+    const warnings: string[] = [];
+    if (updated.notionId) {
+      if (status !== undefined && status) {
+        try {
+          await pushStatusToNotion(updated.notionId, status);
+        } catch (err) {
+          console.error("Failed to push status to Notion:", err);
+          warnings.push(
+            `status: ${err instanceof Error ? err.message : "Notion update failed"}`
+          );
+        }
+      }
+      if (resolvedPillarNotionId !== undefined) {
+        try {
+          await pushPillarToNotion(updated.notionId, resolvedPillarNotionId);
+        } catch (err) {
+          console.error("Failed to push pillar to Notion:", err);
+          warnings.push(
+            `pillar: ${err instanceof Error ? err.message : "Notion update failed"}`
+          );
+        }
+      }
+    }
+
+    return NextResponse.json({
+      ...updated,
+      notionSyncWarning: warnings.length ? warnings.join("; ") : null,
+    });
   } catch (error) {
     console.error("Error updating production item:", error);
     return NextResponse.json(

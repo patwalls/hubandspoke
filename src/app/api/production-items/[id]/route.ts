@@ -74,6 +74,20 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .where(eq(formats.brand, item.brand))
       .orderBy(formats.name);
 
+    let pillar: { id: string; title: string | null; format: string | null } | null = null;
+    if (item.pillarContentItemId) {
+      const [p] = await db
+        .select({
+          id: productionItems.id,
+          title: productionItems.title,
+          format: productionItems.format,
+        })
+        .from(productionItems)
+        .where(eq(productionItems.id, item.pillarContentItemId))
+        .limit(1);
+      if (p) pillar = p;
+    }
+
     // Scope Repurpose targets to direct children of this item's source format.
     // The item stores its format as a text name, so resolve it via brandFormats.
     const sourceFormat = item.format
@@ -118,6 +132,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       formatNames: brandFormats.map((f) => f.name),
       formats: brandFormats,
       repurposeTargets,
+      pillar,
     });
   } catch (error) {
     console.error("Error fetching production item:", error);

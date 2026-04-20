@@ -1,6 +1,6 @@
 {
-  "id": "f3976a6b-c829-4237-ad21-6cd93a478958",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "897ff62a-48d2-4f8c-a33c-9598b4dea965",
+  "prevId": "f3976a6b-c829-4237-ad21-6cd93a478958",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -924,6 +924,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uniq_production_items_pillar_format": {
+          "name": "uniq_production_items_pillar_format",
+          "columns": [
+            {
+              "expression": "pillar_content_item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lower(\"format\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"production_items\".\"pillar_content_item_id\" IS NOT NULL AND \"production_items\".\"format\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

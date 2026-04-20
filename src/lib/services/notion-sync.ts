@@ -433,16 +433,59 @@ export async function syncFromNotion(): Promise<{
     // Resolve pillar_content_item_id from pillar_content_notion_id in a single
     // indexed UPDATE. Done after the main loop so order-of-insert doesn't
     // matter — every derivative and its pillar are both in the table by now.
+    // Resolve pillar_content_item_id via DISTINCT ON: at most one derivative
+    // per (pillar, lower(format)) slot so the uniq_production_items_pillar_format
+    // index doesn't reject the whole statement if a duplicate sneaks in. Oldest
+    // derivative wins by created_at; duplicates keep their previous value (or
+    // NULL) and get surfaced via the log below.
     await db.execute(sql`
-      UPDATE production_items AS derivative
-      SET pillar_content_item_id = pillar.id
-      FROM production_items AS pillar
-      WHERE derivative.pillar_content_notion_id = pillar.notion_id
-        AND (
-          derivative.pillar_content_item_id IS NULL
-          OR derivative.pillar_content_item_id <> pillar.id
-        )
+      WITH non_null_format AS (
+        SELECT DISTINCT ON (pillar.id, lower(derivative.format))
+          derivative.id AS deriv_id,
+          pillar.id AS pillar_id
+        FROM production_items AS derivative
+        JOIN production_items AS pillar
+          ON derivative.pillar_content_notion_id = pillar.notion_id
+        WHERE derivative.format IS NOT NULL
+          AND (derivative.pillar_content_item_id IS NULL
+               OR derivative.pillar_content_item_id <> pillar.id)
+        ORDER BY pillar.id, lower(derivative.format), derivative.created_at, derivative.id
+      ),
+      null_format AS (
+        SELECT derivative.id AS deriv_id, pillar.id AS pillar_id
+        FROM production_items AS derivative
+        JOIN production_items AS pillar
+          ON derivative.pillar_content_notion_id = pillar.notion_id
+        WHERE derivative.format IS NULL
+          AND (derivative.pillar_content_item_id IS NULL
+               OR derivative.pillar_content_item_id <> pillar.id)
+      ),
+      resolved AS (
+        SELECT * FROM non_null_format
+        UNION ALL
+        SELECT * FROM null_format
+      )
+      UPDATE production_items AS d
+      SET pillar_content_item_id = r.pillar_id
+      FROM resolved r
+      WHERE d.id = r.deriv_id
     `);
+
+    const unresolvedRows = (await db.execute(sql`
+      SELECT count(*)::text AS count
+      FROM production_items AS derivative
+      JOIN production_items AS pillar
+        ON derivative.pillar_content_notion_id = pillar.notion_id
+      WHERE derivative.format IS NOT NULL
+        AND (derivative.pillar_content_item_id IS NULL
+             OR derivative.pillar_content_item_id <> pillar.id)
+    `)) as unknown as Array<{ count: string }>;
+    const unresolvedCount = Number(unresolvedRows[0]?.count ?? 0);
+    if (unresolvedCount > 0) {
+      console.warn(
+        `[notion-sync] ${unresolvedCount} derivative(s) could not be linked to their pillar — another derivative already occupies that (pillar, format) slot.`
+      );
+    }
     await db.execute(sql`
       UPDATE production_items
       SET pillar_content_item_id = NULL
