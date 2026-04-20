@@ -161,6 +161,16 @@ function extractPillarContentNotionId(properties: any): string | null {
   return rel[0]?.id || null;
 }
 
+// Browsers outside Safari can't render HEIC/HEIF; Notion happily serves them
+// as the raw S3 URL if a user uploaded one. Null them out so the UI falls back
+// to initials instead of a broken image icon.
+function safeAvatarUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const lower = url.toLowerCase().split("?")[0];
+  if (lower.endsWith(".heic") || lower.endsWith(".heif")) return null;
+  return url;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractPerson(properties: any, field: string): {
   email: string | null;
@@ -177,7 +187,7 @@ function extractPerson(properties: any, field: string): {
     email: p?.person?.email || null,
     userId: p?.id || null,
     name: p?.name || null,
-    avatarUrl: p?.avatar_url || null,
+    avatarUrl: safeAvatarUrl(p?.avatar_url),
   };
 }
 

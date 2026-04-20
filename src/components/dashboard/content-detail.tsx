@@ -101,6 +101,70 @@ const STATUS_OPTIONS = [
   "Killed",
 ];
 
+const AVATAR_COLORS = [
+  "bg-rose-200 text-rose-800",
+  "bg-amber-200 text-amber-800",
+  "bg-emerald-200 text-emerald-800",
+  "bg-sky-200 text-sky-800",
+  "bg-violet-200 text-violet-800",
+  "bg-pink-200 text-pink-800",
+  "bg-teal-200 text-teal-800",
+];
+
+function personDisplay(user: { name: string | null; email: string }): {
+  name: string;
+  initials: string;
+  colorClass: string;
+} {
+  const source = (user.name?.trim() || user.email.split("@")[0] || "").trim();
+  const words = source
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .map((p) => p[0]!.toUpperCase() + p.slice(1).toLowerCase());
+  const name = user.name?.trim() || words.join(" ") || user.email;
+  const initials =
+    words.map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() ||
+    (user.email[0] ?? "?").toUpperCase();
+  let hash = 0;
+  const seed = user.email || name;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  const colorClass = AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+  return { name, initials, colorClass };
+}
+
+function UserChip({
+  user,
+  size = "sm",
+}: {
+  user: { name: string | null; email: string; avatarUrl: string | null };
+  size?: "sm" | "xs";
+}) {
+  const { name, initials, colorClass } = personDisplay(user);
+  const dim = size === "xs" ? "w-5 h-5 text-[9px]" : "w-6 h-6 text-[10px]";
+  return (
+    <span className="inline-flex items-center gap-2 min-w-0">
+      {user.avatarUrl ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={user.avatarUrl}
+          alt=""
+          className={`${dim} rounded-full object-cover shrink-0 bg-accent`}
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <span
+          className={`${dim} rounded-full flex items-center justify-center font-semibold shrink-0 ${colorClass}`}
+        >
+          {initials}
+        </span>
+      )}
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}
+
 function formatCompact(n: number | null | undefined): string {
   if (n == null) return "—";
   if (n >= 1_000_000)
@@ -672,6 +736,19 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const isYouTube = !!item.youtubeId;
   const isPublished = !!item.publishedLink;
   const isPrePublish = item.status !== "Published";
+
+  // Resolve the currently-selected producer/editor for the trigger display.
+  // Prefer the freshly-loaded assignable list (stays in sync with local
+  // selections), and fall back to the detail endpoint's authoritative record
+  // so we still render name + avatar even if the user isn't in the list.
+  const producerUser = producerUserId
+    ? assignableUsers.find((u) => u.id === producerUserId) ??
+      (data.producer?.id === producerUserId ? data.producer : null)
+    : null;
+  const editorUser = editorUserId
+    ? assignableUsers.find((u) => u.id === editorUserId) ??
+      (data.editor?.id === editorUserId ? data.editor : null)
+    : null;
   const currentFormat =
     data.formats.find((f) => f.name === item.format) ?? null;
   const formatPrompt = currentFormat?.instructions ?? null;
@@ -996,14 +1073,18 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 void persistField({ producerUserId: next || null });
               }}
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Unassigned" />
+              <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
+                {producerUser ? (
+                  <UserChip user={producerUser} />
+                ) : (
+                  <span className="text-muted-foreground">Unassigned</span>
+                )}
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__unassigned">Unassigned</SelectItem>
                 {assignableUsers.map((u) => (
                   <SelectItem key={u.id} value={u.id}>
-                    {u.name || u.email}
+                    <UserChip user={u} />
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1019,14 +1100,18 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 void persistField({ editorUserId: next || null });
               }}
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Unassigned" />
+              <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
+                {editorUser ? (
+                  <UserChip user={editorUser} />
+                ) : (
+                  <span className="text-muted-foreground">Unassigned</span>
+                )}
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__unassigned">Unassigned</SelectItem>
                 {assignableUsers.map((u) => (
                   <SelectItem key={u.id} value={u.id}>
-                    {u.name || u.email}
+                    <UserChip user={u} />
                   </SelectItem>
                 ))}
               </SelectContent>
