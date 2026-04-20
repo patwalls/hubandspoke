@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { asc, isNotNull } from "drizzle-orm";
+import { asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
 
-// Returns the list of users who can be picked as producer/editor — i.e. anyone
-// who has accepted an invite (passwordHash set). Notion-synced contractors
-// without an account are intentionally excluded so assignments only land on
-// people who can log in and see their work.
+// Everyone in the users table is assignable — including Notion-synced accounts
+// that haven't logged in yet. Assignment emails still reach them, and they're
+// expected to be onboarding to Hub & Spoke anyway.
 export async function GET() {
   const session = await auth();
   if (!session?.user) {
@@ -22,7 +21,6 @@ export async function GET() {
       avatarUrl: users.avatarUrl,
     })
     .from(users)
-    .where(isNotNull(users.passwordHash))
     .orderBy(asc(users.name));
 
   return NextResponse.json({ users: rows });
