@@ -163,12 +163,16 @@ function NotificationRow({
     summary = `${actorName} assigned you as ${n.payload.role}`;
   } else if (n.payload.kind === "comment") {
     summary = `${actorName} commented`;
+  } else if (n.payload.kind === "mention") {
+    summary = `${actorName} mentioned you`;
   } else {
     summary = "Update";
   }
 
   const body =
-    n.payload.kind === "comment" ? n.payload.excerpt : title;
+    n.payload.kind === "comment" || n.payload.kind === "mention"
+      ? n.payload.excerpt
+      : title;
 
   return (
     <Link
@@ -190,7 +194,7 @@ function NotificationRow({
         <p className="text-[13px] text-foreground font-medium truncate">
           {title}
         </p>
-        {n.payload.kind === "comment" && (
+        {(n.payload.kind === "comment" || n.payload.kind === "mention") && (
           <p className="text-[12px] text-muted-foreground line-clamp-2 mt-0.5">
             {body}
           </p>

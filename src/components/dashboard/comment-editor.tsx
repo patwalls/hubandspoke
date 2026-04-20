@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect } from "react";
-import { useEditor, EditorContent, type Editor } from "@tiptap/react";
+import { useEditor, EditorContent, ReactRenderer, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
+import Mention from "@tiptap/extension-mention";
+import tippy, { type Instance as TippyInstance } from "tippy.js";
 import { Bold, Italic, Link as LinkIcon, List, ListOrdered, Strikethrough } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MentionList, type MentionListRef, type MentionUser } from "./mention-list";
 
 interface CommentEditorProps {
   value: string;
@@ -21,6 +24,39 @@ const EMPTY_HTML_RE = /^(\s|<p>\s*<\/p>|<br\s*\/?>)*$/i;
 
 export function isEditorEmpty(html: string): boolean {
   return EMPTY_HTML_RE.test(html);
+}
+
+// Cached user list for @mention suggestions. Shared across editor instances on
+// the same page so the composer + an open edit box don't double-fetch.
+let mentionUsersCache: { at: number; users: MentionUser[] } | null = null;
+const USERS_TTL_MS = 60_000;
+
+async function fetchMentionUsers(): Promise<MentionUser[]> {
+  const now = Date.now();
+  if (mentionUsersCache && now - mentionUsersCache.at < USERS_TTL_MS) {
+    return mentionUsersCache.users;
+  }
+  try {
+    const res = await fetch("/api/users/assignable", { cache: "no-store" });
+    if (!res.ok) return mentionUsersCache?.users ?? [];
+    const data = (await res.json()) as { users: MentionUser[] };
+    mentionUsersCache = { at: now, users: data.users };
+    return data.users;
+  } catch {
+    return mentionUsersCache?.users ?? [];
+  }
+}
+
+function filterUsers(users: MentionUser[], query: string): MentionUser[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return users.slice(0, 8);
+  return users
+    .filter((u) => {
+      const name = (u.name || "").toLowerCase();
+      const email = u.email.toLowerCase();
+      return name.includes(q) || email.includes(q);
+    })
+    .slice(0, 8);
 }
 
 export function CommentEditor({
@@ -47,6 +83,68 @@ export function CommentEditor({
         },
       }),
       Placeholder.configure({ placeholder }),
+      Mention.configure({
+        HTMLAttributes: { class: "mention", "data-type": "mention" },
+        renderHTML: ({ options, node }) => [
+          "span",
+          {
+            ...options.HTMLAttributes,
+            "data-id": node.attrs.id,
+            "data-label": node.attrs.label ?? node.attrs.id,
+          },
+          `@${node.attrs.label ?? node.attrs.id}`,
+        ],
+        suggestion: {
+          char: "@",
+          items: async ({ query }) => {
+            const users = await fetchMentionUsers();
+            return filterUsers(users, query);
+          },
+          render: () => {
+            let component: ReactRenderer<MentionListRef> | null = null;
+            let popup: TippyInstance | null = null;
+
+            return {
+              onStart: (props) => {
+                component = new ReactRenderer(MentionList, {
+                  props,
+                  editor: props.editor,
+                });
+                if (!props.clientRect) return;
+                popup = tippy(document.body, {
+                  getReferenceClientRect: props.clientRect as () => DOMRect,
+                  appendTo: () => document.body,
+                  content: component.element,
+                  showOnCreate: true,
+                  interactive: true,
+                  trigger: "manual",
+                  placement: "bottom-start",
+                });
+              },
+              onUpdate: (props) => {
+                component?.updateProps(props);
+                if (!props.clientRect) return;
+                popup?.setProps({
+                  getReferenceClientRect: props.clientRect as () => DOMRect,
+                });
+              },
+              onKeyDown: (props) => {
+                if (props.event.key === "Escape") {
+                  popup?.hide();
+                  return true;
+                }
+                return component?.ref?.onKeyDown(props) ?? false;
+              },
+              onExit: () => {
+                popup?.destroy();
+                component?.destroy();
+                popup = null;
+                component = null;
+              },
+            };
+          },
+        },
+      }),
     ],
     content: value || "",
     editable: !disabled,

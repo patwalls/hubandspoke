@@ -333,6 +333,12 @@ export type NotificationPayload =
       title: string | null;
       excerpt: string;
       authorName: string | null;
+    }
+  | {
+      kind: "mention";
+      title: string | null;
+      excerpt: string;
+      authorName: string | null;
     };
 
 export const notifications = pgTable(

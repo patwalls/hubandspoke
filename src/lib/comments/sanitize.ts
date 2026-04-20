@@ -16,13 +16,18 @@ const ALLOWED_TAGS = [
   "h1",
   "h2",
   "h3",
+  "span",
 ];
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function sanitizeCommentHtml(html: string): string {
   return sanitizeHtml(html, {
     allowedTags: ALLOWED_TAGS,
     allowedAttributes: {
       a: ["href", "target", "rel"],
+      span: ["data-type", "data-id", "data-label", "class"],
     },
     allowedSchemes: ["http", "https", "mailto"],
     allowedSchemesAppliedToAttributes: ["href"],
@@ -36,6 +41,29 @@ export function sanitizeCommentHtml(html: string): string {
           rel: "noopener noreferrer nofollow",
         },
       }),
+      // Only allow `<span>` if it's a well-formed mention: data-type="mention"
+      // and a UUID data-id. Everything else becomes plain text (tag stripped,
+      // children preserved) via an empty tagName.
+      span: (tagName, attribs) => {
+        const isMention =
+          attribs["data-type"] === "mention" &&
+          typeof attribs["data-id"] === "string" &&
+          UUID_RE.test(attribs["data-id"]);
+        if (!isMention) {
+          return { tagName: "", attribs: {} };
+        }
+        return {
+          tagName: "span",
+          attribs: {
+            "data-type": "mention",
+            "data-id": attribs["data-id"],
+            ...(attribs["data-label"]
+              ? { "data-label": attribs["data-label"] }
+              : {}),
+            class: "mention",
+          },
+        };
+      },
     },
   });
 }

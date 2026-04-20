@@ -127,6 +127,48 @@ export async function sendCommentEmail(opts: {
   });
 }
 
+export async function sendMentionEmail(opts: {
+  to: string;
+  name?: string | null;
+  itemTitle: string | null;
+  commentAuthor: string | null;
+  commentBody: string;
+  itemUrl: string;
+}) {
+  const greeting = opts.name ? `Hi ${opts.name},` : "Hi,";
+  const title = opts.itemTitle || "(Untitled)";
+  const author = opts.commentAuthor || "A teammate";
+  const excerpt = opts.commentBody.length > 400
+    ? opts.commentBody.slice(0, 400) + "…"
+    : opts.commentBody;
+  const subject = `${author} mentioned you on "${title}"`;
+  return getClient().sendEmail({
+    From: from,
+    To: opts.to,
+    Subject: subject,
+    TextBody: [
+      greeting,
+      "",
+      `${author} mentioned you on "${title}":`,
+      "",
+      excerpt,
+      "",
+      opts.itemUrl,
+      "",
+      "— Hub & Spoke",
+    ].join("\n"),
+    HtmlBody: `
+      <p>${greeting}</p>
+      <p><strong>${escapeHtml(author)}</strong> mentioned you on <strong>${escapeHtml(title)}</strong>:</p>
+      <blockquote style="margin:16px 0;padding:10px 14px;border-left:3px solid #16a34a;background:#f6fbf7;color:#333;white-space:pre-wrap;">${escapeHtml(excerpt)}</blockquote>
+      <p><a href="${opts.itemUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Reply in Hub &amp; Spoke</a></p>
+      <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.itemUrl}">${opts.itemUrl}</a></p>
+      <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
+    `,
+    MessageStream: "outbound",
+  });
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")

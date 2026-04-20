@@ -111,12 +111,16 @@ function NotificationFullRow(props: {
     headline = `${actor} assigned you as ${props.payload.role}`;
   } else if (props.payload.kind === "comment") {
     headline = `${actor} commented`;
+  } else if (props.payload.kind === "mention") {
+    headline = `${actor} mentioned you`;
   } else {
     headline = "Update";
   }
 
   const excerpt =
-    props.payload.kind === "comment" ? props.payload.excerpt : null;
+    props.payload.kind === "comment" || props.payload.kind === "mention"
+      ? props.payload.excerpt
+      : null;
 
   return (
     <li

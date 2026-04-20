@@ -5,6 +5,7 @@ import { asc, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
+import { extractMentionUserIds } from "@/lib/comments/extract-mentions";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -123,15 +124,35 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .where(eq(users.id, session.user.id))
       .limit(1);
 
-    // Notify producer and editor (minus commenter). Self-notification is
-    // filtered inside enqueueNotification. Fire-and-forget so a Postmark or
-    // DB hiccup never breaks the comment POST.
+    // Notify @mentioned users first (higher priority than producer/editor).
+    // Self-notification is filtered inside enqueueNotification.
     const excerpt = plain.slice(0, 240);
     const authorName = user?.name || user?.email || null;
+    const mentionIds = new Set(extractMentionUserIds(sanitized));
+    for (const mentionedId of mentionIds) {
+      void enqueueNotification({
+        userId: mentionedId,
+        kind: "mention",
+        contentItemId: id,
+        commentId: inserted.id,
+        actorUserId: session.user.id,
+        payload: {
+          kind: "mention",
+          title: item.title,
+          excerpt,
+          authorName,
+        },
+      }).catch((err) => console.error("[comment] mention notify failed", err));
+    }
+
+    // Notify producer + editor, but skip anyone already pinged as a mention so
+    // nobody gets double-notified. Fire-and-forget so a Postmark or DB hiccup
+    // never breaks the comment POST.
     const recipientIds = new Set<string>();
     if (item.producerUserId) recipientIds.add(item.producerUserId);
     if (item.editorUserId) recipientIds.add(item.editorUserId);
     for (const recipientId of recipientIds) {
+      if (mentionIds.has(recipientId)) continue;
       void enqueueNotification({
         userId: recipientId,
         kind: "comment",

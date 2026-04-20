@@ -166,3 +166,12 @@
   content: attr(data-placeholder);
   @apply text-muted-foreground float-left h-0 pointer-events-none;
 }
+.tiptap .mention {
+  @apply inline-block px-1 py-0 rounded bg-primary/10 text-primary font-medium;
+}
+.tippy-box {
+  background: transparent;
+}
+.tippy-content {
+  padding: 0;
+}

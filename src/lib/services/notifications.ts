@@ -6,7 +6,11 @@ import {
   users,
   type NotificationPayload,
 } from "@/lib/db/schema";
-import { sendAssignmentEmail, sendCommentEmail } from "@/lib/email";
+import {
+  sendAssignmentEmail,
+  sendCommentEmail,
+  sendMentionEmail,
+} from "@/lib/email";
 
 type EnqueueInput = {
   userId: string;
@@ -106,6 +110,15 @@ async function sendEmailForNotification(
     });
   } else if (input.payload.kind === "comment") {
     await sendCommentEmail({
+      to: recipient.email,
+      name: recipient.name,
+      itemTitle: input.payload.title,
+      commentAuthor: input.payload.authorName || assignerName,
+      commentBody: input.payload.excerpt,
+      itemUrl: url,
+    });
+  } else if (input.payload.kind === "mention") {
+    await sendMentionEmail({
       to: recipient.email,
       name: recipient.name,
       itemTitle: input.payload.title,

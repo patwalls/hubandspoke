@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { contentComments, users } from "@/lib/db/schema";
+import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
+import { extractMentionUserIds } from "@/lib/comments/extract-mentions";
+import { enqueueNotification } from "@/lib/services/notifications";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -28,9 +30,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
     }
     const sanitized = sanitizeCommentHtml(raw);
-    if (!htmlToPlainText(sanitized)) {
+    const plain = htmlToPlainText(sanitized);
+    if (!plain) {
       return NextResponse.json({ error: "body is required" }, { status: 400 });
     }
+
+    // Load the previous body so we can notify only newly added mentions.
+    const [previous] = await db
+      .select({
+        body: contentComments.body,
+        contentItemId: contentComments.contentItemId,
+      })
+      .from(contentComments)
+      .where(
+        and(
+          eq(contentComments.id, id),
+          eq(contentComments.userId, session.user.id),
+        ),
+      )
+      .limit(1);
 
     const [updated] = await db
       .update(contentComments)
@@ -52,6 +70,39 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       .from(users)
       .where(eq(users.id, session.user.id))
       .limit(1);
+
+    // Notify mentions added by this edit (diff against previous body).
+    if (previous) {
+      const prevMentions = new Set(extractMentionUserIds(previous.body));
+      const newMentions = extractMentionUserIds(sanitized);
+      const added = newMentions.filter((uid) => !prevMentions.has(uid));
+      if (added.length > 0) {
+        const [item] = await db
+          .select({ id: productionItems.id, title: productionItems.title })
+          .from(productionItems)
+          .where(eq(productionItems.id, previous.contentItemId))
+          .limit(1);
+        const excerpt = plain.slice(0, 240);
+        const authorName = user?.name || user?.email || null;
+        for (const mentionedId of added) {
+          void enqueueNotification({
+            userId: mentionedId,
+            kind: "mention",
+            contentItemId: previous.contentItemId,
+            commentId: updated.id,
+            actorUserId: session.user.id,
+            payload: {
+              kind: "mention",
+              title: item?.title ?? null,
+              excerpt,
+              authorName,
+            },
+          }).catch((err) =>
+            console.error("[comment-edit] mention notify failed", err),
+          );
+        }
+      }
+    }
 
     return NextResponse.json({
       comment: {
