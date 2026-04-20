@@ -5,16 +5,14 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { ProductionPipelineTable } from "./production-pipeline-table";
-import { IdeaQueueTable } from "./idea-queue-table";
 import type { ProductionItem } from "@/types";
 
 interface ProductionViewProps {
   brand: string;
 }
 
-// Idea moved to its own sub-tab — the Pipeline view tracks work that's already
-// been assigned out. Long-form YouTube pillars (YouTube, YouTube (SS), YouTube
-// (SS Build)) are excluded across both tabs: those live in Notion.
+// Long-form YouTube pillars (YouTube, YouTube (SS), YouTube (SS Build)) are
+// excluded — those live in Notion. Idea-stage triage moved to /[brand]/queue.
 const PIPELINE_STATUSES = [
   "Ready To Publish",
   "Final Review",
@@ -29,13 +27,10 @@ const STATUS_COLORS: Record<string, string> = {
   Assigned: "bg-blue-100 text-blue-800 border-blue-200",
 };
 
-type SubTab = "pipeline" | "idea-queue";
-
 export function ProductionView({ brand }: ProductionViewProps) {
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<SubTab>("pipeline");
 
   const fetchPipeline = useCallback(async () => {
     setLoading(true);
@@ -62,8 +57,6 @@ export function ProductionView({ brand }: ProductionViewProps) {
     fetchPipeline();
   }, [fetchPipeline]);
 
-  // Exclude long-form YouTube pillars across the entire Production view —
-  // those are Notion-authoritative and tracked there.
   const hsItems = items.filter((item) => !isNotionAuthoritative(item.platform));
 
   const query = search.trim().toLowerCase();
@@ -81,13 +74,13 @@ export function ProductionView({ brand }: ProductionViewProps) {
     );
   };
 
-  const filtered = hsItems.filter(matchesQuery);
-
-  const pipelineItems = filtered.filter(
-    (item) =>
-      item.status && (PIPELINE_STATUSES as readonly string[]).includes(item.status)
-  );
-  const ideaItems = filtered.filter((item) => item.status === "Idea");
+  const pipelineItems = hsItems
+    .filter(matchesQuery)
+    .filter(
+      (item) =>
+        item.status &&
+        (PIPELINE_STATUSES as readonly string[]).includes(item.status)
+    );
 
   const byStatus = new Map<string, ProductionItem[]>();
   for (const status of PIPELINE_STATUSES) byStatus.set(status, []);
@@ -95,13 +88,6 @@ export function ProductionView({ brand }: ProductionViewProps) {
     const bucket = item.status ? byStatus.get(item.status) : null;
     if (bucket) bucket.push(item);
   }
-
-  // Counts ignore search so the tab labels don't jump around while typing —
-  // we count everything the user could navigate to.
-  const pipelineCount = hsItems.filter(
-    (i) => i.status && (PIPELINE_STATUSES as readonly string[]).includes(i.status)
-  ).length;
-  const ideaCount = hsItems.filter((i) => i.status === "Idea").length;
 
   return (
     <div className="space-y-6">
@@ -111,9 +97,7 @@ export function ProductionView({ brand }: ProductionViewProps) {
             Production
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            {tab === "pipeline"
-              ? "Track content moving through the pipeline"
-              : "Triage new ideas — assign an editor or kill"}
+            Track content moving through the pipeline.
           </p>
         </div>
         <Input
@@ -122,21 +106,6 @@ export function ProductionView({ brand }: ProductionViewProps) {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search title, format, channel, producer…"
           className="h-8 w-48 sm:w-72 text-xs"
-        />
-      </div>
-
-      <div className="flex items-center gap-1 border-b border-border">
-        <TabButton
-          active={tab === "pipeline"}
-          onClick={() => setTab("pipeline")}
-          label="Pipeline"
-          count={pipelineCount}
-        />
-        <TabButton
-          active={tab === "idea-queue"}
-          onClick={() => setTab("idea-queue")}
-          label="Queue"
-          count={ideaCount}
         />
       </div>
 
@@ -165,7 +134,7 @@ export function ProductionView({ brand }: ProductionViewProps) {
             <span className="text-sm">Loading production pipeline…</span>
           </div>
         </div>
-      ) : tab === "pipeline" ? (
+      ) : (
         <div className="space-y-8">
           {PIPELINE_STATUSES.map((status) => {
             const statusItems = byStatus.get(status) ?? [];
@@ -200,48 +169,7 @@ export function ProductionView({ brand }: ProductionViewProps) {
             </div>
           )}
         </div>
-      ) : (
-        <IdeaQueueTable
-          items={ideaItems}
-          brand={brand}
-          emptyMessage={
-            query
-              ? `No ideas match “${search}”.`
-              : "Nothing to triage — the queue is empty."
-          }
-          onMutate={fetchPipeline}
-        />
       )}
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  label,
-  count,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-        active
-          ? "border-foreground text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground"
-      )}
-    >
-      {label}
-      <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">
-        {count}
-      </span>
-    </button>
   );
 }
