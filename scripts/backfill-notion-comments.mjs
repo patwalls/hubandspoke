@@ -22,6 +22,9 @@ const onlyIdx = process.argv.indexOf("--only");
 const ONLY = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
 const limitIdx = process.argv.indexOf("--limit");
 const LIMIT = limitIdx >= 0 ? Number(process.argv[limitIdx + 1]) : null;
+// Skip items that already have ≥1 notion-sourced comment. Makes resuming
+// an interrupted run cheap — no Notion API calls for already-done items.
+const SKIP_EXISTING = process.argv.includes("--skip-existing");
 
 if (!process.env.NOTION_API_SECRET) {
   console.error("NOTION_API_SECRET not set");
@@ -144,11 +147,24 @@ async function main() {
   let inserted = 0;
   let updated = 0;
   let skippedNoBody = 0;
+  let skippedAlreadyDone = 0;
   let itemsWithComments = 0;
   let itemsFailed = 0;
 
   for (const item of items) {
     try {
+      if (SKIP_EXISTING) {
+        const existing = await sql`
+          SELECT 1 FROM content_comments
+          WHERE content_item_id = ${item.id} AND notion_comment_id IS NOT NULL
+          LIMIT 1
+        `;
+        if (existing.length > 0) {
+          skippedAlreadyDone++;
+          continue;
+        }
+      }
+
       const comments = await listPageComments(item.notion_id);
       await sleep(SLEEP_MS);
 
@@ -227,7 +243,7 @@ async function main() {
   }
 
   console.log(
-    `\nDone. items_scanned=${items.length} items_with_comments=${itemsWithComments} fetched=${totalFetched} inserted=${inserted} updated=${updated} skipped_empty=${skippedNoBody} items_failed=${itemsFailed}${DRY_RUN ? " (dry run — no writes)" : ""}`,
+    `\nDone. items_scanned=${items.length} skipped_already_done=${skippedAlreadyDone} items_with_comments=${itemsWithComments} fetched=${totalFetched} inserted=${inserted} updated=${updated} skipped_empty=${skippedNoBody} items_failed=${itemsFailed}${DRY_RUN ? " (dry run — no writes)" : ""}`,
   );
 
   if (!DRY_RUN) {
