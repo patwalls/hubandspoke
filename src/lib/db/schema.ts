@@ -174,8 +174,9 @@ export const users = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     email: text("email").notNull().unique(),
-    passwordHash: text("password_hash").notNull(),
+    passwordHash: text("password_hash"),
     name: text("name"),
+    avatarUrl: text("avatar_url"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

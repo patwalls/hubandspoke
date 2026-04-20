@@ -1,6 +1,6 @@
 import { Client } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { productionItems, syncLogs } from "@/lib/db/schema";
+import { productionItems, syncLogs, users } from "@/lib/db/schema";
 import { eq, notInArray, sql } from "drizzle-orm";
 import { estimateViewsFromLikes, shouldEstimate } from "./view-estimator";
 
@@ -167,17 +167,58 @@ function extractPerson(properties: any, field: string): {
   email: string | null;
   userId: string | null;
   name: string | null;
+  avatarUrl: string | null;
 } {
   const people = properties[field]?.people;
   if (!Array.isArray(people) || people.length === 0) {
-    return { email: null, userId: null, name: null };
+    return { email: null, userId: null, name: null, avatarUrl: null };
   }
   const p = people[0];
   return {
     email: p?.person?.email || null,
     userId: p?.id || null,
     name: p?.name || null,
+    avatarUrl: p?.avatar_url || null,
   };
+}
+
+type NotionPerson = {
+  email: string | null;
+  userId: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+};
+
+function collectPerson(
+  bucket: Map<string, { email: string; name: string | null; avatarUrl: string | null }>,
+  p: NotionPerson
+): void {
+  if (!p.email) return;
+  const email = p.email.toLowerCase().trim();
+  if (!email) return;
+  // Last write wins for name/avatar — the full-sync pass sees every page, so
+  // later entries for the same email tend to be just as good as earlier ones.
+  bucket.set(email, { email, name: p.name, avatarUrl: p.avatarUrl });
+}
+
+async function flushUserUpserts(
+  bucket: Map<string, { email: string; name: string | null; avatarUrl: string | null }>
+): Promise<number> {
+  const rows = [...bucket.values()];
+  if (rows.length === 0) return 0;
+  // Single INSERT ... ON CONFLICT for all collected people.
+  await db
+    .insert(users)
+    .values(rows)
+    .onConflictDoUpdate({
+      target: users.email,
+      set: {
+        name: sql`COALESCE(${users.name}, EXCLUDED.name)`,
+        avatarUrl: sql`EXCLUDED.avatar_url`,
+        updatedAt: new Date(),
+      },
+    });
+  return rows.length;
 }
 
 async function extractFormat(
@@ -258,6 +299,10 @@ export async function syncFromNotion(): Promise<{
     totalFetched = allResults.length;
 
     const notionIds: string[] = [];
+    const peopleBucket = new Map<
+      string,
+      { email: string; name: string | null; avatarUrl: string | null }
+    >();
 
     // Process each item
     for (const item of allResults) {
@@ -293,6 +338,9 @@ export async function syncFromNotion(): Promise<{
 
       const producer = extractPerson(properties, "Producer");
       const editor = extractPerson(properties, "Editor/Creator");
+
+      collectPerson(peopleBucket, producer);
+      collectPerson(peopleBucket, editor);
 
       const data = {
         notionId,
@@ -369,6 +417,9 @@ export async function syncFromNotion(): Promise<{
         totalCreated++;
       }
     }
+
+    // Upsert users directory from the producers/editors we saw.
+    await flushUserUpserts(peopleBucket);
 
     // Delete orphaned records
     if (completedFetch && notionIds.length > 0) {

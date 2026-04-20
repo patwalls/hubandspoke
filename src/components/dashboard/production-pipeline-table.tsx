@@ -48,6 +48,42 @@ function avatarColor(seed: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
+function PersonAvatar({
+  avatarUrl,
+  initials,
+  colorClass,
+  name,
+}: {
+  avatarUrl: string | null | undefined;
+  initials: string;
+  colorClass: string;
+  name: string;
+}) {
+  if (avatarUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={avatarUrl}
+        alt={name}
+        title={name}
+        className="w-6 h-6 rounded-full object-cover shrink-0 bg-accent"
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  return (
+    <span
+      className={cn(
+        "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0",
+        colorClass
+      )}
+      title={name}
+    >
+      {initials}
+    </span>
+  );
+}
+
 export function ProductionPipelineTable({
   items,
   brand,
@@ -106,34 +142,34 @@ export function ProductionPipelineTable({
                   className="border-b border-border/50 hover:bg-accent/30 transition-colors"
                 >
                   <td className="px-3 py-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className={cn(
-                          "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0",
-                          producerColor
-                        )}
-                      >
-                        {producer.initials}
-                      </span>
-                      <span
-                        className="text-sm text-foreground truncate"
-                        title={producer.name}
-                      >
-                        {producer.name}
-                      </span>
-                    </div>
+                    {item.producerName || item.producerEmail ? (
+                      <div className="flex items-center gap-2 min-w-0">
+                        <PersonAvatar
+                          avatarUrl={item.producerAvatarUrl}
+                          initials={producer.initials}
+                          colorClass={producerColor}
+                          name={producer.name}
+                        />
+                        <span
+                          className="text-sm text-foreground truncate"
+                          title={producer.name}
+                        >
+                          {producer.name}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     {item.editorName || item.editorEmail ? (
                       <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className={cn(
-                            "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0",
-                            editorColor
-                          )}
-                        >
-                          {editor.initials}
-                        </span>
+                        <PersonAvatar
+                          avatarUrl={item.editorAvatarUrl}
+                          initials={editor.initials}
+                          colorClass={editorColor}
+                          name={editor.name}
+                        />
                         <span
                           className="text-sm text-foreground truncate"
                           title={editor.name}

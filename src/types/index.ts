@@ -25,8 +25,10 @@ export interface ProductionItem {
   apvFirst24Hours: number | null;
   producerEmail: string | null;
   producerName: string | null;
+  producerAvatarUrl: string | null;
   editorEmail: string | null;
   editorName: string | null;
+  editorAvatarUrl: string | null;
   viewsEstimated: boolean | null;
   lastPerformanceSyncAt: string | null;
   descriptProjectId?: string | null;

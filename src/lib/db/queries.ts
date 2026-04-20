@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
-import { productionItems, formats, brandSettings } from "@/lib/db/schema";
+import { productionItems, formats, brandSettings, users } from "@/lib/db/schema";
+import { aliasedTable } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, inArray, sql } from "drizzle-orm";
 
 export const PIPELINE_STATUSES = [
@@ -12,7 +13,17 @@ export const PIPELINE_STATUSES = [
 
 type ProductionItemRow = typeof productionItems.$inferSelect;
 
-function mapProductionItem(item: ProductionItemRow): ProductionItem {
+type UserExtras = {
+  producerUserName?: string | null;
+  producerAvatarUrl?: string | null;
+  editorUserName?: string | null;
+  editorAvatarUrl?: string | null;
+};
+
+function mapProductionItem(
+  item: ProductionItemRow,
+  extras: UserExtras = {}
+): ProductionItem {
   return {
     id: item.id,
     notionId: item.notionId,
@@ -41,9 +52,11 @@ function mapProductionItem(item: ProductionItemRow): ProductionItem {
       ? parseFloat(item.apvFirst24Hours)
       : null,
     producerEmail: item.producerEmail,
-    producerName: item.producerName,
+    producerName: extras.producerUserName ?? item.producerName,
+    producerAvatarUrl: extras.producerAvatarUrl ?? null,
     editorEmail: item.editorEmail,
-    editorName: item.editorName,
+    editorName: extras.editorUserName ?? item.editorName,
+    editorAvatarUrl: extras.editorAvatarUrl ?? null,
     viewsEstimated: item.viewsEstimated ?? false,
     lastPerformanceSyncAt: item.lastPerformanceSyncAt?.toISOString() ?? null,
     createdAt: item.createdAt.toISOString(),
@@ -235,7 +248,7 @@ export async function getContentReport(
 
   const weeklyGoal = await getWeeklyGoal("starter-story");
 
-  const mappedItems: ProductionItem[] = items.map(mapProductionItem);
+  const mappedItems: ProductionItem[] = items.map((it) => mapProductionItem(it));
 
   return {
     periods,
@@ -264,9 +277,26 @@ export async function getContentReport(
 export async function getProductionPipeline(
   brand: string
 ): Promise<ProductionItem[]> {
-  const items = await db
-    .select()
+  const producers = aliasedTable(users, "producer_user");
+  const editors = aliasedTable(users, "editor_user");
+
+  const rows = await db
+    .select({
+      item: productionItems,
+      producerUserName: producers.name,
+      producerAvatarUrl: producers.avatarUrl,
+      editorUserName: editors.name,
+      editorAvatarUrl: editors.avatarUrl,
+    })
     .from(productionItems)
+    .leftJoin(
+      producers,
+      sql`lower(${producers.email}) = lower(${productionItems.producerEmail})`
+    )
+    .leftJoin(
+      editors,
+      sql`lower(${editors.email}) = lower(${productionItems.editorEmail})`
+    )
     .where(
       and(
         eq(productionItems.brand, brand),
@@ -274,5 +304,12 @@ export async function getProductionPipeline(
       )
     );
 
-  return items.map(mapProductionItem);
+  return rows.map((r) =>
+    mapProductionItem(r.item, {
+      producerUserName: r.producerUserName,
+      producerAvatarUrl: r.producerAvatarUrl,
+      editorUserName: r.editorUserName,
+      editorAvatarUrl: r.editorAvatarUrl,
+    })
+  );
 }
