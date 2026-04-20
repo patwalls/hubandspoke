@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { TriageDialog } from "./triage-dialog";
 import type { ProductionItem } from "@/types";
 
@@ -59,7 +58,6 @@ export function IdeaQueueTable({
           <colgroup>
             <col className="w-[180px]" />
             <col />
-            <col className="w-[220px]" />
             <col className="w-[120px]" />
           </colgroup>
           <thead>
@@ -69,9 +67,6 @@ export function IdeaQueueTable({
               </th>
               <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                 Content
-              </th>
-              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                Format
               </th>
               <th className="px-3 py-2.5 text-right font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
                 Action
@@ -136,18 +131,14 @@ function IdeaQueueRow({
               Repost
             </span>
           )}
-          <Link
-            href={`/${brand}/content/${item.id}`}
-            className="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors truncate block"
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="text-left text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors truncate block min-w-0"
             title={item.title || "(Untitled)"}
           >
             {item.title || "(Untitled)"}
-          </Link>
-        </div>
-      </td>
-      <td className="px-3 py-2 text-sm text-muted-foreground">
-        <div className="truncate" title={item.format || ""}>
-          {item.format || "—"}
+          </button>
         </div>
       </td>
       <td className="px-3 py-2 text-right">
