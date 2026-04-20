@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { UserChip } from "./user-chip";
+import { renderInstructions } from "@/lib/utils/markdown";
 import type { ProductionItem } from "@/types";
 
 interface AssignableUser {
@@ -51,6 +52,8 @@ interface TriageDialogProps {
   onDone: () => void;
 }
 
+type RepostActionMode = "idle" | "form";
+
 export function TriageDialog({
   open,
   onOpenChange,
@@ -67,6 +70,7 @@ export function TriageDialog({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [mode, setMode] = useState<RepostActionMode>("idle");
 
   useEffect(() => {
     if (!open) return;
@@ -77,6 +81,7 @@ export function TriageDialog({
     setSummaryLoading(true);
     setSummaryError(null);
     setActionError(null);
+    setMode("idle");
 
     (async () => {
       try {
@@ -157,12 +162,6 @@ export function TriageDialog({
     return updateStatus("Killed");
   }
 
-  function markPublished() {
-    return updateStatus("Published", {
-      publishedDate: new Date().toISOString().slice(0, 10),
-    });
-  }
-
   const pillar = detail?.pillar;
   const repostedFrom = detail?.repostedFrom ?? null;
   const formatInstructions =
@@ -172,7 +171,7 @@ export function TriageDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto gap-5">
+      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto gap-5">
         <DialogHeader>
           <div className="flex items-center gap-2 flex-wrap">
             {isRepost && (
@@ -203,85 +202,109 @@ export function TriageDialog({
         </DialogHeader>
 
         {isRepost ? (
-          <RepostSection
+          <RepostBody
             loading={detailLoading}
             repostedFrom={repostedFrom}
+            item={item}
+            brand={brand}
+            saving={saving}
+            mode={mode}
+            setMode={setMode}
+            actionError={actionError}
+            onMarkPublished={(fields) => updateStatus("Published", fields)}
+            onKill={killIt}
           />
         ) : (
-          <>
-            {/* Pillar content */}
-            <section className="space-y-1.5">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Pillar content
-              </h3>
-              {detailLoading ? (
-                <p className="text-sm text-muted-foreground">Loading…</p>
-              ) : pillar ? (
-                <Link
-                  href={`/${brand}/content/${pillar.id}`}
-                  target="_blank"
-                  className="inline-flex items-center gap-1.5 text-sm text-foreground hover:text-primary hover:underline"
-                >
-                  {pillar.title || "(Untitled)"}
-                  {pillar.format && (
-                    <span className="text-xs text-muted-foreground">
-                      · {pillar.format}
-                    </span>
-                  )}
-                  <ExternalLinkIcon className="size-3 text-muted-foreground" />
-                </Link>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  No pillar linked.
-                </p>
-              )}
-            </section>
-
-            {/* AI summary */}
-            <section className="space-y-1.5">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Summary
-              </h3>
-              {summaryLoading ? (
-                <p className="text-sm text-muted-foreground">Generating…</p>
-              ) : summaryError ? (
-                <p className="text-sm text-red-600">
-                  Couldn&apos;t generate a summary.
-                </p>
-              ) : summary ? (
-                <p className="text-sm text-foreground leading-relaxed bg-accent/30 rounded-md p-3">
-                  {summary}
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">(empty)</p>
-              )}
-            </section>
-          </>
+          <OriginalBody
+            brand={brand}
+            detailLoading={detailLoading}
+            pillar={pillar ?? null}
+            summary={summary}
+            summaryLoading={summaryLoading}
+            summaryError={summaryError}
+            formatInstructions={formatInstructions}
+            users={users}
+            saving={saving}
+            actionError={actionError}
+            onAssign={assignTo}
+            onKill={killIt}
+            itemId={item.id}
+          />
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-        {/* Format instructions */}
-        {formatInstructions && !isRepost && (
+// ─── Repost body ─────────────────────────────────────────────────────────
+function RepostBody({
+  loading,
+  repostedFrom,
+  item,
+  brand,
+  saving,
+  mode,
+  setMode,
+  actionError,
+  onMarkPublished,
+  onKill,
+}: {
+  loading: boolean;
+  repostedFrom: RepostedFromRef | null;
+  item: ProductionItem;
+  brand: string;
+  saving: boolean;
+  mode: RepostActionMode;
+  setMode: (m: RepostActionMode) => void;
+  actionError: string | null;
+  onMarkPublished: (fields: {
+    publishedLink: string;
+    publishedDate: string;
+    views?: number | null;
+    likes?: number | null;
+  }) => Promise<unknown>;
+  onKill: () => void;
+}) {
+  if (loading) {
+    return (
+      <p className="text-sm text-muted-foreground">Loading original post…</p>
+    );
+  }
+
+  const channel = repostedFrom?.platform?.[0] ?? "";
+  const isTwitter =
+    channel === "Twitter" ||
+    channel === "Twitter (Pat Walls)" ||
+    (repostedFrom?.publishedLink &&
+      /^https:\/\/(?:www\.)?(?:twitter|x)\.com\//.test(
+        repostedFrom.publishedLink
+      ));
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+      {/* LEFT: why + actions */}
+      <div className="md:col-span-5 space-y-4">
+        {repostedFrom?.evergreenReasoning && (
           <section className="space-y-1.5">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Format skill
+              Why repost this
             </h3>
-            <div className="whitespace-pre-wrap break-words text-xs text-foreground bg-accent/30 rounded-md p-3 max-h-60 overflow-auto leading-relaxed">
-              {formatInstructions}
-            </div>
+            <p className="text-sm text-foreground leading-relaxed bg-amber-50 border border-amber-200 rounded-md p-3">
+              {repostedFrom.evergreenReasoning}
+            </p>
           </section>
         )}
 
-        {/* Actions */}
-        <section className="space-y-2 border-t border-border pt-4">
-          {isRepost ? (
-            <div className="flex flex-wrap items-center gap-2">
+        <section className="space-y-2">
+          {mode === "idle" ? (
+            <div className="flex flex-col gap-2">
               <button
                 type="button"
-                onClick={markPublished}
+                onClick={() => setMode("form")}
                 disabled={saving}
                 className="inline-flex h-9 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
               >
-                {saving ? "Saving…" : "I posted this ✓"}
+                I posted this ✓
               </button>
               {repostedFrom?.publishedLink && (
                 <a
@@ -296,112 +319,43 @@ export function TriageDialog({
               )}
             </div>
           ) : (
-            <>
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Assign editor
-              </h3>
-              <div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-1">
-                {users.length === 0 ? (
-                  <div className="text-xs text-muted-foreground col-span-2">
-                    No assignable users found.
-                  </div>
-                ) : (
-                  users.map((u) => (
-                    <button
-                      key={u.id}
-                      type="button"
-                      onClick={() => assignTo(u.id)}
-                      disabled={saving}
-                      className="flex items-center w-full text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-                    >
-                      <UserChip user={u} size="xs" />
-                    </button>
-                  ))
-                )}
-              </div>
-            </>
+            <PostedForm
+              saving={saving}
+              onSubmit={onMarkPublished}
+              onCancel={() => setMode("idle")}
+              defaultChannel={channel}
+            />
           )}
-
           {actionError && (
             <p className="text-[11px] text-red-600">{actionError}</p>
           )}
-
-          <div className="flex items-center justify-between pt-2">
-            <button
-              type="button"
-              onClick={killIt}
-              disabled={saving}
-              className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
-            >
-              Kill this idea
-            </button>
-            <Link
-              href={`/${brand}/content/${item.id}`}
-              target="_blank"
-              className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-            >
-              Open full page
-              <ExternalLinkIcon className="size-3" />
-            </Link>
-          </div>
         </section>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
-function RepostSection({
-  loading,
-  repostedFrom,
-}: {
-  loading: boolean;
-  repostedFrom: RepostedFromRef | null;
-}) {
-  if (loading) {
-    return (
-      <section className="space-y-1.5">
-        <p className="text-sm text-muted-foreground">Loading original post…</p>
-      </section>
-    );
-  }
-  if (!repostedFrom) {
-    return (
-      <section className="space-y-1.5">
-        <p className="text-sm text-muted-foreground">
-          Original post not found. It may have been deleted.
-        </p>
-      </section>
-    );
-  }
+        <div className="flex items-center justify-between border-t border-border pt-3">
+          <button
+            type="button"
+            onClick={onKill}
+            disabled={saving}
+            className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+          >
+            Kill this idea
+          </button>
+          <Link
+            href={`/${brand}/content/${item.id}`}
+            target="_blank"
+            className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+          >
+            Open full page
+            <ExternalLinkIcon className="size-3" />
+          </Link>
+        </div>
+      </div>
 
-  const channel = repostedFrom.platform?.[0] ?? "";
-  const isTwitter =
-    channel === "Twitter" ||
-    channel === "Twitter (Pat Walls)" ||
-    (repostedFrom.publishedLink &&
-      /^https:\/\/(?:www\.)?(?:twitter|x)\.com\//.test(
-        repostedFrom.publishedLink
-      ));
-
-  return (
-    <>
-      {/* Why this was recommended */}
-      {repostedFrom.evergreenReasoning && (
-        <section className="space-y-1.5">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Why repost this
-          </h3>
-          <p className="text-sm text-foreground leading-relaxed bg-amber-50 border border-amber-200 rounded-md p-3">
-            {repostedFrom.evergreenReasoning}
-          </p>
-        </section>
-      )}
-
-      {/* Original post */}
-      <section className="space-y-1.5">
+      {/* RIGHT: original post */}
+      <div className="md:col-span-7 space-y-1.5">
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Original post
-          {repostedFrom.publishedDate && (
+          {repostedFrom?.publishedDate && (
             <span className="ml-2 font-normal normal-case tracking-normal text-xs text-muted-foreground">
               from {new Date(repostedFrom.publishedDate).toLocaleDateString(
                 "en-US",
@@ -414,9 +368,9 @@ function RepostSection({
           )}
         </h3>
 
-        {repostedFrom.publishedLink && isTwitter ? (
+        {repostedFrom?.publishedLink && isTwitter ? (
           <TweetEmbed url={repostedFrom.publishedLink} />
-        ) : repostedFrom.publishedLink ? (
+        ) : repostedFrom?.publishedLink ? (
           <a
             href={repostedFrom.publishedLink}
             target="_blank"
@@ -436,11 +390,307 @@ function RepostSection({
             No published link on the original.
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Posted-confirmation form ────────────────────────────────────────────
+function PostedForm({
+  saving,
+  onSubmit,
+  onCancel,
+  defaultChannel,
+}: {
+  saving: boolean;
+  onSubmit: (fields: {
+    publishedLink: string;
+    publishedDate: string;
+    views?: number | null;
+    likes?: number | null;
+  }) => Promise<unknown>;
+  onCancel: () => void;
+  defaultChannel: string;
+}) {
+  const [link, setLink] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [views, setViews] = useState("");
+  const [likes, setLikes] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  const linkPlaceholder =
+    defaultChannel.startsWith("Twitter") || defaultChannel === "Twitter"
+      ? "https://x.com/your-handle/status/…"
+      : defaultChannel === "Instagram Reel"
+      ? "https://instagram.com/reel/…"
+      : "https://…";
+
+  function validateLink(value: string): string | null {
+    if (!value.trim()) return "Required";
+    if (!/^https:\/\//.test(value.trim())) return "Must start with https://";
+    return null;
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const err = validateLink(link);
+    setLinkError(err);
+    if (err) return;
+    await onSubmit({
+      publishedLink: link.trim(),
+      publishedDate: date,
+      views: views === "" ? null : Number(views),
+      likes: likes === "" ? null : Number(likes),
+    });
+  }
+
+  const canSubmit = !saving && !!link.trim() && !!date;
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Post details
+      </h3>
+
+      <div className="space-y-1">
+        <label
+          htmlFor="posted-link"
+          className="block text-xs font-medium text-foreground"
+        >
+          Published link <span className="text-red-600">*</span>
+        </label>
+        <input
+          id="posted-link"
+          type="url"
+          required
+          autoFocus
+          value={link}
+          onChange={(e) => {
+            setLink(e.target.value);
+            if (linkError) setLinkError(validateLink(e.target.value));
+          }}
+          placeholder={linkPlaceholder}
+          className="w-full rounded-md border border-input bg-background px-2.5 h-9 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        {linkError && <p className="text-[11px] text-red-600">{linkError}</p>}
+      </div>
+
+      <div className="space-y-1">
+        <label
+          htmlFor="posted-date"
+          className="block text-xs font-medium text-foreground"
+        >
+          Published date <span className="text-red-600">*</span>
+        </label>
+        <input
+          id="posted-date"
+          type="date"
+          required
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="rounded-md border border-input bg-background px-2.5 h-9 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <label
+            htmlFor="posted-views"
+            className="block text-xs font-medium text-foreground"
+          >
+            Views
+          </label>
+          <input
+            id="posted-views"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={views}
+            onChange={(e) => setViews(e.target.value)}
+            placeholder="Optional"
+            className="w-full rounded-md border border-input bg-background px-2.5 h-9 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+        <div className="space-y-1">
+          <label
+            htmlFor="posted-likes"
+            className="block text-xs font-medium text-foreground"
+          >
+            Likes
+          </label>
+          <input
+            id="posted-likes"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={likes}
+            onChange={(e) => setLikes(e.target.value)}
+            placeholder="Optional"
+            className="w-full rounded-md border border-input bg-background px-2.5 h-9 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          className="inline-flex h-9 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Mark posted"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ─── Original (non-repost) body ──────────────────────────────────────────
+function OriginalBody({
+  brand,
+  detailLoading,
+  pillar,
+  summary,
+  summaryLoading,
+  summaryError,
+  formatInstructions,
+  users,
+  saving,
+  actionError,
+  onAssign,
+  onKill,
+  itemId,
+}: {
+  brand: string;
+  detailLoading: boolean;
+  pillar: PillarRef | null;
+  summary: string | null;
+  summaryLoading: boolean;
+  summaryError: string | null;
+  formatInstructions: string | null;
+  users: AssignableUser[];
+  saving: boolean;
+  actionError: string | null;
+  onAssign: (userId: string) => Promise<unknown>;
+  onKill: () => void;
+  itemId: string;
+}) {
+  return (
+    <>
+      <section className="space-y-1.5">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Pillar content
+        </h3>
+        {detailLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : pillar ? (
+          <Link
+            href={`/${brand}/content/${pillar.id}`}
+            target="_blank"
+            className="inline-flex items-center gap-1.5 text-sm text-foreground hover:text-primary hover:underline"
+          >
+            {pillar.title || "(Untitled)"}
+            {pillar.format && (
+              <span className="text-xs text-muted-foreground">
+                · {pillar.format}
+              </span>
+            )}
+            <ExternalLinkIcon className="size-3 text-muted-foreground" />
+          </Link>
+        ) : (
+          <p className="text-sm text-muted-foreground">No pillar linked.</p>
+        )}
+      </section>
+
+      <section className="space-y-1.5">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Summary
+        </h3>
+        {summaryLoading ? (
+          <p className="text-sm text-muted-foreground">Generating…</p>
+        ) : summaryError ? (
+          <p className="text-sm text-red-600">
+            Couldn&apos;t generate a summary.
+          </p>
+        ) : summary ? (
+          <p className="text-sm text-foreground leading-relaxed bg-accent/30 rounded-md p-3">
+            {summary}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">(empty)</p>
+        )}
+      </section>
+
+      {formatInstructions && (
+        <section className="space-y-1.5">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Format skill
+          </h3>
+          <div className="whitespace-pre-wrap break-words text-xs text-foreground bg-accent/30 rounded-md p-3 max-h-60 overflow-auto leading-relaxed">
+            {renderInstructions(formatInstructions)}
+          </div>
+        </section>
+      )}
+
+      <section className="space-y-2 border-t border-border pt-4">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Assign editor
+        </h3>
+        <div className="max-h-56 overflow-y-auto grid grid-cols-2 lg:grid-cols-3 gap-1">
+          {users.length === 0 ? (
+            <div className="text-xs text-muted-foreground col-span-full">
+              No assignable users found.
+            </div>
+          ) : (
+            users.map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => onAssign(u.id)}
+                disabled={saving}
+                className="flex items-center w-full text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+              >
+                <UserChip user={u} size="xs" />
+              </button>
+            ))
+          )}
+        </div>
+
+        {actionError && (
+          <p className="text-[11px] text-red-600">{actionError}</p>
+        )}
+
+        <div className="flex items-center justify-between pt-2">
+          <button
+            type="button"
+            onClick={onKill}
+            disabled={saving}
+            className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+          >
+            Kill this idea
+          </button>
+          <Link
+            href={`/${brand}/content/${itemId}`}
+            target="_blank"
+            className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+          >
+            Open full page
+            <ExternalLinkIcon className="size-3" />
+          </Link>
+        </div>
       </section>
     </>
   );
 }
 
+// ─── Tweet embed ─────────────────────────────────────────────────────────
 declare global {
   interface Window {
     twttr?: {

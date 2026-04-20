@@ -90,15 +90,22 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     }
 
     // Reposts: other items whose repostedFromItemId points back at THIS item.
-    // Used by the detail page to render the "reposted 12× in 12 months" strip
-    // on originals, and to show the source item on a repost.
+    // Used by the detail page to render the "Reposts" strip on originals, and
+    // to show the source item on a repost. Mirrors the Derivative table's
+    // columns so the two sections feel like siblings.
     const reposts = await db
       .select({
         id: productionItems.id,
         title: productionItems.title,
+        thumbnail: productionItems.thumbnail,
         status: productionItems.status,
         platform: productionItems.platform,
         publishedDate: productionItems.publishedDate,
+        publishedLink: productionItems.publishedLink,
+        views: productionItems.views,
+        viewsEstimated: productionItems.viewsEstimated,
+        likes: productionItems.likes,
+        comments: productionItems.comments,
         createdAt: productionItems.createdAt,
       })
       .from(productionItems)

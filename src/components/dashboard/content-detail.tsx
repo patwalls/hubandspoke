@@ -25,6 +25,7 @@ import {
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
 import { UserChip } from "./user-chip";
+import { renderInstructions } from "@/lib/utils/markdown";
 
 interface BrandFormat {
   id: string;
@@ -51,9 +52,15 @@ interface AssignableUser {
 interface RepostRow {
   id: string;
   title: string | null;
+  thumbnail: string | null;
   status: string | null;
   platform: string[] | null;
   publishedDate: string | null;
+  publishedLink: string | null;
+  views: number | null;
+  viewsEstimated: boolean | null;
+  likes: number | null;
+  comments: number | null;
   createdAt: string;
 }
 
@@ -127,60 +134,6 @@ function formatCompact(n: number | null | undefined): string {
     return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   return n.toLocaleString();
-}
-
-// Render a markdown-ish string: [label](url) → anchor, bare URLs → anchor,
-// newlines preserved. Read-only, no other markdown features.
-function renderInstructions(text: string): React.ReactNode[] {
-  const MD_LINK = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-  const BARE_URL = /(https?:\/\/[^\s)]+)/g;
-
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-  let key = 0;
-
-  const pushText = (s: string) => {
-    if (!s) return;
-    // Second pass: turn any remaining bare URLs into anchors.
-    let last = 0;
-    let m: RegExpExecArray | null;
-    const re = new RegExp(BARE_URL);
-    while ((m = re.exec(s)) !== null) {
-      if (m.index > last) parts.push(s.slice(last, m.index));
-      parts.push(
-        <a
-          key={`u${key++}`}
-          href={m[1]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:text-blue-800 underline break-all"
-        >
-          {m[1]}
-        </a>
-      );
-      last = m.index + m[1].length;
-    }
-    if (last < s.length) parts.push(s.slice(last));
-  };
-
-  while ((match = MD_LINK.exec(text)) !== null) {
-    if (match.index > cursor) pushText(text.slice(cursor, match.index));
-    parts.push(
-      <a
-        key={`l${key++}`}
-        href={match[2]}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-600 hover:text-blue-800 underline"
-      >
-        {match[1]}
-      </a>
-    );
-    cursor = match.index + match[0].length;
-  }
-  if (cursor < text.length) pushText(text.slice(cursor));
-  return parts;
 }
 
 function formatDate(d: string | null): string {
@@ -750,6 +703,15 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             </h1>
           </div>
           <div className="flex items-center gap-2 flex-wrap mt-2">
+            {item.sourceType === "repost" && (
+              <Badge
+                variant="secondary"
+                className="bg-amber-100 text-amber-900 border border-amber-200"
+                title="This is a repost of an earlier piece of content"
+              >
+                Repost
+              </Badge>
+            )}
             {(item.platform || []).map((p) => (
               <Badge
                 key={p}
@@ -822,40 +784,37 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       </div>
 
-      {/* Repost context — shown when this item was generated as a repost
-          suggestion. The reasoning is copied from the source item at scan
-          time so producers don't have to go hunting for the why. */}
+      {/* Reposted from — the header badge handles the "is a repost" signal;
+          this card gives the context (source link + AI reason) using the same
+          card styling as the rest of the page so it fits naturally. */}
       {item.sourceType === "repost" && data.repostedFrom && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <div className="flex items-start gap-3">
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-900 border border-amber-200 shrink-0 mt-0.5">
-              Repost
-            </span>
-            <div className="flex-1 min-w-0 text-sm text-amber-900">
-              <div>
-                Reposting{" "}
-                <Link
-                  href={`/${brand}/content/${data.repostedFrom.id}`}
-                  className="font-medium underline hover:no-underline"
-                >
-                  {data.repostedFrom.title || "(untitled)"}
-                </Link>
-                {data.repostedFrom.publishedDate && (
-                  <> from {formatDate(data.repostedFrom.publishedDate)}</>
-                )}
-                {data.repostedFrom.views != null && (
-                  <> · {formatCompact(data.repostedFrom.views)} views</>
-                )}
-                .
-              </div>
-              {data.repostedFrom.evergreenReasoning && (
-                <p className="mt-1 text-xs text-amber-800">
-                  <span className="font-medium">Why this was recommended:</span>{" "}
-                  {data.repostedFrom.evergreenReasoning}
-                </p>
+        <div className="rounded-lg border border-border bg-card p-4 sm:p-5 space-y-2">
+          <h3 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+            Reposted from
+          </h3>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <Link
+              href={`/${brand}/content/${data.repostedFrom.id}`}
+              className="text-sm font-medium text-foreground hover:text-primary hover:underline"
+            >
+              {data.repostedFrom.title || "(untitled)"}
+            </Link>
+            <span className="text-xs text-muted-foreground">
+              {data.repostedFrom.publishedDate &&
+                `originally ${formatDate(data.repostedFrom.publishedDate)}`}
+              {data.repostedFrom.views != null && (
+                <> · {formatCompact(data.repostedFrom.views)} views</>
               )}
-            </div>
+            </span>
           </div>
+          {data.repostedFrom.evergreenReasoning && (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              <span className="font-medium text-foreground">
+                Why this was recommended:
+              </span>{" "}
+              {data.repostedFrom.evergreenReasoning}
+            </p>
+          )}
         </div>
       )}
 
@@ -1449,50 +1408,48 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       </div>
 
-      {/* Repost history — only rendered on items that have been reposted.
-          Shows the cadence at a glance ("3 reposts · last on Mar 15") so you
-          can see whether a piece is in rotation. */}
+      {/* Reposts — list of same-content reposts that descend from this item.
+          Styled to mirror the Derivative content table directly above so the
+          two sections read as siblings. */}
       {data.reposts.length > 0 && (
         <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">
-              Repost history
-              <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
-                {data.reposts.length}
-              </span>
-            </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {data.reposts.filter((r) => r.status === "Published").length}{" "}
-              posted · {data.reposts.filter((r) => r.status !== "Published" && r.status !== "Killed").length}{" "}
-              in flight
-              {(() => {
-                const lastPosted = data.reposts.find(
-                  (r) => r.status === "Published" && r.publishedDate
-                );
-                return lastPosted
-                  ? ` · last posted ${formatDate(lastPosted.publishedDate)}`
-                  : "";
-              })()}
-            </p>
+          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">
+                Reposts
+                <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
+                  {data.reposts.length}
+                </span>
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Same-content reposts of this piece over time.
+              </p>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-accent/50">
                   <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Suggested
+                    Title
                   </th>
                   <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Channel
+                    Platform
                   </th>
                   <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                     Status
                   </th>
                   <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                    Posted on
+                    Published
                   </th>
-                  <th className="px-3 py-2.5 text-right font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Open
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Views
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Likes
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Comments
                   </th>
                 </tr>
               </thead>
@@ -1502,12 +1459,39 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                     key={r.id}
                     className="border-b border-border/50 hover:bg-accent/30 transition-colors"
                   >
-                    <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
-                      {new Date(r.createdAt).toLocaleDateString("en-US", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })}
+                    <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
+                      <div className="flex items-center gap-3">
+                        {r.thumbnail && (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={r.thumbnail}
+                            alt=""
+                            className="w-20 h-12 rounded object-cover shrink-0"
+                          />
+                        )}
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
+                            <Link
+                              href={`/${brand}/content/${r.id}`}
+                              className="hover:text-primary hover:underline transition-colors truncate"
+                            >
+                              {r.title || "(Untitled)"}
+                            </Link>
+                            {r.publishedLink && (
+                              <a
+                                href={r.publishedLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-muted-foreground hover:text-foreground shrink-0"
+                                title="Open published post"
+                                aria-label="Open published post"
+                              >
+                                ↗
+                              </a>
+                            )}
+                          </span>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-1">
@@ -1522,22 +1506,36 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       </div>
                     </td>
                     <td className="px-3 py-2">
-                      {r.status && (
+                      {r.status ? (
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border">
                           {r.status}
                         </span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
-                      {r.publishedDate ? formatDate(r.publishedDate) : "—"}
+                      {r.publishedDate ? formatDate(r.publishedDate) : "-"}
                     </td>
-                    <td className="px-3 py-2 text-right">
-                      <Link
-                        href={`/${brand}/content/${r.id}`}
-                        className="text-xs font-medium text-foreground hover:text-primary hover:underline"
-                      >
-                        Open →
-                      </Link>
+                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                      {r.views != null ? (
+                        <span
+                          title={
+                            r.viewsEstimated ? "Estimated from likes" : undefined
+                          }
+                        >
+                          {r.viewsEstimated ? "~" : ""}
+                          {r.views.toLocaleString()}
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                      {r.likes?.toLocaleString() || "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                      {r.comments?.toLocaleString() || "-"}
                     </td>
                   </tr>
                 ))}
