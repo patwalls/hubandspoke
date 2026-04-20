@@ -33,6 +33,7 @@ import {
   fetchLinkedInPostByUrl,
   fetchYouTubeCommunityPostByUrl,
 } from "./matg-sync";
+import { estimateViewsFromLikes } from "./view-estimator";
 
 /* ------------------------------------------------------------------ */
 /*  Decay schedule configuration                                       */
@@ -173,9 +174,25 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
   }
 
   const url = item.publishedLink || item.youtubeUrl || "";
+  const platforms = (item.platform as string[] | null) ?? [];
   const kinds = platformKindsFor(item.platform as string[] | null);
 
-  // --- YouTube video / shorts ---
+  // Apply the likes-multiplier estimator on platforms where SC doesn't return
+  // view counts (LinkedIn, YouTube Community, Instagram Photo, Threads
+  // fallback). Returns the final view count + estimated flag to persist.
+  const deriveViews = (
+    realViews: number | null,
+    likes: number | null
+  ): { views: number | null; estimated: boolean } => {
+    if (realViews != null) return { views: realViews, estimated: false };
+    if (likes == null) return { views: null, estimated: false };
+    const est = estimateViewsFromLikes(platforms, likes);
+    return est.estimated
+      ? { views: est.views, estimated: true }
+      : { views: null, estimated: false };
+  };
+
+  // --- YouTube video / shorts (SC returns real views + likes + comments) ---
   if (kinds.has("youtube") && url) {
     const detail = await fetchSingleVideo(url);
     const views = detail.viewCountInt ?? null;
@@ -187,6 +204,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         views: views ?? 0,
         likes,
         comments,
+        viewsEstimated: false,
         lastPerformanceSyncAt: new Date(),
         updatedAt: new Date(),
       })
@@ -194,7 +212,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     return { itemId, updated: true, platform: "youtube", views, likes, comments, creditsUsed: 1 };
   }
 
-  // --- YouTube Community post (only `likeCount` returned by SC) ---
+  // --- YouTube Community post (SC returns only likeCount → estimate views) ---
   if (kinds.has("youtube_community") && url) {
     const post = await fetchYouTubeCommunityPostByUrl(url);
     if (!post) {
@@ -209,10 +227,15 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         creditsUsed: 1,
       };
     }
+    const derived = deriveViews(null, post.likes);
     await db
       .update(productionItems)
       .set({
         ...(post.likes != null && { likes: post.likes }),
+        ...(derived.views != null && {
+          views: derived.views,
+          viewsEstimated: derived.estimated,
+        }),
         lastPerformanceSyncAt: new Date(),
         updatedAt: new Date(),
       })
@@ -221,14 +244,14 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       itemId,
       updated: true,
       platform: "youtube_community",
-      views: null,
+      views: derived.views,
       likes: post.likes,
       comments: null,
       creditsUsed: 1,
     };
   }
 
-  // --- Twitter / X ---
+  // --- Twitter / X (SC returns real views) ---
   if (kinds.has("twitter") && url) {
     const tweet = await fetchTweetByUrl(url);
     if (!tweet || !tweet.legacy) {
@@ -249,7 +272,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     await db
       .update(productionItems)
       .set({
-        ...(views != null && { views }),
+        ...(views != null && { views, viewsEstimated: false }),
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
         lastPerformanceSyncAt: new Date(),
@@ -259,7 +282,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     return { itemId, updated: true, platform: "twitter", views, likes, comments, creditsUsed: 1 };
   }
 
-  // --- Instagram post / reel ---
+  // --- Instagram post / reel (Reels: SC returns play_count; Photos: null → estimate) ---
   if (kinds.has("instagram") && url) {
     const post = await fetchInstagramPostByUrl(url);
     if (!post) {
@@ -274,11 +297,15 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         creditsUsed: 1,
       };
     }
-    const { views, likes, comments, thumbnail } = post;
+    const { likes, comments, thumbnail } = post;
+    const derived = deriveViews(post.views, likes);
     await db
       .update(productionItems)
       .set({
-        ...(views != null && { views }),
+        ...(derived.views != null && {
+          views: derived.views,
+          viewsEstimated: derived.estimated,
+        }),
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
         ...(thumbnail && { thumbnail }),
@@ -286,10 +313,18 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
-    return { itemId, updated: true, platform: "instagram", views, likes, comments, creditsUsed: 1 };
+    return {
+      itemId,
+      updated: true,
+      platform: "instagram",
+      views: derived.views,
+      likes,
+      comments,
+      creditsUsed: 1,
+    };
   }
 
-  // --- Threads ---
+  // --- Threads (SC usually returns view_counts; fall back to estimator) ---
   if (kinds.has("threads") && url) {
     const post = await fetchThreadsPostByUrl(url);
     if (!post) {
@@ -304,21 +339,33 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         creditsUsed: 1,
       };
     }
-    const { views, likes, comments } = post;
+    const { likes, comments } = post;
+    const derived = deriveViews(post.views, likes);
     await db
       .update(productionItems)
       .set({
-        ...(views != null && { views }),
+        ...(derived.views != null && {
+          views: derived.views,
+          viewsEstimated: derived.estimated,
+        }),
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
         lastPerformanceSyncAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
-    return { itemId, updated: true, platform: "threads", views, likes, comments, creditsUsed: 1 };
+    return {
+      itemId,
+      updated: true,
+      platform: "threads",
+      views: derived.views,
+      likes,
+      comments,
+      creditsUsed: 1,
+    };
   }
 
-  // --- LinkedIn (no views returned by SC) ---
+  // --- LinkedIn (SC returns no views → always estimate from likes) ---
   if (kinds.has("linkedin") && url) {
     const post = await fetchLinkedInPostByUrl(url);
     if (!post) {
@@ -334,9 +381,14 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       };
     }
     const { likes, comments } = post;
+    const derived = deriveViews(null, likes);
     await db
       .update(productionItems)
       .set({
+        ...(derived.views != null && {
+          views: derived.views,
+          viewsEstimated: derived.estimated,
+        }),
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
         lastPerformanceSyncAt: new Date(),
@@ -347,7 +399,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       itemId,
       updated: true,
       platform: "linkedin",
-      views: null,
+      views: derived.views,
       likes,
       comments,
       creditsUsed: 1,
