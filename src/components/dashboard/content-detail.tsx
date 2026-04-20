@@ -177,15 +177,23 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<DetailResponse | null>(null);
-  const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [saveResult, setSaveResult] = useState<{
-    success: boolean;
-    message: string;
-  } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<
+    | { kind: "idle" }
+    | { kind: "saving" }
+    | { kind: "saved" }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
-  const [statusSaving, setStatusSaving] = useState(false);
-  const [statusSaveError, setStatusSaveError] = useState<string | null>(null);
+
+  // Auto-clear the "Saved" pill so it doesn't stay pinned after a single edit.
+  // Errors persist until the next save attempt so the user can read them.
+  useEffect(() => {
+    if (saveState.kind !== "saved") return;
+    const t = setTimeout(() => setSaveState({ kind: "idle" }), 1500);
+    return () => clearTimeout(t);
+  }, [saveState]);
 
   // Per-format repurpose state, keyed by format id
   type RepurposeKind = "descript_clip" | "manual_task";
@@ -573,92 +581,49 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     load();
   }, [load]);
 
-  // Status is the one field that saves on change — the activity feed relies on
-  // status transitions being captured immediately, and users shouldn't have to
-  // click Save just to advance a post through the pipeline.
-  async function handleStatusChange(nextStatus: string | null) {
-    const prev = status;
-    const normalized = nextStatus ?? "";
-    if (normalized === prev) return;
-    setStatus(normalized);
-    setStatusSaving(true);
-    setStatusSaveError(null);
-    try {
-      const res = await fetch("/api/production-items", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: contentId, status: normalized || null }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      const payload = await res.json();
-      if (payload.notionSyncWarning) {
-        setStatusSaveError(`Saved locally. Notion: ${payload.notionSyncWarning}`);
-      }
-      setActivityRefreshKey((k) => k + 1);
-    } catch (e) {
-      setStatus(prev);
-      setStatusSaveError(e instanceof Error ? e.message : "Failed to save status");
-    } finally {
-      setStatusSaving(false);
-    }
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    setSaveResult(null);
-    try {
-      const res = await fetch("/api/production-items", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: contentId,
-          title,
-          platform: platforms,
-          format: format || null,
-          status: status || null,
-          pillarContentItemId: pillar?.id ?? null,
-          producerUserId: producerUserId || null,
-          editorUserId: editorUserId || null,
-          publishedLink: publishedLink || null,
-          publishedDate,
-          views: views ? parseInt(views, 10) : null,
-          likes: likes ? parseInt(likes, 10) : null,
-          comments: comments ? parseInt(comments, 10) : null,
-          clicks: clicks ? parseInt(clicks, 10) : null,
-          leads: leads ? parseInt(leads, 10) : null,
-          salesAmount: salesAmount || null,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        setSaveResult({
-          success: false,
-          message: err.error || "Failed to save",
+  // Every field auto-persists through here. The PUT route accepts partial
+  // bodies, so we send only what changed. Server response is merged back into
+  // `data.item` so derived flags like `isPublished` stay current without a full
+  // reload (which would steal focus from the input the user just blurred).
+  const persistField = useCallback(
+    async (patch: Record<string, unknown>): Promise<boolean> => {
+      setSaveState({ kind: "saving" });
+      try {
+        const res = await fetch("/api/production-items", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: contentId, ...patch }),
         });
-        return;
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `HTTP ${res.status}`);
+        }
+        const payload = await res.json();
+        setData((prev) =>
+          prev ? { ...prev, item: { ...prev.item, ...payload } } : prev
+        );
+        setActivityRefreshKey((k) => k + 1);
+        setSaveState(
+          payload.notionSyncWarning
+            ? { kind: "error", message: `Saved. Notion: ${payload.notionSyncWarning}` }
+            : { kind: "saved" }
+        );
+        return true;
+      } catch (e) {
+        setSaveState({
+          kind: "error",
+          message: e instanceof Error ? e.message : "Save failed",
+        });
+        return false;
       }
-      const payload = await res.json();
-      setSaveResult({
-        success: true,
-        message: payload.notionSyncWarning
-          ? `Saved locally. Notion update failed: ${payload.notionSyncWarning}`
-          : "Saved.",
-      });
-      await load();
-      setActivityRefreshKey((k) => k + 1);
-    } catch (err) {
-      setSaveResult({ success: false, message: String(err) });
-    } finally {
-      setSaving(false);
-    }
-  }
+    },
+    [contentId]
+  );
 
   async function handleDelete() {
     if (!confirm("Delete this post? This cannot be undone.")) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
       const res = await fetch("/api/production-items", {
         method: "DELETE",
@@ -667,16 +632,13 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       });
       if (!res.ok) {
         const err = await res.json();
-        setSaveResult({
-          success: false,
-          message: err.error || "Failed to delete",
-        });
+        setDeleteError(err.error || "Failed to delete");
         setDeleting(false);
         return;
       }
       router.push(`/${brand}/content`);
     } catch (err) {
-      setSaveResult({ success: false, message: String(err) });
+      setDeleteError(String(err));
       setDeleting(false);
     }
   }
@@ -896,40 +858,50 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             : undefined
         }
       >
-      <div className="rounded-lg border border-border bg-card p-5 space-y-5">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              Post details
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {isYouTube
-                ? "Auto-synced from YouTube — fields are read-only."
-                : "Edits save when you click Save changes."}
-            </p>
+      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+        {(isYouTube || saveState.kind !== "idle") && (
+          <div className="flex items-center justify-end gap-2 -mb-1 min-h-[18px]">
+            {isYouTube && (
+              <span className="text-[11px] text-muted-foreground">
+                Auto-synced from YouTube — fields are read-only.
+              </span>
+            )}
+            {saveState.kind === "saving" && (
+              <span className="text-[11px] text-muted-foreground">Saving…</span>
+            )}
+            {saveState.kind === "saved" && (
+              <span className="text-[11px] text-green-600">Saved</span>
+            )}
+            {saveState.kind === "error" && (
+              <span className="text-[11px] text-red-600" title={saveState.message}>
+                {saveState.message}
+              </span>
+            )}
           </div>
-          {!isYouTube && (
-            <Button onClick={handleSave} disabled={saving || !title || !platforms.length || !publishedDate}>
-              {saving ? "Saving…" : "Save changes"}
-            </Button>
-          )}
-        </div>
+        )}
 
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <Label>Title</Label>
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => {
+              if ((item.title ?? "") !== title) void persistField({ title });
+            }}
             disabled={isYouTube}
           />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label>Platform</Label>
             <Select
               value={platforms[0] || ""}
-              onValueChange={(v) => setPlatforms(v ? [v] : [])}
+              onValueChange={(v) => {
+                const next = v ? [v] : [];
+                setPlatforms(next);
+                void persistField({ platform: next });
+              }}
               disabled={isYouTube}
             >
               <SelectTrigger>
@@ -946,11 +918,14 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </div>
 
           {brandFormats.length > 0 && (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label>Format</Label>
               <Select
                 value={format}
-                onValueChange={(v) => setFormat(v || "")}
+                onValueChange={(v) => {
+                  setFormat(v || "");
+                  void persistField({ format: v || null });
+                }}
                 disabled={isYouTube}
               >
                 <SelectTrigger>
@@ -968,63 +943,58 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           )}
         </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
             <Label>Status</Label>
-            {statusSaving && (
-              <span className="text-[11px] text-muted-foreground">Saving…</span>
-            )}
+            <Select
+              value={status}
+              onValueChange={(v) => {
+                const prev = status;
+                const next = v ?? "";
+                if (next === prev) return;
+                setStatus(next);
+                void persistField({ status: next || null }).then((ok) => {
+                  if (!ok) setStatus(prev);
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select status…" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <Select
-            value={status}
-            onValueChange={handleStatusChange}
-            disabled={statusSaving}
-          >
-            <SelectTrigger className="md:w-[280px]">
-              <SelectValue placeholder="Select status…" />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {statusSaveError ? (
-            <p className="text-[11px] text-red-600">{statusSaveError}</p>
-          ) : data?.item.notionId ? (
-            <p className="text-[11px] text-muted-foreground">
-              Saves instantly and syncs to Notion.
-            </p>
-          ) : (
-            <p className="text-[11px] text-muted-foreground">
-              Local-only — this post isn&apos;t linked to a Notion page.
-            </p>
-          )}
-        </div>
 
-        <div className="space-y-2">
-          <Label>Pillar Content</Label>
-          <PillarPicker
-            brand={brand}
-            excludeId={contentId}
-            value={pillar}
-            onChange={setPillar}
-          />
-          <p className="text-[11px] text-muted-foreground">
-            The root post this derivative rolls up to. Syncs to Notion on save.
-          </p>
+          <div className="space-y-1.5">
+            <Label>Pillar Content</Label>
+            <PillarPicker
+              brand={brand}
+              excludeId={contentId}
+              value={pillar}
+              onChange={(next) => {
+                setPillar(next);
+                void persistField({ pillarContentItemId: next?.id ?? null });
+              }}
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label>Producer</Label>
             <Select
               value={producerUserId || "__unassigned"}
-              onValueChange={(v) =>
-                setProducerUserId(v && v !== "__unassigned" ? v : "")
-              }
+              onValueChange={(v) => {
+                const next = v && v !== "__unassigned" ? v : "";
+                setProducerUserId(next);
+                void persistField({ producerUserId: next || null });
+              }}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Unassigned" />
@@ -1039,13 +1009,15 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label>Editor</Label>
             <Select
               value={editorUserId || "__unassigned"}
-              onValueChange={(v) =>
-                setEditorUserId(v && v !== "__unassigned" ? v : "")
-              }
+              onValueChange={(v) => {
+                const next = v && v !== "__unassigned" ? v : "";
+                setEditorUserId(next);
+                void persistField({ editorUserId: next || null });
+              }}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Unassigned" />
@@ -1061,110 +1033,136 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             </Select>
           </div>
         </div>
-        <p className="text-[11px] text-muted-foreground -mt-2">
-          Assignments are managed in Hub &amp; Spoke. Changes notify the new
-          assignee by email.
-        </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label>Published Link</Label>
             <Input
               value={publishedLink}
               onChange={(e) => setPublishedLink(e.target.value)}
+              onBlur={() => {
+                if ((item.publishedLink ?? "") !== publishedLink)
+                  void persistField({ publishedLink: publishedLink || null });
+              }}
               placeholder="https://…"
               disabled={isYouTube}
             />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label>Published Date</Label>
             <Input
               type="date"
               value={publishedDate}
-              onChange={(e) => setPublishedDate(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setPublishedDate(next);
+                if ((item.publishedDate ?? "") !== next)
+                  void persistField({ publishedDate: next });
+              }}
               disabled={isYouTube}
             />
           </div>
         </div>
 
-        <div className="rounded-lg border border-dashed border-gray-300 p-3 space-y-3">
-          <p className="text-xs text-muted-foreground font-medium">Metrics</p>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Views</Label>
-              <Input
-                type="number"
-                value={views}
-                onChange={(e) => setViews(e.target.value)}
-                placeholder="0"
-                disabled={isYouTube}
-              />
+        {isPublished && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground font-medium">Metrics</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Views</Label>
+                <Input
+                  type="number"
+                  value={views}
+                  onChange={(e) => setViews(e.target.value)}
+                  onBlur={() => {
+                    const current = item.views != null ? String(item.views) : "";
+                    if (current !== views) void persistField({ views: views || null });
+                  }}
+                  placeholder="0"
+                  disabled={isYouTube}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Likes</Label>
+                <Input
+                  type="number"
+                  value={likes}
+                  onChange={(e) => setLikes(e.target.value)}
+                  onBlur={() => {
+                    const current = item.likes != null ? String(item.likes) : "";
+                    if (current !== likes) void persistField({ likes: likes || null });
+                  }}
+                  placeholder="0"
+                  disabled={isYouTube}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Comments</Label>
+                <Input
+                  type="number"
+                  value={comments}
+                  onChange={(e) => setComments(e.target.value)}
+                  onBlur={() => {
+                    const current = item.comments != null ? String(item.comments) : "";
+                    if (current !== comments) void persistField({ comments: comments || null });
+                  }}
+                  placeholder="0"
+                  disabled={isYouTube}
+                />
+              </div>
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Likes</Label>
-              <Input
-                type="number"
-                value={likes}
-                onChange={(e) => setLikes(e.target.value)}
-                placeholder="0"
-                disabled={isYouTube}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Comments</Label>
-              <Input
-                type="number"
-                value={comments}
-                onChange={(e) => setComments(e.target.value)}
-                placeholder="0"
-                disabled={isYouTube}
-              />
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Clicks</Label>
+                <Input
+                  type="number"
+                  value={clicks}
+                  onChange={(e) => setClicks(e.target.value)}
+                  onBlur={() => {
+                    const current = item.clicks != null ? String(item.clicks) : "";
+                    if (current !== clicks) void persistField({ clicks: clicks || null });
+                  }}
+                  placeholder="0"
+                  disabled={isYouTube}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Leads</Label>
+                <Input
+                  type="number"
+                  value={leads}
+                  onChange={(e) => setLeads(e.target.value)}
+                  onBlur={() => {
+                    const current = item.leads != null ? String(item.leads) : "";
+                    if (current !== leads) void persistField({ leads: leads || null });
+                  }}
+                  placeholder="0"
+                  disabled={isYouTube}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Sales $</Label>
+                <Input
+                  type="number"
+                  value={salesAmount}
+                  onChange={(e) => setSalesAmount(e.target.value)}
+                  onBlur={() => {
+                    const current = item.salesAmount != null ? String(item.salesAmount) : "";
+                    if (current !== salesAmount)
+                      void persistField({ salesAmount: salesAmount || null });
+                  }}
+                  placeholder="0"
+                  step="0.01"
+                  disabled={isYouTube}
+                />
+              </div>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Clicks</Label>
-              <Input
-                type="number"
-                value={clicks}
-                onChange={(e) => setClicks(e.target.value)}
-                placeholder="0"
-                disabled={isYouTube}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Leads</Label>
-              <Input
-                type="number"
-                value={leads}
-                onChange={(e) => setLeads(e.target.value)}
-                placeholder="0"
-                disabled={isYouTube}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Sales $</Label>
-              <Input
-                type="number"
-                value={salesAmount}
-                onChange={(e) => setSalesAmount(e.target.value)}
-                placeholder="0"
-                step="0.01"
-                disabled={isYouTube}
-              />
-            </div>
-          </div>
-        </div>
+        )}
 
-        {saveResult && (
-          <div
-            className={`text-sm rounded-lg px-3 py-2 ${
-              saveResult.success
-                ? "bg-green-50 text-green-700 border border-green-200"
-                : "bg-red-50 text-red-700 border border-red-200"
-            }`}
-          >
-            {saveResult.message}
+        {deleteError && (
+          <div className="text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200">
+            {deleteError}
           </div>
         )}
       </div>
