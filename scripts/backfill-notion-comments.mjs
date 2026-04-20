@@ -20,6 +20,8 @@ import postgres from "postgres";
 const DRY_RUN = process.argv.includes("--dry-run");
 const onlyIdx = process.argv.indexOf("--only");
 const ONLY = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
+const limitIdx = process.argv.indexOf("--limit");
+const LIMIT = limitIdx >= 0 ? Number(process.argv[limitIdx + 1]) : null;
 
 if (!process.env.NOTION_API_SECRET) {
   console.error("NOTION_API_SECRET not set");
@@ -35,8 +37,8 @@ const ssl =
 const sql = postgres(process.env.DATABASE_URL, { prepare: false, ssl });
 const notion = new Client({ auth: process.env.NOTION_API_SECRET });
 
-// Notion rate limit is ~3 req/sec; 300ms keeps us well under.
-const SLEEP_MS = 300;
+// Notion rate limit is ~3 req/sec; 400ms keeps us under even with bursts.
+const SLEEP_MS = 400;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function richToPlain(rich) {
@@ -44,15 +46,42 @@ function richToPlain(rich) {
   return rich.map((r) => r.plain_text ?? "").join("");
 }
 
+async function withRetry(fn, label) {
+  const MAX = 6;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const transient =
+        err?.code === "rate_limited" ||
+        err?.status === 429 ||
+        err?.status === 502 ||
+        err?.status === 503 ||
+        err?.status === 504;
+      if (!transient || attempt >= MAX) throw err;
+      const retryAfter = Number(err?.headers?.["retry-after"]);
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : Math.min(60000, 2 ** attempt * 1000);
+      console.log(`   ⏳ ${label}: ${err.code ?? err.status} — sleeping ${Math.round(waitMs / 1000)}s (attempt ${attempt}/${MAX})`);
+      await sleep(waitMs);
+    }
+  }
+}
+
 async function listPageComments(pageId) {
   const all = [];
   let cursor;
   do {
-    const res = await notion.comments.list({
-      block_id: pageId,
-      start_cursor: cursor,
-      page_size: 100,
-    });
+    const res = await withRetry(
+      () =>
+        notion.comments.list({
+          block_id: pageId,
+          start_cursor: cursor,
+          page_size: 100,
+        }),
+      `comments.list ${pageId}`,
+    );
     all.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
@@ -88,12 +117,20 @@ async function main() {
         FROM production_items
         WHERE notion_id = ${ONLY}
       `
-    : await sql`
-        SELECT id, notion_id, title
-        FROM production_items
-        WHERE notion_id IS NOT NULL
-        ORDER BY created_at
-      `;
+    : LIMIT
+      ? await sql`
+          SELECT id, notion_id, title
+          FROM production_items
+          WHERE notion_id IS NOT NULL
+          ORDER BY created_at DESC
+          LIMIT ${LIMIT}
+        `
+      : await sql`
+          SELECT id, notion_id, title
+          FROM production_items
+          WHERE notion_id IS NOT NULL
+          ORDER BY created_at DESC
+        `;
 
   console.log(`Scanning ${items.length} production item(s)\n`);
 
