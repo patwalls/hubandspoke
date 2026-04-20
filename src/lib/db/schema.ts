@@ -194,6 +194,36 @@ export const repurposeTriggers = pgTable(
   ]
 );
 
+// Rules driving the cross-post scanner: "when a published item on
+// `sourcePlatform` passes `viewThreshold` views, queue a cross-post idea
+// targeting `targetPlatform`." One row per (source → target) pair per brand.
+// Formats used to carry this via parent→child rows; that conflated syndication
+// with true repurpose. Rules keep the formats tree for real repurpose work.
+export const crossPostRules = pgTable(
+  "cross_post_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    brand: text("brand").notNull().default("starter-story"),
+    sourcePlatform: text("source_platform").notNull(),
+    viewThreshold: integer("view_threshold").notNull(),
+    targetPlatform: text("target_platform").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uniq_cross_post_rules_brand_src_tgt").on(
+      table.brand,
+      table.sourcePlatform,
+      table.targetPlatform
+    ),
+  ]
+);
+
 export const brandSettings = pgTable("brand_settings", {
   brand: text("brand").primaryKey(),
   weeklyGoal: integer("weekly_goal"),

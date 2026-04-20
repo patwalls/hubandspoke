@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect } from "react";
+import { ExternalLinkIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -168,6 +170,24 @@ export function SettingsPageContent({
           )}
         </div>
       </form>
+
+      <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            Cross-post rules
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Auto-queue cross-post ideas when a post crosses a view threshold.
+          </p>
+        </div>
+        <Link
+          href={`/${brand}/cross-post-rules`}
+          className="inline-flex items-center gap-1.5 text-sm text-foreground hover:text-primary hover:underline"
+        >
+          Manage rules
+          <ExternalLinkIcon className="size-3.5" />
+        </Link>
+      </div>
     </div>
   );
 }

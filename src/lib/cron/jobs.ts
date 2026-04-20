@@ -2,6 +2,7 @@ import { syncFromNotion } from "@/lib/services/notion-sync";
 import { syncPerformanceData } from "@/lib/services/performance-decay";
 import { checkSSThresholds } from "@/lib/services/threshold-monitor";
 import { runEvergreenScan } from "@/lib/services/evergreen-scan";
+import { runCrossPostScan } from "@/lib/services/cross-post-scan";
 
 type TenMinSlot = 0 | 10 | 20 | 30 | 40 | 50;
 
@@ -46,6 +47,11 @@ export const CRON_JOBS: CronJob[] = [
     name: "evergreen-scan",
     schedule: { every: "day", atUtcHour: 15 },
     run: () => runEvergreenScan(),
+  },
+  {
+    name: "cross-post-scan",
+    schedule: { every: "day", atUtcHour: 16 },
+    run: () => runCrossPostScan(),
   },
 ];
 

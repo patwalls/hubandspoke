@@ -64,6 +64,9 @@ export function QueueView({ brand }: QueueViewProps) {
   const repostCount = filtered.filter(
     (i) => i.sourceType === "repost"
   ).length;
+  const crossPostCount = filtered.filter(
+    (i) => i.sourceType === "cross_post"
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -82,6 +85,16 @@ export function QueueView({ brand }: QueueViewProps) {
                 {" "}
                 <span className="text-amber-700">
                   {repostCount} repost suggestion{repostCount === 1 ? "" : "s"}
+                </span>{" "}
+                waiting.
+              </>
+            )}
+            {crossPostCount > 0 && (
+              <>
+                {" "}
+                <span className="text-indigo-700">
+                  {crossPostCount} cross-post suggestion
+                  {crossPostCount === 1 ? "" : "s"}
                 </span>{" "}
                 waiting.
               </>

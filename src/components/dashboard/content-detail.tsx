@@ -83,6 +83,7 @@ interface DetailResponse {
   producer: AssignableUser | null;
   editor: AssignableUser | null;
   reposts: RepostRow[];
+  crossPosts: RepostRow[];
   repostedFrom: RepostedFromRef | null;
 }
 
@@ -712,6 +713,15 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 Repost
               </Badge>
             )}
+            {item.sourceType === "cross_post" && (
+              <Badge
+                variant="secondary"
+                className="bg-indigo-100 text-indigo-900 border border-indigo-200"
+                title="Same content syndicated to a different platform"
+              >
+                Cross-post
+              </Badge>
+            )}
             {(item.platform || []).map((p) => (
               <Badge
                 key={p}
@@ -784,13 +794,14 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       </div>
 
-      {/* Reposted from — the header badge handles the "is a repost" signal;
-          this card gives the context (source link + AI reason) using the same
-          card styling as the rest of the page so it fits naturally. */}
-      {item.sourceType === "repost" && data.repostedFrom && (
+      {/* Source card — shown for reposts and cross-posts. The header badge
+          carries the "is a X" signal; this gives context (source link + AI
+          reason) using the same card styling as the rest of the page. */}
+      {(item.sourceType === "repost" || item.sourceType === "cross_post") &&
+        data.repostedFrom && (
         <div className="rounded-lg border border-border bg-card p-4 sm:p-5 space-y-2">
           <h3 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-            Reposted from
+            {item.sourceType === "cross_post" ? "Cross-posted from" : "Reposted from"}
           </h3>
           <div className="flex items-baseline gap-2 flex-wrap">
             <Link
@@ -1455,6 +1466,142 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               </thead>
               <tbody>
                 {data.reposts.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                  >
+                    <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
+                      <div className="flex items-center gap-3">
+                        {r.thumbnail && (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={r.thumbnail}
+                            alt=""
+                            className="w-20 h-12 rounded object-cover shrink-0"
+                          />
+                        )}
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
+                            <Link
+                              href={`/${brand}/content/${r.id}`}
+                              className="hover:text-primary hover:underline transition-colors truncate"
+                            >
+                              {r.title || "(Untitled)"}
+                            </Link>
+                            {r.publishedLink && (
+                              <a
+                                href={r.publishedLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-muted-foreground hover:text-foreground shrink-0"
+                                title="Open published post"
+                                aria-label="Open published post"
+                              >
+                                ↗
+                              </a>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {r.platform?.map((p) => (
+                          <span
+                            key={p}
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                          >
+                            {p}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      {r.status ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border">
+                          {r.status}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
+                      {r.publishedDate ? formatDate(r.publishedDate) : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                      {r.views != null ? (
+                        <span
+                          title={
+                            r.viewsEstimated ? "Estimated from likes" : undefined
+                          }
+                        >
+                          {r.viewsEstimated ? "~" : ""}
+                          {r.views.toLocaleString()}
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                      {r.likes?.toLocaleString() || "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                      {r.comments?.toLocaleString() || "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Cross-posts — same content, different platform. Mirrors the Reposts
+          table so the two sections read as siblings. */}
+      {data.crossPosts.length > 0 && (
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">
+                Cross-posts
+                <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
+                  {data.crossPosts.length}
+                </span>
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Same content syndicated to other platforms.
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-accent/50">
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Title
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Platform
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Status
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
+                    Published
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Views
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Likes
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Comments
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.crossPosts.map((r) => (
                   <tr
                     key={r.id}
                     className="border-b border-border/50 hover:bg-accent/30 transition-colors"

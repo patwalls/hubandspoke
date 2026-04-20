@@ -131,6 +131,14 @@ function IdeaQueueRow({
               Repost
             </span>
           )}
+          {item.sourceType === "cross_post" && (
+            <span
+              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-900 border border-indigo-200 shrink-0"
+              title="Same content syndicated to a different platform"
+            >
+              Cross-post
+            </span>
+          )}
           <button
             type="button"
             onClick={() => setOpen(true)}

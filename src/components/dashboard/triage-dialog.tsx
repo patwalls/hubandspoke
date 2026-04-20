@@ -63,6 +63,8 @@ export function TriageDialog({
   onDone,
 }: TriageDialogProps) {
   const isRepost = item.sourceType === "repost";
+  const isCrossPost = item.sourceType === "cross_post";
+  const isSourced = isRepost || isCrossPost;
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
@@ -96,9 +98,9 @@ export function TriageDialog({
       }
     })();
 
-    // Reposts already have an AI-authored "why" — skip the summary fetch to
-    // save LLM spend and latency. Originals still get it.
-    if (!isRepost) {
+    // Reposts/cross-posts inherit context from the source — skip the LLM
+    // summary to save spend and latency. Originals still get it.
+    if (!isSourced) {
       (async () => {
         try {
           const res = await fetch(`/api/production-items/${item.id}/summary`);
@@ -124,7 +126,7 @@ export function TriageDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, item.id, isRepost]);
+  }, [open, item.id, isSourced]);
 
   async function updateStatus(
     nextStatus: "Assigned" | "Killed" | "Published",
@@ -182,6 +184,14 @@ export function TriageDialog({
                 Repost
               </span>
             )}
+            {isCrossPost && (
+              <span
+                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-900 border border-indigo-200"
+                title="Same content syndicated to a different platform"
+              >
+                Cross-post
+              </span>
+            )}
             {(item.platform || []).map((p) => (
               <span
                 key={p}
@@ -190,7 +200,7 @@ export function TriageDialog({
                 {p}
               </span>
             ))}
-            {item.format && !isRepost && (
+            {item.format && !isSourced && (
               <span className="text-xs text-muted-foreground">
                 · {item.format}
               </span>
@@ -201,8 +211,9 @@ export function TriageDialog({
           </DialogTitle>
         </DialogHeader>
 
-        {isRepost ? (
-          <RepostBody
+        {isSourced ? (
+          <SourcedBody
+            kind={isCrossPost ? "cross_post" : "repost"}
             loading={detailLoading}
             repostedFrom={repostedFrom}
             item={item}
@@ -236,8 +247,9 @@ export function TriageDialog({
   );
 }
 
-// ─── Repost body ─────────────────────────────────────────────────────────
-function RepostBody({
+// ─── Sourced (repost + cross-post) body ──────────────────────────────────
+function SourcedBody({
+  kind,
   loading,
   repostedFrom,
   item,
@@ -249,6 +261,7 @@ function RepostBody({
   onMarkPublished,
   onKill,
 }: {
+  kind: "repost" | "cross_post";
   loading: boolean;
   repostedFrom: RepostedFromRef | null;
   item: ProductionItem;
@@ -267,29 +280,52 @@ function RepostBody({
 }) {
   if (loading) {
     return (
-      <p className="text-sm text-muted-foreground">Loading original post…</p>
+      <p className="text-sm text-muted-foreground">Loading source post…</p>
     );
   }
 
-  const channel = repostedFrom?.platform?.[0] ?? "";
+  const isCrossPost = kind === "cross_post";
+  const sourceChannel = repostedFrom?.platform?.[0] ?? "";
+  const targetChannel = (item.platform ?? [])[0] ?? "";
   const isTwitter =
-    channel === "Twitter" ||
-    channel === "Twitter (Pat Walls)" ||
+    sourceChannel === "Twitter" ||
+    sourceChannel === "Twitter (Pat Walls)" ||
     (repostedFrom?.publishedLink &&
       /^https:\/\/(?:www\.)?(?:twitter|x)\.com\//.test(
         repostedFrom.publishedLink
       ));
 
+  const reasoningLabel = isCrossPost ? "Why cross-post this" : "Why repost this";
+  const sourceLabel = isCrossPost ? "Source post" : "Original post";
+  const panelStyles = isCrossPost
+    ? "bg-indigo-50 border-indigo-200"
+    : "bg-amber-50 border-amber-200";
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-      {/* LEFT: why + actions */}
+      {/* LEFT: context + actions */}
       <div className="md:col-span-5 space-y-4">
-        {repostedFrom?.evergreenReasoning && (
+        {isCrossPost && sourceChannel && targetChannel && (
           <section className="space-y-1.5">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Why repost this
+              {reasoningLabel}
             </h3>
-            <p className="text-sm text-foreground leading-relaxed bg-amber-50 border border-amber-200 rounded-md p-3">
+            <p className={`text-sm text-foreground leading-relaxed ${panelStyles} border rounded-md p-3`}>
+              Source ran on <span className="font-medium">{sourceChannel}</span>
+              {repostedFrom?.views != null && (
+                <> and hit {formatCompact(repostedFrom.views)} views</>
+              )}
+              . Re-post on <span className="font-medium">{targetChannel}</span>{" "}
+              with light tweaks for the platform.
+            </p>
+          </section>
+        )}
+        {!isCrossPost && repostedFrom?.evergreenReasoning && (
+          <section className="space-y-1.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {reasoningLabel}
+            </h3>
+            <p className={`text-sm text-foreground leading-relaxed ${panelStyles} border rounded-md p-3`}>
               {repostedFrom.evergreenReasoning}
             </p>
           </section>
@@ -313,7 +349,7 @@ function RepostBody({
                   rel="noopener noreferrer"
                   className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground hover:bg-accent"
                 >
-                  Open original
+                  Open source
                   <ExternalLinkIcon className="size-3.5" />
                 </a>
               )}
@@ -323,7 +359,7 @@ function RepostBody({
               saving={saving}
               onSubmit={onMarkPublished}
               onCancel={() => setMode("idle")}
-              defaultChannel={channel}
+              defaultChannel={targetChannel || sourceChannel}
             />
           )}
           {actionError && (
@@ -351,10 +387,10 @@ function RepostBody({
         </div>
       </div>
 
-      {/* RIGHT: original post */}
+      {/* RIGHT: source post */}
       <div className="md:col-span-7 space-y-1.5">
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Original post
+          {sourceLabel}
           {repostedFrom?.publishedDate && (
             <span className="ml-2 font-normal normal-case tracking-normal text-xs text-muted-foreground">
               from {new Date(repostedFrom.publishedDate).toLocaleDateString(
@@ -387,7 +423,7 @@ function RepostBody({
           </a>
         ) : (
           <p className="text-sm text-muted-foreground">
-            No published link on the original.
+            No published link on the source.
           </p>
         )}
       </div>

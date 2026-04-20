@@ -93,7 +93,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     // Used by the detail page to render the "Reposts" strip on originals, and
     // to show the source item on a repost. Mirrors the Derivative table's
     // columns so the two sections feel like siblings.
-    const reposts = await db
+    const sourcedChildren = await db
       .select({
         id: productionItems.id,
         title: productionItems.title,
@@ -106,11 +106,17 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         viewsEstimated: productionItems.viewsEstimated,
         likes: productionItems.likes,
         comments: productionItems.comments,
+        sourceType: productionItems.sourceType,
         createdAt: productionItems.createdAt,
       })
       .from(productionItems)
       .where(eq(productionItems.repostedFromItemId, id))
       .orderBy(desc(productionItems.createdAt));
+
+    const reposts = sourcedChildren.filter((r) => r.sourceType === "repost");
+    const crossPosts = sourcedChildren.filter(
+      (r) => r.sourceType === "cross_post"
+    );
 
     let repostedFrom:
       | {
@@ -123,7 +129,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           evergreenReasoning: string | null;
         }
       | null = null;
-    if (item.sourceType === "repost" && item.repostedFromItemId) {
+    if (
+      (item.sourceType === "repost" || item.sourceType === "cross_post") &&
+      item.repostedFromItemId
+    ) {
       const [src] = await db
         .select({
           id: productionItems.id,
@@ -214,6 +223,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       producer,
       editor,
       reposts: reposts.map((r) => ({
+        ...r,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      crossPosts: crossPosts.map((r) => ({
         ...r,
         createdAt: r.createdAt.toISOString(),
       })),
