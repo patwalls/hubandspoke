@@ -1,7 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { format } from "date-fns";
 import type { MetricData, Period } from "@/types";
+
+function formatPeriodTooltip(p: Period): string {
+  const s = new Date(p.start + "T00:00:00");
+  const e = new Date(p.end + "T00:00:00");
+  if (p.start === p.end) return format(s, "EEEE, MMMM do, yyyy");
+  return `${format(s, "EEEE, MMMM do")} to ${format(e, "EEEE, MMMM do")}`;
+}
 
 type MetricKey = "production" | "views" | "leads" | "viewsPerPost" | "sales";
 
@@ -114,7 +122,8 @@ export function PeriodTable({
               {periods.map((p) => (
                 <th
                   key={p.label}
-                  className="px-2 py-2.5 text-center font-medium text-muted-foreground min-w-[52px] font-mono uppercase tracking-wider text-[10px]"
+                  title={formatPeriodTooltip(p)}
+                  className="px-2 py-2.5 text-center font-medium text-muted-foreground min-w-[52px] font-mono uppercase tracking-wider text-[10px] cursor-help"
                 >
                   {p.label}
                 </th>

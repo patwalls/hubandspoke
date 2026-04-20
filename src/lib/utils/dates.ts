@@ -23,7 +23,14 @@ export function buildPeriods(
   const periods: Period[] = [];
 
   if (viewType === "weekly") {
-    let current = startOfWeek(startDate, { weekStartsOn: 0 }); // Sunday
+    // Round UP to the next Sunday so W1 is always a full Sun–Sat week
+    // inside the lookback window. The trailing week still ends on `endDate`
+    // (typically today), so the current in-progress week is shown as-is
+    // with whatever partial data exists.
+    let current = startOfWeek(startDate, { weekStartsOn: 0 });
+    if (differenceInDays(startDate, current) > 0) {
+      current = addWeeks(current, 1);
+    }
     let weekNum = 1;
 
     while (!isAfter(current, endDate)) {
