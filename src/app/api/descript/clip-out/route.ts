@@ -9,7 +9,6 @@ import {
   extractCompositionIdFromAgentResponse,
 } from "@/lib/descript";
 import { dispatchRepurpose, type RepurposeAction } from "@/lib/repurpose-agent";
-import { createNotionRepurposeTask } from "@/lib/services/notion-tasks";
 
 async function resolveCompositionInBackground(
   triggerId: string,
@@ -128,6 +127,11 @@ export async function POST(request: NextRequest) {
 
   const channel = Array.isArray(target.channels) ? target.channels[0] : undefined;
 
+  // Derivatives born here are Hub & Spoke-native — no Notion page is created.
+  // The Notion sync's pull filter would skip non-authoritative platforms
+  // anyway, so there's no value in round-tripping through a Notion task page.
+  const platform = channel ? [channel] : null;
+
   if (action.kind === "descript_clip") {
     try {
       const result = await invokeDescriptAgent({
@@ -135,50 +139,25 @@ export async function POST(request: NextRequest) {
         prompt: action.descriptPrompt,
       });
 
-      const notionResult = await createNotionRepurposeTask({
-        pillarContentTitle: item.title || "Untitled",
-        targetFormatName: target.name,
-        title: action.compositionName,
-        channel,
-        pillarContentNotionId: item.notionId || undefined,
-        targetFormatNotionPageId: target.notionPageId || undefined,
-        editorNotionUserId: target.editorNotionUserId || undefined,
-        descriptProjectUrl: result.projectUrl,
-      });
-      if (!notionResult.success) {
-        return NextResponse.json(
-          {
-            error:
-              "Descript clip started, but Notion task creation failed: " +
-              (notionResult.error || "unknown error"),
-          },
-          { status: 502 }
-        );
-      }
-      const notionPageId = notionResult.notionPageId;
-      const notionPageUrl = notionResult.notionPageUrl;
-
       let derivativeItemId: string | undefined;
-      if (notionPageId) {
-        try {
-          const [derivative] = await db
-            .insert(productionItems)
-            .values({
-              brand: item.brand,
-              notionId: notionPageId,
-              title: action.compositionName,
-              format: target.name,
-              status: "Idea",
-              pillarContentNotionId: item.notionId,
-              pillarContentItemId: item.id,
-              descriptProjectId: item.descriptProjectId,
-              descriptProjectUrl: result.projectUrl,
-            })
-            .returning({ id: productionItems.id });
-          derivativeItemId = derivative.id;
-        } catch (err) {
-          console.error("Derivative production_item insert failed:", err);
-        }
+      try {
+        const [derivative] = await db
+          .insert(productionItems)
+          .values({
+            brand: item.brand,
+            title: action.compositionName,
+            platform,
+            format: target.name,
+            status: "Idea",
+            pillarContentNotionId: item.notionId,
+            pillarContentItemId: item.id,
+            descriptProjectId: item.descriptProjectId,
+            descriptProjectUrl: result.projectUrl,
+          })
+          .returning({ id: productionItems.id });
+        derivativeItemId = derivative.id;
+      } catch (err) {
+        console.error("Derivative production_item insert failed:", err);
       }
 
       const [trigger] = await db
@@ -190,7 +169,6 @@ export async function POST(request: NextRequest) {
           descriptProjectUrl: result.projectUrl,
           descriptPrompt: action.descriptPrompt,
           compositionName: action.compositionName,
-          notionTaskPageId: notionPageId,
         })
         .returning({ id: repurposeTriggers.id });
 
@@ -208,8 +186,7 @@ export async function POST(request: NextRequest) {
         descriptPrompt: action.descriptPrompt,
         compositionName: action.compositionName,
         targetFormatName: target.name,
-        notionPageId,
-        notionPageUrl,
+        derivativeItemId,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -218,39 +195,23 @@ export async function POST(request: NextRequest) {
   }
 
   // manual_task
-  const notionResult = await createNotionRepurposeTask({
-    pillarContentTitle: item.title || "Untitled",
-    targetFormatName: target.name,
-    title: action.taskName,
-    channel,
-    pillarContentNotionId: item.notionId || undefined,
-    targetFormatNotionPageId: target.notionPageId || undefined,
-    editorNotionUserId: target.editorNotionUserId || undefined,
-    guidanceMarkdown: action.guidance,
-  });
-  if (!notionResult.success) {
-    return NextResponse.json(
-      { error: notionResult.error || "Notion task creation failed" },
-      { status: 502 }
-    );
-  }
-  const notionPageId = notionResult.notionPageId;
-  const notionPageUrl = notionResult.notionPageUrl;
-
-  if (notionPageId) {
-    try {
-      await db.insert(productionItems).values({
+  let derivativeItemId: string | undefined;
+  try {
+    const [derivative] = await db
+      .insert(productionItems)
+      .values({
         brand: item.brand,
-        notionId: notionPageId,
         title: action.taskName,
+        platform,
         format: target.name,
         status: "Idea",
         pillarContentNotionId: item.notionId,
         pillarContentItemId: item.id,
-      });
-    } catch (err) {
-      console.error("Derivative production_item insert failed:", err);
-    }
+      })
+      .returning({ id: productionItems.id });
+    derivativeItemId = derivative.id;
+  } catch (err) {
+    console.error("Derivative production_item insert failed:", err);
   }
 
   const [trigger] = await db
@@ -259,7 +220,6 @@ export async function POST(request: NextRequest) {
       productionItemId: item.id,
       targetFormatId: target.id,
       compositionName: action.taskName,
-      notionTaskPageId: notionPageId,
     })
     .returning({ id: repurposeTriggers.id });
 
@@ -269,7 +229,6 @@ export async function POST(request: NextRequest) {
     taskName: action.taskName,
     guidance: action.guidance,
     targetFormatName: target.name,
-    notionPageId,
-    notionPageUrl,
+    derivativeItemId,
   });
 }

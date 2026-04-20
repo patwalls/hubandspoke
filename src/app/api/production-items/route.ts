@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
 import { enqueueNotification } from "@/lib/services/notifications";
+import { isNotionAuthoritative } from "@/lib/platform";
 
 function getNotion(): Client {
   const auth = process.env.NOTION_API_SECRET;
@@ -335,7 +336,11 @@ export async function PUT(request: NextRequest) {
     }
 
     const warnings: string[] = [];
-    if (updated.notionId) {
+    // Only long-form YouTube pillars stay in sync with Notion. Shorts,
+    // Community, IG, LinkedIn, etc. are H&S-owned — a stale notionId on those
+    // rows (from pre-migration syncs) stays as a historical pointer but we no
+    // longer round-trip edits to it.
+    if (updated.notionId && isNotionAuthoritative(updated.platform)) {
       if (status !== undefined && status) {
         try {
           await pushStatusToNotion(updated.notionId, status);

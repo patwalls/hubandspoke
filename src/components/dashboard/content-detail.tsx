@@ -269,7 +269,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     descriptPrompt?: string; // clip directive (when kind === descript_clip)
     guidance?: string;       // editor brief (when kind === manual_task)
     projectUrl?: string;     // Descript project URL
-    notionPageUrl?: string;  // Notion task URL (set on successful real run)
     firedAt?: "preview" | "real";
   };
   const [clipStatus, setClipStatus] = useState<Record<string, RepurposeState>>(
@@ -326,7 +325,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             label: mode === "preview" ? "preview ready" : "clip queued",
             descriptPrompt: json.descriptPrompt,
             projectUrl: json.projectUrl,
-            notionPageUrl: json.notionPageUrl,
           },
         }));
         if (mode === "real") {
@@ -343,7 +341,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             kind: "manual_task",
             label: mode === "preview" ? "preview ready" : "task created",
             guidance: json.guidance,
-            notionPageUrl: json.notionPageUrl,
           },
         }));
         if (mode === "real") {
@@ -1591,16 +1588,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                               className="text-[11px] text-primary hover:underline"
                             >
                               Open in Descript →
-                            </a>
-                          )}
-                          {st.notionPageUrl && (
-                            <a
-                              href={st.notionPageUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[11px] text-primary hover:underline"
-                            >
-                              Open Notion task →
                             </a>
                           )}
                         </div>

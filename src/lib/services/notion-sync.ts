@@ -1,7 +1,8 @@
 import { Client } from "@notionhq/client";
 import { db } from "@/lib/db";
 import { productionItems, syncLogs, users } from "@/lib/db/schema";
-import { eq, notInArray, sql } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
+import { isNotionAuthoritative } from "@/lib/platform";
 
 const DATABASE_ID = "8cb6cee4163d4282a5c87991ea689bde";
 
@@ -330,9 +331,23 @@ export async function syncFromNotion(): Promise<{
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const properties = (item as any).properties || {};
       const notionId = item.id;
+      // Push every scanned id so the orphan-delete below doesn't nuke rows we
+      // *intentionally* skipped (e.g. a Short re-tagged from a long-form YT
+      // page still has a real Notion page we just don't want to overwrite
+      // H&S from).
       notionIds.push(notionId);
 
       const platform = extractPlatform(properties);
+
+      // Pages whose platform isn't on the Notion-authoritative allowlist are
+      // owned by Hub & Spoke — skip them entirely. Don't overwrite the H&S
+      // row, don't upsert the producer/editor directory from their fields.
+      // An empty/missing platform is also treated as non-authoritative so
+      // unlabeled drafts in Notion can't accidentally clobber H&S state.
+      if (!isNotionAuthoritative(platform)) {
+        continue;
+      }
+
       const publishedLink = extractPublishedLink(properties);
       const formatName = await extractFormat(properties, notion);
 
@@ -408,6 +423,10 @@ export async function syncFromNotion(): Promise<{
     // FKs are still NULL. Idempotent: WHERE producer_user_id IS NULL means we
     // never clobber an app-side assignment edit, and pre-existing rows already
     // had their FKs set by migration 0006's backfill.
+    //
+    // Invariant: this path intentionally bypasses enqueueNotification — Notion
+    // is not allowed to page the assignee. Assignment emails only fire from
+    // the H&S UI PUT path (src/app/api/production-items/route.ts).
     await db.execute(sql`
       UPDATE production_items
       SET producer_user_id = u.id
@@ -425,11 +444,18 @@ export async function syncFromNotion(): Promise<{
         AND lower(u.email) = lower(production_items.editor_email)
     `);
 
-    // Delete orphaned records
+    // Delete orphaned records — but ONLY authoritative ones. H&S-owned rows
+    // (Shorts, IG, LinkedIn, Newsletter, etc.) with a stale notionId must not
+    // be nuked just because their Notion page is gone or was never scanned.
     if (completedFetch && notionIds.length > 0) {
       const deleted = await db
         .delete(productionItems)
-        .where(notInArray(productionItems.notionId, notionIds))
+        .where(
+          and(
+            notInArray(productionItems.notionId, notionIds),
+            sql`${productionItems.platform} && ARRAY['YouTube', 'YouTube (SS)', 'YouTube (SS Build)']::text[]`
+          )
+        )
         .returning();
       totalDeleted = deleted.length;
     }
