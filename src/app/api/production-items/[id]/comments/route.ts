@@ -4,6 +4,7 @@ import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { enqueueNotification } from "@/lib/services/notifications";
+import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -80,15 +81,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const { id } = await context.params;
 
     const body = await request.json();
-    const text = typeof body?.body === "string" ? body.body.trim() : "";
-    if (!text) {
-      return NextResponse.json({ error: "body is required" }, { status: 400 });
-    }
-    if (text.length > MAX_BODY) {
+    const raw = typeof body?.body === "string" ? body.body : "";
+    if (raw.length > MAX_BODY) {
       return NextResponse.json(
         { error: `body exceeds ${MAX_BODY} characters` },
         { status: 400 },
       );
+    }
+    const sanitized = sanitizeCommentHtml(raw);
+    const plain = htmlToPlainText(sanitized);
+    if (!plain) {
+      return NextResponse.json({ error: "body is required" }, { status: 400 });
     }
 
     const [item] = await db
@@ -110,7 +113,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .values({
         contentItemId: id,
         userId: session.user.id,
-        body: text,
+        body: sanitized,
       })
       .returning();
 
@@ -123,7 +126,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // Notify producer and editor (minus commenter). Self-notification is
     // filtered inside enqueueNotification. Fire-and-forget so a Postmark or
     // DB hiccup never breaks the comment POST.
-    const excerpt = text.slice(0, 240);
+    const excerpt = plain.slice(0, 240);
     const authorName = user?.name || user?.email || null;
     const recipientIds = new Set<string>();
     if (item.producerUserId) recipientIds.add(item.producerUserId);

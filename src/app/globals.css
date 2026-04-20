@@ -128,3 +128,41 @@
     @apply font-sans;
   }
 }
+
+.tiptap p {
+  @apply my-1 whitespace-pre-wrap;
+}
+.tiptap p:first-child {
+  @apply mt-0;
+}
+.tiptap p:last-child {
+  @apply mb-0;
+}
+.tiptap ul {
+  @apply list-disc pl-5 space-y-0.5 my-1;
+}
+.tiptap ol {
+  @apply list-decimal pl-5 space-y-0.5 my-1;
+}
+.tiptap h1 {
+  @apply text-base font-semibold my-1;
+}
+.tiptap h2 {
+  @apply text-sm font-semibold my-1;
+}
+.tiptap h3 {
+  @apply text-sm font-semibold my-1;
+}
+.tiptap code {
+  @apply bg-accent px-1 py-0.5 rounded text-xs font-mono;
+}
+.tiptap blockquote {
+  @apply border-l-2 border-border pl-3 text-muted-foreground;
+}
+.tiptap a {
+  @apply text-blue-600 underline hover:text-blue-700 break-all;
+}
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  @apply text-muted-foreground float-left h-0 pointer-events-none;
+}

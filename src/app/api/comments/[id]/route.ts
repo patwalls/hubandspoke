@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { contentComments, users } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -19,20 +20,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const { id } = await context.params;
 
     const body = await request.json();
-    const text = typeof body?.body === "string" ? body.body.trim() : "";
-    if (!text) {
-      return NextResponse.json({ error: "body is required" }, { status: 400 });
-    }
-    if (text.length > MAX_BODY) {
+    const raw = typeof body?.body === "string" ? body.body : "";
+    if (raw.length > MAX_BODY) {
       return NextResponse.json(
         { error: `body exceeds ${MAX_BODY} characters` },
         { status: 400 },
       );
     }
+    const sanitized = sanitizeCommentHtml(raw);
+    if (!htmlToPlainText(sanitized)) {
+      return NextResponse.json({ error: "body is required" }, { status: 400 });
+    }
 
     const [updated] = await db
       .update(contentComments)
-      .set({ body: text, editedAt: new Date() })
+      .set({ body: sanitized, editedAt: new Date() })
       .where(
         and(
           eq(contentComments.id, id),

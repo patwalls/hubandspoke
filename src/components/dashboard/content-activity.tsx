@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { CommentEditor, isEditorEmpty } from "@/components/dashboard/comment-editor";
 
 interface ActivityUser {
   id: string;
@@ -86,6 +86,15 @@ const MARKDOWN_LINK_CLASS =
   "text-blue-600 underline hover:text-blue-700 break-all";
 
 function CommentBody({ body }: { body: string }) {
+  const isHtml = body.trimStart().startsWith("<");
+  if (isHtml) {
+    return (
+      <div
+        className="tiptap mt-0.5 text-sm text-foreground break-words space-y-2 leading-relaxed"
+        dangerouslySetInnerHTML={{ __html: body }}
+      />
+    );
+  }
   return (
     <div className="mt-0.5 text-sm text-foreground break-words space-y-2 leading-relaxed">
       <ReactMarkdown
@@ -172,8 +181,8 @@ export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityPr
   }, [contentId, refreshKey]);
 
   const submit = useCallback(async () => {
-    const body = draft.trim();
-    if (!body || posting) return;
+    const body = draft;
+    if (isEditorEmpty(body) || posting) return;
     const tempId = `temp-${++tempCounter.current}`;
     const optimistic: CommentItem = {
       kind: "comment",
@@ -210,16 +219,6 @@ export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityPr
     }
   }, [draft, posting, contentId]);
 
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        void submit();
-      }
-    },
-    [submit],
-  );
-
   const startEdit = (c: CommentItem) => {
     setEditingId(c.id);
     setEditDraft(c.body);
@@ -232,8 +231,8 @@ export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityPr
 
   const saveEdit = async () => {
     if (!editingId) return;
-    const body = editDraft.trim();
-    if (!body || savingEdit) return;
+    const body = editDraft;
+    if (isEditorEmpty(body) || savingEdit) return;
     setSavingEdit(true);
     try {
       const res = await fetch(`/api/comments/${editingId}`, {
@@ -311,13 +310,12 @@ export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityPr
       </div>
 
       <div className="pt-2 border-t border-border space-y-2">
-        <Textarea
-          placeholder="Write a comment…"
+        <CommentEditor
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={3}
-          className="text-sm"
+          onChange={setDraft}
+          onSubmit={submit}
+          placeholder="Write a comment…"
+          disabled={posting}
         />
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
@@ -327,7 +325,7 @@ export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityPr
           <Button
             type="button"
             onClick={submit}
-            disabled={posting || !draft.trim()}
+            disabled={posting || isEditorEmpty(draft)}
             size="sm"
           >
             {posting ? "Posting…" : "Post comment"}
@@ -405,18 +403,19 @@ function CommentRow({
         </div>
         {editingId === c.id ? (
           <div className="mt-2 space-y-2">
-            <Textarea
+            <CommentEditor
               value={editDraft}
-              onChange={(e) => setEditDraft(e.target.value)}
-              rows={3}
-              className="text-sm"
+              onChange={setEditDraft}
+              onSubmit={onSaveEdit}
+              disabled={savingEdit}
+              autoFocus
             />
             <div className="flex items-center gap-2">
               <Button
                 type="button"
                 size="sm"
                 onClick={onSaveEdit}
-                disabled={savingEdit || !editDraft.trim()}
+                disabled={savingEdit || isEditorEmpty(editDraft)}
               >
                 {savingEdit ? "Saving…" : "Save"}
               </Button>
