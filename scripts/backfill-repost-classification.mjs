@@ -131,7 +131,10 @@ if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL not set. Run with --env-file=.env.local or set it.");
   process.exit(1);
 }
-const sql = postgres(process.env.DATABASE_URL);
+const sql = postgres(process.env.DATABASE_URL, {
+  prepare: false,
+  ssl: process.env.DATABASE_SSL === "off" ? false : "require",
+});
 
 // status='Published' + published_date NOT NULL mirror the evergreen-scan service
 // (src/lib/services/evergreen-scan.ts:61). Also excludes:
