@@ -136,23 +136,6 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
     setDialogOpen(true);
   }
 
-  function openEditDialog(item: ProductionItem) {
-    setEditingItem(item);
-    setFormTitle(item.title || "");
-    setFormPlatforms(item.platform || []);
-    setFormFormat(item.format || "");
-    setFormLink(item.publishedLink || "");
-    setFormDate(item.publishedDate || "");
-    setFormViews(item.views != null ? String(item.views) : "");
-    setFormLikes(item.likes != null ? String(item.likes) : "");
-    setFormComments(item.comments != null ? String(item.comments) : "");
-    setFormClicks(item.clicks != null ? String(item.clicks) : "");
-    setFormLeads(item.leads != null ? String(item.leads) : "");
-    setFormSalesAmount(item.salesAmount != null ? String(item.salesAmount) : "");
-    setSaveResult(null);
-    setDialogOpen(true);
-  }
-
   function togglePlatform(p: string) {
     setFormPlatforms((prev) =>
       prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]
@@ -513,7 +496,6 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-border bg-accent/50">
-              <th className="px-3 py-2.5 w-12"></th>
               <SortHeader label="Title" sortKeyName="title" />
               <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                 Platform
@@ -541,16 +523,6 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                 key={item.id}
                 className="border-b border-border/50 hover:bg-accent/30 transition-colors"
               >
-                <td className="px-2 py-2 whitespace-nowrap">
-                  {!item.youtubeId && (
-                    <button
-                      onClick={() => openEditDialog(item)}
-                      className="text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:underline px-1.5 py-0.5 rounded"
-                    >
-                      Edit
-                    </button>
-                  )}
-                </td>
                 <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                   <div className="flex items-center gap-3">
                     {hasThumbnails && item.thumbnail && (

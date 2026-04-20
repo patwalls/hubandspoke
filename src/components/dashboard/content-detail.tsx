@@ -1072,7 +1072,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   setFormat(v || "");
                   void persistField({ format: v || null });
                 }}
-                disabled={isYouTube}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select format…" />
