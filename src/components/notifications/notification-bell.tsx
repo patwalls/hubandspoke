@@ -38,33 +38,35 @@ const POLL_MS = 30_000;
 export function NotificationBell() {
   const [data, setData] = useState<ApiShape | null>(null);
   const [open, setOpen] = useState(false);
-
-  const refetch = useCallback(async () => {
-    try {
-      const res = await fetch("/api/notifications?limit=20", {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const json: ApiShape = await res.json();
-      setData(json);
-    } catch {
-      // Silent: bell stays on last known state, will retry next poll.
-    }
-  }, []);
+  // Bump this to force a refetch after a mark-read action.
+  const [refetchTick, setRefetchTick] = useState(0);
 
   useEffect(() => {
-    refetch();
-    const t = setInterval(refetch, POLL_MS);
-    return () => clearInterval(t);
-  }, [refetch]);
-
-  // Refetch when the tab regains focus so a just-arrived email's link takes
-  // you to an accurate unread count.
-  useEffect(() => {
-    const onFocus = () => refetch();
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/notifications?limit=20", {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const json: ApiShape = await res.json();
+        if (!cancelled) setData(json);
+      } catch {
+        // Silent: bell stays on last known state, will retry next poll.
+      }
+    };
+    void load();
+    const t = setInterval(load, POLL_MS);
+    const onFocus = () => void load();
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refetch]);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refetchTick]);
+
+  const refetch = useCallback(() => setRefetchTick((n) => n + 1), []);
 
   const unread = data?.unreadCount ?? 0;
   const items = data?.items ?? [];

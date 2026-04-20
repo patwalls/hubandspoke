@@ -1023,7 +1023,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             <Select
               value={producerUserId || "__unassigned"}
               onValueChange={(v) =>
-                setProducerUserId(v === "__unassigned" ? "" : v)
+                setProducerUserId(v && v !== "__unassigned" ? v : "")
               }
             >
               <SelectTrigger>
@@ -1044,7 +1044,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             <Select
               value={editorUserId || "__unassigned"}
               onValueChange={(v) =>
-                setEditorUserId(v === "__unassigned" ? "" : v)
+                setEditorUserId(v && v !== "__unassigned" ? v : "")
               }
             >
               <SelectTrigger>

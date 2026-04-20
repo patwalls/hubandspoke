@@ -313,10 +313,7 @@ export async function syncFromNotion(): Promise<{
     totalFetched = allResults.length;
 
     const notionIds: string[] = [];
-    const peopleBucket = new Map<
-      string,
-      { email: string; name: string | null; avatarUrl: string | null }
-    >();
+    const peopleBucket = new Map<string, PersonRow>();
 
     // Process each item
     for (const item of allResults) {
