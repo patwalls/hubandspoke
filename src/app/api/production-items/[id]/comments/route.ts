@@ -27,6 +27,8 @@ function shape(row: {
           avatarUrl: row.user.avatarUrl,
         }
       : null,
+    authorName: row.comment.authorName,
+    authorAvatarUrl: row.comment.authorAvatarUrl,
     isMine: !!currentUserId && row.comment.userId === currentUserId,
   };
 }

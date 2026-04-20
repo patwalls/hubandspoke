@@ -185,14 +185,14 @@ async function main() {
 
         const createdBy = c.created_by ?? {};
         const email = createdBy.person?.email ?? null;
-        const displayName = createdBy.name ?? null;
-        const avatarUrl = createdBy.avatar_url ?? null;
+        const authorName = createdBy.name ?? null;
+        const authorAvatarUrl = createdBy.avatar_url ?? null;
 
         let userId = null;
         if (email) {
           userId = DRY_RUN
             ? null
-            : await upsertUserByEmail({ email, name: displayName, avatarUrl });
+            : await upsertUserByEmail({ email, name: authorName, avatarUrl: authorAvatarUrl });
         }
 
         const editedAt =
@@ -200,9 +200,10 @@ async function main() {
             ? c.last_edited_time
             : null;
 
+        const who = email ?? authorName ?? "anon";
         if (DRY_RUN) {
           console.log(
-            `   ✓  WOULD UPSERT ${c.id}  by=${email ?? "anon"}  len=${body.length}`,
+            `   ✓  WOULD UPSERT ${c.id}  by=${who}  len=${body.length}`,
           );
           inserted++;
           continue;
@@ -212,24 +213,28 @@ async function main() {
         // (WHERE notion_comment_id IS NOT NULL) in drizzle/0003_*.sql.
         const result = await sql`
           INSERT INTO content_comments
-            (notion_comment_id, content_item_id, user_id, body, created_at, edited_at)
+            (notion_comment_id, content_item_id, user_id, body, created_at, edited_at,
+             author_name, author_avatar_url)
           VALUES
             (${c.id}, ${item.id}, ${userId}, ${body},
-             ${c.created_time}, ${editedAt})
+             ${c.created_time}, ${editedAt},
+             ${authorName}, ${authorAvatarUrl})
           ON CONFLICT (notion_comment_id) WHERE notion_comment_id IS NOT NULL
           DO UPDATE SET
             body = EXCLUDED.body,
             edited_at = EXCLUDED.edited_at,
-            user_id = EXCLUDED.user_id
+            user_id = EXCLUDED.user_id,
+            author_name = EXCLUDED.author_name,
+            author_avatar_url = EXCLUDED.author_avatar_url
           RETURNING (xmax = 0) AS was_insert
         `;
         const row = result[0];
         if (row.was_insert) {
           inserted++;
-          console.log(`   ✓  INSERT ${c.id}  by=${email ?? "anon"}  len=${body.length}`);
+          console.log(`   ✓  INSERT ${c.id}  by=${who}  len=${body.length}`);
         } else {
           updated++;
-          console.log(`   ↻  UPDATE ${c.id}  by=${email ?? "anon"}  len=${body.length}`);
+          console.log(`   ↻  UPDATE ${c.id}  by=${who}  len=${body.length}`);
         }
       }
     } catch (err) {

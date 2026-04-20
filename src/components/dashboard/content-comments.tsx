@@ -17,6 +17,8 @@ interface Comment {
   createdAt: string;
   editedAt: string | null;
   user: CommentUser | null;
+  authorName: string | null;
+  authorAvatarUrl: string | null;
   isMine: boolean;
 }
 
@@ -40,14 +42,17 @@ function timeAgo(iso: string): string {
   });
 }
 
-function displayName(user: CommentUser | null): string {
-  if (!user) return "Deleted user";
-  if (user.name && user.name.trim()) return user.name;
-  return user.email.split("@")[0] ?? user.email;
+function displayName(comment: Comment): string {
+  if (comment.user) {
+    if (comment.user.name && comment.user.name.trim()) return comment.user.name;
+    return comment.user.email.split("@")[0] ?? comment.user.email;
+  }
+  if (comment.authorName && comment.authorName.trim()) return comment.authorName;
+  return "Deleted user";
 }
 
-function initials(user: CommentUser | null): string {
-  const name = displayName(user);
+function initials(comment: Comment): string {
+  const name = displayName(comment);
   const parts = name.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) {
     return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -126,6 +131,8 @@ export function ContentComments({ contentId }: ContentCommentsProps) {
       createdAt: new Date().toISOString(),
       editedAt: null,
       user: null,
+      authorName: null,
+      authorAvatarUrl: null,
       isMine: true,
     };
     setComments((prev) => [...prev, optimistic]);
@@ -231,24 +238,26 @@ export function ContentComments({ contentId }: ContentCommentsProps) {
             No comments yet. Start the discussion.
           </p>
         ) : (
-          comments.map((c) => (
+          comments.map((c) => {
+            const avatarUrl = c.user?.avatarUrl ?? c.authorAvatarUrl;
+            return (
             <div key={c.id} className="group flex gap-3">
-              {c.user?.avatarUrl ? (
+              {avatarUrl ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
-                  src={c.user.avatarUrl}
+                  src={avatarUrl}
                   alt=""
                   className="size-8 rounded-full object-cover shrink-0"
                 />
               ) : (
                 <div className="size-8 rounded-full bg-accent text-muted-foreground text-xs font-medium inline-flex items-center justify-center shrink-0">
-                  {initials(c.user)}
+                  {initials(c)}
                 </div>
               )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2 flex-wrap">
                   <span className="text-sm font-medium text-foreground">
-                    {displayName(c.user)}
+                    {displayName(c)}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {timeAgo(c.createdAt)}
@@ -312,7 +321,8 @@ export function ContentComments({ contentId }: ContentCommentsProps) {
                 )}
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 

@@ -261,6 +261,12 @@ export const contentComments = pgTable(
       .defaultNow()
       .notNull(),
     notionCommentId: text("notion_comment_id").unique(),
+    // Notion rarely exposes the commenter's email to integrations, so a
+    // notion-sourced comment usually can't be linked to a local user.
+    // These columns preserve the display name/avatar from Notion so the
+    // UI has something better than "Deleted user" to render.
+    authorName: text("author_name"),
+    authorAvatarUrl: text("author_avatar_url"),
   },
   (table) => [
     index("idx_content_comments_item_created").on(
