@@ -15,8 +15,37 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 ## Development
 - `npm run dev` - Start dev server (main worktree uses port 3000)
 - `npm run build` - Production build
-- `npx drizzle-kit generate` - Generate migrations
+- `npm run db:generate` - Generate a new migration after editing `schema.ts`
+- `npm run db:migrate` - Apply pending migrations to the DB in `DATABASE_URL`
 - `node --env-file=.env.local scripts/seed-user.mjs <email> <pass> [name]` - Seed a user
+
+## Database Migrations
+Rails-style versioned migrations via `drizzle-kit`. Versioned SQL files live in
+`drizzle/` and are committed to git. Heroku's release phase runs
+`npm run db:migrate` before new dynos take traffic — a failed migration fails the
+deploy, so schema and code ship together.
+
+**To change the schema:**
+1. Edit `src/lib/db/schema.ts`.
+2. Run `npm run db:generate` — emits `drizzle/NNNN_<name>.sql` (plus updates the
+   snapshot/journal in `drizzle/meta/`). Review the SQL.
+3. Commit everything under `drizzle/` alongside the schema change.
+4. Push. Heroku's release phase applies it automatically.
+
+**Never** hand-write `scripts/add-*.mjs` or `scripts/create-*-table.mjs` for
+schema changes — that's the pre-2026-04 pattern that caused outages when someone
+forgot to `heroku run` them. The legacy scripts in `scripts/` are historical
+only; do not extend them.
+
+**Data backfills** (distinct from schema changes) still belong in
+`scripts/backfill-*.mjs` — they're one-shot, often need to be re-run selectively,
+and shouldn't block deploys. Run with `heroku run --app=hubandspoke node
+scripts/backfill-foo.mjs`.
+
+**Adopting migrations on a pre-existing DB** (already done for prod 2026-04-19):
+run `scripts/bootstrap-drizzle-migrations.mjs` once. It creates
+`drizzle.__drizzle_migrations` and marks every migration in the journal as
+already-applied so drizzle-kit doesn't try to recreate existing tables.
 
 ## Worktree Workflow
 All feature work happens in a git worktree, not the main checkout. Set one up with:
