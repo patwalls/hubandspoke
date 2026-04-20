@@ -227,6 +227,8 @@ export function ContentReport() {
           periods={data.periods}
           metrics={data.byPlatform}
           tabs={PLATFORM_TABS}
+          brand="starter-story"
+          filterKey={data.showingFormats ? "format" : "platform"}
         />
       ) : !loading ? (
         <div className="text-center py-20">

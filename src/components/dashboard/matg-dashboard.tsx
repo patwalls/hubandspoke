@@ -387,6 +387,8 @@ export function MATGDashboard() {
           periods={data.periods}
           metrics={data.byPlatform}
           tabs={PLATFORM_TABS}
+          brand="matg"
+          filterKey={data.showingFormats ? "format" : "platform"}
         />
       )}
     </div>

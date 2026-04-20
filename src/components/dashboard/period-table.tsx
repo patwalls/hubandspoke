@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { format } from "date-fns";
 import type { MetricData, Period } from "@/types";
 
@@ -11,6 +12,20 @@ function formatPeriodTooltip(p: Period): string {
   return `${format(s, "EEEE, MMMM do")} to ${format(e, "EEEE, MMMM do")}`;
 }
 
+function buildContentUrl(
+  brand: string,
+  filterKey: "platform" | "format",
+  rowLabel: string | null,
+  startDate: string,
+  endDate: string,
+): string {
+  const params = new URLSearchParams();
+  if (rowLabel) params.set(filterKey, rowLabel);
+  params.set("startDate", startDate);
+  params.set("endDate", endDate);
+  return `/${brand}/content?${params.toString()}`;
+}
+
 type MetricKey = "production" | "views" | "leads" | "viewsPerPost" | "sales";
 
 interface PeriodTableProps {
@@ -19,6 +34,12 @@ interface PeriodTableProps {
   periods: Period[];
   metrics: Record<string, MetricData>;
   tabs: { key: MetricKey; label: string }[];
+  // When provided, numeric cells become links to the content list filtered
+  // by the corresponding row label (platform or format) and the period's
+  // date range. Row totals use the full periods range; the Total row skips
+  // the row filter; grand total drops both.
+  brand?: string;
+  filterKey?: "platform" | "format";
 }
 
 function formatValue(value: number, metricKey: MetricKey): string {
@@ -38,8 +59,31 @@ export function PeriodTable({
   periods,
   metrics,
   tabs,
+  brand,
+  filterKey = "platform",
 }: PeriodTableProps) {
   const [activeTab, setActiveTab] = useState<MetricKey>(tabs[0].key);
+  const rangeStart = periods[0]?.start ?? "";
+  const rangeEnd = periods[periods.length - 1]?.end ?? "";
+  const linkable = Boolean(brand);
+
+  const cellContent = (
+    displayValue: string,
+    value: number,
+    rowLabel: string | null,
+    periodStart: string,
+    periodEnd: string,
+  ) => {
+    if (!linkable || value === 0) return displayValue;
+    return (
+      <Link
+        href={buildContentUrl(brand!, filterKey, rowLabel, periodStart, periodEnd)}
+        className="hover:underline"
+      >
+        {displayValue}
+      </Link>
+    );
+  };
 
   const data = metrics[activeTab] || {};
   const rows = Object.keys(data).sort();
@@ -144,6 +188,7 @@ export function PeriodTable({
                 </td>
                 {periods.map((p) => {
                   const value = data[row]?.[p.label] || 0;
+                  const display = formatValue(value, activeTab);
                   return (
                     <td
                       key={p.label}
@@ -153,12 +198,18 @@ export function PeriodTable({
                           : "text-foreground"
                       }`}
                     >
-                      {formatValue(value, activeTab)}
+                      {cellContent(display, value, row, p.start, p.end)}
                     </td>
                   );
                 })}
                 <td className="px-3 py-2 text-center font-semibold text-foreground bg-accent/30 tabular-nums">
-                  {formatValue(rowTotals[row], activeTab)}
+                  {cellContent(
+                    formatValue(rowTotals[row], activeTab),
+                    rowTotals[row],
+                    row,
+                    rangeStart,
+                    rangeEnd,
+                  )}
                 </td>
               </tr>
             ))}
@@ -166,16 +217,25 @@ export function PeriodTable({
               <td className="sticky left-0 bg-accent/50 px-3 sm:px-4 py-2 text-xs sm:text-sm text-foreground z-10 font-mono uppercase tracking-wider text-[10px]">
                 Total
               </td>
-              {periods.map((p) => (
-                <td
-                  key={p.label}
-                  className="px-2 py-2 text-center text-foreground tabular-nums"
-                >
-                  {formatValue(periodTotals[p.label], activeTab)}
-                </td>
-              ))}
+              {periods.map((p) => {
+                const v = periodTotals[p.label];
+                return (
+                  <td
+                    key={p.label}
+                    className="px-2 py-2 text-center text-foreground tabular-nums"
+                  >
+                    {cellContent(formatValue(v, activeTab), v, null, p.start, p.end)}
+                  </td>
+                );
+              })}
               <td className="px-3 py-2 text-center text-foreground bg-accent tabular-nums">
-                {formatValue(grandTotal, activeTab)}
+                {cellContent(
+                  formatValue(grandTotal, activeTab),
+                  grandTotal,
+                  null,
+                  rangeStart,
+                  rangeEnd,
+                )}
               </td>
             </tr>
           </tbody>
