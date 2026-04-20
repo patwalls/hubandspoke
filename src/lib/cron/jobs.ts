@@ -1,5 +1,6 @@
 import { syncFromNotion } from "@/lib/services/notion-sync";
 import { syncPerformanceData } from "@/lib/services/performance-decay";
+import { smartSyncSSMetrics } from "@/lib/services/ss-sync";
 import { checkSSThresholds } from "@/lib/services/threshold-monitor";
 import { runEvergreenScan } from "@/lib/services/evergreen-scan";
 import { runCrossPostScan } from "@/lib/services/cross-post-scan";
@@ -37,6 +38,14 @@ export const CRON_JOBS: CronJob[] = [
     name: "notion-sync",
     schedule: { every: "hour", atMinute: 30 },
     run: () => syncFromNotion(),
+  },
+  {
+    // Smart-gated SS metrics refresh for Instagram + Twitter. Skips a platform
+    // entirely if no published SS item is due by the shared decay tiers, so
+    // idle hours cost ~0 credits. YouTube is handled by performance-decay.
+    name: "ss-metrics-sync",
+    schedule: { every: "hour", atMinute: 40 },
+    run: () => smartSyncSSMetrics(),
   },
   {
     name: "ss-threshold-check",

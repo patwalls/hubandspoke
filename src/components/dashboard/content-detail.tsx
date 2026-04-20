@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon } from "lucide-react";
+import { DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, RefreshCwIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -147,6 +147,23 @@ function formatDate(d: string | null): string {
   });
 }
 
+function formatRelative(iso: string): string {
+  const then = new Date(iso).getTime();
+  const diffMs = Date.now() - then;
+  if (Number.isNaN(diffMs) || diffMs < 0) return "just now";
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -199,6 +216,17 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [descriptResult, setDescriptResult] = useState<
     { projectUrl: string } | null
   >(null);
+
+  // Manual metrics refresh state for the Sync button on the metrics grid.
+  // `error` holds a non-fatal note (e.g. "not found in recent feed") so the
+  // user sees why metrics didn't move even though the call succeeded.
+  const [syncState, setSyncState] = useState<
+    | { kind: "idle" }
+    | { kind: "syncing" }
+    | { kind: "synced" }
+    | { kind: "note"; message: string }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
 
   async function callRepurpose(targetFormatId: string, mode: "preview" | "real") {
     setClipStatus((prev) => ({
@@ -591,6 +619,45 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     [contentId]
   );
 
+  const handleSync = useCallback(async () => {
+    setSyncState({ kind: "syncing" });
+    try {
+      const res = await fetch(`/api/production-items/${contentId}/sync`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || `HTTP ${res.status}`);
+      }
+      // Merge the fresh metrics onto the local item so the stat cards update
+      // without a full detail reload (which would steal input focus).
+      setData((prev) => {
+        if (!prev) return prev;
+        const patch: Partial<ProductionItem> = {};
+        if (json.views != null) patch.views = json.views;
+        if (json.likes != null) patch.likes = json.likes;
+        if (json.comments != null) patch.comments = json.comments;
+        patch.lastPerformanceSyncAt = json.syncedAt ?? new Date().toISOString();
+        return { ...prev, item: { ...prev.item, ...patch } };
+      });
+      if (json.updated) {
+        setSyncState({ kind: "synced" });
+        setTimeout(() => setSyncState({ kind: "idle" }), 2500);
+      } else {
+        setSyncState({
+          kind: "note",
+          message: json.note || "No fresh data returned",
+        });
+        setTimeout(() => setSyncState({ kind: "idle" }), 5000);
+      }
+    } catch (err) {
+      setSyncState({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Sync failed",
+      });
+    }
+  }, [contentId]);
+
   async function handleDelete() {
     if (!confirm("Delete this post? This cannot be undone.")) return;
     setDeleting(true);
@@ -831,6 +898,47 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
 
       {/* Metrics — only shown once the post is actually live */}
       {isPublished && (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2 px-1">
+          <p className="text-xs text-muted-foreground">
+            {item.lastPerformanceSyncAt
+              ? `Metrics last synced ${formatRelative(item.lastPerformanceSyncAt)}`
+              : "Metrics not yet synced"}
+          </p>
+          <div className="flex items-center gap-2">
+            {syncState.kind === "synced" && (
+              <span className="text-[11px] text-green-600">Synced</span>
+            )}
+            {syncState.kind === "note" && (
+              <span
+                className="text-[11px] text-muted-foreground"
+                title={syncState.message}
+              >
+                {syncState.message}
+              </span>
+            )}
+            {syncState.kind === "error" && (
+              <span
+                className="text-[11px] text-red-600"
+                title={syncState.message}
+              >
+                {syncState.message}
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSync}
+              disabled={syncState.kind === "syncing"}
+              className="h-7 text-xs gap-1.5"
+            >
+              <RefreshCwIcon
+                className={`h-3 w-3 ${syncState.kind === "syncing" ? "animate-spin" : ""}`}
+              />
+              {syncState.kind === "syncing" ? "Syncing…" : "Sync metrics"}
+            </Button>
+          </div>
+        </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
@@ -884,6 +992,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               : "Link clicks"}
           </p>
         </div>
+      </div>
       </div>
       )}
 

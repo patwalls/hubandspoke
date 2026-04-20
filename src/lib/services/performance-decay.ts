@@ -6,8 +6,8 @@
  * we don't burn API credits on archival items.
  *
  * Decay tiers (based on content age since publishedDate):
- *   Fresh    (< 24h)   → sync every 3 hours
- *   Recent   (1–7d)    → sync every 12 hours
+ *   Fresh    (< 24h)   → sync every 1 hour    (catches early engagement curve)
+ *   Recent   (1–7d)    → sync every 6 hours
  *   Active   (8–28d)   → sync daily
  *   Mature   (29–90d)  → sync every 3 days
  *   Aging    (91–180d) → sync weekly
@@ -43,8 +43,8 @@ const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
 export const DECAY_SCHEDULE: DecayTier[] = [
-  { maxAgeDays: 1, syncIntervalMs: 3 * HOUR, label: "Fresh (< 24h)" },
-  { maxAgeDays: 7, syncIntervalMs: 12 * HOUR, label: "Recent (1–7d)" },
+  { maxAgeDays: 1, syncIntervalMs: 1 * HOUR, label: "Fresh (< 24h)" },
+  { maxAgeDays: 7, syncIntervalMs: 6 * HOUR, label: "Recent (1–7d)" },
   { maxAgeDays: 28, syncIntervalMs: 1 * DAY, label: "Active (8–28d)" },
   { maxAgeDays: 90, syncIntervalMs: 3 * DAY, label: "Mature (29–90d)" },
   { maxAgeDays: 180, syncIntervalMs: 7 * DAY, label: "Aging (91–180d)" },

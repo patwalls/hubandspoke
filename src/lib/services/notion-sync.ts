@@ -536,6 +536,20 @@ export async function syncFromNotion(): Promise<{
       })
       .where(eq(syncLogs.id, logEntry.id));
 
+    // Publish-hook: if this run created any rows, kick off a smart SS metrics
+    // refresh so a just-published post gets its first views/likes data within
+    // minutes instead of waiting for the next hourly ss-metrics-sync tick.
+    // The smart gate inside skips platforms with no due items, so this is
+    // effectively free when nothing new shipped.
+    if (totalCreated > 0) {
+      try {
+        const { smartSyncSSMetrics } = await import("./ss-sync");
+        await smartSyncSSMetrics();
+      } catch (hookErr) {
+        console.error("[notion-sync] publish-hook refresh failed:", hookErr);
+      }
+    }
+
     return {
       success: true,
       totalFetched,
