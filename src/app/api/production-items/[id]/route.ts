@@ -110,6 +110,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           id: string;
           title: string | null;
           publishedDate: string | null;
+          publishedLink: string | null;
+          platform: string[] | null;
           views: number | null;
           evergreenReasoning: string | null;
         }
@@ -120,13 +122,19 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           id: productionItems.id,
           title: productionItems.title,
           publishedDate: productionItems.publishedDate,
+          publishedLink: productionItems.publishedLink,
+          platform: productionItems.platform,
           views: productionItems.views,
           evergreenReasoning: productionItems.evergreenReasoning,
         })
         .from(productionItems)
         .where(eq(productionItems.id, item.repostedFromItemId))
         .limit(1);
-      if (src) repostedFrom = src;
+      if (src)
+        repostedFrom = {
+          ...src,
+          platform: (src.platform ?? null) as string[] | null,
+        };
     }
 
     // Resolve producer + editor user records for the assignee pickers.
