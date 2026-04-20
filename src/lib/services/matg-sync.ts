@@ -174,7 +174,7 @@ function unixToDate(ts: number): string | null {
 /* ------------------------------------------------------------------ */
 
 export { SC_BASE, headers };
-export type { SCVideo, SCShort };
+export type { SCVideo, SCShort, SCTweet, SCInstagramPost };
 
 export async function fetchYouTubeChannelVideos(handle: string): Promise<SCVideo[]> {
   const url = `${SC_BASE}/v1/youtube/channel-videos?handle=${handle}&sort=latest`;
@@ -217,6 +217,63 @@ export async function fetchSingleVideo(videoUrl: string): Promise<SCVideoDetail>
   const res = await fetch(url, { headers: headers() });
   if (!res.ok) throw new Error(`Video detail error (${res.status}): ${await res.text()}`);
   return res.json();
+}
+
+/**
+ * Fetch a single tweet's full payload by URL. Works for any tweet — does not
+ * require it to be on a particular user's recent timeline. 1 SC credit.
+ * Accepts custom headers so SS's brand-scoped API key can be used here too.
+ */
+export async function fetchTweetByUrl(
+  tweetUrl: string,
+  customHeaders: HeadersInit = headers()
+): Promise<SCTweet | null> {
+  const url = `${SC_BASE}/v1/twitter/tweet?url=${encodeURIComponent(tweetUrl)}`;
+  const res = await fetch(url, { headers: customHeaders });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Twitter tweet error (${res.status}): ${await res.text()}`);
+  const data = await res.json();
+  // SC wraps the tweet under different keys depending on version; accept both.
+  return data.tweet || data.data || data;
+}
+
+export interface SCInstagramPostMetrics {
+  shortcode: string;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  thumbnail: string | null;
+}
+
+/**
+ * Fetch a single Instagram post/reel by URL. Response is `xdt_shortcode_media`
+ * shape, different from the bulk user/posts endpoint — we normalize it here.
+ * 1 SC credit.
+ */
+export async function fetchInstagramPostByUrl(
+  postUrl: string,
+  customHeaders: HeadersInit = headers()
+): Promise<SCInstagramPostMetrics | null> {
+  const url = `${SC_BASE}/v1/instagram/post?url=${encodeURIComponent(postUrl)}`;
+  const res = await fetch(url, { headers: customHeaders });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`IG post error (${res.status}): ${await res.text()}`);
+  const data = await res.json();
+  const media = data?.data?.xdt_shortcode_media;
+  if (!media) return null;
+  const thumbnailCandidates = media.display_resources || [];
+  const thumbnail =
+    thumbnailCandidates[thumbnailCandidates.length - 1]?.src ||
+    thumbnailCandidates[0]?.src ||
+    media.display_url ||
+    null;
+  return {
+    shortcode: media.shortcode || "",
+    views: media.video_play_count ?? media.video_view_count ?? null,
+    likes: media.edge_media_preview_like?.count ?? null,
+    comments: media.edge_media_to_parent_comment?.count ?? null,
+    thumbnail,
+  };
 }
 
 async function fetchInstagramPosts(): Promise<SCInstagramPost[]> {

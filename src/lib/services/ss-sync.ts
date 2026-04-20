@@ -14,7 +14,11 @@ import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
 import { eq, and, inArray, isNotNull } from "drizzle-orm";
 import { needsPerformanceSync } from "./performance-decay";
-import { fetchSingleVideo } from "./matg-sync";
+import {
+  fetchSingleVideo,
+  fetchTweetByUrl,
+  fetchInstagramPostByUrl,
+} from "./matg-sync";
 
 const SC_BASE = "https://api.scrapecreators.com";
 const MAX_CREDITS_PER_RUN = 10;
@@ -503,12 +507,23 @@ function platformKindsFor(platforms: string[] | null): Set<PlatformKind> {
   return out;
 }
 
-// Same "due" test used by the YouTube decay path so all platforms share one
-// source of truth. An item is due if its tier's interval has elapsed OR it
-// has never been synced.
-async function dueSSItemsByPlatform(): Promise<Record<PlatformKind, number>> {
+// Per-run credit cap for the cron loop. Tune via SC_MAX_CREDITS_PER_RUN.
+// At hourly cadence, 30 = 720/day worst case across IG + Twitter combined.
+const CRON_MAX_CREDITS = Number(process.env.SC_MAX_CREDITS_PER_RUN) || 30;
+
+interface DueItemRow {
+  id: string;
+  kinds: Set<PlatformKind>;
+  reason: string;
+}
+
+// Find every SS Published item whose decay tier says it's due for a refresh.
+// One row per DB item (not per platform) — we let `refreshItemMetrics` pick
+// the right endpoint from the item's platform[] at call time.
+async function dueSSItems(): Promise<DueItemRow[]> {
   const rows = await db
     .select({
+      id: productionItems.id,
       publishedDate: productionItems.publishedDate,
       lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
       platform: productionItems.platform,
@@ -522,33 +537,33 @@ async function dueSSItemsByPlatform(): Promise<Record<PlatformKind, number>> {
       )
     );
 
-  const counts: Record<PlatformKind, number> = {
-    youtube: 0,
-    instagram: 0,
-    twitter: 0,
-  };
-
+  const due: DueItemRow[] = [];
   for (const r of rows) {
     const check = needsPerformanceSync({
       publishedDate: r.publishedDate,
       lastPerformanceSyncAt: r.lastPerformanceSyncAt,
     });
     if (!check.needsSync) continue;
-    for (const kind of platformKindsFor(r.platform as string[] | null)) {
-      counts[kind]++;
-    }
+    const kinds = platformKindsFor(r.platform as string[] | null);
+    // YouTube items are owned by `performance-decay` — don't double-refresh.
+    kinds.delete("youtube");
+    if (kinds.size === 0) continue;
+    due.push({ id: r.id, kinds, reason: check.reason });
   }
-  return counts;
+  // Oldest-sync-first would require returning the timestamp; for now the
+  // natural DB order is fine — freshly-inserted rows (sync=null) tend to
+  // come first. If we later see starvation on busy days, sort by
+  // lastPerformanceSyncAt nulls-first, ascending.
+  return due;
 }
 
 /**
- * Smart-gated SS metrics refresh. Only hits a platform's bulk endpoint if at
- * least one Published SS item on that platform is due per the shared decay
- * tiers. Intended to run hourly — idle hours cost ~0 credits.
+ * Smart per-item SS metrics refresh for the hourly cron. Iterates due items
+ * (per the shared decay tiers) and calls the Scrape Creators direct-URL
+ * endpoint for each. Stops once `CRON_MAX_CREDITS` credits have been spent.
  *
- * YouTube is intentionally skipped here because `performance-decay` already
- * covers it (per-video endpoint + channel bulk), and double-syncing would
- * waste credits.
+ * YouTube items are skipped — `performance-decay` already owns YouTube via
+ * its own per-URL + channel-bulk flow.
  */
 export async function smartSyncSSMetrics(): Promise<SSSyncResult> {
   const startedAt = new Date();
@@ -561,52 +576,61 @@ export async function smartSyncSSMetrics(): Promise<SSSyncResult> {
     errors: [],
   };
 
+  const perPlatform: Record<PlatformKind, SourceSyncResult> = {
+    youtube: { source: "YouTube", fetched: 0, matched: 0, updated: 0, errors: [] },
+    instagram: { source: "Instagram", fetched: 0, matched: 0, updated: 0, errors: [] },
+    twitter: { source: "Twitter", fetched: 0, matched: 0, updated: 0, errors: [] },
+  };
+
   try {
-    const due = await dueSSItemsByPlatform();
+    const due = await dueSSItems();
     let credits = 0;
 
-    if (due.instagram > 0) {
-      const ig = await syncInstagram(credits);
-      finalResult.sources.push(ig.result);
-      credits = ig.creditsUsed;
-    } else {
-      finalResult.sources.push({
-        source: "Instagram",
-        fetched: 0,
-        matched: 0,
-        updated: 0,
-        errors: ["skipped: no due items"],
-      });
+    for (const item of due) {
+      if (credits >= CRON_MAX_CREDITS) {
+        finalResult.errors.push(`credit cap hit at ${credits} — ${due.length - finalResult.totalMatched} items deferred`);
+        break;
+      }
+      try {
+        const r = await refreshItemMetrics(item.id);
+        credits += r.creditsUsed;
+        const bucket = perPlatform[r.platform === "unknown" ? "twitter" : r.platform];
+        bucket.fetched++;
+        if (r.updated) {
+          bucket.matched++;
+          bucket.updated++;
+        } else if (r.note) {
+          bucket.errors.push(`${item.id}: ${r.note}`);
+        }
+      } catch (err) {
+        // Best-effort: don't let one bad item kill the whole run.
+        const msg = err instanceof Error ? err.message : String(err);
+        // Attribute to whichever platform the item claimed so the log is useful.
+        const kind: PlatformKind = item.kinds.has("twitter")
+          ? "twitter"
+          : item.kinds.has("instagram")
+            ? "instagram"
+            : "youtube";
+        perPlatform[kind].errors.push(`${item.id}: ${msg}`);
+        // Still count the credit if the call went out; we can't tell from here
+        // so assume it did to stay safely under the cap.
+        credits += 1;
+      }
+      finalResult.totalMatched++;
     }
 
-    if (due.twitter > 0) {
-      const tw = await syncTwitter(credits);
-      finalResult.sources.push(tw.result);
-      credits = tw.creditsUsed;
-    } else {
-      finalResult.sources.push({
-        source: "Twitter",
-        fetched: 0,
-        matched: 0,
-        updated: 0,
-        errors: ["skipped: no due items"],
-      });
-    }
-
+    finalResult.sources = [perPlatform.instagram, perPlatform.twitter];
     finalResult.creditsUsed = credits;
     finalResult.totalFetched = finalResult.sources.reduce((s, r) => s + r.fetched, 0);
-    finalResult.totalMatched = finalResult.sources.reduce((s, r) => s + r.matched, 0);
     finalResult.totalUpdated = finalResult.sources.reduce((s, r) => s + r.updated, 0);
-    finalResult.errors = finalResult.sources
-      .flatMap((r) => r.errors)
-      .filter((e) => !e.startsWith("skipped:"));
+    finalResult.errors.push(...finalResult.sources.flatMap((r) => r.errors));
 
     await db.insert(syncLogs).values({
       syncType: "ss-metrics-sync",
-      status: finalResult.errors.length > 0 && finalResult.totalUpdated === 0 ? "error" : "success",
+      status: finalResult.totalUpdated === 0 && finalResult.errors.length > 0 ? "error" : "success",
       itemsFetched: finalResult.totalFetched,
       itemsUpdated: finalResult.totalUpdated,
-      errorMessage: finalResult.errors.length > 0 ? finalResult.errors.join("; ") : null,
+      errorMessage: finalResult.errors.length > 0 ? finalResult.errors.slice(0, 5).join("; ") : null,
       startedAt,
       completedAt: new Date(),
     });
@@ -625,20 +649,8 @@ export async function smartSyncSSMetrics(): Promise<SSSyncResult> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Per-item refresh (for the UI "Sync metrics" button)                */
+/*  Per-item refresh (powers the UI button + the decay cron loop)      */
 /* ------------------------------------------------------------------ */
-
-const TW_HANDLE_RE = /(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{1,15})/i;
-const IG_HANDLE_FROM_URL_RE = /instagram\.com\/([A-Za-z0-9._]+)\//i;
-
-function extractTwitterHandleFromUrl(url: string): string | null {
-  const m = url.match(TW_HANDLE_RE);
-  // Guard against status/intent paths that aren't user handles
-  if (!m) return null;
-  const h = m[1];
-  if (["i", "intent", "share", "status", "home"].includes(h.toLowerCase())) return null;
-  return h;
-}
 
 export interface RefreshItemResult {
   itemId: string;
@@ -653,9 +665,13 @@ export interface RefreshItemResult {
 
 /**
  * Refresh a single production item's metrics by hitting the appropriate
- * Scrape Creators endpoint. Cheap path (1 credit for YT via per-video; 1
- * credit for a handle's timeline for IG/TW). Writes `lastPerformanceSyncAt`
- * regardless so the decay gate sees it as fresh.
+ * Scrape Creators URL endpoint directly. 1 credit per call (0 if the
+ * platform/URL isn't supported). Writes `lastPerformanceSyncAt` on success
+ * so the decay gate sees it as fresh.
+ *
+ * Uses URL-based endpoints across all platforms — no timeline/feed matching,
+ * so it works regardless of how old the post is or whether it's still on the
+ * author's recent timeline.
  */
 export async function refreshItemMetrics(itemId: string): Promise<RefreshItemResult> {
   const [item] = await db
@@ -686,8 +702,8 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       .update(productionItems)
       .set({
         views: views ?? 0,
-        likes: likes,
-        comments: comments,
+        likes,
+        comments,
         lastPerformanceSyncAt: new Date(),
         updatedAt: new Date(),
       })
@@ -703,10 +719,10 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     };
   }
 
-  // --- Twitter: fetch just the item's handle, match by URL ---
+  // --- Twitter: direct-URL tweet endpoint (no handle lookup needed) ---
   if (kinds.has("twitter") && url) {
-    const handle = extractTwitterHandleFromUrl(url);
-    if (!handle) {
+    const tweet = await fetchTweetByUrl(url, ssHeaders());
+    if (!tweet || !tweet.legacy) {
       return {
         itemId,
         updated: false,
@@ -714,34 +730,13 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         views: null,
         likes: null,
         comments: null,
-        note: "Could not extract handle from URL",
-        creditsUsed: 0,
-      };
-    }
-    const endpoint = `${SC_BASE}/v1/twitter/user-tweets?handle=${handle}`;
-    const res = await fetch(endpoint, { headers: ssHeaders() });
-    if (!res.ok) {
-      throw new Error(`TW ${handle}: HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    const tweets: SCTweet[] = data.tweets || [];
-    const norm = normalizeUrl(url);
-    const match = tweets.find((t) => t.url && normalizeUrl(t.url) === norm);
-    if (!match) {
-      return {
-        itemId,
-        updated: false,
-        platform: "twitter",
-        views: null,
-        likes: null,
-        comments: null,
-        note: "Tweet not found in handle's recent timeline",
+        note: tweet ? "Tweet response missing engagement fields" : "Tweet not found at URL",
         creditsUsed: 1,
       };
     }
-    const views = match.views?.count ? parseInt(match.views.count, 10) : null;
-    const likes = match.legacy?.favorite_count ?? null;
-    const comments = match.legacy?.reply_count ?? null;
+    const views = tweet.views?.count ? parseInt(tweet.views.count, 10) : null;
+    const likes = tweet.legacy.favorite_count ?? null;
+    const comments = tweet.legacy.reply_count ?? null;
     await db
       .update(productionItems)
       .set({
@@ -763,28 +758,10 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     };
   }
 
-  // --- Instagram: fetch handle's recent posts, match by URL ---
+  // --- Instagram: direct-URL post/reel endpoint ---
   if (kinds.has("instagram") && url) {
-    const handleMatch = url.match(IG_HANDLE_FROM_URL_RE);
-    // If the published link is a /p/<code>/ or /reel/<code>/ URL without a
-    // handle (which it typically is), fall back to the configured SS handle.
-    const handle =
-      handleMatch && !["p", "reel", "reels"].includes(handleMatch[1].toLowerCase())
-        ? handleMatch[1]
-        : SS_IG_HANDLE;
-    const endpoint = `${SC_BASE}/v2/instagram/user/posts?handle=${handle}`;
-    const res = await fetch(endpoint, { headers: ssHeaders() });
-    if (!res.ok) {
-      throw new Error(`IG ${handle}: HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    const posts: SCInstagramPost[] = data.items || [];
-    const norm = normalizeUrl(url);
-    const match = posts.find((p) => {
-      const postUrl = p.url || `https://www.instagram.com/p/${p.code}/`;
-      return normalizeUrl(postUrl) === norm;
-    });
-    if (!match) {
+    const post = await fetchInstagramPostByUrl(url, ssHeaders());
+    if (!post) {
       return {
         itemId,
         updated: false,
@@ -792,19 +769,18 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         views: null,
         likes: null,
         comments: null,
-        note: "Post not found in handle's recent feed",
+        note: "Post not found at URL",
         creditsUsed: 1,
       };
     }
-    const views = match.play_count ?? null;
-    const likes = match.like_count ?? null;
-    const comments = match.comment_count ?? null;
+    const { views, likes, comments, thumbnail } = post;
     await db
       .update(productionItems)
       .set({
         ...(views != null && { views }),
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
+        ...(thumbnail && { thumbnail }),
         lastPerformanceSyncAt: new Date(),
         updatedAt: new Date(),
       })
