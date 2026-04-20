@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ContentComments } from "./content-comments";
 
 interface BrandFormat {
   id: string;
@@ -554,6 +555,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const brandFormats = formatNames;
   const isYouTube = !!item.youtubeId;
   const isPublished = !!item.publishedLink;
+  const isPrePublish = item.status !== "Published";
+  const currentFormat =
+    data.formats.find((f) => f.name === item.format) ?? null;
+  const formatPrompt = currentFormat?.instructions ?? null;
   const notionUrl = item.notionId
     ? `https://www.notion.so/${item.notionId.replace(/-/g, "")}`
     : null;
@@ -730,6 +735,13 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       )}
 
       {/* Post details — edit form (above derivatives so editing is one scroll) */}
+      <div
+        className={
+          isPrePublish
+            ? "grid grid-cols-1 lg:grid-cols-2 gap-6 items-start"
+            : undefined
+        }
+      >
       <div className="rounded-lg border border-border bg-card p-5 space-y-5">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
@@ -905,6 +917,59 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         )}
       </div>
 
+      {isPrePublish && (
+        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">
+                Format prompt
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {currentFormat
+                  ? `Instructions for creating "${currentFormat.name}" content.`
+                  : "Instructions for creating this content."}
+              </p>
+            </div>
+            {currentFormat && (
+              <Link
+                href={`/${brand}/formats/${currentFormat.id}`}
+                className="text-xs text-muted-foreground hover:text-foreground underline"
+              >
+                Edit
+              </Link>
+            )}
+          </div>
+          {formatPrompt ? (
+            <pre className="whitespace-pre-wrap break-words text-sm text-foreground font-sans bg-accent/30 rounded-md p-3 max-h-[600px] overflow-auto">
+              {formatPrompt}
+            </pre>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              {currentFormat
+                ? "No prompt set on this format yet."
+                : "This post has no format assigned."}
+              {currentFormat && (
+                <>
+                  {" "}
+                  <Link
+                    href={`/${brand}/formats/${currentFormat.id}`}
+                    className="text-foreground underline"
+                  >
+                    Add one
+                  </Link>
+                  .
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      </div>
+
+      {isPrePublish && <ContentComments contentId={item.id} />}
+
+      {!isPrePublish && (
+      <>
       {/* Derivative content — same look/feel as Content Performance table */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
@@ -1223,6 +1288,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <span className="font-medium">Repurpose</span> creates the Notion task and, for clip-style skills, fires the Descript job. Click a format name to edit its skill.
         </p>
       </div>
+
+      </>
+      )}
 
       {/* Add to Descript modal */}
       <Dialog open={descriptModalOpen} onOpenChange={(o) => { if (!o) closeDescriptModal(); }}>

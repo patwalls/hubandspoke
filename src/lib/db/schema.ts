@@ -204,6 +204,28 @@ export const passwordResetTokens = pgTable(
   (table) => [index("idx_password_reset_tokens_user").on(table.userId)]
 );
 
+export const contentComments = pgTable(
+  "content_comments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    contentItemId: uuid("content_item_id")
+      .references(() => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_content_comments_item_created").on(
+      table.contentItemId,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const syncLogs = pgTable("sync_logs", {
   id: uuid("id").defaultRandom().primaryKey(),
   syncType: text("sync_type").notNull(),

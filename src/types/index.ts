@@ -99,6 +99,7 @@ export interface Format {
   name: string;
   channels: string[];
   event: string | null;
+  instructions: string | null;
   createdAt: string;
   updatedAt: string;
   repurposeTargets?: Format[];
