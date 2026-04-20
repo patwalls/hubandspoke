@@ -68,7 +68,7 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
           eq(productionItems.sourceType, "original"),
           eq(productionItems.status, "Published"),
           gte(productionItems.views, rule.viewThreshold),
-          sql`${productionItems.platform} @> ${JSON.stringify([rule.sourcePlatform])}::jsonb`,
+          sql`${productionItems.platform} ? ${rule.sourcePlatform}`,
           gte(
             productionItems.publishedDate,
             sql`(now() - interval '${sql.raw(String(RECENCY_WINDOW_DAYS))} days')::date`
@@ -95,7 +95,7 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
           and(
             eq(productionItems.sourceType, "cross_post"),
             eq(productionItems.repostedFromItemId, candidate.id),
-            sql`${productionItems.platform} @> ${JSON.stringify([rule.targetPlatform])}::jsonb`
+            sql`${productionItems.platform} ? ${rule.targetPlatform}`
           )
         )
         .limit(1);
