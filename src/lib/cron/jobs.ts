@@ -1,8 +1,6 @@
 import { syncFromNotion } from "@/lib/services/notion-sync";
 import { syncPerformanceData } from "@/lib/services/performance-decay";
-import { syncSSYouTubeViews } from "@/lib/services/ss-sync";
 import { checkSSThresholds } from "@/lib/services/threshold-monitor";
-import { syncAllMATG } from "@/lib/services/matg-sync";
 
 type TenMinSlot = 0 | 10 | 20 | 30 | 40 | 50;
 
@@ -29,7 +27,7 @@ export interface CronJob {
  */
 export const CRON_JOBS: CronJob[] = [
   {
-    name: "performance-sync",
+    name: "performance-decay",
     schedule: { every: "hour", atMinute: 0 },
     run: () => syncPerformanceData(),
   },
@@ -39,18 +37,9 @@ export const CRON_JOBS: CronJob[] = [
     run: () => syncFromNotion(),
   },
   {
-    name: "youtube-sync-matg",
-    schedule: { every: "day", atUtcHour: 13 },
-    run: () => syncAllMATG(),
-  },
-  {
-    name: "ss-automation",
+    name: "ss-threshold-check",
     schedule: { every: "day", atUtcHour: 14 },
-    run: async () => {
-      const viewSync = await syncSSYouTubeViews();
-      const thresholdCheck = await checkSSThresholds();
-      return { viewSync, thresholdCheck };
-    },
+    run: () => checkSSThresholds(),
   },
 ];
 

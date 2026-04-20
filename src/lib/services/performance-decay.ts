@@ -1,8 +1,9 @@
 /**
- * Performance Data Decay Service for MATG.
+ * Performance Data Decay Service.
  *
- * Implements a decay schedule that syncs fresh content frequently
- * and old content rarely, saving API credits.
+ * Syncs Scrape Creators metrics (views / likes / comments) into production_items
+ * on a decay schedule — fresh content refreshes often, old content rarely — so
+ * we don't burn API credits on archival items.
  *
  * Decay tiers (based on content age since publishedDate):
  *   Fresh    (< 24h)   → sync every 3 hours
@@ -11,15 +12,21 @@
  *   Mature   (29–90d)  → sync every 3 days
  *   Aging    (91–180d) → sync weekly
  *   Archived (180d+)   → sync monthly
+ *
+ * Brand-agnostic: both MATG and Starter Story are covered in one pass via the
+ * BRAND_YT_HANDLES table. Non-YouTube platforms are skipped for now (SC has
+ * URL-based endpoints for them; wiring TBD).
  */
 
 import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
 import {
-  fetchYouTubeVideos,
-  fetchYouTubeShorts,
+  fetchYouTubeChannelVideos,
+  fetchYouTubeChannelShorts,
   fetchSingleVideo,
+  type SCVideo,
+  type SCShort,
 } from "./matg-sync";
 
 /* ------------------------------------------------------------------ */
@@ -44,8 +51,16 @@ export const DECAY_SCHEDULE: DecayTier[] = [
   { maxAgeDays: Infinity, syncIntervalMs: 30 * DAY, label: "Archived (180d+)" },
 ];
 
-/** Safety cap — never spend more than this many API credits in one run */
-const MAX_CREDITS_PER_RUN = 10;
+/** Safety cap — never spend more than this many API credits in one run.
+ *  Tune via SC_MAX_CREDITS_PER_RUN env var. At hourly cadence, 60 = 1440/day. */
+const MAX_CREDITS_PER_RUN = Number(process.env.SC_MAX_CREDITS_PER_RUN) || 60;
+
+/** YouTube handle → channel-videos / channel-shorts bulk fetch targets.
+ *  One fetch per handle = 1 credit. MATG has 1 channel; SS has 2. */
+const BRAND_YT_HANDLES: Record<string, string[]> = {
+  matg: ["MATGpod"],
+  "starter-story": ["starterstory", "StarterStoryBuild"],
+};
 
 /* ------------------------------------------------------------------ */
 /*  Tier helpers                                                       */
@@ -95,6 +110,7 @@ export function needsPerformanceSync(item: {
 
 interface DueItem {
   id: string;
+  brand: string;
   publishedDate: string;
   publishedLink: string | null;
   youtubeUrl: string | null;
@@ -114,6 +130,7 @@ export async function getItemsDueForSync(): Promise<DueSyncSummary> {
   const items = await db
     .select({
       id: productionItems.id,
+      brand: productionItems.brand,
       publishedDate: productionItems.publishedDate,
       publishedLink: productionItems.publishedLink,
       youtubeUrl: productionItems.youtubeUrl,
@@ -121,12 +138,7 @@ export async function getItemsDueForSync(): Promise<DueSyncSummary> {
       lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
     })
     .from(productionItems)
-    .where(
-      and(
-        eq(productionItems.brand, "matg"),
-        isNotNull(productionItems.publishedDate)
-      )
-    );
+    .where(isNotNull(productionItems.publishedDate));
 
   const videos: DueItem[] = [];
   const shorts: DueItem[] = [];
@@ -140,18 +152,28 @@ export async function getItemsDueForSync(): Promise<DueSyncSummary> {
 
     if (!check.needsSync) continue;
 
+    // Only items on YouTube are scrape-able by this service today. Others are
+    // skipped — their metrics come from manual edits / Notion / upstream
+    // batch jobs until we wire up IG/Twitter/LinkedIn URL-based fetches.
+    const platforms = (item.platform as string[]) || [];
+    const hasYouTube = platforms.some((p) => p.includes("YouTube"));
+    if (!hasYouTube) continue;
+
+    // Skip brands we don't have YouTube handles for.
+    if (!BRAND_YT_HANDLES[item.brand]) continue;
+
     const dueItem: DueItem = {
       id: item.id,
+      brand: item.brand,
       publishedDate: item.publishedDate!,
       publishedLink: item.publishedLink,
       youtubeUrl: item.youtubeUrl,
-      platform: item.platform as string[] | null,
+      platform: platforms,
       tier: check.tier,
     };
 
     byTier[check.tier.label] = (byTier[check.tier.label] || 0) + 1;
 
-    const platforms = (item.platform as string[]) || [];
     if (platforms.includes("YouTube Shorts")) {
       shorts.push(dueItem);
     } else {
@@ -159,17 +181,19 @@ export async function getItemsDueForSync(): Promise<DueSyncSummary> {
     }
   }
 
-  // Estimate credits: 1 for channel-shorts (if any shorts due), 1 for channel-videos (if any videos due),
-  // + 1 per fresh/recent video that needs individual fetch for likes/comments
+  // Estimate credits: one channel-videos + one channel-shorts fetch per brand
+  // that has due items, plus one per fresh/recent video individual fetch.
+  const brandsWithVideos = new Set(videos.map((v) => v.brand));
+  const brandsWithShorts = new Set(shorts.map((s) => s.brand));
   let estimatedCredits = 0;
-  if (shorts.length > 0) estimatedCredits += 1;
-  if (videos.length > 0) {
-    estimatedCredits += 1; // channel-videos for bulk view update
-    const freshRecent = videos.filter(
-      (v) => v.tier.maxAgeDays <= 7
-    ).length;
-    estimatedCredits += freshRecent; // individual fetches for likes/comments
+  for (const brand of brandsWithVideos) {
+    estimatedCredits += (BRAND_YT_HANDLES[brand] || []).length;
   }
+  for (const brand of brandsWithShorts) {
+    estimatedCredits += (BRAND_YT_HANDLES[brand] || []).length;
+  }
+  const freshRecent = videos.filter((v) => v.tier.maxAgeDays <= 7).length;
+  estimatedCredits += freshRecent;
 
   return {
     videos,
@@ -201,7 +225,7 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
   if (due.totalDue === 0) {
     // Log the "nothing to do" sync
     await db.insert(syncLogs).values({
-      syncType: "matg-performance",
+      syncType: "performance-decay",
       status: "success",
       itemsFetched: 0,
       itemsUpdated: 0,
@@ -225,85 +249,98 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
   let videosUpdated = 0;
   let individualFetches = 0;
 
-  // Build a set of due item IDs for quick lookup
-  const dueShortIds = new Set(due.shorts.map((s) => s.id));
-  const dueVideoIds = new Set(due.videos.map((v) => v.id));
+  // Bucket due items by brand so we can issue the right channel-level fetch(es).
+  const shortsByBrand = new Map<string, DueItem[]>();
+  const videosByBrand = new Map<string, DueItem[]>();
+  for (const s of due.shorts) {
+    const arr = shortsByBrand.get(s.brand) || [];
+    arr.push(s);
+    shortsByBrand.set(s.brand, arr);
+  }
+  for (const v of due.videos) {
+    const arr = videosByBrand.get(v.brand) || [];
+    arr.push(v);
+    videosByBrand.set(v.brand, arr);
+  }
 
-  /* ------ Shorts: channel-level fetch (1 credit, full metrics) ------ */
-  if (due.shorts.length > 0 && creditsUsed < MAX_CREDITS_PER_RUN) {
-    try {
-      const allShorts = await fetchYouTubeShorts();
-      creditsUsed++;
-
-      // Build a URL → short data map from the API response
-      const shortsByUrl = new Map(
-        allShorts.map((s) => [s.url, s])
-      );
-
-      // Update only the due shorts
-      for (const dueShort of due.shorts) {
-        const apiData = shortsByUrl.get(dueShort.publishedLink || "");
-        if (!apiData) continue;
-
-        await db
-          .update(productionItems)
-          .set({
-            views: apiData.viewCountInt || 0,
-            likes: apiData.likeCountInt || null,
-            comments: apiData.commentCountInt || null,
-            lastPerformanceSyncAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(productionItems.id, dueShort.id));
-
-        shortsUpdated++;
+  /* ------ Shorts: per-brand channel fetch (1 credit per handle) ------ */
+  for (const [brand, dueShorts] of shortsByBrand) {
+    const handles = BRAND_YT_HANDLES[brand] || [];
+    const shortsByUrl = new Map<string, SCShort>();
+    for (const handle of handles) {
+      if (creditsUsed >= MAX_CREDITS_PER_RUN) break;
+      try {
+        const shorts = await fetchYouTubeChannelShorts(handle);
+        creditsUsed++;
+        for (const s of shorts) shortsByUrl.set(s.url, s);
+      } catch (err) {
+        console.error(`Performance sync: shorts fetch failed for ${handle}:`, err);
       }
-    } catch (err) {
-      console.error("Performance sync: shorts fetch failed:", err);
+    }
+
+    for (const dueShort of dueShorts) {
+      const apiData = shortsByUrl.get(dueShort.publishedLink || "");
+      if (!apiData) continue;
+
+      await db
+        .update(productionItems)
+        .set({
+          views: apiData.viewCountInt || 0,
+          likes: apiData.likeCountInt || null,
+          comments: apiData.commentCountInt || null,
+          lastPerformanceSyncAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(productionItems.id, dueShort.id));
+
+      shortsUpdated++;
     }
   }
 
-  /* ------ Videos: channel-level fetch (1 credit, views only) ------ */
-  if (due.videos.length > 0 && creditsUsed < MAX_CREDITS_PER_RUN) {
-    try {
-      const allVideos = await fetchYouTubeVideos();
-      creditsUsed++;
-
-      const videosByUrl = new Map(
-        allVideos.map((v) => [v.url, v])
-      );
-
-      // Update views for all due videos from the channel fetch
-      for (const dueVideo of due.videos) {
-        const apiData = videosByUrl.get(dueVideo.publishedLink || "");
-        if (!apiData) continue;
-
-        await db
-          .update(productionItems)
-          .set({
-            views: apiData.viewCountInt || 0,
-            lastPerformanceSyncAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(productionItems.id, dueVideo.id));
-
-        videosUpdated++;
+  /* ------ Videos: per-brand channel fetch (1 credit per handle, views only) ------ */
+  for (const [brand, dueVideos] of videosByBrand) {
+    if (creditsUsed >= MAX_CREDITS_PER_RUN) break;
+    const handles = BRAND_YT_HANDLES[brand] || [];
+    const videosByUrl = new Map<string, SCVideo>();
+    for (const handle of handles) {
+      if (creditsUsed >= MAX_CREDITS_PER_RUN) break;
+      try {
+        const videos = await fetchYouTubeChannelVideos(handle);
+        creditsUsed++;
+        for (const v of videos) videosByUrl.set(v.url, v);
+      } catch (err) {
+        console.error(`Performance sync: videos fetch failed for ${handle}:`, err);
       }
-    } catch (err) {
-      console.error("Performance sync: videos channel fetch failed:", err);
+    }
+
+    for (const dueVideo of dueVideos) {
+      const apiData = videosByUrl.get(dueVideo.publishedLink || "");
+      if (!apiData) continue;
+
+      await db
+        .update(productionItems)
+        .set({
+          views: apiData.viewCountInt || 0,
+          lastPerformanceSyncAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(productionItems.id, dueVideo.id));
+
+      videosUpdated++;
     }
   }
 
   /* ------ Fresh/Recent videos: individual fetch for likes/comments ------ */
   const freshRecentVideos = due.videos.filter(
-    (v) => v.tier.maxAgeDays <= 7 && v.youtubeUrl
+    (v) => v.tier.maxAgeDays <= 7 && (v.youtubeUrl || v.publishedLink)
   );
 
   for (const video of freshRecentVideos) {
     if (creditsUsed >= MAX_CREDITS_PER_RUN) break;
 
+    const targetUrl = video.youtubeUrl || video.publishedLink!;
     try {
-      const detail = await fetchSingleVideo(video.youtubeUrl!);
+      const detail = await fetchSingleVideo(targetUrl);
       creditsUsed++;
       individualFetches++;
 
@@ -319,7 +356,7 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
         .where(eq(productionItems.id, video.id));
     } catch (err) {
       console.error(
-        `Performance sync: individual fetch failed for ${video.youtubeUrl}:`,
+        `Performance sync: individual fetch failed for ${targetUrl}:`,
         err
       );
     }
@@ -329,7 +366,7 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
 
   // Log sync
   await db.insert(syncLogs).values({
-    syncType: "matg-performance",
+    syncType: "performance-decay",
     status: "success",
     itemsFetched: due.totalDue,
     itemsUpdated: totalUpdated,

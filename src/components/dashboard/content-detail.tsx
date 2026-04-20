@@ -100,6 +100,60 @@ function formatCompact(n: number | null | undefined): string {
   return n.toLocaleString();
 }
 
+// Render a markdown-ish string: [label](url) → anchor, bare URLs → anchor,
+// newlines preserved. Read-only, no other markdown features.
+function renderInstructions(text: string): React.ReactNode[] {
+  const MD_LINK = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  const BARE_URL = /(https?:\/\/[^\s)]+)/g;
+
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  const pushText = (s: string) => {
+    if (!s) return;
+    // Second pass: turn any remaining bare URLs into anchors.
+    let last = 0;
+    let m: RegExpExecArray | null;
+    const re = new RegExp(BARE_URL);
+    while ((m = re.exec(s)) !== null) {
+      if (m.index > last) parts.push(s.slice(last, m.index));
+      parts.push(
+        <a
+          key={`u${key++}`}
+          href={m[1]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:text-blue-800 underline break-all"
+        >
+          {m[1]}
+        </a>
+      );
+      last = m.index + m[1].length;
+    }
+    if (last < s.length) parts.push(s.slice(last));
+  };
+
+  while ((match = MD_LINK.exec(text)) !== null) {
+    if (match.index > cursor) pushText(text.slice(cursor, match.index));
+    parts.push(
+      <a
+        key={`l${key++}`}
+        href={match[2]}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:text-blue-800 underline"
+      >
+        {match[1]}
+      </a>
+    );
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) pushText(text.slice(cursor));
+  return parts;
+}
+
 function formatDate(d: string | null): string {
   if (!d) return "—";
   const date = new Date(d + "T00:00:00");
@@ -993,7 +1047,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <h2 className="text-base font-semibold text-foreground">
-                Format prompt
+                Instructions
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {currentFormat
@@ -1011,9 +1065,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             )}
           </div>
           {formatPrompt ? (
-            <pre className="whitespace-pre-wrap break-words text-sm text-foreground font-sans bg-accent/30 rounded-md p-3 max-h-[600px] overflow-auto">
-              {formatPrompt}
-            </pre>
+            <div className="whitespace-pre-wrap break-words text-sm text-foreground bg-accent/30 rounded-md p-3 max-h-[600px] overflow-auto">
+              {renderInstructions(formatPrompt)}
+            </div>
           ) : (
             <div className="text-sm text-muted-foreground">
               {currentFormat

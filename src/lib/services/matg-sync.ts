@@ -176,20 +176,30 @@ function unixToDate(ts: number): string | null {
 export { SC_BASE, headers };
 export type { SCVideo, SCShort };
 
-export async function fetchYouTubeVideos(): Promise<SCVideo[]> {
-  const url = `${SC_BASE}/v1/youtube/channel-videos?handle=${MATG_YT_HANDLE}&sort=latest`;
+export async function fetchYouTubeChannelVideos(handle: string): Promise<SCVideo[]> {
+  const url = `${SC_BASE}/v1/youtube/channel-videos?handle=${handle}&sort=latest`;
   const res = await fetch(url, { headers: headers() });
   if (!res.ok) throw new Error(`YT videos error (${res.status}): ${await res.text()}`);
   const data = await res.json();
   return data.videos || [];
 }
 
-export async function fetchYouTubeShorts(): Promise<SCShort[]> {
-  const url = `${SC_BASE}/v1/youtube/channel/shorts?handle=${MATG_YT_HANDLE}`;
+export async function fetchYouTubeChannelShorts(handle: string): Promise<SCShort[]> {
+  const url = `${SC_BASE}/v1/youtube/channel/shorts?handle=${handle}`;
   const res = await fetch(url, { headers: headers() });
   if (!res.ok) throw new Error(`YT shorts error (${res.status}): ${await res.text()}`);
   const data = await res.json();
   return data.shorts || [];
+}
+
+// Brand-scoped conveniences. MATG only has one handle; other callers should use
+// the generic `fetchYouTubeChannelVideos/Shorts` with the handle they need.
+export async function fetchYouTubeVideos(): Promise<SCVideo[]> {
+  return fetchYouTubeChannelVideos(MATG_YT_HANDLE);
+}
+
+export async function fetchYouTubeShorts(): Promise<SCShort[]> {
+  return fetchYouTubeChannelShorts(MATG_YT_HANDLE);
 }
 
 export interface SCVideoDetail {
