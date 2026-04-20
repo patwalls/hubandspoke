@@ -29,8 +29,8 @@ const SS_IG_HANDLE = "starter_story";
 const SS_TW_HANDLES = ["thepatwalls", "starterstory"];
 
 function ssApiKey() {
-  const key = process.env.SC_API_KEY_SS || process.env.SCRAPE_CREATORS_API_KEY;
-  if (!key) throw new Error("SC_API_KEY_SS or SCRAPE_CREATORS_API_KEY must be set");
+  const key = process.env.SCRAPE_CREATORS_API_KEY;
+  if (!key) throw new Error("SCRAPE_CREATORS_API_KEY must be set");
   return key;
 }
 
