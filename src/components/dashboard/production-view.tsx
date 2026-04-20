@@ -135,7 +135,7 @@ export function ProductionView({ brand }: ProductionViewProps) {
         <TabButton
           active={tab === "idea-queue"}
           onClick={() => setTab("idea-queue")}
-          label="Idea Queue"
+          label="Queue"
           count={ideaCount}
         />
       </div>
