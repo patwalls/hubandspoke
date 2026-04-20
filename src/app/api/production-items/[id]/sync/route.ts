@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { refreshItemMetrics } from "@/lib/services/ss-sync";
+import { refreshItemMetrics } from "@/lib/services/performance-decay";
 
 interface RouteContext {
   params: Promise<{ id: string }>;

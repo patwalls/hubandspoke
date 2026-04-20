@@ -245,6 +245,76 @@ export interface SCInstagramPostMetrics {
   thumbnail: string | null;
 }
 
+export interface SCPostMetrics {
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+}
+
+/**
+ * Fetch a Threads post by URL. 1 SC credit. Normalized to
+ * { views, likes, comments } at the boundary.
+ */
+export async function fetchThreadsPostByUrl(
+  postUrl: string,
+  customHeaders: HeadersInit = headers()
+): Promise<SCPostMetrics | null> {
+  const url = `${SC_BASE}/v1/threads/post?url=${encodeURIComponent(postUrl)}`;
+  const res = await fetch(url, { headers: customHeaders });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Threads post error (${res.status}): ${await res.text()}`);
+  const data = await res.json();
+  const post = data?.post;
+  if (!post) return null;
+  return {
+    views: post.view_counts ?? null,
+    likes: post.like_count ?? null,
+    comments: post.text_post_app_info?.direct_reply_count ?? null,
+  };
+}
+
+/**
+ * Fetch a LinkedIn post by URL. 1 SC credit. Views are not returned by SC
+ * for LinkedIn so we leave that column alone at the caller.
+ */
+export async function fetchLinkedInPostByUrl(
+  postUrl: string,
+  customHeaders: HeadersInit = headers()
+): Promise<SCPostMetrics | null> {
+  const url = `${SC_BASE}/v1/linkedin/post?url=${encodeURIComponent(postUrl)}`;
+  const res = await fetch(url, { headers: customHeaders });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`LinkedIn post error (${res.status}): ${await res.text()}`);
+  const data = await res.json();
+  if (data?.success === false) return null;
+  return {
+    views: null,
+    likes: data?.likeCount ?? null,
+    comments: data?.commentCount ?? null,
+  };
+}
+
+/**
+ * Fetch a YouTube community post by URL. 1 SC credit. Only likes are
+ * returned by SC — views and comments stay untouched at the caller.
+ */
+export async function fetchYouTubeCommunityPostByUrl(
+  postUrl: string,
+  customHeaders: HeadersInit = headers()
+): Promise<SCPostMetrics | null> {
+  const url = `${SC_BASE}/v1/youtube/community-post?url=${encodeURIComponent(postUrl)}`;
+  const res = await fetch(url, { headers: customHeaders });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`YT community post error (${res.status}): ${await res.text()}`);
+  const data = await res.json();
+  if (data?.success === false) return null;
+  return {
+    views: null,
+    likes: data?.likeCount ?? null,
+    comments: null,
+  };
+}
+
 /**
  * Fetch a single Instagram post/reel by URL. Response is `xdt_shortcode_media`
  * shape, different from the bulk user/posts endpoint — we normalize it here.

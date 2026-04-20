@@ -1,32 +1,37 @@
 /**
- * Performance Data Decay Service.
+ * Performance Data Decay Service — unified metrics refresh.
  *
- * Syncs Scrape Creators metrics (views / likes / comments) into production_items
- * on a decay schedule — fresh content refreshes often, old content rarely — so
- * we don't burn API credits on archival items.
+ * Single entry point for pulling fresh views / likes / comments from Scrape
+ * Creators across every supported platform. Brand-agnostic; URL-based (one SC
+ * credit per item); decay-tier gated so archival items don't burn credits.
  *
  * Decay tiers (based on content age since publishedDate):
- *   Fresh    (< 24h)   → sync every 1 hour    (catches early engagement curve)
- *   Recent   (1–7d)    → sync every 6 hours
- *   Active   (8–28d)   → sync daily
- *   Mature   (29–90d)  → sync every 3 days
- *   Aging    (91–180d) → sync weekly
- *   Archived (180d+)   → sync monthly
+ *   Fresh    (< 24h)   → every 1 hour    (catches early engagement curve)
+ *   Recent   (1–7d)    → every 6 hours
+ *   Active   (8–28d)   → daily
+ *   Mature   (29–90d)  → every 3 days
+ *   Aging    (91–180d) → weekly
+ *   Archived (180d+)   → monthly
  *
- * Brand-agnostic: both MATG and Starter Story are covered in one pass via the
- * BRAND_YT_HANDLES table. Non-YouTube platforms are skipped for now (SC has
- * URL-based endpoints for them; wiring TBD).
+ * Supported platforms:
+ *   YouTube (video + shorts)    /v1/youtube/video?url=
+ *   YouTube Community           /v1/youtube/community-post?url=
+ *   Instagram (post + reel)     /v1/instagram/post?url=
+ *   Twitter / X                 /v1/twitter/tweet?url=
+ *   Threads                     /v1/threads/post?url=
+ *   LinkedIn                    /v1/linkedin/post?url=
  */
 
 import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
-import { eq, and, isNotNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import {
-  fetchYouTubeChannelVideos,
-  fetchYouTubeChannelShorts,
   fetchSingleVideo,
-  type SCVideo,
-  type SCShort,
+  fetchTweetByUrl,
+  fetchInstagramPostByUrl,
+  fetchThreadsPostByUrl,
+  fetchLinkedInPostByUrl,
+  fetchYouTubeCommunityPostByUrl,
 } from "./matg-sync";
 
 /* ------------------------------------------------------------------ */
@@ -51,16 +56,9 @@ export const DECAY_SCHEDULE: DecayTier[] = [
   { maxAgeDays: Infinity, syncIntervalMs: 30 * DAY, label: "Archived (180d+)" },
 ];
 
-/** Safety cap — never spend more than this many API credits in one run.
- *  Tune via SC_MAX_CREDITS_PER_RUN env var. At hourly cadence, 60 = 1440/day. */
-const MAX_CREDITS_PER_RUN = Number(process.env.SC_MAX_CREDITS_PER_RUN) || 60;
-
-/** YouTube handle → channel-videos / channel-shorts bulk fetch targets.
- *  One fetch per handle = 1 credit. MATG has 1 channel; SS has 2. */
-const BRAND_YT_HANDLES: Record<string, string[]> = {
-  matg: ["MATGpod"],
-  "starter-story": ["starterstory", "StarterStoryBuild"],
-};
+/** Per-run credit cap. Each refreshed item costs 1 SC credit. Tune via
+ *  SC_MAX_CREDITS_PER_RUN. At hourly cadence, 100 = 2400/day worst case. */
+const MAX_CREDITS_PER_RUN = Number(process.env.SC_MAX_CREDITS_PER_RUN) || 100;
 
 /* ------------------------------------------------------------------ */
 /*  Tier helpers                                                       */
@@ -91,7 +89,6 @@ export function needsPerformanceSync(item: {
 
   const tier = getDecayTier(item.publishedDate);
 
-  // Never been synced — always needs it
   if (!item.lastPerformanceSyncAt) {
     return { needsSync: true, tier, reason: "Never synced" };
   }
@@ -105,116 +102,357 @@ export function needsPerformanceSync(item: {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Query items due for sync                                           */
+/*  Platform kind detection                                            */
 /* ------------------------------------------------------------------ */
 
-interface DueItem {
-  id: string;
-  brand: string;
-  publishedDate: string;
-  publishedLink: string | null;
-  youtubeUrl: string | null;
-  platform: string[] | null;
-  tier: DecayTier;
+export type PlatformKind =
+  | "youtube"
+  | "youtube_community"
+  | "instagram"
+  | "twitter"
+  | "threads"
+  | "linkedin";
+
+/**
+ * Map an item's `platform[]` strings to the set of SC-supported platform
+ * kinds. Order matters for YouTube Community vs. YouTube — check community
+ * first so the regular-YouTube test doesn't swallow it.
+ */
+export function platformKindsFor(platforms: string[] | null): Set<PlatformKind> {
+  const out = new Set<PlatformKind>();
+  for (const p of platforms || []) {
+    if (p === "YouTube Community") out.add("youtube_community");
+    else if (p.includes("YouTube")) out.add("youtube");
+    else if (p.includes("Instagram")) out.add("instagram");
+    else if (p === "Twitter" || p === "X") out.add("twitter");
+    else if (p === "Threads") out.add("threads");
+    else if (p === "LinkedIn") out.add("linkedin");
+  }
+  return out;
 }
 
-export interface DueSyncSummary {
-  videos: DueItem[];
-  shorts: DueItem[];
-  totalDue: number;
-  estimatedCredits: number;
-  byTier: Record<string, number>;
+/* ------------------------------------------------------------------ */
+/*  Per-item refresh                                                   */
+/* ------------------------------------------------------------------ */
+
+export interface RefreshItemResult {
+  itemId: string;
+  updated: boolean;
+  platform: PlatformKind | "unknown";
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  note?: string;
+  creditsUsed: number;
 }
 
-export async function getItemsDueForSync(): Promise<DueSyncSummary> {
-  const items = await db
+/**
+ * Refresh a single production item's metrics by hitting the matching SC
+ * URL endpoint. 1 credit per supported call (0 if the item's platform has
+ * no SC coverage or no URL is set). Writes `lastPerformanceSyncAt` on
+ * success so the decay gate sees it as fresh.
+ *
+ * Partial metric updates: platforms that don't return a field (LinkedIn
+ * views, YouTube Community views/comments) leave the existing column
+ * untouched rather than clobbering it with 0 or NULL.
+ */
+export async function refreshItemMetrics(itemId: string): Promise<RefreshItemResult> {
+  const [item] = await db
     .select({
       id: productionItems.id,
-      brand: productionItems.brand,
-      publishedDate: productionItems.publishedDate,
       publishedLink: productionItems.publishedLink,
       youtubeUrl: productionItems.youtubeUrl,
       platform: productionItems.platform,
-      lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
     })
     .from(productionItems)
-    .where(isNotNull(productionItems.publishedDate));
+    .where(eq(productionItems.id, itemId))
+    .limit(1);
 
-  const videos: DueItem[] = [];
-  const shorts: DueItem[] = [];
-  const byTier: Record<string, number> = {};
+  if (!item) {
+    throw new Error(`Item not found: ${itemId}`);
+  }
 
-  for (const item of items) {
-    const check = needsPerformanceSync({
-      publishedDate: item.publishedDate,
-      lastPerformanceSyncAt: item.lastPerformanceSyncAt,
-    });
+  const url = item.publishedLink || item.youtubeUrl || "";
+  const kinds = platformKindsFor(item.platform as string[] | null);
 
-    if (!check.needsSync) continue;
+  // --- YouTube video / shorts ---
+  if (kinds.has("youtube") && url) {
+    const detail = await fetchSingleVideo(url);
+    const views = detail.viewCountInt ?? null;
+    const likes = detail.likeCountInt ?? null;
+    const comments = detail.commentCountInt ?? null;
+    await db
+      .update(productionItems)
+      .set({
+        views: views ?? 0,
+        likes,
+        comments,
+        lastPerformanceSyncAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, itemId));
+    return { itemId, updated: true, platform: "youtube", views, likes, comments, creditsUsed: 1 };
+  }
 
-    // Only items on YouTube are scrape-able by this service today. Others are
-    // skipped — their metrics come from manual edits / Notion / upstream
-    // batch jobs until we wire up IG/Twitter/LinkedIn URL-based fetches.
-    const platforms = (item.platform as string[]) || [];
-    const hasYouTube = platforms.some((p) => p.includes("YouTube"));
-    if (!hasYouTube) continue;
-
-    // Skip brands we don't have YouTube handles for.
-    if (!BRAND_YT_HANDLES[item.brand]) continue;
-
-    const dueItem: DueItem = {
-      id: item.id,
-      brand: item.brand,
-      publishedDate: item.publishedDate!,
-      publishedLink: item.publishedLink,
-      youtubeUrl: item.youtubeUrl,
-      platform: platforms,
-      tier: check.tier,
-    };
-
-    byTier[check.tier.label] = (byTier[check.tier.label] || 0) + 1;
-
-    if (platforms.includes("YouTube Shorts")) {
-      shorts.push(dueItem);
-    } else {
-      videos.push(dueItem);
+  // --- YouTube Community post (only `likeCount` returned by SC) ---
+  if (kinds.has("youtube_community") && url) {
+    const post = await fetchYouTubeCommunityPostByUrl(url);
+    if (!post) {
+      return {
+        itemId,
+        updated: false,
+        platform: "youtube_community",
+        views: null,
+        likes: null,
+        comments: null,
+        note: "Community post not found at URL",
+        creditsUsed: 1,
+      };
     }
+    await db
+      .update(productionItems)
+      .set({
+        ...(post.likes != null && { likes: post.likes }),
+        lastPerformanceSyncAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, itemId));
+    return {
+      itemId,
+      updated: true,
+      platform: "youtube_community",
+      views: null,
+      likes: post.likes,
+      comments: null,
+      creditsUsed: 1,
+    };
   }
 
-  // Estimate credits: one channel-videos + one channel-shorts fetch per brand
-  // that has due items, plus one per fresh/recent video individual fetch.
-  const brandsWithVideos = new Set(videos.map((v) => v.brand));
-  const brandsWithShorts = new Set(shorts.map((s) => s.brand));
-  let estimatedCredits = 0;
-  for (const brand of brandsWithVideos) {
-    estimatedCredits += (BRAND_YT_HANDLES[brand] || []).length;
+  // --- Twitter / X ---
+  if (kinds.has("twitter") && url) {
+    const tweet = await fetchTweetByUrl(url);
+    if (!tweet || !tweet.legacy) {
+      return {
+        itemId,
+        updated: false,
+        platform: "twitter",
+        views: null,
+        likes: null,
+        comments: null,
+        note: tweet ? "Tweet response missing engagement fields" : "Tweet not found at URL",
+        creditsUsed: 1,
+      };
+    }
+    const views = tweet.views?.count ? parseInt(tweet.views.count, 10) : null;
+    const likes = tweet.legacy.favorite_count ?? null;
+    const comments = tweet.legacy.reply_count ?? null;
+    await db
+      .update(productionItems)
+      .set({
+        ...(views != null && { views }),
+        ...(likes != null && { likes }),
+        ...(comments != null && { comments }),
+        lastPerformanceSyncAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, itemId));
+    return { itemId, updated: true, platform: "twitter", views, likes, comments, creditsUsed: 1 };
   }
-  for (const brand of brandsWithShorts) {
-    estimatedCredits += (BRAND_YT_HANDLES[brand] || []).length;
+
+  // --- Instagram post / reel ---
+  if (kinds.has("instagram") && url) {
+    const post = await fetchInstagramPostByUrl(url);
+    if (!post) {
+      return {
+        itemId,
+        updated: false,
+        platform: "instagram",
+        views: null,
+        likes: null,
+        comments: null,
+        note: "Post not found at URL",
+        creditsUsed: 1,
+      };
+    }
+    const { views, likes, comments, thumbnail } = post;
+    await db
+      .update(productionItems)
+      .set({
+        ...(views != null && { views }),
+        ...(likes != null && { likes }),
+        ...(comments != null && { comments }),
+        ...(thumbnail && { thumbnail }),
+        lastPerformanceSyncAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, itemId));
+    return { itemId, updated: true, platform: "instagram", views, likes, comments, creditsUsed: 1 };
   }
-  const freshRecent = videos.filter((v) => v.tier.maxAgeDays <= 7).length;
-  estimatedCredits += freshRecent;
+
+  // --- Threads ---
+  if (kinds.has("threads") && url) {
+    const post = await fetchThreadsPostByUrl(url);
+    if (!post) {
+      return {
+        itemId,
+        updated: false,
+        platform: "threads",
+        views: null,
+        likes: null,
+        comments: null,
+        note: "Threads post not found at URL",
+        creditsUsed: 1,
+      };
+    }
+    const { views, likes, comments } = post;
+    await db
+      .update(productionItems)
+      .set({
+        ...(views != null && { views }),
+        ...(likes != null && { likes }),
+        ...(comments != null && { comments }),
+        lastPerformanceSyncAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, itemId));
+    return { itemId, updated: true, platform: "threads", views, likes, comments, creditsUsed: 1 };
+  }
+
+  // --- LinkedIn (no views returned by SC) ---
+  if (kinds.has("linkedin") && url) {
+    const post = await fetchLinkedInPostByUrl(url);
+    if (!post) {
+      return {
+        itemId,
+        updated: false,
+        platform: "linkedin",
+        views: null,
+        likes: null,
+        comments: null,
+        note: "LinkedIn post not found at URL",
+        creditsUsed: 1,
+      };
+    }
+    const { likes, comments } = post;
+    await db
+      .update(productionItems)
+      .set({
+        ...(likes != null && { likes }),
+        ...(comments != null && { comments }),
+        lastPerformanceSyncAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, itemId));
+    return {
+      itemId,
+      updated: true,
+      platform: "linkedin",
+      views: null,
+      likes,
+      comments,
+      creditsUsed: 1,
+    };
+  }
 
   return {
-    videos,
-    shorts,
-    totalDue: videos.length + shorts.length,
-    estimatedCredits: Math.min(estimatedCredits, MAX_CREDITS_PER_RUN),
-    byTier,
+    itemId,
+    updated: false,
+    platform: "unknown",
+    views: null,
+    likes: null,
+    comments: null,
+    note: "Platform not supported or missing URL",
+    creditsUsed: 0,
   };
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main orchestrator: sync performance data using decay schedule       */
+/*  Due-items query — used by the cron + the /api/sync/youtube status  */
+/* ------------------------------------------------------------------ */
+
+interface DueItem {
+  id: string;
+  kinds: Set<PlatformKind>;
+  tier: DecayTier;
+  lastPerformanceSyncAt: Date | null;
+}
+
+export interface DueSyncSummary {
+  items: DueItem[];
+  totalDue: number;
+  estimatedCredits: number;
+  byTier: Record<string, number>;
+  byPlatform: Record<string, number>;
+}
+
+export async function getItemsDueForSync(): Promise<DueSyncSummary> {
+  // NULLS FIRST on lastPerformanceSyncAt so "Never" rows backfill first,
+  // then oldest-synced rows, so we don't get starvation where fresh items
+  // keep monopolizing the credit cap.
+  const rows = await db
+    .select({
+      id: productionItems.id,
+      publishedDate: productionItems.publishedDate,
+      lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
+      platform: productionItems.platform,
+    })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.status, "Published"),
+        isNotNull(productionItems.publishedDate)
+      )
+    )
+    .orderBy(
+      sql`${productionItems.lastPerformanceSyncAt} ASC NULLS FIRST`,
+      asc(productionItems.publishedDate)
+    );
+
+  const items: DueItem[] = [];
+  const byTier: Record<string, number> = {};
+  const byPlatform: Record<string, number> = {};
+
+  for (const r of rows) {
+    const check = needsPerformanceSync({
+      publishedDate: r.publishedDate,
+      lastPerformanceSyncAt: r.lastPerformanceSyncAt,
+    });
+    if (!check.needsSync) continue;
+    const kinds = platformKindsFor(r.platform as string[] | null);
+    if (kinds.size === 0) continue;
+
+    items.push({
+      id: r.id,
+      kinds,
+      tier: check.tier,
+      lastPerformanceSyncAt: r.lastPerformanceSyncAt,
+    });
+    byTier[check.tier.label] = (byTier[check.tier.label] || 0) + 1;
+    for (const kind of kinds) {
+      byPlatform[kind] = (byPlatform[kind] || 0) + 1;
+    }
+  }
+
+  return {
+    items,
+    totalDue: items.length,
+    estimatedCredits: Math.min(items.length, MAX_CREDITS_PER_RUN),
+    byTier,
+    byPlatform,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main orchestrator — one tick, all platforms                        */
 /* ------------------------------------------------------------------ */
 
 export interface PerformanceSyncResult {
   creditsUsed: number;
   itemsUpdated: number;
-  shortsUpdated: number;
-  videosUpdated: number;
-  individualFetches: number;
+  itemsAttempted: number;
   byTier: Record<string, number>;
+  byPlatform: Record<string, { attempted: number; updated: number; errors: number }>;
+  errors: string[];
   skippedReason?: string;
 }
 
@@ -222,8 +460,10 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
   const startedAt = new Date();
   const due = await getItemsDueForSync();
 
+  const byPlatform: PerformanceSyncResult["byPlatform"] = {};
+  const errors: string[] = [];
+
   if (due.totalDue === 0) {
-    // Log the "nothing to do" sync
     await db.insert(syncLogs).values({
       syncType: "performance-decay",
       status: "success",
@@ -232,154 +472,76 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
       startedAt,
       completedAt: new Date(),
     });
-
     return {
       creditsUsed: 0,
       itemsUpdated: 0,
-      shortsUpdated: 0,
-      videosUpdated: 0,
-      individualFetches: 0,
+      itemsAttempted: 0,
       byTier: due.byTier,
+      byPlatform,
+      errors,
       skippedReason: "No items due for sync",
     };
   }
 
   let creditsUsed = 0;
-  let shortsUpdated = 0;
-  let videosUpdated = 0;
-  let individualFetches = 0;
+  let itemsUpdated = 0;
+  let itemsAttempted = 0;
 
-  // Bucket due items by brand so we can issue the right channel-level fetch(es).
-  const shortsByBrand = new Map<string, DueItem[]>();
-  const videosByBrand = new Map<string, DueItem[]>();
-  for (const s of due.shorts) {
-    const arr = shortsByBrand.get(s.brand) || [];
-    arr.push(s);
-    shortsByBrand.set(s.brand, arr);
-  }
-  for (const v of due.videos) {
-    const arr = videosByBrand.get(v.brand) || [];
-    arr.push(v);
-    videosByBrand.set(v.brand, arr);
-  }
-
-  /* ------ Shorts: per-brand channel fetch (1 credit per handle) ------ */
-  for (const [brand, dueShorts] of shortsByBrand) {
-    const handles = BRAND_YT_HANDLES[brand] || [];
-    const shortsByUrl = new Map<string, SCShort>();
-    for (const handle of handles) {
-      if (creditsUsed >= MAX_CREDITS_PER_RUN) break;
-      try {
-        const shorts = await fetchYouTubeChannelShorts(handle);
-        creditsUsed++;
-        for (const s of shorts) shortsByUrl.set(s.url, s);
-      } catch (err) {
-        console.error(`Performance sync: shorts fetch failed for ${handle}:`, err);
-      }
-    }
-
-    for (const dueShort of dueShorts) {
-      const apiData = shortsByUrl.get(dueShort.publishedLink || "");
-      if (!apiData) continue;
-
-      await db
-        .update(productionItems)
-        .set({
-          views: apiData.viewCountInt || 0,
-          likes: apiData.likeCountInt || null,
-          comments: apiData.commentCountInt || null,
-          lastPerformanceSyncAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(productionItems.id, dueShort.id));
-
-      shortsUpdated++;
-    }
-  }
-
-  /* ------ Videos: per-brand channel fetch (1 credit per handle, views only) ------ */
-  for (const [brand, dueVideos] of videosByBrand) {
-    if (creditsUsed >= MAX_CREDITS_PER_RUN) break;
-    const handles = BRAND_YT_HANDLES[brand] || [];
-    const videosByUrl = new Map<string, SCVideo>();
-    for (const handle of handles) {
-      if (creditsUsed >= MAX_CREDITS_PER_RUN) break;
-      try {
-        const videos = await fetchYouTubeChannelVideos(handle);
-        creditsUsed++;
-        for (const v of videos) videosByUrl.set(v.url, v);
-      } catch (err) {
-        console.error(`Performance sync: videos fetch failed for ${handle}:`, err);
-      }
-    }
-
-    for (const dueVideo of dueVideos) {
-      const apiData = videosByUrl.get(dueVideo.publishedLink || "");
-      if (!apiData) continue;
-
-      await db
-        .update(productionItems)
-        .set({
-          views: apiData.viewCountInt || 0,
-          lastPerformanceSyncAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(productionItems.id, dueVideo.id));
-
-      videosUpdated++;
-    }
-  }
-
-  /* ------ Fresh/Recent videos: individual fetch for likes/comments ------ */
-  const freshRecentVideos = due.videos.filter(
-    (v) => v.tier.maxAgeDays <= 7 && (v.youtubeUrl || v.publishedLink)
-  );
-
-  for (const video of freshRecentVideos) {
-    if (creditsUsed >= MAX_CREDITS_PER_RUN) break;
-
-    const targetUrl = video.youtubeUrl || video.publishedLink!;
-    try {
-      const detail = await fetchSingleVideo(targetUrl);
-      creditsUsed++;
-      individualFetches++;
-
-      await db
-        .update(productionItems)
-        .set({
-          views: detail.viewCountInt || 0,
-          likes: detail.likeCountInt || null,
-          comments: detail.commentCountInt || null,
-          lastPerformanceSyncAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(productionItems.id, video.id));
-    } catch (err) {
-      console.error(
-        `Performance sync: individual fetch failed for ${targetUrl}:`,
-        err
+  for (const item of due.items) {
+    if (creditsUsed >= MAX_CREDITS_PER_RUN) {
+      errors.push(
+        `credit cap hit at ${creditsUsed}; ${due.items.length - itemsAttempted} item(s) deferred to next run`
       );
+      break;
+    }
+
+    itemsAttempted++;
+    // Pick a single platform attribution for the stats bucket. refreshItemMetrics
+    // handles one endpoint per call via the if-chain; the first kind that matches
+    // the router order there is what wins.
+    const kind =
+      [...item.kinds].find((k) =>
+        ["youtube", "youtube_community", "twitter", "instagram", "threads", "linkedin"].includes(k)
+      ) ?? "unknown";
+    byPlatform[kind] ??= { attempted: 0, updated: 0, errors: 0 };
+    byPlatform[kind].attempted++;
+
+    try {
+      const r = await refreshItemMetrics(item.id);
+      creditsUsed += r.creditsUsed;
+      if (r.updated) {
+        itemsUpdated++;
+        byPlatform[r.platform] ??= { attempted: 0, updated: 0, errors: 0 };
+        byPlatform[r.platform].updated++;
+      } else if (r.note) {
+        errors.push(`${item.id} (${r.platform}): ${r.note}`);
+        byPlatform[kind].errors++;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${item.id} (${kind}): ${msg}`);
+      byPlatform[kind].errors++;
+      // Assume the call went out to stay safely under the cap even on errors.
+      creditsUsed++;
     }
   }
 
-  const totalUpdated = shortsUpdated + videosUpdated;
-
-  // Log sync
   await db.insert(syncLogs).values({
     syncType: "performance-decay",
-    status: "success",
-    itemsFetched: due.totalDue,
-    itemsUpdated: totalUpdated,
+    status: itemsUpdated === 0 && errors.length > 0 ? "error" : "success",
+    itemsFetched: itemsAttempted,
+    itemsUpdated,
+    errorMessage: errors.length > 0 ? errors.slice(0, 5).join("; ") : null,
     startedAt,
     completedAt: new Date(),
   });
 
   return {
     creditsUsed,
-    itemsUpdated: totalUpdated,
-    shortsUpdated,
-    videosUpdated,
-    individualFetches,
+    itemsUpdated,
+    itemsAttempted,
     byTier: due.byTier,
+    byPlatform,
+    errors,
   };
 }
