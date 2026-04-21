@@ -22,6 +22,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
 import { UserChip } from "./user-chip";
@@ -504,6 +517,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [title, setTitle] = useState("");
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [format, setFormat] = useState("");
+  const [formatPickerOpen, setFormatPickerOpen] = useState(false);
   const [status, setStatus] = useState("");
   const [pillar, setPillar] = useState<PillarOption | null>(null);
   const [producerUserId, setProducerUserId] = useState<string>("");
@@ -1052,24 +1066,52 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           {brandFormats.length > 0 && (
             <div className="space-y-1.5">
               <Label>Format</Label>
-              <Select
-                value={format}
-                onValueChange={(v) => {
-                  setFormat(v || "");
-                  void persistField({ format: v || null });
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select format…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {brandFormats.map((f) => (
-                    <SelectItem key={f} value={f}>
-                      {f}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={formatPickerOpen} onOpenChange={setFormatPickerOpen}>
+                <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+                  {format ? (
+                    <span className="truncate">{format}</span>
+                  ) : (
+                    <span className="text-muted-foreground">Select format…</span>
+                  )}
+                  <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                </PopoverTrigger>
+                <PopoverContent className="w-96 p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search formats…" />
+                    <CommandList>
+                      <CommandEmpty>No matching format.</CommandEmpty>
+                      <CommandGroup>
+                        {format && (
+                          <CommandItem
+                            onSelect={() => {
+                              setFormat("");
+                              void persistField({ format: null });
+                              setFormatPickerOpen(false);
+                            }}
+                            className="text-muted-foreground"
+                          >
+                            <span className="text-sm">Clear selection</span>
+                          </CommandItem>
+                        )}
+                        {brandFormats.map((f) => (
+                          <CommandItem
+                            key={f}
+                            value={f}
+                            onSelect={() => {
+                              setFormat(f);
+                              void persistField({ format: f });
+                              setFormatPickerOpen(false);
+                            }}
+                            data-checked={format === f ? "true" : undefined}
+                          >
+                            <span className="text-sm">{f}</span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           )}
         </div>
