@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { todayLocalISO } from "@/lib/utils/dates";
 
 interface PerformanceTableProps {
   items: ProductionItem[];
@@ -103,7 +104,7 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
   const [formPlatforms, setFormPlatforms] = useState<string[]>([]);
   const [formFormat, setFormFormat] = useState("");
   const [formLink, setFormLink] = useState("");
-  const [formDate, setFormDate] = useState(new Date().toISOString().split("T")[0]);
+  const [formDate, setFormDate] = useState(todayLocalISO());
   const [formViews, setFormViews] = useState("");
   const [formLikes, setFormLikes] = useState("");
   const [formComments, setFormComments] = useState("");
@@ -125,7 +126,7 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
     setFormPlatforms([]);
     setFormFormat("");
     setFormLink("");
-    setFormDate(new Date().toISOString().split("T")[0]);
+    setFormDate(todayLocalISO());
     setFormViews("");
     setFormLikes("");
     setFormComments("");

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { format, parse, startOfYear } from "date-fns";
+import { addDays, format, parse, startOfYear } from "date-fns";
 import { ChevronDownIcon, CheckIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -54,9 +54,10 @@ function resolvePreset(
   value: string
 ): { startDate: Date; endDate: Date } | null {
   const today = new Date();
-  if (value === "today") return { startDate: today, endDate: today };
-  if (value === "ytd") return { startDate: startOfYear(today), endDate: today };
-  if (value === "all-time") return { startDate: new Date(2010, 0, 1), endDate: today };
+  const endDate = addDays(today, 1);
+  if (value === "today") return { startDate: today, endDate };
+  if (value === "ytd") return { startDate: startOfYear(today), endDate };
+  if (value === "all-time") return { startDate: new Date(2010, 0, 1), endDate };
   return getQuickRange(value);
 }
 

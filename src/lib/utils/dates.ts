@@ -84,23 +84,38 @@ export function getWeekProgress(): { day: number; percent: number } {
   return { day, percent };
 }
 
+// `yyyy-MM-dd` for the user's local date. `Date#toISOString()` returns UTC, so
+// it can roll over to "tomorrow" on the evening of the user's local day —
+// avoid it for date inputs that should reflect what the user sees on the wall.
+export function todayLocalISO(): string {
+  return format(new Date(), "yyyy-MM-dd");
+}
+
+// Endpoint for "…through today" presets. Extended to today+1 so items whose
+// stored published_date drifts a day into the future (UTC vs. local timezone)
+// still appear in the range.
+function rangeEnd(today: Date): Date {
+  return addDays(today, 1);
+}
+
 export function getQuickRange(
   range: string
 ): { startDate: Date; endDate: Date } | null {
   const today = new Date();
+  const endDate = rangeEnd(today);
   switch (range) {
     case "7d":
-      return { startDate: subDays(today, 7), endDate: today };
+      return { startDate: subDays(today, 7), endDate };
     case "30d":
-      return { startDate: subDays(today, 30), endDate: today };
+      return { startDate: subDays(today, 30), endDate };
     case "this-quarter":
-      return { startDate: startOfQuarter(today), endDate: today };
+      return { startDate: startOfQuarter(today), endDate };
     case "last-quarter": {
       const lastQ = subQuarters(today, 1);
       return { startDate: startOfQuarter(lastQ), endDate: endOfQuarter(lastQ) };
     }
     case "90d":
-      return { startDate: subDays(today, 90), endDate: today };
+      return { startDate: subDays(today, 90), endDate };
     default:
       return null;
   }

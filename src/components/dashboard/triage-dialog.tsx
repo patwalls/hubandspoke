@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
+import { todayLocalISO } from "@/lib/utils/dates";
 import type { ProductionItem } from "@/types";
 
 interface AssignableUser {
@@ -449,7 +450,7 @@ function PostedForm({
   defaultChannel: string;
 }) {
   const [link, setLink] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayLocalISO());
   const [views, setViews] = useState("");
   const [likes, setLikes] = useState("");
   const [linkError, setLinkError] = useState<string | null>(null);
