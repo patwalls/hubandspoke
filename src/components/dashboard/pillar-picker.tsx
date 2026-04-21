@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { XIcon, LinkIcon, ChevronsUpDownIcon } from "lucide-react";
+import Link from "next/link";
+import { XIcon, LinkIcon, ChevronsUpDownIcon, ExternalLinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Popover,
   PopoverContent,
@@ -138,15 +139,27 @@ export function PillarPicker({
         </PopoverContent>
       </Popover>
       {value && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onChange(null)}
-          title="Clear pillar"
-          className="shrink-0"
-        >
-          <XIcon className="w-3.5 h-3.5" />
-        </Button>
+        <>
+          <Link
+            href={`/${brand}/content/${value.id}`}
+            title="Open pillar"
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "sm" }),
+              "shrink-0"
+            )}
+          >
+            <ExternalLinkIcon className="w-3.5 h-3.5" />
+          </Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange(null)}
+            title="Clear pillar"
+            className="shrink-0"
+          >
+            <XIcon className="w-3.5 h-3.5" />
+          </Button>
+        </>
       )}
     </div>
   );
