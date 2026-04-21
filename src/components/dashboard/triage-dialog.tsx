@@ -87,7 +87,11 @@ function showTriageToast(
     return;
   }
   if (status === "Published") {
-    toast.success("Marked as published", options);
+    const link = typeof extra?.publishedLink === "string" ? extra.publishedLink : "";
+    toast.success(
+      link ? "Marked as published" : "Marked as scheduled — add link later",
+      options
+    );
   }
 }
 
@@ -562,7 +566,13 @@ function PostedForm({
     });
   }
 
+  async function handleScheduled() {
+    setLinkError(null);
+    await onSubmit({ publishedLink: "", publishedDate: date });
+  }
+
   const canSubmit = !saving && !!link.trim() && !!date;
+  const canSchedule = !saving && !!date;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
@@ -617,6 +627,15 @@ function PostedForm({
           className="inline-flex h-9 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
         >
           {saving ? "Saving…" : "Mark posted"}
+        </button>
+        <button
+          type="button"
+          onClick={handleScheduled}
+          disabled={!canSchedule}
+          title="Mark published with no link — someone can fill it in later"
+          className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+        >
+          Scheduled
         </button>
         <button
           type="button"
