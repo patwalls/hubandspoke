@@ -1,0 +1,1 @@
+ALTER TABLE "production_items" ADD COLUMN "content_media_url" text;

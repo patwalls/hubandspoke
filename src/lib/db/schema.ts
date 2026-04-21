@@ -41,6 +41,11 @@ export const productionItems = pgTable(
       withTimezone: true,
     }),
     contentBodySource: text("content_body_source"),
+    // Permanent URL to the primary media file for this item (e.g. a
+    // ScrapeCreators-hosted .mp4 for IG reels, an image for IG photos).
+    // Distinct from `thumbnail` — thumbnail may be an ephemeral IG CDN URL
+    // that expires; this column is meant to survive.
+    contentMediaUrl: text("content_media_url"),
     isExternal: boolean("is_external").default(false).notNull(),
     views: integer("views"),
     likes: integer("likes"),
