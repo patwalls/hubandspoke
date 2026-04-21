@@ -37,6 +37,8 @@ import {
 } from "@/components/ui/command";
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
+import { TranscriptButton } from "./transcript-dialog";
+import { ClipIdeasPanel } from "./clip-ideas-panel";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
@@ -868,6 +870,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               <FilmIcon className="size-3.5" /> Descript
             </a>
           )}
+          <TranscriptButton
+            itemId={item.id}
+            hasDescriptProject={hasDescriptProject}
+          />
           {item.mediaS3Key && (
             <a
               href={`/api/uploads/download?itemId=${item.id}`}
@@ -1516,6 +1522,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </table>
         </div>
       </div>
+
+      <ClipIdeasPanel itemId={item.id} hasDescriptProject={hasDescriptProject} />
 
       {/* Reposts — list of same-content reposts that descend from this item.
           Styled to mirror the Derivative content table directly above so the

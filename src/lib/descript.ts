@@ -53,6 +53,11 @@ interface DescriptJobResponse {
     status?: string;
     project_changed?: boolean;
     agent_response?: string;
+    // Populated on publish jobs.
+    composition_id?: string;
+    share_url?: string;
+    download_url?: string;
+    download_url_expires_at?: string;
   };
   project_url?: string;
   project_id?: string;
@@ -108,6 +113,86 @@ export async function invokeDescriptAgent(args: {
     projectUrl: body.project_url,
     projectId: body.project_id,
   };
+}
+
+export interface PublishCompositionArgs {
+  projectId: string;
+  compositionId: string;
+  mediaType?: "Video" | "Audio";
+  resolution?: string;
+}
+
+interface PublishJobResponse {
+  job_id: string;
+  drive_id?: string;
+  project_id: string;
+  project_url: string;
+}
+
+export async function publishComposition(
+  args: PublishCompositionArgs
+): Promise<{ jobId: string; projectUrl: string; projectId: string }> {
+  const res = await fetch(`${BASE_URL}/jobs/publish`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: authHeader(),
+    },
+    body: JSON.stringify({
+      project_id: args.projectId,
+      composition_id: args.compositionId,
+      media_type: args.mediaType ?? "Video",
+      resolution: args.resolution ?? "1080p",
+    }),
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    const msg = (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    throw new Error(`Descript publish failed: ${msg}`);
+  }
+  const body = json as PublishJobResponse;
+  return {
+    jobId: body.job_id,
+    projectUrl: body.project_url,
+    projectId: body.project_id,
+  };
+}
+
+export interface PublishedProject {
+  project_id: string;
+  publish_type: string;
+  privacy: string;
+  download_url?: string;
+  download_url_expires_at?: string;
+  metadata?: {
+    title?: string;
+    published_at?: string;
+    published_by?: string;
+  };
+  subtitles?: string;
+}
+
+export async function fetchPublishedProject(
+  slug: string
+): Promise<PublishedProject> {
+  const res = await fetch(`${BASE_URL}/published_projects/${slug}`, {
+    headers: { Authorization: authHeader() },
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    const msg = (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    throw new Error(`Descript published_projects fetch failed: ${msg}`);
+  }
+  return json as PublishedProject;
+}
+
+// Descript publish jobs return a share_url like
+// https://share.descript.com/view/85F9VPWTO8X — the last path segment is the
+// slug we pass to /published_projects/{slug}.
+export function extractShareSlug(shareUrl: string | undefined): string | null {
+  if (!shareUrl) return null;
+  const m = shareUrl.match(/\/view\/([A-Za-z0-9]+)/);
+  return m ? m[1] : null;
 }
 
 async function postImportProjectMedia(
