@@ -251,6 +251,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
 
   // Descript upload modal state
   const [descriptModalOpen, setDescriptModalOpen] = useState(false);
+  const [descriptReplacing, setDescriptReplacing] = useState(false);
   const [descriptMode, setDescriptMode] = useState<"upload" | "url">("upload");
   const [descriptUrl, setDescriptUrl] = useState("");
   const [descriptFile, setDescriptFile] = useState<File | null>(null);
@@ -363,6 +364,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   }
 
   function openDescriptModal() {
+    setDescriptReplacing(!!data?.item.descriptProjectId);
     setDescriptMode("upload");
     setDescriptFile(null);
     setDescriptStage("idle");
@@ -899,6 +901,16 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             >
               <FilmIcon className="size-3.5" /> Descript
             </a>
+          )}
+          {hasDescriptProject && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openDescriptModal}
+              title="Re-upload a new file and replace the Descript project linked to this post"
+            >
+              <RefreshCwIcon className="size-3.5" /> Replace
+            </Button>
           )}
           <TranscriptButton
             itemId={item.id}
@@ -2085,7 +2097,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       <Dialog open={descriptModalOpen} onOpenChange={(o) => { if (!o) closeDescriptModal(); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Add to Descript</DialogTitle>
+            <DialogTitle>
+              {descriptReplacing ? "Replace Descript project" : "Add to Descript"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -2093,14 +2107,17 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 {item.title || "Untitled"}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Creates a new Descript project for this post so you can clip it
-                into other formats.
+                {descriptReplacing
+                  ? "Uploads a new file and repoints this post to a fresh Descript project. The previous Descript project is not deleted — it stays in your Descript account."
+                  : "Creates a new Descript project for this post so you can clip it into other formats."}
               </p>
             </div>
             {descriptResult ? (
               <>
                 <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm space-y-2">
-                  <div className="font-medium text-foreground">Project created.</div>
+                  <div className="font-medium text-foreground">
+                    {descriptReplacing ? "Project replaced." : "Project created."}
+                  </div>
                   <a
                     href={descriptResult.projectUrl}
                     target="_blank"
@@ -2234,11 +2251,17 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                     }
                   >
                     {descriptStage === "creating"
-                      ? "Creating…"
+                      ? descriptReplacing
+                        ? "Replacing…"
+                        : "Creating…"
                       : descriptStage === "uploading"
                       ? "Uploading…"
                       : descriptMode === "upload"
-                      ? "Upload & create"
+                      ? descriptReplacing
+                        ? "Upload & replace"
+                        : "Upload & create"
+                      : descriptReplacing
+                      ? "Replace project"
                       : "Create project"}
                   </Button>
                   )}
