@@ -1371,57 +1371,58 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               )}
             </div>
           )}
-        </div>
-      )}
-      </div>
 
-      {isPrePublish && currentFormat && (
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              Top Bangers In This Format
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Highest performing published content in this format
-            </p>
-          </div>
+          {/* Top Bangers — highest performing items in this format */}
+          {currentFormat && (
+            <>
+              <div className="border-t border-border pt-4 mt-4">
+                <h3 className="text-sm font-semibold text-foreground">
+                  Top Bangers In This Format
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Highest performing published content in this format
+                </p>
+              </div>
 
-          {data?.topPerformers && data.topPerformers.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {data.topPerformers.map((perf) => (
-                <Link
-                  href={`/${brand}/${perf.id}`}
-                  key={perf.id}
-                  className="flex gap-3 p-3 rounded border border-border hover:bg-accent/50 transition"
-                >
-                  {perf.thumbnail && (
-                    <img
-                      src={perf.thumbnail}
-                      alt={perf.title || "Content thumbnail"}
-                      className="h-16 w-16 rounded object-cover flex-shrink-0"
-                    />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground line-clamp-2">
-                      {perf.title || "Untitled"}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {perf.views ? formatCompact(perf.views) : "—"} views
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatDate(perf.publishedDate)}
-                    </p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">
-              No data available for this format
-            </div>
+              {data?.topPerformers && data.topPerformers.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {data.topPerformers.map((perf) => (
+                    <Link
+                      href={`/${brand}/${perf.id}`}
+                      key={perf.id}
+                      className="flex gap-3 p-3 rounded border border-border hover:bg-accent/50 transition"
+                    >
+                      {perf.thumbnail && (
+                        <img
+                          src={perf.thumbnail}
+                          alt={perf.title || "Content thumbnail"}
+                          className="h-16 w-16 rounded object-cover flex-shrink-0"
+                        />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-foreground line-clamp-2">
+                          {perf.title || "Untitled"}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {perf.views ? formatCompact(perf.views) : "—"} views
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDate(perf.publishedDate)}
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  No data available for this format
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
+      </div>
 
       <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
 

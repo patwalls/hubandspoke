@@ -200,6 +200,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
     // Top performers in this format: up to 3 published items with highest views.
     // Used to show creators benchmarks for the format they're creating in.
+    // Looks for items that have been published (have publishedLink) with views data.
     // Only shows if item has a format assigned and there are published items in it.
     const topPerformers = item.format
       ? await db
@@ -215,7 +216,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             and(
               eq(productionItems.brand, item.brand),
               eq(productionItems.format, item.format),
-              eq(productionItems.status, "Ready To Publish"),
+              isNotNull(productionItems.publishedLink),
               isNotNull(productionItems.views),
               isNotNull(productionItems.publishedDate)
             )
