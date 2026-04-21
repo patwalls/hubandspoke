@@ -1568,7 +1568,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {data.topPerformers.map((perf) => (
                     <Link
-                      href={`/${brand}/${perf.id}`}
+                      href={`/${brand}/content/${perf.id}`}
                       key={perf.id}
                       className="flex gap-3 p-3 rounded border border-border hover:bg-accent/50 transition"
                     >
