@@ -44,9 +44,11 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
+const sslOpt = process.env.DATABASE_SSL === "off" ? false : "require";
+console.log(`[debug] DATABASE_SSL=${JSON.stringify(process.env.DATABASE_SSL)} sslOpt=${JSON.stringify(sslOpt)}`);
 const sql = postgres(process.env.DATABASE_URL, {
   prepare: false,
-  ssl: process.env.DATABASE_SSL === "off" ? false : "require",
+  ssl: sslOpt,
 });
 
 function isPatWallsTweet(publishedLink) {
