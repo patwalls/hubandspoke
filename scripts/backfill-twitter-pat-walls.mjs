@@ -17,7 +17,8 @@
  *
  * Usage (after pushing to main and Heroku has deployed):
  *   heroku run --app=hubandspoke node scripts/backfill-twitter-pat-walls.mjs
- *   heroku run --app=hubandspoke node scripts/backfill-twitter-pat-walls.mjs --apply
+ *   heroku run --app=hubandspoke "node scripts/backfill-twitter-pat-walls.mjs --apply"
+ *   (quote the command so --apply is forwarded to node, not consumed by heroku)
  *
  * Local:
  *   node scripts/backfill-twitter-pat-walls.mjs              # dry-run (default)
@@ -44,11 +45,9 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-const sslOpt = process.env.DATABASE_SSL === "off" ? false : "require";
-console.log(`[debug] DATABASE_SSL=${JSON.stringify(process.env.DATABASE_SSL)} sslOpt=${JSON.stringify(sslOpt)}`);
 const sql = postgres(process.env.DATABASE_URL, {
   prepare: false,
-  ssl: sslOpt,
+  ssl: process.env.DATABASE_SSL === "off" ? false : "require",
 });
 
 function isPatWallsTweet(publishedLink) {
