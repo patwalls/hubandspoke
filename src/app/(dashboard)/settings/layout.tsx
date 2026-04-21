@@ -31,6 +31,12 @@ export default async function SettingsLayout({
           >
             Users
           </Link>
+          <Link
+            href="/settings/sync-errors"
+            className="px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            Sync errors
+          </Link>
           <div className="mt-3 px-2 text-[11px] uppercase tracking-wide text-muted-foreground">
             Brand goals
           </div>

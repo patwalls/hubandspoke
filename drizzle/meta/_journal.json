@@ -78,6 +78,13 @@
       "when": 1776738344450,
       "tag": "0010_lean_mathemanic",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1776784496319,
+      "tag": "0011_typical_corsair",
+      "breakpoints": true
     }
   ]
 }

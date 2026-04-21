@@ -57,10 +57,6 @@ export const DECAY_SCHEDULE: DecayTier[] = [
   { maxAgeDays: Infinity, syncIntervalMs: 30 * DAY, label: "Archived (180d+)" },
 ];
 
-/** Per-run credit cap. Each refreshed item costs 1 SC credit. Tune via
- *  SC_MAX_CREDITS_PER_RUN. At hourly cadence, 100 = 2400/day worst case. */
-const MAX_CREDITS_PER_RUN = Number(process.env.SC_MAX_CREDITS_PER_RUN) || 100;
-
 /* ------------------------------------------------------------------ */
 /*  Tier helpers                                                       */
 /* ------------------------------------------------------------------ */
@@ -136,6 +132,23 @@ export function platformKindsFor(platforms: string[] | null): Set<PlatformKind> 
 /*  Per-item refresh                                                   */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Stamp a sync attempt on an item without touching metrics. Called on every
+ * failure path so broken-URL items don't stay pinned to the front of the
+ * NULLS-FIRST queue and burn credits every run. The decay interval provides
+ * natural retry; the Sync Errors UI gives the user a manual retry.
+ */
+async function stampSyncResult(itemId: string, error: string | null): Promise<void> {
+  await db
+    .update(productionItems)
+    .set({
+      lastPerformanceSyncAt: new Date(),
+      lastPerformanceSyncError: error,
+      updatedAt: new Date(),
+    })
+    .where(eq(productionItems.id, itemId));
+}
+
 export interface RefreshItemResult {
   itemId: string;
   updated: boolean;
@@ -206,6 +219,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         comments,
         viewsEstimated: false,
         lastPerformanceSyncAt: new Date(),
+        lastPerformanceSyncError: null,
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
@@ -216,6 +230,8 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
   if (kinds.has("youtube_community") && url) {
     const post = await fetchYouTubeCommunityPostByUrl(url);
     if (!post) {
+      const note = "Community post not found at URL";
+      await stampSyncResult(itemId, note);
       return {
         itemId,
         updated: false,
@@ -223,7 +239,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         views: null,
         likes: null,
         comments: null,
-        note: "Community post not found at URL",
+        note,
         creditsUsed: 1,
       };
     }
@@ -237,6 +253,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
           viewsEstimated: derived.estimated,
         }),
         lastPerformanceSyncAt: new Date(),
+        lastPerformanceSyncError: null,
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
@@ -255,6 +272,8 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
   if (kinds.has("twitter") && url) {
     const tweet = await fetchTweetByUrl(url);
     if (!tweet || !tweet.legacy) {
+      const note = tweet ? "Tweet response missing engagement fields" : "Tweet not found at URL";
+      await stampSyncResult(itemId, note);
       return {
         itemId,
         updated: false,
@@ -262,7 +281,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         views: null,
         likes: null,
         comments: null,
-        note: tweet ? "Tweet response missing engagement fields" : "Tweet not found at URL",
+        note,
         creditsUsed: 1,
       };
     }
@@ -276,6 +295,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
         lastPerformanceSyncAt: new Date(),
+        lastPerformanceSyncError: null,
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
@@ -286,6 +306,8 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
   if (kinds.has("instagram") && url) {
     const post = await fetchInstagramPostByUrl(url);
     if (!post) {
+      const note = "Post not found at URL";
+      await stampSyncResult(itemId, note);
       return {
         itemId,
         updated: false,
@@ -293,7 +315,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         views: null,
         likes: null,
         comments: null,
-        note: "Post not found at URL",
+        note,
         creditsUsed: 1,
       };
     }
@@ -310,6 +332,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         ...(comments != null && { comments }),
         ...(thumbnail && { thumbnail }),
         lastPerformanceSyncAt: new Date(),
+        lastPerformanceSyncError: null,
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
@@ -328,6 +351,8 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
   if (kinds.has("threads") && url) {
     const post = await fetchThreadsPostByUrl(url);
     if (!post) {
+      const note = "Threads post not found at URL";
+      await stampSyncResult(itemId, note);
       return {
         itemId,
         updated: false,
@@ -335,7 +360,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         views: null,
         likes: null,
         comments: null,
-        note: "Threads post not found at URL",
+        note,
         creditsUsed: 1,
       };
     }
@@ -351,6 +376,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
         lastPerformanceSyncAt: new Date(),
+        lastPerformanceSyncError: null,
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
@@ -369,6 +395,8 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
   if (kinds.has("linkedin") && url) {
     const post = await fetchLinkedInPostByUrl(url);
     if (!post) {
+      const note = "LinkedIn post not found at URL";
+      await stampSyncResult(itemId, note);
       return {
         itemId,
         updated: false,
@@ -376,7 +404,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         views: null,
         likes: null,
         comments: null,
-        note: "LinkedIn post not found at URL",
+        note,
         creditsUsed: 1,
       };
     }
@@ -392,6 +420,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
         lastPerformanceSyncAt: new Date(),
+        lastPerformanceSyncError: null,
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
@@ -406,6 +435,8 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     };
   }
 
+  const note = "Platform not supported or missing URL";
+  await stampSyncResult(itemId, note);
   return {
     itemId,
     updated: false,
@@ -413,7 +444,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     views: null,
     likes: null,
     comments: null,
-    note: "Platform not supported or missing URL",
+    note,
     creditsUsed: 0,
   };
 }
@@ -432,7 +463,6 @@ interface DueItem {
 export interface DueSyncSummary {
   items: DueItem[];
   totalDue: number;
-  estimatedCredits: number;
   byTier: Record<string, number>;
   byPlatform: Record<string, number>;
 }
@@ -488,7 +518,6 @@ export async function getItemsDueForSync(): Promise<DueSyncSummary> {
   return {
     items,
     totalDue: items.length,
-    estimatedCredits: Math.min(items.length, MAX_CREDITS_PER_RUN),
     byTier,
     byPlatform,
   };
@@ -540,13 +569,6 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
   let itemsAttempted = 0;
 
   for (const item of due.items) {
-    if (creditsUsed >= MAX_CREDITS_PER_RUN) {
-      errors.push(
-        `credit cap hit at ${creditsUsed}; ${due.items.length - itemsAttempted} item(s) deferred to next run`
-      );
-      break;
-    }
-
     itemsAttempted++;
     // Pick a single platform attribution for the stats bucket. refreshItemMetrics
     // handles one endpoint per call via the if-chain; the first kind that matches
@@ -573,7 +595,7 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`${item.id} (${kind}): ${msg}`);
       byPlatform[kind].errors++;
-      // Assume the call went out to stay safely under the cap even on errors.
+      await stampSyncResult(item.id, msg);
       creditsUsed++;
     }
   }

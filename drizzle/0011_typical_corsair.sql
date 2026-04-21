@@ -1,0 +1,1 @@
+ALTER TABLE "production_items" ADD COLUMN "last_performance_sync_error" text;

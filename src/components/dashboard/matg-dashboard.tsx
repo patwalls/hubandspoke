@@ -46,7 +46,6 @@ interface PerfSyncResult {
 
 interface PerformanceDue {
   totalDue: number;
-  estimatedCredits: number;
   byTier: Record<string, number>;
 }
 

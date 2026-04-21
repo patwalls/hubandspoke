@@ -66,7 +66,6 @@ export async function GET() {
       performanceDue: dueSummary
         ? {
             totalDue: dueSummary.totalDue,
-            estimatedCredits: dueSummary.estimatedCredits,
             byTier: dueSummary.byTier,
           }
         : null,

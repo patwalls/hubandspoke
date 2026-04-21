@@ -62,6 +62,7 @@ export const productionItems = pgTable(
     lastPerformanceSyncAt: timestamp("last_performance_sync_at", {
       withTimezone: true,
     }),
+    lastPerformanceSyncError: text("last_performance_sync_error"),
     descriptProjectId: text("descript_project_id"),
     descriptProjectUrl: text("descript_project_url"),
     descriptCompositionId: text("descript_composition_id"),
