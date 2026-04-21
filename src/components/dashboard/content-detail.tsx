@@ -511,12 +511,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
-  const [views, setViews] = useState("");
-  const [likes, setLikes] = useState("");
-  const [comments, setComments] = useState("");
-  const [clicks, setClicks] = useState("");
-  const [leads, setLeads] = useState("");
-  const [salesAmount, setSalesAmount] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -547,14 +541,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     setEditorUserId(item.editorUserId || "");
     setPublishedLink(item.publishedLink || "");
     setPublishedDate(item.publishedDate || "");
-    setViews(item.views != null ? String(item.views) : "");
-    setLikes(item.likes != null ? String(item.likes) : "");
-    setComments(item.comments != null ? String(item.comments) : "");
-    setClicks(item.clicks != null ? String(item.clicks) : "");
-    setLeads(item.leads != null ? String(item.leads) : "");
-    setSalesAmount(
-      item.salesAmount != null ? String(item.salesAmount) : ""
-    );
   }, []);
 
   const load = useCallback(async () => {
@@ -1216,102 +1202,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             />
           </div>
         </div>
-
-        {isPublished && (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground font-medium">Metrics</p>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Views</Label>
-                <Input
-                  type="number"
-                  value={views}
-                  onChange={(e) => setViews(e.target.value)}
-                  onBlur={() => {
-                    const current = item.views != null ? String(item.views) : "";
-                    if (current !== views) void persistField({ views: views || null });
-                  }}
-                  placeholder="0"
-                  disabled={isYouTube}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Likes</Label>
-                <Input
-                  type="number"
-                  value={likes}
-                  onChange={(e) => setLikes(e.target.value)}
-                  onBlur={() => {
-                    const current = item.likes != null ? String(item.likes) : "";
-                    if (current !== likes) void persistField({ likes: likes || null });
-                  }}
-                  placeholder="0"
-                  disabled={isYouTube}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Comments</Label>
-                <Input
-                  type="number"
-                  value={comments}
-                  onChange={(e) => setComments(e.target.value)}
-                  onBlur={() => {
-                    const current = item.comments != null ? String(item.comments) : "";
-                    if (current !== comments) void persistField({ comments: comments || null });
-                  }}
-                  placeholder="0"
-                  disabled={isYouTube}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Clicks</Label>
-                <Input
-                  type="number"
-                  value={clicks}
-                  onChange={(e) => setClicks(e.target.value)}
-                  onBlur={() => {
-                    const current = item.clicks != null ? String(item.clicks) : "";
-                    if (current !== clicks) void persistField({ clicks: clicks || null });
-                  }}
-                  placeholder="0"
-                  disabled={isYouTube}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Leads</Label>
-                <Input
-                  type="number"
-                  value={leads}
-                  onChange={(e) => setLeads(e.target.value)}
-                  onBlur={() => {
-                    const current = item.leads != null ? String(item.leads) : "";
-                    if (current !== leads) void persistField({ leads: leads || null });
-                  }}
-                  placeholder="0"
-                  disabled={isYouTube}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Sales $</Label>
-                <Input
-                  type="number"
-                  value={salesAmount}
-                  onChange={(e) => setSalesAmount(e.target.value)}
-                  onBlur={() => {
-                    const current = item.salesAmount != null ? String(item.salesAmount) : "";
-                    if (current !== salesAmount)
-                      void persistField({ salesAmount: salesAmount || null });
-                  }}
-                  placeholder="0"
-                  step="0.01"
-                  disabled={isYouTube}
-                />
-              </div>
-            </div>
-          </div>
-        )}
 
         {deleteError && (
           <div className="text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200">
