@@ -42,6 +42,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { UserChip } from "./user-chip";
 import { SS_CHANNELS, MATG_CHANNELS } from "@/lib/config/channels";
 import { applyStarterTemplate } from "@/lib/format-skill";
 
@@ -49,6 +50,13 @@ interface AsanaMember {
   gid: string;
   name: string;
   email: string;
+}
+
+interface AssignableUser {
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
 }
 
 interface FormatRow {
@@ -65,7 +73,7 @@ interface FormatRow {
   totalViews: number;
 }
 
-type SortKey = "name" | "pillar" | "viewThreshold" | "totalViews";
+type SortKey = "name" | "viewThreshold" | "totalViews";
 
 export function FormatsPageContent({ brand }: { brand: string }) {
   const ALL_CHANNELS = brand === "matg" ? MATG_CHANNELS : SS_CHANNELS;
@@ -76,6 +84,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [channelFilter, setChannelFilter] = useState<string>("all");
 
   const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
   const [producerPopoverOpen, setProducerPopoverOpen] = useState(false);
   const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
@@ -119,6 +128,21 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       }
     }
     loadMembers();
+  }, []);
+
+  useEffect(() => {
+    async function loadAssignable() {
+      try {
+        const res = await fetch("/api/users/assignable");
+        if (res.ok) {
+          const json = await res.json();
+          setAssignableUsers(json.users || []);
+        }
+      } catch (err) {
+        console.error("Failed to fetch assignable users:", err);
+      }
+    }
+    loadAssignable();
   }, []);
 
   function openCreate() {
@@ -196,7 +220,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       setSortDir(sortDir === "asc" ? "desc" : "asc");
     } else {
       setSortKey(key);
-      setSortDir(key === "name" || key === "pillar" ? "asc" : "desc");
+      setSortDir(key === "name" ? "asc" : "desc");
     }
   }
 
@@ -237,15 +261,49 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     return formats.filter((f) => f.channels?.includes(channelFilter));
   }, [formats, channelFilter]);
 
+  // Resolve stored editor/producer names to real user rows (for avatars).
+  // Missing matches fall back to plain initials, so unknown names still render.
+  const userByName = useMemo(() => {
+    const map = new Map<string, AssignableUser>();
+    for (const u of assignableUsers) {
+      if (u.name) map.set(u.name.toLowerCase(), u);
+      map.set(u.email.toLowerCase(), u);
+    }
+    return map;
+  }, [assignableUsers]);
+
+  const resolveUser = (
+    value: string | null
+  ): { name: string | null; email: string; avatarUrl: string | null } | null => {
+    if (!value) return null;
+    const hit = userByName.get(value.toLowerCase());
+    if (hit) return hit;
+    return { name: value, email: value, avatarUrl: null };
+  };
+
   const sorted = useMemo(() => {
     const parentNameOf = (f: FormatRow) =>
       f.parentFormatId ? parentNameById.get(f.parentFormatId) ?? "" : "";
-    const getVal = (f: FormatRow): string | number | null => {
+
+    // For the Name sort, keep derivatives nested under their pillar:
+    // primary = pillar group (self-name if pillar, parent-name if derivative),
+    // secondary = pillar first (0) then derivatives (1), tertiary = own name.
+    if (sortKey === "name") {
+      const dir = sortDir === "asc" ? 1 : -1;
+      return [...filtered].sort((a, b) => {
+        const aGroup = a.parentFormatId ? parentNameOf(a) : a.name;
+        const bGroup = b.parentFormatId ? parentNameOf(b) : b.name;
+        const g = aGroup.localeCompare(bGroup);
+        if (g !== 0) return dir * g;
+        const aRank = a.parentFormatId ? 1 : 0;
+        const bRank = b.parentFormatId ? 1 : 0;
+        if (aRank !== bRank) return aRank - bRank;
+        return dir * a.name.localeCompare(b.name);
+      });
+    }
+
+    const getVal = (f: FormatRow): number | null => {
       switch (sortKey) {
-        case "name":
-          return f.name;
-        case "pillar":
-          return parentNameOf(f);
         case "viewThreshold":
           return f.viewThreshold;
         case "totalViews":
@@ -255,18 +313,10 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     return [...filtered].sort((a, b) => {
       const aVal = getVal(a);
       const bVal = getVal(b);
-      if (aVal === "" && bVal === "") return 0;
       if (aVal == null && bVal == null) return 0;
-      if (aVal == null || aVal === "") return 1;
-      if (bVal == null || bVal === "") return -1;
-      if (typeof aVal === "string" && typeof bVal === "string") {
-        return sortDir === "asc"
-          ? aVal.localeCompare(bVal)
-          : bVal.localeCompare(aVal);
-      }
-      return sortDir === "asc"
-        ? (aVal as number) - (bVal as number)
-        : (bVal as number) - (aVal as number);
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+      return sortDir === "asc" ? aVal - bVal : bVal - aVal;
     });
   }, [filtered, sortKey, sortDir, parentNameById]);
 
@@ -655,7 +705,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           <TableHeader>
             <TableRow>
               <SortHeader label="Name" sortKeyName="name" />
-              <SortHeader label="Pillar" sortKeyName="pillar" />
               <TableHead>Channels</TableHead>
               <TableHead>Editor</TableHead>
               <TableHead>Producer</TableHead>
@@ -677,10 +726,25 @@ export function FormatsPageContent({ brand }: { brand: string }) {
               const parentName = f.parentFormatId
                 ? parentNameById.get(f.parentFormatId) ?? null
                 : null;
+              const editorUser = resolveUser(f.editor);
+              const producerUser = resolveUser(f.producer);
               return (
                 <TableRow key={f.id}>
                   <TableCell>
                     <span className="flex items-center gap-2 min-w-0">
+                      {!isPillar && parentName && (
+                        <>
+                          <Link
+                            href={`/${brand}/formats/${f.parentFormatId}`}
+                            className="text-muted-foreground hover:text-foreground hover:underline truncate max-w-[180px]"
+                          >
+                            {parentName}
+                          </Link>
+                          <span className="text-muted-foreground shrink-0">
+                            →
+                          </span>
+                        </>
+                      )}
                       <Link
                         href={`/${brand}/formats/${f.id}`}
                         className="font-medium text-foreground hover:underline truncate"
@@ -699,18 +763,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                     </span>
                   </TableCell>
                   <TableCell>
-                    {f.parentFormatId && parentName ? (
-                      <Link
-                        href={`/${brand}/formats/${f.parentFormatId}`}
-                        className="text-muted-foreground hover:text-foreground hover:underline"
-                      >
-                        {parentName}
-                      </Link>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {f.channels?.map((ch) => (
                         <Badge
@@ -724,33 +776,15 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {f.editor ? (
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-                          {f.editor
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")
-                            .slice(0, 2)}
-                        </span>
-                        <span className="truncate">{f.editor}</span>
-                      </span>
+                    {editorUser ? (
+                      <UserChip user={editorUser} size="xs" />
                     ) : (
                       "—"
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {f.producer ? (
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-                          {f.producer
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")
-                            .slice(0, 2)}
-                        </span>
-                        <span className="truncate">{f.producer}</span>
-                      </span>
+                    {producerUser ? (
+                      <UserChip user={producerUser} size="xs" />
                     ) : (
                       "—"
                     )}
@@ -769,7 +803,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             {sorted.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={6}
                   className="text-center text-muted-foreground text-xs py-8"
                 >
                   {formats.length === 0
