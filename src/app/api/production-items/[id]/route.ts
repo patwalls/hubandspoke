@@ -5,7 +5,7 @@ import {
   formats,
   users,
 } from "@/lib/db/schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -198,6 +198,32 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           .orderBy(formats.name)
       : [];
 
+    // Top performers in this format: up to 3 published items with highest views.
+    // Used to show creators benchmarks for the format they're creating in.
+    // Only shows if item has a format assigned and there are published items in it.
+    const topPerformers = item.format
+      ? await db
+          .select({
+            id: productionItems.id,
+            title: productionItems.title,
+            views: productionItems.views,
+            publishedDate: productionItems.publishedDate,
+            thumbnail: productionItems.thumbnail,
+          })
+          .from(productionItems)
+          .where(
+            and(
+              eq(productionItems.brand, item.brand),
+              eq(productionItems.format, item.format),
+              eq(productionItems.status, "Ready To Publish"),
+              isNotNull(productionItems.views),
+              isNotNull(productionItems.publishedDate)
+            )
+          )
+          .orderBy(desc(productionItems.views))
+          .limit(3)
+      : [];
+
     return NextResponse.json({
       item: {
         ...item,
@@ -222,6 +248,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       pillar,
       producer,
       editor,
+      topPerformers,
       reposts: reposts.map((r) => ({
         ...r,
         createdAt: r.createdAt.toISOString(),
