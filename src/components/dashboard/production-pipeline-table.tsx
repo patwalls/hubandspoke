@@ -122,7 +122,6 @@ export function ProductionPipelineTable({
             <col />
             <col className="w-[220px]" />
             <col className="w-[100px]" />
-            <col className="w-[110px]" />
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-accent/50">
@@ -146,9 +145,6 @@ export function ProductionPipelineTable({
                 title="Predicted views — based on past performance of similar content"
               >
                 Est. Views
-              </th>
-              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                Published
               </th>
             </tr>
           </thead>
@@ -279,9 +275,6 @@ export function ProductionPipelineTable({
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
-                  </td>
-                  <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
-                    {item.publishedDate || "—"}
                   </td>
                 </tr>
               );
