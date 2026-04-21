@@ -22,6 +22,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       brand,
       weeklyGoal: row?.weeklyGoal ?? null,
+      defaultProducerUserId: row?.defaultProducerUserId ?? null,
+      defaultEditorUserId: row?.defaultEditorUserId ?? null,
     });
   } catch (error) {
     console.error("Error fetching brand settings:", error);
@@ -35,39 +37,62 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { brand, weeklyGoal } = body as {
-      brand?: string;
-      weeklyGoal?: number | null;
-    };
+    const { brand, weeklyGoal, defaultProducerUserId, defaultEditorUserId } =
+      body as {
+        brand?: string;
+        weeklyGoal?: number | null;
+        defaultProducerUserId?: string | null;
+        defaultEditorUserId?: string | null;
+      };
 
     if (!brand || !VALID_BRANDS.has(brand)) {
       return NextResponse.json({ error: "Unknown brand" }, { status: 400 });
     }
 
-    let normalizedGoal: number | null = null;
-    if (weeklyGoal !== null && weeklyGoal !== undefined) {
-      const n = Number(weeklyGoal);
-      if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
-        return NextResponse.json(
-          { error: "weeklyGoal must be a non-negative integer or null" },
-          { status: 400 }
-        );
+    // Only overwrite fields the caller actually sent. `null` is a valid value
+    // (clears the default → global fallback); `undefined` means "leave alone".
+    const patch: Partial<typeof brandSettings.$inferInsert> = { updatedAt: new Date() };
+
+    if (weeklyGoal !== undefined) {
+      if (weeklyGoal === null) {
+        patch.weeklyGoal = null;
+      } else {
+        const n = Number(weeklyGoal);
+        if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+          return NextResponse.json(
+            { error: "weeklyGoal must be a non-negative integer or null" },
+            { status: 400 }
+          );
+        }
+        patch.weeklyGoal = n;
       }
-      normalizedGoal = n;
+    }
+    if (defaultProducerUserId !== undefined) {
+      patch.defaultProducerUserId = defaultProducerUserId || null;
+    }
+    if (defaultEditorUserId !== undefined) {
+      patch.defaultEditorUserId = defaultEditorUserId || null;
     }
 
     const [row] = await db
       .insert(brandSettings)
-      .values({ brand, weeklyGoal: normalizedGoal })
+      .values({
+        brand,
+        weeklyGoal: patch.weeklyGoal ?? null,
+        defaultProducerUserId: patch.defaultProducerUserId ?? null,
+        defaultEditorUserId: patch.defaultEditorUserId ?? null,
+      })
       .onConflictDoUpdate({
         target: brandSettings.brand,
-        set: { weeklyGoal: normalizedGoal, updatedAt: new Date() },
+        set: patch,
       })
       .returning();
 
     return NextResponse.json({
       brand: row.brand,
       weeklyGoal: row.weeklyGoal,
+      defaultProducerUserId: row.defaultProducerUserId,
+      defaultEditorUserId: row.defaultEditorUserId,
     });
   } catch (error) {
     console.error("Error updating brand settings:", error);

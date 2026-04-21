@@ -6,11 +6,27 @@ import { ExternalLinkIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
+import { UserChip } from "./user-chip";
 
 interface SettingsPageContentProps {
   brand: string;
   brandLabel: string;
 }
+
+interface AssignableUser {
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+const UNASSIGNED = "__unassigned";
 
 export function SettingsPageContent({
   brand,
@@ -18,8 +34,18 @@ export function SettingsPageContent({
 }: SettingsPageContentProps) {
   const [weeklyGoal, setWeeklyGoal] = useState<string>("");
   const [savedGoal, setSavedGoal] = useState<number | null>(null);
+  const [defaultProducerUserId, setDefaultProducerUserId] = useState<
+    string | null
+  >(null);
+  const [defaultEditorUserId, setDefaultEditorUserId] = useState<string | null>(
+    null
+  );
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [assigneeStatus, setAssigneeStatus] = useState<
+    { kind: "saved" } | { kind: "error"; message: string } | null
+  >(null);
   const [status, setStatus] = useState<
     | { kind: "saved" }
     | { kind: "cleared" }
@@ -32,12 +58,19 @@ export function SettingsPageContent({
     async function load() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/brand-settings?brand=${brand}`);
-        const json = await res.json();
+        const [settingsRes, usersRes] = await Promise.all([
+          fetch(`/api/brand-settings?brand=${brand}`),
+          fetch("/api/users/assignable"),
+        ]);
+        const settingsJson = await settingsRes.json();
+        const usersJson = usersRes.ok ? await usersRes.json() : { users: [] };
         if (cancelled) return;
-        const goal: number | null = json?.weeklyGoal ?? null;
+        const goal: number | null = settingsJson?.weeklyGoal ?? null;
         setSavedGoal(goal);
         setWeeklyGoal(goal != null ? String(goal) : "");
+        setDefaultProducerUserId(settingsJson?.defaultProducerUserId ?? null);
+        setDefaultEditorUserId(settingsJson?.defaultEditorUserId ?? null);
+        setAssignableUsers(usersJson?.users ?? []);
       } catch (err) {
         console.error("Failed to load settings:", err);
       } finally {
@@ -78,6 +111,33 @@ export function SettingsPageContent({
     }
   }
 
+  async function persistAssignee(
+    field: "defaultProducerUserId" | "defaultEditorUserId",
+    value: string | null
+  ) {
+    setAssigneeStatus(null);
+    // Optimistic update so the chip re-renders instantly.
+    if (field === "defaultProducerUserId") setDefaultProducerUserId(value);
+    else setDefaultEditorUserId(value);
+    try {
+      const res = await fetch("/api/brand-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brand, [field]: value }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to save");
+      }
+      setAssigneeStatus({ kind: "saved" });
+    } catch (err) {
+      setAssigneeStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Failed to save",
+      });
+    }
+  }
+
   function handleSave(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = weeklyGoal.trim();
@@ -100,6 +160,13 @@ export function SettingsPageContent({
   const dirty =
     !loading &&
     weeklyGoal.trim() !== (savedGoal != null ? String(savedGoal) : "");
+
+  const producerUser = defaultProducerUserId
+    ? assignableUsers.find((u) => u.id === defaultProducerUserId) ?? null
+    : null;
+  const editorUser = defaultEditorUserId
+    ? assignableUsers.find((u) => u.id === defaultEditorUserId) ?? null
+    : null;
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -170,6 +237,82 @@ export function SettingsPageContent({
           )}
         </div>
       </form>
+
+      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            Default assignments
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Producer/editor assigned to new items when they can&rsquo;t inherit
+            from a source or format. Leave unset to fall back to Pat.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label>Default producer</Label>
+            <Select
+              value={defaultProducerUserId || UNASSIGNED}
+              onValueChange={(v) => {
+                const next = v === UNASSIGNED ? null : v;
+                void persistAssignee("defaultProducerUserId", next);
+              }}
+              disabled={loading}
+            >
+              <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
+                {producerUser ? (
+                  <UserChip user={producerUser} />
+                ) : (
+                  <span className="text-muted-foreground">Use global fallback (Pat)</span>
+                )}
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={UNASSIGNED}>Use global fallback (Pat)</SelectItem>
+                {assignableUsers.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    <UserChip user={u} />
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Default editor</Label>
+            <Select
+              value={defaultEditorUserId || UNASSIGNED}
+              onValueChange={(v) => {
+                const next = v === UNASSIGNED ? null : v;
+                void persistAssignee("defaultEditorUserId", next);
+              }}
+              disabled={loading}
+            >
+              <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
+                {editorUser ? (
+                  <UserChip user={editorUser} />
+                ) : (
+                  <span className="text-muted-foreground">Use global fallback (Pat)</span>
+                )}
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={UNASSIGNED}>Use global fallback (Pat)</SelectItem>
+                {assignableUsers.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    <UserChip user={u} />
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {assigneeStatus?.kind === "saved" && (
+          <span className="text-xs text-primary">Saved.</span>
+        )}
+        {assigneeStatus?.kind === "error" && (
+          <span className="text-xs text-amber-600">{assigneeStatus.message}</span>
+        )}
+      </div>
 
       <div className="rounded-lg border border-border bg-card p-5 space-y-3">
         <div>
