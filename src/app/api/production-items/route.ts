@@ -461,6 +461,19 @@ export async function PUT(request: NextRequest) {
       return trimmed.slice(0, 2000);
     })();
 
+    // A reason is required whenever we transition to Killed. Kill reasons feed
+    // the evergreen classifier as negative exemplars — null reasons break the
+    // feedback loop.
+    if (
+      statusTransition?.to === "Killed" &&
+      (!normalizedKillReason || normalizedKillReason.length < 10)
+    ) {
+      return NextResponse.json(
+        { error: "A kill reason of at least 10 characters is required" },
+        { status: 400 }
+      );
+    }
+
     let updated: typeof productionItems.$inferSelect | undefined;
     try {
       [updated] = await db.transaction(async (tx) => {

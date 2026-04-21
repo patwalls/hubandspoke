@@ -13,13 +13,14 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
 const REASON_MAX = 2000;
+const REASON_MIN = 10;
 
 interface KillIdeaDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   saving?: boolean;
-  onConfirm: (reason: string | null) => void | Promise<void>;
+  onConfirm: (reason: string) => void | Promise<void>;
 }
 
 export function KillIdeaDialog({
@@ -35,9 +36,12 @@ export function KillIdeaDialog({
     if (!open) setReason("");
   }, [open]);
 
+  const trimmed = reason.trim();
+  const canConfirm = trimmed.length >= REASON_MIN && !saving;
+
   async function handleConfirm() {
-    const trimmed = reason.trim();
-    await onConfirm(trimmed ? trimmed.slice(0, REASON_MAX) : null);
+    if (!canConfirm) return;
+    await onConfirm(trimmed.slice(0, REASON_MAX));
   }
 
   return (
@@ -46,8 +50,8 @@ export function KillIdeaDialog({
         <DialogHeader>
           <DialogTitle>Kill "{title || "(Untitled)"}"?</DialogTitle>
           <DialogDescription>
-            Optional: why wouldn't this work? Capturing the reason helps improve
-            future ideas.
+            Why wouldn't this work? The reason trains future idea suggestions —
+            past kills are fed back into the classifier.
           </DialogDescription>
         </DialogHeader>
         <Textarea
@@ -59,6 +63,13 @@ export function KillIdeaDialog({
           autoFocus
           disabled={saving}
         />
+        <div className="text-xs text-muted-foreground">
+          {trimmed.length < REASON_MIN
+            ? `${REASON_MIN - trimmed.length} more character${
+                REASON_MIN - trimmed.length === 1 ? "" : "s"
+              } needed`
+            : `${trimmed.length}/${REASON_MAX}`}
+        </div>
         <DialogFooter>
           <Button
             variant="outline"
@@ -70,7 +81,7 @@ export function KillIdeaDialog({
           <Button
             variant="destructive"
             onClick={handleConfirm}
-            disabled={saving}
+            disabled={!canConfirm}
           >
             {saving ? "Killing…" : "Kill idea"}
           </Button>

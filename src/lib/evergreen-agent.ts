@@ -2,6 +2,10 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const MODEL = "claude-haiku-4-5";
 
+// How much of the body to send to the classifier. Captions over ~1.5k chars
+// are rare; clipping keeps tokens bounded without losing judgement signal.
+const MAX_BODY_CHARS = 1500;
+
 export interface EvergreenVerdict {
   isEvergreen: boolean;
   reasoning: string;
@@ -42,7 +46,7 @@ const tools: Anthropic.Tool[] = [
   },
 ];
 
-const SYSTEM_PROMPT = `You are an evergreen-content classifier for a content production dashboard. A piece of content is "evergreen" when a viewer encountering it for the first time 12+ months from now would still find it valid, interesting, and non-dated.
+const BASE_SYSTEM_PROMPT = `You are an evergreen-content classifier for a content production dashboard. A piece of content is "evergreen" when a viewer encountering it for the first time 12+ months from now would still find it valid, interesting, and non-dated.
 
 Evergreen signals:
   - Foundational lessons, frameworks, mental models, life advice
@@ -58,21 +62,57 @@ NOT evergreen signals:
   - Seasonal or calendar-pinned content (Black Friday, tax season, New Year)
   - "Yesterday I…", "today I…", anything overtly framed as current news
 
+When a full Body is provided, judge primarily on the body text — the title is often truncated or platform-generated (especially for Instagram) and does not reflect the actual post. The body is the source of truth.
+
 You must call exactly one tool — never respond with plain text. Default to \`mark_not_evergreen\` when genuinely uncertain: a false negative just means we skip a repost; a false positive means we push stale content onto the queue.`;
+
+export interface PastKillReason {
+  reason: string;
+  platform?: string | null;
+}
+
+function buildSystemPrompt(pastKills: PastKillReason[] | undefined): string {
+  if (!pastKills || pastKills.length === 0) return BASE_SYSTEM_PROMPT;
+  const lines = pastKills
+    .filter((k) => typeof k.reason === "string" && k.reason.trim().length > 0)
+    .slice(0, 10)
+    .map((k) => {
+      const plat = k.platform ? ` [${k.platform}]` : "";
+      return `  - ${k.reason.trim()}${plat}`;
+    });
+  if (lines.length === 0) return BASE_SYSTEM_PROMPT;
+  return `${BASE_SYSTEM_PROMPT}
+
+Recent operator rejections of repost ideas. Use these as signal for the kind of content the operator no longer wants resurfaced — if the current item is likely to draw a similar rejection, lean toward \`mark_not_evergreen\`:
+${lines.join("\n")}`;
+}
 
 export async function classifyEvergreen(params: {
   title: string;
   platform: string[] | null;
   publishedDate: string | null;
   format?: string | null;
+  contentBody?: string | null;
+  hasArchivedMedia?: boolean;
+  pastKillReasons?: PastKillReason[];
 }): Promise<EvergreenVerdict> {
   const client = new Anthropic();
+
+  const bodyTrimmed = params.contentBody?.trim() ?? "";
+  const bodySection = bodyTrimmed
+    ? `Body:\n"""\n${bodyTrimmed.slice(0, MAX_BODY_CHARS)}${
+        bodyTrimmed.length > MAX_BODY_CHARS ? "…" : ""
+      }\n"""`
+    : `Body: (none captured)`;
 
   const userMessage = [
     `Title: "${params.title}"`,
     `Format: ${params.format ?? "(none)"}`,
     `Channels: ${params.platform?.join(", ") || "(none)"}`,
     `Originally published: ${params.publishedDate ?? "(unknown)"}`,
+    `Archived media available: ${params.hasArchivedMedia ? "yes" : "no"}`,
+    ``,
+    bodySection,
     ``,
     `Classify this as evergreen or not. Call exactly one tool.`,
   ].join("\n");
@@ -80,7 +120,7 @@ export async function classifyEvergreen(params: {
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 512,
-    system: SYSTEM_PROMPT,
+    system: buildSystemPrompt(params.pastKillReasons),
     tools,
     tool_choice: { type: "any" },
     messages: [{ role: "user", content: userMessage }],
