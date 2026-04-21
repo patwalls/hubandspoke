@@ -604,6 +604,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           prev ? { ...prev, item: { ...prev.item, ...payload } } : prev
         );
         setActivityRefreshKey((k) => k + 1);
+        // sourceType flips can materialize reposted_from_item_id and thus the
+        // "Reposted from" source card. That card reads from data.repostedFrom
+        // which only the GET endpoint computes — refetch to surface it.
+        if ("sourceType" in patch) void load();
         setSaveState(
           payload.notionSyncWarning
             ? { kind: "error", message: `Saved. Notion: ${payload.notionSyncWarning}` }
@@ -618,7 +622,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         return false;
       }
     },
-    [contentId]
+    [contentId, load]
   );
 
   const handleSync = useCallback(async () => {
