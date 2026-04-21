@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
 import { enqueueNotification } from "@/lib/services/notifications";
+import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 
 function getNotion(): Client {
@@ -120,6 +121,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const bodyProducerUserId =
+      typeof body.producerUserId === "string" ? body.producerUserId : null;
+    const bodyEditorUserId =
+      typeof body.editorUserId === "string" ? body.editorUserId : null;
+    const resolved = await resolveAssignees({
+      brand,
+      format: format || null,
+    });
+    const producerUserId = bodyProducerUserId ?? resolved.producerUserId;
+    const editorUserId = bodyEditorUserId ?? resolved.editorUserId;
+
     const [created] = await db
       .insert(productionItems)
       .values({
@@ -138,6 +150,8 @@ export async function POST(request: NextRequest) {
         youtubeId,
         youtubeUrl,
         isExternal: false,
+        producerUserId,
+        editorUserId,
         lastPerformanceSyncAt: autoFetched ? new Date() : null,
       })
       .returning();

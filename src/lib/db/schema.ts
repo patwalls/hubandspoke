@@ -312,6 +312,17 @@ export const crossPostRules = pgTable(
 export const brandSettings = pgTable("brand_settings", {
   brand: text("brand").primaryKey(),
   weeklyGoal: integer("weekly_goal"),
+  // Per-brand fallbacks used by resolveAssignees when a new item can't
+  // inherit from a source item or its format. NULL → fall through to the
+  // global fallback (pat).
+  defaultProducerUserId: uuid("default_producer_user_id").references(
+    () => users.id,
+    { onDelete: "set null" }
+  ),
+  defaultEditorUserId: uuid("default_editor_user_id").references(
+    () => users.id,
+    { onDelete: "set null" }
+  ),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

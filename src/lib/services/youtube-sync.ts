@@ -8,6 +8,7 @@
 import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
+import { resolveAssignees } from "@/lib/services/assignees";
 
 const SCRAPE_CREATORS_BASE = "https://api.scrapecreators.com/v1/youtube";
 const MATG_HANDLE = "MATGpod";
@@ -177,9 +178,15 @@ export async function syncMATGYouTube(): Promise<YouTubeSyncResult> {
           result.updated++;
         } else {
           // Insert new
+          const assignees = await resolveAssignees({
+            brand: "matg",
+            format: "Business Interview",
+          });
           await db.insert(productionItems).values({
             ...videoData,
             youtubeId: video.id,
+            producerUserId: assignees.producerUserId,
+            editorUserId: assignees.editorUserId,
           });
           result.created++;
         }

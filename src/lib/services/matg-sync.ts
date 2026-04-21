@@ -14,6 +14,7 @@
 import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
+import { resolveAssignees } from "@/lib/services/assignees";
 
 const SC_BASE = "https://api.scrapecreators.com";
 const MATG_YT_HANDLE = "MATGpod";
@@ -420,7 +421,16 @@ async function syncYouTubeVideos(): Promise<SyncResult> {
         await db.update(productionItems).set(data).where(eq(productionItems.id, existingMap.get(video.url)!));
         result.updated++;
       } else {
-        await db.insert(productionItems).values({ ...data, youtubeId: video.id });
+        const assignees = await resolveAssignees({
+          brand: "matg",
+          format: "Business Interview",
+        });
+        await db.insert(productionItems).values({
+          ...data,
+          youtubeId: video.id,
+          producerUserId: assignees.producerUserId,
+          editorUserId: assignees.editorUserId,
+        });
         result.created++;
       }
     } catch (err) {
@@ -471,7 +481,16 @@ async function syncYouTubeShorts(): Promise<SyncResult> {
         await db.update(productionItems).set(data).where(eq(productionItems.id, existingMap.get(short.url)!));
         result.updated++;
       } else {
-        await db.insert(productionItems).values({ ...data, youtubeId: short.id });
+        const assignees = await resolveAssignees({
+          brand: "matg",
+          format: "YouTube Short",
+        });
+        await db.insert(productionItems).values({
+          ...data,
+          youtubeId: short.id,
+          producerUserId: assignees.producerUserId,
+          editorUserId: assignees.editorUserId,
+        });
         result.created++;
       }
     } catch (err) {
@@ -528,7 +547,15 @@ async function syncInstagram(): Promise<SyncResult> {
         await db.update(productionItems).set(data).where(eq(productionItems.id, existingMap.get(postUrl)!));
         result.updated++;
       } else {
-        await db.insert(productionItems).values(data);
+        const assignees = await resolveAssignees({
+          brand: "matg",
+          format: formatLabel,
+        });
+        await db.insert(productionItems).values({
+          ...data,
+          producerUserId: assignees.producerUserId,
+          editorUserId: assignees.editorUserId,
+        });
         result.created++;
       }
     } catch (err) {
@@ -585,7 +612,15 @@ async function syncTwitter(): Promise<SyncResult> {
         await db.update(productionItems).set(data).where(eq(productionItems.id, existingMap.get(tweetUrl)!));
         result.updated++;
       } else {
-        await db.insert(productionItems).values(data);
+        const assignees = await resolveAssignees({
+          brand: "matg",
+          format: "Tweet",
+        });
+        await db.insert(productionItems).values({
+          ...data,
+          producerUserId: assignees.producerUserId,
+          editorUserId: assignees.editorUserId,
+        });
         result.created++;
       }
     } catch (err) {

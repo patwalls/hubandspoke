@@ -2,6 +2,7 @@ import { and, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { classifyEvergreen } from "@/lib/evergreen-agent";
+import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 
 // Tunables. Keep at module top so the first operator to look at this file can
@@ -202,6 +203,12 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
     );
     if (!channel) continue;
 
+    const assignees = await resolveAssignees({
+      brand: original.brand,
+      sourceItemId: original.id,
+      format: original.format,
+    });
+
     const [inserted] = await db
       .insert(productionItems)
       .values({
@@ -214,6 +221,8 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
         sourceType: "repost",
         repostedFromItemId: original.id,
         evergreenReasoning: original.evergreenReasoning,
+        producerUserId: assignees.producerUserId,
+        editorUserId: assignees.editorUserId,
       })
       .returning({ id: productionItems.id });
 

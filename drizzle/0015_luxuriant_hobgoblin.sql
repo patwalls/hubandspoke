@@ -1,0 +1,4 @@
+ALTER TABLE "brand_settings" ADD COLUMN "default_producer_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "brand_settings" ADD COLUMN "default_editor_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "brand_settings" ADD CONSTRAINT "brand_settings_default_producer_user_id_users_id_fk" FOREIGN KEY ("default_producer_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "brand_settings" ADD CONSTRAINT "brand_settings_default_editor_user_id_users_id_fk" FOREIGN KEY ("default_editor_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;

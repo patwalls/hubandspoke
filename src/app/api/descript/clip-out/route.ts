@@ -9,6 +9,7 @@ import {
   extractCompositionIdFromAgentResponse,
 } from "@/lib/descript";
 import { dispatchRepurpose, type RepurposeAction } from "@/lib/repurpose-agent";
+import { resolveAssignees } from "@/lib/services/assignees";
 
 async function resolveCompositionInBackground(
   triggerId: string,
@@ -127,6 +128,12 @@ export async function POST(request: NextRequest) {
 
   const channel = Array.isArray(target.channels) ? target.channels[0] : undefined;
 
+  const derivativeAssignees = await resolveAssignees({
+    brand: item.brand,
+    sourceItemId: item.id,
+    format: target.name,
+  });
+
   // Derivatives born here are Hub & Spoke-native — no Notion page is created.
   // The Notion sync's pull filter would skip non-authoritative platforms
   // anyway, so there's no value in round-tripping through a Notion task page.
@@ -153,6 +160,8 @@ export async function POST(request: NextRequest) {
             pillarContentItemId: item.id,
             descriptProjectId: item.descriptProjectId,
             descriptProjectUrl: result.projectUrl,
+            producerUserId: derivativeAssignees.producerUserId,
+            editorUserId: derivativeAssignees.editorUserId,
           })
           .returning({ id: productionItems.id });
         derivativeItemId = derivative.id;
@@ -207,6 +216,8 @@ export async function POST(request: NextRequest) {
         status: "Idea",
         pillarContentNotionId: item.notionId,
         pillarContentItemId: item.id,
+        producerUserId: derivativeAssignees.producerUserId,
+        editorUserId: derivativeAssignees.editorUserId,
       })
       .returning({ id: productionItems.id });
     derivativeItemId = derivative.id;

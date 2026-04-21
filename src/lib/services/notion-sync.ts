@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { productionItems, syncLogs, users } from "@/lib/db/schema";
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { isNotionAuthoritative } from "@/lib/platform";
+import { resolveAssignees } from "@/lib/services/assignees";
 
 const DATABASE_ID = "8cb6cee4163d4282a5c87991ea689bde";
 
@@ -326,6 +327,25 @@ export async function syncFromNotion(): Promise<{
     const notionIds: string[] = [];
     const peopleBucket = new Map<string, PersonRow>();
 
+    // Cache email → users.id lookups for this sync so each unique producer/editor
+    // email hits the DB at most once. Populated lazily in resolveAssigneeFromEmail.
+    const emailUserCache = new Map<string, string | null>();
+    async function resolveAssigneeFromEmail(
+      email: string | null
+    ): Promise<string | null> {
+      if (!email) return null;
+      const key = email.toLowerCase();
+      if (emailUserCache.has(key)) return emailUserCache.get(key) ?? null;
+      const [row] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(sql`lower(${users.email}) = ${key}`)
+        .limit(1);
+      const id = row?.id ?? null;
+      emailUserCache.set(key, id);
+      return id;
+    }
+
     // Process each item
     for (const item of allResults) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -399,10 +419,25 @@ export async function syncFromNotion(): Promise<{
           .where(eq(productionItems.notionId, notionId));
         totalUpdated++;
       } else {
-        // INSERT path: seed the legacy email/name columns so the first render
-        // has something to show. producer_user_id/editor_user_id get resolved
-        // by the single UPDATE after flushUserUpserts, so we don't need to
-        // block per-item on a user lookup here.
+        // INSERT path: seed the legacy email/name columns for display, and
+        // resolve producer/editor FKs inline — prefer an email match against
+        // users, fall through to format/brand/global via resolveAssignees.
+        // The email lookup uses an in-memory cache so each unique email hits
+        // the DB once per sync.
+        const [producerFromEmail, editorFromEmail] = await Promise.all([
+          resolveAssigneeFromEmail(producer.email),
+          resolveAssigneeFromEmail(editor.email),
+        ]);
+        let producerUserId = producerFromEmail;
+        let editorUserId = editorFromEmail;
+        if (!producerUserId || !editorUserId) {
+          const resolved = await resolveAssignees({
+            brand: "starter-story",
+            format: formatName,
+          });
+          producerUserId = producerUserId ?? resolved.producerUserId;
+          editorUserId = editorUserId ?? resolved.editorUserId;
+        }
         await db.insert(productionItems).values({
           ...commonData,
           producerEmail: producer.email,
@@ -411,6 +446,8 @@ export async function syncFromNotion(): Promise<{
           editorEmail: editor.email,
           editorNotionUserId: editor.userId,
           editorName: editor.name,
+          producerUserId,
+          editorUserId,
         });
         totalCreated++;
       }
@@ -418,31 +455,6 @@ export async function syncFromNotion(): Promise<{
 
     // Upsert users directory from the producers/editors we saw.
     await flushUserUpserts(peopleBucket);
-
-    // Resolve producer_user_id / editor_user_id on freshly-inserted rows whose
-    // FKs are still NULL. Idempotent: WHERE producer_user_id IS NULL means we
-    // never clobber an app-side assignment edit, and pre-existing rows already
-    // had their FKs set by migration 0006's backfill.
-    //
-    // Invariant: this path intentionally bypasses enqueueNotification — Notion
-    // is not allowed to page the assignee. Assignment emails only fire from
-    // the H&S UI PUT path (src/app/api/production-items/route.ts).
-    await db.execute(sql`
-      UPDATE production_items
-      SET producer_user_id = u.id
-      FROM users u
-      WHERE production_items.producer_user_id IS NULL
-        AND production_items.producer_email IS NOT NULL
-        AND lower(u.email) = lower(production_items.producer_email)
-    `);
-    await db.execute(sql`
-      UPDATE production_items
-      SET editor_user_id = u.id
-      FROM users u
-      WHERE production_items.editor_user_id IS NULL
-        AND production_items.editor_email IS NOT NULL
-        AND lower(u.email) = lower(production_items.editor_email)
-    `);
 
     // Delete orphaned records — but ONLY authoritative ones. H&S-owned rows
     // (Shorts, IG, LinkedIn, Newsletter, etc.) with a stale notionId must not

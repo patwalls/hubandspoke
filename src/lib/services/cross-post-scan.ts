@@ -1,6 +1,7 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { crossPostRules, productionItems } from "@/lib/db/schema";
+import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 
 // Cap flood risk: only consider items published within the last N days on the
@@ -114,6 +115,12 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
         continue;
       }
 
+      const assignees = await resolveAssignees({
+        brand: candidate.brand,
+        sourceItemId: candidate.id,
+        format: candidate.format,
+      });
+
       const [inserted] = await db
         .insert(productionItems)
         .values({
@@ -127,6 +134,8 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
           format: candidate.format,
           pillarContentNotionId: candidate.pillarContentNotionId,
           pillarContentItemId: candidate.pillarContentItemId,
+          producerUserId: assignees.producerUserId,
+          editorUserId: assignees.editorUserId,
         })
         .returning({ id: productionItems.id });
 
