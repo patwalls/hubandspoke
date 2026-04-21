@@ -1235,22 +1235,21 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <div className="space-y-1.5">
             <Label>Producer</Label>
             <Select
-              value={producerUserId || "__unassigned"}
+              value={producerUserId || ""}
               onValueChange={(v) => {
-                const next = v && v !== "__unassigned" ? v : "";
-                setProducerUserId(next);
-                void persistField({ producerUserId: next || null });
+                if (!v) return;
+                setProducerUserId(v);
+                void persistField({ producerUserId: v });
               }}
             >
               <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
                 {producerUser ? (
                   <UserChip user={producerUser} />
                 ) : (
-                  <span className="text-muted-foreground">Unassigned</span>
+                  <span className="text-muted-foreground">Select producer</span>
                 )}
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__unassigned">Unassigned</SelectItem>
                 {assignableUsers.map((u) => (
                   <SelectItem key={u.id} value={u.id}>
                     <UserChip user={u} />
@@ -1262,22 +1261,21 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <div className="space-y-1.5">
             <Label>Editor</Label>
             <Select
-              value={editorUserId || "__unassigned"}
+              value={editorUserId || ""}
               onValueChange={(v) => {
-                const next = v && v !== "__unassigned" ? v : "";
-                setEditorUserId(next);
-                void persistField({ editorUserId: next || null });
+                if (!v) return;
+                setEditorUserId(v);
+                void persistField({ editorUserId: v });
               }}
             >
               <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
                 {editorUser ? (
                   <UserChip user={editorUser} />
                 ) : (
-                  <span className="text-muted-foreground">Unassigned</span>
+                  <span className="text-muted-foreground">Select editor</span>
                 )}
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__unassigned">Unassigned</SelectItem>
                 {assignableUsers.map((u) => (
                   <SelectItem key={u.id} value={u.id}>
                     <UserChip user={u} />

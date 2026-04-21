@@ -48,16 +48,19 @@ export const productionItems = pgTable(
     editorEmail: text("editor_email"),
     editorNotionUserId: text("editor_notion_user_id"),
     editorName: text("editor_name"),
-    // App-owned assignment FKs. Seeded from the legacy email columns on insert
-    // and backfilled once. Notion sync stops touching these on update — edits
-    // happen only in-app. Legacy email/name columns remain for historical
-    // display on archived items whose people aren't in our users directory.
-    producerUserId: uuid("producer_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    editorUserId: uuid("editor_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
+    // App-owned assignment FKs. Required: every production item has both a
+    // producer and an editor. Defaults come from resolveAssignees (source →
+    // format → brand → global). Notion sync stops touching these on update —
+    // edits happen only in-app. Legacy email/name columns remain for
+    // historical display on archived items whose people aren't in our users
+    // directory. onDelete: "restrict" over "set null" since NOT NULL would
+    // reject that anyway — user deletion is blocked while they own items.
+    producerUserId: uuid("producer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    editorUserId: uuid("editor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
     viewsEstimated: boolean("views_estimated").default(false),
     lastPerformanceSyncAt: timestamp("last_performance_sync_at", {
       withTimezone: true,

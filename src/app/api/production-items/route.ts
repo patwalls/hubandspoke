@@ -292,15 +292,34 @@ export async function PUT(request: NextRequest) {
     }
 
     // Capture assignment diffs before the UPDATE so we can fire a notification
-    // for each new assignee after the write commits. Empty string coerces to
-    // null so the UI can clear an assignment.
+    // for each new assignee after the write commits. Producer/editor are
+    // NOT NULL at the DB level — reject explicit attempts to clear them.
     let assignmentDiff: {
       producerChanged: boolean;
       editorChanged: boolean;
-      nextProducerUserId: string | null;
-      nextEditorUserId: string | null;
+      nextProducerUserId: string;
+      nextEditorUserId: string;
     } | null = null;
     if (producerUserId !== undefined || editorUserId !== undefined) {
+      if (
+        producerUserId !== undefined &&
+        (producerUserId === null || producerUserId === "")
+      ) {
+        return NextResponse.json(
+          { error: "producerUserId cannot be empty — every item needs a producer" },
+          { status: 400 }
+        );
+      }
+      if (
+        editorUserId !== undefined &&
+        (editorUserId === null || editorUserId === "")
+      ) {
+        return NextResponse.json(
+          { error: "editorUserId cannot be empty — every item needs an editor" },
+          { status: 400 }
+        );
+      }
+
       const [existing] = await db
         .select({
           producerUserId: productionItems.producerUserId,
@@ -309,14 +328,13 @@ export async function PUT(request: NextRequest) {
         .from(productionItems)
         .where(eq(productionItems.id, id))
         .limit(1);
-      const nextProducer: string | null =
-        producerUserId === undefined
-          ? existing?.producerUserId ?? null
-          : producerUserId || null;
-      const nextEditor: string | null =
-        editorUserId === undefined
-          ? existing?.editorUserId ?? null
-          : editorUserId || null;
+      if (!existing) {
+        return NextResponse.json({ error: "Item not found" }, { status: 404 });
+      }
+      const nextProducer: string =
+        producerUserId === undefined ? existing.producerUserId : producerUserId;
+      const nextEditor: string =
+        editorUserId === undefined ? existing.editorUserId : editorUserId;
       if (producerUserId !== undefined) {
         updateData.producerUserId = nextProducer;
       }
@@ -325,11 +343,9 @@ export async function PUT(request: NextRequest) {
       }
       assignmentDiff = {
         producerChanged:
-          producerUserId !== undefined &&
-          (existing?.producerUserId ?? null) !== nextProducer,
+          producerUserId !== undefined && existing.producerUserId !== nextProducer,
         editorChanged:
-          editorUserId !== undefined &&
-          (existing?.editorUserId ?? null) !== nextEditor,
+          editorUserId !== undefined && existing.editorUserId !== nextEditor,
         nextProducerUserId: nextProducer,
         nextEditorUserId: nextEditor,
       };
