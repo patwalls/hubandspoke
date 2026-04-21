@@ -219,11 +219,13 @@ export function TriageDialog({
             repostedFrom={repostedFrom}
             item={item}
             brand={brand}
+            users={users}
             saving={saving}
             mode={mode}
             setMode={setMode}
             actionError={actionError}
             onMarkPublished={(fields) => updateStatus("Published", fields)}
+            onAssign={assignTo}
             onKill={killIt}
           />
         ) : (
@@ -255,11 +257,13 @@ function SourcedBody({
   repostedFrom,
   item,
   brand,
+  users,
   saving,
   mode,
   setMode,
   actionError,
   onMarkPublished,
+  onAssign,
   onKill,
 }: {
   kind: "repost" | "cross_post";
@@ -267,6 +271,7 @@ function SourcedBody({
   repostedFrom: RepostedFromRef | null;
   item: ProductionItem;
   brand: string;
+  users: AssignableUser[];
   saving: boolean;
   mode: RepostActionMode;
   setMode: (m: RepostActionMode) => void;
@@ -277,6 +282,7 @@ function SourcedBody({
     views?: number | null;
     likes?: number | null;
   }) => Promise<unknown>;
+  onAssign: (userId: string) => Promise<unknown>;
   onKill: () => void;
 }) {
   if (loading) {
@@ -367,6 +373,33 @@ function SourcedBody({
             <p className="text-[11px] text-red-600">{actionError}</p>
           )}
         </section>
+
+        {isCrossPost && mode === "idle" && (
+          <section className="space-y-2 border-t border-border pt-3">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Assign editor
+            </h3>
+            <div className="max-h-40 overflow-y-auto grid grid-cols-2 gap-1">
+              {users.length === 0 ? (
+                <div className="text-xs text-muted-foreground col-span-full">
+                  No assignable users found.
+                </div>
+              ) : (
+                users.map((u) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => onAssign(u.id)}
+                    disabled={saving}
+                    className="flex items-center w-full text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+                  >
+                    <UserChip user={u} size="xs" />
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+        )}
 
         <div className="flex items-center justify-between border-t border-border pt-3">
           <button
