@@ -319,11 +319,48 @@ console.log(
 if (dryRun) {
   console.log("\nDRY RUN — no writes. Pass --apply to persist.");
 } else if (assigned.size > 0) {
-  console.log(`\nApplying ${assigned.size} updates…`);
-  let applied = 0;
+  // Pre-filter pillar-format conflicts in JS so the SQL UPDATE never
+  // trips uniq_production_items_pillar_format. Filtering at the DB
+  // through try/catch turned out not to be reliable — postgres.js can
+  // surface the constraint error via an uncaught rejection.
+  console.log(`\nPre-filtering pillar-format conflicts…`);
+  const takenPairs = new Set(); // key: `${pillarId}::${lower(format)}`
+  const existing = await sql`
+    SELECT pillar_content_item_id, format
+    FROM production_items
+    WHERE brand = ${brandArg}
+      AND pillar_content_item_id IS NOT NULL
+      AND format IS NOT NULL
+  `;
+  for (const r of existing) {
+    takenPairs.add(`${r.pillar_content_item_id}::${(r.format ?? "").toLowerCase()}`);
+  }
+  const itemsById = new Map(itemsRaw.map((it) => [it.id, it]));
+  const toApply = [];
   let pillarConflicts = 0;
-  let otherErrors = 0;
   for (const [id, { format }] of assigned) {
+    const it = itemsById.get(id);
+    const pillarId = it?.pillar_content_item_id ?? null;
+    if (pillarId) {
+      const key = `${pillarId}::${format.toLowerCase()}`;
+      if (takenPairs.has(key)) {
+        pillarConflicts++;
+        if (pillarConflicts <= 10) {
+          console.log(`  ↻ skip ${id}: pillar-format slot already taken → ${format}`);
+        }
+        continue;
+      }
+      takenPairs.add(key);
+    }
+    toApply.push([id, format]);
+  }
+  console.log(
+    `Pre-filter: ${pillarConflicts} pillar-format conflicts skipped. ${toApply.length} updates to apply.`,
+  );
+
+  let applied = 0;
+  let otherErrors = 0;
+  for (const [id, format] of toApply) {
     try {
       await sql`
         UPDATE production_items
@@ -332,23 +369,12 @@ if (dryRun) {
       `;
       applied++;
     } catch (err) {
-      // uniq_production_items_pillar_format: at most one derivative per
-      // (pillar, lower(format)) slot. LLM sometimes picks the same format
-      // for two derivatives of the same pillar — first writer wins, skip
-      // the rest so the run doesn't abort.
-      if (err?.code === "23505" && String(err?.constraint_name ?? "").includes("pillar_format")) {
-        pillarConflicts++;
-        if (pillarConflicts <= 10) {
-          console.log(`  ↻ skip ${id}: pillar-format slot already taken → ${format}`);
-        }
-      } else {
-        otherErrors++;
-        console.error(`  ✗ ${id}: ${err?.code ?? ""} ${err?.message ?? err}`);
-      }
+      otherErrors++;
+      console.error(`  ✗ ${id}: ${err?.code ?? ""} ${err?.message ?? err}`);
     }
   }
   console.log(
-    `Applied ${applied}. Skipped ${pillarConflicts} pillar-format conflicts, ${otherErrors} other errors.`,
+    `Applied ${applied}. ${pillarConflicts} conflicts pre-filtered, ${otherErrors} other errors.`,
   );
   await sql`
     INSERT INTO sync_logs (sync_type, status, items_updated, completed_at)
