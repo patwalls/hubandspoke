@@ -83,7 +83,8 @@ async function main() {
     }
 
     const candidates = await sql`
-      SELECT id, title, thumbnail, brand, platform, views, published_date
+      SELECT id, title, thumbnail, brand, platform, views, published_date,
+             format, pillar_content_notion_id, pillar_content_item_id
       FROM production_items
       WHERE brand = ${rule.brand}
         AND source_type = 'original'
@@ -122,11 +123,13 @@ async function main() {
         await sql`
           INSERT INTO production_items (
             brand, title, thumbnail, status, platform,
-            source_type, reposted_from_item_id
+            source_type, reposted_from_item_id,
+            format, pillar_content_notion_id, pillar_content_item_id
           ) VALUES (
             ${c.brand}, ${c.title}, ${c.thumbnail}, 'Idea',
             ${JSON.stringify([rule.target_platform])}::jsonb,
-            'cross_post', ${c.id}
+            'cross_post', ${c.id},
+            ${c.format}, ${c.pillar_content_notion_id}, ${c.pillar_content_item_id}
           )
         `;
       }

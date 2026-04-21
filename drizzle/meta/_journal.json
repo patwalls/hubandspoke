@@ -71,6 +71,13 @@
       "when": 1776722942559,
       "tag": "0009_oval_swarm",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1776738344450,
+      "tag": "0010_lean_mathemanic",
+      "breakpoints": true
     }
   ]
 }

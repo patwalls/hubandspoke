@@ -127,7 +127,7 @@ export const productionItems = pgTable(
     uniqueIndex("uniq_production_items_pillar_format")
       .on(table.pillarContentItemId, sql`lower(${table.format})`)
       .where(
-        sql`${table.pillarContentItemId} IS NOT NULL AND ${table.format} IS NOT NULL`
+        sql`${table.pillarContentItemId} IS NOT NULL AND ${table.format} IS NOT NULL AND ${table.sourceType} = 'original'`
       ),
   ]
 );

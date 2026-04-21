@@ -60,6 +60,9 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
         views: productionItems.views,
         brand: productionItems.brand,
         publishedDate: productionItems.publishedDate,
+        format: productionItems.format,
+        pillarContentNotionId: productionItems.pillarContentNotionId,
+        pillarContentItemId: productionItems.pillarContentItemId,
       })
       .from(productionItems)
       .where(
@@ -121,6 +124,9 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
           platform: [rule.targetPlatform],
           sourceType: "cross_post",
           repostedFromItemId: candidate.id,
+          format: candidate.format,
+          pillarContentNotionId: candidate.pillarContentNotionId,
+          pillarContentItemId: candidate.pillarContentItemId,
         })
         .returning({ id: productionItems.id });
 
