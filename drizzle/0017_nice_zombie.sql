@@ -1,0 +1,1 @@
+ALTER TABLE "brand_settings" ADD COLUMN "week_start_day" integer DEFAULT 0 NOT NULL;

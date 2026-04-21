@@ -15,26 +15,29 @@ import {
 } from "date-fns";
 import type { Period } from "@/types";
 
+export type WeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
 export function buildPeriods(
   startDate: Date,
   endDate: Date,
-  viewType: "weekly" | "daily"
+  viewType: "weekly" | "daily",
+  weekStartsOn: WeekStartsOn = 0
 ): Period[] {
   const periods: Period[] = [];
 
   if (viewType === "weekly") {
-    // Round UP to the next Sunday so W1 is always a full Sun–Sat week
-    // inside the lookback window. The trailing week still ends on `endDate`
-    // (typically today), so the current in-progress week is shown as-is
-    // with whatever partial data exists.
-    let current = startOfWeek(startDate, { weekStartsOn: 0 });
+    // Round UP to the next week-start so W1 is always a full week inside the
+    // lookback window. The trailing week still ends on `endDate` (typically
+    // today), so the current in-progress week is shown as-is with whatever
+    // partial data exists.
+    let current = startOfWeek(startDate, { weekStartsOn });
     if (differenceInDays(startDate, current) > 0) {
       current = addWeeks(current, 1);
     }
     let weekNum = 1;
 
     while (!isAfter(current, endDate)) {
-      const weekEnd = endOfWeek(current, { weekStartsOn: 0 });
+      const weekEnd = endOfWeek(current, { weekStartsOn });
       const periodEnd = isAfter(weekEnd, endDate) ? endDate : weekEnd;
 
       periods.push({
@@ -76,10 +79,12 @@ export function findPeriod(
   });
 }
 
-export function getWeekProgress(): { day: number; percent: number } {
+export function getWeekProgress(
+  weekStartsOn: WeekStartsOn = 0
+): { day: number; percent: number } {
   const now = new Date();
-  const dayOfWeek = now.getDay(); // 0 = Sunday
-  const day = dayOfWeek === 0 ? 7 : dayOfWeek; // Make Sunday = 7
+  // Day 1 = week-start, Day 7 = last day of the week.
+  const day = ((now.getDay() - weekStartsOn + 7) % 7) + 1;
   const percent = Math.round((day / 7) * 100);
   return { day, percent };
 }
@@ -123,10 +128,11 @@ export function getQuickRange(
 
 export function alignToWeekBoundaries(
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  weekStartsOn: WeekStartsOn = 0
 ): { startDate: Date; endDate: Date } {
   return {
-    startDate: startOfWeek(startDate, { weekStartsOn: 0 }),
-    endDate: endOfWeek(endDate, { weekStartsOn: 0 }),
+    startDate: startOfWeek(startDate, { weekStartsOn }),
+    endDate: endOfWeek(endDate, { weekStartsOn }),
   };
 }

@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { productionItems, formats } from "@/lib/db/schema";
 import { and, eq, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
-import { getWeeklyGoal } from "@/lib/db/queries";
+import { getBrandSettings } from "@/lib/db/queries";
 import { format, subDays } from "date-fns";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
 
@@ -54,11 +54,14 @@ export async function GET(request: NextRequest) {
   const sourceFilter = searchParams.get("source") || "all";
 
   try {
+    const { weeklyGoal, weekStartDay } = await getBrandSettings("matg");
+
     // Build periods
     const periods = buildPeriods(
       new Date(startDate + "T00:00:00"),
       new Date(endDate + "T00:00:00"),
-      viewType
+      viewType,
+      weekStartDay
     );
 
     // Build query conditions — MATG brand, has published date
@@ -210,8 +213,6 @@ export async function GET(request: NextRequest) {
     const primaryViewsPerPost = calcViewsPerPost(primaryProduction, primaryViews);
     const formatViewsPerPost = calcViewsPerPost(formatProduction, formatViews);
 
-    const weeklyGoal = await getWeeklyGoal("matg");
-
     // Map items
     const mappedItems: ProductionItem[] = items.map((item) => ({
       id: item.id,
@@ -268,7 +269,7 @@ export async function GET(request: NextRequest) {
         viewsPerPost: formatViewsPerPost,
       },
       items: mappedItems,
-      weekProgress: getWeekProgress(),
+      weekProgress: getWeekProgress(weekStartDay),
       platforms: platformList,
       formats: formatList,
       showingFormats,

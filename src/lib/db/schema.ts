@@ -315,6 +315,8 @@ export const crossPostRules = pgTable(
 export const brandSettings = pgTable("brand_settings", {
   brand: text("brand").primaryKey(),
   weeklyGoal: integer("weekly_goal"),
+  // 0 = Sunday .. 6 = Saturday. Controls dashboard week buckets.
+  weekStartDay: integer("week_start_day").notNull().default(0),
   // Per-brand fallbacks used by resolveAssignees when a new item can't
   // inherit from a source item or its format. NULL → fall through to the
   // global fallback (pat).

@@ -93,7 +93,7 @@ export function MetricTiles({
         ) : (
           <div className="mt-3">
             <Link
-              href={`/${brand}/settings`}
+              href={`/settings/brands/${brand}`}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
               Set goal

@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       brand,
       weeklyGoal: row?.weeklyGoal ?? null,
+      weekStartDay: row?.weekStartDay ?? 0,
       defaultProducerUserId: row?.defaultProducerUserId ?? null,
       defaultEditorUserId: row?.defaultEditorUserId ?? null,
     });
@@ -37,13 +38,19 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { brand, weeklyGoal, defaultProducerUserId, defaultEditorUserId } =
-      body as {
-        brand?: string;
-        weeklyGoal?: number | null;
-        defaultProducerUserId?: string | null;
-        defaultEditorUserId?: string | null;
-      };
+    const {
+      brand,
+      weeklyGoal,
+      weekStartDay,
+      defaultProducerUserId,
+      defaultEditorUserId,
+    } = body as {
+      brand?: string;
+      weeklyGoal?: number | null;
+      weekStartDay?: number;
+      defaultProducerUserId?: string | null;
+      defaultEditorUserId?: string | null;
+    };
 
     if (!brand || !VALID_BRANDS.has(brand)) {
       return NextResponse.json({ error: "Unknown brand" }, { status: 400 });
@@ -67,6 +74,16 @@ export async function PUT(request: NextRequest) {
         patch.weeklyGoal = n;
       }
     }
+    if (weekStartDay !== undefined) {
+      const n = Number(weekStartDay);
+      if (!Number.isInteger(n) || n < 0 || n > 6) {
+        return NextResponse.json(
+          { error: "weekStartDay must be an integer 0–6 (0 = Sunday)" },
+          { status: 400 }
+        );
+      }
+      patch.weekStartDay = n;
+    }
     if (defaultProducerUserId !== undefined) {
       patch.defaultProducerUserId = defaultProducerUserId || null;
     }
@@ -79,6 +96,7 @@ export async function PUT(request: NextRequest) {
       .values({
         brand,
         weeklyGoal: patch.weeklyGoal ?? null,
+        weekStartDay: patch.weekStartDay ?? 0,
         defaultProducerUserId: patch.defaultProducerUserId ?? null,
         defaultEditorUserId: patch.defaultEditorUserId ?? null,
       })
@@ -91,6 +109,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({
       brand: row.brand,
       weeklyGoal: row.weeklyGoal,
+      weekStartDay: row.weekStartDay,
       defaultProducerUserId: row.defaultProducerUserId,
       defaultEditorUserId: row.defaultEditorUserId,
     });

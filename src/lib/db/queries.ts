@@ -79,7 +79,39 @@ export async function getWeeklyGoal(brand: string): Promise<number | null> {
     .limit(1);
   return row?.weeklyGoal ?? null;
 }
-import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
+
+export type BrandSettings = {
+  weeklyGoal: number | null;
+  weekStartDay: WeekStartsOn;
+};
+
+export async function getBrandSettings(brand: string): Promise<BrandSettings> {
+  const [row] = await db
+    .select({
+      weeklyGoal: brandSettings.weeklyGoal,
+      weekStartDay: brandSettings.weekStartDay,
+    })
+    .from(brandSettings)
+    .where(eq(brandSettings.brand, brand))
+    .limit(1);
+  return {
+    weeklyGoal: row?.weeklyGoal ?? null,
+    weekStartDay: normalizeWeekStart(row?.weekStartDay),
+  };
+}
+
+function normalizeWeekStart(value: number | null | undefined): WeekStartsOn {
+  if (value == null) return 0;
+  const clamped = Math.max(0, Math.min(6, Math.floor(value)));
+  return clamped as WeekStartsOn;
+}
+
+import {
+  buildPeriods,
+  findPeriod,
+  getWeekProgress,
+  type WeekStartsOn,
+} from "@/lib/utils/dates";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
 
 interface ReportParams {
@@ -96,11 +128,14 @@ export async function getContentReport(
 ): Promise<ContentReportData> {
   const { startDate, endDate, viewType, platform, format, source } = params;
 
+  const { weeklyGoal, weekStartDay } = await getBrandSettings("starter-story");
+
   // Build periods
   const periods = buildPeriods(
     new Date(startDate + "T00:00:00"),
     new Date(endDate + "T00:00:00"),
-    viewType
+    viewType,
+    weekStartDay
   );
 
   // Build query conditions — scoped to starter-story brand only
@@ -253,8 +288,6 @@ export async function getContentReport(
   const primaryViewsPerPost = calcViewsPerPost(primaryProduction, primaryViews);
   const formatViewsPerPost = calcViewsPerPost(formatProduction, formatViews);
 
-  const weeklyGoal = await getWeeklyGoal("starter-story");
-
   const mappedItems: ProductionItem[] = items.map((it) => mapProductionItem(it));
 
   return {
@@ -273,7 +306,7 @@ export async function getContentReport(
       viewsPerPost: formatViewsPerPost,
     },
     items: mappedItems,
-    weekProgress: getWeekProgress(),
+    weekProgress: getWeekProgress(weekStartDay),
     platforms: platformList,
     formats: formatList,
     showingFormats,

@@ -28,12 +28,23 @@ interface AssignableUser {
 
 const UNASSIGNED = "__unassigned";
 
+const WEEK_DAYS = [
+  { value: 0, label: "Sunday" },
+  { value: 1, label: "Monday" },
+  { value: 2, label: "Tuesday" },
+  { value: 3, label: "Wednesday" },
+  { value: 4, label: "Thursday" },
+  { value: 5, label: "Friday" },
+  { value: 6, label: "Saturday" },
+] as const;
+
 export function SettingsPageContent({
   brand,
   brandLabel,
 }: SettingsPageContentProps) {
   const [weeklyGoal, setWeeklyGoal] = useState<string>("");
   const [savedGoal, setSavedGoal] = useState<number | null>(null);
+  const [weekStartDay, setWeekStartDay] = useState<number>(0);
   const [defaultProducerUserId, setDefaultProducerUserId] = useState<
     string | null
   >(null);
@@ -43,6 +54,9 @@ export function SettingsPageContent({
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [weekStatus, setWeekStatus] = useState<
+    { kind: "saved" } | { kind: "error"; message: string } | null
+  >(null);
   const [assigneeStatus, setAssigneeStatus] = useState<
     { kind: "saved" } | { kind: "error"; message: string } | null
   >(null);
@@ -68,6 +82,11 @@ export function SettingsPageContent({
         const goal: number | null = settingsJson?.weeklyGoal ?? null;
         setSavedGoal(goal);
         setWeeklyGoal(goal != null ? String(goal) : "");
+        setWeekStartDay(
+          typeof settingsJson?.weekStartDay === "number"
+            ? settingsJson.weekStartDay
+            : 0
+        );
         setDefaultProducerUserId(settingsJson?.defaultProducerUserId ?? null);
         setDefaultEditorUserId(settingsJson?.defaultEditorUserId ?? null);
         setAssignableUsers(usersJson?.users ?? []);
@@ -108,6 +127,30 @@ export function SettingsPageContent({
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function persistWeekStart(next: number) {
+    const prev = weekStartDay;
+    setWeekStartDay(next); // optimistic
+    setWeekStatus(null);
+    try {
+      const res = await fetch("/api/brand-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brand, weekStartDay: next }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to save");
+      }
+      setWeekStatus({ kind: "saved" });
+    } catch (err) {
+      setWeekStartDay(prev);
+      setWeekStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Failed to save",
+      });
     }
   }
 
@@ -237,6 +280,43 @@ export function SettingsPageContent({
           )}
         </div>
       </form>
+
+      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            Week boundaries
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Controls the week buckets shown on the dashboard. End of week is
+            six days after the start.
+          </p>
+        </div>
+        <div className="space-y-1.5 max-w-[240px]">
+          <Label>Week starts on</Label>
+          <Select
+            value={String(weekStartDay)}
+            onValueChange={(v) => void persistWeekStart(Number(v))}
+            disabled={loading}
+          >
+            <SelectTrigger>
+              {WEEK_DAYS.find((d) => d.value === weekStartDay)?.label ?? "Sunday"}
+            </SelectTrigger>
+            <SelectContent>
+              {WEEK_DAYS.map((d) => (
+                <SelectItem key={d.value} value={String(d.value)}>
+                  {d.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {weekStatus?.kind === "saved" && (
+            <span className="text-xs text-primary">Saved.</span>
+          )}
+          {weekStatus?.kind === "error" && (
+            <span className="text-xs text-amber-600">{weekStatus.message}</span>
+          )}
+        </div>
+      </div>
 
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">
         <div>
