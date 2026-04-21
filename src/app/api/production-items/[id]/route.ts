@@ -6,6 +6,11 @@ import {
   users,
 } from "@/lib/db/schema";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import {
+  buildViewPredictorContext,
+  predictViews,
+  type ViewPrediction,
+} from "@/lib/services/view-predictor";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -225,6 +230,23 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           .limit(3)
       : [];
 
+    // Predicted views — computed on the fly for pre-published items. Once the
+    // item is "Published" we rely on the `predictedViewsSnapshot` column
+    // (captured at the publish transition) and skip recomputation.
+    let prediction: ViewPrediction | null = null;
+    if (item.status !== "Published") {
+      const ctx = await buildViewPredictorContext(item.brand);
+      prediction = predictViews(
+        {
+          id: item.id,
+          format: item.format,
+          platforms: (item.platform as string[] | null) ?? null,
+          pillarContentItemId: item.pillarContentItemId,
+        },
+        ctx
+      );
+    }
+
     return NextResponse.json({
       item: {
         ...item,
@@ -234,6 +256,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           ? parseFloat(item.apvFirst24Hours)
           : null,
       },
+      prediction,
       descendantViewsTotal,
       derivatives: derivatives.map((d) => ({
         ...d,

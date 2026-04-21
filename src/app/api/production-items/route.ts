@@ -5,6 +5,10 @@ import { contentEvents, productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
+import {
+  buildViewPredictorContext,
+  predictViews,
+} from "@/lib/services/view-predictor";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
@@ -288,6 +292,56 @@ export async function PUT(request: NextRequest) {
       const nextStatus: string | null = status || null;
       if (existing && existing.status !== nextStatus) {
         statusTransition = { from: existing.status, to: nextStatus };
+      }
+    }
+
+    // Snapshot the prediction the first time this item flips to Published so
+    // we can render Predicted-vs-Actual afterwards. Never overwrite an existing
+    // snapshot — a republish shouldn't erase the original call.
+    if (statusTransition?.to === "Published") {
+      const [current] = await db
+        .select({
+          brand: productionItems.brand,
+          format: productionItems.format,
+          platform: productionItems.platform,
+          pillarContentItemId: productionItems.pillarContentItemId,
+          predictedViewsSnapshot: productionItems.predictedViewsSnapshot,
+        })
+        .from(productionItems)
+        .where(eq(productionItems.id, id))
+        .limit(1);
+      if (current && current.predictedViewsSnapshot == null) {
+        const nextPlatform =
+          platform !== undefined
+            ? (platform as string[] | null)
+            : ((current.platform as string[] | null) ?? null);
+        const nextFormat =
+          format !== undefined ? (format || null) : current.format;
+        const nextPillar =
+          pillarContentItemId !== undefined
+            ? pillarContentItemId || null
+            : current.pillarContentItemId;
+        try {
+          const ctx = await buildViewPredictorContext(current.brand);
+          const p = predictViews(
+            {
+              id,
+              format: nextFormat,
+              platforms: nextPlatform,
+              pillarContentItemId: nextPillar,
+            },
+            ctx
+          );
+          if (p.prediction != null) {
+            updateData.predictedViewsSnapshot = p.prediction;
+            updateData.predictedViewsSnapshotAt = new Date();
+          }
+        } catch (err) {
+          console.error(
+            "[publish] predicted views snapshot failed — continuing publish anyway",
+            err
+          );
+        }
       }
     }
 

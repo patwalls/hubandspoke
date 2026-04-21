@@ -127,6 +127,13 @@
       "when": 1776805372073,
       "tag": "0017_nice_zombie",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1776806184679,
+      "tag": "0018_noisy_raider",
+      "breakpoints": true
     }
   ]
 }

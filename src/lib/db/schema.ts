@@ -111,6 +111,13 @@ export const productionItems = pgTable(
       withTimezone: true,
     }),
     evergreenReasoning: text("evergreen_reasoning"),
+    // Predicted views at the moment this item transitioned to "Published".
+    // Written once on the first published-transition and never overwritten —
+    // lets the detail page show actual-vs-predicted after the fact.
+    predictedViewsSnapshot: integer("predicted_views_snapshot"),
+    predictedViewsSnapshotAt: timestamp("predicted_views_snapshot_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

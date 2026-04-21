@@ -1,3 +1,5 @@
+import type { ViewPrediction } from "@/lib/services/view-predictor";
+
 export interface ProductionItem {
   id: string;
   notionId: string | null;
@@ -46,6 +48,9 @@ export interface ProductionItem {
   mediaS3UploadedAt?: string | null;
   mediaSizeBytes?: number | null;
   mediaContentType?: string | null;
+  predictedViewsSnapshot?: number | null;
+  predictedViewsSnapshotAt?: string | null;
+  prediction?: ViewPrediction | null;
   createdAt: string;
   updatedAt: string;
 }

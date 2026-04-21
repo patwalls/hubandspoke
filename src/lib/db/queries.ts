@@ -66,6 +66,10 @@ function mapProductionItem(
       | "repost"
       | "cross_post",
     repostedFromItemId: item.repostedFromItemId,
+    pillarContentItemId: item.pillarContentItemId,
+    predictedViewsSnapshot: item.predictedViewsSnapshot,
+    predictedViewsSnapshotAt:
+      item.predictedViewsSnapshotAt?.toISOString() ?? null,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
   };
