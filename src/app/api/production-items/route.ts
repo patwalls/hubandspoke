@@ -178,7 +178,16 @@ export async function PUT(request: NextRequest) {
       clicks,
       leads,
       salesAmount,
+      sourceType,
     } = body;
+
+    const VALID_SOURCE_TYPES = new Set(["original", "repost", "cross_post"]);
+    if (sourceType !== undefined && !VALID_SOURCE_TYPES.has(sourceType)) {
+      return NextResponse.json(
+        { error: `sourceType must be one of: ${[...VALID_SOURCE_TYPES].join(", ")}` },
+        { status: 400 }
+      );
+    }
 
     if (!id) {
       return NextResponse.json(
@@ -226,6 +235,31 @@ export async function PUT(request: NextRequest) {
     if (clicks !== undefined) updateData.clicks = clicks === "" || clicks === null ? null : Number(clicks);
     if (leads !== undefined) updateData.leads = leads === "" || leads === null ? null : Number(leads);
     if (salesAmount !== undefined) updateData.salesAmount = salesAmount === "" || salesAmount === null ? null : String(salesAmount);
+
+    // Source type: original → repost/cross_post mirrors pillar into
+    // reposted_from_item_id if the latter is empty (matches the backfill
+    // classifier's semantic). Flipping back to original clears it so the
+    // repost graph stays clean.
+    if (sourceType !== undefined) {
+      updateData.sourceType = sourceType;
+      const [existing] = await db
+        .select({
+          pillarContentItemId: productionItems.pillarContentItemId,
+          repostedFromItemId: productionItems.repostedFromItemId,
+        })
+        .from(productionItems)
+        .where(eq(productionItems.id, id))
+        .limit(1);
+      if (sourceType === "original") {
+        updateData.repostedFromItemId = null;
+      } else if (existing && !existing.repostedFromItemId) {
+        const nextPillar =
+          pillarContentItemId !== undefined
+            ? pillarContentItemId
+            : existing.pillarContentItemId;
+        if (nextPillar) updateData.repostedFromItemId = nextPillar;
+      }
+    }
 
     // If status is changing, capture from/to so we can write a content_events row.
     // Fetched before the UPDATE so the diff is accurate.

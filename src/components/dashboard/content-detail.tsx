@@ -525,6 +525,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
+  const [sourceType, setSourceType] = useState<string>("original");
 
   useEffect(() => {
     let cancelled = false;
@@ -555,6 +556,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     setEditorUserId(item.editorUserId || "");
     setPublishedLink(item.publishedLink || "");
     setPublishedDate(item.publishedDate || "");
+    setSourceType(item.sourceType || "original");
   }, []);
 
   const load = useCallback(async () => {
@@ -1155,6 +1157,39 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 void persistField({ pillarContentItemId: next?.id ?? null });
               }}
             />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label>Source type</Label>
+            <Select
+              value={sourceType}
+              onValueChange={(v) => {
+                const next = v ?? "original";
+                const prev = sourceType;
+                if (next === prev) return;
+                setSourceType(next);
+                void persistField({ sourceType: next }).then((ok) => {
+                  if (!ok) setSourceType(prev);
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="original">Original</SelectItem>
+                <SelectItem value="repost">Repost</SelectItem>
+                <SelectItem value="cross_post">Cross-post</SelectItem>
+              </SelectContent>
+            </Select>
+            {(sourceType === "repost" || sourceType === "cross_post") && (
+              <p className="text-xs text-muted-foreground">
+                Exempt from the (pillar, format) uniqueness — can reuse the
+                original&rsquo;s format.
+              </p>
+            )}
           </div>
         </div>
 
