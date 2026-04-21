@@ -32,6 +32,15 @@ export const productionItems = pgTable(
     campaign: text("campaign"),
     utmCampaign: text("utm_campaign"),
     publishedLink: text("published_link"),
+    // Full post body (tweet text, IG caption, YT description). Captured from
+    // the upstream API at sync/publish time. For long-form video, the
+    // transcript lives in `transcripts` instead — this column is only used
+    // for short-form text posts where the body *is* the content.
+    contentBody: text("content_body"),
+    contentBodyFetchedAt: timestamp("content_body_fetched_at", {
+      withTimezone: true,
+    }),
+    contentBodySource: text("content_body_source"),
     isExternal: boolean("is_external").default(false).notNull(),
     views: integer("views"),
     likes: integer("likes"),
