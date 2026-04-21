@@ -1,19 +1,30 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { IdeaQueueTable } from "./idea-queue-table";
+import { SelectPill } from "./filter-pills";
 import type { ProductionItem } from "@/types";
 
 interface QueueViewProps {
   brand: string;
 }
 
+const SOURCES = [
+  { value: "all", label: "All sources" },
+  { value: "original", label: "Original" },
+  { value: "repost", label: "Repost" },
+  { value: "cross_post", label: "Cross-post" },
+];
+
 export function QueueView({ brand }: QueueViewProps) {
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [selectedPlatform, setSelectedPlatform] = useState("all");
+  const [selectedFormat, setSelectedFormat] = useState("all");
+  const [selectedSource, setSelectedSource] = useState("all");
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -45,21 +56,60 @@ export function QueueView({ brand }: QueueViewProps) {
   const hsItems = items.filter((item) => !isNotionAuthoritative(item.platform));
   const ideaItems = hsItems.filter((item) => item.status === "Idea");
 
+  const platformOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of ideaItems) {
+      for (const p of item.platform ?? []) {
+        if (p) set.add(p);
+      }
+    }
+    return [
+      { value: "all", label: "All channels" },
+      ...Array.from(set)
+        .sort((a, b) => a.localeCompare(b))
+        .map((p) => ({ value: p, label: p })),
+    ];
+  }, [ideaItems]);
+
+  const formatOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of ideaItems) {
+      if (item.format) set.add(item.format);
+    }
+    return [
+      { value: "all", label: "All formats" },
+      ...Array.from(set)
+        .sort((a, b) => a.localeCompare(b))
+        .map((f) => ({ value: f, label: f })),
+    ];
+  }, [ideaItems]);
+
   const query = search.trim().toLowerCase();
-  const filtered = query
-    ? ideaItems.filter((item) => {
-        const haystack = [
-          item.title,
-          item.format,
-          item.platform?.join(" "),
-          item.producerEmail,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        return haystack.includes(query);
-      })
-    : ideaItems;
+  const filtered = ideaItems.filter((item) => {
+    if (selectedPlatform !== "all") {
+      if (!item.platform?.includes(selectedPlatform)) return false;
+    }
+    if (selectedFormat !== "all") {
+      if (item.format !== selectedFormat) return false;
+    }
+    if (selectedSource !== "all") {
+      const source = item.sourceType ?? "original";
+      if (source !== selectedSource) return false;
+    }
+    if (query) {
+      const haystack = [
+        item.title,
+        item.format,
+        item.platform?.join(" "),
+        item.producerEmail,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+    return true;
+  });
 
   const repostCount = filtered.filter(
     (i) => i.sourceType === "repost"
@@ -110,6 +160,27 @@ export function QueueView({ brand }: QueueViewProps) {
         />
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <SelectPill
+          label="Channel"
+          value={selectedPlatform}
+          options={platformOptions}
+          onChange={setSelectedPlatform}
+        />
+        <SelectPill
+          label="Format"
+          value={selectedFormat}
+          options={formatOptions}
+          onChange={setSelectedFormat}
+        />
+        <SelectPill
+          label="Source"
+          value={selectedSource}
+          options={SOURCES}
+          onChange={setSelectedSource}
+        />
+      </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -140,8 +211,11 @@ export function QueueView({ brand }: QueueViewProps) {
           items={filtered}
           brand={brand}
           emptyMessage={
-            query
-              ? `No ideas match “${search}”.`
+            query ||
+            selectedPlatform !== "all" ||
+            selectedFormat !== "all" ||
+            selectedSource !== "all"
+              ? "No ideas match the current filters."
               : "Nothing to triage — the queue is empty."
           }
           onMutate={fetchQueue}

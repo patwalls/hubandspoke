@@ -231,7 +231,7 @@ function DateRangePill({
   );
 }
 
-function SelectPill({
+export function SelectPill({
   label,
   value,
   options,
