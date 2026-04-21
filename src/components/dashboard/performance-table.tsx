@@ -21,6 +21,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { todayLocalISO } from "@/lib/utils/dates";
+import { cn } from "@/lib/utils";
+import { platformClass } from "@/lib/badge-colors";
 
 interface PerformanceTableProps {
   items: ProductionItem[];
@@ -67,7 +69,8 @@ const SS_PLATFORMS = [
   "Instagram Post",
   "Instagram Reel",
   "Instagram Story",
-  "Twitter",
+  "X (Starter Story)",
+  "X (Pat Walls)",
   "LinkedIn",
   "TikTok",
   "Threads",
@@ -80,7 +83,7 @@ const MATG_PLATFORMS = [
   "Instagram Post",
   "Instagram Reel",
   "Instagram Story",
-  "Twitter",
+  "X",
   "LinkedIn",
   "TikTok",
   "Threads",
@@ -567,7 +570,10 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                     {item.platform?.map((p) => (
                       <span
                         key={p}
-                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                        className={cn(
+                          "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                          platformClass(p)
+                        )}
                       >
                         {p}
                       </span>

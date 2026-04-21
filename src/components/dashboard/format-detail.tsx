@@ -1432,7 +1432,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
               <Input
                 value={childName}
                 onChange={(e) => setChildName(e.target.value)}
-                placeholder="e.g. Twitter clip"
+                placeholder="e.g. X clip"
                 autoFocus
               />
             </div>

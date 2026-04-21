@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
+import { statusClass } from "@/lib/badge-colors";
 import { ProductionPipelineTable } from "./production-pipeline-table";
 import type { ProductionItem } from "@/types";
 
@@ -19,13 +20,6 @@ const PIPELINE_STATUSES = [
   "Review",
   "Assigned",
 ] as const;
-
-const STATUS_COLORS: Record<string, string> = {
-  "Ready To Publish": "bg-pink-100 text-pink-800 border-pink-200",
-  "Final Review": "bg-orange-100 text-orange-800 border-orange-200",
-  Review: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  Assigned: "bg-blue-100 text-blue-800 border-blue-200",
-};
 
 export function ProductionView({ brand }: ProductionViewProps) {
   const [items, setItems] = useState<ProductionItem[]>([]);
@@ -145,7 +139,7 @@ export function ProductionView({ brand }: ProductionViewProps) {
                   <span
                     className={cn(
                       "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border",
-                      STATUS_COLORS[status]
+                      statusClass(status)
                     )}
                   >
                     {status}

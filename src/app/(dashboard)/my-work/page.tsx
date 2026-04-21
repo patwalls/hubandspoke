@@ -4,6 +4,8 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
+import { cn } from "@/lib/utils";
+import { statusClass } from "@/lib/badge-colors";
 
 export const dynamic = "force-dynamic";
 
@@ -262,7 +264,12 @@ function Section({
                     </td>
                     <td className="px-3 py-2">
                       {r.status ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border">
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                            statusClass(r.status)
+                          )}
+                        >
                           {r.status}
                         </span>
                       ) : (

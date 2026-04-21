@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { TriageDialog } from "./triage-dialog";
+import { cn } from "@/lib/utils";
+import { platformClass } from "@/lib/badge-colors";
 import type { ProductionItem } from "@/types";
 
 interface AssignableUser {
@@ -110,7 +112,10 @@ function IdeaQueueRow({
           {item.platform?.map((p) => (
             <span
               key={p}
-              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border max-w-full truncate"
+              className={cn(
+                "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border max-w-full truncate",
+                platformClass(p)
+              )}
               title={p}
             >
               {p}

@@ -121,7 +121,14 @@ export function platformKindsFor(platforms: string[] | null): Set<PlatformKind> 
     if (p === "YouTube Community") out.add("youtube_community");
     else if (p.includes("YouTube")) out.add("youtube");
     else if (p.includes("Instagram")) out.add("instagram");
-    else if (p === "Twitter" || p === "X") out.add("twitter");
+    else if (
+      p === "X" ||
+      p === "X (Starter Story)" ||
+      p === "X (Pat Walls)" ||
+      p === "Twitter" ||
+      p === "Twitter (Pat Walls)"
+    )
+      out.add("twitter");
     else if (p === "Threads") out.add("threads");
     else if (p === "LinkedIn") out.add("linkedin");
   }

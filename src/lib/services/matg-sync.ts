@@ -571,7 +571,7 @@ async function syncInstagram(): Promise<SyncResult> {
 /* ------------------------------------------------------------------ */
 
 async function syncTwitter(): Promise<SyncResult> {
-  const result: SyncResult = { source: "Twitter", fetched: 0, created: 0, updated: 0, errors: 0 };
+  const result: SyncResult = { source: "X", fetched: 0, created: 0, updated: 0, errors: 0 };
   const tweets = await fetchTwitterTweets();
   result.fetched = tweets.length;
 
@@ -597,7 +597,7 @@ async function syncTwitter(): Promise<SyncResult> {
         thumbnail,
         publishedDate,
         status: "Published" as const,
-        platform: ["Twitter"] as string[],
+        platform: ["X"] as string[],
         format: "Tweet",
         brand: "matg" as const,
         publishedLink: tweetUrl,

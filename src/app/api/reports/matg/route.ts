@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
       "YouTube Shorts",
       "Instagram Reel",
       "Instagram Post",
-      "Twitter",
+      "X",
     ];
 
     const allPlatforms = new Set<string>(MATG_PLATFORMS);

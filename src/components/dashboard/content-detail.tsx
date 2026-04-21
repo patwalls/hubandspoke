@@ -38,6 +38,8 @@ import {
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
 import { TranscriptButton } from "./transcript-dialog";
+import { cn } from "@/lib/utils";
+import { platformClass, statusClass } from "@/lib/badge-colors";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { UserChip } from "./user-chip";
@@ -125,7 +127,8 @@ const SS_PLATFORMS = [
   "Instagram Post",
   "Instagram Reel",
   "Instagram Story",
-  "Twitter",
+  "X (Starter Story)",
+  "X (Pat Walls)",
   "LinkedIn",
   "TikTok",
   "Threads",
@@ -138,7 +141,7 @@ const MATG_PLATFORMS = [
   "Instagram Post",
   "Instagram Reel",
   "Instagram Story",
-  "Twitter",
+  "X",
   "LinkedIn",
   "TikTok",
   "Threads",
@@ -823,7 +826,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               <Badge
                 key={p}
                 variant="secondary"
-                className="bg-accent text-muted-foreground border border-border"
+                className={cn("border", platformClass(p))}
               >
                 {p}
               </Badge>
@@ -1529,7 +1532,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       {d.platform?.map((p) => (
                         <span
                           key={p}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                          className={cn(
+                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                            platformClass(p)
+                          )}
                         >
                           {p}
                         </span>
@@ -1541,7 +1547,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   </td>
                   <td className="px-3 py-2">
                     {d.status ? (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border">
+                      <span
+                        className={cn(
+                          "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                          statusClass(d.status)
+                        )}
+                      >
                         {d.status}
                       </span>
                     ) : (
@@ -1675,7 +1686,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                         {r.platform?.map((p) => (
                           <span
                             key={p}
-                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                            className={cn(
+                              "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                              platformClass(p)
+                            )}
                           >
                             {p}
                           </span>
@@ -1684,7 +1698,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                     </td>
                     <td className="px-3 py-2">
                       {r.status ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border">
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                            statusClass(r.status)
+                          )}
+                        >
                           {r.status}
                         </span>
                       ) : (
@@ -1811,7 +1830,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                         {r.platform?.map((p) => (
                           <span
                             key={p}
-                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                            className={cn(
+                              "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                              platformClass(p)
+                            )}
                           >
                             {p}
                           </span>
@@ -1820,7 +1842,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                     </td>
                     <td className="px-3 py-2">
                       {r.status ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border">
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                            statusClass(r.status)
+                          )}
+                        >
                           {r.status}
                         </span>
                       ) : (

@@ -18,6 +18,7 @@ const INTERNAL_PLATFORM_KEYWORDS = [
   "(SS)",
   "(SS Build)",
   "(Pat Walls)",
+  "(Starter Story)",
   "Newsletter",
   "SS Case Study",
   "SS Database",
@@ -31,6 +32,37 @@ const INTERNAL_PLATFORM_KEYWORDS = [
   "LinkedIn",
   "Threads",
 ];
+
+/**
+ * Notion's "Channel" multi_select still uses the legacy "Twitter" label.
+ * Translate to our X-prefixed names on the way in. For the ambiguous base
+ * "Twitter" (no account suffix), use the published URL to decide SS vs PW.
+ */
+const PAT_WALLS_X_HANDLES = ["thepatwalls", "patrickwalls"];
+
+function isPatWallsXUrl(publishedLink: string | null): boolean {
+  if (!publishedLink) return false;
+  try {
+    const u = new URL(publishedLink);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    if (host !== "twitter.com" && host !== "x.com") return false;
+    const handle = u.pathname.split("/").filter(Boolean)[0]?.toLowerCase();
+    return !!handle && PAT_WALLS_X_HANDLES.includes(handle);
+  } catch {
+    return false;
+  }
+}
+
+function remapChannelName(
+  channel: string,
+  publishedLink: string | null
+): string {
+  if (channel === "Twitter (Pat Walls)") return "X (Pat Walls)";
+  if (channel === "Twitter") {
+    return isPatWallsXUrl(publishedLink) ? "X (Pat Walls)" : "X (Starter Story)";
+  }
+  return channel;
+}
 
 const SOCIAL_MEDIA_DOMAINS = [
   "x.com",
@@ -357,18 +389,21 @@ export async function syncFromNotion(): Promise<{
       // H&S from).
       notionIds.push(notionId);
 
-      const platform = extractPlatform(properties);
+      const rawPlatform = extractPlatform(properties);
 
       // Pages whose platform isn't on the Notion-authoritative allowlist are
       // owned by Hub & Spoke — skip them entirely. Don't overwrite the H&S
       // row, don't upsert the producer/editor directory from their fields.
       // An empty/missing platform is also treated as non-authoritative so
       // unlabeled drafts in Notion can't accidentally clobber H&S state.
-      if (!isNotionAuthoritative(platform)) {
+      if (!isNotionAuthoritative(rawPlatform)) {
         continue;
       }
 
       const publishedLink = extractPublishedLink(properties);
+      const platform = rawPlatform
+        ? rawPlatform.map((c) => remapChannelName(c, publishedLink))
+        : rawPlatform;
       const formatName = await extractFormat(properties, notion);
 
       const producer = extractPerson(properties, "Producer");

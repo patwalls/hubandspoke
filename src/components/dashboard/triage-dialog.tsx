@@ -13,6 +13,8 @@ import { UserChip } from "./user-chip";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { todayLocalISO } from "@/lib/utils/dates";
+import { cn } from "@/lib/utils";
+import { platformClass } from "@/lib/badge-colors";
 import type { ProductionItem } from "@/types";
 
 interface AssignableUser {
@@ -203,7 +205,10 @@ export function TriageDialog({
             {(item.platform || []).map((p) => (
               <span
                 key={p}
-                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent text-muted-foreground border border-border"
+                className={cn(
+                  "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                  platformClass(p)
+                )}
               >
                 {p}
               </span>
@@ -309,6 +314,9 @@ function SourcedBody({
   const sourceChannel = repostedFrom?.platform?.[0] ?? "";
   const targetChannel = (item.platform ?? [])[0] ?? "";
   const isTwitter =
+    sourceChannel === "X" ||
+    sourceChannel === "X (Starter Story)" ||
+    sourceChannel === "X (Pat Walls)" ||
     sourceChannel === "Twitter" ||
     sourceChannel === "Twitter (Pat Walls)" ||
     (repostedFrom?.publishedLink &&
@@ -503,7 +511,7 @@ function PostedForm({
   const [linkError, setLinkError] = useState<string | null>(null);
 
   const linkPlaceholder =
-    defaultChannel.startsWith("Twitter") || defaultChannel === "Twitter"
+    defaultChannel.startsWith("X") || defaultChannel.startsWith("Twitter")
       ? "https://x.com/your-handle/status/…"
       : defaultChannel === "Instagram Reel"
       ? "https://instagram.com/reel/…"
