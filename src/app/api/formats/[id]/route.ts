@@ -45,7 +45,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       cursor = row.parentFormatId;
     }
 
-    const items = await db
+    const allItems = await db
       .select()
       .from(productionItems)
       .where(
@@ -55,6 +55,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         )
       )
       .orderBy(desc(productionItems.views));
+
+    // Killed ideas don't belong in the format's content roster — they're dead
+    // weight in the table and skew perceptions of format performance.
+    const items = allItems.filter((i) => i.status !== "Killed");
 
     const publishedItems = items.filter(
       (i) => i.status === "Published" && i.publishedDate
