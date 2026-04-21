@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/command";
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
+import { KillIdeaDialog } from "./kill-idea-dialog";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
 
@@ -526,6 +527,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
   const [sourceType, setSourceType] = useState<string>("original");
+  const [pendingKill, setPendingKill] = useState<{ previousStatus: string } | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -663,6 +667,15 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       });
     }
   }, [contentId]);
+
+  async function confirmKill(reason: string | null) {
+    if (!pendingKill) return;
+    const prev = pendingKill.previousStatus;
+    setStatus("Killed");
+    setPendingKill(null);
+    const ok = await persistField({ status: "Killed", killReason: reason });
+    if (!ok) setStatus(prev);
+  }
 
   async function handleDelete() {
     if (!confirm("Delete this post? This cannot be undone.")) return;
@@ -1131,6 +1144,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 const prev = status;
                 const next = v ?? "";
                 if (next === prev) return;
+                if (next === "Killed") {
+                  // Intercept: capture reason via dialog before committing.
+                  // Keep the dropdown on its previous value until confirmed.
+                  setPendingKill({ previousStatus: prev });
+                  return;
+                }
                 setStatus(next);
                 void persistField({ status: next || null }).then((ok) => {
                   if (!ok) setStatus(prev);
@@ -2096,6 +2115,16 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <KillIdeaDialog
+        open={pendingKill !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingKill(null);
+        }}
+        title={title || item.title || ""}
+        saving={saveState.kind === "saving"}
+        onConfirm={confirmKill}
+      />
 
     </div>
   );

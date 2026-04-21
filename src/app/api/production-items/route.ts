@@ -179,6 +179,7 @@ export async function PUT(request: NextRequest) {
       leads,
       salesAmount,
       sourceType,
+      killReason,
     } = body;
 
     const VALID_SOURCE_TYPES = new Set(["original", "repost", "cross_post"]);
@@ -345,6 +346,15 @@ export async function PUT(request: NextRequest) {
     const session = await auth();
     const actorUserId = session?.user?.id ?? null;
 
+    // Normalize kill reason: trim, empty → null, cap length. Only meaningful
+    // when this PUT is flipping status to Killed; otherwise it's silently ignored.
+    const normalizedKillReason: string | null = (() => {
+      if (typeof killReason !== "string") return null;
+      const trimmed = killReason.trim();
+      if (!trimmed) return null;
+      return trimmed.slice(0, 2000);
+    })();
+
     const [updated] = await db.transaction(async (tx) => {
       const [row] = await tx
         .update(productionItems)
@@ -352,12 +362,25 @@ export async function PUT(request: NextRequest) {
         .where(eq(productionItems.id, id))
         .returning();
       if (row && statusTransition) {
-        await tx.insert(contentEvents).values({
-          contentItemId: id,
-          userId: actorUserId,
-          eventType: "status_change",
-          payload: { type: "status_change", ...statusTransition },
-        });
+        if (statusTransition.to === "Killed") {
+          await tx.insert(contentEvents).values({
+            contentItemId: id,
+            userId: actorUserId,
+            eventType: "killed",
+            payload: {
+              type: "killed",
+              from: statusTransition.from,
+              reason: normalizedKillReason,
+            },
+          });
+        } else {
+          await tx.insert(contentEvents).values({
+            contentItemId: id,
+            userId: actorUserId,
+            eventType: "status_change",
+            payload: { type: "status_change", ...statusTransition },
+          });
+        }
       }
       return [row];
     });

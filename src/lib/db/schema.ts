@@ -347,7 +347,8 @@ export const contentComments = pgTable(
 // tomorrow). Type + jsonb payload keeps future additions to inserts + a new
 // payload shape + a new renderer branch — no schema migration per event.
 export type ContentEventPayload =
-  | { type: "status_change"; from: string | null; to: string | null };
+  | { type: "status_change"; from: string | null; to: string | null }
+  | { type: "killed"; from: string | null; reason: string | null };
 
 export const contentEvents = pgTable(
   "content_events",

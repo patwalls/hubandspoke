@@ -25,11 +25,9 @@ interface CommentItem {
   isMine: boolean;
 }
 
-type EventPayload = {
-  type: "status_change";
-  from: string | null;
-  to: string | null;
-};
+type EventPayload =
+  | { type: "status_change"; from: string | null; to: string | null }
+  | { type: "killed"; from: string | null; reason: string | null };
 
 interface EventItem {
   kind: "event";
@@ -470,7 +468,7 @@ function EventBody({
   actorName: string;
   event: EventItem;
 }) {
-  if (event.eventType === "status_change") {
+  if (event.payload.type === "status_change") {
     const { from, to } = event.payload;
     return (
       <span>
@@ -484,6 +482,22 @@ function EventBody({
         ) : null}{" "}
         to {to ? <StatusChip label={to} /> : <em>none</em>}
       </span>
+    );
+  }
+  if (event.payload.type === "killed") {
+    const { reason } = event.payload;
+    return (
+      <div className="space-y-1">
+        <span>
+          <span className="font-medium text-foreground">{actorName}</span> killed
+          this idea
+        </span>
+        {reason ? (
+          <div className="rounded border-l-2 border-border pl-2 text-sm italic text-muted-foreground">
+            &ldquo;{reason}&rdquo;
+          </div>
+        ) : null}
+      </div>
     );
   }
   return (

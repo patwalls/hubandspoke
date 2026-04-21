@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { UserChip } from "./user-chip";
+import { KillIdeaDialog } from "./kill-idea-dialog";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { todayLocalISO } from "@/lib/utils/dates";
 import type { ProductionItem } from "@/types";
@@ -74,6 +75,7 @@ export function TriageDialog({
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [mode, setMode] = useState<RepostActionMode>("idle");
+  const [killOpen, setKillOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -85,6 +87,7 @@ export function TriageDialog({
     setSummaryError(null);
     setActionError(null);
     setMode("idle");
+    setKillOpen(false);
 
     (async () => {
       try {
@@ -161,8 +164,12 @@ export function TriageDialog({
   }
 
   function killIt() {
-    if (!confirm(`Kill "${item.title || "(Untitled)"}"?`)) return;
-    return updateStatus("Killed");
+    setKillOpen(true);
+  }
+
+  async function confirmKill(reason: string | null) {
+    await updateStatus("Killed", { killReason: reason });
+    setKillOpen(false);
   }
 
   const pillar = detail?.pillar;
@@ -246,6 +253,13 @@ export function TriageDialog({
           />
         )}
       </DialogContent>
+      <KillIdeaDialog
+        open={killOpen}
+        onOpenChange={setKillOpen}
+        title={item.title || ""}
+        saving={saving}
+        onConfirm={confirmKill}
+      />
     </Dialog>
   );
 }
