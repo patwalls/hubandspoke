@@ -44,7 +44,10 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-const sql = postgres(process.env.DATABASE_URL, { prepare: false });
+const sql = postgres(process.env.DATABASE_URL, {
+  prepare: false,
+  ssl: process.env.DATABASE_SSL === "off" ? false : "require",
+});
 
 function isPatWallsTweet(publishedLink) {
   if (!publishedLink) return false;
