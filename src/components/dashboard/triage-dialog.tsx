@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -57,6 +58,38 @@ interface TriageDialogProps {
 }
 
 type RepostActionMode = "idle" | "form";
+
+function showTriageToast(
+  status: "Assigned" | "Killed" | "Published",
+  extra: Record<string, unknown> | undefined,
+  item: ProductionItem,
+  brand: string,
+  users: AssignableUser[]
+) {
+  const viewAction = {
+    label: "View →",
+    onClick: () =>
+      window.open(`/${brand}/content/${item.id}`, "_blank", "noopener"),
+  };
+  const options = { duration: 6000, action: viewAction };
+
+  if (status === "Assigned") {
+    const editorId =
+      typeof extra?.editorUserId === "string" ? extra.editorUserId : null;
+    const editor = editorId ? users.find((u) => u.id === editorId) : null;
+    const name = editor?.name || editor?.email || "editor";
+    toast.success(`Assigned to ${name}`, options);
+    return;
+  }
+  if (status === "Killed") {
+    const title = item.title || "idea";
+    toast(`Killed “${title}”`, options);
+    return;
+  }
+  if (status === "Published") {
+    toast.success("Marked as published", options);
+  }
+}
 
 export function TriageDialog({
   open,
@@ -150,6 +183,7 @@ export function TriageDialog({
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
+      showTriageToast(nextStatus, extra, item, brand, users);
       onOpenChange(false);
       onDone();
     } catch (e) {

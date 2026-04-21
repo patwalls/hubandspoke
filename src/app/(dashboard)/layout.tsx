@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { Toaster } from "sonner";
 import { DashboardNav, SectionTabs } from "@/components/dashboard/nav";
 
 export default async function DashboardLayout({
@@ -21,6 +22,7 @@ export default async function DashboardLayout({
         </div>
         {children}
       </main>
+      <Toaster position="bottom-right" richColors closeButton />
     </div>
   );
 }
