@@ -410,7 +410,7 @@ function SourcedBody({
                   rel="noopener noreferrer"
                   className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground hover:bg-accent"
                 >
-                  Open source
+                  See post
                   <ExternalLinkIcon className="size-3.5" />
                 </a>
               )}
@@ -774,63 +774,123 @@ declare global {
   interface Window {
     twttr?: {
       widgets: {
-        load: (el?: HTMLElement) => void;
+        createTweet: (
+          id: string,
+          container: HTMLElement,
+          options?: Record<string, unknown>
+        ) => Promise<HTMLElement | undefined>;
       };
     };
   }
 }
 
-function TweetEmbed({ url }: { url: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [rendered, setRendered] = useState(false);
+function extractTweetId(url: string): string | null {
+  const match = url.match(/(?:twitter|x)\.com\/[^/]+\/status(?:es)?\/(\d+)/);
+  return match?.[1] ?? null;
+}
 
-  useEffect(() => {
-    let cancelled = false;
+let widgetsScriptPromise: Promise<void> | null = null;
 
-    function loadAndRender() {
-      if (cancelled || !ref.current) return;
-      if (!window.twttr?.widgets) return;
-      window.twttr.widgets.load(ref.current);
-      setRendered(true);
-    }
-
+function loadWidgetsScript(): Promise<void> {
+  if (widgetsScriptPromise) return widgetsScriptPromise;
+  widgetsScriptPromise = new Promise((resolve, reject) => {
     if (window.twttr?.widgets) {
-      loadAndRender();
-      return () => {
-        cancelled = true;
-      };
+      resolve();
+      return;
     }
-
-    // First embed on this page — inject widgets.js once. Subsequent embeds
-    // reuse the same window.twttr singleton.
     const existing = document.querySelector<HTMLScriptElement>(
       'script[src="https://platform.twitter.com/widgets.js"]'
     );
     if (existing) {
-      existing.addEventListener("load", loadAndRender, { once: true });
-    } else {
-      const s = document.createElement("script");
-      s.src = "https://platform.twitter.com/widgets.js";
-      s.async = true;
-      s.charset = "utf-8";
-      s.addEventListener("load", loadAndRender, { once: true });
-      document.body.appendChild(s);
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("widgets.js failed")),
+        { once: true }
+      );
+      return;
     }
+    const s = document.createElement("script");
+    s.src = "https://platform.twitter.com/widgets.js";
+    s.async = true;
+    s.charset = "utf-8";
+    s.addEventListener("load", () => resolve(), { once: true });
+    s.addEventListener(
+      "error",
+      () => reject(new Error("widgets.js failed")),
+      { once: true }
+    );
+    document.body.appendChild(s);
+  });
+  return widgetsScriptPromise;
+}
+
+function TweetEmbed({ url }: { url: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "failed">(
+    "loading"
+  );
+  const tweetId = extractTweetId(url);
+
+  useEffect(() => {
+    if (!tweetId) {
+      setStatus("failed");
+      return;
+    }
+    let cancelled = false;
+    setStatus("loading");
+
+    function render() {
+      if (cancelled || !containerRef.current || !window.twttr?.widgets) return;
+      containerRef.current.innerHTML = "";
+      window.twttr.widgets
+        .createTweet(tweetId!, containerRef.current, {
+          conversation: "none",
+          dnt: "true",
+        })
+        .then((embed) => {
+          if (cancelled) return;
+          setStatus(embed ? "ready" : "failed");
+        })
+        .catch(() => {
+          if (!cancelled) setStatus("failed");
+        });
+    }
+
+    loadWidgetsScript()
+      .then(render)
+      .catch(() => {
+        if (!cancelled) setStatus("failed");
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [tweetId]);
+
+  if (status === "failed") {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block bg-accent/30 border border-border rounded-md p-3 hover:bg-accent transition-colors"
+      >
+        <div className="text-sm font-medium text-foreground inline-flex items-center gap-1.5">
+          See post on X
+          <ExternalLinkIcon className="size-3.5" />
+        </div>
+        <div className="text-xs text-muted-foreground mt-1 break-all">
+          {url}
+        </div>
+      </a>
+    );
+  }
 
   return (
-    <div
-      ref={ref}
-      className="bg-accent/20 border border-border rounded-md p-2 min-h-[120px]"
-    >
-      <blockquote className="twitter-tweet" data-conversation="none">
-        <a href={url}>{url}</a>
-      </blockquote>
-      {!rendered && (
+    <div className="bg-accent/20 border border-border rounded-md p-2 min-h-[120px]">
+      <div ref={containerRef} />
+      {status === "loading" && (
         <p className="text-xs text-muted-foreground px-2 py-1">
           Loading tweet…
         </p>

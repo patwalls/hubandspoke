@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, RefreshCwIcon } from "lucide-react";
+import { DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, RefreshCwIcon, TrendingUpIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -872,6 +872,157 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {(item.sourceType === "repost" || item.sourceType === "cross_post") &&
+            data.repostedFrom && (
+              <Popover>
+                <PopoverTrigger
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                  title="Show the source post this was based on"
+                >
+                  <LinkIcon className="size-3.5" /> Reference post
+                </PopoverTrigger>
+                <PopoverContent className="w-96 space-y-2" align="end">
+                  <h3 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    {item.sourceType === "cross_post"
+                      ? "Cross-posted from"
+                      : "Reposted from"}
+                  </h3>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <Link
+                      href={`/${brand}/content/${data.repostedFrom.id}`}
+                      className="text-sm font-medium text-foreground hover:text-primary hover:underline"
+                    >
+                      {data.repostedFrom.title || "(untitled)"}
+                    </Link>
+                    <span className="text-xs text-muted-foreground">
+                      {data.repostedFrom.publishedDate &&
+                        `originally ${formatDate(data.repostedFrom.publishedDate)}`}
+                      {data.repostedFrom.views != null && (
+                        <> · {formatCompact(data.repostedFrom.views)} views</>
+                      )}
+                    </span>
+                  </div>
+                  {data.repostedFrom.evergreenReasoning && (
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      <span className="font-medium text-foreground">
+                        Why this was recommended:
+                      </span>{" "}
+                      {data.repostedFrom.evergreenReasoning}
+                    </p>
+                  )}
+                </PopoverContent>
+              </Popover>
+            )}
+          {isPrePublish && data.prediction && (
+            <Popover>
+              <PopoverTrigger
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+                title="See how this estimate was calculated"
+              >
+                {data.prediction.prediction != null ? (
+                  <>
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        CONFIDENCE_STYLES[data.prediction.confidence].dot
+                      )}
+                      aria-hidden
+                    />
+                    Est. {formatCompact(data.prediction.prediction)} views
+                  </>
+                ) : (
+                  <>
+                    <TrendingUpIcon className="size-3.5" /> Est. views
+                  </>
+                )}
+              </PopoverTrigger>
+              <PopoverContent className="w-[28rem] space-y-4" align="end">
+                {data.prediction.prediction == null ? (
+                  <>
+                    <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                      Predicted Views
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Not enough similar published content yet to predict views.
+                    </p>
+                  </>
+                ) : (
+                  (() => {
+                    const style = CONFIDENCE_STYLES[data.prediction.confidence];
+                    const totalN = data.prediction.cohortBreakdown.reduce(
+                      (s, c) => s + c.n,
+                      0
+                    );
+                    return (
+                      <>
+                        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                          <div>
+                            <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                              Predicted Views
+                            </p>
+                            <div className="mt-2 flex items-baseline gap-3 flex-wrap">
+                              <span className="text-3xl font-semibold text-foreground tabular-nums">
+                                {formatCompact(data.prediction.prediction)}
+                              </span>
+                              {data.prediction.p25 != null &&
+                                data.prediction.p75 != null && (
+                                  <span className="text-sm text-muted-foreground tabular-nums">
+                                    range{" "}
+                                    {formatCompact(data.prediction.p25)}–
+                                    {formatCompact(data.prediction.p75)}
+                                  </span>
+                                )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                "w-1.5 h-1.5 rounded-full",
+                                style.dot
+                              )}
+                              aria-hidden
+                            />
+                            <span className={cn("text-xs", style.text)}>
+                              {style.label}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Based on {totalN.toFixed(0)} similar posts
+                        </p>
+                        {data.prediction.cohortBreakdown.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {data.prediction.cohortBreakdown.map((c) => (
+                              <span
+                                key={c.cohort}
+                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-accent/40 text-[11px] text-muted-foreground"
+                                title={`Weight ${(c.weight * 100).toFixed(0)}% of blended prediction`}
+                              >
+                                <span className="font-medium text-foreground">
+                                  {c.label}
+                                </span>
+                                <span className="text-muted-foreground">
+                                  · {c.n.toFixed(0)} posts, median{" "}
+                                  <span className="tabular-nums">
+                                    {formatCompact(c.median)}
+                                  </span>
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          Blend of historical performance from the same pillar,
+                          format, and platform. Social is noisy — treat this as
+                          a sanity-check range, not a forecast.
+                        </p>
+                      </>
+                    );
+                  })()
+                )}
+              </PopoverContent>
+            </Popover>
+          )}
           {item.publishedLink && (
             <a
               href={item.publishedLink}
@@ -930,47 +1081,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           )}
         </div>
       </div>
-
-      {/* Source card — shown for reposts and cross-posts. The header badge
-          carries the "is a X" signal; this gives context (source link + AI
-          reason) using the same card styling as the rest of the page. */}
-      {(item.sourceType === "repost" || item.sourceType === "cross_post") &&
-        data.repostedFrom && (
-        <div className="rounded-lg border border-border bg-card p-4 sm:p-5 space-y-2">
-          <h3 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-            {item.sourceType === "cross_post" ? "Cross-posted from" : "Reposted from"}
-          </h3>
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <Link
-              href={`/${brand}/content/${data.repostedFrom.id}`}
-              className="text-sm font-medium text-foreground hover:text-primary hover:underline"
-            >
-              {data.repostedFrom.title || "(untitled)"}
-            </Link>
-            <span className="text-xs text-muted-foreground">
-              {data.repostedFrom.publishedDate &&
-                `originally ${formatDate(data.repostedFrom.publishedDate)}`}
-              {data.repostedFrom.views != null && (
-                <> · {formatCompact(data.repostedFrom.views)} views</>
-              )}
-            </span>
-          </div>
-          {data.repostedFrom.evergreenReasoning && (
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              <span className="font-medium text-foreground">
-                Why this was recommended:
-              </span>{" "}
-              {data.repostedFrom.evergreenReasoning}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Predicted views — pre-publish only. Benchmark against similar past
-          content so producers can gut-check reach before shipping. */}
-      {isPrePublish && data.prediction && (
-        <PredictedViewsCard prediction={data.prediction} />
-      )}
 
       {/* Metrics — only shown once the post is actually live */}
       {isPublished && (
@@ -2320,77 +2430,6 @@ const CONFIDENCE_STYLES: Record<
     text: "text-muted-foreground",
   },
 };
-
-function PredictedViewsCard({ prediction }: { prediction: ViewPrediction }) {
-  if (prediction.prediction == null) {
-    return (
-      <div className="rounded-lg border border-dashed border-border bg-card p-5">
-        <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-          Predicted Views
-        </p>
-        <p className="mt-3 text-sm text-muted-foreground">
-          Not enough similar published content yet to predict views.
-        </p>
-      </div>
-    );
-  }
-  const style = CONFIDENCE_STYLES[prediction.confidence];
-  const totalN = prediction.cohortBreakdown.reduce((s, c) => s + c.n, 0);
-  return (
-    <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-      <div className="flex items-baseline justify-between gap-3 flex-wrap">
-        <div>
-          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Predicted Views
-          </p>
-          <div className="mt-2 flex items-baseline gap-3 flex-wrap">
-            <span className="text-3xl font-semibold text-foreground tabular-nums">
-              {formatCompact(prediction.prediction)}
-            </span>
-            {prediction.p25 != null && prediction.p75 != null && (
-              <span className="text-sm text-muted-foreground tabular-nums">
-                range {formatCompact(prediction.p25)}–
-                {formatCompact(prediction.p75)}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span
-            className={cn("w-1.5 h-1.5 rounded-full", style.dot)}
-            aria-hidden
-          />
-          <span className={cn("text-xs", style.text)}>{style.label}</span>
-          <span className="text-xs text-muted-foreground">
-            · based on {totalN.toFixed(0)} similar posts
-          </span>
-        </div>
-      </div>
-      {prediction.cohortBreakdown.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {prediction.cohortBreakdown.map((c) => (
-            <span
-              key={c.cohort}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-accent/40 text-[11px] text-muted-foreground"
-              title={`Weight ${(c.weight * 100).toFixed(0)}% of blended prediction`}
-            >
-              <span className="font-medium text-foreground">{c.label}</span>
-              <span className="text-muted-foreground">
-                · {c.n.toFixed(0)} posts, median{" "}
-                <span className="tabular-nums">{formatCompact(c.median)}</span>
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
-      <p className="text-[11px] text-muted-foreground leading-relaxed">
-        Blend of historical performance from the same pillar, format, and
-        platform. Social is noisy — treat this as a sanity-check range, not a
-        forecast.
-      </p>
-    </div>
-  );
-}
 
 function PredictedVsActualCard({
   predicted,
