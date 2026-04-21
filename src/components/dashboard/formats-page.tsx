@@ -34,6 +34,14 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { SS_CHANNELS, MATG_CHANNELS } from "@/lib/config/channels";
 import { applyStarterTemplate } from "@/lib/format-skill";
 
@@ -54,299 +62,10 @@ interface FormatRow {
   producerAsanaGid: string | null;
   instructions: string | null;
   parentFormatId: string | null;
+  totalViews: number;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Recursive tree rendering                                           */
-/* ------------------------------------------------------------------ */
-
-function DesktopTreeRows({
-  node,
-  depth,
-  brand,
-  childrenByParent,
-  expanded,
-  onToggle,
-  onDelete,
-}: {
-  node: FormatRow;
-  depth: number;
-  brand: string;
-  childrenByParent: Map<string, FormatRow[]>;
-  expanded: Set<string>;
-  onToggle: (id: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  const isRoot = depth === 0;
-  const children = childrenByParent.get(node.id) ?? [];
-  const isOpen = expanded.has(node.id);
-  const rowStyle = isRoot
-    ? { borderLeft: "4px solid #3b82f6" }
-    : undefined;
-
-  return (
-    <>
-      <tr
-        className={`border-b border-gray-100 ${isRoot ? "hover:bg-blue-50/30" : "bg-gray-50/50"}`}
-        style={rowStyle}
-      >
-        <td className="px-4 py-3">
-          <div className="flex items-center gap-2" style={{ paddingLeft: `${depth * 1.25}rem` }}>
-            {children.length > 0 ? (
-              <button
-                onClick={() => onToggle(node.id)}
-                className="text-gray-400 hover:text-gray-600 -ml-1 p-0.5"
-              >
-                <svg
-                  className={`w-4 h-4 transition-transform ${isOpen ? "rotate-90" : ""}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-            ) : depth > 0 ? (
-              <span className="text-gray-300 text-xs">└</span>
-            ) : (
-              <span className="w-5" />
-            )}
-            <Link
-              href={`/${brand}/formats/${node.id}`}
-              className={`hover:underline ${isRoot ? "font-semibold text-gray-900" : "text-gray-700 text-sm"}`}
-            >
-              {node.name}
-            </Link>
-            <span
-              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                isRoot ? "bg-blue-50 text-blue-700" : "bg-purple-50 text-purple-700"
-              }`}
-            >
-              {isRoot ? "Pillar" : "Repurposed"}
-            </span>
-            {children.length > 0 && (
-              <span className="text-[10px] text-gray-400 font-medium bg-gray-100 px-1.5 py-0.5 rounded-full">
-                {children.length} direct
-              </span>
-            )}
-          </div>
-        </td>
-        <td className="px-4 py-3">
-          <div className="flex flex-wrap gap-1">
-            {node.channels?.map((ch) => (
-              <Badge key={ch} variant="secondary" className="text-xs">
-                {ch}
-              </Badge>
-            ))}
-          </div>
-        </td>
-        <td className="px-4 py-3 text-gray-600">
-          {node.viewThreshold != null ? node.viewThreshold.toLocaleString() : "-"}
-        </td>
-        <td className="px-4 py-3 text-gray-600">
-          {node.editor ? (
-            <span className="flex items-center gap-1.5">
-              <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-                {node.editor
-                  .split(" ")
-                  .map((n) => n[0])
-                  .join("")
-                  .slice(0, 2)}
-              </span>
-              <span className="truncate">{node.editor}</span>
-            </span>
-          ) : (
-            "-"
-          )}
-        </td>
-        <td className="px-4 py-3 text-gray-600">
-          {node.producer ? (
-            <span className="flex items-center gap-1.5">
-              <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-                {node.producer
-                  .split(" ")
-                  .map((n) => n[0])
-                  .join("")
-                  .slice(0, 2)}
-              </span>
-              <span className="truncate">{node.producer}</span>
-            </span>
-          ) : (
-            "-"
-          )}
-        </td>
-        <td className="px-4 py-3 text-gray-600 max-w-[200px]">
-          {node.instructions ? (
-            <span className="line-clamp-2 text-xs">{node.instructions}</span>
-          ) : (
-            "-"
-          )}
-        </td>
-        <td className="px-4 py-3 text-right">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-red-600 hover:text-red-700"
-            onClick={() => onDelete(node.id)}
-          >
-            Delete
-          </Button>
-        </td>
-      </tr>
-      {isOpen &&
-        children.map((child) => (
-          <DesktopTreeRows
-            key={child.id}
-            node={child}
-            depth={depth + 1}
-            brand={brand}
-            childrenByParent={childrenByParent}
-            expanded={expanded}
-            onToggle={onToggle}
-            onDelete={onDelete}
-          />
-        ))}
-    </>
-  );
-}
-
-function MobileTreeCard({
-  node,
-  depth,
-  brand,
-  childrenByParent,
-  expanded,
-  onToggle,
-  onDelete,
-}: {
-  node: FormatRow;
-  depth: number;
-  brand: string;
-  childrenByParent: Map<string, FormatRow[]>;
-  expanded: Set<string>;
-  onToggle: (id: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  const isRoot = depth === 0;
-  const children = childrenByParent.get(node.id) ?? [];
-  const isOpen = expanded.has(node.id);
-
-  return (
-    <div className="space-y-0">
-      <div
-        className={`rounded-lg p-3 space-y-2 ${
-          isRoot
-            ? "bg-white border-2 border-blue-200"
-            : "bg-gray-50 border border-gray-200"
-        }`}
-      >
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2 min-w-0">
-            {children.length > 0 && (
-              <button
-                onClick={() => onToggle(node.id)}
-                className="text-gray-400 hover:text-gray-600 -ml-1"
-              >
-                <svg
-                  className={`w-4 h-4 transition-transform ${isOpen ? "rotate-90" : ""}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-            )}
-            <Link
-              href={`/${brand}/formats/${node.id}`}
-              className={`font-medium text-gray-900 hover:underline truncate ${isRoot ? "" : "text-sm"}`}
-            >
-              {node.name}
-            </Link>
-            <span
-              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
-                isRoot ? "bg-blue-50 text-blue-700" : "bg-purple-50 text-purple-700"
-              }`}
-            >
-              {isRoot ? "Pillar" : "Repurposed"}
-            </span>
-            {children.length > 0 && (
-              <span className="text-[10px] text-gray-400 font-medium">
-                {children.length} direct
-              </span>
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-red-600 hover:text-red-700 shrink-0"
-            onClick={() => onDelete(node.id)}
-          >
-            Delete
-          </Button>
-        </div>
-        {node.channels?.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {node.channels.map((ch) => (
-              <Badge key={ch} variant="secondary" className="text-xs">
-                {ch}
-              </Badge>
-            ))}
-          </div>
-        )}
-        {node.viewThreshold != null && (
-          <p className="text-xs text-gray-500">View Threshold: {node.viewThreshold.toLocaleString()}</p>
-        )}
-        {(node.editor || node.producer) && (
-          <div className="flex flex-wrap gap-3 text-xs text-gray-500">
-            {node.editor && (
-              <span className="flex items-center gap-1">
-                <span className="w-4 h-4 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium inline-flex">
-                  {node.editor
-                    .split(" ")
-                    .map((n) => n[0])
-                    .join("")
-                    .slice(0, 2)}
-                </span>
-                Editor: {node.editor}
-              </span>
-            )}
-            {node.producer && (
-              <span className="flex items-center gap-1">
-                <span className="w-4 h-4 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium inline-flex">
-                  {node.producer
-                    .split(" ")
-                    .map((n) => n[0])
-                    .join("")
-                    .slice(0, 2)}
-                </span>
-                Producer: {node.producer}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-      {isOpen && children.length > 0 && (
-        <div className="ml-4 border-l-2 border-blue-100 space-y-2 pt-2 pl-3">
-          {children.map((child) => (
-            <MobileTreeCard
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              brand={brand}
-              childrenByParent={childrenByParent}
-              expanded={expanded}
-              onToggle={onToggle}
-              onDelete={onDelete}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+type SortKey = "name" | "pillar" | "viewThreshold" | "totalViews";
 
 export function FormatsPageContent({ brand }: { brand: string }) {
   const ALL_CHANNELS = brand === "matg" ? MATG_CHANNELS : SS_CHANNELS;
@@ -355,7 +74,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [channelFilter, setChannelFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
 
   const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
@@ -440,16 +158,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     fetchFormats();
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Delete this format? Any direct children will become roots.")) return;
-    await fetch("/api/formats", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    fetchFormats();
-  }
-
   function toggleChannel(channel: string) {
     setChannels((prev) =>
       prev.includes(channel) ? prev.filter((c) => c !== channel) : [...prev, channel]
@@ -480,118 +188,120 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setProducerPopoverOpen(false);
   }
 
-  // Derive tree structures.
-  const { childrenByParent, ancestorsById } = useMemo(() => {
-    const byParent = new Map<string, FormatRow[]>();
-    for (const f of formats) {
-      if (f.parentFormatId) {
-        const arr = byParent.get(f.parentFormatId) ?? [];
-        arr.push(f);
-        byParent.set(f.parentFormatId, arr);
-      }
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir(key === "name" || key === "pillar" ? "asc" : "desc");
     }
-    for (const arr of byParent.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
-
-    // For each node, the set of ancestor ids (for channel filter context).
-    const ancestors = new Map<string, Set<string>>();
-    const byId = new Map(formats.map((f) => [f.id, f]));
-    for (const f of formats) {
-      const chain = new Set<string>();
-      let cur = f.parentFormatId;
-      while (cur && !chain.has(cur)) {
-        chain.add(cur);
-        cur = byId.get(cur)?.parentFormatId ?? null;
-      }
-      ancestors.set(f.id, chain);
-    }
-    return { childrenByParent: byParent, ancestorsById: ancestors };
-  }, [formats]);
-
-  // Default expansion: every node with children is open.
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  useEffect(() => {
-    const withChildren = new Set<string>();
-    for (const id of childrenByParent.keys()) withChildren.add(id);
-    setExpandedNodes(withChildren);
-  }, [childrenByParent]);
-
-  function toggleNode(id: string) {
-    setExpandedNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }
 
-  // Filter: type + channel. If a node matches channel, include all ancestors too.
-  const { visibleIds, visibleRoots, flatDerivatives } = useMemo(() => {
-    const channelOk = (f: FormatRow) =>
-      channelFilter === "all" || f.channels?.includes(channelFilter);
-
-    const typeOk = (f: FormatRow) => {
-      if (typeFilter === "all") return true;
-      if (typeFilter === "pillar") return !f.parentFormatId;
-      if (typeFilter === "repurposed") return !!f.parentFormatId;
-      return true;
-    };
-
-    const directMatches = formats.filter((f) => channelOk(f) && typeOk(f));
-    const idSet = new Set(directMatches.map((f) => f.id));
-
-    // For tree display, add ancestors so the matched node keeps its context.
-    if (typeFilter !== "repurposed") {
-      for (const m of directMatches) {
-        for (const a of ancestorsById.get(m.id) ?? []) idSet.add(a);
+  // Parent-name lookup powers the Pillar column + sort-by-pillar. Depth chain is
+  // still needed by the create-dialog's parent picker.
+  const { parentNameById, depthById } = useMemo(() => {
+    const byId = new Map(formats.map((f) => [f.id, f]));
+    const names = new Map<string, string>();
+    const depths = new Map<string, number>();
+    for (const f of formats) names.set(f.id, f.name);
+    for (const f of formats) {
+      let depth = 0;
+      const seen = new Set<string>();
+      let cur = f.parentFormatId;
+      while (cur && !seen.has(cur)) {
+        seen.add(cur);
+        depth++;
+        cur = byId.get(cur)?.parentFormatId ?? null;
       }
+      depths.set(f.id, depth);
     }
+    return { parentNameById: names, depthById: depths };
+  }, [formats]);
 
-    const rootsVisible =
-      typeFilter === "repurposed"
-        ? []
-        : formats
-            .filter((f) => !f.parentFormatId && idSet.has(f.id))
-            .sort((a, b) => a.name.localeCompare(b.name));
-
-    const derivatives = typeFilter === "repurposed"
-      ? directMatches.sort((a, b) => a.name.localeCompare(b.name))
-      : [];
-
-    return {
-      visibleIds: idSet,
-      visibleRoots: rootsVisible,
-      flatDerivatives: derivatives,
-    };
-  }, [formats, channelFilter, typeFilter, ancestorsById]);
-
-  // Filtered children lookup: respects the visibleIds set.
-  const filteredChildrenByParent = useMemo(() => {
-    const map = new Map<string, FormatRow[]>();
-    for (const [parentId, kids] of childrenByParent) {
-      const visible = kids.filter((k) => visibleIds.has(k.id));
-      if (visible.length > 0) map.set(parentId, visible);
-    }
-    return map;
-  }, [childrenByParent, visibleIds]);
-
-  // Parent picker: offer all formats (self excluded, descendants would make cycles but on
-  // create the row has no descendants yet).
   const parentOptions = useMemo(() => {
     return formats
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((f) => {
-        const depth = (ancestorsById.get(f.id)?.size ?? 0);
-        return { ...f, depth };
-      });
-  }, [formats, ancestorsById]);
+      .map((f) => ({ ...f, depth: depthById.get(f.id) ?? 0 }));
+  }, [formats, depthById]);
 
   const selectedParent = parentFormatId
     ? formats.find((f) => f.id === parentFormatId) ?? null
     : null;
 
-  const totalVisible =
-    typeFilter === "repurposed" ? flatDerivatives.length : visibleRoots.length;
+  const filtered = useMemo(() => {
+    if (channelFilter === "all") return formats;
+    return formats.filter((f) => f.channels?.includes(channelFilter));
+  }, [formats, channelFilter]);
+
+  const sorted = useMemo(() => {
+    const parentNameOf = (f: FormatRow) =>
+      f.parentFormatId ? parentNameById.get(f.parentFormatId) ?? "" : "";
+    const getVal = (f: FormatRow): string | number | null => {
+      switch (sortKey) {
+        case "name":
+          return f.name;
+        case "pillar":
+          return parentNameOf(f);
+        case "viewThreshold":
+          return f.viewThreshold;
+        case "totalViews":
+          return f.totalViews;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const aVal = getVal(a);
+      const bVal = getVal(b);
+      if (aVal === "" && bVal === "") return 0;
+      if (aVal == null && bVal == null) return 0;
+      if (aVal == null || aVal === "") return 1;
+      if (bVal == null || bVal === "") return -1;
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        return sortDir === "asc"
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal);
+      }
+      return sortDir === "asc"
+        ? (aVal as number) - (bVal as number)
+        : (bVal as number) - (aVal as number);
+    });
+  }, [filtered, sortKey, sortDir, parentNameById]);
+
+  function SortHeader({
+    label,
+    sortKeyName,
+    align,
+  }: {
+    label: string;
+    sortKeyName: SortKey;
+    align?: "right";
+  }) {
+    const isActive = sortKey === sortKeyName;
+    return (
+      <TableHead
+        className={`cursor-pointer select-none hover:text-foreground transition-colors ${
+          align === "right" ? "text-right" : ""
+        }`}
+        onClick={() => handleSort(sortKeyName)}
+      >
+        <span
+          className={`inline-flex items-center gap-1 ${
+            align === "right" ? "justify-end" : ""
+          }`}
+        >
+          {label}
+          {isActive && (
+            <span className="text-foreground">
+              {sortDir === "asc" ? "\u2191" : "\u2193"}
+            </span>
+          )}
+        </span>
+      </TableHead>
+    );
+  }
 
   if (loading) {
     return (
@@ -918,145 +628,158 @@ export function FormatsPageContent({ brand }: { brand: string }) {
         </Dialog>
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-        <div className="flex items-center gap-2">
-          <Label className="text-sm text-gray-600 whitespace-nowrap">Type:</Label>
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-            <button
-              onClick={() => setTypeFilter("all")}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                typeFilter === "all" ? "bg-gray-900 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => setTypeFilter("pillar")}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 ${
-                typeFilter === "pillar" ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              🎯 Roots
-            </button>
-            <button
-              onClick={() => setTypeFilter("repurposed")}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 ${
-                typeFilter === "repurposed" ? "bg-purple-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              🔄 Derivatives
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-sm text-gray-600 whitespace-nowrap">Channel:</Label>
-          <Select value={channelFilter} onValueChange={(v) => setChannelFilter(v ?? "all")}>
-            <SelectTrigger className="w-full sm:w-[200px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All channels</SelectItem>
-              {ALL_CHANNELS.map((ch) => (
-                <SelectItem key={ch} value={ch}>
-                  {ch}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="flex items-center gap-2">
+        <Label className="text-sm text-muted-foreground whitespace-nowrap">
+          Channel:
+        </Label>
+        <Select
+          value={channelFilter}
+          onValueChange={(v) => setChannelFilter(v ?? "all")}
+        >
+          <SelectTrigger className="w-full sm:w-[220px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All channels</SelectItem>
+            {ALL_CHANNELS.map((ch) => (
+              <SelectItem key={ch} value={ch}>
+                {ch}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      {/* Mobile card view */}
-      <div className="sm:hidden space-y-3">
-        {typeFilter === "repurposed" ? (
-          flatDerivatives.map((f) => (
-            <MobileTreeCard
-              key={f.id}
-              node={f}
-              depth={1}
-              brand={brand}
-              childrenByParent={new Map()}
-              expanded={new Set()}
-              onToggle={toggleNode}
-              onDelete={handleDelete}
-            />
-          ))
-        ) : (
-          visibleRoots.map((root) => (
-            <MobileTreeCard
-              key={root.id}
-              node={root}
-              depth={0}
-              brand={brand}
-              childrenByParent={filteredChildrenByParent}
-              expanded={expandedNodes}
-              onToggle={toggleNode}
-              onDelete={handleDelete}
-            />
-          ))
-        )}
-        {totalVisible === 0 && (
-          <div className="py-8 text-center text-gray-400 text-sm">
-            {formats.length === 0
-              ? 'No formats yet. Click "Add Format" to create one.'
-              : "No formats match the current filters."}
-          </div>
-        )}
-      </div>
-
-      {/* Desktop table view */}
-      <div className="hidden sm:block bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 bg-gray-50">
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Channels</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">View Threshold</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Editor</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Producer</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Instructions</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-600">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {typeFilter === "repurposed" ? (
-              flatDerivatives.map((f) => (
-                <DesktopTreeRows
-                  key={f.id}
-                  node={f}
-                  depth={1}
-                  brand={brand}
-                  childrenByParent={new Map()}
-                  expanded={new Set()}
-                  onToggle={toggleNode}
-                  onDelete={handleDelete}
-                />
-              ))
-            ) : (
-              visibleRoots.map((root) => (
-                <DesktopTreeRows
-                  key={root.id}
-                  node={root}
-                  depth={0}
-                  brand={brand}
-                  childrenByParent={filteredChildrenByParent}
-                  expanded={expandedNodes}
-                  onToggle={toggleNode}
-                  onDelete={handleDelete}
-                />
-              ))
-            )}
-            {totalVisible === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+      <div className="rounded-md border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <SortHeader label="Name" sortKeyName="name" />
+              <SortHeader label="Pillar" sortKeyName="pillar" />
+              <TableHead>Channels</TableHead>
+              <TableHead>Editor</TableHead>
+              <TableHead>Producer</TableHead>
+              <SortHeader
+                label="Threshold"
+                sortKeyName="viewThreshold"
+                align="right"
+              />
+              <SortHeader
+                label="Total Views"
+                sortKeyName="totalViews"
+                align="right"
+              />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((f) => {
+              const isPillar = !f.parentFormatId;
+              const parentName = f.parentFormatId
+                ? parentNameById.get(f.parentFormatId) ?? null
+                : null;
+              return (
+                <TableRow key={f.id}>
+                  <TableCell>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <Link
+                        href={`/${brand}/formats/${f.id}`}
+                        className="font-medium text-foreground hover:underline truncate"
+                      >
+                        {f.name}
+                      </Link>
+                      <span
+                        className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
+                          isPillar
+                            ? "bg-blue-50 text-blue-700"
+                            : "bg-purple-50 text-purple-700"
+                        }`}
+                      >
+                        {isPillar ? "Pillar" : "Derivative"}
+                      </span>
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    {f.parentFormatId && parentName ? (
+                      <Link
+                        href={`/${brand}/formats/${f.parentFormatId}`}
+                        className="text-muted-foreground hover:text-foreground hover:underline"
+                      >
+                        {parentName}
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {f.channels?.map((ch) => (
+                        <Badge
+                          key={ch}
+                          variant="secondary"
+                          className="text-xs"
+                        >
+                          {ch}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {f.editor ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                          {f.editor
+                            .split(" ")
+                            .map((n) => n[0])
+                            .join("")
+                            .slice(0, 2)}
+                        </span>
+                        <span className="truncate">{f.editor}</span>
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {f.producer ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium shrink-0">
+                          {f.producer
+                            .split(" ")
+                            .map((n) => n[0])
+                            .join("")
+                            .slice(0, 2)}
+                        </span>
+                        <span className="truncate">{f.producer}</span>
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {f.viewThreshold != null
+                      ? f.viewThreshold.toLocaleString()
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-foreground">
+                    {f.totalViews > 0 ? f.totalViews.toLocaleString() : "—"}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {sorted.length === 0 && (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="text-center text-muted-foreground text-xs py-8"
+                >
                   {formats.length === 0
                     ? 'No formats yet. Click "Add Format" to create one.'
-                    : "No formats match the current filters."}
-                </td>
-              </tr>
+                    : "No formats match the current filter."}
+                </TableCell>
+              </TableRow>
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { formats, productionItems } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 
 async function isAncestor(candidateAncestorId: string, descendantId: string): Promise<boolean> {
   // Walk up from candidateAncestorId. Return true if we reach descendantId.
@@ -30,7 +30,57 @@ export async function GET(request: NextRequest) {
       .where(eq(formats.brand, brand))
       .orderBy(formats.name);
 
-    return NextResponse.json(allFormats);
+    // Sum views for every format name that appears on a production_item, in one
+    // scan. Then roll each format's total up through its descendants so a pillar
+    // row reflects its whole repurpose chain.
+    const viewsRows = await db
+      .select({
+        format: productionItems.format,
+        total: sql<string>`COALESCE(SUM(${productionItems.views}), 0)`,
+      })
+      .from(productionItems)
+      .where(
+        and(
+          eq(productionItems.brand, brand),
+          isNotNull(productionItems.format)
+        )
+      )
+      .groupBy(productionItems.format);
+
+    const viewsByName = new Map<string, number>();
+    for (const r of viewsRows) {
+      if (r.format) viewsByName.set(r.format, Number(r.total) || 0);
+    }
+
+    const childrenByParent = new Map<string, string[]>();
+    for (const f of allFormats) {
+      if (f.parentFormatId) {
+        const arr = childrenByParent.get(f.parentFormatId) ?? [];
+        arr.push(f.id);
+        childrenByParent.set(f.parentFormatId, arr);
+      }
+    }
+    const byId = new Map(allFormats.map((f) => [f.id, f]));
+    const rollup = new Map<string, number>();
+    const rollupFor = (id: string): number => {
+      const cached = rollup.get(id);
+      if (cached !== undefined) return cached;
+      const f = byId.get(id);
+      if (!f) return 0;
+      let total = viewsByName.get(f.name) ?? 0;
+      for (const childId of childrenByParent.get(id) ?? []) {
+        total += rollupFor(childId);
+      }
+      rollup.set(id, total);
+      return total;
+    };
+
+    const enriched = allFormats.map((f) => ({
+      ...f,
+      totalViews: rollupFor(f.id),
+    }));
+
+    return NextResponse.json(enriched);
   } catch (error) {
     console.error("Error fetching formats:", error);
     return NextResponse.json(
