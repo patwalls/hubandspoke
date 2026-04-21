@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clipIdeas } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
@@ -31,7 +31,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .select()
     .from(clipIdeas)
     .where(eq(clipIdeas.batchId, latest.batchId))
-    .orderBy(desc(clipIdeas.confidence));
+    .orderBy(
+      // Sort by estimatedViews desc; older rows without it fall back to
+      // confidence so pre-v2 batches still render in a sensible order.
+      sql`COALESCE(${clipIdeas.estimatedViews}, 0) DESC, ${clipIdeas.confidence} DESC NULLS LAST`
+    );
 
   return NextResponse.json({
     batch: {
@@ -43,6 +47,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       startSec: Number(i.startSec),
       endSec: Number(i.endSec),
       confidence: i.confidence != null ? Number(i.confidence) : null,
+      estimatedViews: i.estimatedViews ?? null,
     })),
   });
 }

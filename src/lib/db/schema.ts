@@ -187,12 +187,22 @@ export const clipIdeas = pgTable(
     hook: text("hook").notNull(),
     angle: text("angle").notNull(),
     rationale: text("rationale").notNull(),
+    // Legacy field from the first cut; unused now that the agent returns
+    // estimatedViews. Kept nullable so older rows still read.
     confidence: decimal("confidence"),
+    estimatedViews: bigint("estimated_views", { mode: "number" }),
     generatedBy: text("generated_by").notNull(),
     promptVersion: integer("prompt_version").notNull().default(1),
     modelUsage: jsonb("model_usage"),
     status: text("status").notNull().default("suggested"),
     killReason: text("kill_reason"),
+    acceptedNotionPageId: text("accepted_notion_page_id"),
+    acceptedNotionPageUrl: text("accepted_notion_page_url"),
+    acceptedTargetFormat: text("accepted_target_format"),
+    acceptedEditorUserId: uuid("accepted_editor_user_id").references(
+      () => users.id,
+      { onDelete: "set null" }
+    ),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     decidedByUserId: uuid("decided_by_user_id").references(() => users.id, {
       onDelete: "set null",

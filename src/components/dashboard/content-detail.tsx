@@ -1580,7 +1580,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       </div>
 
-      <ClipIdeasPanel itemId={item.id} hasDescriptProject={hasDescriptProject} />
+      <ClipIdeasPanel
+        itemId={item.id}
+        hasDescriptProject={hasDescriptProject}
+        pillarFormat={item.format}
+        brand={brand}
+      />
 
       {/* Reposts — list of same-content reposts that descend from this item.
           Styled to mirror the Derivative content table directly above so the

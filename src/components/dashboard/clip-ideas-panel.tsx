@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { SparklesIcon, RefreshCwIcon } from "lucide-react";
+import { SparklesIcon, RefreshCwIcon, ExternalLinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ClipTriageDialog } from "./clip-triage-dialog";
 
 interface ClipIdea {
   id: string;
@@ -14,13 +15,18 @@ interface ClipIdea {
   angle: string;
   rationale: string;
   confidence: number | null;
+  estimatedViews: number | null;
   status: string;
+  acceptedNotionPageUrl: string | null;
+  acceptedTargetFormat: string | null;
   createdAt: string;
 }
 
 interface Props {
   itemId: string;
   hasDescriptProject: boolean;
+  pillarFormat: string | null;
+  brand: string;
 }
 
 function fmtTs(sec: number): string {
@@ -35,6 +41,13 @@ function fmtDur(start: number, end: number): string {
   return `${d}s`;
 }
 
+function fmtViews(n: number | null | undefined): string | null {
+  if (n == null) return null;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M views`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K views`;
+  return `${n.toLocaleString()} views`;
+}
+
 function fmtRel(iso: string): string {
   const d = new Date(iso);
   const diff = Date.now() - d.getTime();
@@ -46,7 +59,12 @@ function fmtRel(iso: string): string {
   return d.toLocaleDateString();
 }
 
-export function ClipIdeasPanel({ itemId, hasDescriptProject }: Props) {
+export function ClipIdeasPanel({
+  itemId,
+  hasDescriptProject,
+  pillarFormat,
+  brand,
+}: Props) {
   const [loading, setLoading] = useState(true);
   const [ideas, setIdeas] = useState<ClipIdea[]>([]);
   const [batchCreatedAt, setBatchCreatedAt] = useState<string | null>(null);
@@ -55,6 +73,7 @@ export function ClipIdeasPanel({ itemId, hasDescriptProject }: Props) {
     | { kind: "generating" }
     | { kind: "error"; message: string }
   >({ kind: "idle" });
+  const [triageIdea, setTriageIdea] = useState<ClipIdea | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -155,51 +174,108 @@ export function ClipIdeasPanel({ itemId, hasDescriptProject }: Props) {
         </p>
       ) : (
         <ol className="space-y-2">
-          {ideas.map((idea, i) => (
-            <li
-              key={idea.id}
-              className="rounded-md border border-border bg-background p-3 space-y-1.5"
-            >
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-xs font-mono text-muted-foreground shrink-0">
-                  #{i + 1}
-                </span>
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-mono",
-                    "bg-muted text-muted-foreground"
-                  )}
-                  title={`Clip runs ${fmtDur(idea.startSec, idea.endSec)}`}
-                >
-                  {fmtTs(idea.startSec)}–{fmtTs(idea.endSec)}{" "}
-                  <span className="opacity-70">
-                    ({fmtDur(idea.startSec, idea.endSec)})
-                  </span>
-                </span>
-                {idea.confidence != null && (
-                  <span
-                    className="text-[11px] text-muted-foreground"
-                    title="Model's self-estimated confidence that this clip would perform well on short-form"
-                  >
-                    {Math.round(idea.confidence * 100)}%
-                  </span>
+          {ideas.map((idea, i) => {
+            const accepted = idea.status === "accepted";
+            const killed = idea.status === "killed";
+            const interactive = idea.status === "suggested";
+            return (
+              <li
+                key={idea.id}
+                className={cn(
+                  "rounded-md border border-border bg-background p-3 space-y-1.5 transition-colors",
+                  interactive && "cursor-pointer hover:border-foreground/30",
+                  killed && "opacity-50"
                 )}
-              </div>
-              <p className="text-sm font-medium text-foreground leading-snug">
-                “{idea.hook}”
-              </p>
-              <p className="text-[13px] text-foreground leading-snug">
-                <span className="text-muted-foreground">Angle: </span>
-                {idea.angle}
-              </p>
-              <p className="text-[12px] text-muted-foreground leading-snug">
-                <span className="font-medium text-foreground/80">Why: </span>
-                {idea.rationale}
-              </p>
-            </li>
-          ))}
+                onClick={() => {
+                  if (interactive) setTriageIdea(idea);
+                }}
+              >
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-xs font-mono text-muted-foreground shrink-0">
+                    #{i + 1}
+                  </span>
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-mono",
+                      "bg-muted text-muted-foreground"
+                    )}
+                    title={`Clip runs ${fmtDur(idea.startSec, idea.endSec)}`}
+                  >
+                    {fmtTs(idea.startSec)}–{fmtTs(idea.endSec)}{" "}
+                    <span className="opacity-70">
+                      ({fmtDur(idea.startSec, idea.endSec)})
+                    </span>
+                  </span>
+                  {idea.estimatedViews != null ? (
+                    <span
+                      className="text-[11px] font-medium text-foreground"
+                      title="Model's estimate of realistic view count on best-fit short-form channel, calibrated against brand historicals"
+                    >
+                      ~{fmtViews(idea.estimatedViews)}
+                    </span>
+                  ) : idea.confidence != null ? (
+                    <span
+                      className="text-[11px] text-muted-foreground"
+                      title="Legacy confidence score (pre-v2 batch)"
+                    >
+                      {Math.round(idea.confidence * 100)}%
+                    </span>
+                  ) : null}
+                  {accepted && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700">
+                      Accepted
+                      {idea.acceptedTargetFormat && (
+                        <span className="text-muted-foreground">
+                          → {idea.acceptedTargetFormat}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {killed && (
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      Killed
+                    </span>
+                  )}
+                  {accepted && idea.acceptedNotionPageUrl && (
+                    <a
+                      href={idea.acceptedNotionPageUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                      title="Open the Notion A-Record"
+                    >
+                      <ExternalLinkIcon className="size-3" /> Notion
+                    </a>
+                  )}
+                </div>
+                <p className="text-sm font-medium text-foreground leading-snug">
+                  “{idea.hook}”
+                </p>
+                <p className="text-[13px] text-foreground leading-snug">
+                  <span className="text-muted-foreground">Angle: </span>
+                  {idea.angle}
+                </p>
+                <p className="text-[12px] text-muted-foreground leading-snug">
+                  <span className="font-medium text-foreground/80">Why: </span>
+                  {idea.rationale}
+                </p>
+              </li>
+            );
+          })}
         </ol>
       )}
+
+      <ClipTriageDialog
+        open={triageIdea !== null}
+        onOpenChange={(o) => {
+          if (!o) setTriageIdea(null);
+        }}
+        idea={triageIdea}
+        pillarFormat={pillarFormat}
+        brand={brand}
+        onDone={load}
+      />
     </div>
   );
 }
