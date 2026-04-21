@@ -3,6 +3,7 @@ import { syncPerformanceData } from "@/lib/services/performance-decay";
 import { checkSSThresholds } from "@/lib/services/threshold-monitor";
 import { runEvergreenScan } from "@/lib/services/evergreen-scan";
 import { runCrossPostScan } from "@/lib/services/cross-post-scan";
+import { syncAllMATG } from "@/lib/services/matg-sync";
 
 type TenMinSlot = 0 | 10 | 20 | 30 | 40 | 50;
 
@@ -40,6 +41,11 @@ export const CRON_JOBS: CronJob[] = [
     name: "notion-sync",
     schedule: { every: "hour", atMinute: 30 },
     run: () => syncFromNotion(),
+  },
+  {
+    name: "matg-sync",
+    schedule: { every: "day", atUtcHour: 13 },
+    run: () => syncAllMATG(),
   },
   {
     name: "ss-threshold-check",
