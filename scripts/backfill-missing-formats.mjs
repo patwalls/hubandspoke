@@ -321,15 +321,35 @@ if (dryRun) {
 } else if (assigned.size > 0) {
   console.log(`\nApplying ${assigned.size} updates…`);
   let applied = 0;
+  let pillarConflicts = 0;
+  let otherErrors = 0;
   for (const [id, { format }] of assigned) {
-    await sql`
-      UPDATE production_items
-      SET format = ${format}, updated_at = NOW()
-      WHERE id = ${id} AND format IS NULL
-    `;
-    applied++;
+    try {
+      await sql`
+        UPDATE production_items
+        SET format = ${format}, updated_at = NOW()
+        WHERE id = ${id} AND format IS NULL
+      `;
+      applied++;
+    } catch (err) {
+      // uniq_production_items_pillar_format: at most one derivative per
+      // (pillar, lower(format)) slot. LLM sometimes picks the same format
+      // for two derivatives of the same pillar — first writer wins, skip
+      // the rest so the run doesn't abort.
+      if (err?.code === "23505" && String(err?.constraint_name ?? "").includes("pillar_format")) {
+        pillarConflicts++;
+        if (pillarConflicts <= 10) {
+          console.log(`  ↻ skip ${id}: pillar-format slot already taken → ${format}`);
+        }
+      } else {
+        otherErrors++;
+        console.error(`  ✗ ${id}: ${err?.code ?? ""} ${err?.message ?? err}`);
+      }
+    }
   }
-  console.log(`Applied ${applied} updates.`);
+  console.log(
+    `Applied ${applied}. Skipped ${pillarConflicts} pillar-format conflicts, ${otherErrors} other errors.`,
+  );
   await sql`
     INSERT INTO sync_logs (sync_type, status, items_updated, completed_at)
     VALUES ('format_backfill', 'completed', ${applied}, NOW())
