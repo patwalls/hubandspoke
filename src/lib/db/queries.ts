@@ -334,14 +334,8 @@ export async function getProductionPipeline(
       editorAvatarUrl: editors.avatarUrl,
     })
     .from(productionItems)
-    .leftJoin(
-      producers,
-      sql`lower(${producers.email}) = lower(${productionItems.producerEmail})`
-    )
-    .leftJoin(
-      editors,
-      sql`lower(${editors.email}) = lower(${productionItems.editorEmail})`
-    )
+    .leftJoin(producers, eq(producers.id, productionItems.producerUserId))
+    .leftJoin(editors, eq(editors.id, productionItems.editorUserId))
     .where(
       and(
         eq(productionItems.brand, brand),
