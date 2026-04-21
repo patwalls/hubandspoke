@@ -12,7 +12,10 @@ export default auth((req) => {
   const { pathname } = req.nextUrl;
   const isAuthApi = pathname.startsWith("/api/auth");
   const isCronApi = pathname.startsWith("/api/cron");
-  if (isAuthApi || isCronApi) return NextResponse.next();
+  const isInviteApi =
+    pathname === "/api/invites/validate" ||
+    pathname === "/api/invites/accept";
+  if (isAuthApi || isCronApi || isInviteApi) return NextResponse.next();
 
   const isPublic = PUBLIC_PAGES.has(pathname);
   const loggedIn = !!req.auth;
