@@ -332,8 +332,6 @@ function SourcedBody({
   onMarkPublished: (fields: {
     publishedLink: string;
     publishedDate: string;
-    views?: number | null;
-    likes?: number | null;
   }) => Promise<unknown>;
   onAssign: (userId: string) => Promise<unknown>;
   onKill: () => void;
@@ -532,16 +530,12 @@ function PostedForm({
   onSubmit: (fields: {
     publishedLink: string;
     publishedDate: string;
-    views?: number | null;
-    likes?: number | null;
   }) => Promise<unknown>;
   onCancel: () => void;
   defaultChannel: string;
 }) {
   const [link, setLink] = useState("");
   const [date, setDate] = useState(() => todayLocalISO());
-  const [views, setViews] = useState("");
-  const [likes, setLikes] = useState("");
   const [linkError, setLinkError] = useState<string | null>(null);
 
   const linkPlaceholder =
@@ -565,8 +559,6 @@ function PostedForm({
     await onSubmit({
       publishedLink: link.trim(),
       publishedDate: date,
-      views: views === "" ? null : Number(views),
-      likes: likes === "" ? null : Number(likes),
     });
   }
 
@@ -616,45 +608,6 @@ function PostedForm({
           onChange={(e) => setDate(e.target.value)}
           className="rounded-md border border-input bg-background px-2.5 h-9 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <label
-            htmlFor="posted-views"
-            className="block text-xs font-medium text-foreground"
-          >
-            Views
-          </label>
-          <input
-            id="posted-views"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            value={views}
-            onChange={(e) => setViews(e.target.value)}
-            placeholder="Optional"
-            className="w-full rounded-md border border-input bg-background px-2.5 h-9 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
-        <div className="space-y-1">
-          <label
-            htmlFor="posted-likes"
-            className="block text-xs font-medium text-foreground"
-          >
-            Likes
-          </label>
-          <input
-            id="posted-likes"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            value={likes}
-            onChange={(e) => setLikes(e.target.value)}
-            placeholder="Optional"
-            className="w-full rounded-md border border-input bg-background px-2.5 h-9 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
       </div>
 
       <div className="flex items-center gap-2 pt-1">
