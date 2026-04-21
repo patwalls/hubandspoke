@@ -4,6 +4,7 @@ import { productionItems, syncLogs, users } from "@/lib/db/schema";
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 const DATABASE_ID = "8cb6cee4163d4282a5c87991ea689bde";
 
@@ -412,17 +413,21 @@ export async function syncFromNotion(): Promise<{
       collectPerson(peopleBucket, producer);
       collectPerson(peopleBucket, editor);
 
+      const notionUtmCampaign = extractUtmCampaign(properties);
+      const title = extractTitle(properties);
+
       // Fields every sync row writes. Producer/editor are deliberately absent:
       // assignments are app-owned post-insert (see below for INSERT-only seed).
+      // utmCampaign is also absent here — UPDATE path sets it only when Notion
+      // has a non-empty value, INSERT path auto-generates when Notion is empty.
       const commonData = {
         notionId,
-        title: extractTitle(properties),
+        title,
         publishedDate: extractPublishDate(properties),
         status: extractStatus(properties),
         platform,
         format: formatName,
         campaign: extractCampaign(properties),
-        utmCampaign: extractUtmCampaign(properties),
         publishedLink,
         isExternal: detectExternal(publishedLink, platform),
         // views/likes/comments intentionally NOT written here — Scrape Creators
@@ -448,9 +453,16 @@ export async function syncFromNotion(): Promise<{
         // UPDATE path: skip producer/editor entirely. Hub & Spoke is now the
         // source of truth for assignments — Notion edits to Producer/Editor
         // after first sync are intentionally ignored.
+        // utmCampaign: only overwrite when Notion has a non-empty value so we
+        // don't clobber an auto-generated or editor-tweaked slug with Notion's
+        // blank.
+        const updatePayload: typeof commonData & { utmCampaign?: string } = {
+          ...commonData,
+        };
+        if (notionUtmCampaign) updatePayload.utmCampaign = notionUtmCampaign;
         await db
           .update(productionItems)
-          .set(commonData)
+          .set(updatePayload)
           .where(eq(productionItems.notionId, notionId));
         totalUpdated++;
       } else {
@@ -473,8 +485,11 @@ export async function syncFromNotion(): Promise<{
           producerUserId = producerUserId ?? resolved.producerUserId;
           editorUserId = editorUserId ?? resolved.editorUserId;
         }
+        const utmCampaign =
+          notionUtmCampaign ?? (await generateUtmCampaign(title));
         await db.insert(productionItems).values({
           ...commonData,
+          utmCampaign,
           producerEmail: producer.email,
           producerNotionUserId: producer.userId,
           producerName: producer.name,
@@ -485,6 +500,27 @@ export async function syncFromNotion(): Promise<{
           editorUserId,
         });
         totalCreated++;
+
+        // If Notion had no utm_campaign, push the auto-generated one back so
+        // Notion reflects reality. Fire-and-forget: the row is already saved,
+        // a failed push-back is surfaced to logs but shouldn't fail the sync.
+        if (!notionUtmCampaign) {
+          try {
+            await notion.pages.update({
+              page_id: notionId,
+              properties: {
+                utm_campaign: {
+                  rich_text: [{ text: { content: utmCampaign } }],
+                },
+              },
+            });
+          } catch (pushErr) {
+            console.error(
+              `[notion-sync] utm_campaign push-back failed for ${notionId}:`,
+              pushErr instanceof Error ? pushErr.message : pushErr
+            );
+          }
+        }
       }
     }
 

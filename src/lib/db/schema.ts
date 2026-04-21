@@ -149,6 +149,9 @@ export const productionItems = pgTable(
       .where(
         sql`${table.pillarContentItemId} IS NOT NULL AND ${table.format} IS NOT NULL AND ${table.sourceType} = 'original'`
       ),
+    uniqueIndex("uniq_production_items_utm_campaign")
+      .on(table.utmCampaign)
+      .where(sql`${table.utmCampaign} IS NOT NULL`),
   ]
 );
 

@@ -15,6 +15,7 @@ import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 const SC_BASE = "https://api.scrapecreators.com";
 const MATG_YT_HANDLE = "MATGpod";
@@ -428,6 +429,7 @@ async function syncYouTubeVideos(): Promise<SyncResult> {
         await db.insert(productionItems).values({
           ...data,
           youtubeId: video.id,
+          utmCampaign: await generateUtmCampaign(video.title),
           producerUserId: assignees.producerUserId,
           editorUserId: assignees.editorUserId,
         });
@@ -488,6 +490,7 @@ async function syncYouTubeShorts(): Promise<SyncResult> {
         await db.insert(productionItems).values({
           ...data,
           youtubeId: short.id,
+          utmCampaign: await generateUtmCampaign(short.title),
           producerUserId: assignees.producerUserId,
           editorUserId: assignees.editorUserId,
         });
@@ -553,6 +556,7 @@ async function syncInstagram(): Promise<SyncResult> {
         });
         await db.insert(productionItems).values({
           ...data,
+          utmCampaign: await generateUtmCampaign(data.title),
           producerUserId: assignees.producerUserId,
           editorUserId: assignees.editorUserId,
         });
@@ -621,6 +625,7 @@ async function syncTwitter(): Promise<SyncResult> {
         });
         await db.insert(productionItems).values({
           ...data,
+          utmCampaign: await generateUtmCampaign(title),
           producerUserId: assignees.producerUserId,
           editorUserId: assignees.editorUserId,
         });

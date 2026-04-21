@@ -563,6 +563,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
+  const [utmCampaign, setUtmCampaign] = useState("");
   const [sourceType, setSourceType] = useState<string>("original");
   const [pendingKill, setPendingKill] = useState<{ previousStatus: string } | null>(
     null,
@@ -597,6 +598,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     setEditorUserId(item.editorUserId || "");
     setPublishedLink(item.publishedLink || "");
     setPublishedDate(item.publishedDate || "");
+    setUtmCampaign(item.utmCampaign || "");
     setSourceType(item.sourceType || "original");
   }, []);
 
@@ -865,11 +867,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               </span>
             )}
           </div>
-          {item.utmCampaign && (
-            <p className="mt-1 text-[11px] text-muted-foreground font-mono">
-              {item.utmCampaign}
-            </p>
-          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           {(item.sourceType === "repost" || item.sourceType === "cross_post") &&
@@ -1479,6 +1476,27 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               disabled={isYouTube}
             />
           </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>CTA UTM Campaign</Label>
+          <Input
+            value={utmCampaign}
+            onChange={(e) => setUtmCampaign(e.target.value)}
+            onBlur={() => {
+              const next = utmCampaign.trim();
+              if ((item.utmCampaign ?? "") !== next) {
+                void persistField({ utmCampaign: next }).then((ok) => {
+                  if (!ok) setUtmCampaign(item.utmCampaign ?? "");
+                });
+              }
+            }}
+            className="font-mono text-sm"
+            placeholder="e.g. angus-warner-42"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Used in Lynx for CTA tracking. Must be unique across all content.
+          </p>
         </div>
 
         {deleteError && (

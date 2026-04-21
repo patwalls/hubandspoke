@@ -10,6 +10,7 @@ import {
 } from "@/lib/descript";
 import { dispatchRepurpose, type RepurposeAction } from "@/lib/repurpose-agent";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 async function resolveCompositionInBackground(
   triggerId: string,
@@ -160,6 +161,7 @@ export async function POST(request: NextRequest) {
             pillarContentItemId: item.id,
             descriptProjectId: item.descriptProjectId,
             descriptProjectUrl: result.projectUrl,
+            utmCampaign: await generateUtmCampaign(action.compositionName),
             producerUserId: derivativeAssignees.producerUserId,
             editorUserId: derivativeAssignees.editorUserId,
           })
@@ -216,6 +218,7 @@ export async function POST(request: NextRequest) {
         status: "Idea",
         pillarContentNotionId: item.notionId,
         pillarContentItemId: item.id,
+        utmCampaign: await generateUtmCampaign(action.taskName),
         producerUserId: derivativeAssignees.producerUserId,
         editorUserId: derivativeAssignees.editorUserId,
       })

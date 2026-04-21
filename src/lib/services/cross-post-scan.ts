@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { crossPostRules, productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 // Cap flood risk: only consider items published within the last N days on the
 // first pass. Older evergreen content rides the existing repost queue. Tunable.
@@ -134,6 +135,7 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
           format: candidate.format,
           pillarContentNotionId: candidate.pillarContentNotionId,
           pillarContentItemId: candidate.pillarContentItemId,
+          utmCampaign: await generateUtmCampaign(candidate.title),
           producerUserId: assignees.producerUserId,
           editorUserId: assignees.editorUserId,
         })

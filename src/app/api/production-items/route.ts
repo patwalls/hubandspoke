@@ -12,6 +12,7 @@ import {
 import { enqueueNotification } from "@/lib/services/notifications";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 function getNotion(): Client {
   const auth = process.env.NOTION_API_SECRET;
@@ -40,6 +41,20 @@ async function pushPillarToNotion(
     properties: {
       "Pillar Content": {
         relation: pillarNotionId ? [{ id: pillarNotionId }] : [],
+      },
+    },
+  });
+}
+
+async function pushUtmCampaignToNotion(
+  notionId: string,
+  value: string | null
+): Promise<void> {
+  await getNotion().pages.update({
+    page_id: notionId,
+    properties: {
+      utm_campaign: {
+        rich_text: value ? [{ text: { content: value } }] : [],
       },
     },
   });
@@ -136,6 +151,7 @@ export async function POST(request: NextRequest) {
     const producerUserId = bodyProducerUserId ?? resolved.producerUserId;
     const editorUserId = bodyEditorUserId ?? resolved.editorUserId;
 
+    const utmCampaign = await generateUtmCampaign(title);
     const [created] = await db
       .insert(productionItems)
       .values({
@@ -146,6 +162,7 @@ export async function POST(request: NextRequest) {
         publishedDate,
         brand,
         status: "Published",
+        utmCampaign,
         views: finalViews,
         likes: finalLikes,
         comments: finalComments,
@@ -198,6 +215,7 @@ export async function PUT(request: NextRequest) {
       salesAmount,
       sourceType,
       killReason,
+      utmCampaign,
     } = body;
 
     const VALID_SOURCE_TYPES = new Set(["original", "repost", "cross_post"]);
@@ -223,6 +241,10 @@ export async function PUT(request: NextRequest) {
     if (publishedLink !== undefined) updateData.publishedLink = publishedLink || null;
     if (publishedDate !== undefined) updateData.publishedDate = publishedDate;
     if (status !== undefined) updateData.status = status || null;
+    if (utmCampaign !== undefined) {
+      const trimmed = typeof utmCampaign === "string" ? utmCampaign.trim() : "";
+      updateData.utmCampaign = trimmed || null;
+    }
 
     // Pillar: accept itemId (or null to clear). Resolve target's notionId so we
     // keep both foreign keys in sync, and so we can push the relation to Notion.
@@ -439,35 +461,53 @@ export async function PUT(request: NextRequest) {
       return trimmed.slice(0, 2000);
     })();
 
-    const [updated] = await db.transaction(async (tx) => {
-      const [row] = await tx
-        .update(productionItems)
-        .set(updateData)
-        .where(eq(productionItems.id, id))
-        .returning();
-      if (row && statusTransition) {
-        if (statusTransition.to === "Killed") {
-          await tx.insert(contentEvents).values({
-            contentItemId: id,
-            userId: actorUserId,
-            eventType: "killed",
-            payload: {
-              type: "killed",
-              from: statusTransition.from,
-              reason: normalizedKillReason,
-            },
-          });
-        } else {
-          await tx.insert(contentEvents).values({
-            contentItemId: id,
-            userId: actorUserId,
-            eventType: "status_change",
-            payload: { type: "status_change", ...statusTransition },
-          });
+    let updated: typeof productionItems.$inferSelect | undefined;
+    try {
+      [updated] = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(productionItems)
+          .set(updateData)
+          .where(eq(productionItems.id, id))
+          .returning();
+        if (row && statusTransition) {
+          if (statusTransition.to === "Killed") {
+            await tx.insert(contentEvents).values({
+              contentItemId: id,
+              userId: actorUserId,
+              eventType: "killed",
+              payload: {
+                type: "killed",
+                from: statusTransition.from,
+                reason: normalizedKillReason,
+              },
+            });
+          } else {
+            await tx.insert(contentEvents).values({
+              contentItemId: id,
+              userId: actorUserId,
+              eventType: "status_change",
+              payload: { type: "status_change", ...statusTransition },
+            });
+          }
         }
+        return [row];
+      });
+    } catch (err) {
+      // 23505 = unique_violation. The only unique constraint a PUT can trip is
+      // the partial index on utm_campaign (notion_id/youtube_id are insert-only
+      // in this handler).
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? String((err as { code: unknown }).code)
+          : null;
+      if (code === "23505") {
+        return NextResponse.json(
+          { error: "That CTA UTM campaign is already taken" },
+          { status: 409 }
+        );
       }
-      return [row];
-    });
+      throw err;
+    }
 
     if (!updated) {
       return NextResponse.json(
@@ -499,6 +539,19 @@ export async function PUT(request: NextRequest) {
           console.error("Failed to push pillar to Notion:", err);
           warnings.push(
             `pillar: ${err instanceof Error ? err.message : "Notion update failed"}`
+          );
+        }
+      }
+      if (utmCampaign !== undefined) {
+        try {
+          await pushUtmCampaignToNotion(
+            updated.notionId,
+            updated.utmCampaign ?? null
+          );
+        } catch (err) {
+          console.error("Failed to push utm_campaign to Notion:", err);
+          warnings.push(
+            `utm_campaign: ${err instanceof Error ? err.message : "Notion update failed"}`
           );
         }
       }

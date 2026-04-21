@@ -4,6 +4,7 @@ import { productionItems } from "@/lib/db/schema";
 import { classifyEvergreen } from "@/lib/evergreen-agent";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 // Tunables. Keep at module top so the first operator to look at this file can
 // see every knob in one place.
@@ -221,6 +222,7 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
         sourceType: "repost",
         repostedFromItemId: original.id,
         evergreenReasoning: original.evergreenReasoning,
+        utmCampaign: await generateUtmCampaign(original.title),
         producerUserId: assignees.producerUserId,
         editorUserId: assignees.editorUserId,
       })

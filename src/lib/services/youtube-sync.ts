@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 const SCRAPE_CREATORS_BASE = "https://api.scrapecreators.com/v1/youtube";
 const MATG_HANDLE = "MATGpod";
@@ -185,6 +186,7 @@ export async function syncMATGYouTube(): Promise<YouTubeSyncResult> {
           await db.insert(productionItems).values({
             ...videoData,
             youtubeId: video.id,
+            utmCampaign: await generateUtmCampaign(video.title),
             producerUserId: assignees.producerUserId,
             editorUserId: assignees.editorUserId,
           });
