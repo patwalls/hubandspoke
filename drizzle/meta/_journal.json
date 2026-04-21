@@ -134,6 +134,20 @@
       "when": 1776806184679,
       "tag": "0018_noisy_raider",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1776807732296,
+      "tag": "0019_faithful_puff_adder",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1776810158993,
+      "tag": "0020_cuddly_the_renegades",
+      "breakpoints": true
     }
   ]
 }

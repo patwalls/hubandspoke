@@ -1,0 +1,1 @@
+ALTER TABLE "formats" DROP COLUMN "field_schema";

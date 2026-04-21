@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
+  contentDrafts,
   productionItems,
   formats,
   users,
@@ -11,6 +12,7 @@ import {
   predictViews,
   type ViewPrediction,
 } from "@/lib/services/view-predictor";
+import { resolveSchemaForPlatforms } from "@/lib/platform-field-schemas";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -79,6 +81,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .from(formats)
       .where(eq(formats.brand, item.brand))
       .orderBy(formats.name);
+
+    // Whether this item has a platform we can draft for — drives the
+    // "Generate draft" button's enabled state. Lookup is by platform (where
+    // the post lives), not format (the editorial template).
+    const platformResolution = resolveSchemaForPlatforms(
+      (item.platform as string[] | null) ?? null,
+    );
+    const hasFieldSchema = !!platformResolution.schema;
 
     let pillar: { id: string; title: string | null; format: string | null } | null = null;
     if (item.pillarContentItemId) {
@@ -230,6 +240,20 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           .limit(3)
       : [];
 
+    // Current draft (at most one row per item thanks to the partial unique
+    // index). Null if the item has no draft yet. The UI renders fields based
+    // on `fieldSchemaSnapshot` — decoupled from live format edits.
+    const [currentDraft] = await db
+      .select()
+      .from(contentDrafts)
+      .where(
+        and(
+          eq(contentDrafts.productionItemId, id),
+          eq(contentDrafts.isCurrent, true),
+        ),
+      )
+      .limit(1);
+
     // Predicted views — computed on the fly for pre-published items. Once the
     // item is "Published" we rely on the `predictedViewsSnapshot` column
     // (captured at the publish transition) and skip recomputation.
@@ -282,6 +306,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         createdAt: r.createdAt.toISOString(),
       })),
       repostedFrom,
+      currentDraft: currentDraft ?? null,
+      hasFieldSchema,
     });
   } catch (error) {
     console.error("Error fetching production item:", error);

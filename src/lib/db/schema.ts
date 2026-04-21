@@ -227,6 +227,86 @@ export const clipIdeas = pgTable(
   ]
 );
 
+// Schema describing the fields a draft contains. Keyed by *platform* (where
+// the post lives) — see `src/lib/platform-field-schemas.ts` for the
+// authoritative map. The `prompt` on each field is the AI directive used at
+// generation time; a `format.instructions` string is composed alongside as
+// editorial-voice context. The top-level `version` lets the schema shape
+// evolve without a full backfill — store a snapshot on each draft row.
+export type FormatFieldSchema = {
+  version: number;
+  fields: Array<{
+    key: string;
+    label: string;
+    type: "text" | "longtext" | "tags" | "slides";
+    prompt: string;
+    maxLength?: number;
+    required?: boolean;
+  }>;
+};
+
+// Platform-specific draft content (caption, description, tweet text, slide
+// copy) for a production item. One "current" row per item — edits mutate it
+// in place via auto-persist-on-blur. A fresh AI generation or an explicit
+// "save version" clones the current row: the new row becomes current, the
+// previous row stays as a frozen snapshot. History lives in the same table
+// ordered by `version`.
+//
+// `fieldSchemaSnapshot` captures the format's `fieldSchema` at write time so
+// old drafts survive later format edits. `modelUsage` + `promptVersion`
+// mirror the `clipIdeas` pattern so we can audit cost + regressions.
+export type ContentDraftSlide = {
+  id: string;        // stable id — used as feedback key suffix later (Stage 3)
+  order: number;
+  text: string;
+  imageUrl?: string;
+};
+
+export type ContentDraftContent = Record<
+  string,
+  string | string[] | ContentDraftSlide[] | null
+>;
+
+export const contentDrafts = pgTable(
+  "content_drafts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    productionItemId: uuid("production_item_id")
+      .references(() => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    version: integer("version").notNull(),
+    isCurrent: boolean("is_current").notNull().default(false),
+    content: jsonb("content").$type<ContentDraftContent>().notNull(),
+    fieldSchemaSnapshot: jsonb("field_schema_snapshot")
+      .$type<FormatFieldSchema>()
+      .notNull(),
+    generatedBy: text("generated_by").notNull(), // "ai:<model>:v<n>" | "user"
+    promptVersion: integer("prompt_version"),
+    modelUsage: jsonb("model_usage"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_content_drafts_item").on(table.productionItemId),
+    // Partial unique index — at most one current draft per item. Cleaner than
+    // a racy isCurrent boolean + app-level invariant; Postgres enforces it.
+    uniqueIndex("uq_content_drafts_current")
+      .on(table.productionItemId)
+      .where(sql`${table.isCurrent} = true`),
+    uniqueIndex("uq_content_drafts_item_version").on(
+      table.productionItemId,
+      table.version,
+    ),
+  ],
+);
+
 export const formats = pgTable(
   "formats",
   {

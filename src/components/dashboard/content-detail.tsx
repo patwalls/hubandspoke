@@ -41,6 +41,7 @@ import { TranscriptButton } from "./transcript-dialog";
 import { cn } from "@/lib/utils";
 import { platformClass, statusClass } from "@/lib/badge-colors";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
+import { ContentDraftPanel, type DraftRow } from "./content-draft";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
@@ -130,6 +131,8 @@ interface DetailResponse {
   crossPosts: RepostRow[];
   repostedFrom: RepostedFromRef | null;
   prediction: ViewPrediction | null;
+  currentDraft: DraftRow | null;
+  hasFieldSchema: boolean;
 }
 
 interface ContentDetailProps {
@@ -1472,6 +1475,17 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       )}
       </div>
+
+      {item.format &&
+        item.status !== "Published" &&
+        item.status !== "Killed" && (
+          <ContentDraftPanel
+            itemId={item.id}
+            hasFieldSchema={data.hasFieldSchema}
+            initialDraft={data.currentDraft}
+            formatName={item.format}
+          />
+        )}
 
       <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
 
