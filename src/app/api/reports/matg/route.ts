@@ -270,6 +270,7 @@ export async function GET(request: NextRequest) {
       },
       items: mappedItems,
       weekProgress: getWeekProgress(weekStartDay),
+      weekStartDay,
       platforms: platformList,
       formats: formatList,
       showingFormats,

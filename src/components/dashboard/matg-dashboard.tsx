@@ -90,6 +90,7 @@ export function MATGDashboard() {
           viewsData={data.byPlatform.views}
           formatData={data.byFormat.production}
           weekProgress={data.weekProgress}
+          weekStartDay={data.weekStartDay}
           currentPeriodLabel={currentPeriodLabel}
           weeklyGoal={data.weeklyGoal}
           brand="matg"

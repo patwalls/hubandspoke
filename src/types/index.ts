@@ -84,6 +84,7 @@ export interface ContentReportData {
   };
   items: ProductionItem[];
   weekProgress: { day: number; percent: number } | null;
+  weekStartDay: number;
   platforms: string[];
   formats: string[];
   showingFormats: boolean;

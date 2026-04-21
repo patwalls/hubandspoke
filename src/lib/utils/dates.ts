@@ -79,13 +79,23 @@ export function findPeriod(
   });
 }
 
+// Fractional position within the current week, honoring the brand's configured
+// week start. `day` is a 1-decimal value between 1.0 (week-start morning) and
+// ~7.9 (last day just before rollover). `percent` is the raw float 0–100; the
+// UI rounds it for display, while projection math uses the full precision.
 export function getWeekProgress(
-  weekStartsOn: WeekStartsOn = 0
+  weekStartsOn: WeekStartsOn = 0,
+  now: Date = new Date()
 ): { day: number; percent: number } {
-  const now = new Date();
-  // Day 1 = week-start, Day 7 = last day of the week.
-  const day = ((now.getDay() - weekStartsOn + 7) % 7) + 1;
-  const percent = Math.round((day / 7) * 100);
+  const start = startOfWeek(now, { weekStartsOn });
+  const end = endOfWeek(now, { weekStartsOn });
+  const total = end.getTime() - start.getTime();
+  const fraction = Math.min(
+    1,
+    Math.max(0, (now.getTime() - start.getTime()) / total)
+  );
+  const day = Math.min(7.9, Math.round((fraction * 7 + 1) * 10) / 10);
+  const percent = fraction * 100;
   return { day, percent };
 }
 

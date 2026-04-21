@@ -311,6 +311,7 @@ export async function getContentReport(
     },
     items: mappedItems,
     weekProgress: getWeekProgress(weekStartDay),
+    weekStartDay,
     platforms: platformList,
     formats: formatList,
     showingFormats,
