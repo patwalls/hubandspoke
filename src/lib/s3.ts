@@ -42,6 +42,21 @@ export function buildKey(itemId: string, fileName: string): string {
   return `${keyPrefix()}/${itemId}/${randomUUID()}-${safe}`;
 }
 
+export async function putObject(
+  key: string,
+  body: Buffer | Uint8Array,
+  contentType: string
+): Promise<void> {
+  await s3Client().send(
+    new PutObjectCommand({
+      Bucket: bucketName(),
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    })
+  );
+}
+
 export async function getPresignedPutUrl(
   key: string,
   contentType: string,
