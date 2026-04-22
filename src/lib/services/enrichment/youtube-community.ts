@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { bucketName } from "@/lib/s3";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
-import { archiveRemoteToS3 } from "./shared";
+import { archiveCarouselMedia, type CarouselSlide } from "./shared";
 import type { EnrichmentResult } from "./types";
 
 interface YTCommunityChannel {
@@ -46,14 +46,27 @@ export function isYouTubeCommunityUrl(
   }
 }
 
-function pickLargestImage(
-  images: YTCommunityImage[] | undefined
-): string | null {
-  if (!images?.length) return null;
-  const withSize = images.filter((i) => i.url);
-  if (!withSize.length) return null;
-  withSize.sort((a, b) => (b.width ?? 0) - (a.width ?? 0));
-  return withSize[0].url ?? null;
+// Build a slide list from SC's YT community payload. `data.images` holds
+// slides for multi-image posts (and a single entry for a single image).
+// `data.attachment.images` is the fallback when `images` is empty (older post
+// types use this shape). We de-dup by the URL base (everything before `?`) to
+// guard against the occasional multi-size response where the same image
+// appears at several widths.
+function buildSlides(
+  data: YTCommunityResponse,
+  stem: string
+): CarouselSlide[] {
+  const raw = data.images?.length ? data.images : data.attachment?.images ?? [];
+  const seen = new Set<string>();
+  const slides: CarouselSlide[] = [];
+  for (const img of raw) {
+    if (!img.url) continue;
+    const base = img.url.split("?")[0];
+    if (seen.has(base)) continue;
+    seen.add(base);
+    slides.push({ url: img.url, kind: "image", fileNameHint: stem });
+  }
+  return slides;
 }
 
 export async function enrichYouTubeCommunityItem(
@@ -117,24 +130,20 @@ export async function enrichYouTubeCommunityItem(
     result.fields.authorFetched = true;
   }
 
-  const imageUrl =
-    pickLargestImage(data.images) ??
-    pickLargestImage(data.attachment?.images);
-  if (!item.posterS3Key && imageUrl) {
-    try {
-      const archived = await archiveRemoteToS3(
-        itemId,
-        imageUrl,
-        `${data.postId ?? "community"}-poster`
-      );
-      result.updates.posterS3Key = archived.key;
+  const slides = buildSlides(data, data.postId ?? "community");
+  if (slides.length > 0) {
+    const res = await archiveCarouselMedia(itemId, slides);
+    if (res.primary) {
       result.updates.mediaS3Bucket = item.mediaS3Bucket ?? bucketName();
-      result.fields.posterArchived = true;
-    } catch (err) {
-      console.warn(
-        `[yt-comm-enrich] poster archive failed for ${itemId}:`,
-        err instanceof Error ? err.message : err
-      );
+      result.updates.mediaS3Key = res.primary.key;
+      result.updates.mediaContentType = res.primary.contentType;
+      result.updates.mediaSizeBytes = res.primary.size;
+      result.updates.mediaS3UploadedAt = new Date();
+      if (!item.posterS3Key) {
+        result.updates.posterS3Key = res.primary.key;
+        result.fields.posterArchived = true;
+      }
+      result.fields.mediaArchived = res.archived > 0;
     }
   }
 

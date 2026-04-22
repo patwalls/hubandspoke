@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { transcripts } from "@/lib/db/schema";
-import { buildKey, putObject } from "@/lib/s3";
+import { productionItemMedia, transcripts } from "@/lib/db/schema";
+import { buildKey, bucketName, putObject } from "@/lib/s3";
 
 const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
 
@@ -76,6 +76,154 @@ export async function archiveRemoteToS3(
   const key = buildKey(productionItemId, safeName);
   await putObject(key, Buffer.from(arr), contentType);
   return { key, size: arr.byteLength, contentType };
+}
+
+export interface CarouselSlide {
+  /** Remote URL to archive. For video slides, the actual video file. */
+  url: string;
+  /** What kind of media this slide is. `archiveRemoteToS3` will auto-detect
+   *  content-type from the HTTP response, but the enricher knows ahead of time
+   *  whether the slide is a photo or a video. Drives the UI render choice. */
+  kind: "image" | "video";
+  /** For video slides, the still-frame / cover image URL. Archived separately
+   *  so the gallery can render a thumb without loading the video. */
+  posterUrl?: string;
+  /** Stem for the S3 key (uuid + extension are appended automatically). */
+  fileNameHint: string;
+}
+
+export interface ArchiveCarouselResult {
+  archived: number;
+  total: number;
+  /** Index-0 result so callers can mirror the cover into legacy single-media
+   *  columns on production_items. */
+  primary: ArchiveResult | null;
+  primaryPoster: ArchiveResult | null;
+}
+
+/**
+ * Archive every slide of a carousel/multi-media post to S3 and upsert rows
+ * into `production_item_media` keyed by (productionItemId, index). Idempotent
+ * — an existing row with the same `sourceUrl` is left untouched so re-runs
+ * don't re-download. A row whose sourceUrl no longer matches the upstream is
+ * replaced (covers the "post was edited" edge case).
+ *
+ * Per-slide failures are logged and skipped; the function does not throw on a
+ * single bad slide so a broken URL doesn't block the rest of the carousel.
+ */
+export async function archiveCarouselMedia(
+  productionItemId: string,
+  slides: CarouselSlide[]
+): Promise<ArchiveCarouselResult> {
+  const out: ArchiveCarouselResult = {
+    archived: 0,
+    total: slides.length,
+    primary: null,
+    primaryPoster: null,
+  };
+  if (!slides.length) return out;
+
+  const existing = await db
+    .select({
+      index: productionItemMedia.index,
+      sourceUrl: productionItemMedia.sourceUrl,
+      s3Key: productionItemMedia.s3Key,
+      posterS3Key: productionItemMedia.posterS3Key,
+      contentType: productionItemMedia.contentType,
+      sizeBytes: productionItemMedia.sizeBytes,
+    })
+    .from(productionItemMedia)
+    .where(eq(productionItemMedia.productionItemId, productionItemId));
+  const existingByIndex = new Map(existing.map((r) => [r.index, r]));
+
+  for (let i = 0; i < slides.length; i++) {
+    const slide = slides[i];
+    const prev = existingByIndex.get(i);
+    if (prev && prev.sourceUrl === slide.url) {
+      // Already archived for this source URL. Capture the primary result so
+      // the caller can still mirror it to legacy columns on re-run.
+      if (i === 0) {
+        out.primary = {
+          key: prev.s3Key,
+          size: prev.sizeBytes ?? 0,
+          contentType: prev.contentType,
+        };
+        if (prev.posterS3Key) {
+          out.primaryPoster = {
+            key: prev.posterS3Key,
+            size: 0,
+            contentType: "image/jpeg",
+          };
+        }
+      }
+      continue;
+    }
+
+    let mediaRes: ArchiveResult;
+    try {
+      mediaRes = await archiveRemoteToS3(
+        productionItemId,
+        slide.url,
+        `${slide.fileNameHint}-${i}`
+      );
+    } catch (err) {
+      console.warn(
+        `[carousel-archive] slide ${i} media failed for ${productionItemId}:`,
+        err instanceof Error ? err.message : err
+      );
+      continue;
+    }
+
+    let posterRes: ArchiveResult | null = null;
+    if (slide.kind === "video" && slide.posterUrl) {
+      try {
+        posterRes = await archiveRemoteToS3(
+          productionItemId,
+          slide.posterUrl,
+          `${slide.fileNameHint}-${i}-poster`
+        );
+      } catch (err) {
+        console.warn(
+          `[carousel-archive] slide ${i} poster failed for ${productionItemId}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+
+    const row = {
+      productionItemId,
+      index: i,
+      kind: slide.kind,
+      s3Bucket: bucketName(),
+      s3Key: mediaRes.key,
+      contentType: mediaRes.contentType,
+      sizeBytes: mediaRes.size,
+      posterS3Key: posterRes?.key ?? null,
+      sourceUrl: slide.url,
+      uploadedAt: new Date(),
+    };
+    if (prev) {
+      await db
+        .update(productionItemMedia)
+        .set(row)
+        .where(
+          and(
+            eq(productionItemMedia.productionItemId, productionItemId),
+            eq(productionItemMedia.index, i)
+          )
+        );
+    } else {
+      await db.insert(productionItemMedia).values(row);
+    }
+
+    out.archived += 1;
+    if (i === 0) {
+      out.primary = mediaRes;
+      out.primaryPoster = posterRes;
+    }
+  }
+
+  return out;
 }
 
 export interface TranscriptInput {

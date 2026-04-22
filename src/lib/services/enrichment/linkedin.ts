@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { bucketName } from "@/lib/s3";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
-import { archiveRemoteToS3 } from "./shared";
+import { archiveCarouselMedia, type CarouselSlide } from "./shared";
 import type { EnrichmentResult } from "./types";
 
 interface LIAuthor {
@@ -45,14 +45,6 @@ export function isLinkedInUrl(url: string | null | undefined): boolean {
   } catch {
     return false;
   }
-}
-
-function pickLargest(images: LIImage[] | undefined): string | null {
-  if (!images?.length) return null;
-  const withSize = images.filter((i) => i.url);
-  if (!withSize.length) return null;
-  withSize.sort((a, b) => (b.width ?? 0) - (a.width ?? 0));
-  return withSize[0].url ?? null;
 }
 
 function postIdFromUrl(url: string): string {
@@ -135,26 +127,36 @@ export async function enrichLinkedInItem(
     result.fields.authorFetched = true;
   }
 
-  const imageUrl =
-    pickLargest(data.images) ??
-    data.thumbnail ??
-    data.thumbnailUrl ??
-    null;
-  if (!item.posterS3Key && imageUrl) {
-    try {
-      const archived = await archiveRemoteToS3(
-        itemId,
-        imageUrl,
-        `${postIdFromUrl(item.publishedLink)}-poster`
-      );
-      result.updates.posterS3Key = archived.key;
+  // Treat every entry in `data.images` as a distinct slide — LinkedIn multi-
+  // image posts expose one entry per slide. Fall back to the top-level
+  // thumbnail when `images` is missing entirely. If `images` really turns out
+  // to be "multiple sizes of the same image" for some post types, the
+  // idempotency check in archiveCarouselMedia will still produce a correct
+  // (if slightly redundant) result.
+  const stem = postIdFromUrl(item.publishedLink);
+  const slides: CarouselSlide[] = [];
+  if (data.images?.length) {
+    for (const img of data.images) {
+      if (img.url) slides.push({ url: img.url, kind: "image", fileNameHint: stem });
+    }
+  } else {
+    const fallback = data.thumbnail ?? data.thumbnailUrl;
+    if (fallback) slides.push({ url: fallback, kind: "image", fileNameHint: stem });
+  }
+
+  if (slides.length > 0) {
+    const res = await archiveCarouselMedia(itemId, slides);
+    if (res.primary) {
       result.updates.mediaS3Bucket = item.mediaS3Bucket ?? bucketName();
-      result.fields.posterArchived = true;
-    } catch (err) {
-      console.warn(
-        `[linkedin-enrich] poster archive failed for ${itemId}:`,
-        err instanceof Error ? err.message : err
-      );
+      result.updates.mediaS3Key = res.primary.key;
+      result.updates.mediaContentType = res.primary.contentType;
+      result.updates.mediaSizeBytes = res.primary.size;
+      result.updates.mediaS3UploadedAt = new Date();
+      if (!item.posterS3Key) {
+        result.updates.posterS3Key = res.primary.key;
+        result.fields.posterArchived = true;
+      }
+      result.fields.mediaArchived = res.archived > 0;
     }
   }
 

@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { bucketName } from "@/lib/s3";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
-import { archiveRemoteToS3 } from "./shared";
+import { archiveCarouselMedia, type CarouselSlide } from "./shared";
 import type { EnrichmentResult } from "./types";
 
 interface ThreadsImageVersion {
@@ -119,28 +119,38 @@ export async function enrichThreadsItem(
     result.fields.authorFetched = true;
   }
 
-  // Poster image — for an image post or video poster frame. Prefer the post's
-  // own image_versions2; fall back to the first carousel item.
-  const imageUrl =
-    pickLargestCandidate(post.image_versions2?.candidates) ??
-    pickLargestCandidate(
-      post.carousel_media?.[0]?.image_versions2?.candidates
-    );
-  if (!item.posterS3Key && imageUrl) {
-    try {
-      const archived = await archiveRemoteToS3(
-        itemId,
-        imageUrl,
-        `${post.pk ?? post.id ?? "thread"}-poster`
-      );
-      result.updates.posterS3Key = archived.key;
+  // Build a slide list: prefer `carousel_media` (one slide per entry); fall
+  // back to the post's own `image_versions2` for single-image posts. All
+  // Threads slides are images; the SC schema doesn't expose video versions
+  // here.
+  const stem = post.pk ?? post.id ?? "thread";
+  const slides: CarouselSlide[] = [];
+  if (post.carousel_media?.length) {
+    for (const entry of post.carousel_media) {
+      const url = pickLargestCandidate(entry.image_versions2?.candidates);
+      if (url) slides.push({ url, kind: "image", fileNameHint: stem });
+    }
+  } else {
+    const url = pickLargestCandidate(post.image_versions2?.candidates);
+    if (url) slides.push({ url, kind: "image", fileNameHint: stem });
+  }
+
+  if (slides.length > 0) {
+    const res = await archiveCarouselMedia(itemId, slides);
+    if (res.primary) {
+      // Threads slides are still images — mirror slide 0 into BOTH posterS3Key
+      // and mediaS3Key so legacy UI (which reads either) keeps rendering a
+      // cover.
       result.updates.mediaS3Bucket = item.mediaS3Bucket ?? bucketName();
-      result.fields.posterArchived = true;
-    } catch (err) {
-      console.warn(
-        `[threads-enrich] poster archive failed for ${itemId}:`,
-        err instanceof Error ? err.message : err
-      );
+      result.updates.mediaS3Key = res.primary.key;
+      result.updates.mediaContentType = res.primary.contentType;
+      result.updates.mediaSizeBytes = res.primary.size;
+      result.updates.mediaS3UploadedAt = new Date();
+      if (!item.posterS3Key) {
+        result.updates.posterS3Key = res.primary.key;
+        result.fields.posterArchived = true;
+      }
+      result.fields.mediaArchived = res.archived > 0;
     }
   }
 

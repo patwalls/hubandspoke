@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  enrichSingleItem,
   runEnrichmentSweep,
   type SweepOptions,
 } from "@/lib/services/enrichment/orchestrator";
+import { ScrapeCreatorsError } from "@/lib/services/sc-client";
 import type { PlatformKind } from "@/lib/services/performance-decay";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +45,33 @@ export async function GET(request: NextRequest) {
   const limitParam = params.get("limit");
   const platformParam = params.get("platform");
   const forceParam = params.get("force");
+  const itemIdParam = params.get("itemId");
+  const force = forceParam === "true";
+  const withMedia = params.get("withMedia") === "true";
+
+  // Targeted single-item run — skips the sweep queueing logic. Handy for
+  // validating a bug fix on a specific item without burning credits on the
+  // full eligible pool.
+  if (itemIdParam) {
+    try {
+      const result = await enrichSingleItem(itemIdParam, { force, withMedia });
+      return NextResponse.json({
+        ok: true,
+        itemId: itemIdParam,
+        result: result
+          ? { creditsSpent: result.creditsSpent, fields: result.fields }
+          : null,
+        skipped: result === null,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const status = err instanceof ScrapeCreatorsError ? err.status : 500;
+      return NextResponse.json(
+        { ok: false, error: message, itemId: itemIdParam },
+        { status: status === 404 ? 404 : 502 }
+      );
+    }
+  }
 
   const options: SweepOptions = {};
   if (limitParam) {
@@ -66,8 +95,8 @@ export async function GET(request: NextRequest) {
     }
     options.platform = platformParam as PlatformKind;
   }
-  if (forceParam === "true") options.force = true;
-  if (params.get("withMedia") === "true") options.withMedia = true;
+  if (force) options.force = true;
+  if (withMedia) options.withMedia = true;
 
   const summary = await runEnrichmentSweep(options);
   return NextResponse.json({ ok: true, options, summary });

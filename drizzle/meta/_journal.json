@@ -183,6 +183,13 @@
       "when": 1776817533654,
       "tag": "0025_late_firebird",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1776829921585,
+      "tag": "0026_powerful_peter_parker",
+      "breakpoints": true
     }
   ]
 }

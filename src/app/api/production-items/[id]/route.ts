@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
   contentDrafts,
+  productionItemMedia,
   productionItems,
   formats,
   transcripts,
   users,
 } from "@/lib/db/schema";
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import {
   buildViewPredictorContext,
   predictViews,
@@ -304,6 +305,21 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .where(eq(transcripts.productionItemId, id))
       .limit(1);
 
+    // Carousel / multi-image slides archived during enrichment. Ordered by
+    // upstream slide position so index 0 is the cover.
+    const mediaRows = await db
+      .select({
+        index: productionItemMedia.index,
+        kind: productionItemMedia.kind,
+        s3Key: productionItemMedia.s3Key,
+        posterS3Key: productionItemMedia.posterS3Key,
+        contentType: productionItemMedia.contentType,
+        sizeBytes: productionItemMedia.sizeBytes,
+      })
+      .from(productionItemMedia)
+      .where(eq(productionItemMedia.productionItemId, id))
+      .orderBy(asc(productionItemMedia.index));
+
     // Presign all S3-archived assets in parallel. Failures degrade to null
     // (callers fall back to the legacy `thumbnail` column on the row).
     const allS3Keys = [
@@ -317,6 +333,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       ...reposts.map((r) => r.mediaS3Key),
       ...crossPosts.map((r) => r.posterS3Key),
       ...crossPosts.map((r) => r.mediaS3Key),
+      ...mediaRows.map((m) => m.s3Key),
+      ...mediaRows.map((m) => m.posterS3Key),
     ];
     const presignedByKey = new Map<string, string>();
     await Promise.all(
@@ -389,6 +407,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       repostedFrom,
       currentDraft: currentDraft ?? null,
       hasFieldSchema,
+      media: mediaRows.map((m) => ({
+        index: m.index,
+        kind: m.kind,
+        url: urlFor(m.s3Key),
+        posterUrl: urlFor(m.posterS3Key),
+        contentType: m.contentType,
+        sizeBytes: m.sizeBytes,
+      })),
     });
   } catch (error) {
     console.error("Error fetching production item:", error);

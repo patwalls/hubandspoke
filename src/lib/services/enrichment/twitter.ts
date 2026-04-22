@@ -3,7 +3,11 @@ import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { bucketName } from "@/lib/s3";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
-import { archiveRemoteToS3, saveTranscript } from "./shared";
+import {
+  archiveCarouselMedia,
+  saveTranscript,
+  type CarouselSlide,
+} from "./shared";
 import type { EnrichmentResult } from "./types";
 
 interface XUserLegacy {
@@ -157,62 +161,66 @@ export async function enrichTwitterItem(
   }
 
   // Media archive — `extended_entities.media` is more complete than
-  // `entities.media` for tweets with multiple/video attachments. Archive the
-  // first item; multi-photo tweets aren't a use case worth solving today.
-  const media =
-    tweet.legacy?.extended_entities?.media?.[0] ??
-    tweet.legacy?.entities?.media?.[0];
+  // `entities.media` for tweets with multiple/video attachments. Up to 4
+  // media items per tweet; we archive all of them.
+  const mediaEntries =
+    tweet.legacy?.extended_entities?.media ??
+    tweet.legacy?.entities?.media ??
+    [];
   const tweetId = tweetIdFromUrl(item.publishedLink) ?? "tweet";
-  if (media && !item.mediaS3Key) {
-    const mediaUrl =
-      media.type === "video" || media.type === "animated_gif"
-        ? bestVideoVariant(media.video_info?.variants)
-        : media.media_url_https;
-    if (mediaUrl) {
-      try {
-        const archived = await archiveRemoteToS3(itemId, mediaUrl, tweetId);
-        result.updates.mediaS3Bucket = item.mediaS3Bucket ?? bucketName();
-        result.updates.mediaS3Key = archived.key;
-        result.updates.mediaS3UploadedAt = new Date();
-        result.updates.mediaSizeBytes = archived.size;
-        result.updates.mediaContentType = archived.contentType;
-        result.fields.mediaArchived = true;
-      } catch (err) {
-        console.warn(
-          `[x-enrich] media archive failed for ${itemId}:`,
-          err instanceof Error ? err.message : err
-        );
+  const slides: CarouselSlide[] = [];
+  for (const m of mediaEntries) {
+    if (m.type === "video" || m.type === "animated_gif") {
+      const videoUrl = bestVideoVariant(m.video_info?.variants);
+      if (videoUrl) {
+        slides.push({
+          url: videoUrl,
+          kind: "video",
+          posterUrl: m.media_url_https,
+          fileNameHint: tweetId,
+        });
+      } else if (m.media_url_https) {
+        // No video variant — fall back to the still image.
+        slides.push({
+          url: m.media_url_https,
+          kind: "image",
+          fileNameHint: tweetId,
+        });
+      }
+    } else if (m.media_url_https) {
+      slides.push({
+        url: m.media_url_https,
+        kind: "image",
+        fileNameHint: tweetId,
+      });
+    }
+  }
+
+  if (slides.length > 0) {
+    const res = await archiveCarouselMedia(itemId, slides);
+    if (res.primary) {
+      result.updates.mediaS3Bucket = item.mediaS3Bucket ?? bucketName();
+      result.updates.mediaS3Key = res.primary.key;
+      result.updates.mediaContentType = res.primary.contentType;
+      result.updates.mediaSizeBytes = res.primary.size;
+      result.updates.mediaS3UploadedAt = new Date();
+      result.fields.mediaArchived = res.archived > 0;
+    }
+    // Mirror slide-0 poster (video still frame) if present, else fall back to
+    // slide-0 image so the cover thumbnail has a durable source.
+    if (!item.posterS3Key) {
+      if (res.primaryPoster) {
+        result.updates.posterS3Key = res.primaryPoster.key;
+        result.fields.posterArchived = true;
+      } else if (res.primary && slides[0]?.kind === "image") {
+        result.updates.posterS3Key = res.primary.key;
+        result.fields.posterArchived = true;
       }
     }
   }
 
-  // Poster: for video tweets, the photo on `media.media_url_https` is the
-  // poster frame — archive it separately so a thumbnail renders without
-  // having to load the video.
-  if (
-    !item.posterS3Key &&
-    media?.media_url_https &&
-    (media.type === "video" || media.type === "animated_gif")
-  ) {
-    try {
-      const archived = await archiveRemoteToS3(
-        itemId,
-        media.media_url_https,
-        `${tweetId}-poster`
-      );
-      result.updates.posterS3Key = archived.key;
-      result.updates.mediaS3Bucket = item.mediaS3Bucket ?? bucketName();
-      result.fields.posterArchived = true;
-    } catch (err) {
-      console.warn(
-        `[x-enrich] poster archive failed for ${itemId}:`,
-        err instanceof Error ? err.message : err
-      );
-    }
-  }
-
   // Video tweet transcript. SC's docs note this only works for video tweets.
-  const isVideoTweet = media?.type === "video";
+  const isVideoTweet = mediaEntries[0]?.type === "video";
   if (isVideoTweet && !existingTranscript) {
     try {
       const t = await scFetchJson<XTranscriptResponse>(

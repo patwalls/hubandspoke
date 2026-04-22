@@ -38,7 +38,7 @@ import {
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
 import { TranscriptButton } from "./transcript-dialog";
-import { EnrichmentButton } from "./enrichment-dialog";
+import { EnrichmentButton, type EnrichmentMedia } from "./enrichment-dialog";
 import { coverImageUrl } from "@/lib/cover-image";
 import { cn } from "@/lib/utils";
 import { platformClass, statusClass } from "@/lib/badge-colors";
@@ -149,6 +149,7 @@ interface DetailResponse {
   prediction: ViewPrediction | null;
   currentDraft: DraftRow | null;
   hasFieldSchema: boolean;
+  media?: EnrichmentMedia[];
 }
 
 interface ContentDetailProps {
@@ -1146,6 +1147,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             mediaSizeBytes={item.mediaSizeBytes}
             mediaS3Key={item.mediaS3Key}
             posterS3Key={item.posterS3Key}
+            media={data.media}
             onSynced={load}
           />
           {item.descriptProjectUrl && (

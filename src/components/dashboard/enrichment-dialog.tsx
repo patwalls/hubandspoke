@@ -27,6 +27,15 @@ interface EnrichmentFields {
   authorFetched?: boolean;
 }
 
+export interface EnrichmentMedia {
+  index: number;
+  kind: string; // "image" | "video"
+  url: string | null;
+  posterUrl: string | null;
+  contentType: string;
+  sizeBytes: number | null;
+}
+
 interface Props {
   itemId: string;
   enrichmentCompletedAt?: string | null;
@@ -47,6 +56,10 @@ interface Props {
   mediaSizeBytes?: number | null;
   mediaS3Key?: string | null;
   posterS3Key?: string | null;
+  /** Full carousel — one entry per archived slide, index 0 == cover. Empty
+   *  array for older items that were enriched pre-carousel support (the
+   *  dialog falls back to the single `mediaUrl` / `posterUrl` fields). */
+  media?: EnrichmentMedia[];
   onSynced: () => Promise<void> | void;
 }
 
@@ -120,6 +133,7 @@ export function EnrichmentButton(props: Props) {
     mediaSizeBytes,
     mediaS3Key,
     posterS3Key,
+    media = [],
     onSynced,
   } = props;
 
@@ -334,50 +348,83 @@ export function EnrichmentButton(props: Props) {
               </dd>
             </dl>
 
-            {(posterUrl || mediaUrl) && (
-              <div className="grid grid-cols-2 gap-3">
-                {posterUrl && (
-                  <figure className="space-y-1">
-                    <img
-                      src={posterUrl}
-                      alt="Poster"
-                      className="w-full rounded-md border border-border object-cover"
-                    />
-                    <figcaption className="text-[11px] text-muted-foreground">
-                      Poster (archived)
-                    </figcaption>
-                  </figure>
-                )}
-                {mediaUrl && (
-                  <figure className="space-y-1">
-                    {isVideo ? (
-                      <video
-                        src={mediaUrl}
-                        controls
-                        className="w-full rounded-md border border-border"
-                      />
-                    ) : isImage ? (
+            {media.length > 0 ? (
+              <>
+                <div className="text-[11px] text-muted-foreground mb-2">
+                  {media.length} slide{media.length === 1 ? "" : "s"} archived
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {media.map((m) => (
+                    <figure key={m.index} className="space-y-1">
+                      {m.kind === "video" && m.url ? (
+                        <video
+                          src={m.url}
+                          poster={m.posterUrl ?? undefined}
+                          controls
+                          className="w-full rounded-md border border-border aspect-square object-cover"
+                        />
+                      ) : m.url ? (
+                        <img
+                          src={m.url}
+                          alt={`Slide ${m.index + 1}`}
+                          className="w-full rounded-md border border-border aspect-square object-cover"
+                        />
+                      ) : null}
+                      <figcaption className="text-[11px] text-muted-foreground">
+                        Slide {m.index + 1}
+                        {m.kind === "video" ? " · video" : ""}
+                        {m.sizeBytes ? ` · ${fmtBytes(m.sizeBytes)}` : ""}
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
+              </>
+            ) : (
+              (posterUrl || mediaUrl) && (
+                <div className="grid grid-cols-2 gap-3">
+                  {posterUrl && (
+                    <figure className="space-y-1">
                       <img
-                        src={mediaUrl}
-                        alt="Media"
+                        src={posterUrl}
+                        alt="Poster"
                         className="w-full rounded-md border border-border object-cover"
                       />
-                    ) : (
-                      <a
-                        href={mediaUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary hover:underline"
-                      >
-                        Open archived media
-                      </a>
-                    )}
-                    <figcaption className="text-[11px] text-muted-foreground">
-                      Archived media
-                    </figcaption>
-                  </figure>
-                )}
-              </div>
+                      <figcaption className="text-[11px] text-muted-foreground">
+                        Poster (archived)
+                      </figcaption>
+                    </figure>
+                  )}
+                  {mediaUrl && (
+                    <figure className="space-y-1">
+                      {isVideo ? (
+                        <video
+                          src={mediaUrl}
+                          controls
+                          className="w-full rounded-md border border-border"
+                        />
+                      ) : isImage ? (
+                        <img
+                          src={mediaUrl}
+                          alt="Media"
+                          className="w-full rounded-md border border-border object-cover"
+                        />
+                      ) : (
+                        <a
+                          href={mediaUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline"
+                        >
+                          Open archived media
+                        </a>
+                      )}
+                      <figcaption className="text-[11px] text-muted-foreground">
+                        Archived media
+                      </figcaption>
+                    </figure>
+                  )}
+                </div>
+              )
             )}
           </Section>
         </div>

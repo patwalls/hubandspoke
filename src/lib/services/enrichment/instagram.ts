@@ -3,7 +3,12 @@ import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { bucketName } from "@/lib/s3";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
-import { archiveRemoteToS3, saveTranscript } from "./shared";
+import {
+  archiveCarouselMedia,
+  archiveRemoteToS3,
+  saveTranscript,
+  type CarouselSlide,
+} from "./shared";
 import type { EnrichmentResult } from "./types";
 
 const IG_HOSTS = new Set([
@@ -84,11 +89,12 @@ function captionFrom(media: IGMedia | undefined): string | null {
 }
 
 interface EnrichOptions {
-  /** Burn 10 credits on the SC-hosted media download. Skipped automatically
-   *  if the item already has `mediaS3Key`. Default false to keep the auto
-   *  sweep cheap — transcripts + posters are the high-value training signals,
-   *  the raw video is only worth archiving when explicitly opted in (e.g.
-   *  via the backfill script's `--with-media` flag). */
+  /** Burn 10 credits on the SC-hosted media download. Default false to keep
+   *  the auto sweep cheap — transcripts + posters are the high-value training
+   *  signals, the raw media is only worth archiving when explicitly opted in
+   *  (backfill script's `--with-media`, enrichment dialog's Sync button).
+   *  Per-slide idempotency in `archiveCarouselMedia` means a repeat call with
+   *  the same upstream URLs doesn't re-download. */
   withMedia?: boolean;
 }
 
@@ -145,7 +151,10 @@ export async function enrichInstagramItem(
   // download_media=true bumps to 10 credits and adds SC-hosted CDN URLs;
   // only worth it when we still need to archive the primary media.
   // ------------------------------------------------------------------
-  const needsMediaArchive = withMedia && !item.mediaS3Key;
+  // Gate on `withMedia` only — per-slide idempotency in `archiveCarouselMedia`
+  // avoids re-downloading slides we already have, and a re-run is the only
+  // way to backfill slides 1..N on items that were enriched pre-carousel.
+  const needsMediaArchive = withMedia;
   const query: Record<string, string> = { url: item.publishedLink };
   if (needsMediaArchive) query.download_media = "true";
 
@@ -219,30 +228,31 @@ export async function enrichInstagramItem(
   }
 
   // ------------------------------------------------------------------
-  // Step 3: archive primary media (video for reel, image for photo) to S3.
+  // Step 3: archive primary media + every carousel slide to S3. Carousels
+  // expose each slide as an entry on `download_media_urls[]`; single-photo
+  // and reel posts put their one asset at `[0]`. `archiveCarouselMedia`
+  // handles idempotent per-slide upsert; the legacy single-media columns on
+  // production_items mirror slide 0 so existing UI still works.
   // ------------------------------------------------------------------
   if (needsMediaArchive) {
-    const scHosted = data.download_media_urls?.[0]?.cdn_url;
-    if (scHosted) {
-      try {
-        const archived = await archiveRemoteToS3(
-          itemId,
-          scHosted,
-          shortcode
-        );
+    const slides: CarouselSlide[] = (data.download_media_urls ?? [])
+      .filter((e): e is IGDownloadEntry & { cdn_url: string } => !!e.cdn_url)
+      .map((e) => ({
+        url: e.cdn_url,
+        kind: e.type === "video" ? "video" : "image",
+        fileNameHint: shortcode,
+      }));
+    if (slides.length > 0) {
+      const res = await archiveCarouselMedia(itemId, slides);
+      if (res.primary) {
         result.updates.mediaS3Bucket = item.mediaS3Bucket ?? bucketName();
-        result.updates.mediaS3Key = archived.key;
+        result.updates.mediaS3Key = res.primary.key;
         result.updates.mediaS3UploadedAt = new Date();
-        result.updates.mediaSizeBytes = archived.size;
-        result.updates.mediaContentType = archived.contentType;
+        result.updates.mediaSizeBytes = res.primary.size;
+        result.updates.mediaContentType = res.primary.contentType;
         // The ephemeral URL is now stale data — clear it.
         result.updates.contentMediaUrl = null;
-        result.fields.mediaArchived = true;
-      } catch (err) {
-        console.warn(
-          `[ig-enrich] media archive failed for ${itemId}:`,
-          err instanceof Error ? err.message : err
-        );
+        result.fields.mediaArchived = res.archived > 0;
       }
     }
   }
