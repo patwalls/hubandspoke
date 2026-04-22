@@ -12,6 +12,7 @@ interface BrandLink {
 const SECTIONS = [
   { href: "/settings/users", label: "Users" },
   { href: "/settings/sync-errors", label: "Sync errors" },
+  { href: "/settings/jobs", label: "Jobs" },
 ] as const;
 
 export function SettingsSidebarNav({ brands }: { brands: BrandLink[] }) {
