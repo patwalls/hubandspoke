@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 // verbatim quote requirement, performance grounding, estimatedViews replaces
 // the earlier confidence %.
 const MODEL = "claude-sonnet-4-6";
-export const PROMPT_VERSION = 2;
+export const PROMPT_VERSION = 3;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You are an expert short-form video editor. Given a long-form transcript plus examples of what has worked for this brand, you identify the 10 moments most likely to perform as standalone short-form clips (Reels, TikTok, YouTube Shorts).
@@ -43,6 +43,20 @@ ANGLE
 Angle is the one-sentence payoff the viewer gets. If the hook is the first word, the angle is what they walk away understanding. Every clip has exactly one angle — a clip that tries to deliver two is a clip that delivers zero.
 
 =====================================================
+RATIONALE — WHY THIS CLIP WILL GO VIRAL
+=====================================================
+
+The rationale is the case for virality. This is the single most important thinking you'll do after picking the hook: an editor will read it to decide whether to ship the clip, so make it load-bearing, not padding.
+
+Frame the rationale around three things, in 2–4 tight sentences:
+
+1. The scroll-stopping move — what specifically about the FIRST FIVE WORDS makes a viewer pause? (Specific number, contrarian claim, vulnerability, curiosity gap, etc. Name the pattern.)
+2. The emotional payoff — what does the viewer feel or learn by the end? This is what they'll screenshot or comment on.
+3. The brand-proof calibration — cite a comparable top-performer from the PERFORMANCE CONTEXT by its hook/title and view count. Anchor your virality claim against something real on this brand, not against generic internet trends.
+
+Lead with the strongest of those three. Be concrete. Say "$39 of $40K is profit is a jaw-dropping verbatim stat" — not "this clip has strong retention potential." If you can't articulate a specific reason this will outperform the brand's median, the clip probably won't.
+
+=====================================================
 OTHER CLIP CONSTRAINTS
 =====================================================
 
@@ -75,7 +89,7 @@ Each idea:
 - startSec / endSec: whole or fractional SECONDS (not MM:SS). Align to cue boundaries from the transcript.
 - hook: the 1–2 sentence opening line, verbatim or near-verbatim from the transcript. This is what the viewer hears first.
 - angle: one sentence describing the clip's payoff.
-- rationale: 1–2 sentences explaining WHY this clip will perform. Cite the hook pattern, reference a similar-performing title from the performance context when applicable.
+- rationale: 2–4 sentences on WHY this clip will go viral, following the RATIONALE section above — scroll-stopping move, emotional payoff, and a concrete brand-proof calibration vs. a top-performer in the performance context.
 - estimatedViews: integer. Realistic, calibrated against the performance context.
 
 Never respond with plain text. Always call the tool.`;

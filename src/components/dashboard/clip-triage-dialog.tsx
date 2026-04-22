@@ -24,7 +24,6 @@ import {
   ThumbsUpIcon,
 } from "lucide-react";
 import { KillIdeaDialog } from "./kill-idea-dialog";
-import { UserChip, personDisplay } from "./user-chip";
 
 interface ClipIdeaSummary {
   id: string;
@@ -60,26 +59,11 @@ interface Props {
   brand: string;
 }
 
-interface AssignableUser {
-  id: string;
-  email: string;
-  name: string | null;
-  avatarUrl: string | null;
-}
-
 function fmtTs(sec: number): string {
   const total = Math.max(0, Math.floor(sec));
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
-
-function fmtViews(n: number | null | undefined): string | null {
-  if (n == null) return null;
-  if (n >= 1_000_000)
-    return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M views`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K views`;
-  return `${n.toLocaleString()} views`;
 }
 
 export function ClipTriageDialog({
@@ -93,12 +77,54 @@ export function ClipTriageDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [killOpen, setKillOpen] = useState(false);
-  const [users, setUsers] = useState<AssignableUser[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
+  // Editable hook. Seeded from the server-provided idea on open; edits are
+  // flushed to PATCH /api/clip-ideas/:id on blur. The right-side preview
+  // reads from this local copy so it updates as the user types.
+  const [hookDraft, setHookDraft] = useState("");
+  const [hookBaseline, setHookBaseline] = useState("");
+  const [hookSaving, setHookSaving] = useState(false);
 
   useEffect(() => {
     if (!open) setError(null);
   }, [open]);
+
+  // Reseed the hook textarea whenever a new idea opens. Drops any unsaved
+  // edits from a previous idea — acceptable because blur-to-save flushes
+  // before close in the normal path.
+  useEffect(() => {
+    if (idea) {
+      setHookDraft(idea.hook);
+      setHookBaseline(idea.hook);
+    }
+  }, [idea]);
+
+  const commitHook = useCallback(async () => {
+    if (!idea) return;
+    const next = hookDraft.trim();
+    if (!next || next === hookBaseline) {
+      setHookDraft(hookBaseline);
+      return;
+    }
+    setHookSaving(true);
+    try {
+      const res = await fetch(`/api/clip-ideas/${idea.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hook: next }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setError(json?.error || `Failed to save hook (${res.status})`);
+        setHookDraft(hookBaseline);
+        return;
+      }
+      setHookBaseline(next);
+      onDone();
+    } finally {
+      setHookSaving(false);
+    }
+  }, [idea, hookDraft, hookBaseline, onDone]);
 
   // Fetch transcript excerpt + signed video URL whenever the dialog opens on
   // a new idea. Short-circuit while closed — the fetch is cheap but useless
@@ -125,23 +151,6 @@ export function ClipTriageDialog({
     };
   }, [open, idea]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/users/assignable");
-        if (!res.ok) return;
-        const json = (await res.json()) as { users: AssignableUser[] };
-        if (!cancelled) setUsers(json.users ?? []);
-      } catch {
-        // Swallow — grid will render empty-state copy below.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const handleKill = useCallback(
     async (reason: string | null) => {
       if (!idea) return;
@@ -166,43 +175,6 @@ export function ClipTriageDialog({
       }
     },
     [idea, onDone, onOpenChange],
-  );
-
-  const handleAssign = useCallback(
-    async (user: AssignableUser) => {
-      if (!idea) return;
-      setSaving(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/clip-ideas/${idea.id}/triage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "assign", editorUserId: user.id }),
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setError(json?.error || `Failed (${res.status})`);
-          return;
-        }
-        const newId: string | undefined = json?.newProductionItemId;
-        const brandSlug: string = json?.sourceBrand ?? brand;
-        const viewUrl = newId ? `/${brandSlug}/content/${newId}` : null;
-        toast.success(`Assigned to ${personDisplay(user).name}`, {
-          duration: 6000,
-          action: viewUrl
-            ? {
-                label: "View content →",
-                onClick: () => window.open(viewUrl, "_blank", "noopener"),
-              }
-            : undefined,
-        });
-        onDone();
-        onOpenChange(false);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [idea, onDone, onOpenChange, brand],
   );
 
   const runCreateInDescript = useCallback(
@@ -249,7 +221,6 @@ export function ClipTriageDialog({
 
   if (!idea) return null;
   const duration = Math.max(0, Math.round(idea.endSec - idea.startSec));
-  const views = fmtViews(idea.estimatedViews);
   const isDecided = idea.status && idea.status !== "suggested";
 
   return (
@@ -257,39 +228,59 @@ export function ClipTriageDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Clip idea</DialogTitle>
+            <DialogTitle>The Clip</DialogTitle>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto">
             <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_320px] gap-4">
               <div className="space-y-4 min-w-0">
-                <div className="rounded-md border border-border bg-background p-3 space-y-1.5">
+                <div className="rounded-md border border-border bg-background p-3 space-y-3">
                   <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
                     <span className="rounded bg-muted px-1.5 py-0.5">
                       {fmtTs(idea.startSec)}–{fmtTs(idea.endSec)} ({duration}s)
                     </span>
-                    {views && (
-                      <span className="text-foreground font-medium">
-                        ~{views}
-                      </span>
-                    )}
                   </div>
-                  <p className="text-sm font-medium leading-snug">
-                    “{idea.hook}”
-                  </p>
-                  <p className="text-[13px] leading-snug">
-                    <span className="text-muted-foreground">Angle: </span>
-                    {idea.angle}
-                  </p>
-                  <p className="text-[12px] text-muted-foreground leading-snug">
-                    <span className="font-medium text-foreground/80">
-                      Why:{" "}
-                    </span>
-                    {idea.rationale}
-                  </p>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Hook
+                    </label>
+                    <textarea
+                      value={hookDraft}
+                      onChange={(e) => setHookDraft(e.target.value)}
+                      onBlur={() => void commitHook()}
+                      disabled={isDecided || hookSaving}
+                      rows={2}
+                      placeholder="The first line the viewer hears"
+                      className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm font-medium leading-snug focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+                    />
+                  </div>
+
+                  <div>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      Why it&apos;ll go viral
+                    </h3>
+                    <p className="text-[13px] leading-relaxed text-foreground/90">
+                      {idea.rationale}
+                    </p>
+                  </div>
+
+                  {preview && preview.segments.length > 0 && (
+                    <div>
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                        Transcript
+                      </h3>
+                      <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-muted/30 px-2.5 py-2 text-[13px] leading-relaxed text-foreground/80">
+                        {preview.segments
+                          .map((s) => s.text.trim())
+                          .filter(Boolean)
+                          .join(" ")}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {isDecided ? (
+                {isDecided && (
                   <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-blue-900">
                     <span>
                       {idea.status === "assigned" && idea.acceptedEditorName ? (
@@ -318,31 +309,6 @@ export function ClipTriageDialog({
                       </a>
                     )}
                   </div>
-                ) : (
-                  <section className="space-y-2 border-t border-border pt-3">
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Assign to
-                    </h3>
-                    <div className="max-h-56 overflow-y-auto grid grid-cols-2 gap-1">
-                      {users.length === 0 ? (
-                        <div className="text-xs text-muted-foreground col-span-full">
-                          No assignable users found.
-                        </div>
-                      ) : (
-                        users.map((u) => (
-                          <button
-                            key={u.id}
-                            type="button"
-                            onClick={() => handleAssign(u)}
-                            disabled={saving}
-                            className="flex items-center w-full text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-                          >
-                            <UserChip user={u} size="xs" />
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </section>
                 )}
 
                 {error && <p className="text-xs text-red-600">{error}</p>}
@@ -350,7 +316,7 @@ export function ClipTriageDialog({
 
               <div className="md:sticky md:top-0 self-start">
                 <ShortsPreview
-                  hook={idea.hook}
+                  hook={hookDraft || idea.hook}
                   startSec={idea.startSec}
                   endSec={idea.endSec}
                   preview={preview}
@@ -459,24 +425,23 @@ function ShortsPreview({
       className="mx-auto w-full max-w-[320px] rounded-xl bg-black text-white overflow-hidden flex flex-col shadow-lg"
       style={{ aspectRatio: "9 / 16" }}
     >
-      <div className="px-3 pt-4 pb-2">
+      {/* Upper black space keeps the hook+video group anchored low-center,
+          matching how Shorts letterboxes a landscape source on black. */}
+      <div className="flex-1 min-h-0" />
+
+      <div className="px-3 space-y-2">
         <p className="text-[15px] font-extrabold leading-tight line-clamp-3">
           {hook}
         </p>
-      </div>
-
-      <div className="flex-1 relative flex items-center justify-center px-2 min-h-0">
         {preview?.videoUrl ? (
           isAudio ? (
-            <div className="w-full px-2">
-              <audio
-                key={`${preview.videoUrl}-audio`}
-                src={`${preview.videoUrl}#t=${startSec},${endSec}`}
-                controls
-                preload="metadata"
-                className="w-full"
-              />
-            </div>
+            <audio
+              key={`${preview.videoUrl}-audio`}
+              src={`${preview.videoUrl}#t=${startSec},${endSec}`}
+              controls
+              preload="metadata"
+              className="w-full"
+            />
           ) : (
             <video
               key={`${preview.videoUrl}-video`}
@@ -484,30 +449,31 @@ function ShortsPreview({
               controls
               preload="metadata"
               playsInline
-              className="max-h-full w-full rounded-md bg-black object-contain"
+              className="w-full rounded-md bg-black object-contain max-h-56"
             />
           )
         ) : (
-          <div className="text-[11px] text-white/50">
+          <div className="flex items-center justify-center h-24 text-[11px] text-white/50">
             {preview === null ? "Loading preview…" : "No preview available"}
           </div>
         )}
+      </div>
 
-        <div className="absolute right-1.5 bottom-2 flex flex-col items-center gap-3 text-white/85 pointer-events-none">
+      <div className="relative flex-1 min-h-0">
+        {captionText && (
+          <div className="absolute inset-x-0 top-2 px-3 text-center">
+            <p className="text-[13px] font-semibold leading-snug line-clamp-3">
+              {captionText}
+            </p>
+          </div>
+        )}
+        <div className="absolute right-1.5 bottom-3 flex flex-col items-center gap-3 text-white/85 pointer-events-none">
           <ThumbsUpIcon className="h-5 w-5" strokeWidth={1.8} />
           <ThumbsDownIcon className="h-5 w-5" strokeWidth={1.8} />
           <MessageCircleIcon className="h-5 w-5" strokeWidth={1.8} />
           <Share2Icon className="h-5 w-5" strokeWidth={1.8} />
         </div>
       </div>
-
-      {captionText && (
-        <div className="px-3 pb-4 pt-2 text-center">
-          <p className="text-[13px] font-semibold leading-snug line-clamp-4">
-            {captionText}
-          </p>
-        </div>
-      )}
     </div>
   );
 }

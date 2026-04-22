@@ -45,13 +45,6 @@ function fmtDur(start: number, end: number): string {
   return `${d}s`;
 }
 
-function fmtViews(n: number | null | undefined): string | null {
-  if (n == null) return null;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M views`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K views`;
-  return `${n.toLocaleString()} views`;
-}
-
 function fmtRel(iso: string): string {
   const d = new Date(iso);
   const diff = Date.now() - d.getTime();
@@ -250,21 +243,6 @@ export function ClipIdeasPanel({
                       ({fmtDur(idea.startSec, idea.endSec)})
                     </span>
                   </span>
-                  {idea.estimatedViews != null ? (
-                    <span
-                      className="text-[11px] font-medium text-foreground"
-                      title="Model's estimate of realistic view count on best-fit short-form channel, calibrated against brand historicals"
-                    >
-                      ~{fmtViews(idea.estimatedViews)}
-                    </span>
-                  ) : idea.confidence != null ? (
-                    <span
-                      className="text-[11px] text-muted-foreground"
-                      title="Legacy confidence score (pre-v2 batch)"
-                    >
-                      {Math.round(idea.confidence * 100)}%
-                    </span>
-                  ) : null}
                   {accepted && (
                     <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700">
                       Accepted
