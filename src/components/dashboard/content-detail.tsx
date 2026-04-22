@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, Share2Icon, TrendingUpIcon } from "lucide-react";
+import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, Share2Icon, Trash2Icon, TrendingUpIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1097,16 +1097,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         >
           ← Content
         </Link>
-        {!isYouTube && (
-          <Button
-            variant="outline"
-            onClick={handleDelete}
-            disabled={deleting}
-            className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300 hover:bg-red-50"
-          >
-            {deleting ? "Deleting…" : "Delete post"}
-          </Button>
-        )}
       </div>
 
       {/* Header */}
@@ -1497,6 +1487,19 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       />
                       {isSyncing ? "Syncing…" : "Sync metrics"}
                     </DropdownMenuItem>
+                  )}
+                  {!isYouTube && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        disabled={deleting}
+                        onClick={() => void handleDelete()}
+                      >
+                        <Trash2Icon className="size-3.5" />
+                        {deleting ? "Deleting…" : "Delete post"}
+                      </DropdownMenuItem>
+                    </>
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
