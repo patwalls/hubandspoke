@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, RefreshCwIcon, TrendingUpIcon } from "lucide-react";
+import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, Share2Icon, TrendingUpIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Command,
   CommandEmpty,
@@ -680,6 +690,62 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [pendingKill, setPendingKill] = useState<{ previousStatus: string } | null>(
     null,
   );
+  const [actionPending, setActionPending] = useState(false);
+
+  const handleCrossPost = useCallback(
+    async (targetPlatform: string) => {
+      if (actionPending) return;
+      setActionPending(true);
+      try {
+        const res = await fetch(
+          `/api/production-items/${contentId}/cross-post`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ targetPlatform }),
+          },
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (res.status === 409 && json?.existingId) {
+            toast.info(`Already cross-posted to ${targetPlatform} — opening it.`);
+            router.push(`/${brand}/content/${json.existingId}`);
+            return;
+          }
+          toast.error(json?.error || "Failed to create cross-post");
+          return;
+        }
+        toast.success(`Cross-post idea created for ${targetPlatform}`);
+        router.push(`/${brand}/content/${json.id}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to create cross-post");
+      } finally {
+        setActionPending(false);
+      }
+    },
+    [actionPending, brand, contentId, router],
+  );
+
+  const handleDuplicate = useCallback(async () => {
+    if (actionPending) return;
+    setActionPending(true);
+    try {
+      const res = await fetch(`/api/production-items/${contentId}/duplicate`, {
+        method: "POST",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Failed to duplicate");
+        return;
+      }
+      toast.success("Duplicated — opening the copy");
+      router.push(`/${brand}/content/${json.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to duplicate");
+    } finally {
+      setActionPending(false);
+    }
+  }, [actionPending, brand, contentId, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1321,6 +1387,66 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             media={data.media}
             onSynced={load}
           />
+          {(() => {
+            const currentPlatforms = new Set(item.platform ?? []);
+            const alreadyCrossPostedPlatforms = new Set(
+              (data.crossPosts ?? []).flatMap((cp) => cp.platform ?? []),
+            );
+            const crossPostTargets = platformOptions.filter(
+              (p) => !currentPlatforms.has(p),
+            );
+            return (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                  disabled={actionPending}
+                  title="Actions for this post"
+                >
+                  <MoreHorizontalIcon className="size-3.5" /> Actions
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <Share2Icon className="size-3.5" /> Cross-post to…
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
+                      {crossPostTargets.length === 0 ? (
+                        <DropdownMenuItem disabled>
+                          No eligible platforms
+                        </DropdownMenuItem>
+                      ) : (
+                        crossPostTargets.map((p) => {
+                          const alreadyDone =
+                            alreadyCrossPostedPlatforms.has(p);
+                          return (
+                            <DropdownMenuItem
+                              key={p}
+                              disabled={alreadyDone || actionPending}
+                              onSelect={() => void handleCrossPost(p)}
+                            >
+                              {p}
+                              {alreadyDone && (
+                                <span className="ml-auto text-[10px] text-muted-foreground">
+                                  done
+                                </span>
+                              )}
+                            </DropdownMenuItem>
+                          );
+                        })
+                      )}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={actionPending}
+                    onSelect={() => void handleDuplicate()}
+                  >
+                    <CopyIcon className="size-3.5" /> Duplicate
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            );
+          })()}
           {item.descriptProjectUrl && (
             <a
               href={item.descriptProjectUrl}

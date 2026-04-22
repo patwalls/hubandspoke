@@ -13,18 +13,24 @@ export interface CrossPostFitVerdict {
   isFallback: boolean;
 }
 
+export interface PastCrossPostKill {
+  reason: string;
+  /** The target platform of the cross-post that was killed. */
+  targetPlatform?: string | null;
+}
+
 const tools: Anthropic.Tool[] = [
   {
     name: "mark_good_fit",
     description:
-      "Mark this post as a good candidate to cross-post to another platform. Use when the content is self-contained, durable, and would read naturally lifted off the source platform and placed somewhere else.",
+      "Mark this post as a good candidate to cross-post to the specified target platform. Use when the content is self-contained, durable, and fits the target platform's medium and audience.",
     input_schema: {
       type: "object" as const,
       properties: {
         reasoning: {
           type: "string",
           description:
-            "One or two sentences explaining why this content travels well — what makes it durable and self-contained.",
+            "One or two sentences explaining why this specific post fits this specific target platform.",
         },
       },
       required: ["reasoning"],
@@ -33,14 +39,14 @@ const tools: Anthropic.Tool[] = [
   {
     name: "mark_bad_fit",
     description:
-      "Mark this post as a poor cross-post candidate. Use when the content is tied to a moment in time, leans on platform-native framing, is a short reaction with no reusable substance, or would feel off lifted to another platform.",
+      "Mark this post as a poor cross-post candidate for the specified target platform. Use when the content is tied to a moment, leans on the source platform's framing, is a thin reaction, or — most importantly — its medium (video, long thread, etc.) does not translate to the target platform.",
     input_schema: {
       type: "object" as const,
       properties: {
         reasoning: {
           type: "string",
           description:
-            "One or two sentences explaining why this content should not be cross-posted. Cite the specific quality (time-sensitive, platform-native, thin reaction, etc.).",
+            "One or two sentences explaining why this post should not be cross-posted to this target platform. Cite the specific quality (time-sensitive, platform-native, thin reaction, medium mismatch).",
         },
       },
       required: ["reasoning"],
@@ -48,33 +54,63 @@ const tools: Anthropic.Tool[] = [
   },
 ];
 
-const SYSTEM_PROMPT = `You are judging whether a social post is a good candidate to cross-post as-is (or with light tweaks) to a different platform days or weeks after the original ran.
+const BASE_SYSTEM_PROMPT = `You are judging whether a social post is a good candidate to cross-post to a specific target platform, days or weeks after the original ran.
 
-A good cross-post is content that stands on its own: a lesson, a story, a framework, an observation, a teaching — the kind of thing a viewer encountering it cold on a different platform would still find valuable.
+You will be told the source platform, the target platform, the post's title/body, and what media the source contains (video, image, or none). Your job is to judge fit for that specific target — not fit in the abstract.
 
-Signals the post is a GOOD fit to cross-post:
-  - Self-contained idea, story, or lesson that doesn't need context from the original platform
-  - Evergreen framing — the point still lands months later
-  - The substance is in the text/caption itself, not in a reaction or link-out
+Core questions, in order:
 
-Signals the post is a BAD fit to cross-post:
-  - Tied to a specific moment: a news event, breaking story, product launch, earnings print, holiday, meme cycle, or current drama. Anything that would make a reader think "wait, this is old news" when they see it later.
-  - Platform-native framing: threads that only make sense as threads, replies/quote-tweets, posts that reference the source platform itself ("here on X…", "as I tweeted"), or formats that don't translate (e.g., an X Space announcement).
-  - Thin reactions: short "RIP", "lol", "this is wild", pure commentary on someone else's content with no substance of its own.
-  - Link-only posts where the real payload lives elsewhere and the caption doesn't carry the idea.
-  - References to specific current pricing, current stats, "this week", "today I", "yesterday".
+1. **Medium fit for the target.** Does the target platform accept and showcase the source's medium? A video belongs on video-first platforms (YouTube, YouTube Shorts, TikTok, Instagram Reels, X). A photo belongs on image-friendly platforms (Instagram, LinkedIn, YouTube Community, Threads, X). A pure text post belongs on text-friendly platforms (Threads, X, LinkedIn, YouTube Community). If the source's medium does not fit the target, mark as bad fit — even if the idea itself is great. Reason explicitly: "the source is a video, but the target is for image/text status updates" (or similar).
 
-The body text is the source of truth. Titles are often truncated or platform-generated and can mislead — judge primarily on the body.
+2. **Substance and durability.** Is the content self-contained, evergreen, and valuable to a cold viewer? Bad signals: tied to a specific moment (news, launch, earnings, holiday, meme cycle, "today I", "this week"), platform-native framing ("as I tweeted"), thin reactions ("lol", "RIP"), link-only where the payload lives elsewhere.
 
-You must call exactly one tool — never respond with plain text. When genuinely uncertain, lean toward \`mark_bad_fit\`: a false negative just means one fewer cross-post suggestion; a false positive means stale or awkward content on the queue.`;
+3. **Audience & tone fit.** Does the tone and topic match what the target platform's audience expects?
+
+The body text is the source of truth. Titles are often truncated or platform-generated.
+
+You must call exactly one tool — never respond with plain text. When genuinely uncertain, lean toward \`mark_bad_fit\`: a false negative means one fewer suggestion; a false positive means a stale or awkward suggestion on the operator's queue.`;
+
+function buildSystemPrompt(pastKills: PastCrossPostKill[] | undefined): string {
+  if (!pastKills || pastKills.length === 0) return BASE_SYSTEM_PROMPT;
+  const lines = pastKills
+    .filter((k) => typeof k.reason === "string" && k.reason.trim().length > 0)
+    .slice(0, 10)
+    .map((k) => {
+      const plat = k.targetPlatform ? ` [→ ${k.targetPlatform}]` : "";
+      return `  - ${k.reason.trim()}${plat}`;
+    });
+  if (lines.length === 0) return BASE_SYSTEM_PROMPT;
+  return `${BASE_SYSTEM_PROMPT}
+
+Recent operator rejections of cross-post ideas — each is tagged with the target platform it was killed for. Use these as signal for the kinds of mismatches the operator has already flagged. If the current (source → target) pair is likely to draw a similar rejection, lean toward \`mark_bad_fit\`:
+${lines.join("\n")}`;
+}
+
+function formatMedia(params: {
+  hasVideo?: boolean;
+  hasImage?: boolean;
+  mediaCount?: number;
+}): string {
+  const parts: string[] = [];
+  if (params.hasVideo) parts.push("video");
+  if (params.hasImage) parts.push("image");
+  if (parts.length === 0) return "(none — text only)";
+  const count = params.mediaCount ?? 0;
+  return count > 1 ? `${parts.join(" + ")} (${count} items)` : parts.join(" + ");
+}
 
 export async function classifyCrossPostFit(params: {
   title: string | null;
   contentBody: string | null;
   sourcePlatform: string;
+  targetPlatform: string;
   publishedDate: string | null;
   format?: string | null;
   brand?: string | null;
+  hasVideo?: boolean;
+  hasImage?: boolean;
+  mediaCount?: number;
+  pastKillReasons?: PastCrossPostKill[];
 }): Promise<CrossPostFitVerdict> {
   const body = params.contentBody?.trim() ?? "";
   if (!body) {
@@ -93,6 +129,8 @@ export async function classifyCrossPostFit(params: {
 
   const userMessage = [
     `Source platform: ${params.sourcePlatform}`,
+    `Target platform: ${params.targetPlatform}`,
+    `Media on source: ${formatMedia(params)}`,
     `Title: "${params.title ?? "(none)"}"`,
     `Format: ${params.format ?? "(none)"}`,
     `Brand: ${params.brand ?? "(none)"}`,
@@ -100,14 +138,14 @@ export async function classifyCrossPostFit(params: {
     ``,
     bodySection,
     ``,
-    `Judge this as a cross-post candidate. Call exactly one tool.`,
+    `Judge this as a cross-post candidate for the target platform above. Call exactly one tool.`,
   ].join("\n");
 
   try {
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 512,
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(params.pastKillReasons),
       tools,
       tool_choice: { type: "any" },
       messages: [{ role: "user", content: userMessage }],

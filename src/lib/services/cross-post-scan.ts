@@ -1,14 +1,28 @@
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { crossPostRules, productionItems, syncLogs } from "@/lib/db/schema";
+import {
+  contentEvents,
+  crossPostFitVerdicts,
+  crossPostRules,
+  productionItemMedia,
+  productionItems,
+  syncLogs,
+} from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
-import { classifyCrossPostFit } from "@/lib/services/cross-post-fit-classifier";
+import {
+  classifyCrossPostFit,
+  type PastCrossPostKill,
+} from "@/lib/services/cross-post-fit-classifier";
 
 // Cap flood risk: only consider items published within the last N days on the
 // first pass. Older evergreen content rides the existing repost queue. Tunable.
 const RECENCY_WINDOW_DAYS = 180;
+
+// How many recent operator kill reasons to feed into the classifier's system
+// prompt. Matches KILL_REASON_HISTORY in evergreen-scan.ts.
+const KILL_REASON_HISTORY = 10;
 
 export interface CrossPostScanResult {
   rulesEvaluated: number;
@@ -24,6 +38,12 @@ export interface CrossPostScanResult {
     targetPlatform: string;
     title: string;
   }>;
+}
+
+interface MediaSignals {
+  hasVideo: boolean;
+  hasImage: boolean;
+  mediaCount: number;
 }
 
 /**
@@ -53,11 +73,11 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
 
   if (rules.length === 0) return result;
 
+  const pastKillReasons = await fetchPastCrossPostKillReasons();
+
   for (const rule of rules) {
     result.rulesEvaluated++;
 
-    // Candidates: published originals on sourcePlatform with views >= threshold
-    // and published within the recency window.
     const candidates = await db
       .select({
         id: productionItems.id,
@@ -71,8 +91,7 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
         pillarContentNotionId: productionItems.pillarContentNotionId,
         pillarContentItemId: productionItems.pillarContentItemId,
         contentBody: productionItems.contentBody,
-        crossPostFitGood: productionItems.crossPostFitGood,
-        crossPostFitCheckedAt: productionItems.crossPostFitCheckedAt,
+        mediaContentType: productionItems.mediaContentType,
       })
       .from(productionItems)
       .where(
@@ -89,18 +108,24 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
         )
       );
 
+    if (candidates.length === 0) continue;
+
+    const candidateIds = candidates.map((c) => c.id);
+    const mediaByItem = await fetchMediaSignals(candidateIds);
+    const verdictsByItem = await fetchCachedVerdicts(
+      candidateIds,
+      rule.targetPlatform
+    );
+
     for (const candidate of candidates) {
       result.candidatesConsidered++;
 
-      // Don't cross-post back to a platform the original already covers.
       const existingPlatforms = (candidate.platform ?? []) as string[];
       if (existingPlatforms.includes(rule.targetPlatform)) {
         result.skippedExisting++;
         continue;
       }
 
-      // Skip if we've already queued (or posted) a cross-post of this source
-      // targeting this platform.
       const existing = await db
         .select({ id: productionItems.id })
         .from(productionItems)
@@ -118,24 +143,25 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
         continue;
       }
 
-      // Target platform may itself be Notion-authoritative long-form — skip.
       if (isNotionAuthoritative([rule.targetPlatform])) {
         result.skippedExisting++;
         continue;
       }
 
-      // LLM fit gate. Classify each source item exactly once — cached verdict
-      // lives on the row and is reused on subsequent scans. Skip the model
-      // call entirely when contentBody is empty (scanner falls back to the
-      // view-threshold heuristic). On model/API errors we fail open and
-      // don't cache, so a transient failure gets retried next run.
-      if (candidate.crossPostFitGood === false) {
+      // LLM fit gate — per (source item × target platform). Verdicts are
+      // cached in crossPostFitVerdicts; a cached bad verdict skips the call,
+      // a cached good verdict proceeds without calling, absence triggers a
+      // fresh classification whose result is upserted.
+      const cachedVerdict = verdictsByItem.get(candidate.id);
+      const media = mediaByItem.get(candidate.id) ?? deriveMediaFromItem(candidate.mediaContentType);
+
+      if (cachedVerdict === false) {
         result.skippedByLlm++;
         continue;
       }
 
       if (
-        candidate.crossPostFitCheckedAt === null &&
+        cachedVerdict === undefined &&
         candidate.contentBody !== null &&
         candidate.contentBody.trim().length > 0
       ) {
@@ -143,22 +169,38 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
           title: candidate.title,
           contentBody: candidate.contentBody,
           sourcePlatform: rule.sourcePlatform,
+          targetPlatform: rule.targetPlatform,
           publishedDate: candidate.publishedDate,
           format: candidate.format,
           brand: candidate.brand,
+          hasVideo: media.hasVideo,
+          hasImage: media.hasImage,
+          mediaCount: media.mediaCount,
+          pastKillReasons,
         });
 
         if (!verdict.isFallback) {
           const now = new Date();
           await db
-            .update(productionItems)
-            .set({
-              crossPostFitGood: verdict.isGoodFit,
-              crossPostFitReasoning: verdict.reasoning,
-              crossPostFitCheckedAt: now,
-              updatedAt: now,
+            .insert(crossPostFitVerdicts)
+            .values({
+              sourceItemId: candidate.id,
+              targetPlatform: rule.targetPlatform,
+              isGoodFit: verdict.isGoodFit,
+              reasoning: verdict.reasoning,
+              checkedAt: now,
             })
-            .where(eq(productionItems.id, candidate.id));
+            .onConflictDoUpdate({
+              target: [
+                crossPostFitVerdicts.sourceItemId,
+                crossPostFitVerdicts.targetPlatform,
+              ],
+              set: {
+                isGoodFit: verdict.isGoodFit,
+                reasoning: verdict.reasoning,
+                checkedAt: now,
+              },
+            });
 
           result.classifiedThisRun++;
 
@@ -216,4 +258,104 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
   }
 
   return result;
+}
+
+async function fetchMediaSignals(
+  itemIds: string[]
+): Promise<Map<string, MediaSignals>> {
+  const map = new Map<string, MediaSignals>();
+  if (itemIds.length === 0) return map;
+
+  const rows = await db
+    .select({
+      productionItemId: productionItemMedia.productionItemId,
+      kind: productionItemMedia.kind,
+    })
+    .from(productionItemMedia)
+    .where(inArray(productionItemMedia.productionItemId, itemIds));
+
+  for (const row of rows) {
+    const existing = map.get(row.productionItemId) ?? {
+      hasVideo: false,
+      hasImage: false,
+      mediaCount: 0,
+    };
+    if (row.kind === "video") existing.hasVideo = true;
+    if (row.kind === "image") existing.hasImage = true;
+    existing.mediaCount += 1;
+    map.set(row.productionItemId, existing);
+  }
+
+  return map;
+}
+
+function deriveMediaFromItem(mediaContentType: string | null): MediaSignals {
+  // Fallback for pre-carousel-enrichment rows: infer from the legacy
+  // single-media mediaContentType column. No row means we simply don't know.
+  if (!mediaContentType) {
+    return { hasVideo: false, hasImage: false, mediaCount: 0 };
+  }
+  const isVideo = mediaContentType.startsWith("video/");
+  const isImage = mediaContentType.startsWith("image/");
+  return {
+    hasVideo: isVideo,
+    hasImage: isImage,
+    mediaCount: isVideo || isImage ? 1 : 0,
+  };
+}
+
+async function fetchCachedVerdicts(
+  itemIds: string[],
+  targetPlatform: string
+): Promise<Map<string, boolean>> {
+  const map = new Map<string, boolean>();
+  if (itemIds.length === 0) return map;
+
+  const rows = await db
+    .select({
+      sourceItemId: crossPostFitVerdicts.sourceItemId,
+      isGoodFit: crossPostFitVerdicts.isGoodFit,
+    })
+    .from(crossPostFitVerdicts)
+    .where(
+      and(
+        inArray(crossPostFitVerdicts.sourceItemId, itemIds),
+        eq(crossPostFitVerdicts.targetPlatform, targetPlatform)
+      )
+    );
+
+  for (const row of rows) map.set(row.sourceItemId, row.isGoodFit);
+  return map;
+}
+
+async function fetchPastCrossPostKillReasons(): Promise<PastCrossPostKill[]> {
+  // Join contentEvents → productionItems to find recently-killed cross-posts
+  // and tag each reason with the *target* platform that got killed. That's
+  // what the classifier needs to learn "don't pair videos with YouTube
+  // Community again" without us hand-coding the rule.
+  const rows = await db
+    .select({
+      reason: sql<string>`${contentEvents.payload}->>'reason'`,
+      platform: productionItems.platform,
+    })
+    .from(contentEvents)
+    .innerJoin(
+      productionItems,
+      eq(productionItems.id, contentEvents.contentItemId)
+    )
+    .where(
+      and(
+        eq(productionItems.sourceType, "cross_post"),
+        sql`${contentEvents.payload}->>'type' = 'killed'`,
+        sql`${contentEvents.payload}->>'reason' IS NOT NULL`,
+        sql`length(${contentEvents.payload}->>'reason') >= 10`
+      )
+    )
+    .orderBy(desc(contentEvents.createdAt))
+    .limit(KILL_REASON_HISTORY);
+
+  return rows.map((r) => ({
+    reason: r.reason,
+    targetPlatform: ((r.platform ?? []) as string[])[0] ?? null,
+  }));
 }

@@ -509,6 +509,32 @@ export const crossPostRules = pgTable(
   ]
 );
 
+// Cached LLM fit verdicts per (source item × target platform). The classifier
+// now judges target-aware fit, so a single source can be a good fit for one
+// target platform and a bad fit for another. Replaces the source-scoped
+// crossPostFit* columns on production_items (which are now unused).
+export const crossPostFitVerdicts = pgTable(
+  "cross_post_fit_verdicts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sourceItemId: uuid("source_item_id")
+      .notNull()
+      .references(() => productionItems.id, { onDelete: "cascade" }),
+    targetPlatform: text("target_platform").notNull(),
+    isGoodFit: boolean("is_good_fit").notNull(),
+    reasoning: text("reasoning"),
+    checkedAt: timestamp("checked_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("uniq_cross_post_fit_verdicts_source_target").on(
+      t.sourceItemId,
+      t.targetPlatform
+    ),
+  ]
+);
+
 export const brandSettings = pgTable("brand_settings", {
   brand: text("brand").primaryKey(),
   weeklyGoal: integer("weekly_goal"),
