@@ -18,6 +18,7 @@ import {
   notificationSendTask,
   type NotificationSendPayload,
 } from "./notification-send";
+import { enrichItemTask, type EnrichItemPayload } from "./enrich-item";
 import {
   performanceDecayTask,
   notionSyncTask,
@@ -32,6 +33,7 @@ export interface TaskPayloads {
   "transcript-finish": TranscriptFinishPayload;
   "descript-clip-resolve": DescriptClipResolvePayload;
   "notification-send": NotificationSendPayload;
+  "enrich-item": EnrichItemPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
@@ -51,6 +53,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "transcript-finish": transcriptFinishTask,
   "descript-clip-resolve": descriptClipResolveTask,
   "notification-send": notificationSendTask,
+  "enrich-item": enrichItemTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,

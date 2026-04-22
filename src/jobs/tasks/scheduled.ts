@@ -9,7 +9,8 @@ import { syncPerformanceData } from "@/lib/services/performance-decay";
 import { runEvergreenScan } from "@/lib/services/evergreen-scan";
 import { runCrossPostScan } from "@/lib/services/cross-post-scan";
 import { syncAllMATG } from "@/lib/services/matg-sync";
-import { runEnrichmentSweep } from "@/lib/services/enrichment/orchestrator";
+import { selectEnrichmentCandidates } from "@/lib/services/enrichment/orchestrator";
+import type { EnrichItemPayload } from "./enrich-item";
 
 function timed(name: string, fn: () => Promise<unknown>): Task {
   return async (_payload, helpers) => {
@@ -33,9 +34,29 @@ export const performanceDecayTask: Task = timed("performance-decay", () =>
   syncPerformanceData()
 );
 export const notionSyncTask: Task = timed("notion-sync", () => syncFromNotion());
-export const enrichmentSweepTask: Task = timed("enrichment-sweep", () =>
-  runEnrichmentSweep()
-);
+/**
+ * Cron parent task: select pending items and enqueue one `enrich-item` child
+ * per item. Returns immediately; children run in parallel up to the worker's
+ * concurrency. Replaces the old in-series `runEnrichmentSweep()` loop —
+ * per-item failures no longer starve the rest of the batch.
+ */
+export const enrichmentSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("enrichment-sweep start");
+  const candidates = await selectEnrichmentCandidates();
+  for (const productionItemId of candidates) {
+    const payload: EnrichItemPayload = { productionItemId };
+    await helpers.addJob("enrich-item", payload as never, {
+      // Coalesce duplicate enqueues across overlapping sweeps: if item A is
+      // still pending from last tick, don't double-queue.
+      jobKey: `enrich-${productionItemId}`,
+      jobKeyMode: "unsafe_dedupe",
+    });
+  }
+  helpers.logger.info(
+    `enrichment-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
+  );
+};
 export const matgSyncTask: Task = timed("matg-sync", () => syncAllMATG());
 export const evergreenScanTask: Task = timed("evergreen-scan", () =>
   runEvergreenScan()

@@ -13,10 +13,40 @@ import type { EnrichmentResult } from "./types";
 
 /** Items per sweep tick. Conservative — first sweep after deploy will be the
  *  largest because nothing is enriched yet; tune up once steady state hits. */
-const SWEEP_BATCH_LIMIT = 50;
+export const SWEEP_BATCH_LIMIT = 50;
 
 /** Max attempts before we stop retrying a broken item (until 24h cooldown). */
 const MAX_ATTEMPTS = 5;
+
+/**
+ * Select production-item IDs due for enrichment. Shared by the in-process
+ * {@link runEnrichmentSweep} loop and the Graphile Worker parent task that
+ * fans work out to per-item child jobs.
+ */
+export async function selectEnrichmentCandidates(
+  limit: number = SWEEP_BATCH_LIMIT
+): Promise<string[]> {
+  const cooldownCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({ id: productionItems.id })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.status, "Published"),
+        isNull(productionItems.enrichmentCompletedAt),
+        or(
+          lt(productionItems.enrichmentAttempts, MAX_ATTEMPTS),
+          lt(productionItems.updatedAt, cooldownCutoff)
+        )!
+      )
+    )
+    .orderBy(
+      asc(productionItems.enrichmentAttempts),
+      asc(productionItems.updatedAt)
+    )
+    .limit(limit);
+  return rows.map((r) => r.id);
+}
 
 /**
  * Enrich a single item by ID — the entry point for the on-demand API route
