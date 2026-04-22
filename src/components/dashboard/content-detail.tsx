@@ -39,6 +39,7 @@ import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
 import { TranscriptButton } from "./transcript-dialog";
 import { EnrichmentButton } from "./enrichment-dialog";
+import { coverImageUrl } from "@/lib/cover-image";
 import { cn } from "@/lib/utils";
 import { platformClass, statusClass } from "@/lib/badge-colors";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
@@ -74,6 +75,8 @@ interface RepostRow {
   title: string | null;
   thumbnail: string | null;
   posterUrl: string | null;
+  mediaUrl: string | null;
+  mediaContentType: string | null;
   status: string | null;
   platform: string[] | null;
   publishedDate: string | null;
@@ -100,6 +103,8 @@ interface TopPerformer {
   publishedDate: string | null;
   thumbnail: string | null;
   posterUrl: string | null;
+  mediaUrl: string | null;
+  mediaContentType: string | null;
 }
 
 interface ItemTranscript {
@@ -870,14 +875,17 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3 flex-wrap">
-            {(item.posterUrl || item.thumbnail) && (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={item.posterUrl || item.thumbnail || ""}
-                alt=""
-                className="w-16 h-10 rounded object-cover shrink-0"
-              />
-            )}
+            {(() => {
+              const cover = coverImageUrl(item);
+              return cover ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={cover}
+                  alt=""
+                  className="w-16 h-10 rounded object-cover shrink-0"
+                />
+              ) : null;
+            })()}
             <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
               {item.title || "(Untitled)"}
             </h1>
@@ -1707,13 +1715,16 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       key={perf.id}
                       className="flex gap-3 p-3 rounded border border-border hover:bg-accent/50 transition"
                     >
-                      {(perf.posterUrl || perf.thumbnail) && (
-                        <img
-                          src={perf.posterUrl || perf.thumbnail || ""}
-                          alt={perf.title || "Content thumbnail"}
-                          className="h-16 w-16 rounded object-cover flex-shrink-0"
-                        />
-                      )}
+                      {(() => {
+                        const cover = coverImageUrl(perf);
+                        return cover ? (
+                          <img
+                            src={cover}
+                            alt={perf.title || "Content thumbnail"}
+                            className="h-16 w-16 rounded object-cover flex-shrink-0"
+                          />
+                        ) : null;
+                      })()}
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-foreground line-clamp-2">
                           {perf.title || "Untitled"}
@@ -1846,14 +1857,17 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 >
                   <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                     <div className="flex items-center gap-3">
-                      {(d.posterUrl || d.thumbnail) && (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img
-                          src={d.posterUrl || d.thumbnail || ""}
-                          alt=""
-                          className="w-20 h-12 rounded object-cover shrink-0"
-                        />
-                      )}
+                      {(() => {
+                        const cover = coverImageUrl(d);
+                        return cover ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={cover}
+                            alt=""
+                            className="w-20 h-12 rounded object-cover shrink-0"
+                          />
+                        ) : null;
+                      })()}
                       <div className="flex flex-col gap-0.5 min-w-0">
                         <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
                           {d.depth > 1 && (
@@ -2014,14 +2028,17 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   >
                     <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                       <div className="flex items-center gap-3">
-                        {(r.posterUrl || r.thumbnail) && (
-                          /* eslint-disable-next-line @next/next/no-img-element */
-                          <img
-                            src={r.posterUrl || r.thumbnail || ""}
-                            alt=""
-                            className="w-20 h-12 rounded object-cover shrink-0"
-                          />
-                        )}
+                        {(() => {
+                          const cover = coverImageUrl(r);
+                          return cover ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={cover}
+                              alt=""
+                              className="w-20 h-12 rounded object-cover shrink-0"
+                            />
+                          ) : null;
+                        })()}
                         <div className="flex flex-col gap-0.5 min-w-0">
                           <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
                             <Link
@@ -2158,14 +2175,17 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   >
                     <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                       <div className="flex items-center gap-3">
-                        {(r.posterUrl || r.thumbnail) && (
-                          /* eslint-disable-next-line @next/next/no-img-element */
-                          <img
-                            src={r.posterUrl || r.thumbnail || ""}
-                            alt=""
-                            className="w-20 h-12 rounded object-cover shrink-0"
-                          />
-                        )}
+                        {(() => {
+                          const cover = coverImageUrl(r);
+                          return cover ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={cover}
+                              alt=""
+                              className="w-20 h-12 rounded object-cover shrink-0"
+                            />
+                          ) : null;
+                        })()}
                         <div className="flex flex-col gap-0.5 min-w-0">
                           <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
                             <Link

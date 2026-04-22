@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { productionItems, formats, brandSettings, users } from "@/lib/db/schema";
 import { aliasedTable } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, inArray, sql } from "drizzle-orm";
+import { getPresignedGetUrl } from "@/lib/s3";
 
 export const PIPELINE_STATUSES = [
   "Ready To Publish",
@@ -67,12 +68,40 @@ function mapProductionItem(
       | "cross_post",
     repostedFromItemId: item.repostedFromItemId,
     pillarContentItemId: item.pillarContentItemId,
+    posterS3Key: item.posterS3Key,
+    mediaS3Key: item.mediaS3Key,
+    mediaContentType: item.mediaContentType,
     predictedViewsSnapshot: item.predictedViewsSnapshot,
     predictedViewsSnapshotAt:
       item.predictedViewsSnapshotAt?.toISOString() ?? null,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
   };
+}
+
+// Presign every unique S3 key in `items` in parallel and attach posterUrl /
+// mediaUrl to each. Failures fall through (url stays null); the UI has its own
+// fallback to `thumbnail`. 1h TTL matches the detail endpoint.
+async function attachPresignedCoverUrls(items: ProductionItem[]): Promise<void> {
+  const keys = new Set<string>();
+  for (const it of items) {
+    if (it.posterS3Key) keys.add(it.posterS3Key);
+    if (it.mediaS3Key) keys.add(it.mediaS3Key);
+  }
+  const urlByKey = new Map<string, string>();
+  await Promise.all(
+    Array.from(keys).map(async (key) => {
+      try {
+        urlByKey.set(key, await getPresignedGetUrl(key, 60 * 60));
+      } catch {
+        /* ignore */
+      }
+    })
+  );
+  for (const it of items) {
+    it.posterUrl = it.posterS3Key ? urlByKey.get(it.posterS3Key) ?? null : null;
+    it.mediaUrl = it.mediaS3Key ? urlByKey.get(it.mediaS3Key) ?? null : null;
+  }
 }
 
 export async function getWeeklyGoal(brand: string): Promise<number | null> {
@@ -293,6 +322,7 @@ export async function getContentReport(
   const formatViewsPerPost = calcViewsPerPost(formatProduction, formatViews);
 
   const mappedItems: ProductionItem[] = items.map((it) => mapProductionItem(it));
+  await attachPresignedCoverUrls(mappedItems);
 
   return {
     periods,

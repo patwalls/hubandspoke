@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { coverImageUrl } from "@/lib/cover-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +64,9 @@ interface ContentItem {
   publishedDate: string | null;
   publishedLink: string | null;
   thumbnail: string | null;
+  posterUrl: string | null;
+  mediaUrl: string | null;
+  mediaContentType: string | null;
   views: number | null;
   likes: number | null;
   comments: number | null;
@@ -1226,14 +1230,17 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                   <tr key={item.id} className="border-b border-border/50 last:border-b-0 hover:bg-accent/30">
                     <td className="px-5 py-2.5">
                       <div className="flex items-center gap-2 min-w-0">
-                        {item.thumbnail && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={item.thumbnail}
-                            alt=""
-                            className="w-8 h-8 rounded object-cover shrink-0"
-                          />
-                        )}
+                        {(() => {
+                          const cover = coverImageUrl(item);
+                          return cover ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={cover}
+                              alt=""
+                              className="w-8 h-8 rounded object-cover shrink-0"
+                            />
+                          ) : null;
+                        })()}
                         <div className="min-w-0">
                           <Link
                             href={`/${brand}/content/${item.id}`}

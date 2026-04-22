@@ -23,6 +23,7 @@ import {
 import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
 import { platformClass } from "@/lib/badge-colors";
+import { coverImageUrl } from "@/lib/cover-image";
 
 interface PerformanceTableProps {
   items: ProductionItem[];
@@ -90,7 +91,7 @@ const MATG_PLATFORMS = [
 ];
 
 export function PerformanceTable({ items, brand, formats, onPostCreated }: PerformanceTableProps) {
-  const hasThumbnails = items.some((item) => item.thumbnail);
+  const hasThumbnails = items.some((item) => coverImageUrl(item));
   const hasPerformanceSync = items.some((item) => item.lastPerformanceSyncAt);
   const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -529,13 +530,17 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
               >
                 <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                   <div className="flex items-center gap-3">
-                    {hasThumbnails && item.thumbnail && (
-                      <img
-                        src={item.thumbnail}
-                        alt=""
-                        className="w-20 h-12 rounded object-cover shrink-0"
-                      />
-                    )}
+                    {(() => {
+                      if (!hasThumbnails) return null;
+                      const cover = coverImageUrl(item);
+                      return cover ? (
+                        <img
+                          src={cover}
+                          alt=""
+                          className="w-20 h-12 rounded object-cover shrink-0"
+                        />
+                      ) : null;
+                    })()}
                     <div className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
                         <Link

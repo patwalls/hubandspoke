@@ -127,6 +127,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         title: productionItems.title,
         thumbnail: productionItems.thumbnail,
         posterS3Key: productionItems.posterS3Key,
+        mediaS3Key: productionItems.mediaS3Key,
+        mediaContentType: productionItems.mediaContentType,
         status: productionItems.status,
         platform: productionItems.platform,
         publishedDate: productionItems.publishedDate,
@@ -240,6 +242,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             publishedDate: productionItems.publishedDate,
             thumbnail: productionItems.thumbnail,
             posterS3Key: productionItems.posterS3Key,
+            mediaS3Key: productionItems.mediaS3Key,
+            mediaContentType: productionItems.mediaContentType,
           })
           .from(productionItems)
           .where(
@@ -306,9 +310,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       item.posterS3Key,
       item.mediaS3Key,
       ...derivatives.map((d) => d.posterS3Key),
+      ...derivatives.map((d) => d.mediaS3Key),
       ...topPerformers.map((t) => t.posterS3Key),
+      ...topPerformers.map((t) => t.mediaS3Key),
       ...reposts.map((r) => r.posterS3Key),
+      ...reposts.map((r) => r.mediaS3Key),
       ...crossPosts.map((r) => r.posterS3Key),
+      ...crossPosts.map((r) => r.mediaS3Key),
     ];
     const presignedByKey = new Map<string, string>();
     await Promise.all(
@@ -353,6 +361,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           ? parseFloat(d.apvFirst24Hours)
           : null,
         posterUrl: urlFor(d.posterS3Key),
+        mediaUrl: urlFor(d.mediaS3Key),
       })),
       formatNames: brandFormats.map((f) => f.name),
       formats: brandFormats,
@@ -363,16 +372,19 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       topPerformers: topPerformers.map((t) => ({
         ...t,
         posterUrl: urlFor(t.posterS3Key),
+        mediaUrl: urlFor(t.mediaS3Key),
       })),
       reposts: reposts.map((r) => ({
         ...r,
         createdAt: r.createdAt.toISOString(),
         posterUrl: urlFor(r.posterS3Key),
+        mediaUrl: urlFor(r.mediaS3Key),
       })),
       crossPosts: crossPosts.map((r) => ({
         ...r,
         createdAt: r.createdAt.toISOString(),
         posterUrl: urlFor(r.posterS3Key),
+        mediaUrl: urlFor(r.mediaS3Key),
       })),
       repostedFrom,
       currentDraft: currentDraft ?? null,

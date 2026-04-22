@@ -5,6 +5,7 @@ import {
   productionItems,
 } from "@/lib/db/schema";
 import { and, desc, eq } from "drizzle-orm";
+import { getPresignedGetUrl } from "@/lib/s3";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -77,6 +78,24 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       }
     });
 
+    // Presign archived S3 objects so the items table can fall back to a durable
+    // cover when the upstream `thumbnail` CDN URL has expired.
+    const keys = new Set<string>();
+    for (const i of items) {
+      if (i.posterS3Key) keys.add(i.posterS3Key);
+      if (i.mediaS3Key) keys.add(i.mediaS3Key);
+    }
+    const urlByKey = new Map<string, string>();
+    await Promise.all(
+      Array.from(keys).map(async (key) => {
+        try {
+          urlByKey.set(key, await getPresignedGetUrl(key, 60 * 60));
+        } catch {
+          /* ignore */
+        }
+      })
+    );
+
     return NextResponse.json({
       format,
       children,
@@ -88,6 +107,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         publishedDate: i.publishedDate,
         publishedLink: i.publishedLink,
         thumbnail: i.thumbnail,
+        posterUrl: i.posterS3Key ? urlByKey.get(i.posterS3Key) ?? null : null,
+        mediaUrl: i.mediaS3Key ? urlByKey.get(i.mediaS3Key) ?? null : null,
+        mediaContentType: i.mediaContentType,
         views: i.views,
         likes: i.likes,
         comments: i.comments,
