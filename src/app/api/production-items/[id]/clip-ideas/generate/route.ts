@@ -24,9 +24,6 @@ function isShortForm(platform: string[] | null): boolean {
   return platform.some((p) => SHORT_FORM_PLATFORMS.includes(p));
 }
 
-// Generation is a single Sonnet call, typically <15s, but allow headroom.
-export const maxDuration = 120;
-
 export async function POST(_request: NextRequest, context: RouteContext) {
   const guard = await requireAdmin();
   if (guard.response) return guard.response;
@@ -57,50 +54,55 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     );
   }
 
-  // Derivatives of THIS pillar — direct children only (depth 1), short-form.
-  // Keeping to depth 1 matches the "clips already made from this video" framing
-  // and avoids pulling cousin long-form posts that share an ancestor.
-  const derivativeRows = await db
-    .select({
-      id: productionItems.id,
-      title: productionItems.title,
-      platform: productionItems.platform,
-      format: productionItems.format,
-      views: productionItems.views,
-    })
-    .from(productionItems)
-    .where(
-      and(
-        eq(productionItems.pillarContentItemId, id),
-        isNotNull(productionItems.views),
-        sql`(${productionItems.platform}::jsonb @> '["YouTube Shorts"]'::jsonb OR ${productionItems.platform}::jsonb @> '["Instagram Reel"]'::jsonb OR ${productionItems.platform}::jsonb @> '["TikTok"]'::jsonb)`
+  // The Sonnet call + potential retry can exceed Heroku's 30s router limit
+  // (H12), which would hand the client an HTML error page and blow up
+  // res.json() in the panel. Return 202 now and run the generation in the
+  // background; the client polls GET /clip-ideas until a new batch lands.
+  // Mirrors the pattern in /transcript/fetch/route.ts.
+  (async () => {
+    // Derivatives of THIS pillar — direct children only (depth 1), short-form.
+    // Keeping to depth 1 matches the "clips already made from this video"
+    // framing and avoids pulling cousin long-form posts that share an ancestor.
+    const derivativeRows = await db
+      .select({
+        id: productionItems.id,
+        title: productionItems.title,
+        platform: productionItems.platform,
+        format: productionItems.format,
+        views: productionItems.views,
+      })
+      .from(productionItems)
+      .where(
+        and(
+          eq(productionItems.pillarContentItemId, id),
+          isNotNull(productionItems.views),
+          sql`(${productionItems.platform}::jsonb @> '["YouTube Shorts"]'::jsonb OR ${productionItems.platform}::jsonb @> '["Instagram Reel"]'::jsonb OR ${productionItems.platform}::jsonb @> '["TikTok"]'::jsonb)`
+        )
       )
-    )
-    .orderBy(sql`${productionItems.views} DESC NULLS LAST`)
-    .limit(20);
+      .orderBy(sql`${productionItems.views} DESC NULLS LAST`)
+      .limit(20);
 
-  const derivatives: PerfRow[] = derivativeRows
-    .filter((d) => isShortForm(d.platform as string[] | null))
-    .map((d) => ({
-      title: d.title,
-      platform: d.platform as string[] | null,
-      format: d.format,
-      views: d.views,
+    const derivatives: PerfRow[] = derivativeRows
+      .filter((d) => isShortForm(d.platform as string[] | null))
+      .map((d) => ({
+        title: d.title,
+        platform: d.platform as string[] | null,
+        format: d.format,
+        views: d.views,
+      }));
+
+    const topPerfRows = await topShortFormPerformers({
+      brand: item.brand,
+      excludeDerivativesOfPillarId: id,
+      limit: 30,
+    });
+    const topPerformers: PerfRow[] = topPerfRows.map((r) => ({
+      title: r.title,
+      platform: r.platform,
+      format: r.format,
+      views: r.views,
     }));
 
-  const topPerfRows = await topShortFormPerformers({
-    brand: item.brand,
-    excludeDerivativesOfPillarId: id,
-    limit: 30,
-  });
-  const topPerformers: PerfRow[] = topPerfRows.map((r) => ({
-    title: r.title,
-    platform: r.platform,
-    format: r.format,
-    views: r.views,
-  }));
-
-  try {
     const result = await generateClipIdeas({
       pillarTitle: item.title,
       pillarFormat: item.format,
@@ -128,18 +130,15 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     }));
 
     await db.insert(clipIdeas).values(rows);
+  })().catch((err) => {
+    console.error(
+      `[clip-ideas] background generation failed for item=${id}:`,
+      err
+    );
+  });
 
-    return NextResponse.json({
-      ok: true,
-      batchId,
-      count: rows.length,
-      derivativesCount: derivatives.length,
-      topPerformersCount: topPerformers.length,
-      modelUsage: result.modelUsage,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("clip-idea generation failed:", err);
-    return NextResponse.json({ error: message }, { status: 502 });
-  }
+  return NextResponse.json(
+    { ok: true, status: "pending" },
+    { status: 202 }
+  );
 }

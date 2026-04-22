@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -9,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { KillIdeaDialog } from "./kill-idea-dialog";
+import { UserChip, personDisplay } from "./user-chip";
 
 interface ClipIdeaSummary {
   id: string;
@@ -18,6 +20,9 @@ interface ClipIdeaSummary {
   startSec: number;
   endSec: number;
   estimatedViews: number | null;
+  status?: string;
+  acceptedEditorName?: string | null;
+  acceptedProductionItemId?: string | null;
 }
 
 interface Props {
@@ -25,6 +30,14 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   idea: ClipIdeaSummary | null;
   onDone: () => void;
+  brand: string;
+}
+
+interface AssignableUser {
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
 }
 
 function fmtTs(sec: number): string {
@@ -47,14 +60,33 @@ export function ClipTriageDialog({
   onOpenChange,
   idea,
   onDone,
+  brand,
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [killOpen, setKillOpen] = useState(false);
+  const [users, setUsers] = useState<AssignableUser[]>([]);
 
   useEffect(() => {
     if (!open) setError(null);
   }, [open]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/users/assignable");
+        if (!res.ok) return;
+        const json = (await res.json()) as { users: AssignableUser[] };
+        if (!cancelled) setUsers(json.users ?? []);
+      } catch {
+        // Swallow — grid will render empty-state copy below.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleKill = useCallback(
     async (reason: string | null) => {
@@ -79,12 +111,50 @@ export function ClipTriageDialog({
         setSaving(false);
       }
     },
-    [idea, onDone, onOpenChange]
+    [idea, onDone, onOpenChange],
+  );
+
+  const handleAssign = useCallback(
+    async (user: AssignableUser) => {
+      if (!idea) return;
+      setSaving(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/clip-ideas/${idea.id}/triage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "assign", editorUserId: user.id }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(json?.error || `Failed (${res.status})`);
+          return;
+        }
+        const newId: string | undefined = json?.newProductionItemId;
+        const brandSlug: string = json?.sourceBrand ?? brand;
+        const viewUrl = newId ? `/${brandSlug}/content/${newId}` : null;
+        toast.success(`Assigned to ${personDisplay(user).name}`, {
+          duration: 6000,
+          action: viewUrl
+            ? {
+                label: "View content →",
+                onClick: () => window.open(viewUrl, "_blank", "noopener"),
+              }
+            : undefined,
+        });
+        onDone();
+        onOpenChange(false);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [idea, onDone, onOpenChange, brand],
   );
 
   if (!idea) return null;
   const duration = Math.max(0, Math.round(idea.endSec - idea.startSec));
   const views = fmtViews(idea.estimatedViews);
+  const isDecided = idea.status && idea.status !== "suggested";
 
   return (
     <>
@@ -117,17 +187,77 @@ export function ClipTriageDialog({
               </p>
             </div>
 
+            {isDecided ? (
+              <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-blue-900">
+                <span>
+                  {idea.status === "assigned" && idea.acceptedEditorName ? (
+                    <>
+                      <span className="font-medium">Assigned</span> to{" "}
+                      {idea.acceptedEditorName}
+                    </>
+                  ) : idea.status === "killed" ? (
+                    <span className="font-medium text-muted-foreground">
+                      This idea was killed.
+                    </span>
+                  ) : (
+                    <span className="font-medium">
+                      {idea.status === "accepted"
+                        ? "Accepted"
+                        : "Already decided"}
+                    </span>
+                  )}
+                </span>
+                {idea.acceptedProductionItemId && (
+                  <a
+                    href={`/${brand}/content/${idea.acceptedProductionItemId}`}
+                    className="text-blue-700 hover:underline font-medium"
+                  >
+                    View content →
+                  </a>
+                )}
+              </div>
+            ) : (
+              <section className="space-y-2 border-t border-border pt-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Assign to
+                </h3>
+                <div className="max-h-56 overflow-y-auto grid grid-cols-2 gap-1">
+                  {users.length === 0 ? (
+                    <div className="text-xs text-muted-foreground col-span-full">
+                      No assignable users found.
+                    </div>
+                  ) : (
+                    users.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => handleAssign(u)}
+                        disabled={saving}
+                        className="flex items-center w-full text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+                      >
+                        <UserChip user={u} size="xs" />
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+            )}
+
             {error && <p className="text-xs text-red-600">{error}</p>}
 
             <div className="flex items-center justify-between border-t border-border pt-3">
-              <button
-                type="button"
-                onClick={() => setKillOpen(true)}
-                disabled={saving}
-                className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
-              >
-                Kill idea
-              </button>
+              {isDecided ? (
+                <span />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setKillOpen(true)}
+                  disabled={saving}
+                  className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+                >
+                  Kill idea
+                </button>
+              )}
               <Button
                 type="button"
                 variant="outline"

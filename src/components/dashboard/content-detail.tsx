@@ -2138,6 +2138,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
 
       <ClipIdeasPanel
         itemId={item.id}
+        brand={brand}
         hasDescriptProject={hasDescriptProject}
       />
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { SparklesIcon, RefreshCwIcon, ExternalLinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,11 +20,16 @@ interface ClipIdea {
   status: string;
   acceptedNotionPageUrl: string | null;
   acceptedTargetFormat: string | null;
+  acceptedEditorUserId: string | null;
+  acceptedEditorName: string | null;
+  acceptedEditorEmail: string | null;
+  acceptedProductionItemId: string | null;
   createdAt: string;
 }
 
 interface Props {
   itemId: string;
+  brand: string;
   hasDescriptProject: boolean;
 }
 
@@ -59,6 +65,7 @@ function fmtRel(iso: string): string {
 
 export function ClipIdeasPanel({
   itemId,
+  brand,
   hasDescriptProject,
 }: Props) {
   const [loading, setLoading] = useState(true);
@@ -94,12 +101,21 @@ export function ClipIdeasPanel({
 
   const handleGenerate = useCallback(async () => {
     setGenState({ kind: "generating" });
+    const priorBatchCreatedAt = batchCreatedAt;
     try {
       const res = await fetch(
         `/api/production-items/${itemId}/clip-ideas/generate`,
         { method: "POST" }
       );
-      const json = await res.json();
+      // Tolerate non-JSON bodies — Heroku's 502 error page is HTML, for
+      // example, and res.json() would throw "Unexpected token '<'".
+      const bodyText = await res.text();
+      let json: { error?: string } | null = null;
+      try {
+        json = bodyText ? (JSON.parse(bodyText) as { error?: string }) : null;
+      } catch {
+        json = null;
+      }
       if (!res.ok) {
         setGenState({
           kind: "error",
@@ -107,15 +123,45 @@ export function ClipIdeasPanel({
         });
         return;
       }
-      setGenState({ kind: "idle" });
-      await load();
+
+      // 202 Accepted: agent is running in the background to dodge Heroku's
+      // 30s router timeout. Poll GET /clip-ideas until a fresh batch appears
+      // (detected by a changed createdAt) or 3 minutes elapse.
+      const DEADLINE_MS = 3 * 60 * 1000;
+      const POLL_MS = 5000;
+      const started = Date.now();
+      while (Date.now() - started < DEADLINE_MS) {
+        await new Promise((r) => setTimeout(r, POLL_MS));
+        const pollRes = await fetch(
+          `/api/production-items/${itemId}/clip-ideas`
+        );
+        if (!pollRes.ok) continue;
+        const pollJson = (await pollRes.json()) as {
+          batch: { id: string; createdAt: string } | null;
+          ideas: ClipIdea[];
+        };
+        if (
+          pollJson.batch &&
+          pollJson.batch.createdAt !== priorBatchCreatedAt
+        ) {
+          setIdeas(pollJson.ideas);
+          setBatchCreatedAt(pollJson.batch.createdAt);
+          setGenState({ kind: "idle" });
+          return;
+        }
+      }
+      setGenState({
+        kind: "error",
+        message:
+          "Generation timed out after 3 minutes. Reload this page shortly to check — the agent may still finish.",
+      });
     } catch (err) {
       setGenState({
         kind: "error",
         message: err instanceof Error ? err.message : "Generation failed",
       });
     }
-  }, [itemId, load]);
+  }, [itemId, batchCreatedAt]);
 
   if (!hasDescriptProject) return null;
 
@@ -172,18 +218,20 @@ export function ClipIdeasPanel({
         <ol className="space-y-2">
           {ideas.map((idea, i) => {
             const accepted = idea.status === "accepted";
+            const assigned = idea.status === "assigned";
             const killed = idea.status === "killed";
-            const interactive = idea.status === "suggested";
+            const canOpen = !accepted;
             return (
               <li
                 key={idea.id}
                 className={cn(
                   "rounded-md border border-border bg-background p-3 space-y-1.5 transition-colors",
-                  interactive && "cursor-pointer hover:border-foreground/30",
+                  canOpen && "cursor-pointer hover:border-foreground/30",
+                  assigned && "border-blue-200 bg-blue-50/40",
                   killed && "opacity-50"
                 )}
                 onClick={() => {
-                  if (interactive) setTriageIdea(idea);
+                  if (canOpen) setTriageIdea(idea);
                 }}
               >
                 <div className="flex items-baseline gap-2 flex-wrap">
@@ -224,6 +272,31 @@ export function ClipIdeasPanel({
                         <span className="text-muted-foreground">
                           → {idea.acceptedTargetFormat}
                         </span>
+                      )}
+                    </span>
+                  )}
+                  {assigned && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700">
+                      {idea.acceptedProductionItemId ? (
+                        <Link
+                          href={`/${brand}/content/${idea.acceptedProductionItemId}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 hover:underline"
+                          title="Open the assigned content"
+                        >
+                          Assigned
+                          <ExternalLinkIcon className="size-3" />
+                        </Link>
+                      ) : (
+                        <span>Assigned</span>
+                      )}
+                      {idea.acceptedEditorName && (
+                        <>
+                          <span className="text-muted-foreground">→</span>
+                          <span className="text-muted-foreground">
+                            {idea.acceptedEditorName}
+                          </span>
+                        </>
                       )}
                     </span>
                   )}
@@ -269,6 +342,7 @@ export function ClipIdeasPanel({
         }}
         idea={triageIdea}
         onDone={load}
+        brand={brand}
       />
     </div>
   );

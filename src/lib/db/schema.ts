@@ -302,6 +302,13 @@ export const clipIdeas = pgTable(
       () => users.id,
       { onDelete: "set null" }
     ),
+    // Set when a clip idea is assigned and gets promoted into a real
+    // production_items row (status "Assigned"). The clip idea stays as the
+    // triage record; the FK lets the panel deep-link to the created content.
+    acceptedProductionItemId: uuid("accepted_production_item_id").references(
+      (): AnyPgColumn => productionItems.id,
+      { onDelete: "set null" }
+    ),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     decidedByUserId: uuid("decided_by_user_id").references(() => users.id, {
       onDelete: "set null",

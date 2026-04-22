@@ -1,0 +1,2 @@
+ALTER TABLE "clip_ideas" ADD COLUMN "accepted_production_item_id" uuid;--> statement-breakpoint
+ALTER TABLE "clip_ideas" ADD CONSTRAINT "clip_ideas_accepted_production_item_id_production_items_id_fk" FOREIGN KEY ("accepted_production_item_id") REFERENCES "public"."production_items"("id") ON DELETE set null ON UPDATE no action;
