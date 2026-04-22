@@ -1387,6 +1387,22 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             media={data.media}
             onSynced={load}
           />
+          {item.descriptProjectUrl && (
+            <a
+              href={item.descriptProjectUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              title="Open the Descript project"
+            >
+              <FilmIcon className="size-3.5" /> Descript
+            </a>
+          )}
+          <TranscriptButton
+            itemId={item.id}
+            hasDescriptProject={hasDescriptProject}
+            hasTranscript={data.transcript != null}
+          />
           {(() => {
             const currentPlatforms = new Set(item.platform ?? []);
             const alreadyCrossPostedPlatforms = new Set(
@@ -1395,6 +1411,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             const crossPostTargets = platformOptions.filter(
               (p) => !currentPlatforms.has(p),
             );
+            const isSyncing = syncState.kind === "syncing";
             return (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -1436,52 +1453,53 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       )}
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
-                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     disabled={actionPending}
                     onClick={() => void handleDuplicate()}
                   >
                     <CopyIcon className="size-3.5" /> Duplicate
                   </DropdownMenuItem>
+                  {(hasDescriptProject ||
+                    item.mediaS3Key ||
+                    isPublished) && <DropdownMenuSeparator />}
+                  {hasDescriptProject && (
+                    <DropdownMenuItem onClick={openDescriptModal}>
+                      <RefreshCwIcon className="size-3.5" /> Replace Descript
+                      file
+                    </DropdownMenuItem>
+                  )}
+                  {item.mediaS3Key && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        window.location.href = `/api/uploads/download?itemId=${item.id}`;
+                      }}
+                    >
+                      <DownloadIcon className="size-3.5" /> Download media
+                      {item.mediaSizeBytes && (
+                        <span className="ml-auto text-[10px] text-muted-foreground">
+                          {(item.mediaSizeBytes / 1024 / 1024).toFixed(1)} MB
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  )}
+                  {isPublished && (
+                    <DropdownMenuItem
+                      disabled={isSyncing}
+                      onClick={() => void handleSync()}
+                    >
+                      <RefreshCwIcon
+                        className={cn(
+                          "size-3.5",
+                          isSyncing && "animate-spin",
+                        )}
+                      />
+                      {isSyncing ? "Syncing…" : "Sync metrics"}
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             );
           })()}
-          {item.descriptProjectUrl && (
-            <a
-              href={item.descriptProjectUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-              title="Open the Descript project"
-            >
-              <FilmIcon className="size-3.5" /> Descript
-            </a>
-          )}
-          {hasDescriptProject && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={openDescriptModal}
-              title="Re-upload a new file and replace the Descript project linked to this post"
-            >
-              <RefreshCwIcon className="size-3.5" /> Replace
-            </Button>
-          )}
-          <TranscriptButton
-            itemId={item.id}
-            hasDescriptProject={hasDescriptProject}
-            hasTranscript={data.transcript != null}
-          />
-          {item.mediaS3Key && (
-            <a
-              href={`/api/uploads/download?itemId=${item.id}`}
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-              title={`Download original media from S3${item.mediaSizeBytes ? ` (${(item.mediaSizeBytes / 1024 / 1024).toFixed(1)} MB)` : ""}`}
-            >
-              <DownloadIcon className="size-3.5" /> Download
-            </a>
-          )}
         </div>
       </div>
 
@@ -1514,18 +1532,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 {syncState.message}
               </span>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSync}
-              disabled={syncState.kind === "syncing"}
-              className="h-7 text-xs gap-1.5"
-            >
-              <RefreshCwIcon
-                className={`h-3 w-3 ${syncState.kind === "syncing" ? "animate-spin" : ""}`}
-              />
-              {syncState.kind === "syncing" ? "Syncing…" : "Sync metrics"}
-            </Button>
           </div>
         </div>
       <div
