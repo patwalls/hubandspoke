@@ -20,6 +20,20 @@ interface IdeaQueueTableProps {
   onMutate: () => void;
 }
 
+function formatCompact(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (n >= 1_000_000)
+    return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return n.toLocaleString();
+}
+
+const CONFIDENCE_DOT: Record<string, string> = {
+  high: "bg-emerald-500",
+  med: "bg-amber-500",
+  low: "bg-muted-foreground/40",
+};
+
 export function IdeaQueueTable({
   items,
   brand,
@@ -60,7 +74,8 @@ export function IdeaQueueTable({
           <colgroup>
             <col className="w-[180px]" />
             <col />
-            <col className="w-[120px]" />
+            <col className="w-[220px]" />
+            <col className="w-[100px]" />
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-accent/50">
@@ -70,8 +85,14 @@ export function IdeaQueueTable({
               <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                 Content
               </th>
-              <th className="px-3 py-2.5 text-right font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                Action
+              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                Format
+              </th>
+              <th
+                className="px-3 py-2.5 text-right font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap"
+                title="Predicted views — based on past performance of similar content"
+              >
+                Est. Views
               </th>
             </tr>
           </thead>
@@ -154,14 +175,43 @@ function IdeaQueueRow({
           </button>
         </div>
       </td>
-      <td className="px-3 py-2 text-right">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="inline-flex h-7 items-center justify-center rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground shadow-xs hover:bg-accent transition-colors"
-        >
-          Triage
-        </button>
+      <td className="px-3 py-2 text-sm text-muted-foreground max-w-[220px]">
+        <div className="truncate" title={item.format || ""}>
+          {item.format || "—"}
+        </div>
+      </td>
+      <td className="px-3 py-2 text-sm text-right tabular-nums">
+        {item.prediction && item.prediction.prediction != null ? (
+          <div
+            className="inline-flex items-center gap-1.5 justify-end"
+            title={`Range ${formatCompact(item.prediction.p25)}–${formatCompact(
+              item.prediction.p75
+            )} · ${item.prediction.confidence} confidence${
+              item.prediction.cohortBreakdown.length
+                ? ` · ${item.prediction.cohortBreakdown
+                    .map(
+                      (c) =>
+                        `${c.label}: ${c.n} posts, median ${formatCompact(c.median)}`
+                    )
+                    .join(" · ")}`
+                : ""
+            }`}
+          >
+            <span
+              className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                CONFIDENCE_DOT[item.prediction.confidence] ??
+                  CONFIDENCE_DOT.low
+              )}
+              aria-hidden
+            />
+            <span className="text-foreground">
+              {formatCompact(item.prediction.prediction)}
+            </span>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
         <TriageDialog
           open={open}
           onOpenChange={setOpen}
