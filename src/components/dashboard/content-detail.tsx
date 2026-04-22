@@ -1364,29 +1364,31 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               <FileTextIcon className="size-3.5" /> Notion
             </a>
           )}
-          <EnrichmentButton
-            itemId={item.id}
-            enrichmentCompletedAt={item.enrichmentCompletedAt}
-            enrichmentAttempts={item.enrichmentAttempts}
-            enrichmentError={item.enrichmentError}
-            contentBody={item.contentBody}
-            contentBodyFetchedAt={item.contentBodyFetchedAt}
-            contentBodySource={item.contentBodySource}
-            contentMediaUrl={item.contentMediaUrl}
-            description={item.description}
-            authorHandle={item.authorHandle}
-            authorDisplayName={item.authorDisplayName}
-            authorFollowerCount={item.authorFollowerCount}
-            authorVerified={item.authorVerified}
-            posterUrl={item.posterUrl}
-            mediaUrl={item.mediaUrl}
-            mediaContentType={item.mediaContentType}
-            mediaSizeBytes={item.mediaSizeBytes}
-            mediaS3Key={item.mediaS3Key}
-            posterS3Key={item.posterS3Key}
-            media={data.media}
-            onSynced={load}
-          />
+          {isPublished && (
+            <EnrichmentButton
+              itemId={item.id}
+              enrichmentCompletedAt={item.enrichmentCompletedAt}
+              enrichmentAttempts={item.enrichmentAttempts}
+              enrichmentError={item.enrichmentError}
+              contentBody={item.contentBody}
+              contentBodyFetchedAt={item.contentBodyFetchedAt}
+              contentBodySource={item.contentBodySource}
+              contentMediaUrl={item.contentMediaUrl}
+              description={item.description}
+              authorHandle={item.authorHandle}
+              authorDisplayName={item.authorDisplayName}
+              authorFollowerCount={item.authorFollowerCount}
+              authorVerified={item.authorVerified}
+              posterUrl={item.posterUrl}
+              mediaUrl={item.mediaUrl}
+              mediaContentType={item.mediaContentType}
+              mediaSizeBytes={item.mediaSizeBytes}
+              mediaS3Key={item.mediaS3Key}
+              posterS3Key={item.posterS3Key}
+              media={data.media}
+              onSynced={load}
+            />
+          )}
           {item.descriptProjectUrl && (
             <a
               href={item.descriptProjectUrl}
