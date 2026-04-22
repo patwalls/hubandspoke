@@ -35,6 +35,7 @@ type ContentHit = {
   platform: string[] | null;
   status: string | null;
   publishedDate: string | null;
+  views: number | null;
 };
 
 type FormatHit = {
@@ -61,6 +62,13 @@ const QUICK_NAV: NavEntry[] = [
   { slug: "my-work", label: "My Work", href: () => `/my-work` },
   { slug: "settings", label: "Settings", href: () => `/settings` },
 ];
+
+function formatCompact(n: number | null | undefined): string | null {
+  if (n == null) return null;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return n.toLocaleString();
+}
 
 function formatShortDate(d: string | null): string | null {
   if (!d) return null;
@@ -368,6 +376,7 @@ function EmptyStateGroups({
 function ContentRow({ hit, title }: { hit: ContentHit; title: string }) {
   const platforms = hit.platform ?? [];
   const date = formatShortDate(hit.publishedDate);
+  const views = formatCompact(hit.views);
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3">
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -406,11 +415,16 @@ function ContentRow({ hit, title }: { hit: ContentHit; title: string }) {
           ) : null}
         </div>
       </div>
-      {date ? (
-        <span className="shrink-0 text-[11px] text-muted-foreground">
-          {date}
-        </span>
-      ) : null}
+      <div className="flex shrink-0 flex-col items-end gap-0.5">
+        {views ? (
+          <span className="text-[11px] font-medium tabular-nums text-foreground">
+            {views} views
+          </span>
+        ) : null}
+        {date ? (
+          <span className="text-[10px] text-muted-foreground">{date}</span>
+        ) : null}
+      </div>
     </div>
   );
 }

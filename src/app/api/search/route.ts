@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, desc, eq, ilike, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, productionItems } from "@/lib/db/schema";
 
@@ -30,6 +30,7 @@ export async function GET(request: NextRequest) {
         platform: productionItems.platform,
         status: productionItems.status,
         publishedDate: productionItems.publishedDate,
+        views: productionItems.views,
       })
       .from(productionItems)
       .where(
@@ -39,7 +40,12 @@ export async function GET(request: NextRequest) {
           ilike(productionItems.title, pattern),
         ),
       )
-      .orderBy(desc(productionItems.publishedDate))
+      .orderBy(
+        // Rank popular items first; keep a recency tiebreaker so fresh posts
+        // with no view count yet still surface above forgotten duds.
+        sql`coalesce(${productionItems.views}, 0) desc`,
+        desc(productionItems.publishedDate),
+      )
       .limit(CONTENT_LIMIT),
     db
       .select({
