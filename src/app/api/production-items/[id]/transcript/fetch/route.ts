@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth-guards";
 import {
   startDescriptTranscriptFetch,
-  finishDescriptTranscriptFetch,
   TranscriptFetchError,
 } from "@/lib/services/transcript-fetch";
+import { enqueue } from "@/jobs/enqueue";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -29,18 +29,13 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ ok: false, error: message, kind }, { status });
   }
 
-  // Poll the publish job and ingest subtitles in the background. Heroku's
-  // router times out at 30s but a publish job can take 30–180s, so we return
-  // 202 now and let the client poll GET /transcript until the row lands. The
-  // dyno's Node process keeps the promise alive until it resolves.
-  finishDescriptTranscriptFetch(id, start.publishJobId, start.startedAt).catch(
-    (err) => {
-      console.error(
-        `[transcript-fetch] background finish failed for item=${id} job=${start.publishJobId}:`,
-        err
-      );
-    }
-  );
+  // Hand off the 30–180s publish-poll + subtitle ingest to Graphile Worker.
+  // The dialog's client-side polling of GET /transcript detects completion.
+  await enqueue("transcript-finish", {
+    productionItemId: id,
+    publishJobId: start.publishJobId,
+    startedAtIso: start.startedAt.toISOString(),
+  });
 
   return NextResponse.json(
     { ok: true, status: "pending", publishJobId: start.publishJobId },

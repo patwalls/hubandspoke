@@ -4,7 +4,7 @@
 //
 // The WorkerUtils instance opens its own small pg pool — separate from the
 // drizzle `postgres.js` client — because `graphile-worker` expects `pg`
-// semantics (advisory locks, NOTIFY). Pool is bounded to `maxPoolSize: 2` per
+// semantics (advisory locks, NOTIFY). Pool is bounded to 2 connections per
 // dyno; see the connection budget in CLAUDE.md.
 
 import {
@@ -13,6 +13,7 @@ import {
   type TaskSpec,
 } from "graphile-worker";
 import type { TaskPayloads } from "./tasks";
+import { buildPgPool } from "./pg-pool";
 
 // Augment graphile-worker's Tasks registry so addJob is type-checked against
 // our TaskPayloads map — callers get "did you mean ..." instead of unknown.
@@ -24,14 +25,7 @@ let utilsPromise: Promise<WorkerUtils> | null = null;
 
 function getUtils(): Promise<WorkerUtils> {
   if (!utilsPromise) {
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      throw new Error("DATABASE_URL not set — cannot enqueue jobs");
-    }
-    utilsPromise = makeWorkerUtils({
-      connectionString,
-      maxPoolSize: 2,
-    });
+    utilsPromise = makeWorkerUtils({ pgPool: buildPgPool({ max: 2 }) });
   }
   return utilsPromise;
 }

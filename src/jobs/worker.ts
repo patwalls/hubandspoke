@@ -5,16 +5,15 @@
 
 import { run } from "graphile-worker";
 import { taskList } from "./tasks";
+import { buildPgPool } from "./pg-pool";
 
 async function main() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    console.error("DATABASE_URL not set");
-    process.exit(1);
-  }
+  // Own pool with explicit SSL — Heroku Postgres requires it, and
+  // graphile-worker's `connectionString` shortcut doesn't negotiate it.
+  const pgPool = buildPgPool({ max: 6 });
 
   const runner = await run({
-    connectionString,
+    pgPool,
     concurrency: 4,
     pollInterval: 2000,
     // Heroku sends SIGKILL 30s after SIGTERM; 20s of grace lets jobs finish
@@ -26,13 +25,16 @@ async function main() {
   const shutdown = async (signal: string) => {
     console.log(`[worker] ${signal} received — shutting down gracefully`);
     await runner.stop();
+    await pgPool.end();
     process.exit(0);
   };
 
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
 
-  console.log(`[worker] started concurrency=4 tasks=${Object.keys(taskList).join(",")}`);
+  console.log(
+    `[worker] started concurrency=4 tasks=${Object.keys(taskList).join(",")}`
+  );
 
   await runner.promise;
 }

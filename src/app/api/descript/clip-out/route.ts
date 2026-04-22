@@ -3,55 +3,11 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems, formats, repurposeTriggers } from "@/lib/db/schema";
-import {
-  invokeDescriptAgent,
-  fetchDescriptJob,
-  extractCompositionIdFromAgentResponse,
-} from "@/lib/descript";
+import { invokeDescriptAgent } from "@/lib/descript";
 import { dispatchRepurpose, type RepurposeAction } from "@/lib/repurpose-agent";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
-
-async function resolveCompositionInBackground(
-  triggerId: string,
-  jobId: string,
-  derivativeItemId?: string
-) {
-  const deadline = Date.now() + 2 * 60 * 1000;
-  while (Date.now() < deadline) {
-    try {
-      const job = await fetchDescriptJob(jobId);
-      if (job.job_state === "stopped") {
-        const compositionId = extractCompositionIdFromAgentResponse(
-          job.result?.agent_response
-        );
-        try {
-          await db
-            .update(repurposeTriggers)
-            .set({ descriptCompositionId: compositionId })
-            .where(eq(repurposeTriggers.id, triggerId));
-        } catch (err) {
-          console.error("resolveCompositionInBackground trigger update failed:", err);
-        }
-        if (derivativeItemId && compositionId) {
-          try {
-            await db
-              .update(productionItems)
-              .set({ descriptCompositionId: compositionId })
-              .where(eq(productionItems.id, derivativeItemId));
-          } catch (err) {
-            console.error("resolveCompositionInBackground derivative update failed:", err);
-          }
-        }
-        return;
-      }
-    } catch (err) {
-      console.error("resolveCompositionInBackground error:", err);
-      return;
-    }
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-}
+import { enqueue } from "@/jobs/enqueue";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -183,11 +139,11 @@ export async function POST(request: NextRequest) {
         })
         .returning({ id: repurposeTriggers.id });
 
-      resolveCompositionInBackground(
-        trigger.id,
-        result.jobId,
-        derivativeItemId
-      ).catch(() => {});
+      await enqueue("descript-clip-resolve", {
+        triggerId: trigger.id,
+        jobId: result.jobId,
+        derivativeItemId,
+      });
 
       return NextResponse.json({
         mode: "descript_clip",

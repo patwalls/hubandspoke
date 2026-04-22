@@ -11,6 +11,7 @@ import {
   sendCommentEmail,
   sendMentionEmail,
 } from "@/lib/email";
+import { enqueue } from "@/jobs/enqueue";
 
 type EnqueueInput = {
   userId: string;
@@ -33,20 +34,14 @@ function itemUrl(brand: string, contentItemId: string): string {
   return `${appBaseUrl()}/${brand}/content/${contentItemId}`;
 }
 
-// Inserts a notification row and fires the matching email (fire-and-forget).
-// Skips self-notifications and users without a passwordHash (uninvited
-// contractors synced from Notion). Email failures are swallowed so they
-// never break the caller's request path.
+// Inserts a notification row and enqueues the matching email send on the
+// background job queue. Skips self-notifications and users without a
+// passwordHash (uninvited contractors synced from Notion).
 export async function enqueueNotification(input: EnqueueInput): Promise<void> {
   if (input.actorUserId && input.actorUserId === input.userId) return;
 
   const [recipient] = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      name: users.name,
-      passwordHash: users.passwordHash,
-    })
+    .select({ passwordHash: users.passwordHash })
     .from(users)
     .where(eq(users.id, input.userId))
     .limit(1);
@@ -67,63 +62,90 @@ export async function enqueueNotification(input: EnqueueInput): Promise<void> {
   if (!recipient.passwordHash) return;
   if (!inserted) return;
 
-  void sendEmailForNotification(inserted.id, input, recipient).catch((err) => {
-    console.error("[notifications] email send failed", err);
-  });
+  await enqueue("notification-send", { notificationId: inserted.id });
 }
 
-async function sendEmailForNotification(
+/**
+ * Reconstruct the email payload from a notification row and send it. Exported
+ * so the `notification-send` Graphile Worker task can re-deliver after a
+ * retry without stashing PII in the queue payload.
+ *
+ * Idempotent: skips if `emailedAt` is already set.
+ */
+export async function sendEmailForNotification(
   notificationId: string,
-  input: EnqueueInput,
-  recipient: { email: string; name: string | null },
 ): Promise<void> {
+  const [row] = await db
+    .select({
+      id: notifications.id,
+      userId: notifications.userId,
+      contentItemId: notifications.contentItemId,
+      actorUserId: notifications.actorUserId,
+      payload: notifications.payload,
+      emailedAt: notifications.emailedAt,
+    })
+    .from(notifications)
+    .where(eq(notifications.id, notificationId))
+    .limit(1);
+  if (!row || row.emailedAt) return;
+
+  const [recipient] = await db
+    .select({ email: users.email, name: users.name })
+    .from(users)
+    .where(eq(users.id, row.userId))
+    .limit(1);
+  if (!recipient) return;
+
   let brand = "starter-story";
-  if (input.contentItemId) {
+  if (row.contentItemId) {
     const [item] = await db
       .select({ brand: productionItems.brand })
       .from(productionItems)
-      .where(eq(productionItems.id, input.contentItemId))
+      .where(eq(productionItems.id, row.contentItemId))
       .limit(1);
     if (item) brand = item.brand;
   }
 
-  const url = input.contentItemId ? itemUrl(brand, input.contentItemId) : appBaseUrl();
+  const url = row.contentItemId
+    ? itemUrl(brand, row.contentItemId)
+    : appBaseUrl();
 
   let assignerName: string | null = null;
-  if (input.actorUserId) {
+  if (row.actorUserId) {
     const [actor] = await db
       .select({ name: users.name, email: users.email })
       .from(users)
-      .where(eq(users.id, input.actorUserId))
+      .where(eq(users.id, row.actorUserId))
       .limit(1);
     assignerName = actor?.name || actor?.email || null;
   }
 
-  if (input.payload.kind === "assigned") {
+  const payload = row.payload as NotificationPayload;
+  if (payload.kind === "assigned") {
     await sendAssignmentEmail({
       to: recipient.email,
       name: recipient.name,
-      itemTitle: input.payload.title,
-      role: input.payload.role,
+      itemTitle: payload.title,
+      role: payload.role,
       assignedByName: assignerName,
       itemUrl: url,
     });
-  } else if (input.payload.kind === "comment") {
+  } else if (payload.kind === "comment") {
     await sendCommentEmail({
       to: recipient.email,
       name: recipient.name,
-      itemTitle: input.payload.title,
-      commentAuthor: input.payload.authorName || assignerName,
-      commentBody: input.payload.excerpt,
+      itemTitle: payload.title,
+      commentAuthor: payload.authorName || assignerName,
+      commentBody: payload.excerpt,
       itemUrl: url,
     });
-  } else if (input.payload.kind === "mention") {
+  } else if (payload.kind === "mention") {
     await sendMentionEmail({
       to: recipient.email,
       name: recipient.name,
-      itemTitle: input.payload.title,
-      commentAuthor: input.payload.authorName || assignerName,
-      commentBody: input.payload.excerpt,
+      itemTitle: payload.title,
+      commentAuthor: payload.authorName || assignerName,
+      commentBody: payload.excerpt,
       itemUrl: url,
     });
   }
