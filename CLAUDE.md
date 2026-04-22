@@ -184,17 +184,27 @@ Notes:
 - `src/components/dashboard/` - Dashboard UI components
 - `src/lib/auth.ts` - Auth.js config
 - `src/lib/email.ts` - Postmark client
-- `src/lib/cron/jobs.ts` - Scheduled job registry (dispatched by `/api/cron/tick`)
-- `src/jobs/` - Graphile Worker: task registry + enqueue helper + worker entrypoint
+- `src/jobs/` - Graphile Worker: task registry + enqueue helper + worker entrypoint + crontab
 
 ## Cron / Scheduled Jobs
-- One Heroku Scheduler entry hits `GET /api/cron/tick` every 10 minutes.
-- The tick endpoint dispatches whichever entries in `src/lib/cron/jobs.ts` match the current 10-minute window.
-- Add a job = add an entry to `CRON_JOBS` and deploy.
-- **Planned migration:** these six entries will move to Graphile Worker's
-  crontab in a follow-up (Phase 2 of the background-job migration). When that
-  lands, Heroku Scheduler retires and `CRON_JOBS` is deleted. Until then, net
-  new recurring work should still go through `CRON_JOBS`.
+Scheduled work runs via **graphile-worker's crontab** on the worker dyno.
+No Heroku Scheduler addon — schedules live in `src/jobs/crontab.ts` (standard
+cron syntax, UTC). Each schedule references a task registered in
+`src/jobs/tasks/index.ts`; see `src/jobs/tasks/scheduled.ts` for the current
+wrappers.
+
+- **Add a scheduled job** = add a task in `src/jobs/tasks/scheduled.ts` + a
+  line in `src/jobs/crontab.ts` + a `TaskPayloads` entry. Push. The worker
+  picks it up on its next boot (release phase restarts the dyno).
+- **Manual ad-hoc trigger:** `GET /api/cron/tick?name=<task>` with
+  `Authorization: Bearer $CRON_SECRET` enqueues the task for immediate pickup.
+  Bare `GET /api/cron/tick` is a noop.
+- **Catch-up:** graphile-worker persists last-fired timestamps in
+  `graphile_worker.known_crontabs`, so a task scheduled while the worker was
+  down fires as soon as the worker boots (within the backfill window).
+- **Long tasks + deploys:** any task that runs longer than ~20s can get
+  interrupted by a dyno restart (deploy, daily cycle). Graphile Worker
+  retries automatically with exponential backoff.
 
 ## Notion Integration
 - Database ID: `8cb6cee4163d4282a5c87991ea689bde`
