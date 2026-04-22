@@ -1422,7 +1422,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                             <DropdownMenuItem
                               key={p}
                               disabled={alreadyDone || actionPending}
-                              onSelect={() => void handleCrossPost(p)}
+                              onClick={() => void handleCrossPost(p)}
                             >
                               {p}
                               {alreadyDone && (
@@ -1439,7 +1439,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     disabled={actionPending}
-                    onSelect={() => void handleDuplicate()}
+                    onClick={() => void handleDuplicate()}
                   >
                     <CopyIcon className="size-3.5" /> Duplicate
                   </DropdownMenuItem>
