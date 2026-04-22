@@ -49,6 +49,14 @@ function formatTimestamp(sec: number): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+function isUniqueViolation(err: unknown, constraintName: string): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; constraint_name?: string; message?: string };
+  if (e.code !== "23505") return false;
+  if (e.constraint_name === constraintName) return true;
+  return typeof e.message === "string" && e.message.includes(constraintName);
+}
+
 export async function assignClipIdea(args: {
   clipIdeaId: string;
   editorUserId: string;
@@ -100,25 +108,41 @@ export async function assignClipIdea(args: {
     `Why: ${row.rationale}`,
   ].join("\n");
 
-  // Create the real production_items row. Default producer = the admin who
-  // assigned; editor = the assignee. Leave `format` null so the editor picks
-  // — this also sidesteps the uniq (pillar, format) index. Default platform
-  // to YouTube Shorts since that's the dominant clip destination across
-  // brands; editor can adjust on the detail page.
-  const [created] = await db
-    .insert(productionItems)
-    .values({
-      title: row.hook,
-      status: "Assigned",
-      platform: ["YouTube Shorts"],
-      brand: row.sourceBrand ?? "starter-story",
-      contentBody: body,
-      pillarContentItemId: row.sourceProductionItemId,
-      sourceType: "original",
-      producerUserId: args.decidedByUserId,
-      editorUserId: args.editorUserId,
-    })
-    .returning({ id: productionItems.id });
+  // Create the real production_items row. sourceType='clip' bypasses the
+  // uniq(pillar, format) index, which is scoped to 'original' — many clips
+  // per pillar+format is the whole point. The partial uniq index on
+  // source_clip_idea_id is the replacement guarantee: one production item
+  // per clip idea, enforced at the DB. Default producer = the admin who
+  // assigned; editor = the assignee. Default platform = YouTube Shorts,
+  // editor can swap on the detail page.
+  let created: { id: string } | undefined;
+  try {
+    const rows = await db
+      .insert(productionItems)
+      .values({
+        title: row.hook,
+        status: "Assigned",
+        platform: ["YouTube Shorts"],
+        format: "Repackage section with hook",
+        brand: row.sourceBrand ?? "starter-story",
+        contentBody: body,
+        pillarContentItemId: row.sourceProductionItemId,
+        sourceType: "clip",
+        sourceClipIdeaId: args.clipIdeaId,
+        producerUserId: args.decidedByUserId,
+        editorUserId: args.editorUserId,
+      })
+      .returning({ id: productionItems.id });
+    created = rows[0];
+  } catch (err) {
+    // Translate the DB-level double-promote guard to the same 409 the
+    // app-level status check uses. Happens on concurrent double-clicks or
+    // retries that slip past the status check.
+    if (isUniqueViolation(err, "uniq_production_items_source_clip_idea")) {
+      throw new ClipIdeaAlreadyDecidedError("assigned");
+    }
+    throw err;
+  }
 
   if (!created) throw new Error("Failed to create production item for clip");
 

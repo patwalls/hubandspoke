@@ -135,11 +135,22 @@ export const productionItems = pgTable(
     // How this item entered the system. "original" is user-authored or
     // Notion-synced; "repost" is a same-content/same-channel re-run of an
     // earlier item; "cross_post" is (reserved) a one-to-one sibling post on a
-    // different channel. Distinct from pillarContentItemId (format-derivative
-    // tree) so repost rollups and repurpose queries don't collide.
+    // different channel; "clip" is promoted from a clip-idea triage (many
+    // clips can share a pillar + format, so the uniq (pillar, format) index
+    // below deliberately scopes itself to sourceType='original'). Distinct
+    // from pillarContentItemId (format-derivative tree) so repost rollups
+    // and repurpose queries don't collide.
     sourceType: text("source_type").notNull().default("original"),
     repostedFromItemId: uuid("reposted_from_item_id").references(
       (): AnyPgColumn => productionItems.id,
+      { onDelete: "set null" }
+    ),
+    // For sourceType='clip' rows: FK back to the triaged clip_ideas row this
+    // production item was promoted from. Enables a direct "came from clip
+    // idea X" lookup; the partial uniq index below guarantees exactly one
+    // production item per clip idea at the DB level.
+    sourceClipIdeaId: uuid("source_clip_idea_id").references(
+      (): AnyPgColumn => clipIdeas.id,
       { onDelete: "set null" }
     ),
     // Populated once by the evergreen classifier on an original item. null =
@@ -195,6 +206,9 @@ export const productionItems = pgTable(
     uniqueIndex("uniq_production_items_utm_campaign")
       .on(table.utmCampaign)
       .where(sql`${table.utmCampaign} IS NOT NULL`),
+    uniqueIndex("uniq_production_items_source_clip_idea")
+      .on(table.sourceClipIdeaId)
+      .where(sql`${table.sourceClipIdeaId} IS NOT NULL`),
   ]
 );
 
