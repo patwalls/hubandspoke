@@ -1607,7 +1607,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             placeholder="e.g. angus-warner-42"
           />
           <p className="text-[11px] text-muted-foreground">
-            Used in Lynx for CTA tracking. Must be unique across all content.
+            Used for CTA tracking. Must be unique across all content.
           </p>
         </div>
 
