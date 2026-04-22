@@ -1,8 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clipIdeas, users } from "@/lib/db/schema";
+import { clipIdeas, transcripts, users } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
+
+const TRANSCRIPT_EXCERPT_MAX = 220;
+
+function buildExcerpt(
+  segments: Array<{ startSec: number; endSec: number; text: string }>,
+  startSec: number,
+  endSec: number,
+): string | null {
+  const overlapping = segments.filter(
+    (s) => s.endSec > startSec && s.startSec < endSec,
+  );
+  if (overlapping.length === 0) return null;
+  const joined = overlapping
+    .map((s) => s.text.trim())
+    .filter(Boolean)
+    .join(" ");
+  if (joined.length <= TRANSCRIPT_EXCERPT_MAX) return joined;
+  return joined.slice(0, TRANSCRIPT_EXCERPT_MAX).trimEnd() + "…";
+}
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -61,19 +80,33 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       sql`COALESCE(${clipIdeas.estimatedViews}, 0) DESC, ${clipIdeas.confidence} DESC NULLS LAST`,
     );
 
+  // One transcript per source item — fetch it once and slice per-idea for
+  // the list card preview. Null if the source hasn't been transcribed.
+  const [transcript] = await db
+    .select({ segments: transcripts.segments })
+    .from(transcripts)
+    .where(eq(transcripts.productionItemId, id))
+    .limit(1);
+  const segments = transcript?.segments ?? [];
+
   return NextResponse.json({
     batch: {
       id: latest.batchId,
       createdAt: latest.createdAt,
     },
-    ideas: rows.map((i) => ({
-      ...i,
-      startSec: Number(i.startSec),
-      endSec: Number(i.endSec),
-      confidence: i.confidence != null ? Number(i.confidence) : null,
-      estimatedViews: i.estimatedViews ?? null,
-      acceptedEditorName: i.editorName ?? i.editorEmail ?? null,
-      acceptedEditorEmail: i.editorEmail ?? null,
-    })),
+    ideas: rows.map((i) => {
+      const startSec = Number(i.startSec);
+      const endSec = Number(i.endSec);
+      return {
+        ...i,
+        startSec,
+        endSec,
+        confidence: i.confidence != null ? Number(i.confidence) : null,
+        estimatedViews: i.estimatedViews ?? null,
+        acceptedEditorName: i.editorName ?? i.editorEmail ?? null,
+        acceptedEditorEmail: i.editorEmail ?? null,
+        transcriptExcerpt: buildExcerpt(segments, startSec, endSec),
+      };
+    }),
   });
 }

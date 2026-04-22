@@ -24,6 +24,7 @@ interface ClipIdea {
   acceptedEditorName: string | null;
   acceptedEditorEmail: string | null;
   acceptedProductionItemId: string | null;
+  transcriptExcerpt: string | null;
   createdAt: string;
 }
 
@@ -296,17 +297,32 @@ export function ClipIdeasPanel({
                     </a>
                   )}
                 </div>
-                <p className="text-sm font-medium text-foreground leading-snug">
-                  “{idea.hook}”
-                </p>
-                <p className="text-[13px] text-foreground leading-snug">
-                  <span className="text-muted-foreground">Angle: </span>
-                  {idea.angle}
-                </p>
-                <p className="text-[12px] text-muted-foreground leading-snug">
-                  <span className="font-medium text-foreground/80">Why: </span>
-                  {idea.rationale}
-                </p>
+                <div className="space-y-0.5">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Hook
+                  </h4>
+                  <p className="text-sm font-medium text-foreground leading-snug">
+                    {idea.hook}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Why it&apos;ll go viral
+                  </h4>
+                  <p className="text-[13px] text-foreground/90 leading-relaxed">
+                    {idea.rationale}
+                  </p>
+                </div>
+                {idea.transcriptExcerpt && (
+                  <div className="space-y-0.5">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Transcript
+                    </h4>
+                    <p className="text-[12px] text-muted-foreground leading-relaxed line-clamp-3">
+                      {idea.transcriptExcerpt}
+                    </p>
+                  </div>
+                )}
               </li>
             );
           })}

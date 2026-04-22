@@ -1767,7 +1767,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               className={cn(
                 "group/tab flex-initial h-9 rounded-md px-3 text-sm font-medium transition-colors",
                 "text-muted-foreground hover:bg-muted hover:text-foreground",
-                "data-active:bg-[#FFEAE3] data-active:text-[#CC5033]",
+                "data-active:bg-orange-100 data-active:text-orange-700",
                 "after:!hidden",
               )}
             >
@@ -1778,7 +1778,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                     "ml-1.5 inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-full px-1.5",
                     "text-[10px] font-semibold tabular-nums",
                     "bg-muted text-muted-foreground",
-                    "group-data-active/tab:bg-[#CC5033]/15 group-data-active/tab:text-[#CC5033]",
+                    "group-data-active/tab:bg-orange-200 group-data-active/tab:text-orange-800",
                   )}
                 >
                   {tab.count}
