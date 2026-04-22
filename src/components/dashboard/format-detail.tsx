@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/command";
 import { channelsForBrand } from "@/lib/config/channels";
 import { applyStarterTemplate } from "@/lib/format-skill";
+import { recordVisit } from "@/lib/hooks/use-recent-items";
 
 interface AsanaMember {
   gid: string;
@@ -518,6 +519,19 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const f = data?.format;
+    if (!f) return;
+    recordVisit({
+      kind: "format",
+      id: formatId,
+      title: f.name,
+      subtitle: f.channels?.join(" · ") || undefined,
+      brand,
+      href: `/${brand}/formats/${formatId}`,
+    });
+  }, [brand, formatId, data?.format]);
 
   useEffect(() => {
     async function loadMembers() {

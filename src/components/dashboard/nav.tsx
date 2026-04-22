@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
+import { SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BRANDS, DEFAULT_BRAND } from "@/lib/config/brands";
 import { NotificationBell } from "@/components/notifications/notification-bell";
+import { GlobalSearch } from "@/components/dashboard/global-search";
 
 type Brand = (typeof BRANDS)[number];
 
@@ -57,6 +59,19 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
   const pathname = usePathname();
   const currentBrand = getBrandFromPath(pathname);
   const isOnFormats = pathname.endsWith("/formats");
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const isK = e.key === "k" || e.key === "K";
+      if (isK && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   async function handleSignOut() {
     await signOut({ callbackUrl: "/login" });
@@ -151,6 +166,18 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
             >
               My Work
             </Link>
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              aria-label="Open search (⌘K)"
+              className="group flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground hover:bg-accent"
+            >
+              <SearchIcon className="size-3.5" />
+              <span className="hidden sm:inline">Search…</span>
+              <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-border bg-muted/60 px-1 py-px text-[10px] font-medium text-muted-foreground group-hover:text-foreground">
+                <span className="text-[11px] leading-none">⌘</span>K
+              </kbd>
+            </button>
             <NotificationBell />
             <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[150px]">{userEmail}</span>
             <button
@@ -162,6 +189,11 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
           </div>
         </div>
       </div>
+      <GlobalSearch
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        brand={currentBrand}
+      />
     </header>
   );
 }

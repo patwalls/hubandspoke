@@ -54,6 +54,7 @@ import type { ContentDraftContent } from "@/lib/db/schema";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
+import { recordVisit } from "@/lib/hooks/use-recent-items";
 
 interface BrandFormat {
   id: string;
@@ -307,6 +308,19 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     {},
   );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const item = data?.item;
+    if (!item) return;
+    recordVisit({
+      kind: "content",
+      id: contentId,
+      title: item.title ?? "(untitled)",
+      subtitle: item.format ?? undefined,
+      brand,
+      href: `/${brand}/content/${contentId}`,
+    });
+  }, [brand, contentId, data?.item]);
 
   // Auto-clear the "Saved" pill so it doesn't stay pinned after a single edit.
   // Errors persist until the next save attempt so the user can read them.
