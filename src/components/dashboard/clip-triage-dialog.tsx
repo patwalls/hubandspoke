@@ -234,51 +234,49 @@ export function ClipTriageDialog({
           <div className="flex-1 overflow-y-auto">
             <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_320px] gap-4">
               <div className="space-y-4 min-w-0">
-                <div className="rounded-md border border-border bg-background p-3 space-y-3">
-                  <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
-                    <span className="rounded bg-muted px-1.5 py-0.5">
-                      {fmtTs(idea.startSec)}–{fmtTs(idea.endSec)} ({duration}s)
-                    </span>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Hook
-                    </label>
-                    <textarea
-                      value={hookDraft}
-                      onChange={(e) => setHookDraft(e.target.value)}
-                      onBlur={() => void commitHook()}
-                      disabled={isDecided || hookSaving}
-                      rows={2}
-                      placeholder="The first line the viewer hears"
-                      className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm font-medium leading-snug focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
-                    />
-                  </div>
-
-                  <div>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                      Why it&apos;ll go viral
-                    </h3>
-                    <p className="text-[13px] leading-relaxed text-foreground/90">
-                      {idea.rationale}
-                    </p>
-                  </div>
-
-                  {preview && preview.segments.length > 0 && (
-                    <div>
-                      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                        Transcript
-                      </h3>
-                      <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-muted/30 px-2.5 py-2 text-[13px] leading-relaxed text-foreground/80">
-                        {preview.segments
-                          .map((s) => s.text.trim())
-                          .filter(Boolean)
-                          .join(" ")}
-                      </div>
-                    </div>
-                  )}
+                <div className="inline-block text-[11px] font-mono text-muted-foreground">
+                  <span className="rounded bg-muted px-1.5 py-0.5">
+                    {fmtTs(idea.startSec)}–{fmtTs(idea.endSec)} ({duration}s)
+                  </span>
                 </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Hook
+                  </label>
+                  <textarea
+                    value={hookDraft}
+                    onChange={(e) => setHookDraft(e.target.value)}
+                    onBlur={() => void commitHook()}
+                    disabled={isDecided || hookSaving}
+                    rows={2}
+                    placeholder="The first line the viewer hears"
+                    className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm font-medium leading-snug focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Why it&apos;ll go viral
+                  </h3>
+                  <p className="text-[13px] leading-relaxed text-foreground/90">
+                    {idea.rationale}
+                  </p>
+                </div>
+
+                {preview && preview.segments.length > 0 && (
+                  <div className="space-y-1">
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Transcript
+                    </h3>
+                    <div className="max-h-48 overflow-y-auto text-[13px] leading-relaxed text-muted-foreground">
+                      {preview.segments
+                        .map((s) => s.text.trim())
+                        .filter(Boolean)
+                        .join(" ")}
+                    </div>
+                  </div>
+                )}
 
                 {isDecided && (
                   <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-blue-900">
@@ -425,11 +423,10 @@ function ShortsPreview({
       className="mx-auto w-full max-w-[320px] rounded-xl bg-black text-white overflow-hidden flex flex-col shadow-lg"
       style={{ aspectRatio: "9 / 16" }}
     >
-      {/* Upper black space keeps the hook+video group anchored low-center,
-          matching how Shorts letterboxes a landscape source on black. */}
-      <div className="flex-1 min-h-0" />
-
-      <div className="px-3 space-y-2">
+      {/* Hook+video group centered vertically. Caption and reaction rail
+          sit absolute at the bottom so they don't push the centered group
+          off-axis. */}
+      <div className="px-3 space-y-2 w-full">
         <p className="text-[15px] font-extrabold leading-tight line-clamp-3">
           {hook}
         </p>
@@ -459,20 +456,19 @@ function ShortsPreview({
         )}
       </div>
 
-      <div className="relative flex-1 min-h-0">
-        {captionText && (
-          <div className="absolute inset-x-0 top-2 px-3 text-center">
-            <p className="text-[13px] font-semibold leading-snug line-clamp-3">
-              {captionText}
-            </p>
-          </div>
-        )}
-        <div className="absolute right-1.5 bottom-3 flex flex-col items-center gap-3 text-white/85 pointer-events-none">
-          <ThumbsUpIcon className="h-5 w-5" strokeWidth={1.8} />
-          <ThumbsDownIcon className="h-5 w-5" strokeWidth={1.8} />
-          <MessageCircleIcon className="h-5 w-5" strokeWidth={1.8} />
-          <Share2Icon className="h-5 w-5" strokeWidth={1.8} />
+      {captionText && (
+        <div className="absolute inset-x-0 bottom-14 px-3 text-center pointer-events-none">
+          <p className="text-[13px] font-semibold leading-snug line-clamp-3">
+            {captionText}
+          </p>
         </div>
+      )}
+
+      <div className="absolute right-1.5 bottom-3 flex flex-col items-center gap-3 text-white/85 pointer-events-none">
+        <ThumbsUpIcon className="h-5 w-5" strokeWidth={1.8} />
+        <ThumbsDownIcon className="h-5 w-5" strokeWidth={1.8} />
+        <MessageCircleIcon className="h-5 w-5" strokeWidth={1.8} />
+        <Share2Icon className="h-5 w-5" strokeWidth={1.8} />
       </div>
     </div>
   );
