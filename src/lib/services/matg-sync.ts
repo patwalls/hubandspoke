@@ -17,20 +17,11 @@ import { eq, and, inArray } from "drizzle-orm";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 
-const SC_BASE = "https://api.scrapecreators.com";
+import { SC_BASE, headers } from "@/lib/services/sc-client";
+
 const MATG_YT_HANDLE = "MATGpod";
 const MATG_IG_HANDLE = "matgpod";
 const MATG_TW_HANDLE = "matgpod";
-
-function apiKey() {
-  const key = process.env.SCRAPE_CREATORS_API_KEY;
-  if (!key) throw new Error("SCRAPE_CREATORS_API_KEY is not set");
-  return key;
-}
-
-function headers() {
-  return { "x-api-key": apiKey() };
-}
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -293,6 +284,28 @@ export async function fetchLinkedInPostByUrl(
     views: null,
     likes: data?.likeCount ?? null,
     comments: data?.commentCount ?? null,
+  };
+}
+
+/**
+ * Fetch a TikTok video by URL. 1 SC credit. SC returns real play / like /
+ * comment counts in `aweme_detail.statistics`, so no view-estimation needed.
+ */
+export async function fetchTikTokVideoByUrl(
+  videoUrl: string,
+  customHeaders: HeadersInit = headers()
+): Promise<SCPostMetrics | null> {
+  const url = `${SC_BASE}/v2/tiktok/video?url=${encodeURIComponent(videoUrl)}`;
+  const res = await fetch(url, { headers: customHeaders });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`TikTok video error (${res.status}): ${await res.text()}`);
+  const data = await res.json();
+  const stats = data?.aweme_detail?.statistics;
+  if (!stats) return null;
+  return {
+    views: stats.play_count ?? null,
+    likes: stats.digg_count ?? null,
+    comments: stats.comment_count ?? null,
   };
 }
 

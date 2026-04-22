@@ -20,6 +20,7 @@
  *   Twitter / X                 /v1/twitter/tweet?url=
  *   Threads                     /v1/threads/post?url=
  *   LinkedIn                    /v1/linkedin/post?url=
+ *   TikTok                      /v2/tiktok/video?url=
  */
 
 import { db } from "@/lib/db";
@@ -32,6 +33,7 @@ import {
   fetchThreadsPostByUrl,
   fetchLinkedInPostByUrl,
   fetchYouTubeCommunityPostByUrl,
+  fetchTikTokVideoByUrl,
 } from "./matg-sync";
 import { estimateViewsFromLikes } from "./view-estimator";
 
@@ -108,7 +110,8 @@ export type PlatformKind =
   | "instagram"
   | "twitter"
   | "threads"
-  | "linkedin";
+  | "linkedin"
+  | "tiktok";
 
 /**
  * Map an item's `platform[]` strings to the set of SC-supported platform
@@ -131,6 +134,7 @@ export function platformKindsFor(platforms: string[] | null): Set<PlatformKind> 
       out.add("twitter");
     else if (p === "Threads") out.add("threads");
     else if (p === "LinkedIn") out.add("linkedin");
+    else if (p === "TikTok") out.add("tiktok");
   }
   return out;
 }
@@ -435,6 +439,50 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       itemId,
       updated: true,
       platform: "linkedin",
+      views: derived.views,
+      likes,
+      comments,
+      creditsUsed: 1,
+    };
+  }
+
+  // --- TikTok (SC returns real play_count + digg + comment) ---
+  if (kinds.has("tiktok") && url) {
+    const post = await fetchTikTokVideoByUrl(url);
+    if (!post) {
+      const note = "TikTok video not found at URL";
+      await stampSyncResult(itemId, note);
+      return {
+        itemId,
+        updated: false,
+        platform: "tiktok",
+        views: null,
+        likes: null,
+        comments: null,
+        note,
+        creditsUsed: 1,
+      };
+    }
+    const { likes, comments } = post;
+    const derived = deriveViews(post.views, likes);
+    await db
+      .update(productionItems)
+      .set({
+        ...(derived.views != null && {
+          views: derived.views,
+          viewsEstimated: derived.estimated,
+        }),
+        ...(likes != null && { likes }),
+        ...(comments != null && { comments }),
+        lastPerformanceSyncAt: new Date(),
+        lastPerformanceSyncError: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, itemId));
+    return {
+      itemId,
+      updated: true,
+      platform: "tiktok",
       views: derived.views,
       likes,
       comments,

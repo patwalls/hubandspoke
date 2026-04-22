@@ -72,6 +72,7 @@ interface RepostRow {
   id: string;
   title: string | null;
   thumbnail: string | null;
+  posterUrl: string | null;
   status: string | null;
   platform: string[] | null;
   publishedDate: string | null;
@@ -97,6 +98,14 @@ interface TopPerformer {
   views: number | null;
   publishedDate: string | null;
   thumbnail: string | null;
+  posterUrl: string | null;
+}
+
+interface ItemTranscript {
+  fullText: string;
+  source: string;
+  wordCount: number | null;
+  durationSec: number | null;
 }
 
 interface PredictionCohort {
@@ -118,6 +127,7 @@ interface ViewPrediction {
 
 interface DetailResponse {
   item: ProductionItem;
+  transcript: ItemTranscript | null;
   derivatives: DerivativeRow[];
   descendantViewsTotal: number;
   formatNames: string[];
@@ -816,10 +826,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3 flex-wrap">
-            {item.thumbnail && (
+            {(item.posterUrl || item.thumbnail) && (
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
-                src={item.thumbnail}
+                src={item.posterUrl || item.thumbnail || ""}
                 alt=""
                 className="w-16 h-10 rounded object-cover shrink-0"
               />
@@ -864,6 +874,28 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             {item.publishedDate && (
               <span className="text-xs text-muted-foreground">
                 · published {formatDate(item.publishedDate)}
+              </span>
+            )}
+            {(item.authorHandle || item.authorDisplayName) && (
+              <span
+                className="text-xs text-muted-foreground inline-flex items-center gap-1"
+                title={
+                  item.authorFollowerCount != null
+                    ? `${item.authorFollowerCount.toLocaleString()} followers at last enrichment`
+                    : undefined
+                }
+              >
+                · @{item.authorHandle || item.authorDisplayName}
+                {item.authorVerified && (
+                  <span className="text-blue-500" aria-label="verified">
+                    ✓
+                  </span>
+                )}
+                {item.authorFollowerCount != null && (
+                  <span className="text-muted-foreground">
+                    · {formatCompact(item.authorFollowerCount)} followers
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -1066,6 +1098,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <TranscriptButton
             itemId={item.id}
             hasDescriptProject={hasDescriptProject}
+            hasTranscript={data.transcript != null}
           />
           {item.mediaS3Key && (
             <a
@@ -1572,9 +1605,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       key={perf.id}
                       className="flex gap-3 p-3 rounded border border-border hover:bg-accent/50 transition"
                     >
-                      {perf.thumbnail && (
+                      {(perf.posterUrl || perf.thumbnail) && (
                         <img
-                          src={perf.thumbnail}
+                          src={perf.posterUrl || perf.thumbnail || ""}
                           alt={perf.title || "Content thumbnail"}
                           className="h-16 w-16 rounded object-cover flex-shrink-0"
                         />
@@ -1614,6 +1647,44 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             formatName={item.format}
           />
         )}
+
+      {(item.contentBody || item.description) && (
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-4 sm:px-5 py-3 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground">
+              Captured from upstream
+            </h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Pulled by the enrichment sweep
+              {item.enrichmentCompletedAt
+                ? ` ${formatRelative(item.enrichmentCompletedAt)}`
+                : ""}
+            </p>
+          </div>
+          <div className="px-4 sm:px-5 py-4 space-y-4">
+            {item.contentBody && (
+              <div>
+                <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+                  Caption / body
+                </p>
+                <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+                  {item.contentBody}
+                </p>
+              </div>
+            )}
+            {item.description && (
+              <div>
+                <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+                  Description
+                </p>
+                <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+                  {item.description}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
 
@@ -1673,10 +1744,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 >
                   <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                     <div className="flex items-center gap-3">
-                      {d.thumbnail && (
+                      {(d.posterUrl || d.thumbnail) && (
                         /* eslint-disable-next-line @next/next/no-img-element */
                         <img
-                          src={d.thumbnail}
+                          src={d.posterUrl || d.thumbnail || ""}
                           alt=""
                           className="w-20 h-12 rounded object-cover shrink-0"
                         />
@@ -1841,10 +1912,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   >
                     <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                       <div className="flex items-center gap-3">
-                        {r.thumbnail && (
+                        {(r.posterUrl || r.thumbnail) && (
                           /* eslint-disable-next-line @next/next/no-img-element */
                           <img
-                            src={r.thumbnail}
+                            src={r.posterUrl || r.thumbnail || ""}
                             alt=""
                             className="w-20 h-12 rounded object-cover shrink-0"
                           />
@@ -1985,10 +2056,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   >
                     <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                       <div className="flex items-center gap-3">
-                        {r.thumbnail && (
+                        {(r.posterUrl || r.thumbnail) && (
                           /* eslint-disable-next-line @next/next/no-img-element */
                           <img
-                            src={r.thumbnail}
+                            src={r.posterUrl || r.thumbnail || ""}
                             alt=""
                             className="w-20 h-12 rounded object-cover shrink-0"
                           />

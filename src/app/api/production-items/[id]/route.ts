@@ -4,6 +4,7 @@ import {
   contentDrafts,
   productionItems,
   formats,
+  transcripts,
   users,
 } from "@/lib/db/schema";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
@@ -13,6 +14,18 @@ import {
   type ViewPrediction,
 } from "@/lib/services/view-predictor";
 import { resolveSchemaForPlatforms } from "@/lib/platform-field-schemas";
+import { getPresignedGetUrl } from "@/lib/s3";
+
+const POSTER_URL_TTL_SECONDS = 60 * 60;
+
+async function presignOrNull(key: string | null): Promise<string | null> {
+  if (!key) return null;
+  try {
+    return await getPresignedGetUrl(key, POSTER_URL_TTL_SECONDS);
+  } catch {
+    return null;
+  }
+}
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -113,6 +126,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         id: productionItems.id,
         title: productionItems.title,
         thumbnail: productionItems.thumbnail,
+        posterS3Key: productionItems.posterS3Key,
         status: productionItems.status,
         platform: productionItems.platform,
         publishedDate: productionItems.publishedDate,
@@ -225,6 +239,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             views: productionItems.views,
             publishedDate: productionItems.publishedDate,
             thumbnail: productionItems.thumbnail,
+            posterS3Key: productionItems.posterS3Key,
           })
           .from(productionItems)
           .where(
@@ -271,6 +286,42 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       );
     }
 
+    // Transcript text for the item, if any has been captured (Descript or
+    // any of the SC enrichers). Surfaced inline so the detail page doesn't
+    // need a second round-trip.
+    const [itemTranscript] = await db
+      .select({
+        fullText: transcripts.fullText,
+        source: transcripts.source,
+        wordCount: transcripts.wordCount,
+        durationSec: transcripts.durationSec,
+      })
+      .from(transcripts)
+      .where(eq(transcripts.productionItemId, id))
+      .limit(1);
+
+    // Presign all S3-archived assets in parallel. Failures degrade to null
+    // (callers fall back to the legacy `thumbnail` column on the row).
+    const allS3Keys = [
+      item.posterS3Key,
+      item.mediaS3Key,
+      ...derivatives.map((d) => d.posterS3Key),
+      ...topPerformers.map((t) => t.posterS3Key),
+      ...reposts.map((r) => r.posterS3Key),
+      ...crossPosts.map((r) => r.posterS3Key),
+    ];
+    const presignedByKey = new Map<string, string>();
+    await Promise.all(
+      Array.from(new Set(allS3Keys.filter((k): k is string => !!k))).map(
+        async (key) => {
+          const url = await presignOrNull(key);
+          if (url) presignedByKey.set(key, url);
+        }
+      )
+    );
+    const urlFor = (key: string | null): string | null =>
+      key ? (presignedByKey.get(key) ?? null) : null;
+
     return NextResponse.json({
       item: {
         ...item,
@@ -279,7 +330,19 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         apvFirst24Hours: item.apvFirst24Hours
           ? parseFloat(item.apvFirst24Hours)
           : null,
+        posterUrl: urlFor(item.posterS3Key),
+        mediaUrl: urlFor(item.mediaS3Key),
       },
+      transcript: itemTranscript
+        ? {
+            fullText: itemTranscript.fullText,
+            source: itemTranscript.source,
+            wordCount: itemTranscript.wordCount,
+            durationSec: itemTranscript.durationSec
+              ? parseFloat(itemTranscript.durationSec)
+              : null,
+          }
+        : null,
       prediction,
       descendantViewsTotal,
       derivatives: derivatives.map((d) => ({
@@ -289,6 +352,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         apvFirst24Hours: d.apvFirst24Hours
           ? parseFloat(d.apvFirst24Hours)
           : null,
+        posterUrl: urlFor(d.posterS3Key),
       })),
       formatNames: brandFormats.map((f) => f.name),
       formats: brandFormats,
@@ -296,14 +360,19 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       pillar,
       producer,
       editor,
-      topPerformers,
+      topPerformers: topPerformers.map((t) => ({
+        ...t,
+        posterUrl: urlFor(t.posterS3Key),
+      })),
       reposts: reposts.map((r) => ({
         ...r,
         createdAt: r.createdAt.toISOString(),
+        posterUrl: urlFor(r.posterS3Key),
       })),
       crossPosts: crossPosts.map((r) => ({
         ...r,
         createdAt: r.createdAt.toISOString(),
+        posterUrl: urlFor(r.posterS3Key),
       })),
       repostedFrom,
       currentDraft: currentDraft ?? null,

@@ -48,6 +48,22 @@ export interface ProductionItem {
   mediaS3UploadedAt?: string | null;
   mediaSizeBytes?: number | null;
   mediaContentType?: string | null;
+  posterS3Key?: string | null;
+  /** Presigned GET URL for `posterS3Key`, regenerated server-side on each
+   *  detail fetch. Prefer this over `thumbnail` when rendering a cover. */
+  posterUrl?: string | null;
+  /** Presigned GET URL for the primary archived media (`mediaS3Key`). */
+  mediaUrl?: string | null;
+  description?: string | null;
+  contentBody?: string | null;
+  contentBodyFetchedAt?: string | null;
+  contentBodySource?: string | null;
+  contentMediaUrl?: string | null;
+  authorHandle?: string | null;
+  authorDisplayName?: string | null;
+  authorFollowerCount?: number | null;
+  authorVerified?: boolean | null;
+  enrichmentCompletedAt?: string | null;
   predictedViewsSnapshot?: number | null;
   predictedViewsSnapshotAt?: string | null;
   prediction?: ViewPrediction | null;

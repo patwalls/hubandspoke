@@ -4,6 +4,7 @@ import { checkSSThresholds } from "@/lib/services/threshold-monitor";
 import { runEvergreenScan } from "@/lib/services/evergreen-scan";
 import { runCrossPostScan } from "@/lib/services/cross-post-scan";
 import { syncAllMATG } from "@/lib/services/matg-sync";
+import { runEnrichmentSweep } from "@/lib/services/enrichment/orchestrator";
 
 type TenMinSlot = 0 | 10 | 20 | 30 | 40 | 50;
 
@@ -41,6 +42,14 @@ export const CRON_JOBS: CronJob[] = [
     name: "notion-sync",
     schedule: { every: "hour", atMinute: 30 },
     run: () => syncFromNotion(),
+  },
+  {
+    // One-shot durable-data capture: caption, poster image to S3, primary
+    // media to S3, transcript, author snapshot. Idempotent per-item via
+    // enrichment_completed_at — most items run exactly once.
+    name: "enrichment-sweep",
+    schedule: { every: "hour", atMinute: 20 },
+    run: () => runEnrichmentSweep(),
   },
   {
     name: "matg-sync",

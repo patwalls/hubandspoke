@@ -176,6 +176,13 @@
       "when": 1776815971625,
       "tag": "0024_uneven_the_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1776817533654,
+      "tag": "0025_late_firebird",
+      "breakpoints": true
     }
   ]
 }

@@ -41,6 +41,11 @@ interface TranscriptPayload {
 interface Props {
   itemId: string;
   hasDescriptProject: boolean;
+  /** Whether the item has any transcript persisted (e.g. one auto-archived by
+   *  the SC enrichment sweep for an IG reel / YouTube video / TikTok). When
+   *  true, the dialog opens even without a Descript project — though the
+   *  "Fetch transcript" action stays gated on Descript. */
+  hasTranscript?: boolean;
 }
 
 function fmtTs(sec: number): string {
@@ -50,7 +55,11 @@ function fmtTs(sec: number): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-export function TranscriptButton({ itemId, hasDescriptProject }: Props) {
+export function TranscriptButton({
+  itemId,
+  hasDescriptProject,
+  hasTranscript = false,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -116,7 +125,7 @@ export function TranscriptButton({ itemId, hasDescriptProject }: Props) {
     }
   }, [transcript]);
 
-  if (!hasDescriptProject) return null;
+  if (!hasDescriptProject && !hasTranscript) return null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -166,30 +175,32 @@ export function TranscriptButton({ itemId, hasDescriptProject }: Props) {
               </>
             )}
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleFetch}
-            disabled={fetchState.kind === "fetching"}
-            className="h-7 text-xs gap-1.5"
-            title={
-              transcript
-                ? "Re-publish the composition and re-fetch the transcript"
-                : "Publish the Descript composition and fetch its transcript"
-            }
-          >
-            <RefreshCwIcon
-              className={cn(
-                "size-3.5",
-                fetchState.kind === "fetching" && "animate-spin"
-              )}
-            />
-            {fetchState.kind === "fetching"
-              ? "Fetching…"
-              : transcript
-                ? "Refetch"
-                : "Fetch transcript"}
-          </Button>
+          {hasDescriptProject && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleFetch}
+              disabled={fetchState.kind === "fetching"}
+              className="h-7 text-xs gap-1.5"
+              title={
+                transcript
+                  ? "Re-publish the composition and re-fetch the transcript"
+                  : "Publish the Descript composition and fetch its transcript"
+              }
+            >
+              <RefreshCwIcon
+                className={cn(
+                  "size-3.5",
+                  fetchState.kind === "fetching" && "animate-spin"
+                )}
+              />
+              {fetchState.kind === "fetching"
+                ? "Fetching…"
+                : transcript
+                  ? "Refetch"
+                  : "Fetch transcript"}
+            </Button>
+          )}
           {transcript?.descriptShareUrl && (
             <a
               href={transcript.descriptShareUrl}
@@ -236,8 +247,9 @@ export function TranscriptButton({ itemId, hasDescriptProject }: Props) {
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">
-              No transcript yet. Click Fetch transcript to publish the Descript
-              composition and pull its WEBVTT subtitles.
+              {hasDescriptProject
+                ? "No transcript yet. Click Fetch transcript to publish the Descript composition and pull its WEBVTT subtitles."
+                : "No transcript yet. The hourly enrichment sweep will fetch one automatically for supported platforms (IG reel, YouTube, TikTok, X video)."}
             </p>
           )}
         </div>

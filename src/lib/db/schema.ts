@@ -96,6 +96,31 @@ export const productionItems = pgTable(
     }),
     mediaSizeBytes: bigint("media_size_bytes", { mode: "number" }),
     mediaContentType: text("media_content_type"),
+    // Durable cover image for video platforms (IG reel, YT, TikTok) and a
+    // backup copy of the cover for image posts. Distinct from `thumbnail`,
+    // which holds an upstream CDN URL that may expire. Lives in the same
+    // bucket as `mediaS3Key` (see `mediaS3Bucket`).
+    posterS3Key: text("poster_s3_key"),
+    // Long-form description (YouTube video description, LinkedIn article body
+    // intro). Distinct from `contentBody`, which is the short-form caption /
+    // post text — both can coexist on a YT video that has a caption-style
+    // title and a long description.
+    description: text("description"),
+    // Owner/author snapshot at the moment of last enrichment. Author follower
+    // counts at publish time are gold for trend analysis later — they drift
+    // over time on the platform side.
+    authorHandle: text("author_handle"),
+    authorDisplayName: text("author_display_name"),
+    authorFollowerCount: integer("author_follower_count"),
+    authorVerified: boolean("author_verified"),
+    // One-shot enrichment state. NULL → eligible for the next enrichment
+    // sweep; a timestamp → fully enriched, skip. Per-field gates inside each
+    // enricher decide which SC calls to actually make on a partial re-run.
+    enrichmentCompletedAt: timestamp("enrichment_completed_at", {
+      withTimezone: true,
+    }),
+    enrichmentAttempts: integer("enrichment_attempts").default(0).notNull(),
+    enrichmentError: text("enrichment_error"),
     // Raw Notion page ID of the pillar (captured directly from the "Pillar
     // Content" relation during sync). Kept alongside the resolved FK so we can
     // still reconcile if a pillar is re-synced out of order.
@@ -154,6 +179,9 @@ export const productionItems = pgTable(
     index("idx_production_items_status").on(table.status),
     index("idx_production_items_brand").on(table.brand),
     index("idx_production_items_last_perf_sync").on(table.lastPerformanceSyncAt),
+    index("idx_production_items_enrichment_pending").on(
+      table.enrichmentCompletedAt
+    ),
     index("idx_production_items_pillar_notion").on(table.pillarContentNotionId),
     index("idx_production_items_pillar_item").on(table.pillarContentItemId),
     index("idx_production_items_reposted_from").on(table.repostedFromItemId),
