@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, Share2Icon, Trash2Icon, TrendingUpIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
@@ -46,6 +46,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
 import { TranscriptButton } from "./transcript-dialog";
@@ -293,8 +294,31 @@ const PROPERTY_INPUT_CLASS =
 const PROPERTY_TRIGGER_CLASS =
   "border-0 bg-transparent shadow-none h-8 px-2 rounded-sm focus:ring-1 focus:ring-ring hover:bg-muted/50 transition-colors";
 
+const DETAIL_TABS = [
+  { value: "details", label: "Details" },
+  { value: "preview", label: "Preview" },
+] as const;
+type DetailTab = (typeof DETAIL_TABS)[number]["value"];
+const DETAIL_TAB_VALUES = DETAIL_TABS.map((t) => t.value) as readonly DetailTab[];
+
 export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab: DetailTab = DETAIL_TAB_VALUES.includes(tabParam as DetailTab)
+    ? (tabParam as DetailTab)
+    : "details";
+  const setActiveTab = useCallback(
+    (next: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "details") params.delete("tab");
+      else params.set("tab", next);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<DetailResponse | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -1609,7 +1633,24 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       </div>
       )}
 
-      {/* Post details — edit form (above derivatives so editing is one scroll) */}
+      {/* Details + Preview tabs */}
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DetailTab)}>
+        <TabsList
+          variant="line"
+          className="h-9 w-full justify-start gap-1 rounded-none border-b border-border p-0"
+        >
+          {DETAIL_TABS.map((tab) => (
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              className="flex-initial px-3"
+            >
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value="details" className="pt-4">
       <div
         className={
           isPrePublish
@@ -2073,15 +2114,19 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       )}
       </div>
+        </TabsContent>
 
-      <ContentPreview
-        item={item}
-        media={data.media ?? []}
-        draftId={draft?.id ?? null}
-        liveContent={liveContent}
-        onLocalEdit={onLocalEdit}
-        onCommit={onCommit}
-      />
+        <TabsContent value="preview" className="pt-4">
+          <ContentPreview
+            item={item}
+            media={data.media ?? []}
+            draftId={draft?.id ?? null}
+            liveContent={liveContent}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+          />
+        </TabsContent>
+      </Tabs>
 
       {item.format &&
         item.status !== "Published" &&

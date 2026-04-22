@@ -24,10 +24,21 @@ async function main() {
     crontab: CRONTAB,
   });
 
+  let shuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log(`[worker] ${signal} received — shutting down gracefully`);
-    await runner.stop();
-    await pgPool.end();
+    try {
+      await runner.stop();
+    } catch (err) {
+      // runner.stop() throws if the runner already stopped itself (e.g. when
+      // graphile-worker intercepted SIGTERM first). Safe to ignore.
+      console.log(
+        `[worker] runner.stop() noop: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    await pgPool.end().catch(() => {});
     process.exit(0);
   };
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -62,6 +63,7 @@ export function ClipTriageDialog({
   onDone,
   brand,
 }: Props) {
+  const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [killOpen, setKillOpen] = useState(false);
@@ -150,6 +152,36 @@ export function ClipTriageDialog({
     },
     [idea, onDone, onOpenChange, brand],
   );
+
+  const handleCreateInDescript = useCallback(async () => {
+    if (!idea) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/clip-ideas/${idea.id}/create-in-descript`,
+        { method: "POST" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json?.error || `Failed (${res.status})`);
+        return;
+      }
+      const newId: string | undefined = json?.newProductionItemId;
+      const brandSlug: string = json?.sourceBrand ?? brand;
+      toast.success("Cutting clip in Descript…", {
+        duration: 6000,
+        description: "The new composition will appear on this item shortly.",
+      });
+      onDone();
+      onOpenChange(false);
+      if (newId) {
+        router.push(`/${brandSlug}/content/${newId}`);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [idea, onDone, onOpenChange, brand, router]);
 
   if (!idea) return null;
   const duration = Math.max(0, Math.round(idea.endSec - idea.startSec));
@@ -258,14 +290,25 @@ export function ClipTriageDialog({
                   Kill idea
                 </button>
               )}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={saving}
-              >
-                Close
-              </Button>
+              <div className="flex items-center gap-2">
+                {!isDecided && (
+                  <Button
+                    type="button"
+                    onClick={handleCreateInDescript}
+                    disabled={saving}
+                  >
+                    Create in Descript
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  disabled={saving}
+                >
+                  Close
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>
