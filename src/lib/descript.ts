@@ -195,6 +195,18 @@ export function extractShareSlug(shareUrl: string | undefined): string | null {
   return m ? m[1] : null;
 }
 
+// Descript's web editor routes a composition as
+// https://web.descript.com/<projectId>/<5-char-prefix-of-compositionId>. The
+// suffix is the first 5 hex chars of the composition UUID (hyphens stripped).
+// Verified against live URLs: `f3854a2c-…` → `/f3854`, `78cba…` → `/78cba`.
+export function buildDescriptCompositionUrl(
+  projectId: string,
+  compositionId: string,
+): string {
+  const slug = compositionId.replace(/-/g, "").slice(0, 5);
+  return `https://web.descript.com/${projectId}/${slug}`;
+}
+
 async function postImportProjectMedia(
   body: Record<string, unknown>
 ): Promise<ImportProjectResponse> {

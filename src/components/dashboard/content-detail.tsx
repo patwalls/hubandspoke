@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, Share2Icon, Trash2Icon, TrendingUpIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
+import { buildDescriptCompositionUrl } from "@/lib/descript";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -363,6 +364,54 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     const t = setTimeout(() => setSaveState({ kind: "idle" }), 1500);
     return () => clearTimeout(t);
   }, [saveState]);
+
+  // Poll for descriptCompositionId while a clip-sourced item is still
+  // waiting on the Descript agent job (the worker at
+  // src/jobs/tasks/descript-clip-resolve.ts fills it in ~30–60s after
+  // creation). Once populated, we can deep-link the Descript button to
+  // the new composition instead of the project root. Bail out after 5
+  // minutes so we don't poll forever on failed jobs.
+  useEffect(() => {
+    const item = data?.item;
+    if (!item) return;
+    const pending =
+      item.sourceType === "clip" &&
+      !!item.descriptProjectId &&
+      !item.descriptCompositionId;
+    if (!pending) return;
+
+    let cancelled = false;
+    const deadline = Date.now() + 5 * 60 * 1000;
+    const tick = async () => {
+      if (cancelled || Date.now() > deadline) {
+        clearInterval(interval);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/production-items/${item.id}`, {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as DetailResponse;
+        if (json.item.descriptCompositionId) {
+          setData((prev) => (prev ? { ...prev, item: json.item } : prev));
+          clearInterval(interval);
+        }
+      } catch {
+        // Silent: next tick will retry.
+      }
+    };
+    const interval = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [
+    data?.item?.id,
+    data?.item?.sourceType,
+    data?.item?.descriptProjectId,
+    data?.item?.descriptCompositionId,
+  ]);
 
   // Auto-clear per-field "Saved" pills 1.5s after each successful save.
   useEffect(() => {
@@ -1403,17 +1452,60 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               onSynced={load}
             />
           )}
-          {item.descriptProjectUrl && (
-            <a
-              href={item.descriptProjectUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-              title="Open the Descript project"
-            >
-              <FilmIcon className="size-3.5" /> Descript
-            </a>
-          )}
+          {(() => {
+            const isClipSource = item.sourceType === "clip";
+            const clipPending =
+              isClipSource &&
+              !!item.descriptProjectId &&
+              !item.descriptCompositionId;
+            if (clipPending) {
+              return (
+                <button
+                  type="button"
+                  disabled
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                  title="Descript is still cutting the new composition — the link will be ready shortly."
+                >
+                  <RefreshCwIcon className="size-3.5 animate-spin" /> Clip
+                  processing…
+                </button>
+              );
+            }
+            if (
+              isClipSource &&
+              item.descriptProjectId &&
+              item.descriptCompositionId
+            ) {
+              return (
+                <a
+                  href={buildDescriptCompositionUrl(
+                    item.descriptProjectId,
+                    item.descriptCompositionId,
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                  title="Open the new Descript composition"
+                >
+                  <FilmIcon className="size-3.5" /> Descript
+                </a>
+              );
+            }
+            if (item.descriptProjectUrl) {
+              return (
+                <a
+                  href={item.descriptProjectUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                  title="Open the Descript project"
+                >
+                  <FilmIcon className="size-3.5" /> Descript
+                </a>
+              );
+            }
+            return null;
+          })()}
           <TranscriptButton
             itemId={item.id}
             hasDescriptProject={hasDescriptProject}
