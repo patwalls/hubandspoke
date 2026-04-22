@@ -1758,27 +1758,27 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DetailTab)}>
         <TabsList
           variant="line"
-          className="h-11 w-full justify-start gap-0 rounded-none border-b border-border bg-transparent p-0"
+          className="h-10 w-full justify-start gap-1 rounded-none border-b border-border bg-transparent p-0"
         >
           {availableTabs.map((tab) => (
             <TabsTrigger
               key={tab.value}
               value={tab.value}
               className={cn(
-                "group/tab flex-initial h-11 px-4 rounded-none text-sm font-medium",
-                "text-muted-foreground hover:text-foreground hover:bg-accent/40",
+                "group/tab relative flex-initial h-10 px-3.5 rounded-none text-sm font-medium",
+                "text-muted-foreground hover:text-foreground",
                 "data-active:text-foreground data-active:bg-transparent",
-                "after:!bottom-[-1px] after:!h-[2px] after:!bg-primary",
+                "after:!inset-x-1 after:!bottom-[-1px] after:!h-[2px] after:!rounded-full after:!bg-foreground",
               )}
             >
               <span>{tab.label}</span>
               {tab.count != null && tab.count > 0 && (
                 <span
                   className={cn(
-                    "ml-1 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5",
+                    "ml-1.5 inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-full px-1.5",
                     "text-[10px] font-semibold tabular-nums",
                     "bg-muted text-muted-foreground",
-                    "group-data-active/tab:bg-primary/10 group-data-active/tab:text-primary",
+                    "group-data-active/tab:bg-foreground group-data-active/tab:text-background",
                   )}
                 >
                   {tab.count}
@@ -1788,7 +1788,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           ))}
         </TabsList>
 
-        <TabsContent value="details" className="pt-4">
+        <TabsContent value="details" className="pt-5 space-y-6">
       <div
         className={
           isPrePublish
@@ -2252,6 +2252,25 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       )}
       </div>
+
+      {item.format &&
+        item.status !== "Published" &&
+        item.status !== "Killed" && (
+          <ContentDraftPanel
+            itemId={item.id}
+            hasFieldSchema={data.hasFieldSchema}
+            formatName={item.format}
+            draft={draft}
+            liveContent={liveContent}
+            fieldSaves={fieldSaves}
+            fieldErrors={fieldErrors}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+            onDraftReplaced={onDraftReplaced}
+          />
+        )}
+
+      <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
         </TabsContent>
 
         <TabsContent value="preview" className="pt-4">
@@ -2907,25 +2926,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       )}
 
       </Tabs>
-
-      {item.format &&
-        item.status !== "Published" &&
-        item.status !== "Killed" && (
-          <ContentDraftPanel
-            itemId={item.id}
-            hasFieldSchema={data.hasFieldSchema}
-            formatName={item.format}
-            draft={draft}
-            liveContent={liveContent}
-            fieldSaves={fieldSaves}
-            fieldErrors={fieldErrors}
-            onLocalEdit={onLocalEdit}
-            onCommit={onCommit}
-            onDraftReplaced={onDraftReplaced}
-          />
-        )}
-
-      <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
 
       {/* Add to Descript modal */}
       <Dialog open={descriptModalOpen} onOpenChange={(o) => { if (!o) closeDescriptModal(); }}>

@@ -80,7 +80,7 @@ export function ContentPreview({
   const data = resolvePreviewData(platform, item, media, liveContent);
   const editable = draftId !== null;
 
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   return (
     <div className="rounded-lg border border-border bg-card">

@@ -33,6 +33,19 @@ interface ClipIdeaSummary {
   acceptedProductionItemId?: string | null;
 }
 
+interface PreviewSegment {
+  startSec: number;
+  endSec: number;
+  text: string;
+  speaker: string | null;
+}
+
+interface Preview {
+  videoUrl: string | null;
+  videoContentType: string | null;
+  segments: PreviewSegment[];
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
