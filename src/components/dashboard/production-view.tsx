@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { statusClass } from "@/lib/badge-colors";
 import { ProductionPipelineTable } from "./production-pipeline-table";
+import { SelectPill } from "./filter-pills";
 import type { ProductionItem } from "@/types";
 
 interface ProductionViewProps {
@@ -21,10 +22,20 @@ const PIPELINE_STATUSES = [
   "Assigned",
 ] as const;
 
+const SOURCES = [
+  { value: "all", label: "All sources" },
+  { value: "original", label: "Original" },
+  { value: "repost", label: "Repost" },
+  { value: "cross_post", label: "Cross-post" },
+];
+
 export function ProductionView({ brand }: ProductionViewProps) {
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [selectedPlatform, setSelectedPlatform] = useState("all");
+  const [selectedFormat, setSelectedFormat] = useState("all");
+  const [selectedSource, setSelectedSource] = useState("all");
 
   const fetchPipeline = useCallback(async () => {
     setLoading(true);
@@ -52,6 +63,39 @@ export function ProductionView({ brand }: ProductionViewProps) {
   }, [fetchPipeline]);
 
   const hsItems = items.filter((item) => !isNotionAuthoritative(item.platform));
+  const pipelineCandidates = hsItems.filter(
+    (item) =>
+      item.status &&
+      (PIPELINE_STATUSES as readonly string[]).includes(item.status)
+  );
+
+  const platformOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of pipelineCandidates) {
+      for (const p of item.platform ?? []) {
+        if (p) set.add(p);
+      }
+    }
+    return [
+      { value: "all", label: "All channels" },
+      ...Array.from(set)
+        .sort((a, b) => a.localeCompare(b))
+        .map((p) => ({ value: p, label: p })),
+    ];
+  }, [pipelineCandidates]);
+
+  const formatOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of pipelineCandidates) {
+      if (item.format) set.add(item.format);
+    }
+    return [
+      { value: "all", label: "All formats" },
+      ...Array.from(set)
+        .sort((a, b) => a.localeCompare(b))
+        .map((f) => ({ value: f, label: f })),
+    ];
+  }, [pipelineCandidates]);
 
   const query = search.trim().toLowerCase();
   const matchesQuery = (item: ProductionItem): boolean => {
@@ -68,13 +112,19 @@ export function ProductionView({ brand }: ProductionViewProps) {
     );
   };
 
-  const pipelineItems = hsItems
-    .filter(matchesQuery)
-    .filter(
-      (item) =>
-        item.status &&
-        (PIPELINE_STATUSES as readonly string[]).includes(item.status)
-    );
+  const pipelineItems = pipelineCandidates.filter((item) => {
+    if (selectedPlatform !== "all") {
+      if (!item.platform?.includes(selectedPlatform)) return false;
+    }
+    if (selectedFormat !== "all") {
+      if (item.format !== selectedFormat) return false;
+    }
+    if (selectedSource !== "all") {
+      const source = item.sourceType ?? "original";
+      if (source !== selectedSource) return false;
+    }
+    return matchesQuery(item);
+  });
 
   const byStatus = new Map<string, ProductionItem[]>();
   for (const status of PIPELINE_STATUSES) byStatus.set(status, []);
@@ -100,6 +150,27 @@ export function ProductionView({ brand }: ProductionViewProps) {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search title, format, channel, producer…"
           className="h-8 w-48 sm:w-72 text-xs"
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <SelectPill
+          label="Channel"
+          value={selectedPlatform}
+          options={platformOptions}
+          onChange={setSelectedPlatform}
+        />
+        <SelectPill
+          label="Format"
+          value={selectedFormat}
+          options={formatOptions}
+          onChange={setSelectedFormat}
+        />
+        <SelectPill
+          label="Source"
+          value={selectedSource}
+          options={SOURCES}
+          onChange={setSelectedSource}
         />
       </div>
 
@@ -156,8 +227,11 @@ export function ProductionView({ brand }: ProductionViewProps) {
           {pipelineItems.length === 0 && (
             <div className="text-center py-20">
               <p className="text-muted-foreground text-sm">
-                {query
-                  ? `No items match “${search}”.`
+                {query ||
+                selectedPlatform !== "all" ||
+                selectedFormat !== "all" ||
+                selectedSource !== "all"
+                  ? "No items match the current filters."
                   : "No items in the pipeline."}
               </p>
             </div>

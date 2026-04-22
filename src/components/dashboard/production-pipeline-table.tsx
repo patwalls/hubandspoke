@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { platformClass } from "@/lib/badge-colors";
@@ -9,6 +10,15 @@ interface ProductionPipelineTableProps {
   items: ProductionItem[];
   brand: string;
 }
+
+type SortKey =
+  | "producer"
+  | "editor"
+  | "channel"
+  | "content"
+  | "format"
+  | "views";
+type SortDir = "asc" | "desc";
 
 function formatCompact(n: number | null | undefined): string {
   if (n == null) return "—";
@@ -99,10 +109,116 @@ function PersonAvatar({
   );
 }
 
+function SortableHeader({
+  label,
+  sortKey,
+  activeKey,
+  direction,
+  onSort,
+  align = "left",
+  className,
+  title,
+}: {
+  label: string;
+  sortKey: SortKey;
+  activeKey: SortKey | null;
+  direction: SortDir;
+  onSort: (key: SortKey) => void;
+  align?: "left" | "right";
+  className?: string;
+  title?: string;
+}) {
+  const active = activeKey === sortKey;
+  const arrow = !active ? "" : direction === "asc" ? "↑" : "↓";
+  return (
+    <th
+      className={cn(
+        "px-3 py-2.5 font-mono uppercase tracking-wider text-[10px] text-muted-foreground",
+        align === "right" ? "text-right" : "text-left",
+        className
+      )}
+      title={title}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer",
+          align === "right" && "justify-end",
+          active && "text-foreground"
+        )}
+      >
+        <span>{label}</span>
+        <span
+          className={cn(
+            "inline-block w-2 text-[10px]",
+            !active && "opacity-0"
+          )}
+          aria-hidden
+        >
+          {arrow}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 export function ProductionPipelineTable({
   items,
   brand,
 }: ProductionPipelineTableProps) {
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "views" ? "desc" : "asc");
+    }
+  };
+
+  const sortedItems = useMemo(() => {
+    if (!sortKey) return items;
+    const dir = sortDir === "asc" ? 1 : -1;
+    const keyFn = (item: ProductionItem): string | number | null => {
+      switch (sortKey) {
+        case "producer":
+          return (
+            item.producerName?.toLowerCase() ??
+            item.producerEmail?.toLowerCase() ??
+            null
+          );
+        case "editor":
+          return (
+            item.editorName?.toLowerCase() ??
+            item.editorEmail?.toLowerCase() ??
+            null
+          );
+        case "channel":
+          return item.platform?.[0]?.toLowerCase() ?? null;
+        case "content":
+          return item.title?.toLowerCase() ?? null;
+        case "format":
+          return item.format?.toLowerCase() ?? null;
+        case "views":
+          return item.prediction?.prediction ?? null;
+      }
+    };
+    return [...items].sort((a, b) => {
+      const av = keyFn(a);
+      const bv = keyFn(b);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") {
+        return (av - bv) * dir;
+      }
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+  }, [items, sortKey, sortDir]);
+
   if (items.length === 0) {
     return (
       <div className="px-4 py-6 text-center text-muted-foreground text-xs border border-border rounded-lg bg-card">
@@ -125,31 +241,57 @@ export function ProductionPipelineTable({
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-accent/50">
-              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                Producer
-              </th>
-              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                Editor
-              </th>
-              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                Channel
-              </th>
-              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                Content
-              </th>
-              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                Format
-              </th>
-              <th
-                className="px-3 py-2.5 text-right font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap"
+              <SortableHeader
+                label="Producer"
+                sortKey="producer"
+                activeKey={sortKey}
+                direction={sortDir}
+                onSort={toggleSort}
+                className="whitespace-nowrap"
+              />
+              <SortableHeader
+                label="Editor"
+                sortKey="editor"
+                activeKey={sortKey}
+                direction={sortDir}
+                onSort={toggleSort}
+                className="whitespace-nowrap"
+              />
+              <SortableHeader
+                label="Channel"
+                sortKey="channel"
+                activeKey={sortKey}
+                direction={sortDir}
+                onSort={toggleSort}
+              />
+              <SortableHeader
+                label="Content"
+                sortKey="content"
+                activeKey={sortKey}
+                direction={sortDir}
+                onSort={toggleSort}
+              />
+              <SortableHeader
+                label="Format"
+                sortKey="format"
+                activeKey={sortKey}
+                direction={sortDir}
+                onSort={toggleSort}
+              />
+              <SortableHeader
+                label="Est. Views"
+                sortKey="views"
+                activeKey={sortKey}
+                direction={sortDir}
+                onSort={toggleSort}
+                align="right"
+                className="whitespace-nowrap"
                 title="Predicted views — based on past performance of similar content"
-              >
-                Est. Views
-              </th>
+              />
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => {
+            {sortedItems.map((item) => {
               const producer = personDisplay(item.producerName, item.producerEmail);
               const editor = personDisplay(item.editorName, item.editorEmail);
               const producerColor = avatarColor(producer.seed || item.id);
