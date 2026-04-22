@@ -537,7 +537,10 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                         <img
                           src={cover}
                           alt=""
-                          className="w-20 h-12 rounded object-cover shrink-0"
+                          className="h-12 w-auto rounded shrink-0"
+                          onError={(e) => {
+                            e.currentTarget.style.display = "none";
+                          }}
                         />
                       ) : null;
                     })()}
