@@ -44,7 +44,13 @@ import { coverImageUrl } from "@/lib/cover-image";
 import { cn } from "@/lib/utils";
 import { platformClass, statusClass } from "@/lib/badge-colors";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
-import { ContentDraftPanel, type DraftRow } from "./content-draft";
+import {
+  ContentDraftPanel,
+  type DraftRow,
+  type FieldSaveState,
+} from "./content-draft";
+import { ContentPreview } from "./preview/content-preview";
+import type { ContentDraftContent } from "@/lib/db/schema";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
@@ -290,6 +296,18 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   >({ kind: "idle" });
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
 
+  // Shared draft state — single source of truth for both ContentDraftPanel
+  // (form view) and ContentPreview (native-mock view). Edits in either
+  // surface flow through `onLocalEdit` / `onCommit`.
+  const [draft, setDraft] = useState<DraftRow | null>(null);
+  const [liveContent, setLiveContent] = useState<ContentDraftContent | null>(
+    null,
+  );
+  const [fieldSaves, setFieldSaves] = useState<Record<string, FieldSaveState>>(
+    {},
+  );
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
   // Auto-clear the "Saved" pill so it doesn't stay pinned after a single edit.
   // Errors persist until the next save attempt so the user can read them.
   useEffect(() => {
@@ -297,6 +315,22 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     const t = setTimeout(() => setSaveState({ kind: "idle" }), 1500);
     return () => clearTimeout(t);
   }, [saveState]);
+
+  // Auto-clear per-field "Saved" pills 1.5s after each successful save.
+  useEffect(() => {
+    const savedKeys = Object.entries(fieldSaves)
+      .filter(([, v]) => v === "saved")
+      .map(([k]) => k);
+    if (savedKeys.length === 0) return;
+    const t = setTimeout(() => {
+      setFieldSaves((prev) => {
+        const next = { ...prev };
+        for (const key of savedKeys) next[key] = "idle";
+        return next;
+      });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [fieldSaves]);
 
   // Per-format repurpose state, keyed by format id
   type RepurposeKind = "descript_clip" | "manual_task";
@@ -688,6 +722,82 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Sync the shared draft state with whatever the server returned on the
+  // most recent load(). Only re-seeds when the server draft id changes or
+  // the draft goes from absent to present (or vice versa) — mid-edit loads
+  // shouldn't stomp the user's typing.
+  const loadedDraft = data?.currentDraft ?? null;
+  useEffect(() => {
+    setDraft(loadedDraft);
+    setLiveContent(loadedDraft?.content ?? null);
+    setFieldSaves({});
+    setFieldErrors({});
+  }, [loadedDraft?.id, loadedDraft]);
+
+  const onLocalEdit = useCallback(
+    (fieldKey: string, value: string | string[]) => {
+      setLiveContent((prev) => ({ ...(prev ?? {}), [fieldKey]: value }));
+    },
+    [],
+  );
+
+  // Commit a single field to the server. Uses the current `liveContent`
+  // snapshot — blur-save semantics. Returns quickly if the value matches the
+  // last server-known value for that field (avoids a PUT on every blur).
+  const onCommit = useCallback(
+    async (fieldKey: string) => {
+      if (!draft) return;
+      const nextValue = liveContent?.[fieldKey];
+      const prevValue = draft.content[fieldKey];
+      if (
+        (typeof nextValue === "string" && prevValue === nextValue) ||
+        (nextValue == null && prevValue == null)
+      ) {
+        return;
+      }
+      setFieldSaves((prev) => ({ ...prev, [fieldKey]: "saving" }));
+      setFieldErrors((prev) => {
+        if (!(fieldKey in prev)) return prev;
+        const next = { ...prev };
+        delete next[fieldKey];
+        return next;
+      });
+      try {
+        const res = await fetch(
+          `/api/production-items/${contentId}/drafts/${draft.id}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ patch: { [fieldKey]: nextValue } }),
+          },
+        );
+        const json = await res.json();
+        if (!res.ok) {
+          throw new Error(json.error || `HTTP ${res.status}`);
+        }
+        setDraft(json.draft as DraftRow);
+        setFieldSaves((prev) => ({ ...prev, [fieldKey]: "saved" }));
+      } catch (err) {
+        setFieldSaves((prev) => ({ ...prev, [fieldKey]: "error" }));
+        setFieldErrors((prev) => ({
+          ...prev,
+          [fieldKey]: err instanceof Error ? err.message : "Save failed",
+        }));
+        toast.error(
+          err instanceof Error ? err.message : "Draft save failed",
+        );
+      }
+    },
+    [contentId, draft, liveContent],
+  );
+
+  const onDraftReplaced = useCallback((newDraft: DraftRow) => {
+    setDraft(newDraft);
+    setLiveContent(newDraft.content);
+    setFieldSaves({});
+    setFieldErrors({});
+  }, []);
 
   // Every field auto-persists through here. The PUT route accepts partial
   // bodies, so we send only what changed. Server response is merged back into
@@ -1813,14 +1923,29 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       )}
       </div>
 
+      <ContentPreview
+        item={item}
+        media={data.media ?? []}
+        draftId={draft?.id ?? null}
+        liveContent={liveContent}
+        onLocalEdit={onLocalEdit}
+        onCommit={onCommit}
+      />
+
       {item.format &&
         item.status !== "Published" &&
         item.status !== "Killed" && (
           <ContentDraftPanel
             itemId={item.id}
             hasFieldSchema={data.hasFieldSchema}
-            initialDraft={data.currentDraft}
             formatName={item.format}
+            draft={draft}
+            liveContent={liveContent}
+            fieldSaves={fieldSaves}
+            fieldErrors={fieldErrors}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+            onDraftReplaced={onDraftReplaced}
           />
         )}
 

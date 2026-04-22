@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { SparklesIcon } from "lucide-react";
 import type { ContentDraftContent, FormatFieldSchema } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
@@ -22,11 +22,19 @@ export interface DraftRow {
   updatedAt: string;
 }
 
+export type FieldSaveState = "idle" | "saving" | "saved" | "error";
+
 interface ContentDraftPanelProps {
   itemId: string;
   hasFieldSchema: boolean;
-  initialDraft: DraftRow | null;
   formatName: string | null;
+  draft: DraftRow | null;
+  liveContent: ContentDraftContent | null;
+  fieldSaves: Record<string, FieldSaveState>;
+  fieldErrors: Record<string, string>;
+  onLocalEdit: (fieldKey: string, value: string | string[]) => void;
+  onCommit: (fieldKey: string) => void;
+  onDraftReplaced: (draft: DraftRow) => void;
 }
 
 type FieldType = FormatFieldSchema["fields"][number]["type"];
@@ -59,41 +67,17 @@ function UnsupportedFieldPlaceholder({
 export function ContentDraftPanel({
   itemId,
   hasFieldSchema,
-  initialDraft,
   formatName,
+  draft,
+  liveContent,
+  fieldSaves,
+  fieldErrors,
+  onLocalEdit,
+  onCommit,
+  onDraftReplaced,
 }: ContentDraftPanelProps) {
-  const [draft, setDraft] = useState<DraftRow | null>(initialDraft);
   const [generating, setGenerating] = useState(false);
-  const [fieldSaves, setFieldSaves] = useState<
-    Record<string, "idle" | "saving" | "saved" | "error">
-  >({});
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const [localValues, setLocalValues] = useState<
-    Record<string, string | string[] | unknown>
-  >({});
-
-  // Keep local input state in sync with the server draft when it changes (e.g.
-  // after a regeneration). Only seed text/tag values — slides aren't edited in
-  // Stage 1.
-  useEffect(() => {
-    if (!draft) {
-      setLocalValues({});
-      return;
-    }
-    const next: Record<string, string | string[]> = {};
-    for (const field of draft.fieldSchemaSnapshot.fields) {
-      const value = draft.content[field.key];
-      if (field.type === "text" || field.type === "longtext") {
-        next[field.key] = typeof value === "string" ? value : "";
-      } else if (field.type === "tags") {
-        next[field.key] = Array.isArray(value)
-          ? (value as string[]).filter((v) => typeof v === "string")
-          : [];
-      }
-    }
-    setLocalValues(next);
-  }, [draft]);
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true);
@@ -107,73 +91,27 @@ export function ContentDraftPanel({
       if (!res.ok) {
         throw new Error(json.error || `HTTP ${res.status}`);
       }
-      setDraft(json.draft as DraftRow);
+      onDraftReplaced(json.draft as DraftRow);
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : "Generation failed");
     } finally {
       setGenerating(false);
     }
-  }, [itemId]);
-
-  const handleFieldBlur = useCallback(
-    async (fieldKey: string, nextValue: string | string[]) => {
-      if (!draft) return;
-      const previousValue = draft.content[fieldKey];
-      // Skip the PUT if nothing actually changed — avoids a network round-trip
-      // on every blur even when the user didn't edit anything.
-      if (typeof nextValue === "string" && previousValue === nextValue) return;
-
-      setFieldSaves((prev) => ({ ...prev, [fieldKey]: "saving" }));
-      setFieldErrors((prev) => {
-        if (!(fieldKey in prev)) return prev;
-        const next = { ...prev };
-        delete next[fieldKey];
-        return next;
-      });
-      try {
-        const res = await fetch(
-          `/api/production-items/${itemId}/drafts/${draft.id}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ patch: { [fieldKey]: nextValue } }),
-          },
-        );
-        const json = await res.json();
-        if (!res.ok) {
-          throw new Error(json.error || `HTTP ${res.status}`);
-        }
-        setDraft(json.draft as DraftRow);
-        setFieldSaves((prev) => ({ ...prev, [fieldKey]: "saved" }));
-      } catch (err) {
-        setFieldSaves((prev) => ({ ...prev, [fieldKey]: "error" }));
-        setFieldErrors((prev) => ({
-          ...prev,
-          [fieldKey]: err instanceof Error ? err.message : "Save failed",
-        }));
-      }
-    },
-    [draft, itemId],
-  );
-
-  // Auto-clear "Saved" pills 1.5s after each successful save, matching the
-  // sibling pattern in content-detail.tsx:229.
-  useEffect(() => {
-    const savedKeys = Object.entries(fieldSaves)
-      .filter(([, v]) => v === "saved")
-      .map(([k]) => k);
-    if (savedKeys.length === 0) return;
-    const t = setTimeout(() => {
-      setFieldSaves((prev) => {
-        const next = { ...prev };
-        for (const key of savedKeys) next[key] = "idle";
-        return next;
-      });
-    }, 1500);
-    return () => clearTimeout(t);
-  }, [fieldSaves]);
+  }, [itemId, onDraftReplaced]);
 
   const fields = draft?.fieldSchemaSnapshot.fields ?? [];
+
+  function readString(fieldKey: string): string {
+    const v = liveContent?.[fieldKey];
+    return typeof v === "string" ? v : "";
+  }
+
+  function readTags(fieldKey: string): string[] {
+    const v = liveContent?.[fieldKey];
+    return Array.isArray(v)
+      ? (v as unknown[]).filter((x): x is string => typeof x === "string")
+      : [];
+  }
 
   function renderField(field: (typeof fields)[number]) {
     const saveState = fieldSaves[field.key] ?? "idle";
@@ -187,15 +125,15 @@ export function ContentDraftPanel({
           )}
         </label>
         <div className="flex items-center gap-2 text-[11px]">
-          {field.maxLength && typeof localValues[field.key] === "string" && (
+          {field.maxLength && (
             <span
               className={
-                (localValues[field.key] as string).length > field.maxLength
+                readString(field.key).length > field.maxLength
                   ? "text-destructive tabular-nums"
                   : "text-muted-foreground tabular-nums"
               }
             >
-              {(localValues[field.key] as string).length}/{field.maxLength}
+              {readString(field.key).length}/{field.maxLength}
             </span>
           )}
           {saveState === "saving" && (
@@ -215,32 +153,28 @@ export function ContentDraftPanel({
 
     switch (countBy(field.type)) {
       case "text": {
-        const value = (localValues[field.key] as string | undefined) ?? "";
+        const value = readString(field.key);
         return (
           <div key={field.key} className="flex flex-col gap-1.5">
             {label}
             <Input
               value={value}
-              onChange={(e) =>
-                setLocalValues((prev) => ({ ...prev, [field.key]: e.target.value }))
-              }
-              onBlur={() => handleFieldBlur(field.key, value)}
+              onChange={(e) => onLocalEdit(field.key, e.target.value)}
+              onBlur={() => onCommit(field.key)}
             />
           </div>
         );
       }
       case "longtext": {
-        const value = (localValues[field.key] as string | undefined) ?? "";
+        const value = readString(field.key);
         return (
           <div key={field.key} className="flex flex-col gap-1.5">
             {label}
             <Textarea
               value={value}
               rows={field.maxLength && field.maxLength <= 300 ? 3 : 6}
-              onChange={(e) =>
-                setLocalValues((prev) => ({ ...prev, [field.key]: e.target.value }))
-              }
-              onBlur={() => handleFieldBlur(field.key, value)}
+              onChange={(e) => onLocalEdit(field.key, e.target.value)}
+              onBlur={() => onCommit(field.key)}
             />
           </div>
         );
@@ -252,7 +186,11 @@ export function ContentDraftPanel({
             {label}
             <UnsupportedFieldPlaceholder
               label={field.type === "slides" ? "Slides" : "Tags"}
-              value={draft?.content[field.key]}
+              value={
+                field.type === "tags"
+                  ? readTags(field.key)
+                  : liveContent?.[field.key]
+              }
             />
           </div>
         );
