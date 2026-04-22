@@ -1,0 +1,14 @@
+// Graphile Worker crontab — standard cron syntax (UTC by default, which
+// matches the existing shouldRunNow() behavior in src/lib/cron/jobs.ts).
+//
+// Format: "minute hour dayOfMonth month dayOfWeek taskName"
+//
+// Edit this file to change a schedule. No Heroku Scheduler involvement.
+export const CRONTAB = `
+0 * * * * performance-decay
+30 * * * * notion-sync
+20 * * * * enrichment-sweep
+0 13 * * * matg-sync
+0 15 * * * evergreen-scan
+0 16 * * * cross-post-scan
+`.trim();

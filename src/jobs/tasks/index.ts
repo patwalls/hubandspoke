@@ -18,12 +18,27 @@ import {
   notificationSendTask,
   type NotificationSendPayload,
 } from "./notification-send";
+import {
+  performanceDecayTask,
+  notionSyncTask,
+  enrichmentSweepTask,
+  matgSyncTask,
+  evergreenScanTask,
+  crossPostScanTask,
+} from "./scheduled";
 
 export interface TaskPayloads {
   "hello": { message?: string };
   "transcript-finish": TranscriptFinishPayload;
   "descript-clip-resolve": DescriptClipResolvePayload;
   "notification-send": NotificationSendPayload;
+  // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
+  "performance-decay": Record<string, never>;
+  "notion-sync": Record<string, never>;
+  "enrichment-sweep": Record<string, never>;
+  "matg-sync": Record<string, never>;
+  "evergreen-scan": Record<string, never>;
+  "cross-post-scan": Record<string, never>;
 }
 
 const helloTask: Task = async (payload, helpers) => {
@@ -36,4 +51,10 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "transcript-finish": transcriptFinishTask,
   "descript-clip-resolve": descriptClipResolveTask,
   "notification-send": notificationSendTask,
+  "performance-decay": performanceDecayTask,
+  "notion-sync": notionSyncTask,
+  "enrichment-sweep": enrichmentSweepTask,
+  "matg-sync": matgSyncTask,
+  "evergreen-scan": evergreenScanTask,
+  "cross-post-scan": crossPostScanTask,
 };

@@ -5,6 +5,7 @@
 
 import { run } from "graphile-worker";
 import { taskList } from "./tasks";
+import { CRONTAB } from "./crontab";
 import { buildPgPool } from "./pg-pool";
 
 async function main() {
@@ -20,6 +21,7 @@ async function main() {
     // while leaving 10s of headroom for cleanup.
     gracefulShutdownAbortTimeout: 20_000,
     taskList,
+    crontab: CRONTAB,
   });
 
   const shutdown = async (signal: string) => {

@@ -1,8 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CRON_JOBS, shouldRunNow } from "@/lib/cron/jobs";
+import { enqueue } from "@/jobs/enqueue";
+import type { TaskPayloads } from "@/jobs/tasks";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+
+/**
+ * Manual enqueue endpoint kept around as a debug handle. Historically this
+ * was the target of a Heroku Scheduler entry that fired every 10 minutes,
+ * but scheduling now lives in `src/jobs/crontab.ts` and runs inside the
+ * worker dyno via graphile-worker.
+ *
+ *   GET /api/cron/tick               → 200 noop
+ *   GET /api/cron/tick?name=my-task  → enqueues `my-task` for immediate pickup
+ *
+ * CRON_SECRET gate preserved for parity with the old curl commands.
+ */
+const SCHEDULED_TASK_NAMES: ReadonlyArray<keyof TaskPayloads> = [
+  "performance-decay",
+  "notion-sync",
+  "enrichment-sweep",
+  "matg-sync",
+  "evergreen-scan",
+  "cross-post-scan",
+];
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -11,58 +31,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const now = new Date();
-  // Ad-hoc override: `?name=<jobName>` runs that job regardless of schedule.
-  // Same CRON_SECRET gate applies. Useful for re-running a daily scan after
-  // a deploy or for validating a job end-to-end without waiting.
   const forceName = request.nextUrl.searchParams.get("name");
-  const due = forceName
-    ? CRON_JOBS.filter((j) => j.name === forceName)
-    : CRON_JOBS.filter((j) => shouldRunNow(j.schedule, now));
-  const skipped = forceName
-    ? CRON_JOBS.filter((j) => j.name !== forceName).map((j) => j.name)
-    : CRON_JOBS.filter((j) => !shouldRunNow(j.schedule, now)).map((j) => j.name);
+  if (!forceName) {
+    return NextResponse.json({
+      noop: true,
+      note: "Scheduling moved to graphile-worker crontab in src/jobs/crontab.ts. This endpoint is now a manual enqueue only — pass ?name=<task>.",
+    });
+  }
 
-  if (forceName && due.length === 0) {
+  const match = SCHEDULED_TASK_NAMES.find((n) => n === forceName);
+  if (!match) {
     return NextResponse.json(
-      { error: `Unknown job: ${forceName}` },
+      { error: `Unknown task: ${forceName}. Valid: ${SCHEDULED_TASK_NAMES.join(", ")}` },
       { status: 404 }
     );
   }
 
-  const results = await Promise.allSettled(
-    due.map(async (j) => {
-      const start = Date.now();
-      try {
-        const result = await j.run();
-        return {
-          name: j.name,
-          ok: true,
-          ms: Date.now() - start,
-          result,
-        };
-      } catch (err) {
-        return {
-          name: j.name,
-          ok: false,
-          ms: Date.now() - start,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
-    })
-  );
-
-  const ran = results.map((r) =>
-    r.status === "fulfilled"
-      ? r.value
-      : { ok: false, error: String(r.reason) }
-  );
-
-  const failed = ran.filter((r) => !r.ok);
-  const status = failed.length > 0 ? 207 : 200;
-
-  return NextResponse.json(
-    { now: now.toISOString(), ran, skipped },
-    { status }
-  );
+  await enqueue(match, {} as never);
+  return NextResponse.json({ ok: true, enqueued: match });
 }
