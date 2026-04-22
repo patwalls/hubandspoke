@@ -37,6 +37,23 @@ const sql = postgres(connectionString, {
   max: 1,
 });
 
+// Platform-label synonyms. When the cross-post scanner was originally run the
+// Twitter column was labeled "X (Starter Story)"; it was later renamed to
+// "Twitter" and the rules were updated, but legacy queue rows still carry the
+// old label. Treat them as equivalent when matching (source_platform,
+// target_platform) against a rule. Keyed canonical → alternates.
+const PLATFORM_SYNONYMS = {
+  Twitter: ["X (Starter Story)"],
+};
+const SYNONYM_TO_CANONICAL = new Map();
+for (const [canonical, alts] of Object.entries(PLATFORM_SYNONYMS)) {
+  SYNONYM_TO_CANONICAL.set(canonical, canonical);
+  for (const alt of alts) SYNONYM_TO_CANONICAL.set(alt, canonical);
+}
+function canonicalize(platform) {
+  return SYNONYM_TO_CANONICAL.get(platform) ?? platform;
+}
+
 async function main() {
   console.log(`Mode: ${DRY_RUN ? "DRY RUN (use --apply to delete)" : "APPLY"}\n`);
 
@@ -58,13 +75,14 @@ async function main() {
     console.log();
   }
 
-  // ruleMap[`${brand}::${source}::${target}`] = threshold
+  // ruleMap[`${brand}::${source}::${target}`] = threshold — canonicalize both
+  // the rule's source and target so we match against queue rows that use
+  // legacy platform labels (e.g. "X (Starter Story)" for "Twitter").
   const ruleMap = new Map();
   for (const r of rules) {
-    ruleMap.set(
-      `${r.brand}::${r.source_platform}::${r.target_platform}`,
-      Number(r.view_threshold)
-    );
+    const src = canonicalize(r.source_platform);
+    const tgt = canonicalize(r.target_platform);
+    ruleMap.set(`${r.brand}::${src}::${tgt}`, Number(r.view_threshold));
   }
 
   const candidates = await sql`
@@ -92,7 +110,8 @@ async function main() {
     const malformedTarget = typeof c.cp_platform === "string";
     const targetPlatforms = Array.isArray(c.cp_platform) ? c.cp_platform : [];
     const sourcePlatforms = Array.isArray(c.src_platform) ? c.src_platform : [];
-    const target = targetPlatforms[0];
+    const target = targetPlatforms[0] ? canonicalize(targetPlatforms[0]) : undefined;
+    const canonicalSources = sourcePlatforms.map(canonicalize);
 
     if (malformedTarget) {
       toPrune.push({
@@ -115,10 +134,11 @@ async function main() {
     }
 
     // Find the best (lowest) active threshold where the source shares the
-    // rule's source platform. If none matches, prune.
+    // rule's source platform. If none matches, prune. Both the source and
+    // target are canonicalized so legacy labels match current rule names.
     let matchedRule = null;
     let matchedThreshold = null;
-    for (const srcPlat of sourcePlatforms) {
+    for (const srcPlat of canonicalSources) {
       const key = `${c.cp_brand}::${srcPlat}::${target}`;
       const threshold = ruleMap.get(key);
       if (threshold !== undefined) {
