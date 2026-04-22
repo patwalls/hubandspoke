@@ -470,6 +470,11 @@ export const repurposeTriggers = pgTable(
     descriptJobId: text("descript_job_id"),
     descriptPrompt: text("descript_prompt"),
     compositionName: text("composition_name"),
+    // Which flow produced this trigger: "agent" hits /jobs/agent with a
+    // natural-language prompt in the source project; "precise-cut" trims the
+    // source video with ffmpeg and imports a brand-new Descript project via
+    // /jobs/import/project_media. Null on legacy rows.
+    descriptImportPath: text("descript_import_path"),
     triggeredAt: timestamp("triggered_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

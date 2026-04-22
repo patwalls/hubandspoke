@@ -9,7 +9,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDownIcon } from "lucide-react";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { UserChip, personDisplay } from "./user-chip";
 
@@ -153,35 +160,47 @@ export function ClipTriageDialog({
     [idea, onDone, onOpenChange, brand],
   );
 
-  const handleCreateInDescript = useCallback(async () => {
-    if (!idea) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/clip-ideas/${idea.id}/create-in-descript`,
-        { method: "POST" },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(json?.error || `Failed (${res.status})`);
-        return;
+  const runCreateInDescript = useCallback(
+    async (path: "agent" | "precise") => {
+      if (!idea) return;
+      setSaving(true);
+      setError(null);
+      try {
+        const url =
+          path === "agent"
+            ? `/api/clip-ideas/${idea.id}/create-in-descript`
+            : `/api/clip-ideas/${idea.id}/create-in-descript-precise`;
+        const res = await fetch(url, { method: "POST" });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(json?.error || `Failed (${res.status})`);
+          return;
+        }
+        const newId: string | undefined = json?.newProductionItemId;
+        const brandSlug: string = json?.sourceBrand ?? brand;
+        toast.success(
+          path === "agent"
+            ? "Cutting clip in Descript (agent)…"
+            : "Trimming clip locally and uploading to Descript…",
+          {
+            duration: 6000,
+            description:
+              path === "agent"
+                ? "The new composition will appear on this item shortly."
+                : "The new Descript project will appear on this item when the upload finishes.",
+          },
+        );
+        onDone();
+        onOpenChange(false);
+        if (newId) {
+          router.push(`/${brandSlug}/content/${newId}`);
+        }
+      } finally {
+        setSaving(false);
       }
-      const newId: string | undefined = json?.newProductionItemId;
-      const brandSlug: string = json?.sourceBrand ?? brand;
-      toast.success("Cutting clip in Descript…", {
-        duration: 6000,
-        description: "The new composition will appear on this item shortly.",
-      });
-      onDone();
-      onOpenChange(false);
-      if (newId) {
-        router.push(`/${brandSlug}/content/${newId}`);
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, [idea, onDone, onOpenChange, brand, router]);
+    },
+    [idea, onDone, onOpenChange, brand, router],
+  );
 
   if (!idea) return null;
   const duration = Math.max(0, Math.round(idea.endSec - idea.startSec));
@@ -292,13 +311,43 @@ export function ClipTriageDialog({
               )}
               <div className="flex items-center gap-2">
                 {!isDecided && (
-                  <Button
-                    type="button"
-                    onClick={handleCreateInDescript}
-                    disabled={saving}
-                  >
-                    Create in Descript
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      disabled={saving}
+                      className={buttonVariants({ variant: "default" })}
+                    >
+                      Create in Descript
+                      <ChevronDownIcon className="size-3.5 ml-1" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-80">
+                      <DropdownMenuItem
+                        onClick={() => void runCreateInDescript("agent")}
+                        className="flex flex-col items-start gap-0.5 py-2"
+                      >
+                        <span className="font-medium">
+                          With AI (Underlord agent)
+                        </span>
+                        <span className="text-[11px] text-muted-foreground leading-snug">
+                          Fast. New composition in the source project. Vertical
+                          9:16 + strike-through filler words requested via
+                          prompt.
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => void runCreateInDescript("precise")}
+                        className="flex flex-col items-start gap-0.5 py-2"
+                      >
+                        <span className="font-medium">
+                          Precise cut (exact timestamps)
+                        </span>
+                        <span className="text-[11px] text-muted-foreground leading-snug">
+                          Trims the source video to the exact range with
+                          ffmpeg, then uploads a new Descript project. Slower
+                          but frame-accurate.
+                        </span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
                 <Button
                   type="button"

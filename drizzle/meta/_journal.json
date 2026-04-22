@@ -211,6 +211,13 @@
       "when": 1776893909373,
       "tag": "0029_flawless_punisher",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1776899505917,
+      "tag": "0030_dusty_redwing",
+      "breakpoints": true
     }
   ]
 }

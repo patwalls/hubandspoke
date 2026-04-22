@@ -62,6 +62,13 @@ export class ClipIdeaSourceMissingDescriptProjectError extends Error {
   }
 }
 
+export class ClipIdeaSourceMissingMediaError extends Error {
+  constructor() {
+    super("Source production item has no archived media file");
+    this.name = "ClipIdeaSourceMissingMediaError";
+  }
+}
+
 const PROMOTED_CLIP_FORMAT = "Repackage section with hook";
 
 function formatTimestamp(sec: number): string {
@@ -92,6 +99,7 @@ interface ClipIdeaRow {
   sourceTitle: string | null;
   sourceBrand: string | null;
   descriptProjectId: string | null;
+  mediaS3Key: string | null;
 }
 
 async function loadAndGuardClipIdea(
@@ -111,6 +119,7 @@ async function loadAndGuardClipIdea(
       sourceTitle: productionItems.title,
       sourceBrand: productionItems.brand,
       descriptProjectId: productionItems.descriptProjectId,
+      mediaS3Key: productionItems.mediaS3Key,
     })
     .from(clipIdeas)
     .leftJoin(
@@ -269,10 +278,16 @@ function buildDescriptPrompt(args: {
   const end = formatTimestamp(args.endSec);
   const safeHook = args.hook.replace(/"/g, '\\"');
   return [
-    `Create a new composition named "${safeHook}" containing a clip from the main composition from ${start} to ${end} (${duration}s).`,
-    "Use the transcript segment at those exact timestamps — do not pick a different moment.",
-    "The clip is a short-form highlight; keep the start on a natural beat and end on a punctuating thought.",
-  ].join(" ");
+    "You are producing a short-form vertical clip. Follow these instructions exactly and do not deviate.",
+    "",
+    `1. In the main composition, locate the transcript segment between ${start} and ${end} (duration ≈ ${duration}s). The time range is non-negotiable.`,
+    `2. Create a NEW composition named "${safeHook}" containing only that segment. Do not include footage outside this range. The start must land on the first spoken word inside the range; the end must land on the last spoken word inside the range.`,
+    "3. Set the new composition to a vertical 9:16 aspect ratio (1080×1920) sized for TikTok / Reels / Shorts. If the source is 16:9, center-crop or reframe so the speaker stays on screen.",
+    "4. Inside the new composition, mark filler words (\"um\", \"uh\", \"like\" when used as filler, \"you know\", \"I mean\", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words; they must stay in the transcript, just ignored.",
+    "5. Do not add transitions, effects, music, captions, or title cards. Do not re-order anything. Do not rewrite the transcript.",
+    "",
+    "If any instruction conflicts with another, prioritize #1 (exact time range) and #2 (no footage outside the range). In the agent response, report what you did for each numbered item.",
+  ].join("\n");
 }
 
 /**
@@ -353,6 +368,7 @@ export async function createClipIdeaInDescript(args: {
       descriptProjectUrl: agent.projectUrl,
       descriptPrompt: prompt,
       compositionName: row.hook,
+      descriptImportPath: "agent",
     })
     .returning({ id: repurposeTriggers.id });
 
@@ -383,5 +399,98 @@ export async function createClipIdeaInDescript(args: {
     newProductionItemId: created.id,
     descriptProjectUrl: agent.projectUrl,
     descriptJobId: agent.jobId,
+  };
+}
+
+export type CreateClipIdeaInDescriptPreciseCutResult = AssignClipIdeaResult;
+
+/**
+ * Precise-cut promotion: create the production_item + repurpose_trigger
+ * synchronously (so the UI has something to navigate to) and enqueue
+ * `clip-idea-precise-cut` which does the slow work — S3 download, ffmpeg
+ * trim, Descript upload, job poll. Unlike the agent flow, we don't have
+ * descriptProjectId / descriptProjectUrl yet; the worker backfills both
+ * onto the production_item and the trigger when the import job stops.
+ * Different from createClipIdeaInDescript in three ways: (1) requires a
+ * source mediaS3Key, not a Descript project; (2) creates a NEW Descript
+ * project per clip (import endpoint doesn't accept project_id); (3) no
+ * agent / LLM in the loop — Descript receives a pre-trimmed file.
+ */
+export async function createClipIdeaInDescriptPreciseCut(args: {
+  clipIdeaId: string;
+  actorUserId: string;
+}): Promise<CreateClipIdeaInDescriptPreciseCutResult> {
+  const row = await loadAndGuardClipIdea(args.clipIdeaId);
+  if (!row.mediaS3Key) {
+    throw new ClipIdeaSourceMissingMediaError();
+  }
+  const brand = row.sourceBrand ?? "starter-story";
+  const editor = await loadEditor(args.actorUserId);
+  const body = buildContentBody(row);
+
+  const formatId = await ensurePromotedClipFormat(brand);
+
+  let created: { id: string } | undefined;
+  try {
+    const rows = await db
+      .insert(productionItems)
+      .values({
+        title: row.hook,
+        status: "Assigned",
+        platform: ["YouTube Shorts"],
+        format: PROMOTED_CLIP_FORMAT,
+        brand,
+        contentBody: body,
+        pillarContentItemId: row.sourceProductionItemId,
+        sourceType: "clip",
+        sourceClipIdeaId: args.clipIdeaId,
+        producerUserId: args.actorUserId,
+        editorUserId: args.actorUserId,
+      })
+      .returning({ id: productionItems.id });
+    created = rows[0];
+  } catch (err) {
+    if (isUniqueViolation(err, "uniq_production_items_source_clip_idea")) {
+      throw new ClipIdeaAlreadyDecidedError("assigned");
+    }
+    throw err;
+  }
+  if (!created) throw new Error("Failed to create production item for clip");
+
+  const [trigger] = await db
+    .insert(repurposeTriggers)
+    .values({
+      productionItemId: row.sourceProductionItemId,
+      targetFormatId: formatId,
+      compositionName: row.hook,
+      descriptImportPath: "precise-cut",
+    })
+    .returning({ id: repurposeTriggers.id });
+
+  await enqueue("clip-idea-precise-cut", {
+    clipIdeaId: args.clipIdeaId,
+    triggerId: trigger.id,
+    derivativeItemId: created.id,
+  });
+
+  await db
+    .update(clipIdeas)
+    .set({
+      status: "assigned",
+      acceptedEditorUserId: args.actorUserId,
+      acceptedProductionItemId: created.id,
+      decidedAt: new Date(),
+      decidedByUserId: args.actorUserId,
+    })
+    .where(eq(clipIdeas.id, args.clipIdeaId));
+
+  return {
+    sourceProductionItemId: row.sourceProductionItemId,
+    sourceTitle: row.sourceTitle,
+    sourceBrand: brand,
+    hook: row.hook,
+    editorName: editor.name,
+    editorEmail: editor.email,
+    newProductionItemId: created.id,
   };
 }

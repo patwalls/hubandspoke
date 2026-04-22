@@ -295,19 +295,23 @@ const PROPERTY_INPUT_CLASS =
 const PROPERTY_TRIGGER_CLASS =
   "border-0 bg-transparent shadow-none h-8 px-2 rounded-sm focus:ring-1 focus:ring-ring hover:bg-muted/50 transition-colors";
 
-const DETAIL_TABS = [
-  { value: "details", label: "Details" },
-  { value: "preview", label: "Preview" },
+const DETAIL_TAB_VALUES = [
+  "details",
+  "preview",
+  "derivatives",
+  "clip-ideas",
+  "repurpose",
 ] as const;
-type DetailTab = (typeof DETAIL_TABS)[number]["value"];
-const DETAIL_TAB_VALUES = DETAIL_TABS.map((t) => t.value) as readonly DetailTab[];
+type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
 export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const activeTab: DetailTab = DETAIL_TAB_VALUES.includes(tabParam as DetailTab)
+  const activeTabParam: DetailTab = DETAIL_TAB_VALUES.includes(
+    tabParam as DetailTab,
+  )
     ? (tabParam as DetailTab)
     : "details";
   const setActiveTab = useCallback(
@@ -1139,6 +1143,31 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const hideDerivativeSections =
     derivatives.length === 0 && repurposeTargets.length === 0;
 
+  // Which tabs are actually applicable for this item's current state. Each
+  // tab appears only when its underlying section would render content. If
+  // the URL asks for a tab that isn't available (e.g. ?tab=derivatives on a
+  // pre-publish item), fall back to the Details tab.
+  const availableTabs: { value: DetailTab; label: string; count: number | null }[] = [
+    { value: "details", label: "Details", count: null },
+    { value: "preview", label: "Preview", count: null },
+    ...(!isPrePublish &&
+    (!hideDerivativeSections ||
+      data.reposts.length > 0 ||
+      data.crossPosts.length > 0)
+      ? ([{ value: "derivatives", label: "Derivatives", count: derivatives.length }] as const)
+      : []),
+    ...(!isPrePublish
+      ? ([{ value: "clip-ideas", label: "Clip ideas", count: null }] as const)
+      : []),
+    ...(!isPrePublish && !hideDerivativeSections
+      ? ([{ value: "repurpose", label: "Repurpose", count: repurposeTargets.length }] as const)
+      : []),
+  ];
+  const availableTabValues = availableTabs.map((t) => t.value);
+  const activeTab: DetailTab = availableTabValues.includes(activeTabParam)
+    ? activeTabParam
+    : "details";
+
   // Resolve the currently-selected producer/editor for the trigger display.
   // Prefer the freshly-loaded assignable list (stays in sync with local
   // selections), and fall back to the detail endpoint's authoritative record
@@ -1725,19 +1754,36 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       </div>
       )}
 
-      {/* Details + Preview tabs */}
+      {/* Content detail tabs */}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DetailTab)}>
         <TabsList
           variant="line"
-          className="h-9 w-full justify-start gap-1 rounded-none border-b border-border p-0"
+          className="h-11 w-full justify-start gap-0 rounded-none border-b border-border bg-transparent p-0"
         >
-          {DETAIL_TABS.map((tab) => (
+          {availableTabs.map((tab) => (
             <TabsTrigger
               key={tab.value}
               value={tab.value}
-              className="flex-initial px-3"
+              className={cn(
+                "group/tab flex-initial h-11 px-4 rounded-none text-sm font-medium",
+                "text-muted-foreground hover:text-foreground hover:bg-accent/40",
+                "data-active:text-foreground data-active:bg-transparent",
+                "after:!bottom-[-1px] after:!h-[2px] after:!bg-primary",
+              )}
             >
-              {tab.label}
+              <span>{tab.label}</span>
+              {tab.count != null && tab.count > 0 && (
+                <span
+                  className={cn(
+                    "ml-1 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5",
+                    "text-[10px] font-semibold tabular-nums",
+                    "bg-muted text-muted-foreground",
+                    "group-data-active/tab:bg-primary/10 group-data-active/tab:text-primary",
+                  )}
+                >
+                  {tab.count}
+                </span>
+              )}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -2218,29 +2264,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             onCommit={onCommit}
           />
         </TabsContent>
-      </Tabs>
 
-      {item.format &&
-        item.status !== "Published" &&
-        item.status !== "Killed" && (
-          <ContentDraftPanel
-            itemId={item.id}
-            hasFieldSchema={data.hasFieldSchema}
-            formatName={item.format}
-            draft={draft}
-            liveContent={liveContent}
-            fieldSaves={fieldSaves}
-            fieldErrors={fieldErrors}
-            onLocalEdit={onLocalEdit}
-            onCommit={onCommit}
-            onDraftReplaced={onDraftReplaced}
-          />
-        )}
-
-      <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
-
-      {!isPrePublish && (
-      <>
+      {!isPrePublish &&
+        (!hideDerivativeSections ||
+          data.reposts.length > 0 ||
+          data.crossPosts.length > 0) && (
+      <TabsContent value="derivatives" className="pt-4 space-y-4">
       {!hideDerivativeSections && (
       <>
       {/* Derivative content — same look/feel as Content Performance table */}
@@ -2409,12 +2438,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       </div>
       </>
       )}
-
-      <ClipIdeasPanel
-        itemId={item.id}
-        brand={brand}
-        hasDescriptProject={hasDescriptProject}
-      />
 
       {/* Reposts — list of same-content reposts that descend from this item.
           Styled to mirror the Derivative content table directly above so the
@@ -2711,8 +2734,21 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       )}
 
-      {!hideDerivativeSections && (
-      <>
+      </TabsContent>
+      )}
+
+      {!isPrePublish && (
+        <TabsContent value="clip-ideas" className="pt-4">
+          <ClipIdeasPanel
+            itemId={item.id}
+            brand={brand}
+            hasDescriptProject={hasDescriptProject}
+          />
+        </TabsContent>
+      )}
+
+      {!isPrePublish && !hideDerivativeSections && (
+      <TabsContent value="repurpose" className="pt-4">
       {/* Repurpose to format */}
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -2867,11 +2903,29 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <span className="font-medium">Repurpose</span> creates the Notion task and, for clip-style skills, fires the Descript job. Click a format name to edit its skill.
         </p>
       </div>
-      </>
+      </TabsContent>
       )}
 
-      </>
-      )}
+      </Tabs>
+
+      {item.format &&
+        item.status !== "Published" &&
+        item.status !== "Killed" && (
+          <ContentDraftPanel
+            itemId={item.id}
+            hasFieldSchema={data.hasFieldSchema}
+            formatName={item.format}
+            draft={draft}
+            liveContent={liveContent}
+            fieldSaves={fieldSaves}
+            fieldErrors={fieldErrors}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+            onDraftReplaced={onDraftReplaced}
+          />
+        )}
+
+      <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
 
       {/* Add to Descript modal */}
       <Dialog open={descriptModalOpen} onOpenChange={(o) => { if (!o) closeDescriptModal(); }}>

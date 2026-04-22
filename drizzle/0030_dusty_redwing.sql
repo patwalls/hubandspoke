@@ -1,0 +1,1 @@
+ALTER TABLE "repurpose_triggers" ADD COLUMN "descript_import_path" text;

@@ -39,6 +39,55 @@ export async function createDescriptProjectFromUrl(
   });
 }
 
+interface ImportProjectUploadArgs {
+  projectName: string;
+  contentType: string;
+  fileSize: number;
+}
+
+/**
+ * Request a signed upload URL from Descript for a file we'll PUT ourselves.
+ * Returns the upload URL alongside the job id + project url; the job won't
+ * finish until we complete the PUT, so the caller is responsible for both
+ * the PUT and then polling /jobs/{jobId}. Used by the precise-cut flow where
+ * we trim the source video with ffmpeg locally before handing bytes to
+ * Descript.
+ */
+export async function createDescriptProjectWithUpload(
+  args: ImportProjectUploadArgs
+): Promise<{
+  jobId: string;
+  projectId: string;
+  projectUrl: string;
+  uploadUrl: string;
+}> {
+  const mediaKey = "main";
+  const res = await postImportProjectMedia({
+    project_name: args.projectName,
+    add_media: {
+      [mediaKey]: {
+        content_type: args.contentType,
+        file_size: args.fileSize,
+      },
+    },
+    add_compositions: [
+      { name: args.projectName, clips: [{ media: mediaKey }] },
+    ],
+  });
+  const uploadUrl = res.upload_urls?.[mediaKey]?.upload_url;
+  if (!uploadUrl) {
+    throw new Error(
+      `Descript import did not return an upload_url for key "${mediaKey}"`
+    );
+  }
+  return {
+    jobId: res.job_id,
+    projectId: res.project_id,
+    projectUrl: res.project_url,
+    uploadUrl,
+  };
+}
+
 interface AgentResponse {
   job_id: string;
   drive_id?: string;
