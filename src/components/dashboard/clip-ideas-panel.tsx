@@ -25,8 +25,6 @@ interface ClipIdea {
 interface Props {
   itemId: string;
   hasDescriptProject: boolean;
-  pillarFormat: string | null;
-  brand: string;
 }
 
 function fmtTs(sec: number): string {
@@ -62,8 +60,6 @@ function fmtRel(iso: string): string {
 export function ClipIdeasPanel({
   itemId,
   hasDescriptProject,
-  pillarFormat,
-  brand,
 }: Props) {
   const [loading, setLoading] = useState(true);
   const [ideas, setIdeas] = useState<ClipIdea[]>([]);
@@ -272,8 +268,6 @@ export function ClipIdeasPanel({
           if (!o) setTriageIdea(null);
         }}
         idea={triageIdea}
-        pillarFormat={pillarFormat}
-        brand={brand}
         onDone={load}
       />
     </div>

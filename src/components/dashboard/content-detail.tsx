@@ -2139,8 +2139,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       <ClipIdeasPanel
         itemId={item.id}
         hasDescriptProject={hasDescriptProject}
-        pillarFormat={item.format}
-        brand={brand}
       />
 
       {/* Reposts — list of same-content reposts that descend from this item.
