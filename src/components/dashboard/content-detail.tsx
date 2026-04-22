@@ -1754,21 +1754,21 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       </div>
       )}
 
-      {/* Content detail tabs */}
+      {/* Content detail tabs — pill style with HubSpot orange active state */}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DetailTab)}>
         <TabsList
           variant="line"
-          className="h-10 w-full justify-start gap-1 rounded-none border-b border-border bg-transparent p-0"
+          className="flex h-auto w-full justify-start gap-1 rounded-none bg-transparent p-0"
         >
           {availableTabs.map((tab) => (
             <TabsTrigger
               key={tab.value}
               value={tab.value}
               className={cn(
-                "group/tab relative flex-initial h-10 px-3.5 rounded-none text-sm font-medium",
-                "text-muted-foreground hover:text-foreground",
-                "data-active:text-foreground data-active:bg-transparent",
-                "after:!inset-x-1 after:!bottom-[-1px] after:!h-[2px] after:!rounded-full after:!bg-foreground",
+                "group/tab flex-initial h-9 rounded-md px-3 text-sm font-medium transition-colors",
+                "text-muted-foreground hover:bg-muted hover:text-foreground",
+                "data-active:bg-[#FFEAE3] data-active:text-[#CC5033]",
+                "after:!hidden",
               )}
             >
               <span>{tab.label}</span>
@@ -1778,7 +1778,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                     "ml-1.5 inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-full px-1.5",
                     "text-[10px] font-semibold tabular-nums",
                     "bg-muted text-muted-foreground",
-                    "group-data-active/tab:bg-foreground group-data-active/tab:text-background",
+                    "group-data-active/tab:bg-[#CC5033]/15 group-data-active/tab:text-[#CC5033]",
                   )}
                 >
                   {tab.count}
