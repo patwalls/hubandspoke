@@ -91,12 +91,21 @@ export function TranscriptButton({
 
   const handleFetch = useCallback(async () => {
     setFetchState({ kind: "fetching" });
+    const priorFetchedAt = transcript?.fetchedAt ?? null;
     try {
       const res = await fetch(
         `/api/production-items/${itemId}/transcript/fetch`,
         { method: "POST" }
       );
-      const json = await res.json();
+      // Tolerate non-JSON bodies — Heroku's 502 error page is HTML, for
+      // example, and res.json() would throw "Unexpected token '<'".
+      const bodyText = await res.text();
+      let json: { error?: string } | null = null;
+      try {
+        json = bodyText ? (JSON.parse(bodyText) as { error?: string }) : null;
+      } catch {
+        json = null;
+      }
       if (!res.ok) {
         setFetchState({
           kind: "error",
@@ -104,15 +113,42 @@ export function TranscriptButton({
         });
         return;
       }
-      setFetchState({ kind: "idle" });
-      await load();
+
+      // 202 Accepted: publish job kicked off server-side, now running in the
+      // background. Poll GET /transcript until the row appears (detected by a
+      // new fetchedAt) or 3 minutes elapse.
+      const DEADLINE_MS = 3 * 60 * 1000;
+      const POLL_MS = 5000;
+      const started = Date.now();
+      while (Date.now() - started < DEADLINE_MS) {
+        await new Promise((r) => setTimeout(r, POLL_MS));
+        const pollRes = await fetch(
+          `/api/production-items/${itemId}/transcript`
+        );
+        if (!pollRes.ok) continue;
+        const pollJson = (await pollRes.json()) as {
+          transcript: TranscriptPayload | null;
+        };
+        const t = pollJson.transcript;
+        if (t && t.fetchedAt !== priorFetchedAt) {
+          setTranscript(t);
+          setLoaded(true);
+          setFetchState({ kind: "idle" });
+          return;
+        }
+      }
+      setFetchState({
+        kind: "error",
+        message:
+          "Transcript fetch timed out after 3 minutes. The publish may still finish — reopen this dialog shortly to check.",
+      });
     } catch (err) {
       setFetchState({
         kind: "error",
         message: err instanceof Error ? err.message : "Fetch failed",
       });
     }
-  }, [itemId, load]);
+  }, [itemId, transcript]);
 
   const handleCopy = useCallback(async () => {
     if (!transcript) return;

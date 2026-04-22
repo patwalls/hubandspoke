@@ -88,16 +88,26 @@ export interface FetchResult {
   shareUrl: string;
 }
 
+export interface StartFetchResult {
+  publishJobId: string;
+  compositionId: string;
+  startedAt: Date;
+}
+
 /**
- * Publish the production item's Descript composition, fetch its published
- * WEBVTT subtitles, parse into segments, and upsert the transcripts row.
- * Gated by DESCRIPT_TRANSCRIPT_FETCH_LIVE — dry-run by default.
+ * Resolve the Descript composition for this item (caching the id on the row
+ * if it wasn't known yet) and kick off a publish job. Returns quickly — the
+ * long-running part (polling the publish job) happens in
+ * {@link finishDescriptTranscriptFetch}.
+ *
+ * Split out so the HTTP route can return a 202 before Heroku's 30s router
+ * timeout, while the finish step runs in the Node background.
+ * Gated by DESCRIPT_TRANSCRIPT_FETCH_LIVE.
  */
-export async function fetchDescriptTranscript(
+export async function startDescriptTranscriptFetch(
   productionItemId: string
-): Promise<FetchResult> {
+): Promise<StartFetchResult> {
   const live = process.env.DESCRIPT_TRANSCRIPT_FETCH_LIVE === "true";
-  const startedAt = new Date();
 
   const [item] = await db
     .select({
@@ -141,12 +151,31 @@ export async function fetchDescriptTranscript(
     );
   }
 
+  const publish = await publishComposition({
+    projectId: item.descriptProjectId,
+    compositionId,
+  });
+
+  return {
+    publishJobId: publish.jobId,
+    compositionId,
+    startedAt: new Date(),
+  };
+}
+
+/**
+ * Finish a transcript fetch that was kicked off by
+ * {@link startDescriptTranscriptFetch}: poll the publish job, fetch the
+ * published WEBVTT, parse, and upsert the transcripts row. Blocks for up to
+ * ~3 minutes — must be called outside the HTTP response path on Heroku.
+ */
+export async function finishDescriptTranscriptFetch(
+  productionItemId: string,
+  publishJobId: string,
+  startedAt: Date
+): Promise<FetchResult> {
   try {
-    const publish = await publishComposition({
-      projectId: item.descriptProjectId,
-      compositionId,
-    });
-    const { shareUrl } = await waitForPublishJob(publish.jobId);
+    const { shareUrl } = await waitForPublishJob(publishJobId);
     const slug = extractShareSlug(shareUrl);
     if (!slug) {
       throw new TranscriptFetchError(`Could not parse slug from ${shareUrl}`, "publish_failed");
@@ -232,6 +261,22 @@ export async function fetchDescriptTranscript(
     });
     throw err;
   }
+}
+
+/**
+ * Convenience wrapper: kick off the publish and wait for it to finish in one
+ * call. Used by scripts and any non-HTTP caller where the 30s Heroku router
+ * timeout doesn't apply. HTTP routes should call start/finish separately.
+ */
+export async function fetchDescriptTranscript(
+  productionItemId: string
+): Promise<FetchResult> {
+  const start = await startDescriptTranscriptFetch(productionItemId);
+  return await finishDescriptTranscriptFetch(
+    productionItemId,
+    start.publishJobId,
+    start.startedAt
+  );
 }
 
 export interface TranscriptPromptPayload {
