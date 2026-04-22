@@ -32,7 +32,9 @@ if (!url) {
   process.exit(1);
 }
 
-const sql = postgres(url, { prepare: false });
+const ssl =
+  process.env.DATABASE_SSL === "off" ? false : { rejectUnauthorized: false };
+const sql = postgres(url, { ssl, prepare: false });
 
 function classify(link) {
   if (!link) return { target: "X (Starter Story)", bucket: "no-link" };
