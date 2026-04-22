@@ -230,6 +230,38 @@ function formatRelative(iso: string): string {
   });
 }
 
+function PropertyRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[130px_1fr] items-center gap-3 min-h-9 px-3">
+      <div className="text-sm text-muted-foreground">{label}</div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function PropertyRowGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 md:divide-x md:divide-border/60 border-b border-border/60 last:border-b-0">
+      {children}
+    </div>
+  );
+}
+
+function PropertyRowSolo({ children }: { children: React.ReactNode }) {
+  return <div className="border-b border-border/60 last:border-b-0">{children}</div>;
+}
+
+const PROPERTY_INPUT_CLASS =
+  "border-0 bg-transparent shadow-none h-8 px-2 rounded-sm focus-visible:ring-1 focus-visible:ring-ring hover:bg-muted/50 transition-colors";
+const PROPERTY_TRIGGER_CLASS =
+  "border-0 bg-transparent shadow-none h-8 px-2 rounded-sm focus:ring-1 focus:ring-ring hover:bg-muted/50 transition-colors";
+
 export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -828,6 +860,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const isYouTube = !!item.youtubeId;
   const isPublished = !!item.publishedLink;
   const isPrePublish = item.status !== "Published";
+  const hideDerivativeSections =
+    derivatives.length === 0 && repurposeTargets.length === 0;
 
   // Resolve the currently-selected producer/editor for the trigger display.
   // Prefer the freshly-loaded assignable list (stays in sync with local
@@ -1309,9 +1343,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             : undefined
         }
       >
-      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
         {(isYouTube || saveState.kind !== "idle") && (
-          <div className="flex items-center justify-end gap-2 -mb-1 min-h-[18px]">
+          <div className="flex items-center justify-end gap-2 px-3 py-1.5 border-b border-border/60 min-h-[26px]">
             {isYouTube && (
               <span className="text-[11px] text-muted-foreground">
                 Auto-synced from YouTube — fields are read-only.
@@ -1331,8 +1365,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </div>
         )}
 
-        <div className="space-y-1.5">
-          <Label>Title</Label>
+        <div className="border-b border-border/60">
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -1340,12 +1373,14 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               if ((item.title ?? "") !== title) void persistField({ title });
             }}
             disabled={isYouTube}
+            aria-label="Title"
+            placeholder="Untitled"
+            className="border-0 bg-transparent shadow-none rounded-none h-auto px-3 py-2.5 text-base font-medium focus-visible:ring-0 focus-visible:ring-offset-0"
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Platform</Label>
+        <PropertyRowGroup>
+          <PropertyRow label="Platform">
             <Select
               value={platforms[0] || ""}
               onValueChange={(v) => {
@@ -1355,7 +1390,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               }}
               disabled={isYouTube}
             >
-              <SelectTrigger>
+              <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Platform">
                 <SelectValue placeholder="Select platform…" />
               </SelectTrigger>
               <SelectContent>
@@ -1366,100 +1401,101 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </PropertyRow>
 
-          <div className="space-y-1.5">
-            <Label>Format</Label>
-            <Popover
-              open={formatPickerOpen}
-              onOpenChange={(open) => {
-                setFormatPickerOpen(open);
-                if (!open) setFormatSearch("");
-              }}
+          <PropertyRow label="Format">
+          <Popover
+            open={formatPickerOpen}
+            onOpenChange={(open) => {
+              setFormatPickerOpen(open);
+              if (!open) setFormatSearch("");
+            }}
+          >
+            <PopoverTrigger
+              aria-label="Format"
+              className="flex h-8 w-full items-center justify-between rounded-sm border-0 bg-transparent px-2 text-sm hover:bg-muted/50 cursor-pointer transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
-              <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
-                {format ? (
-                  <span className="truncate">{format}</span>
-                ) : (
-                  <span className="text-muted-foreground">Select format…</span>
-                )}
-                <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-              </PopoverTrigger>
-              <PopoverContent className="w-96 p-0" align="start">
-                <Command>
-                  <CommandInput
-                    placeholder="Search or create format…"
-                    value={formatSearch}
-                    onValueChange={setFormatSearch}
-                  />
-                  <CommandList>
-                    {(() => {
-                      const trimmed = formatSearch.trim();
-                      const exactMatch = brandFormats.some(
-                        (f) => f.toLowerCase() === trimmed.toLowerCase()
-                      );
-                      const showCreate = trimmed.length > 0 && !exactMatch;
-                      return (
-                        <>
-                          {!showCreate && (
-                            <CommandEmpty>No matching format.</CommandEmpty>
-                          )}
-                          {brandFormats.length > 0 && (
-                            <CommandGroup>
-                              {format && (
-                                <CommandItem
-                                  onSelect={() => {
-                                    setFormat("");
-                                    void persistField({ format: null });
-                                    setFormatPickerOpen(false);
-                                  }}
-                                  className="text-muted-foreground"
-                                >
-                                  <span className="text-sm">Clear selection</span>
-                                </CommandItem>
-                              )}
-                              {brandFormats.map((f) => (
-                                <CommandItem
-                                  key={f}
-                                  value={f}
-                                  onSelect={() => {
-                                    setFormat(f);
-                                    void persistField({ format: f });
-                                    setFormatPickerOpen(false);
-                                  }}
-                                  data-checked={format === f ? "true" : undefined}
-                                >
-                                  <span className="text-sm">{f}</span>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          )}
-                          {showCreate && (
-                            <CommandGroup heading="Actions" forceMount>
+              {format ? (
+                <span className="truncate">{format}</span>
+              ) : (
+                <span className="text-muted-foreground">Select format…</span>
+              )}
+              <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+            </PopoverTrigger>
+            <PopoverContent className="w-96 p-0" align="start">
+              <Command>
+                <CommandInput
+                  placeholder="Search or create format…"
+                  value={formatSearch}
+                  onValueChange={setFormatSearch}
+                />
+                <CommandList>
+                  {(() => {
+                    const trimmed = formatSearch.trim();
+                    const exactMatch = brandFormats.some(
+                      (f) => f.toLowerCase() === trimmed.toLowerCase()
+                    );
+                    const showCreate = trimmed.length > 0 && !exactMatch;
+                    return (
+                      <>
+                        {!showCreate && (
+                          <CommandEmpty>No matching format.</CommandEmpty>
+                        )}
+                        {brandFormats.length > 0 && (
+                          <CommandGroup>
+                            {format && (
                               <CommandItem
-                                value={`__create__ ${trimmed}`}
-                                onSelect={() => void createFormatFromQuery(trimmed)}
-                                forceMount
+                                onSelect={() => {
+                                  setFormat("");
+                                  void persistField({ format: null });
+                                  setFormatPickerOpen(false);
+                                }}
+                                className="text-muted-foreground"
                               >
-                                <span className="text-sm">
-                                  Create <span className="font-medium">&ldquo;{trimmed}&rdquo;</span>
-                                </span>
+                                <span className="text-sm">Clear selection</span>
                               </CommandItem>
-                            </CommandGroup>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
+                            )}
+                            {brandFormats.map((f) => (
+                              <CommandItem
+                                key={f}
+                                value={f}
+                                onSelect={() => {
+                                  setFormat(f);
+                                  void persistField({ format: f });
+                                  setFormatPickerOpen(false);
+                                }}
+                                data-checked={format === f ? "true" : undefined}
+                              >
+                                <span className="text-sm">{f}</span>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        )}
+                        {showCreate && (
+                          <CommandGroup heading="Actions" forceMount>
+                            <CommandItem
+                              value={`__create__ ${trimmed}`}
+                              onSelect={() => void createFormatFromQuery(trimmed)}
+                              forceMount
+                            >
+                              <span className="text-sm">
+                                Create <span className="font-medium">&ldquo;{trimmed}&rdquo;</span>
+                              </span>
+                            </CommandItem>
+                          </CommandGroup>
+                        )}
+                      </>
+                    );
+                  })()}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+          </PropertyRow>
+        </PropertyRowGroup>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Status</Label>
+        <PropertyRowGroup>
+          <PropertyRow label="Status">
             <Select
               value={status}
               onValueChange={(v) => {
@@ -1467,8 +1503,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 const next = v ?? "";
                 if (next === prev) return;
                 if (next === "Killed") {
-                  // Intercept: capture reason via dialog before committing.
-                  // Keep the dropdown on its previous value until confirmed.
                   setPendingKill({ previousStatus: prev });
                   return;
                 }
@@ -1478,7 +1512,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 });
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Status">
                 <SelectValue placeholder="Select status…" />
               </SelectTrigger>
               <SelectContent>
@@ -1489,10 +1523,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </PropertyRow>
 
-          <div className="space-y-1.5">
-            <Label>Pillar Content</Label>
+          <PropertyRow label="Pillar content">
             <PillarPicker
               brand={brand}
               excludeId={contentId}
@@ -1501,46 +1534,47 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 setPillar(next);
                 void persistField({ pillarContentItemId: next?.id ?? null });
               }}
+              triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
             />
-          </div>
-        </div>
+          </PropertyRow>
+        </PropertyRowGroup>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Source type</Label>
-            <Select
-              value={sourceType}
-              onValueChange={(v) => {
-                const next = v ?? "original";
-                const prev = sourceType;
-                if (next === prev) return;
-                setSourceType(next);
-                void persistField({ sourceType: next }).then((ok) => {
-                  if (!ok) setSourceType(prev);
-                });
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="original">Original</SelectItem>
-                <SelectItem value="repost">Repost</SelectItem>
-                <SelectItem value="cross_post">Cross-post</SelectItem>
-              </SelectContent>
-            </Select>
-            {(sourceType === "repost" || sourceType === "cross_post") && (
-              <p className="text-xs text-muted-foreground">
-                Exempt from the (pillar, format) uniqueness — can reuse the
-                original&rsquo;s format.
-              </p>
-            )}
-          </div>
-        </div>
+        <PropertyRowSolo>
+          <PropertyRow label="Source type">
+            <div className="flex flex-col gap-0.5">
+              <Select
+                value={sourceType}
+                onValueChange={(v) => {
+                  const next = v ?? "original";
+                  const prev = sourceType;
+                  if (next === prev) return;
+                  setSourceType(next);
+                  void persistField({ sourceType: next }).then((ok) => {
+                    if (!ok) setSourceType(prev);
+                  });
+                }}
+              >
+                <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Source type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="original">Original</SelectItem>
+                  <SelectItem value="repost">Repost</SelectItem>
+                  <SelectItem value="cross_post">Cross-post</SelectItem>
+                </SelectContent>
+              </Select>
+              {(sourceType === "repost" || sourceType === "cross_post") && (
+                <p className="text-[11px] text-muted-foreground px-2">
+                  Exempt from the (pillar, format) uniqueness — can reuse the
+                  original&rsquo;s format.
+                </p>
+              )}
+            </div>
+          </PropertyRow>
+        </PropertyRowSolo>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Producer</Label>
+        <PropertyRowGroup>
+          <PropertyRow label="Producer">
             <Select
               value={producerUserId || ""}
               onValueChange={(v) => {
@@ -1549,7 +1583,13 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 void persistField({ producerUserId: v });
               }}
             >
-              <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
+              <SelectTrigger
+                aria-label="Producer"
+                className={cn(
+                  PROPERTY_TRIGGER_CLASS,
+                  "[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1"
+                )}
+              >
                 {producerUser ? (
                   <UserChip user={producerUser} />
                 ) : (
@@ -1564,9 +1604,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Editor</Label>
+          </PropertyRow>
+
+          <PropertyRow label="Editor">
             <Select
               value={editorUserId || ""}
               onValueChange={(v) => {
@@ -1575,7 +1615,13 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 void persistField({ editorUserId: v });
               }}
             >
-              <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
+              <SelectTrigger
+                aria-label="Editor"
+                className={cn(
+                  PROPERTY_TRIGGER_CLASS,
+                  "[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1"
+                )}
+              >
                 {editorUser ? (
                   <UserChip user={editorUser} />
                 ) : (
@@ -1590,25 +1636,39 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-        </div>
+          </PropertyRow>
+        </PropertyRowGroup>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Published Link</Label>
-            <Input
-              value={publishedLink}
-              onChange={(e) => setPublishedLink(e.target.value)}
-              onBlur={() => {
-                if ((item.publishedLink ?? "") !== publishedLink)
-                  void persistField({ publishedLink: publishedLink || null });
-              }}
-              placeholder="https://…"
-              disabled={isYouTube}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Published Date</Label>
+        <PropertyRowGroup>
+          <PropertyRow label="Published link">
+            <div className="flex items-center gap-1 min-w-0">
+              <Input
+                value={publishedLink}
+                onChange={(e) => setPublishedLink(e.target.value)}
+                onBlur={() => {
+                  if ((item.publishedLink ?? "") !== publishedLink)
+                    void persistField({ publishedLink: publishedLink || null });
+                }}
+                placeholder="https://…"
+                disabled={isYouTube}
+                aria-label="Published link"
+                className={cn(PROPERTY_INPUT_CLASS, "flex-1 min-w-0")}
+              />
+              {publishedLink && (
+                <a
+                  href={publishedLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 p-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  aria-label="Open published link"
+                >
+                  <ExternalLinkIcon className="h-3.5 w-3.5" />
+                </a>
+              )}
+            </div>
+          </PropertyRow>
+
+          <PropertyRow label="Published date">
             <Input
               type="date"
               value={publishedDate}
@@ -1619,33 +1679,38 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   void persistField({ publishedDate: next });
               }}
               disabled={isYouTube}
+              aria-label="Published date"
+              className={PROPERTY_INPUT_CLASS}
             />
-          </div>
-        </div>
+          </PropertyRow>
+        </PropertyRowGroup>
 
-        <div className="space-y-1.5">
-          <Label>CTA UTM Campaign</Label>
-          <Input
-            value={utmCampaign}
-            onChange={(e) => setUtmCampaign(e.target.value)}
-            onBlur={() => {
-              const next = utmCampaign.trim();
-              if ((item.utmCampaign ?? "") !== next) {
-                void persistField({ utmCampaign: next }).then((ok) => {
-                  if (!ok) setUtmCampaign(item.utmCampaign ?? "");
-                });
-              }
-            }}
-            className="font-mono text-sm"
-            placeholder="e.g. angus-warner-42"
-          />
-          <p className="text-[11px] text-muted-foreground">
-            Used for CTA tracking. Must be unique across all content.
-          </p>
-        </div>
+        <PropertyRowSolo>
+          <PropertyRow label="CTA UTM">
+            <Input
+              value={utmCampaign}
+              onChange={(e) => setUtmCampaign(e.target.value)}
+              onBlur={() => {
+                const next = utmCampaign.trim();
+                if ((item.utmCampaign ?? "") !== next) {
+                  void persistField({ utmCampaign: next }).then((ok) => {
+                    if (!ok) setUtmCampaign(item.utmCampaign ?? "");
+                  });
+                }
+              }}
+              aria-label="CTA UTM campaign"
+              className={cn(PROPERTY_INPUT_CLASS, "font-mono")}
+              placeholder="e.g. angus-warner-42"
+            />
+          </PropertyRow>
+        </PropertyRowSolo>
+
+        <p className="text-[11px] text-muted-foreground px-3 py-2 border-t border-border/60">
+          CTA UTM must be unique across all content.
+        </p>
 
         {deleteError && (
-          <div className="text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200">
+          <div className="text-sm px-3 py-2 bg-red-50 text-red-700 border-t border-red-200">
             {deleteError}
           </div>
         )}
@@ -1763,47 +1828,11 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           />
         )}
 
-      {(item.contentBody || item.description) && (
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <div className="px-4 sm:px-5 py-3 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">
-              Captured from upstream
-            </h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Pulled by the enrichment sweep
-              {item.enrichmentCompletedAt
-                ? ` ${formatRelative(item.enrichmentCompletedAt)}`
-                : ""}
-            </p>
-          </div>
-          <div className="px-4 sm:px-5 py-4 space-y-4">
-            {item.contentBody && (
-              <div>
-                <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
-                  Caption / body
-                </p>
-                <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
-                  {item.contentBody}
-                </p>
-              </div>
-            )}
-            {item.description && (
-              <div>
-                <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
-                  Description
-                </p>
-                <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
-                  {item.description}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
 
       {!isPrePublish && (
+      <>
+      {!hideDerivativeSections && (
       <>
       {/* Derivative content — same look/feel as Content Performance table */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -1969,6 +1998,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </table>
         </div>
       </div>
+      </>
+      )}
 
       <ClipIdeasPanel
         itemId={item.id}
@@ -2272,6 +2303,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
       )}
 
+      {!hideDerivativeSections && (
+      <>
       {/* Repurpose to format */}
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -2426,6 +2459,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           <span className="font-medium">Repurpose</span> creates the Notion task and, for clip-style skills, fires the Descript job. Click a format name to edit its skill.
         </p>
       </div>
+      </>
+      )}
 
       </>
       )}

@@ -31,6 +31,7 @@ interface PillarPickerProps {
   excludeId: string;
   value: PillarOption | null;
   onChange: (next: PillarOption | null) => void;
+  triggerClassName?: string;
 }
 
 export function PillarPicker({
@@ -38,6 +39,7 @@ export function PillarPicker({
   excludeId,
   value,
   onChange,
+  triggerClassName,
 }: PillarPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -79,7 +81,8 @@ export function PillarPicker({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           className={cn(
-            "flex-1 flex items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm text-left hover:bg-accent/50 transition-colors min-w-0"
+            "flex-1 flex items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm text-left hover:bg-accent/50 transition-colors min-w-0",
+            triggerClassName
           )}
         >
           {value ? (
