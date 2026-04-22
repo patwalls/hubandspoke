@@ -64,6 +64,8 @@ export interface ProductionItem {
   authorFollowerCount?: number | null;
   authorVerified?: boolean | null;
   enrichmentCompletedAt?: string | null;
+  enrichmentAttempts?: number | null;
+  enrichmentError?: string | null;
   predictedViewsSnapshot?: number | null;
   predictedViewsSnapshotAt?: string | null;
   prediction?: ViewPrediction | null;
