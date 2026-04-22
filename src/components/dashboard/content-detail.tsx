@@ -566,6 +566,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [format, setFormat] = useState("");
   const [formatPickerOpen, setFormatPickerOpen] = useState(false);
+  const [formatSearch, setFormatSearch] = useState("");
   const [status, setStatus] = useState("");
   const [pillar, setPillar] = useState<PillarOption | null>(null);
   const [producerUserId, setProducerUserId] = useState<string>("");
@@ -676,6 +677,48 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       }
     },
     [contentId, load]
+  );
+
+  const createFormatFromQuery = useCallback(
+    async (name: string) => {
+      try {
+        const res = await fetch("/api/formats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, brand }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          setSaveState({
+            kind: "error",
+            message: err.error || "Couldn't create format",
+          });
+          return;
+        }
+        const created = (await res.json()) as BrandFormat;
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                formatNames: [...prev.formatNames, created.name].sort((a, b) =>
+                  a.localeCompare(b)
+                ),
+                formats: [...prev.formats, created],
+              }
+            : prev
+        );
+        setFormat(created.name);
+        setFormatPickerOpen(false);
+        setFormatSearch("");
+        void persistField({ format: created.name });
+      } catch (e) {
+        setSaveState({
+          kind: "error",
+          message: e instanceof Error ? e.message : "Couldn't create format",
+        });
+      }
+    },
+    [brand, persistField]
   );
 
   const handleSync = useCallback(async () => {
@@ -1292,57 +1335,93 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             </Select>
           </div>
 
-          {brandFormats.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Format</Label>
-              <Popover open={formatPickerOpen} onOpenChange={setFormatPickerOpen}>
-                <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
-                  {format ? (
-                    <span className="truncate">{format}</span>
-                  ) : (
-                    <span className="text-muted-foreground">Select format…</span>
-                  )}
-                  <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-                </PopoverTrigger>
-                <PopoverContent className="w-96 p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search formats…" />
-                    <CommandList>
-                      <CommandEmpty>No matching format.</CommandEmpty>
-                      <CommandGroup>
-                        {format && (
-                          <CommandItem
-                            onSelect={() => {
-                              setFormat("");
-                              void persistField({ format: null });
-                              setFormatPickerOpen(false);
-                            }}
-                            className="text-muted-foreground"
-                          >
-                            <span className="text-sm">Clear selection</span>
-                          </CommandItem>
-                        )}
-                        {brandFormats.map((f) => (
-                          <CommandItem
-                            key={f}
-                            value={f}
-                            onSelect={() => {
-                              setFormat(f);
-                              void persistField({ format: f });
-                              setFormatPickerOpen(false);
-                            }}
-                            data-checked={format === f ? "true" : undefined}
-                          >
-                            <span className="text-sm">{f}</span>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-          )}
+          <div className="space-y-1.5">
+            <Label>Format</Label>
+            <Popover
+              open={formatPickerOpen}
+              onOpenChange={(open) => {
+                setFormatPickerOpen(open);
+                if (!open) setFormatSearch("");
+              }}
+            >
+              <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+                {format ? (
+                  <span className="truncate">{format}</span>
+                ) : (
+                  <span className="text-muted-foreground">Select format…</span>
+                )}
+                <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+              </PopoverTrigger>
+              <PopoverContent className="w-96 p-0" align="start">
+                <Command>
+                  <CommandInput
+                    placeholder="Search or create format…"
+                    value={formatSearch}
+                    onValueChange={setFormatSearch}
+                  />
+                  <CommandList>
+                    {(() => {
+                      const trimmed = formatSearch.trim();
+                      const exactMatch = brandFormats.some(
+                        (f) => f.toLowerCase() === trimmed.toLowerCase()
+                      );
+                      const showCreate = trimmed.length > 0 && !exactMatch;
+                      return (
+                        <>
+                          {!showCreate && (
+                            <CommandEmpty>No matching format.</CommandEmpty>
+                          )}
+                          {brandFormats.length > 0 && (
+                            <CommandGroup>
+                              {format && (
+                                <CommandItem
+                                  onSelect={() => {
+                                    setFormat("");
+                                    void persistField({ format: null });
+                                    setFormatPickerOpen(false);
+                                  }}
+                                  className="text-muted-foreground"
+                                >
+                                  <span className="text-sm">Clear selection</span>
+                                </CommandItem>
+                              )}
+                              {brandFormats.map((f) => (
+                                <CommandItem
+                                  key={f}
+                                  value={f}
+                                  onSelect={() => {
+                                    setFormat(f);
+                                    void persistField({ format: f });
+                                    setFormatPickerOpen(false);
+                                  }}
+                                  data-checked={format === f ? "true" : undefined}
+                                >
+                                  <span className="text-sm">{f}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          )}
+                          {showCreate && (
+                            <CommandGroup heading="Actions" forceMount>
+                              <CommandItem
+                                value={`__create__ ${trimmed}`}
+                                onSelect={() => void createFormatFromQuery(trimmed)}
+                                forceMount
+                              >
+                                <span className="text-sm">
+                                  Create <span className="font-medium">&ldquo;{trimmed}&rdquo;</span>
+                                </span>
+                              </CommandItem>
+                            </CommandGroup>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
