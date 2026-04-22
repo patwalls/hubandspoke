@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, RefreshCwIcon, TrendingUpIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -245,7 +246,20 @@ function PropertyRow({
   );
 }
 
-function PropertyRowGroup({ children }: { children: React.ReactNode }) {
+function PropertyRowGroup({
+  children,
+  single = false,
+}: {
+  children: React.ReactNode;
+  single?: boolean;
+}) {
+  if (single) {
+    return (
+      <div className="divide-y divide-border/60 border-b border-border/60 last:border-b-0">
+        {children}
+      </div>
+    );
+  }
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 md:divide-x md:divide-border/60 border-b border-border/60 last:border-b-0">
       {children}
@@ -701,17 +715,18 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         // "Reposted from" source card. That card reads from data.repostedFrom
         // which only the GET endpoint computes — refetch to surface it.
         if ("sourceType" in patch) void load();
-        setSaveState(
-          payload.notionSyncWarning
-            ? { kind: "error", message: `Saved. Notion: ${payload.notionSyncWarning}` }
-            : { kind: "saved" }
-        );
+        if (payload.notionSyncWarning) {
+          const message = `Saved. Notion: ${payload.notionSyncWarning}`;
+          setSaveState({ kind: "error", message });
+          toast.warning(message);
+        } else {
+          setSaveState({ kind: "saved" });
+        }
         return true;
       } catch (e) {
-        setSaveState({
-          kind: "error",
-          message: e instanceof Error ? e.message : "Save failed",
-        });
+        const message = e instanceof Error ? e.message : "Save failed";
+        setSaveState({ kind: "error", message });
+        toast.error(message);
         return false;
       }
     },
@@ -728,10 +743,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          setSaveState({
-            kind: "error",
-            message: err.error || "Couldn't create format",
-          });
+          const message = err.error || "Couldn't create format";
+          setSaveState({ kind: "error", message });
+          toast.error(message);
           return;
         }
         const created = (await res.json()) as BrandFormat;
@@ -751,10 +765,9 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         setFormatSearch("");
         void persistField({ format: created.name });
       } catch (e) {
-        setSaveState({
-          kind: "error",
-          message: e instanceof Error ? e.message : "Couldn't create format",
-        });
+        const message = e instanceof Error ? e.message : "Couldn't create format";
+        setSaveState({ kind: "error", message });
+        toast.error(message);
       }
     },
     [brand, persistField]
@@ -1344,24 +1357,11 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         }
       >
       <div className="rounded-lg border border-border bg-card overflow-hidden">
-        {(isYouTube || saveState.kind !== "idle") && (
-          <div className="flex items-center justify-end gap-2 px-3 py-1.5 border-b border-border/60 min-h-[26px]">
-            {isYouTube && (
-              <span className="text-[11px] text-muted-foreground">
-                Auto-synced from YouTube — fields are read-only.
-              </span>
-            )}
-            {saveState.kind === "saving" && (
-              <span className="text-[11px] text-muted-foreground">Saving…</span>
-            )}
-            {saveState.kind === "saved" && (
-              <span className="text-[11px] text-green-600">Saved</span>
-            )}
-            {saveState.kind === "error" && (
-              <span className="text-[11px] text-red-600" title={saveState.message}>
-                {saveState.message}
-              </span>
-            )}
+        {isYouTube && (
+          <div className="flex items-center justify-end gap-2 px-3 py-1.5 border-b border-border/60">
+            <span className="text-[11px] text-muted-foreground">
+              Auto-synced from YouTube — fields are read-only.
+            </span>
           </div>
         )}
 
@@ -1379,7 +1379,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           />
         </div>
 
-        <PropertyRowGroup>
+        <PropertyRowGroup single={isPrePublish}>
           <PropertyRow label="Platform">
             <Select
               value={platforms[0] || ""}
@@ -1494,7 +1494,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </PropertyRow>
         </PropertyRowGroup>
 
-        <PropertyRowGroup>
+        <PropertyRowGroup single={isPrePublish}>
           <PropertyRow label="Status">
             <Select
               value={status}
@@ -1573,7 +1573,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </PropertyRow>
         </PropertyRowSolo>
 
-        <PropertyRowGroup>
+        <PropertyRowGroup single={isPrePublish}>
           <PropertyRow label="Producer">
             <Select
               value={producerUserId || ""}
@@ -1639,7 +1639,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           </PropertyRow>
         </PropertyRowGroup>
 
-        <PropertyRowGroup>
+        <PropertyRowGroup single={isPrePublish}>
           <PropertyRow label="Published link">
             <div className="flex items-center gap-1 min-w-0">
               <Input
@@ -1704,10 +1704,6 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             />
           </PropertyRow>
         </PropertyRowSolo>
-
-        <p className="text-[11px] text-muted-foreground px-3 py-2 border-t border-border/60">
-          CTA UTM must be unique across all content.
-        </p>
 
         {deleteError && (
           <div className="text-sm px-3 py-2 bg-red-50 text-red-700 border-t border-red-200">

@@ -145,6 +145,7 @@ function CommentBody({ body }: { body: string }) {
 export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityProps) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
@@ -170,7 +171,10 @@ export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityPr
         if (!cancelled)
           setError(e instanceof Error ? e.message : "Failed to load activity");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setHasLoaded(true);
+        }
       }
     })();
     return () => {
@@ -279,7 +283,7 @@ export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityPr
       )}
 
       <div className="space-y-4">
-        {loading ? (
+        {loading && !hasLoaded ? (
           <p className="text-sm text-muted-foreground">Loading activity…</p>
         ) : items.length === 0 ? (
           <p className="text-sm text-muted-foreground">
