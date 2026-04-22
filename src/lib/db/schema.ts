@@ -125,6 +125,16 @@ export const productionItems = pgTable(
       withTimezone: true,
     }),
     evergreenReasoning: text("evergreen_reasoning"),
+    // Cached verdict from the cross-post-fit classifier. Populated once per
+    // original item when the cross-post scanner first considers it (given a
+    // non-empty contentBody). null = not yet evaluated; true/false = AI
+    // verdict. Bad-fit items are skipped by the scanner on subsequent runs
+    // without re-calling the model.
+    crossPostFitGood: boolean("cross_post_fit_good"),
+    crossPostFitCheckedAt: timestamp("cross_post_fit_checked_at", {
+      withTimezone: true,
+    }),
+    crossPostFitReasoning: text("cross_post_fit_reasoning"),
     // Predicted views at the moment this item transitioned to "Published".
     // Written once on the first published-transition and never overwritten —
     // lets the detail page show actual-vs-predicted after the fact.

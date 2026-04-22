@@ -1,9 +1,10 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { crossPostRules, productionItems } from "@/lib/db/schema";
+import { crossPostRules, productionItems, syncLogs } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { classifyCrossPostFit } from "@/lib/services/cross-post-fit-classifier";
 
 // Cap flood risk: only consider items published within the last N days on the
 // first pass. Older evergreen content rides the existing repost queue. Tunable.
@@ -14,6 +15,8 @@ export interface CrossPostScanResult {
   candidatesConsidered: number;
   suggestionsCreated: number;
   skippedExisting: number;
+  skippedByLlm: number;
+  classifiedThisRun: number;
   suggestionsDetails: Array<{
     ruleId: string;
     sourceItemId: string;
@@ -38,6 +41,8 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
     candidatesConsidered: 0,
     suggestionsCreated: 0,
     skippedExisting: 0,
+    skippedByLlm: 0,
+    classifiedThisRun: 0,
     suggestionsDetails: [],
   };
 
@@ -65,6 +70,9 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
         format: productionItems.format,
         pillarContentNotionId: productionItems.pillarContentNotionId,
         pillarContentItemId: productionItems.pillarContentItemId,
+        contentBody: productionItems.contentBody,
+        crossPostFitGood: productionItems.crossPostFitGood,
+        crossPostFitCheckedAt: productionItems.crossPostFitCheckedAt,
       })
       .from(productionItems)
       .where(
@@ -114,6 +122,61 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
       if (isNotionAuthoritative([rule.targetPlatform])) {
         result.skippedExisting++;
         continue;
+      }
+
+      // LLM fit gate. Classify each source item exactly once — cached verdict
+      // lives on the row and is reused on subsequent scans. Skip the model
+      // call entirely when contentBody is empty (scanner falls back to the
+      // view-threshold heuristic). On model/API errors we fail open and
+      // don't cache, so a transient failure gets retried next run.
+      if (candidate.crossPostFitGood === false) {
+        result.skippedByLlm++;
+        continue;
+      }
+
+      if (
+        candidate.crossPostFitCheckedAt === null &&
+        candidate.contentBody !== null &&
+        candidate.contentBody.trim().length > 0
+      ) {
+        const verdict = await classifyCrossPostFit({
+          title: candidate.title,
+          contentBody: candidate.contentBody,
+          sourcePlatform: rule.sourcePlatform,
+          publishedDate: candidate.publishedDate,
+          format: candidate.format,
+          brand: candidate.brand,
+        });
+
+        if (!verdict.isFallback) {
+          const now = new Date();
+          await db
+            .update(productionItems)
+            .set({
+              crossPostFitGood: verdict.isGoodFit,
+              crossPostFitReasoning: verdict.reasoning,
+              crossPostFitCheckedAt: now,
+              updatedAt: now,
+            })
+            .where(eq(productionItems.id, candidate.id));
+
+          result.classifiedThisRun++;
+
+          await db.insert(syncLogs).values({
+            syncType: "cross-post-scan",
+            status: "success",
+            errorMessage: `classified item=${candidate.id} verdict=${
+              verdict.isGoodFit ? "good" : "bad"
+            } target=${rule.targetPlatform} reason=${verdict.reasoning}`,
+            startedAt: now,
+            completedAt: now,
+          });
+        }
+
+        if (!verdict.isGoodFit) {
+          result.skippedByLlm++;
+          continue;
+        }
       }
 
       const assignees = await resolveAssignees({

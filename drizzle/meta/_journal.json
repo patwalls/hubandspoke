@@ -169,6 +169,13 @@
       "when": 1776812859087,
       "tag": "0023_fantastic_golden_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1776815971625,
+      "tag": "0024_uneven_the_phantom",
+      "breakpoints": true
     }
   ]
 }
