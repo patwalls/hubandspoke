@@ -11,13 +11,7 @@ interface ProductionPipelineTableProps {
   brand: string;
 }
 
-type SortKey =
-  | "producer"
-  | "editor"
-  | "channel"
-  | "content"
-  | "format"
-  | "views";
+type SortKey = "editor" | "channel" | "content" | "format" | "views";
 type SortDir = "asc" | "desc";
 
 function formatCompact(n: number | null | undefined): string {
@@ -184,12 +178,6 @@ export function ProductionPipelineTable({
     const dir = sortDir === "asc" ? 1 : -1;
     const keyFn = (item: ProductionItem): string | number | null => {
       switch (sortKey) {
-        case "producer":
-          return (
-            item.producerName?.toLowerCase() ??
-            item.producerEmail?.toLowerCase() ??
-            null
-          );
         case "editor":
           return (
             item.editorName?.toLowerCase() ??
@@ -234,21 +222,12 @@ export function ProductionPipelineTable({
           <colgroup>
             <col className="w-[160px]" />
             <col className="w-[160px]" />
-            <col className="w-[160px]" />
             <col />
             <col className="w-[220px]" />
             <col className="w-[100px]" />
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-accent/50">
-              <SortableHeader
-                label="Producer"
-                sortKey="producer"
-                activeKey={sortKey}
-                direction={sortDir}
-                onSort={toggleSort}
-                className="whitespace-nowrap"
-              />
               <SortableHeader
                 label="Editor"
                 sortKey="editor"
@@ -292,35 +271,13 @@ export function ProductionPipelineTable({
           </thead>
           <tbody>
             {sortedItems.map((item) => {
-              const producer = personDisplay(item.producerName, item.producerEmail);
               const editor = personDisplay(item.editorName, item.editorEmail);
-              const producerColor = avatarColor(producer.seed || item.id);
               const editorColor = avatarColor(editor.seed || item.id);
               return (
                 <tr
                   key={item.id}
                   className="border-b border-border/50 hover:bg-accent/30 transition-colors"
                 >
-                  <td className="px-3 py-2">
-                    {item.producerName || item.producerEmail ? (
-                      <div className="flex items-center gap-2 min-w-0">
-                        <PersonAvatar
-                          avatarUrl={item.producerAvatarUrl}
-                          initials={producer.initials}
-                          colorClass={producerColor}
-                          name={producer.name}
-                        />
-                        <span
-                          className="text-sm text-foreground truncate"
-                          title={producer.name}
-                        >
-                          {producer.name}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-muted-foreground">—</span>
-                    )}
-                  </td>
                   <td className="px-3 py-2">
                     {item.editorName || item.editorEmail ? (
                       <div className="flex items-center gap-2 min-w-0">
