@@ -3,8 +3,8 @@ import { and, asc, desc, eq, ilike, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, productionItems } from "@/lib/db/schema";
 
-const CONTENT_LIMIT = 8;
-const FORMAT_LIMIT = 5;
+const CONTENT_LIMIT = 12;
+const FORMAT_LIMIT = 8;
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;

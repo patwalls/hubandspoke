@@ -17,7 +17,10 @@ import {
   FileText,
   LayoutGrid,
   Sparkles,
+  Loader2,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { platformClass, statusClass } from "@/lib/badge-colors";
 import {
   recordVisit,
   useFrequent,
@@ -47,13 +50,29 @@ type SearchResponse = {
 
 const EMPTY: SearchResponse = { content: [], formats: [] };
 
-const QUICK_NAV = [
-  { slug: "", label: "Dashboard" },
-  { slug: "content", label: "Content" },
-  { slug: "production", label: "Production" },
-  { slug: "queue", label: "Queue" },
-  { slug: "formats", label: "Formats" },
-] as const;
+type NavEntry = { slug: string; label: string; href: (brand: string) => string };
+
+const QUICK_NAV: NavEntry[] = [
+  { slug: "", label: "Dashboard", href: (b) => `/${b}` },
+  { slug: "content", label: "Content", href: (b) => `/${b}/content` },
+  { slug: "production", label: "Production", href: (b) => `/${b}/production` },
+  { slug: "queue", label: "Queue", href: (b) => `/${b}/queue` },
+  { slug: "formats", label: "Formats", href: (b) => `/${b}/formats` },
+  { slug: "my-work", label: "My Work", href: () => `/my-work` },
+  { slug: "settings", label: "Settings", href: () => `/settings` },
+];
+
+function formatShortDate(d: string | null): string | null {
+  if (!d) return null;
+  const date = new Date(d + "T00:00:00");
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year:
+      date.getFullYear() === new Date().getFullYear() ? undefined : "2-digit",
+  });
+}
 
 export function GlobalSearch({
   open,
@@ -68,8 +87,8 @@ export function GlobalSearch({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResponse>(EMPTY);
   const [loading, setLoading] = useState(false);
-  const recents = useRecents(brand);
-  const frequent = useFrequent(brand);
+  const recents = useRecents(brand, 6);
+  const frequent = useFrequent(brand, 6);
 
   const trimmed = query.trim();
   const abortRef = useRef<AbortController | null>(null);
@@ -119,15 +138,18 @@ export function GlobalSearch({
     handleOpenChange(false);
   }
 
-  function contentHref(id: string) {
-    return `/${brand}/content/${id}`;
-  }
-  function formatHref(id: string) {
-    return `/${brand}/formats/${id}`;
+  function navigate(href: string) {
+    router.push(href);
+    handleOpenChange(false);
   }
 
   const showEmptyState = !trimmed;
   const hasResults = results.content.length > 0 || results.formats.length > 0;
+  const navMatches = trimmed
+    ? QUICK_NAV.filter((entry) =>
+        entry.label.toLowerCase().includes(trimmed.toLowerCase()),
+      )
+    : [];
 
   return (
     <CommandDialog
@@ -135,6 +157,7 @@ export function GlobalSearch({
       onOpenChange={handleOpenChange}
       title="Global search"
       description="Search content, formats, and navigate anywhere."
+      className="sm:max-w-2xl!"
     >
       <Command shouldFilter={false} loop>
         <CommandInput
@@ -143,30 +166,49 @@ export function GlobalSearch({
           onValueChange={setQuery}
           autoFocus
         />
-        <CommandList>
+        <CommandList className="max-h-[440px]!">
           {showEmptyState ? (
             <EmptyStateGroups
               brand={brand}
               recents={recents}
               frequent={frequent}
               onSelect={handleSelect}
-              onNavigate={(href) => {
-                router.push(href);
-                handleOpenChange(false);
-              }}
+              onNavigate={navigate}
             />
           ) : (
             <>
-              {!loading && !hasResults && (
+              {loading && !hasResults && (
+                <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Searching…
+                </div>
+              )}
+              {!loading && !hasResults && navMatches.length === 0 && (
                 <CommandEmpty>No results for &ldquo;{trimmed}&rdquo;</CommandEmpty>
               )}
+              {navMatches.length > 0 && (
+                <CommandGroup heading="Navigate">
+                  {navMatches.map((entry) => {
+                    const href = entry.href(brand);
+                    return (
+                      <CommandItem
+                        key={`nav-match-${entry.slug || "root"}`}
+                        value={`nav-match-${entry.slug || "root"}`}
+                        onSelect={() => navigate(href)}
+                      >
+                        <Compass className="text-muted-foreground" />
+                        <RowBody title={entry.label} meta={href} />
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              )}
               {results.content.length > 0 && (
-                <CommandGroup heading="Content">
+                <CommandGroup
+                  heading={`Content${loading ? " · updating…" : ""}`}
+                >
                   {results.content.map((hit) => {
                     const title = hit.title ?? "(untitled)";
-                    const subtitle = [hit.format, hit.platform?.join(" · ")]
-                      .filter(Boolean)
-                      .join(" · ");
                     return (
                       <CommandItem
                         key={`content-${hit.id}`}
@@ -176,14 +218,16 @@ export function GlobalSearch({
                             kind: "content",
                             id: hit.id,
                             title,
-                            subtitle: subtitle || undefined,
+                            subtitle: [hit.format, hit.platform?.[0]]
+                              .filter(Boolean)
+                              .join(" · ") || undefined,
                             brand,
-                            href: contentHref(hit.id),
+                            href: `/${brand}/content/${hit.id}`,
                           })
                         }
                       >
                         <FileText className="text-muted-foreground" />
-                        <ItemLines title={title} subtitle={subtitle} />
+                        <ContentRow hit={hit} title={title} />
                       </CommandItem>
                     );
                   })}
@@ -191,28 +235,25 @@ export function GlobalSearch({
               )}
               {results.formats.length > 0 && (
                 <CommandGroup heading="Formats">
-                  {results.formats.map((hit) => {
-                    const subtitle = hit.channels?.join(" · ") ?? undefined;
-                    return (
-                      <CommandItem
-                        key={`format-${hit.id}`}
-                        value={`format-${hit.id}-${hit.name}`}
-                        onSelect={() =>
-                          handleSelect({
-                            kind: "format",
-                            id: hit.id,
-                            title: hit.name,
-                            subtitle,
-                            brand,
-                            href: formatHref(hit.id),
-                          })
-                        }
-                      >
-                        <LayoutGrid className="text-muted-foreground" />
-                        <ItemLines title={hit.name} subtitle={subtitle} />
-                      </CommandItem>
-                    );
-                  })}
+                  {results.formats.map((hit) => (
+                    <CommandItem
+                      key={`format-${hit.id}`}
+                      value={`format-${hit.id}-${hit.name}`}
+                      onSelect={() =>
+                        handleSelect({
+                          kind: "format",
+                          id: hit.id,
+                          title: hit.name,
+                          subtitle: hit.channels?.join(" · ") || undefined,
+                          brand,
+                          href: `/${brand}/formats/${hit.id}`,
+                        })
+                      }
+                    >
+                      <LayoutGrid className="text-muted-foreground" />
+                      <FormatRow hit={hit} />
+                    </CommandItem>
+                  ))}
                 </CommandGroup>
               )}
             </>
@@ -255,8 +296,21 @@ function EmptyStateGroups({
                 })
               }
             >
-              <Clock className="text-muted-foreground" />
-              <ItemLines title={item.title} subtitle={item.subtitle} />
+              {item.kind === "content" ? (
+                <FileText className="text-muted-foreground" />
+              ) : (
+                <LayoutGrid className="text-muted-foreground" />
+              )}
+              <RowBody
+                title={item.title}
+                meta={item.subtitle}
+                right={
+                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Clock className="size-3" />
+                    {relativeTime(item.lastVisitedAt)}
+                  </span>
+                }
+              />
             </CommandItem>
           ))}
         </CommandGroup>
@@ -279,14 +333,22 @@ function EmptyStateGroups({
               }
             >
               <Sparkles className="text-muted-foreground" />
-              <ItemLines title={item.title} subtitle={item.subtitle} />
+              <RowBody
+                title={item.title}
+                meta={item.subtitle}
+                right={
+                  <span className="text-[11px] text-muted-foreground">
+                    {item.visitCount} visit{item.visitCount === 1 ? "" : "s"}
+                  </span>
+                }
+              />
             </CommandItem>
           ))}
         </CommandGroup>
       )}
       <CommandGroup heading="Jump to…">
         {QUICK_NAV.map((entry) => {
-          const href = entry.slug ? `/${brand}/${entry.slug}` : `/${brand}`;
+          const href = entry.href(brand);
           return (
             <CommandItem
               key={`nav-${entry.slug || "root"}`}
@@ -294,37 +356,128 @@ function EmptyStateGroups({
               onSelect={() => onNavigate(href)}
             >
               <Compass className="text-muted-foreground" />
-              <ItemLines title={entry.label} subtitle={href} />
+              <RowBody title={entry.label} meta={href} />
             </CommandItem>
           );
         })}
-        <CommandItem
-          value="nav-settings"
-          onSelect={() => onNavigate("/settings")}
-        >
-          <Compass className="text-muted-foreground" />
-          <ItemLines title="Settings" subtitle="/settings" />
-        </CommandItem>
       </CommandGroup>
     </>
   );
 }
 
-function ItemLines({
-  title,
-  subtitle,
-}: {
-  title: string;
-  subtitle?: string;
-}) {
+function ContentRow({ hit, title }: { hit: ContentHit; title: string }) {
+  const platforms = hit.platform ?? [];
+  const date = formatShortDate(hit.publishedDate);
   return (
-    <div className="flex min-w-0 flex-col">
-      <span className="truncate">{title}</span>
-      {subtitle ? (
-        <span className="truncate text-xs text-muted-foreground">
-          {subtitle}
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm">{title}</span>
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+          {hit.status ? (
+            <span
+              className={cn(
+                "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none",
+                statusClass(hit.status),
+              )}
+            >
+              {hit.status}
+            </span>
+          ) : null}
+          {hit.format ? (
+            <span className="shrink-0 truncate text-[11px] text-muted-foreground">
+              {hit.format}
+            </span>
+          ) : null}
+          {platforms.slice(0, 2).map((p) => (
+            <span
+              key={p}
+              className={cn(
+                "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none",
+                platformClass(p),
+              )}
+            >
+              {p}
+            </span>
+          ))}
+          {platforms.length > 2 ? (
+            <span className="shrink-0 text-[10px] text-muted-foreground">
+              +{platforms.length - 2}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {date ? (
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {date}
         </span>
       ) : null}
     </div>
   );
+}
+
+function FormatRow({ hit }: { hit: FormatHit }) {
+  const channels = hit.channels ?? [];
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm">{hit.name}</span>
+        {channels.length > 0 ? (
+          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+            {channels.slice(0, 4).map((c) => (
+              <span
+                key={c}
+                className="shrink-0 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
+              >
+                {c}
+              </span>
+            ))}
+            {channels.length > 4 ? (
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                +{channels.length - 4}
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <span className="text-[11px] text-muted-foreground">No channels</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RowBody({
+  title,
+  meta,
+  right,
+}: {
+  title: string;
+  meta?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm">{title}</span>
+        {meta ? (
+          <span className="truncate text-[11px] text-muted-foreground">
+            {meta}
+          </span>
+        ) : null}
+      </div>
+      {right ? <div className="shrink-0">{right}</div> : null}
+    </div>
+  );
+}
+
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.floor(day / 30);
+  return `${mo}mo ago`;
 }
