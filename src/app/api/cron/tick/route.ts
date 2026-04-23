@@ -19,6 +19,7 @@ const SCHEDULED_TASK_NAMES: ReadonlyArray<keyof TaskPayloads> = [
   "performance-decay",
   "notion-sync",
   "enrichment-sweep",
+  "hook-dispatch-sweep",
   "matg-sync",
   "evergreen-scan",
   "cross-post-scan",

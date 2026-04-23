@@ -9,9 +9,7 @@ export const CRONTAB = `
 15 * * * * threshold-monitor-sweep
 30 * * * * notion-sync
 20 * * * * enrichment-sweep
-40 * * * * hook-extract-sweep
-50 * * * * hook-fallback-sweep
-55 * * * * vision-extract-sweep
+40 * * * * hook-dispatch-sweep
 0 13 * * * matg-sync
 0 15 * * * evergreen-scan
 0 16 * * * cross-post-scan

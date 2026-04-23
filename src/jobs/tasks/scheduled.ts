@@ -13,6 +13,7 @@ import { selectEnrichmentCandidates } from "@/lib/services/enrichment/orchestrat
 import { selectHookCandidates } from "@/lib/services/hook-extract/orchestrator";
 import { selectHookFallbackCandidates } from "@/lib/services/hook-extract/fallback";
 import { selectVisionCandidates } from "@/lib/services/hook-extract/vision";
+import { selectDispatcherCandidates } from "@/lib/services/hook-extract/dispatcher";
 import { db } from "@/lib/db";
 import { accounts } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
@@ -20,6 +21,7 @@ import type { EnrichItemPayload } from "./enrich-item";
 import type { ExtractHookPayload } from "./extract-hook";
 import type { HookFallbackPayload } from "./hook-fallback";
 import type { VisionExtractPayload } from "./vision-extract";
+import type { HookDispatchPayload } from "./hook-dispatch";
 import type { AccountRefreshPayload } from "./account-refresh";
 
 function timed(name: string, fn: () => Promise<unknown>): Task {
@@ -129,6 +131,29 @@ export const visionExtractSweepTask: Task = async (_payload, helpers) => {
   }
   helpers.logger.info(
     `vision-extract-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
+  );
+};
+/**
+ * Cron parent task: unified hook dispatcher. One Haiku call per item sees
+ * every signal (title, caption, transcript opener, poster image) and picks
+ * the best hook with source reasoning. Replaces the old three-sweep setup
+ * (`hook-extract-sweep`, `hook-fallback-sweep`, `vision-extract-sweep`).
+ * Gated on `hook_extracted_at IS NULL` and never overwrites clip_idea /
+ * manual sources. Cost ~$0.001/item.
+ */
+export const hookDispatchSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("hook-dispatch-sweep start");
+  const candidates = await selectDispatcherCandidates();
+  for (const productionItemId of candidates) {
+    const payload: HookDispatchPayload = { productionItemId };
+    await helpers.addJob("hook-dispatch", payload as never, {
+      jobKey: `hook-dispatch-${productionItemId}`,
+      jobKeyMode: "unsafe_dedupe",
+    });
+  }
+  helpers.logger.info(
+    `hook-dispatch-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
   );
 };
 export const matgSyncTask: Task = timed("matg-sync", () => syncAllMATG());

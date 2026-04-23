@@ -236,10 +236,10 @@ export default async function CoveragePage() {
 
       <p className="text-xs text-muted-foreground">
         Signals update on their own schedules: enrichment sweep fires at :20
-        past the hour, hook-extract (LLM, short-form w/ transcript) at :40,
-        hook-fallback (title / body for the rest) at :50, vision (Haiku
-        reading the cover image) at :55, performance decay is continuous,
-        transcripts publish via Descript on demand.
+        past the hour, the hook dispatcher (one Haiku call per item that
+        picks the best hook across overlay/transcript/caption/title) at :40,
+        performance decay is continuous, transcripts publish via Descript on
+        demand.
       </p>
     </div>
   );

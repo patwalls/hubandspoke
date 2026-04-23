@@ -30,6 +30,7 @@ import { enrichItemTask, type EnrichItemPayload } from "./enrich-item";
 import { extractHookTask, type ExtractHookPayload } from "./extract-hook";
 import { hookFallbackTask, type HookFallbackPayload } from "./hook-fallback";
 import { visionExtractTask, type VisionExtractPayload } from "./vision-extract";
+import { hookDispatchTask, type HookDispatchPayload } from "./hook-dispatch";
 import {
   youtubeDownloadTask,
   type YoutubeDownloadPayload,
@@ -46,6 +47,7 @@ import {
   hookExtractSweepTask,
   hookFallbackSweepTask,
   visionExtractSweepTask,
+  hookDispatchSweepTask,
   matgSyncTask,
   evergreenScanTask,
   crossPostScanTask,
@@ -64,6 +66,7 @@ export interface TaskPayloads {
   "extract-hook": ExtractHookPayload;
   "hook-fallback": HookFallbackPayload;
   "vision-extract": VisionExtractPayload;
+  "hook-dispatch": HookDispatchPayload;
   "youtube-download": YoutubeDownloadPayload;
   "account-refresh": AccountRefreshPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
@@ -73,6 +76,7 @@ export interface TaskPayloads {
   "hook-extract-sweep": Record<string, never>;
   "hook-fallback-sweep": Record<string, never>;
   "vision-extract-sweep": Record<string, never>;
+  "hook-dispatch-sweep": Record<string, never>;
   "matg-sync": Record<string, never>;
   "evergreen-scan": Record<string, never>;
   "cross-post-scan": Record<string, never>;
@@ -97,6 +101,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "extract-hook": extractHookTask,
   "hook-fallback": hookFallbackTask,
   "vision-extract": visionExtractTask,
+  "hook-dispatch": hookDispatchTask,
   "youtube-download": youtubeDownloadTask,
   "account-refresh": accountRefreshTask,
   "performance-decay": performanceDecayTask,
@@ -105,6 +110,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "hook-extract-sweep": hookExtractSweepTask,
   "hook-fallback-sweep": hookFallbackSweepTask,
   "vision-extract-sweep": visionExtractSweepTask,
+  "hook-dispatch-sweep": hookDispatchSweepTask,
   "matg-sync": matgSyncTask,
   "evergreen-scan": evergreenScanTask,
   "cross-post-scan": crossPostScanTask,
