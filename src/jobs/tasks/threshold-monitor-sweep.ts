@@ -114,6 +114,8 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
           });
 
           // Create the repurposed production item
+          // Note: accountId is intentionally not set — creators should assign
+          // the appropriate account based on the target format and their needs.
           const [created] = await db
             .insert(productionItems)
             .values({
@@ -127,6 +129,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
               producerUserId: assignees.producerUserId,
               editorUserId: assignees.editorUserId,
               utmCampaign: await generateUtmCampaign(item.title),
+              // accountId: null — left unassigned for manual assignment
             })
             .returning({ id: productionItems.id });
 
