@@ -10,9 +10,14 @@
 // inbound `comment_text` before matching). Same function on both sides means
 // case/whitespace differences never silently miss.
 
-export type ManychatLookupResponse =
-  | { found: true; link: string; post_title: string }
-  | { found: false; link: ""; post_title: "" };
+// Response sent back to ManyChat's External Request action. `found` is a
+// "Yes" | "No" string (not a boolean) because the receiving Custom Field is
+// text-typed in ManyChat — the Condition step compares it via string equality.
+export type ManychatLookupResponse = {
+  found: "Yes" | "No";
+  link: string;
+  post_title: string;
+};
 
 /**
  * Normalize a ManyChat keyword for storage and lookup.

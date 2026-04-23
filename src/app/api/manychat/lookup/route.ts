@@ -10,7 +10,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const NOT_FOUND: ManychatLookupResponse = {
-  found: false,
+  found: "No",
   link: "",
   post_title: "",
 };
@@ -23,9 +23,10 @@ const NOT_FOUND: ManychatLookupResponse = {
  *
  * Headers:  x-manychat-secret: $MANYCHAT_WEBHOOK_SECRET
  * Body:     { "comment_text": "<the IG comment>" }
- * Response: { found, link, post_title } — always 2xx with `found:false` on a
- *           miss so ManyChat continues the flow (its branch reads `found`).
- *           401 only on bad/missing secret.
+ * Response: { found: "Yes"|"No", link, post_title } — always 2xx with
+ *           `found:"No"` on a miss so ManyChat continues the flow (its
+ *           branch reads `found` via string equality against text Custom
+ *           Field). 401 only on bad/missing secret.
  *
  * Matching logic: we normalize both the stored keyword and the inbound comment
  * text (lowercase + collapse whitespace), then try exact match, then a
@@ -50,10 +51,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     commentText = typeof body?.comment_text === "string" ? body.comment_text : "";
   } catch {
+    console.log("[manychat/lookup] body parse failed");
     return NextResponse.json(NOT_FOUND);
   }
 
   const normalized = normalizeKeyword(commentText);
+  // One-line log per request — kept for now to settle whether the IG comment
+  // text actually arrives in `comment_text` (vs the writeup's claim that
+  // ManyChat's Last Text Input only carries DM/Story replies). Strip after a
+  // few real interactions confirm.
+  console.log(
+    `[manychat/lookup] comment_text=${JSON.stringify(commentText)} normalized=${JSON.stringify(normalized)}`
+  );
   if (!normalized) return NextResponse.json(NOT_FOUND);
 
   // Pull every configured (keyword, link) pair. Expected size: tens to low
@@ -73,7 +82,7 @@ export async function POST(request: NextRequest) {
   const exact = candidates.find((c) => c.keyword === normalized);
   if (exact && exact.link) {
     return NextResponse.json<ManychatLookupResponse>({
-      found: true,
+      found: "Yes",
       link: exact.link,
       post_title: exact.title ?? "",
     });
@@ -86,7 +95,7 @@ export async function POST(request: NextRequest) {
     const re = new RegExp(`\\b${escaped}\\b`);
     if (re.test(normalized)) {
       return NextResponse.json<ManychatLookupResponse>({
-        found: true,
+        found: "Yes",
         link: c.link,
         post_title: c.title ?? "",
       });
