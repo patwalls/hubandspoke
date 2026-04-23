@@ -902,6 +902,38 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     load();
   }, [load]);
 
+  const handleAddToDescript = useCallback(async () => {
+    if (actionPending) return;
+    const s3Key = data?.item.mediaS3Key;
+    if (!s3Key) return;
+    setActionPending(true);
+    try {
+      const res = await fetch("/api/descript/create-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "s3",
+          s3Key,
+          projectName: data?.item.title || "Imported video",
+          itemId: contentId,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Failed to add to Descript");
+        return;
+      }
+      toast.success("Added to Descript");
+      load();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to add to Descript",
+      );
+    } finally {
+      setActionPending(false);
+    }
+  }, [actionPending, contentId, data?.item.mediaS3Key, data?.item.title, load]);
+
   // Sync the shared draft state with whatever the server returned on the
   // most recent load(). Only re-seeds when the server draft id changes or
   // the draft goes from absent to present (or vice versa) — mid-edit loads
@@ -1651,6 +1683,14 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                   {(hasDescriptProject ||
                     item.mediaS3Key ||
                     isPublished) && <DropdownMenuSeparator />}
+                  {!hasDescriptProject && item.mediaS3Key && (
+                    <DropdownMenuItem
+                      disabled={actionPending}
+                      onClick={() => void handleAddToDescript()}
+                    >
+                      <FilmIcon className="size-3.5" /> Add to Descript
+                    </DropdownMenuItem>
+                  )}
                   {hasDescriptProject && (
                     <DropdownMenuItem onClick={openDescriptModal}>
                       <RefreshCwIcon className="size-3.5" /> Replace Descript
@@ -1757,19 +1797,36 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             {item.viewsEstimated ? "Estimated from likes" : "Reported"}
           </p>
         </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Total Views
-          </p>
-          <div className="mt-2">
-            <span className="text-3xl font-semibold text-foreground tabular-nums">
-              {formatCompact(data?.descendantViewsTotal ?? 0)}
-            </span>
+        {(data?.derivatives?.length ?? 0) +
+          (data?.reposts?.length ?? 0) +
+          (data?.crossPosts?.length ?? 0) >
+        0 ? (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              Total Views
+            </p>
+            <div className="mt-2">
+              <span className="text-3xl font-semibold text-foreground tabular-nums">
+                {formatCompact(data?.descendantViewsTotal ?? 0)}
+              </span>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Across derivatives, reposts, and cross-posts
+            </p>
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Across derivatives, reposts, and cross-posts
-          </p>
-        </div>
+        ) : (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              Comments
+            </p>
+            <div className="mt-2">
+              <span className="text-3xl font-semibold text-foreground tabular-nums">
+                {formatCompact(item.comments ?? 0)}
+              </span>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">On this post</p>
+          </div>
+        )}
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             Likes
