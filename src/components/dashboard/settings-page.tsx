@@ -20,6 +20,8 @@ interface SettingsPageContentProps {
   /** Hide the top "Settings / Configure {brandLabel}" block. Use when the
    *  enclosing page already owns a page-level header. */
   hideHeader?: boolean;
+  /** Render only a subset of sections. Unset = render all legacy sections. */
+  section?: "goals" | "boundaries";
 }
 
 interface AssignableUser {
@@ -45,7 +47,16 @@ export function SettingsPageContent({
   brand,
   brandLabel,
   hideHeader = false,
+  section,
 }: SettingsPageContentProps) {
+  const showGoals = section == null || section === "goals";
+  const showBoundaries = section == null || section === "boundaries";
+  // Default assignments ride along with Goals when split; kept under the
+  // legacy all-sections layout otherwise.
+  const showAssignments = section == null || section === "goals";
+  // Cross-post teaser is only shown in the legacy all-sections layout; the
+  // split layout has a dedicated Cross posting sub-page.
+  const showCrossPostTeaser = section == null;
   const [weeklyGoal, setWeeklyGoal] = useState<string>("");
   const [savedGoal, setSavedGoal] = useState<number | null>(null);
   const [weekStartDay, setWeekStartDay] = useState<number>(0);
@@ -228,6 +239,7 @@ export function SettingsPageContent({
         </div>
       )}
 
+      {showGoals && (
       <form
         onSubmit={handleSave}
         className="rounded-lg border border-border bg-card p-5 space-y-4"
@@ -286,7 +298,9 @@ export function SettingsPageContent({
           )}
         </div>
       </form>
+      )}
 
+      {showBoundaries && (
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">
         <div>
           <h2 className="text-base font-semibold text-foreground">
@@ -323,7 +337,9 @@ export function SettingsPageContent({
           )}
         </div>
       </div>
+      )}
 
+      {showAssignments && (
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">
         <div>
           <h2 className="text-base font-semibold text-foreground">
@@ -399,7 +415,9 @@ export function SettingsPageContent({
           <span className="text-xs text-amber-600">{assigneeStatus.message}</span>
         )}
       </div>
+      )}
 
+      {showCrossPostTeaser && (
       <div className="rounded-lg border border-border bg-card p-5 space-y-3">
         <div>
           <h2 className="text-base font-semibold text-foreground">
@@ -410,13 +428,14 @@ export function SettingsPageContent({
           </p>
         </div>
         <Link
-          href={`/${brand}/cross-post-rules`}
+          href={`/${brand}/accounts/cross-posting`}
           className="inline-flex items-center gap-1.5 text-sm text-foreground hover:text-primary hover:underline"
         >
           Manage rules
           <ExternalLinkIcon className="size-3.5" />
         </Link>
       </div>
+      )}
     </div>
   );
 }

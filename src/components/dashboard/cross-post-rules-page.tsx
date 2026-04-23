@@ -46,12 +46,16 @@ interface Props {
   /** Accounts available as source/target options. Filtered to the current
    *  brand by the server page. */
   accounts: PickedAccount[];
+  /** Hide the top "Cross-post rules" title block. Use when the enclosing
+   *  page/layout already owns a page-level header. */
+  hideHeader?: boolean;
 }
 
 export function CrossPostRulesPageContent({
   brand,
   brandLabel,
   accounts,
+  hideHeader = false,
 }: Props) {
   const [rules, setRules] = useState<CrossPostRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -194,16 +198,18 @@ export function CrossPostRulesPageContent({
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-          Cross-post rules
-        </h1>
-        <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-          {brandLabel} — when a published post on the source account hits the
-          view threshold, a cross-post idea is auto-queued for the target
-          account.
-        </p>
-      </div>
+      {!hideHeader && (
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
+            Cross-post rules
+          </h1>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            {brandLabel} — when a published post on the source account hits the
+            view threshold, a cross-post idea is auto-queued for the target
+            account.
+          </p>
+        </div>
+      )}
 
       <form
         onSubmit={addRule}
