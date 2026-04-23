@@ -39,6 +39,9 @@ interface FilterPillsProps {
    *  dropdown; post types are a static canonical set. */
   accounts: FilterAccount[];
   formats: string[];
+  /** Hide the Daily/Weekly interval pill. Pages that don't render a time
+   *  series (e.g. /content is a flat table) have no use for it. */
+  showViewType?: boolean;
   onStartDateChange: (d: string) => void;
   onEndDateChange: (d: string) => void;
   onViewTypeChange: (v: string) => void;
@@ -320,6 +323,7 @@ export function FilterPills({
   selectedSource,
   accounts,
   formats,
+  showViewType = true,
   onStartDateChange,
   onEndDateChange,
   onViewTypeChange,
@@ -404,7 +408,9 @@ export function FilterPills({
         onStartDateChange={onStartDateChange}
         onEndDateChange={onEndDateChange}
       />
-      <SelectPill value={viewType} options={INTERVALS} onChange={onViewTypeChange} />
+      {showViewType && (
+        <SelectPill value={viewType} options={INTERVALS} onChange={onViewTypeChange} />
+      )}
       <SelectPill
         label="Platform"
         value={selectedPlatformKey}

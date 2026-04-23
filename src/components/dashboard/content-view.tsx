@@ -127,6 +127,7 @@ export function ContentView({ brand }: ContentViewProps) {
         selectedSource={selectedSource}
         accounts={accounts}
         formats={data?.formats ?? []}
+        showViewType={false}
         onStartDateChange={setStartDate}
         onEndDateChange={setEndDate}
         onViewTypeChange={setViewType}

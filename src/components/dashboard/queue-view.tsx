@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { IdeaQueueTable } from "./idea-queue-table";
 import { SelectPill } from "./filter-pills";
+import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 
 interface QueueViewProps {
@@ -56,20 +57,10 @@ export function QueueView({ brand }: QueueViewProps) {
   const hsItems = items.filter((item) => !isNotionAuthoritative(item.platform));
   const ideaItems = hsItems.filter((item) => item.status === "Idea");
 
-  const platformOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const item of ideaItems) {
-      for (const p of item.platform ?? []) {
-        if (p) set.add(p);
-      }
-    }
-    return [
-      { value: "all", label: "All channels" },
-      ...Array.from(set)
-        .sort((a, b) => a.localeCompare(b))
-        .map((p) => ({ value: p, label: p })),
-    ];
-  }, [ideaItems]);
+  const platformOptions = useMemo(
+    () => buildChannelOptions(ideaItems),
+    [ideaItems]
+  );
 
   const formatOptions = useMemo(() => {
     const set = new Set<string>();
@@ -86,9 +77,7 @@ export function QueueView({ brand }: QueueViewProps) {
 
   const query = search.trim().toLowerCase();
   const filtered = ideaItems.filter((item) => {
-    if (selectedPlatform !== "all") {
-      if (!item.platform?.includes(selectedPlatform)) return false;
-    }
+    if (!matchesChannel(item, selectedPlatform)) return false;
     if (selectedFormat !== "all") {
       if (item.format !== selectedFormat) return false;
     }

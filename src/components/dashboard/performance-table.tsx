@@ -168,7 +168,9 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
         }
         setSaveResult({ success: true, message: "Post updated successfully." });
       } else {
-        // Create new item
+        // Create new item. Metrics (views/likes/comments/clicks/leads/sales)
+        // are never entered by hand — they arrive via sync jobs (YouTube
+        // Analytics, Social Champ, manual refresh) after the item exists.
         const res = await fetch("/api/production-items", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -181,9 +183,6 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             publishedLink: formLink || null,
             publishedDate: formDate,
             brand,
-            views: formViews ? parseInt(formViews, 10) : null,
-            likes: formLikes ? parseInt(formLikes, 10) : null,
-            comments: formComments ? parseInt(formComments, 10) : null,
           }),
         });
         if (!res.ok) {
@@ -395,11 +394,12 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
               />
             </div>
 
-            {/* Metrics section */}
-            {(isEditing || !isYouTubeLink) && (
+            {/* Metrics section — edit-only. New posts never carry hand-entered
+                metrics; sync jobs fill them in after the item exists. */}
+            {isEditing && (
               <div className="space-y-3 rounded-lg border border-dashed border-gray-300 p-3">
                 <p className="text-xs text-muted-foreground font-medium">
-                  Metrics {!isEditing && "(optional)"}
+                  Metrics
                 </p>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
@@ -579,6 +579,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                         account={item.account}
                         postType={item.postType}
                         variant="avatar"
+                        avatarSize={28}
                       />
                     ) : (
                       item.platform?.map((p) => (

@@ -115,7 +115,7 @@ export function IdeaQueueTable({
       <div className="overflow-x-auto">
         <table className="w-full text-xs table-fixed">
           <colgroup>
-            <col className="w-[180px]" />
+            <col className="w-[240px]" />
             <col />
             <col className="w-[220px]" />
             <col className="w-[100px]" />

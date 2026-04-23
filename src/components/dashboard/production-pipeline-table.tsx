@@ -222,7 +222,7 @@ export function ProductionPipelineTable({
         <table className="w-full text-xs table-fixed">
           <colgroup>
             <col className="w-[160px]" />
-            <col className="w-[160px]" />
+            <col className="w-[240px]" />
             <col />
             <col className="w-[220px]" />
             <col className="w-[100px]" />

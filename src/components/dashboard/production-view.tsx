@@ -7,6 +7,7 @@ import { isNotionAuthoritative } from "@/lib/platform";
 import { statusClass } from "@/lib/badge-colors";
 import { ProductionPipelineTable } from "./production-pipeline-table";
 import { SelectPill } from "./filter-pills";
+import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 
 interface ProductionViewProps {
@@ -69,20 +70,10 @@ export function ProductionView({ brand }: ProductionViewProps) {
       (PIPELINE_STATUSES as readonly string[]).includes(item.status)
   );
 
-  const platformOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const item of pipelineCandidates) {
-      for (const p of item.platform ?? []) {
-        if (p) set.add(p);
-      }
-    }
-    return [
-      { value: "all", label: "All channels" },
-      ...Array.from(set)
-        .sort((a, b) => a.localeCompare(b))
-        .map((p) => ({ value: p, label: p })),
-    ];
-  }, [pipelineCandidates]);
+  const platformOptions = useMemo(
+    () => buildChannelOptions(pipelineCandidates),
+    [pipelineCandidates]
+  );
 
   const formatOptions = useMemo(() => {
     const set = new Set<string>();
@@ -113,9 +104,7 @@ export function ProductionView({ brand }: ProductionViewProps) {
   };
 
   const pipelineItems = pipelineCandidates.filter((item) => {
-    if (selectedPlatform !== "all") {
-      if (!item.platform?.includes(selectedPlatform)) return false;
-    }
+    if (!matchesChannel(item, selectedPlatform)) return false;
     if (selectedFormat !== "all") {
       if (item.format !== selectedFormat) return false;
     }

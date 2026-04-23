@@ -21,6 +21,7 @@ export interface FormatChannelWithAccount {
     platform: string;
     handle: string;
     displayName: string | null;
+    avatarUrl: string | null;
     brandSlug: string;
     brandLabel: string;
   };
@@ -93,6 +94,7 @@ export async function getChannelsForFormats(
       accountPlatform: accounts.platform,
       accountHandle: accounts.handle,
       accountDisplayName: accounts.displayName,
+      accountAvatarUrl: accounts.avatarUrl,
       brandSlug: brands.slug,
       brandLabel: brands.label,
     })
@@ -110,6 +112,7 @@ export async function getChannelsForFormats(
         platform: r.accountPlatform,
         handle: r.accountHandle,
         displayName: r.accountDisplayName,
+        avatarUrl: r.accountAvatarUrl ?? null,
         brandSlug: r.brandSlug,
         brandLabel: r.brandLabel,
       },

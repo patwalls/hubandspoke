@@ -35,7 +35,12 @@ interface AccountBadgeProps {
    *               identity and we want a lighter, chromeless look. */
   variant?: "default" | "compact" | "avatar";
   className?: string;
+  /** Platform icon size for the pill variants. */
   size?: number;
+  /** Avatar (and overlay badge) size for variant="avatar". Defaults to 20.
+   *  Bump up to ~28 in mixed-content tables where readers scan for
+   *  platform at a glance. */
+  avatarSize?: number;
 }
 
 /**
@@ -55,6 +60,7 @@ export function AccountBadge({
   variant = "default",
   className,
   size = 12,
+  avatarSize = 20,
 }: AccountBadgeProps) {
   if (!account) {
     return (
@@ -97,7 +103,7 @@ export function AccountBadge({
           avatarUrl={account.avatarUrl ?? null}
           platform={account.platform}
           handle={account.handle}
-          size={20}
+          size={avatarSize}
         />
         <span className="font-medium text-foreground">@{account.handle}</span>
         {showPostTypeSuffix && (

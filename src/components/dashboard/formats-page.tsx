@@ -15,13 +15,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -45,6 +38,9 @@ import {
 import { UserChip } from "./user-chip";
 import { SS_CHANNELS, MATG_CHANNELS } from "@/lib/config/channels";
 import { ChannelChip } from "@/components/ui/channel-chip";
+import { SelectPill } from "./filter-pills";
+import { buildChannelOptions, channelKey } from "@/lib/channel-options";
+import type { FormatChannelWithAccount } from "@/lib/format-channels";
 import { cn } from "@/lib/utils";
 import { applyStarterTemplate } from "@/lib/format-skill";
 
@@ -65,6 +61,7 @@ interface FormatRow {
   id: string;
   name: string;
   channels: string[];
+  accountChannels: FormatChannelWithAccount[];
   viewThreshold: number | null;
   editor: string | null;
   editorAsanaGid: string | null;
@@ -258,9 +255,18 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     ? formats.find((f) => f.id === parentFormatId) ?? null
     : null;
 
+  const channelOptions = useMemo(
+    () => buildChannelOptions(formats.flatMap((f) => f.accountChannels ?? [])),
+    [formats]
+  );
+
   const filtered = useMemo(() => {
     if (channelFilter === "all") return formats;
-    return formats.filter((f) => f.channels?.includes(channelFilter));
+    return formats.filter((f) =>
+      (f.accountChannels ?? []).some(
+        (c) => channelKey(c.accountId, c.postType) === channelFilter
+      )
+    );
   }, [formats, channelFilter]);
 
   // Resolve stored editor/producer names to real user rows (for avatars).
@@ -689,25 +695,12 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       </div>
 
       <div className="flex items-center gap-2">
-        <Label className="text-sm text-muted-foreground whitespace-nowrap">
-          Channel:
-        </Label>
-        <Select
+        <SelectPill
+          label="Channel"
           value={channelFilter}
-          onValueChange={(v) => setChannelFilter(v ?? "all")}
-        >
-          <SelectTrigger className="w-full sm:w-[220px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All channels</SelectItem>
-            {ALL_CHANNELS.map((ch) => (
-              <SelectItem key={ch} value={ch}>
-                {ch}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          options={channelOptions}
+          onChange={setChannelFilter}
+        />
       </div>
 
       <div className="rounded-md border border-border bg-card">
