@@ -100,6 +100,8 @@ interface DescriptJobResponse {
   job_state: string;
   result?: {
     status?: string;
+    /** Present when `status === "error"` — e.g. "Import failed". */
+    error_message?: string;
     project_changed?: boolean;
     agent_response?: string;
     // Populated on import/project_media jobs — one entry per composition

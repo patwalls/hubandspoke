@@ -139,10 +139,31 @@ export const descriptTranscribeTask: Task = async (rawPayload, helpers) => {
   if (payload.uploadJobId) {
     const job = await fetchDescriptJob(payload.uploadJobId);
     if (job.job_state === "stopped") {
+      // Descript signals failure via `result.status === "error"` with an
+      // `error_message` — surface that verbatim. Common cause: unsupported
+      // codec or container. Retrying the same bytes won't help, so we
+      // clear `descriptProjectId` on the item (so a future trigger can try
+      // fresh after a re-encode / different upload) and let graphile
+      // burn its retries quickly.
+      if (job.result?.status && job.result.status !== "success") {
+        await db
+          .update(productionItems)
+          .set({
+            descriptProjectId: null,
+            descriptProjectUrl: null,
+          })
+          .where(eq(productionItems.id, productionItemId));
+        throw new Error(
+          `Descript import ${payload.uploadJobId} failed: status=${job.result.status}` +
+            (job.result.error_message
+              ? ` ${job.result.error_message}`
+              : ""),
+        );
+      }
       const compositionId = job.result?.created_compositions?.[0]?.id;
       if (!compositionId) {
         throw new Error(
-          `Descript import ${payload.uploadJobId} finished without a composition id`,
+          `Descript import ${payload.uploadJobId} stopped with status=${job.result?.status ?? "unknown"} but no composition id`,
         );
       }
       await db
