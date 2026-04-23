@@ -313,15 +313,37 @@ export async function getContentReport(
   const platformHasMultipleTypes = (p: string): boolean =>
     p === "youtube" || p === "instagram";
 
+  // First pass: collect all unique (handle, platform) pairs to detect multi-platform accounts
+  const handlePlatformCombos = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!r.accountId || !r.accountHandle || !r.accountPlatform) continue;
+    const handleKey = r.accountHandle;
+    if (!handlePlatformCombos.has(handleKey)) {
+      handlePlatformCombos.set(handleKey, new Set());
+    }
+    handlePlatformCombos.get(handleKey)!.add(r.accountPlatform);
+  }
+
   for (const r of rows) {
     if (!r.accountId || !r.accountHandle || !r.accountPlatform) continue;
     const pt = r.item.postType ?? null;
     const key = `${r.accountPlatform}|${r.accountHandle}|${pt ?? ""}`;
     itemToRowKey.set(r.item.id, key);
     if (!primaryRowMetaByKey.has(key)) {
-      const label = pt && platformHasMultipleTypes(r.accountPlatform)
-        ? `@${r.accountHandle} · ${postTypeShort[pt] ?? pt}`
-        : `@${r.accountHandle}`;
+      // Build label: account appears on multiple platforms → include platform suffix
+      const accountPlatforms = handlePlatformCombos.get(r.accountHandle)!;
+      let label: string;
+      if (pt && platformHasMultipleTypes(r.accountPlatform)) {
+        // YouTube/Instagram have multiple post types: show the type
+        label = `@${r.accountHandle} · ${postTypeShort[pt] ?? pt}`;
+      } else if (accountPlatforms.size > 1) {
+        // Account on multiple platforms: add platform name for clarity
+        const platformLabel = r.accountPlatform.charAt(0).toUpperCase() + r.accountPlatform.slice(1);
+        label = `@${r.accountHandle} · ${platformLabel}`;
+      } else {
+        // Single platform: just show @handle
+        label = `@${r.accountHandle}`;
+      }
       primaryRowMetaByKey.set(key, {
         label,
         platform: r.accountPlatform,
