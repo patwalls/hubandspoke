@@ -84,6 +84,8 @@ export async function POST(request: NextRequest) {
     const {
       title,
       platform,
+      accountId,
+      postType,
       format,
       publishedLink,
       publishedDate,
@@ -157,6 +159,8 @@ export async function POST(request: NextRequest) {
       .values({
         title,
         platform,
+        accountId: accountId || null,
+        postType: postType || null,
         format: format || null,
         publishedLink: publishedLink || null,
         publishedDate,
