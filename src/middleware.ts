@@ -18,7 +18,17 @@ export default auth((req) => {
   // ManyChat's External Request hits /api/manychat/* without a session. The
   // route handler enforces auth via the `x-manychat-secret` header.
   const isManychatApi = pathname.startsWith("/api/manychat");
-  if (isAuthApi || isCronApi || isInviteApi || isManychatApi)
+  // Meta's Instagram webhook hits /api/instagram/* without a session. The
+  // route handler enforces auth via the X-Hub-Signature-256 HMAC (and
+  // hub.verify_token on the GET handshake).
+  const isInstagramApi = pathname.startsWith("/api/instagram");
+  if (
+    isAuthApi ||
+    isCronApi ||
+    isInviteApi ||
+    isManychatApi ||
+    isInstagramApi
+  )
     return NextResponse.next();
 
   const isPublic = PUBLIC_PAGES.has(pathname);

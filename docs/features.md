@@ -36,7 +36,8 @@ removing, or deprecating anything.
 | AI summary (for clip-idea prompt context) | Active | `POST /api/production-items/[id]/summary` | `productionItems` (cached) | |
 | Direct media upload (bypass YouTube download) | Active | `POST /api/uploads/s3-presign`, `POST /api/uploads/confirm`, `POST /api/uploads/download` | `productionItems` (mediaS3Key, posterS3Key) | Triggers `descript-transcribe` on confirm |
 | **Old cross-post fit fields on productionItems** | **Deprecated** | (no live writers) | `productionItems.crossPostFitGood`, `crossPostFitReasoning` | Replaced by `crossPostFitVerdicts`; columns kept for back-data only |
-| ManyChat IG comment-to-DM | Active | Item detail form (instagram_* posts) → `manychatKeyword` + `manychatLink`; `POST /api/manychat/lookup` | `productionItems.manychat_keyword`, `manychat_link` | One ManyChat automation calls our endpoint with the comment text; we return the matching post's link. Per-account uniqueness on keyword. See [ManyChat setup](#manychat-setup). |
+| IG comment-to-DM (Meta direct) | Active | Item detail form (instagram_* posts) → `manychatKeyword` + `manychatLink`; Meta webhook → `POST /api/instagram/webhook` → `findKeywordMatch` → IG Send API | `productionItems.manychat_keyword`, `manychat_link` | Meta delivers comment events directly. We look up the keyword and DM the link via the IG Private Reply API (bypasses 24h messaging window). Per-account uniqueness on keyword. See [docs/instagram-setup.md](./instagram-setup.md). |
+| **ManyChat IG lookup endpoint** | **Legacy** | `POST /api/manychat/lookup` (called by a ManyChat External Request) | `productionItems.manychat_keyword`, `manychat_link` | Replaced by the Meta direct path above. Kept in service during the migration; remove once Meta direct is verified. ManyChat couldn't pass the actual comment text to webhooks (carries `Last Text Input` which is the user's stale DM history). |
 
 ---
 
@@ -151,43 +152,29 @@ removing, or deprecating anything.
 
 ---
 
-## ManyChat setup
+## IG comment-to-DM setup
 
-One-time configuration for the IG comment-to-DM automation. Per-post keyword
-+ link mappings live entirely in our DB; ManyChat just forwards the comment
-text to `POST /api/manychat/lookup` and DMs back whatever link we return.
-
-**Why this shape:** ManyChat's API has no Keywords/Triggers endpoint and can't
-create/edit Flows programmatically. Inverting the relationship — ManyChat
-calls us — gets the same outcome with a single, never-edited automation.
-
-**Env var:**
-- `MANYCHAT_WEBHOOK_SECRET` — shared secret pasted into the External Request's
-  `x-manychat-secret` header. Generate with `openssl rand -hex 32`. Required
-  in `.env.local` and Heroku config.
-
-**ManyChat automation: `IG Comment → Hub & Spoke Lookup`**
-1. Trigger: Post or Reel comment → `any post or reel` + `any word`
-2. Opening DM: static `"Got it! Tap below and I'll send you the link 👇"` with
-   button `Send me the link`. (IG forces the first private reply to be static.)
-3. After button: External Request action
-   - `POST https://hubandspoke.starterstory.com/api/manychat/lookup`
-   - Headers: `x-manychat-secret: $MANYCHAT_WEBHOOK_SECRET`,
-     `Content-Type: application/json`
-   - Body: `{ "comment_text": "{{last_input_text}}" }`
-   - Response mapping → Custom Fields:
-     - `found` → `cuf_manychat_found` (boolean)
-     - `link` → `cuf_manychat_link` (text)
-     - `post_title` → `cuf_manychat_post_title` (text)
-4. Condition `cuf_manychat_found is true`
-   - **Yes:** DM `Here's the link from "{{cuf_manychat_post_title}}":\n{{cuf_manychat_link}}`
-   - **Otherwise:** DM `Hmm, I couldn't find that one — make sure you copied the exact phrase from the caption!`
+Per-post keyword + link mappings live entirely in our DB; the dispatcher path
+is what carries comment events to us and DMs back to the commenter.
 
 **Per-post workflow:** in the item detail (any `instagram_*` post type), fill in
 `ManyChat phrase` + `ManyChat link`. Phrase is normalized (lowercase, collapsed
 whitespace) on save; uniqueness is per-account. Lookup matches exact first,
 then word-boundary contains, so `"send me guide saas pls"` still hits a stored
 phrase of `guide saas`.
+
+**Active dispatcher: Meta Graph API direct.** See
+[docs/instagram-setup.md](./instagram-setup.md) for the one-time Meta App
+Dashboard configuration. Why this shape: ManyChat's `Last Text Input` variable
+is the user's last DM/Story text, NOT the IG comment that triggered the
+flow — making per-comment lookups impossible. Meta delivers the actual comment
+text in the webhook payload.
+
+**Legacy dispatcher: ManyChat (kept until Meta direct is verified).** A single
+ManyChat automation `IG Comment → Hub & Spoke Lookup` calls
+`POST /api/manychat/lookup` with `{{last_input_text}}`. Works for the page
+admin only (whose `last_input_text` happens to be a valid keyword); broken for
+all other commenters. Tear down once the Meta direct path is proven.
 
 ---
 
