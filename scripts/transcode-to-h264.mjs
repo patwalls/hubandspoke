@@ -176,12 +176,17 @@ async function loadCandidates() {
     );
     return rows;
   }
+  // Anything uploaded after the first batch run (2026-04-23 03:00 UTC) has
+  // already been transcoded by this script — the UPDATE sets
+  // media_s3_uploaded_at = NOW(), so completed items naturally fall out of
+  // the candidate set without a per-item probe.
   const { rows } = await pool.query(
     `SELECT id, title, media_s3_key AS key
        FROM production_items
       WHERE media_s3_key IS NOT NULL
         AND descript_project_id IS NULL
         AND youtube_download_source = 'yt-dlp'
+        AND media_s3_uploaded_at < '2026-04-23 03:00:00+00'
       ORDER BY media_s3_uploaded_at DESC`,
   );
   return rows;
