@@ -11,6 +11,7 @@ export type PlatformKey =
   | "instagram_story"
   | "youtube_long"
   | "youtube_shorts"
+  | "youtube_community"
   | "linkedin"
   | "newsletter"
   | "tiktok"
@@ -148,6 +149,20 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PlatformKey, FormatFieldSchema> = {
       },
     ],
   },
+  youtube_community: {
+    version: SCHEMA_VERSION,
+    fields: [
+      {
+        key: "body",
+        label: "Post body",
+        type: "longtext",
+        maxLength: 2000,
+        required: true,
+        prompt:
+          "YouTube Community post body. Conversational and direct — like a Threads / LinkedIn post. Open with a single concrete hook from the pillar. Soft line breaks are fine. No hashtag walls, no emoji spam.",
+      },
+    ],
+  },
   linkedin: {
     version: SCHEMA_VERSION,
     fields: [
@@ -226,10 +241,12 @@ export function normalizePlatform(raw: string): PlatformKey | null {
     return "x";
   }
 
-  // YouTube long-form. "YouTube", "YouTube (SS)", "YouTube (SS Build)",
-  // "YouTube Community". Shorts is handled separately before this check.
+  // YouTube family. Community posts are text/image cards on the channel's
+  // Community tab — structurally a social post, not a video — so they route
+  // to their own key instead of collapsing into youtube_long.
   if (s === "youtube shorts") return "youtube_shorts";
-  if (s === "youtube" || s.startsWith("youtube (") || s === "youtube community") {
+  if (s === "youtube community") return "youtube_community";
+  if (s === "youtube" || s.startsWith("youtube (")) {
     return "youtube_long";
   }
 

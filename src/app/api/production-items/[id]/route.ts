@@ -80,11 +80,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       if (ad && !bd) return -1;
       return bd.localeCompare(ad);
     });
-    const descendantViewsTotal = derivatives.reduce(
-      (sum, d) => sum + (d.views ?? 0),
-      0
-    );
-
     const brandFormats = await db
       .select({
         id: formats.id,
@@ -149,6 +144,15 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     const crossPosts = sourcedChildren.filter(
       (r) => r.sourceType === "cross_post"
     );
+
+    // Views across every downstream piece of content: pillar-linked
+    // derivatives, same-content reposts, and cross-platform syndications.
+    // These are disjoint in practice (a row is linked via either
+    // pillarContentItemId or repostedFromItemId, not both), so no dedupe.
+    const descendantViewsTotal =
+      derivatives.reduce((sum, d) => sum + (d.views ?? 0), 0) +
+      reposts.reduce((sum, r) => sum + (r.views ?? 0), 0) +
+      crossPosts.reduce((sum, c) => sum + (c.views ?? 0), 0);
 
     let repostedFrom:
       | {

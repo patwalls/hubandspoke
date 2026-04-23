@@ -1143,30 +1143,61 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   const hideDerivativeSections =
     derivatives.length === 0 && repurposeTargets.length === 0;
 
+  // Clip Ideas needs the full video archived to S3 (so precise-cut can
+  // ffmpeg-trim it) and a transcript (so Claude has something to read).
+  // Missing either one = show the tab grayed out with a tooltip, not gone.
+  const clipIdeasDisabledReason = (() => {
+    const missing: string[] = [];
+    if (!item.mediaS3Key) missing.push("the full video archived to S3");
+    if (!data.transcript) missing.push("a transcript");
+    if (missing.length === 0) return null;
+    return `Needs ${missing.join(" and ")}.`;
+  })();
+
   // Which tabs are actually applicable for this item's current state. Each
   // tab appears only when its underlying section would render content. If
   // the URL asks for a tab that isn't available (e.g. ?tab=derivatives on a
   // pre-publish item), fall back to the Details tab.
-  const availableTabs: { value: DetailTab; label: string; count: number | null }[] = [
+  const availableTabs: {
+    value: DetailTab;
+    label: string;
+    count: number | null;
+    disabled?: boolean;
+    disabledReason?: string;
+  }[] = [
     { value: "details", label: "Details", count: null },
     { value: "preview", label: "Preview", count: null },
     ...(!isPrePublish &&
     (!hideDerivativeSections ||
       data.reposts.length > 0 ||
       data.crossPosts.length > 0)
-      ? ([{ value: "derivatives", label: "Derivatives", count: derivatives.length }] as const)
+      ? ([
+          {
+            value: "derivatives",
+            label: "Derivatives",
+            count:
+              derivatives.length +
+              data.reposts.length +
+              data.crossPosts.length,
+          },
+        ] as const)
       : []),
-    ...(!isPrePublish
-      ? ([{ value: "clip-ideas", label: "Clip ideas", count: null }] as const)
-      : []),
+    {
+      value: "clip-ideas",
+      label: "Clip Ideas",
+      count: null,
+      disabled: !!clipIdeasDisabledReason,
+      disabledReason: clipIdeasDisabledReason ?? undefined,
+    },
     ...(!isPrePublish && !hideDerivativeSections
       ? ([{ value: "repurpose", label: "Repurpose", count: repurposeTargets.length }] as const)
       : []),
   ];
-  const availableTabValues = availableTabs.map((t) => t.value);
-  const activeTab: DetailTab = availableTabValues.includes(activeTabParam)
-    ? activeTabParam
-    : "details";
+  const activeTab: DetailTab = (() => {
+    const match = availableTabs.find((t) => t.value === activeTabParam);
+    if (!match || match.disabled) return "details";
+    return activeTabParam;
+  })();
 
   // Resolve the currently-selected producer/editor for the trigger display.
   // Prefer the freshly-loaded assignable list (stays in sync with local
@@ -1715,7 +1746,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             </span>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            Across all derivatives
+            Across derivatives, reposts, and cross-posts
           </p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
@@ -1763,11 +1794,14 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             <TabsTrigger
               key={tab.value}
               value={tab.value}
+              disabled={tab.disabled}
+              title={tab.disabledReason}
               className={cn(
                 "group/tab flex-initial h-9 rounded-md px-3 text-sm font-medium transition-colors",
                 "text-muted-foreground hover:bg-muted hover:text-foreground",
                 "data-active:!bg-orange-100 data-active:!text-orange-700 data-active:!shadow-none",
                 "after:!hidden",
+                "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
               )}
             >
               <span>{tab.label}</span>
@@ -2288,482 +2322,280 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           data.reposts.length > 0 ||
           data.crossPosts.length > 0) && (
       <TabsContent value="derivatives" className="pt-4 space-y-4">
-      {!hideDerivativeSections && (
-      <>
-      {/* Derivative content — same look/feel as Content Performance table */}
-      <div className="rounded-lg border border-border bg-card overflow-hidden">
-        <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">
-              Derivative content
-              <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
-                {derivatives.length}
-              </span>
-            </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Every descendant — direct children, grandchildren, and deeper —
-              across every status and format.
-            </p>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border bg-accent/50">
-                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                  Title
-                </th>
-                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                  Platform
-                </th>
-                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                  Format
-                </th>
-                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                  Status
-                </th>
-                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                  Published
-                </th>
-                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                  Views
-                </th>
-                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                  Likes
-                </th>
-                <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                  Comments
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {derivatives.map((d) => (
-                <tr
-                  key={d.id}
-                  className="border-b border-border/50 hover:bg-accent/30 transition-colors"
-                >
-                  <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
-                    <div className="flex items-center gap-3">
-                      {(() => {
-                        const cover = coverImageUrl(d);
-                        return cover ? (
-                          /* eslint-disable-next-line @next/next/no-img-element */
-                          <img
-                            src={cover}
-                            alt=""
-                            className="w-20 h-12 rounded object-cover shrink-0"
-                          />
-                        ) : null;
-                      })()}
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
-                          {d.depth > 1 && (
-                            <span
-                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-accent text-muted-foreground border border-border shrink-0"
-                              title={
-                                d.depth === 2
-                                  ? "Grandchild"
-                                  : d.depth === 3
-                                  ? "Great-grandchild"
-                                  : `${d.depth} levels deep`
-                              }
-                            >
-                              L{d.depth}
+      {(() => {
+        // One merged table: pillar-derivatives + reposts + cross-posts.
+        // Sources are labeled with the same badges the Queue uses
+        // (Repost / Cross-post); originals and clips get no badge.
+        type MergedRow = {
+          key: string;
+          id: string;
+          title: string | null;
+          platform: string[] | null;
+          format: string | null;
+          status: string | null;
+          publishedDate: string | null;
+          publishedLink: string | null;
+          views: number | null;
+          viewsEstimated: boolean | null;
+          likes: number | null;
+          comments: number | null;
+          depth: number;
+          kind: "derivative" | "repost" | "cross_post";
+          cover: string | null;
+        };
+        const mergedRows: MergedRow[] = [
+          ...derivatives.map<MergedRow>((d) => ({
+            key: `d-${d.id}`,
+            id: d.id,
+            title: d.title,
+            platform: d.platform,
+            format: d.format,
+            status: d.status,
+            publishedDate: d.publishedDate,
+            publishedLink: d.publishedLink,
+            views: d.views,
+            viewsEstimated: d.viewsEstimated,
+            likes: d.likes,
+            comments: d.comments,
+            depth: d.depth,
+            kind: "derivative",
+            cover: coverImageUrl(d),
+          })),
+          ...data.reposts.map<MergedRow>((r) => ({
+            key: `r-${r.id}`,
+            id: r.id,
+            title: r.title,
+            platform: r.platform,
+            format: null,
+            status: r.status,
+            publishedDate: r.publishedDate,
+            publishedLink: r.publishedLink,
+            views: r.views,
+            viewsEstimated: r.viewsEstimated,
+            likes: r.likes,
+            comments: r.comments,
+            depth: 1,
+            kind: "repost",
+            cover: coverImageUrl(r),
+          })),
+          ...data.crossPosts.map<MergedRow>((c) => ({
+            key: `c-${c.id}`,
+            id: c.id,
+            title: c.title,
+            platform: c.platform,
+            format: null,
+            status: c.status,
+            publishedDate: c.publishedDate,
+            publishedLink: c.publishedLink,
+            views: c.views,
+            viewsEstimated: c.viewsEstimated,
+            likes: c.likes,
+            comments: c.comments,
+            depth: 1,
+            kind: "cross_post",
+            cover: coverImageUrl(c),
+          })),
+        ];
+        return (
+          <div className="rounded-lg border border-border bg-card overflow-hidden">
+            <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">
+                  Derivatives
+                  <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
+                    {mergedRows.length}
+                  </span>
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Every downstream piece — pillar derivatives, reposts, and
+                  cross-posts — across every status and format.
+                </p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-accent/50">
+                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                      Title
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                      Platform
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                      Format
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                      Status
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
+                      Published
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                      Views
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                      Likes
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                      Comments
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mergedRows.map((d) => (
+                    <tr
+                      key={d.key}
+                      className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                    >
+                      <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
+                        <div className="flex items-center gap-3">
+                          {d.cover ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={d.cover}
+                              alt=""
+                              className="w-20 h-12 rounded object-cover shrink-0"
+                            />
+                          ) : null}
+                          <div className="flex flex-col gap-0.5 min-w-0">
+                            <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
+                              {d.kind === "repost" && (
+                                <span
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-900 border border-amber-200 shrink-0"
+                                  title="Reposting an existing piece of content"
+                                >
+                                  Repost
+                                </span>
+                              )}
+                              {d.kind === "cross_post" && (
+                                <span
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-900 border border-indigo-200 shrink-0"
+                                  title="Same content syndicated to a different platform"
+                                >
+                                  Cross-post
+                                </span>
+                              )}
+                              {d.kind === "derivative" && d.depth > 1 && (
+                                <span
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-accent text-muted-foreground border border-border shrink-0"
+                                  title={
+                                    d.depth === 2
+                                      ? "Grandchild"
+                                      : d.depth === 3
+                                      ? "Great-grandchild"
+                                      : `${d.depth} levels deep`
+                                  }
+                                >
+                                  L{d.depth}
+                                </span>
+                              )}
+                              <Link
+                                href={`/${brand}/content/${d.id}`}
+                                className="hover:text-primary hover:underline transition-colors truncate"
+                              >
+                                {d.title || "(Untitled)"}
+                              </Link>
+                              {d.publishedLink && (
+                                <a
+                                  href={d.publishedLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-muted-foreground hover:text-foreground shrink-0"
+                                  title="Open published post"
+                                  aria-label="Open published post"
+                                >
+                                  ↗
+                                </a>
+                              )}
                             </span>
-                          )}
-                          <Link
-                            href={`/${brand}/content/${d.id}`}
-                            className="hover:text-primary hover:underline transition-colors truncate"
-                          >
-                            {d.title || "(Untitled)"}
-                          </Link>
-                          {d.publishedLink && (
-                            <a
-                              href={d.publishedLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-muted-foreground hover:text-foreground shrink-0"
-                              title="Open published post"
-                              aria-label="Open published post"
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {d.platform?.map((p) => (
+                            <span
+                              key={p}
+                              className={cn(
+                                "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                                platformClass(p)
+                              )}
                             >
-                              ↗
-                            </a>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {d.platform?.map((p) => (
-                        <span
-                          key={p}
-                          className={cn(
-                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                            platformClass(p)
-                          )}
-                        >
-                          {p}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-sm text-muted-foreground">
-                    {d.format || "-"}
-                  </td>
-                  <td className="px-3 py-2">
-                    {d.status ? (
-                      <span
-                        className={cn(
-                          "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                          statusClass(d.status)
+                              {p}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-sm text-muted-foreground">
+                        {d.format || "-"}
+                      </td>
+                      <td className="px-3 py-2">
+                        {d.status ? (
+                          <span
+                            className={cn(
+                              "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                              statusClass(d.status)
+                            )}
+                          >
+                            {d.status}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
                         )}
+                      </td>
+                      <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
+                        {d.publishedDate
+                          ? formatDate(d.publishedDate)
+                          : "-"}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                        {d.views != null ? (
+                          <span
+                            title={
+                              d.viewsEstimated
+                                ? "Estimated from likes"
+                                : undefined
+                            }
+                          >
+                            {d.viewsEstimated ? "~" : ""}
+                            {d.views.toLocaleString()}
+                          </span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                        {d.likes?.toLocaleString() || "-"}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                        {d.comments?.toLocaleString() || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                  {mergedRows.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        className="px-4 py-12 text-center text-muted-foreground text-sm"
                       >
-                        {d.status}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
-                    {d.publishedDate || "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                    {d.views != null ? (
-                      <span title={d.viewsEstimated ? "Estimated from likes" : undefined}>
-                        {d.viewsEstimated ? "~" : ""}{d.views.toLocaleString()}
-                      </span>
-                    ) : "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                    {d.likes?.toLocaleString() || "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                    {d.comments?.toLocaleString() || "-"}
-                  </td>
-                </tr>
-              ))}
-              {derivatives.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground text-sm">
-                    No derivatives linked in Notion yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      </>
-      )}
-
-      {/* Reposts — list of same-content reposts that descend from this item.
-          Styled to mirror the Derivative content table directly above so the
-          two sections read as siblings. */}
-      {data.reposts.length > 0 && (
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">
-                Reposts
-                <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
-                  {data.reposts.length}
-                </span>
-              </h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Same-content reposts of this piece over time.
-              </p>
+                        No derivatives, reposts, or cross-posts yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border bg-accent/50">
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Title
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Platform
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                    Published
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Views
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Likes
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Comments
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.reposts.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="border-b border-border/50 hover:bg-accent/30 transition-colors"
-                  >
-                    <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
-                      <div className="flex items-center gap-3">
-                        {(() => {
-                          const cover = coverImageUrl(r);
-                          return cover ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
-                              src={cover}
-                              alt=""
-                              className="w-20 h-12 rounded object-cover shrink-0"
-                            />
-                          ) : null;
-                        })()}
-                        <div className="flex flex-col gap-0.5 min-w-0">
-                          <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
-                            <Link
-                              href={`/${brand}/content/${r.id}`}
-                              className="hover:text-primary hover:underline transition-colors truncate"
-                            >
-                              {r.title || "(Untitled)"}
-                            </Link>
-                            {r.publishedLink && (
-                              <a
-                                href={r.publishedLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-muted-foreground hover:text-foreground shrink-0"
-                                title="Open published post"
-                                aria-label="Open published post"
-                              >
-                                ↗
-                              </a>
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {r.platform?.map((p) => (
-                          <span
-                            key={p}
-                            className={cn(
-                              "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                              platformClass(p)
-                            )}
-                          >
-                            {p}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      {r.status ? (
-                        <span
-                          className={cn(
-                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                            statusClass(r.status)
-                          )}
-                        >
-                          {r.status}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
-                      {r.publishedDate ? formatDate(r.publishedDate) : "-"}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                      {r.views != null ? (
-                        <span
-                          title={
-                            r.viewsEstimated ? "Estimated from likes" : undefined
-                          }
-                        >
-                          {r.viewsEstimated ? "~" : ""}
-                          {r.views.toLocaleString()}
-                        </span>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                      {r.likes?.toLocaleString() || "-"}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                      {r.comments?.toLocaleString() || "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Cross-posts — same content, different platform. Mirrors the Reposts
-          table so the two sections read as siblings. */}
-      {data.crossPosts.length > 0 && (
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">
-                Cross-posts
-                <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
-                  {data.crossPosts.length}
-                </span>
-              </h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Same content syndicated to other platforms.
-              </p>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border bg-accent/50">
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Title
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Platform
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                    Published
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Views
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Likes
-                  </th>
-                  <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                    Comments
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.crossPosts.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="border-b border-border/50 hover:bg-accent/30 transition-colors"
-                  >
-                    <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
-                      <div className="flex items-center gap-3">
-                        {(() => {
-                          const cover = coverImageUrl(r);
-                          return cover ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
-                              src={cover}
-                              alt=""
-                              className="w-20 h-12 rounded object-cover shrink-0"
-                            />
-                          ) : null;
-                        })()}
-                        <div className="flex flex-col gap-0.5 min-w-0">
-                          <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
-                            <Link
-                              href={`/${brand}/content/${r.id}`}
-                              className="hover:text-primary hover:underline transition-colors truncate"
-                            >
-                              {r.title || "(Untitled)"}
-                            </Link>
-                            {r.publishedLink && (
-                              <a
-                                href={r.publishedLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-muted-foreground hover:text-foreground shrink-0"
-                                title="Open published post"
-                                aria-label="Open published post"
-                              >
-                                ↗
-                              </a>
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {r.platform?.map((p) => (
-                          <span
-                            key={p}
-                            className={cn(
-                              "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                              platformClass(p)
-                            )}
-                          >
-                            {p}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      {r.status ? (
-                        <span
-                          className={cn(
-                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                            statusClass(r.status)
-                          )}
-                        >
-                          {r.status}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
-                      {r.publishedDate ? formatDate(r.publishedDate) : "-"}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                      {r.views != null ? (
-                        <span
-                          title={
-                            r.viewsEstimated ? "Estimated from likes" : undefined
-                          }
-                        >
-                          {r.viewsEstimated ? "~" : ""}
-                          {r.views.toLocaleString()}
-                        </span>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                      {r.likes?.toLocaleString() || "-"}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                      {r.comments?.toLocaleString() || "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       </TabsContent>
       )}
 
-      {!isPrePublish && (
-        <TabsContent value="clip-ideas" className="pt-4">
-          <ClipIdeasPanel
-            itemId={item.id}
-            brand={brand}
-            hasDescriptProject={hasDescriptProject}
-          />
-        </TabsContent>
-      )}
+      <TabsContent value="clip-ideas" className="pt-4">
+        <ClipIdeasPanel itemId={item.id} brand={brand} />
+      </TabsContent>
 
       {!isPrePublish && !hideDerivativeSections && (
       <TabsContent value="repurpose" className="pt-4">

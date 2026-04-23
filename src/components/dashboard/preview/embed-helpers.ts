@@ -89,6 +89,9 @@ export function resolveEmbed(
         aspect: platform === "youtube_shorts" ? "portrait" : "video",
       };
     }
+    case "youtube_community":
+      // Community posts don't expose an iframe embed — link out.
+      return { kind: "link-only", href: publishedLink };
     case "tiktok": {
       const id = extractTikTokVideoId(url);
       if (!id) return { kind: "link-only", href: publishedLink };

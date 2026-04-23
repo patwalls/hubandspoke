@@ -42,6 +42,7 @@ export const PLATFORM_FIELD_MAP: Record<PlatformKey, PlatformFieldMap> = {
   instagram_story: { caption: "caption", secondary: null },
   youtube_long: { caption: "description", secondary: "title" },
   youtube_shorts: { caption: "description", secondary: "title" },
+  youtube_community: { caption: "body", secondary: null },
   linkedin: { caption: "body", secondary: null },
   newsletter: { caption: "body", secondary: "subject" },
   tiktok: { caption: "caption", secondary: null },
@@ -144,6 +145,29 @@ export function formatCompactCount(n: number | null | undefined): string {
     return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   return n.toLocaleString();
+}
+
+// Feed-style relative time: "now", "5m", "2h", "3d", "1w", then absolute date.
+// Matches how Threads / X / IG render the `·` timestamp next to the handle —
+// no "ago" suffix, single letter unit.
+export function formatFeedTime(iso: string | null): string {
+  if (!iso) return "now";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "now";
+  const diff = Date.now() - then;
+  if (diff < 60_000) return "now";
+  const min = Math.floor(diff / 60_000);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d`;
+  const wk = Math.floor(day / 7);
+  if (wk < 5) return `${wk}w`;
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export function authorInitials(

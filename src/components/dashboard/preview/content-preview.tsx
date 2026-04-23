@@ -24,6 +24,7 @@ import { XSimulator } from "./platforms/x";
 import { LinkedInSimulator } from "./platforms/linkedin";
 import { YouTubeSimulator } from "./platforms/youtube";
 import { YouTubeShortsSimulator } from "./platforms/youtube-shorts";
+import { YouTubeCommunitySimulator } from "./platforms/youtube-community";
 import { TikTokSimulator } from "./platforms/tiktok";
 import { ThreadsSimulator } from "./platforms/threads";
 import { NewsletterSimulator } from "./platforms/newsletter";
@@ -36,6 +37,7 @@ const SIMULATORS: Record<PlatformKey, (props: SimulatorProps) => React.ReactNode
   linkedin: LinkedInSimulator,
   youtube_long: YouTubeSimulator,
   youtube_shorts: YouTubeShortsSimulator,
+  youtube_community: YouTubeCommunitySimulator,
   tiktok: TikTokSimulator,
   threads: ThreadsSimulator,
   newsletter: NewsletterSimulator,
@@ -49,6 +51,7 @@ const PLATFORM_LABEL: Record<PlatformKey, string> = {
   linkedin: "LinkedIn",
   youtube_long: "YouTube",
   youtube_shorts: "YouTube Shorts",
+  youtube_community: "YouTube Community",
   tiktok: "TikTok",
   threads: "Threads",
   newsletter: "Newsletter",

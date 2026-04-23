@@ -31,7 +31,6 @@ interface ClipIdea {
 interface Props {
   itemId: string;
   brand: string;
-  hasDescriptProject: boolean;
 }
 
 function fmtTs(sec: number): string {
@@ -60,7 +59,6 @@ function fmtRel(iso: string): string {
 export function ClipIdeasPanel({
   itemId,
   brand,
-  hasDescriptProject,
 }: Props) {
   const [loading, setLoading] = useState(true);
   const [ideas, setIdeas] = useState<ClipIdea[]>([]);
@@ -156,8 +154,6 @@ export function ClipIdeasPanel({
       });
     }
   }, [itemId, batchCreatedAt]);
-
-  if (!hasDescriptProject) return null;
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 sm:p-5 space-y-3">
