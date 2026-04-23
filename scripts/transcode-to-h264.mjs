@@ -54,11 +54,11 @@ const pool = new pg.Pool({
       : { rejectUnauthorized: false },
 });
 
-async function probeCodec(url) {
+async function probeCodec(path) {
   // ffmpeg exits non-zero when given only `-i` (no output), but prints
   // stream info to stderr first. We parse "Video: <codec>," out of that.
   return new Promise((resolve) => {
-    const proc = spawn(ffmpegInstaller.path, ["-hide_banner", "-i", url], {
+    const proc = spawn(ffmpegInstaller.path, ["-hide_banner", "-i", path], {
       stdio: ["ignore", "ignore", "pipe"],
     });
     let stderr = "";
@@ -108,22 +108,6 @@ async function transcodeItem({ id, title, key }) {
   const t0 = Date.now();
   console.log(`\n=== ${id} — ${title}`);
 
-  const probeUrl = await getSignedUrl(
-    s3,
-    new GetObjectCommand({ Bucket: BUCKET, Key: key }),
-    { expiresIn: 1800 },
-  );
-  const codec = await probeCodec(probeUrl);
-  console.log(`  codec: ${codec ?? "unknown"}`);
-  if (codec === "h264") {
-    console.log("  skip (already H.264)");
-    return { outcome: "skipped", codec };
-  }
-  if (DRY) {
-    console.log(`  dry-run — would transcode from ${codec}`);
-    return { outcome: "would-transcode", codec };
-  }
-
   const head = await s3.send(
     new HeadObjectCommand({ Bucket: BUCKET, Key: key }),
   );
@@ -138,6 +122,20 @@ async function transcodeItem({ id, title, key }) {
     );
     if (!getRes.Body) throw new Error("S3 Get returned no body");
     await pipeline(getRes.Body, createWriteStream(inPath));
+    console.log(`  downloaded`);
+
+    const codec = await probeCodec(inPath);
+    console.log(`  codec: ${codec ?? "unknown"}`);
+    if (codec === "h264") {
+      console.log("  skip (already H.264)");
+      await unlink(inPath).catch(() => {});
+      return { outcome: "skipped", codec };
+    }
+    if (DRY) {
+      console.log(`  dry-run — would transcode from ${codec}`);
+      await unlink(inPath).catch(() => {});
+      return { outcome: "would-transcode", codec };
+    }
 
     await runFfmpeg(inPath, outPath);
     const outStat = await stat(outPath);
