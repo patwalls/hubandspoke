@@ -1554,6 +1554,9 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
               enrichmentCompletedAt={item.enrichmentCompletedAt}
               enrichmentAttempts={item.enrichmentAttempts}
               enrichmentError={item.enrichmentError}
+              hook={item.hook}
+              hookSource={item.hookSource}
+              hookExtractedAt={item.hookExtractedAt}
               contentBody={item.contentBody}
               contentBodyFetchedAt={item.contentBodyFetchedAt}
               contentBodySource={item.contentBodySource}

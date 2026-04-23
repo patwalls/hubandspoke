@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getCoverageMap, type CoverageRow } from "@/lib/db/queries";
+import {
+  getCoverageMap,
+  getHookSourceBreakdown,
+  type CoverageRow,
+  type HookSourceBreakdown,
+} from "@/lib/db/queries";
 import { getBrands } from "@/lib/db/brands";
 
 export const metadata: Metadata = { title: "Coverage" };
@@ -62,11 +67,26 @@ function sumRows(rows: CoverageRow[]): CoverageRow {
   return sum;
 }
 
+const HOOK_SOURCE_LABELS: Array<{
+  key: keyof HookSourceBreakdown["bySource"];
+  label: string;
+}> = [
+  { key: "clip_idea", label: "Clip idea" },
+  { key: "llm", label: "LLM" },
+  { key: "content_body", label: "Post body" },
+  { key: "title", label: "Title" },
+  { key: "manual", label: "Manual" },
+  { key: "other", label: "Other" },
+];
+
 export default async function CoveragePage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const rows = await getCoverageMap();
+  const [rows, hookBreakdown] = await Promise.all([
+    getCoverageMap(),
+    getHookSourceBreakdown(),
+  ]);
   const byBrand = new Map<string, CoverageRow[]>();
   for (const r of rows) {
     if (!byBrand.has(r.brand)) byBrand.set(r.brand, []);
@@ -74,6 +94,7 @@ export default async function CoveragePage() {
   }
   const brands = Array.from(byBrand.keys()).sort();
   const brandLabels = new Map((await getBrands()).map((b) => [b.slug, b.label]));
+  const hookByBrand = new Map(hookBreakdown.map((h) => [h.brand, h]));
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -97,14 +118,55 @@ export default async function CoveragePage() {
       {brands.map((brand) => {
         const brandRows = byBrand.get(brand)!;
         const total = sumRows(brandRows);
+        const hooks = hookByBrand.get(brand);
         return (
-          <section key={brand}>
+          <section key={brand} className="space-y-3">
             <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-2">
               {brandLabel(brand, brandLabels)}
               <span className="ml-2 text-muted-foreground/70 normal-case">
                 ({total.total.toLocaleString()} published)
               </span>
             </h3>
+            {hooks && hooks.total > 0 && (
+              <div className="rounded-lg border border-border p-3">
+                <div className="flex items-baseline justify-between mb-2">
+                  <h4 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    Hook sources
+                  </h4>
+                  <span className="text-xs text-muted-foreground">
+                    {hooks.withHook.toLocaleString()} / {hooks.total.toLocaleString()} with hook
+                    {" "}
+                    ({Math.round((hooks.withHook / hooks.total) * 100)}%)
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
+                  {HOOK_SOURCE_LABELS.map(({ key, label }) => {
+                    const count = hooks.bySource[key];
+                    const pct = hooks.withHook
+                      ? Math.round((count / hooks.withHook) * 100)
+                      : 0;
+                    return (
+                      <div
+                        key={key}
+                        className="rounded-md bg-muted/40 px-2 py-1.5"
+                      >
+                        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                          {label}
+                        </div>
+                        <div className="font-medium">
+                          {count.toLocaleString()}
+                          {count > 0 && (
+                            <span className="ml-1 text-muted-foreground font-normal">
+                              ({pct}%)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="rounded-lg border border-border overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
@@ -169,9 +231,9 @@ export default async function CoveragePage() {
 
       <p className="text-xs text-muted-foreground">
         Signals update on their own schedules: enrichment sweep fires at :20
-        past the hour, performance decay is continuous, transcripts publish
-        via Descript on demand. Hook column will populate once the
-        hook-extract sweep is deployed.
+        past the hour, hook-extract (LLM, short-form w/ transcript) at :40,
+        hook-fallback (title / body for the rest) at :50, performance decay
+        is continuous, transcripts publish via Descript on demand.
       </p>
     </div>
   );

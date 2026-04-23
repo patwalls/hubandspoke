@@ -86,6 +86,13 @@ export interface ProductionItem {
   enrichmentCompletedAt?: string | null;
   enrichmentAttempts?: number | null;
   enrichmentError?: string | null;
+  /** Verbatim scroll-stopper opening. Fill paths: clip_idea promotion,
+   *  LLM (hook-extract-sweep, short-form only), fallback (title / body),
+   *  manual edit. */
+  hook?: string | null;
+  hookSource?: string | null;
+  hookExtractor?: string | null;
+  hookExtractedAt?: string | null;
   predictedViewsSnapshot?: number | null;
   predictedViewsSnapshotAt?: string | null;
   prediction?: ViewPrediction | null;

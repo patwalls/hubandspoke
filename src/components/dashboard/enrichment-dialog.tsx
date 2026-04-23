@@ -41,6 +41,9 @@ interface Props {
   enrichmentCompletedAt?: string | null;
   enrichmentAttempts?: number | null;
   enrichmentError?: string | null;
+  hook?: string | null;
+  hookSource?: string | null;
+  hookExtractedAt?: string | null;
   contentBody?: string | null;
   contentBodyFetchedAt?: string | null;
   contentBodySource?: string | null;
@@ -82,6 +85,23 @@ function fmtTimestamp(iso: string | null | undefined): string {
   return d.toLocaleString();
 }
 
+function hookSourceLabel(source: string | null | undefined): string {
+  switch (source) {
+    case "clip_idea":
+      return "from clip idea";
+    case "llm":
+      return "extracted by LLM";
+    case "content_body":
+      return "from post body";
+    case "title":
+      return "from title";
+    case "manual":
+      return "hand-edited";
+    default:
+      return source ?? "unknown source";
+  }
+}
+
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -118,6 +138,9 @@ export function EnrichmentButton(props: Props) {
     enrichmentCompletedAt,
     enrichmentAttempts,
     enrichmentError,
+    hook,
+    hookSource,
+    hookExtractedAt,
     contentBody,
     contentBodyFetchedAt,
     contentBodySource,
@@ -278,6 +301,31 @@ export function EnrichmentButton(props: Props) {
               </dl>
             </Section>
           )}
+
+          {/* Hook — verbatim scroll-stopper opening. Filled by the LLM sweep
+              (short-form w/ transcript), clip-idea promotion, title/body
+              fallback, or manual edit. */}
+          <Section
+            title="Hook"
+            subtitle={
+              hook
+                ? `${hookSourceLabel(hookSource)}${
+                    hookExtractedAt
+                      ? ` · ${fmtTimestamp(hookExtractedAt)}`
+                      : ""
+                  }`
+                : null
+            }
+            actions={hook ? <CopyButton text={hook} /> : undefined}
+          >
+            {hook ? (
+              <p className="text-[13px] leading-snug font-medium">{hook}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No hook extracted yet.
+              </p>
+            )}
+          </Section>
 
           {/* Caption / body */}
           {contentBody ? (

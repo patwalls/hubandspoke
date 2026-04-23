@@ -28,6 +28,7 @@ import {
 } from "./notification-send";
 import { enrichItemTask, type EnrichItemPayload } from "./enrich-item";
 import { extractHookTask, type ExtractHookPayload } from "./extract-hook";
+import { hookFallbackTask, type HookFallbackPayload } from "./hook-fallback";
 import {
   youtubeDownloadTask,
   type YoutubeDownloadPayload,
@@ -42,6 +43,7 @@ import {
   notionSyncTask,
   enrichmentSweepTask,
   hookExtractSweepTask,
+  hookFallbackSweepTask,
   matgSyncTask,
   evergreenScanTask,
   crossPostScanTask,
@@ -57,6 +59,7 @@ export interface TaskPayloads {
   "notification-send": NotificationSendPayload;
   "enrich-item": EnrichItemPayload;
   "extract-hook": ExtractHookPayload;
+  "hook-fallback": HookFallbackPayload;
   "youtube-download": YoutubeDownloadPayload;
   "account-refresh": AccountRefreshPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
@@ -64,6 +67,7 @@ export interface TaskPayloads {
   "notion-sync": Record<string, never>;
   "enrichment-sweep": Record<string, never>;
   "hook-extract-sweep": Record<string, never>;
+  "hook-fallback-sweep": Record<string, never>;
   "matg-sync": Record<string, never>;
   "evergreen-scan": Record<string, never>;
   "cross-post-scan": Record<string, never>;
@@ -85,12 +89,14 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "notification-send": notificationSendTask,
   "enrich-item": enrichItemTask,
   "extract-hook": extractHookTask,
+  "hook-fallback": hookFallbackTask,
   "youtube-download": youtubeDownloadTask,
   "account-refresh": accountRefreshTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,
   "hook-extract-sweep": hookExtractSweepTask,
+  "hook-fallback-sweep": hookFallbackSweepTask,
   "matg-sync": matgSyncTask,
   "evergreen-scan": evergreenScanTask,
   "cross-post-scan": crossPostScanTask,

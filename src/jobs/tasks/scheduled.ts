@@ -11,11 +11,13 @@ import { runCrossPostScan } from "@/lib/services/cross-post-scan";
 import { syncAllMATG } from "@/lib/services/matg-sync";
 import { selectEnrichmentCandidates } from "@/lib/services/enrichment/orchestrator";
 import { selectHookCandidates } from "@/lib/services/hook-extract/orchestrator";
+import { selectHookFallbackCandidates } from "@/lib/services/hook-extract/fallback";
 import { db } from "@/lib/db";
 import { accounts } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import type { EnrichItemPayload } from "./enrich-item";
 import type { ExtractHookPayload } from "./extract-hook";
+import type { HookFallbackPayload } from "./hook-fallback";
 import type { AccountRefreshPayload } from "./account-refresh";
 
 function timed(name: string, fn: () => Promise<unknown>): Task {
@@ -82,6 +84,28 @@ export const hookExtractSweepTask: Task = async (_payload, helpers) => {
   }
   helpers.logger.info(
     `hook-extract-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
+  );
+};
+/**
+ * Cron parent task: fill `hook` on published items the LLM sweep doesn't
+ * cover — long-form YouTube, tweets, LinkedIn, IG posts, newsletters, etc.
+ * Also rescues short-form rows with no transcript. Pure DB work (no LLM),
+ * so the per-sweep batch is large and cheap. Gated on hookExtractedAt IS
+ * NULL so it never overrides an LLM/manual/clip-idea hook.
+ */
+export const hookFallbackSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("hook-fallback-sweep start");
+  const candidates = await selectHookFallbackCandidates();
+  for (const productionItemId of candidates) {
+    const payload: HookFallbackPayload = { productionItemId };
+    await helpers.addJob("hook-fallback", payload as never, {
+      jobKey: `hook-fallback-${productionItemId}`,
+      jobKeyMode: "unsafe_dedupe",
+    });
+  }
+  helpers.logger.info(
+    `hook-fallback-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
   );
 };
 export const matgSyncTask: Task = timed("matg-sync", () => syncAllMATG());

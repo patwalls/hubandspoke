@@ -646,10 +646,6 @@ export interface CoverageRow {
  * have each durable data signal. Used by the `/coverage` page to spot data
  * gaps before running a backfill. "Primary platform" = first element of the
  * jsonb `platform` array; cross-posts still count once per row.
- *
- * Hook-column comment: `has_hook` is always 0 until migration NNNN adds the
- * `hook` column on production_items. Intentional — the page shipped first so
- * the gap is visible before we spend on Haiku calls.
  */
 export async function getCoverageMap(): Promise<CoverageRow[]> {
   const rows = (await db.execute(sql`
@@ -702,4 +698,84 @@ export async function getCoverageMap(): Promise<CoverageRow[]> {
     hasClipIdeas: Number(r.has_clip_ideas),
     hasEvergreen: Number(r.has_evergreen),
   }));
+}
+
+export interface HookSourceBreakdown {
+  brand: string;
+  total: number;
+  withHook: number;
+  bySource: {
+    clip_idea: number;
+    llm: number;
+    content_body: number;
+    title: number;
+    manual: number;
+    other: number;
+  };
+}
+
+/**
+ * Per-brand breakdown of hook-population by source. Distinct from the
+ * coverage table's single "has hook" column — answers "where did the hook
+ * text come from?" so we can tell whether a brand's hooks are real
+ * (LLM/clip_idea) or just title-fallback.
+ */
+export async function getHookSourceBreakdown(): Promise<HookSourceBreakdown[]> {
+  const rows = (await db.execute(sql`
+    SELECT
+      pi.brand AS brand,
+      pi.hook_source AS hook_source,
+      COUNT(*)::int AS n,
+      COUNT(*) FILTER (WHERE pi.hook IS NOT NULL)::int AS n_with_hook
+    FROM production_items pi
+    WHERE pi.status = 'Published'
+    GROUP BY pi.brand, pi.hook_source
+    ORDER BY pi.brand ASC
+  `)) as unknown as Array<{
+    brand: string;
+    hook_source: string | null;
+    n: number;
+    n_with_hook: number;
+  }>;
+
+  const byBrand = new Map<string, HookSourceBreakdown>();
+  for (const r of rows) {
+    let entry = byBrand.get(r.brand);
+    if (!entry) {
+      entry = {
+        brand: r.brand,
+        total: 0,
+        withHook: 0,
+        bySource: {
+          clip_idea: 0,
+          llm: 0,
+          content_body: 0,
+          title: 0,
+          manual: 0,
+          other: 0,
+        },
+      };
+      byBrand.set(r.brand, entry);
+    }
+    const n = Number(r.n);
+    const nWithHook = Number(r.n_with_hook);
+    entry.total += n;
+    entry.withHook += nWithHook;
+
+    if (nWithHook === 0) continue;
+    switch (r.hook_source) {
+      case "clip_idea":
+      case "llm":
+      case "content_body":
+      case "title":
+      case "manual":
+        entry.bySource[r.hook_source] += nWithHook;
+        break;
+      default:
+        entry.bySource.other += nWithHook;
+    }
+  }
+  return Array.from(byBrand.values()).sort((a, b) =>
+    a.brand.localeCompare(b.brand)
+  );
 }
