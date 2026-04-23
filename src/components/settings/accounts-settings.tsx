@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AccountAvatar } from "@/components/ui/account-avatar";
+import { PlatformIcon } from "@/components/ui/platform-icon";
 
 /** Compact 1.2K / 48.2M number formatter. Falls back to — when null. */
 function formatCount(n: number | null): string {
@@ -318,7 +319,14 @@ export function AccountsSettingsContent({
                           ))}
                         </select>
                       ) : (
-                        a.platform
+                        <span className="inline-flex items-center gap-1.5">
+                          <PlatformIcon
+                            platform={a.platform}
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          {a.platform}
+                        </span>
                       )}
                     </td>
                     <td className="px-3 py-2">
