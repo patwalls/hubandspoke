@@ -1812,33 +1812,40 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           className="flex h-auto w-full justify-start gap-1 rounded-none bg-transparent p-0 shadow-none"
         >
           {availableTabs.map((tab) => (
-            <TabsTrigger
+            // Wrap disabled triggers in a span so the native tooltip fires on
+            // hover — a disabled <button> swallows mouse events in every
+            // browser, which would otherwise suppress the `title` popup.
+            <span
               key={tab.value}
-              value={tab.value}
-              disabled={tab.disabled}
-              title={tab.disabledReason}
-              className={cn(
-                "group/tab flex-initial h-9 rounded-md px-3 text-sm font-medium transition-colors",
-                "text-muted-foreground hover:bg-muted hover:text-foreground",
-                "data-active:!bg-orange-100 data-active:!text-orange-700 data-active:!shadow-none",
-                "after:!hidden",
-                "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
-              )}
+              title={tab.disabled ? tab.disabledReason : undefined}
+              className="inline-flex"
             >
-              <span>{tab.label}</span>
-              {tab.count != null && tab.count > 0 && (
-                <span
-                  className={cn(
-                    "ml-1.5 inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-full px-1.5",
-                    "text-[10px] font-semibold tabular-nums",
-                    "bg-muted text-muted-foreground",
-                    "group-data-active/tab:bg-orange-200 group-data-active/tab:text-orange-800",
-                  )}
-                >
-                  {tab.count}
-                </span>
-              )}
-            </TabsTrigger>
+              <TabsTrigger
+                value={tab.value}
+                disabled={tab.disabled}
+                className={cn(
+                  "group/tab flex-initial h-9 rounded-md px-3 text-sm font-medium transition-colors",
+                  "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  "data-active:!bg-orange-100 data-active:!text-orange-700 data-active:!shadow-none",
+                  "after:!hidden",
+                  "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+                )}
+              >
+                <span>{tab.label}</span>
+                {tab.count != null && tab.count > 0 && (
+                  <span
+                    className={cn(
+                      "ml-1.5 inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-full px-1.5",
+                      "text-[10px] font-semibold tabular-nums",
+                      "bg-muted text-muted-foreground",
+                      "group-data-active/tab:bg-orange-200 group-data-active/tab:text-orange-800",
+                    )}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </TabsTrigger>
+            </span>
           ))}
         </TabsList>
 

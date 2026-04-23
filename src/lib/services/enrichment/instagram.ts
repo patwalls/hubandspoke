@@ -51,6 +51,16 @@ interface IGCaptionEdge {
   node?: { text?: string };
 }
 
+interface IGSidecarNode {
+  is_video?: boolean;
+  display_url?: string;
+  video_url?: string;
+}
+
+interface IGSidecarEdge {
+  node?: IGSidecarNode;
+}
+
 interface IGMedia {
   is_video?: boolean;
   product_type?: string;
@@ -59,6 +69,10 @@ interface IGMedia {
   video_duration?: number;
   edge_media_to_caption?: { edges?: IGCaptionEdge[] };
   owner?: IGOwner;
+  /** Present on carousel posts. Each edge is a slide with its own
+   *  display_url / video_url / is_video. SC's flat `download_media_urls`
+   *  array covers videos only, so carousels have to be built from this. */
+  edge_sidecar_to_children?: { edges?: IGSidecarEdge[] };
 }
 
 interface IGDownloadEntry {
@@ -228,20 +242,58 @@ export async function enrichInstagramItem(
   }
 
   // ------------------------------------------------------------------
-  // Step 3: archive primary media + every carousel slide to S3. Carousels
-  // expose each slide as an entry on `download_media_urls[]`; single-photo
-  // and reel posts put their one asset at `[0]`. `archiveCarouselMedia`
-  // handles idempotent per-slide upsert; the legacy single-media columns on
-  // production_items mirror slide 0 so existing UI still works.
+  // Step 3: archive primary media + every carousel slide to S3.
+  //
+  // The shape SC returns depends on the post type:
+  //   - Single photo / single video / reel → one entry in
+  //     `download_media_urls[]` with a `cdn_url` we can archive directly.
+  //   - Carousel (2–10 mixed slides)      → `edge_sidecar_to_children.edges[]`
+  //     has one node per slide with its own `display_url` / `video_url` /
+  //     `is_video`. SC's `download_media_urls[]` for the same post only
+  //     contains the videos (sometimes just the first one), so image
+  //     slides are silently dropped if we read the flat list. Build the
+  //     slide array from the sidecar instead and fall through to the
+  //     flat list only for non-carousel posts.
+  //
+  // Video slides use the IG CDN `video_url` directly — the URL is fresh at
+  // fetch time and `archiveRemoteToS3` downloads it before it rotates.
+  // `archiveCarouselMedia` is idempotent by (itemId, index, sourceUrl).
   // ------------------------------------------------------------------
   if (needsMediaArchive) {
-    const slides: CarouselSlide[] = (data.download_media_urls ?? [])
-      .filter((e): e is IGDownloadEntry & { cdn_url: string } => !!e.cdn_url)
-      .map((e) => ({
-        url: e.cdn_url,
-        kind: e.type === "video" ? "video" : "image",
-        fileNameHint: shortcode,
-      }));
+    const sidecarEdges = media.edge_sidecar_to_children?.edges ?? [];
+    let slides: CarouselSlide[];
+    if (sidecarEdges.length > 0) {
+      slides = sidecarEdges
+        .map((edge): CarouselSlide | null => {
+          const n = edge.node;
+          if (!n) return null;
+          if (n.is_video && n.video_url) {
+            return {
+              url: n.video_url,
+              kind: "video",
+              posterUrl: n.display_url,
+              fileNameHint: shortcode,
+            };
+          }
+          if (!n.is_video && n.display_url) {
+            return {
+              url: n.display_url,
+              kind: "image",
+              fileNameHint: shortcode,
+            };
+          }
+          return null;
+        })
+        .filter((s): s is CarouselSlide => !!s);
+    } else {
+      slides = (data.download_media_urls ?? [])
+        .filter((e): e is IGDownloadEntry & { cdn_url: string } => !!e.cdn_url)
+        .map((e) => ({
+          url: e.cdn_url,
+          kind: e.type === "video" ? "video" : "image",
+          fileNameHint: shortcode,
+        }));
+    }
     if (slides.length > 0) {
       const res = await archiveCarouselMedia(itemId, slides);
       if (res.primary) {
