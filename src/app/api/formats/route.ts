@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { formats, productionItems } from "@/lib/db/schema";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
+import {
+  getChannelsForFormats,
+  setFormatChannels,
+  type FormatChannelInput,
+} from "@/lib/format-channels";
 
 async function isAncestor(candidateAncestorId: string, descendantId: string): Promise<boolean> {
   // Walk up from candidateAncestorId. Return true if we reach descendantId.
@@ -75,9 +80,12 @@ export async function GET(request: NextRequest) {
       return total;
     };
 
+    const channelsByFormat = await getChannelsForFormats(allFormats.map((f) => f.id));
+
     const enriched = allFormats.map((f) => ({
       ...f,
       totalViews: rollupFor(f.id),
+      accountChannels: channelsByFormat.get(f.id) ?? [],
     }));
 
     return NextResponse.json(enriched);
@@ -93,7 +101,29 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, channels, brand, viewThreshold, editor, editorAsanaGid, producer, producerAsanaGid, instructions, parentFormatId } = body;
+    const {
+      name,
+      accountChannels,
+      brand,
+      viewThreshold,
+      editor,
+      editorAsanaGid,
+      producer,
+      producerAsanaGid,
+      instructions,
+      parentFormatId,
+    } = body as {
+      name: string;
+      accountChannels?: FormatChannelInput[];
+      brand?: string;
+      viewThreshold?: number | null;
+      editor?: string | null;
+      editorAsanaGid?: string | null;
+      producer?: string | null;
+      producerAsanaGid?: string | null;
+      instructions?: string | null;
+      parentFormatId?: string | null;
+    };
 
     const resolvedBrand = brand || "starter-story";
 
@@ -115,7 +145,9 @@ export async function POST(request: NextRequest) {
       .values({
         name,
         brand: resolvedBrand,
-        channels: channels || [],
+        // Mirror written by setFormatChannels below; create with empty default
+        // so the row is valid before the channels write lands.
+        channels: [],
         viewThreshold: viewThreshold || null,
         editor: editor || null,
         editorAsanaGid: editorAsanaGid || null,
@@ -125,6 +157,10 @@ export async function POST(request: NextRequest) {
         parentFormatId: parentFormatId || null,
       })
       .returning();
+
+    if (accountChannels && accountChannels.length) {
+      await setFormatChannels(created.id, accountChannels);
+    }
 
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
@@ -139,7 +175,29 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, channels, viewThreshold, editor, editorAsanaGid, producer, producerAsanaGid, instructions, parentFormatId } = body;
+    const {
+      id,
+      name,
+      accountChannels,
+      viewThreshold,
+      editor,
+      editorAsanaGid,
+      producer,
+      producerAsanaGid,
+      instructions,
+      parentFormatId,
+    } = body as {
+      id: string;
+      name: string;
+      accountChannels?: FormatChannelInput[];
+      viewThreshold?: number | null;
+      editor?: string | null;
+      editorAsanaGid?: string | null;
+      producer?: string | null;
+      producerAsanaGid?: string | null;
+      instructions?: string | null;
+      parentFormatId?: string | null;
+    };
 
     // Validate parent: existence, same brand, not self, not descendant (cycle).
     if (parentFormatId) {
@@ -175,7 +233,6 @@ export async function PUT(request: NextRequest) {
       .update(formats)
       .set({
         name,
-        channels: channels || [],
         viewThreshold: viewThreshold || null,
         editor: editor || null,
         editorAsanaGid: editorAsanaGid || null,
@@ -187,6 +244,10 @@ export async function PUT(request: NextRequest) {
       })
       .where(eq(formats.id, id))
       .returning();
+
+    if (accountChannels !== undefined) {
+      await setFormatChannels(id, accountChannels);
+    }
 
     // If the name changed, update all production items that use the old name
     if (existing && existing.name !== name) {

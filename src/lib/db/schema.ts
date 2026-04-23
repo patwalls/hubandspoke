@@ -498,6 +498,42 @@ export const formats = pgTable(
   (table) => [index("idx_formats_parent_format_id").on(table.parentFormatId)]
 );
 
+// Per-format publishing targets in the new account+post_type model. Replaces
+// the legacy `formats.channels` jsonb string array which conflated account
+// identity (which YouTube channel) with post shape (long vs short vs
+// community). One row per (format, account, post_type) target. post_type is
+// nullable so "other" production buckets (SS Case Study, Paid Ad) can be
+// represented as account-only rows.
+export const formatChannels = pgTable(
+  "format_channels",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    formatId: uuid("format_id")
+      .notNull()
+      .references(() => formats.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references((): AnyPgColumn => accounts.id, { onDelete: "cascade" }),
+    postType: text("post_type"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    // Dedupe rows. NULLs in unique constraints get treated as distinct in
+    // Postgres, so coalesce to '' to enforce one (format, account, no-post-
+    // type) row per format. Matches the "Other" account semantics on
+    // production_items where post_type is also NULL.
+    uniqueIndex("uniq_format_channels_format_account_post_type").on(
+      table.formatId,
+      table.accountId,
+      sql`COALESCE(${table.postType}, '')`
+    ),
+    index("idx_format_channels_format").on(table.formatId),
+    index("idx_format_channels_account").on(table.accountId),
+  ]
+);
+
 export const repurposeTriggers = pgTable(
   "repurpose_triggers",
   {

@@ -3,14 +3,15 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { accounts } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
-import { getAccounts } from "@/lib/db/accounts";
+import { getAccounts, getAccountsForBrand } from "@/lib/db/accounts";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const rows = await getAccounts();
+  const brand = request.nextUrl.searchParams.get("brand");
+  const rows = brand ? await getAccountsForBrand(brand) : await getAccounts();
   return NextResponse.json({ accounts: rows });
 }
 

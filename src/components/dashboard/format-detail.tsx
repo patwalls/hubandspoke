@@ -35,12 +35,38 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { channelsForBrand } from "@/lib/config/channels";
-import { ChannelChip } from "@/components/ui/channel-chip";
+import { AccountBadge } from "@/components/ui/account-badge";
+import type { PickerAccount } from "@/components/ui/account-post-type-picker";
 import { PlatformIcon } from "@/components/ui/platform-icon";
-import { normalizePlatform } from "@/lib/platform-field-schemas";
+import {
+  PLATFORM_META,
+  POST_TYPE_SHORT_LABEL,
+  toPlatform,
+  type Platform,
+} from "@/lib/platforms";
+import type { PostType } from "@/lib/platform-field-schemas";
 import { applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
+
+interface AccountChannelSelection {
+  accountId: string;
+  postType: PostType | null;
+}
+
+interface AccountChannelWithAccount extends AccountChannelSelection {
+  account: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+    brandSlug: string;
+    brandLabel: string;
+  };
+}
+
+function selectionKey(s: { accountId: string; postType: PostType | null }): string {
+  return `${s.accountId}|${s.postType ?? ""}`;
+}
 
 interface AsanaMember {
   gid: string;
@@ -52,7 +78,12 @@ interface FormatRow {
   id: string;
   name: string;
   brand: string;
+  // Legacy mirror — kept in sync server-side from format_channels so
+  // unmigrated consumers (recently-visited subtitle, formats list page) keep
+  // rendering correct strings. The editor + tables here use
+  // `accountChannels` instead.
   channels: string[];
+  accountChannels: AccountChannelWithAccount[];
   viewThreshold: number | null;
   editor: string | null;
   editorAsanaGid: string | null;
@@ -80,6 +111,16 @@ interface ContentItem {
   status: string | null;
   viewsEstimated: boolean;
   descriptProjectUrl: string | null;
+  accountId: string | null;
+  postType: PostType | null;
+  account: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+    brandSlug: string;
+    brandLabel: string;
+  } | null;
 }
 
 interface DetailMetrics {
@@ -120,16 +161,16 @@ function formatDate(d: string | null): string {
 
 export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const router = useRouter();
-  const ALL_CHANNELS = channelsForBrand(brand);
 
   const [data, setData] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [allFormats, setAllFormats] = useState<FormatRow[]>([]);
   const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
+  const [accounts, setAccounts] = useState<PickerAccount[]>([]);
 
   // Form state
   const [name, setName] = useState("");
-  const [channels, setChannels] = useState<string[]>([]);
+  const [selections, setSelections] = useState<AccountChannelSelection[]>([]);
   const [viewThreshold, setViewThreshold] = useState("");
   const [editor, setEditor] = useState("");
   const [editorAsanaGid, setEditorAsanaGid] = useState("");
@@ -149,7 +190,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   // New-derivative dialog state.
   const [addChildOpen, setAddChildOpen] = useState(false);
   const [childName, setChildName] = useState("");
-  const [childChannels, setChildChannels] = useState<string[]>([]);
+  const [childSelections, setChildSelections] = useState<AccountChannelSelection[]>([]);
   const [childViewThreshold, setChildViewThreshold] = useState("");
   const [childEditor, setChildEditor] = useState("");
   const [childEditorGid, setChildEditorGid] = useState("");
@@ -164,7 +205,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
 
   function openAddChild() {
     setChildName("");
-    setChildChannels([]);
+    setChildSelections([]);
     setChildViewThreshold("");
     setChildEditor("");
     setChildEditorGid("");
@@ -175,10 +216,12 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     setAddChildOpen(true);
   }
 
-  function toggleChildChannel(ch: string) {
-    setChildChannels((prev) =>
-      prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
-    );
+  function toggleChildSelection(s: AccountChannelSelection) {
+    setChildSelections((prev) => {
+      const k = selectionKey(s);
+      const exists = prev.find((p) => selectionKey(p) === k);
+      return exists ? prev.filter((p) => selectionKey(p) !== k) : [...prev, s];
+    });
   }
 
   async function submitAddChild() {
@@ -195,7 +238,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         body: JSON.stringify({
           name: childName.trim(),
           brand,
-          channels: childChannels,
+          accountChannels: childSelections,
           viewThreshold: childViewThreshold ? parseInt(childViewThreshold, 10) : null,
           editor: childEditor || null,
           editorAsanaGid: childEditorGid || null,
@@ -485,7 +528,12 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
 
   function applyFormat(f: FormatRow) {
     setName(f.name);
-    setChannels(f.channels || []);
+    setSelections(
+      (f.accountChannels || []).map((c) => ({
+        accountId: c.accountId,
+        postType: c.postType,
+      }))
+    );
     setViewThreshold(f.viewThreshold != null ? String(f.viewThreshold) : "");
     setEditor(f.editor || "");
     setEditorAsanaGid(f.editorAsanaGid || "");
@@ -551,10 +599,27 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     loadMembers();
   }, []);
 
-  function toggleChannel(c: string) {
-    setChannels((prev) =>
-      prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]
-    );
+  useEffect(() => {
+    async function loadAccounts() {
+      try {
+        const res = await fetch(`/api/accounts?brand=${brand}`);
+        if (res.ok) {
+          const json = (await res.json()) as { accounts: PickerAccount[] };
+          setAccounts(json.accounts);
+        }
+      } catch (err) {
+        console.error("Failed to fetch accounts:", err);
+      }
+    }
+    loadAccounts();
+  }, [brand]);
+
+  function toggleSelection(s: AccountChannelSelection) {
+    setSelections((prev) => {
+      const k = selectionKey(s);
+      const exists = prev.find((p) => selectionKey(p) === k);
+      return exists ? prev.filter((p) => selectionKey(p) !== k) : [...prev, s];
+    });
   }
 
   async function setChildParent(childId: string, newParentId: string | null) {
@@ -566,7 +631,10 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
       body: JSON.stringify({
         id: child.id,
         name: child.name,
-        channels: child.channels || [],
+        accountChannels: (child.accountChannels || []).map((c) => ({
+          accountId: c.accountId,
+          postType: c.postType,
+        })),
         viewThreshold: child.viewThreshold ?? null,
         editor: child.editor ?? null,
         editorAsanaGid: child.editorAsanaGid ?? null,
@@ -587,7 +655,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         id: formatId,
         name,
         brand,
-        channels,
+        accountChannels: selections,
         viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
         editor: editor || null,
         editorAsanaGid: editorAsanaGid || null,
@@ -654,6 +722,45 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
 
   const { items, metrics, children, ancestors } = data;
   const isPillar = !parentFormatId;
+
+  // Flat list of (account, postType) options — one row per concrete
+  // publishing target. Mirrors the legacy ALL_CHANNELS list but built from
+  // real account data so brand-scoped accounts (e.g. SS Build) show up
+  // automatically as new accounts are added.
+  type ChannelOption = {
+    key: string;
+    accountId: string;
+    postType: PostType | null;
+    account: PickerAccount;
+    platform: Platform;
+  };
+  const channelOptions: ChannelOption[] = [];
+  for (const a of accounts) {
+    if (!a.isActive) continue;
+    const platform = toPlatform(a.platform);
+    const postTypes = PLATFORM_META[platform].postTypes;
+    if (postTypes.length === 0) {
+      channelOptions.push({
+        key: `${a.id}|`,
+        accountId: a.id,
+        postType: null,
+        account: a,
+        platform,
+      });
+    } else {
+      for (const pt of postTypes) {
+        channelOptions.push({
+          key: `${a.id}|${pt}`,
+          accountId: a.id,
+          postType: pt,
+          account: a,
+          platform,
+        });
+      }
+    }
+  }
+  const selectionLookup = new Set(selections.map((s) => selectionKey(s)));
+  const childSelectionLookup = new Set(childSelections.map((s) => selectionKey(s)));
 
   // Build descendant set to prevent cycles in parent picker.
   const descendantIds = new Set<string>();
@@ -843,59 +950,74 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="space-y-2">
-            <Label>Channels</Label>
+            <Label>Accounts</Label>
             <Popover open={channelsPopoverOpen} onOpenChange={setChannelsPopoverOpen}>
               <PopoverTrigger className="flex min-h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs hover:bg-accent cursor-pointer">
-                {channels.length === 0 ? (
-                  <span className="text-muted-foreground">Select channels…</span>
+                {selections.length === 0 ? (
+                  <span className="text-muted-foreground">Select accounts…</span>
                 ) : (
                   <span className="flex flex-wrap items-center gap-1 overflow-hidden">
-                    {channels.slice(0, 3).map((ch) => (
-                      <ChannelChip key={ch} channel={ch} />
-                    ))}
-                    {channels.length > 3 && (
+                    {selections.slice(0, 3).map((s) => {
+                      const opt = channelOptions.find((o) => selectionKey(o) === selectionKey(s));
+                      const account = opt?.account ?? accounts.find((a) => a.id === s.accountId) ?? null;
+                      return (
+                        <AccountBadge
+                          key={selectionKey(s)}
+                          account={account}
+                          postType={s.postType}
+                        />
+                      );
+                    })}
+                    {selections.length > 3 && (
                       <span className="shrink-0 rounded bg-muted text-[10px] font-medium text-muted-foreground px-1.5 py-0.5">
-                        +{channels.length - 3}
+                        +{selections.length - 3}
                       </span>
                     )}
                   </span>
                 )}
                 <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
               </PopoverTrigger>
-              <PopoverContent className="w-72 p-0" align="start">
+              <PopoverContent className="w-80 p-0" align="start">
                 <Command>
-                  <CommandInput placeholder="Search channels…" />
+                  <CommandInput placeholder="Search accounts…" />
                   <CommandList>
-                    <CommandEmpty>No channels found.</CommandEmpty>
+                    <CommandEmpty>No accounts found.</CommandEmpty>
                     <CommandGroup>
-                      {ALL_CHANNELS.map((ch) => {
-                        const selected = channels.includes(ch);
-                        const postType = normalizePlatform(ch);
-                        const platform = postType?.startsWith("youtube_")
-                          ? "youtube"
-                          : postType?.startsWith("instagram_")
-                          ? "instagram"
-                          : postType ?? "other";
+                      {channelOptions.map((opt) => {
+                        const isSelected = selectionLookup.has(opt.key);
+                        const postTypeLabel = opt.postType
+                          ? POST_TYPE_SHORT_LABEL[opt.postType]
+                          : null;
                         return (
                           <CommandItem
-                            key={ch}
-                            value={ch}
-                            onSelect={() => toggleChannel(ch)}
+                            key={opt.key}
+                            value={`${opt.account.handle} ${opt.account.platform} ${opt.postType ?? ""}`}
+                            onSelect={() =>
+                              toggleSelection({
+                                accountId: opt.accountId,
+                                postType: opt.postType,
+                              })
+                            }
                           >
                             <span className="flex items-center gap-2 w-full">
                               <span
                                 className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
-                                  selected
+                                  isSelected
                                     ? "bg-primary border-primary"
                                     : "border-input"
                                 }`}
                               >
-                                {selected && (
+                                {isSelected && (
                                   <svg className="w-3 h-3 text-primary-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                                 )}
                               </span>
-                              <PlatformIcon platform={platform} size={13} />
-                              <span className="text-sm">{ch}</span>
+                              <PlatformIcon platform={opt.platform} size={13} />
+                              <span className="text-sm font-medium">@{opt.account.handle}</span>
+                              {postTypeLabel && (
+                                <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
+                                  {postTypeLabel}
+                                </span>
+                              )}
                             </span>
                           </CommandItem>
                         );
@@ -1108,7 +1230,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                     Name
                   </th>
                   <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Channels
+                    Accounts
                   </th>
                   <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
                     Threshold
@@ -1142,15 +1264,17 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                       </div>
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="flex flex-wrap gap-1 max-w-[220px]">
-                        {(f.channels || []).slice(0, 3).map((ch) => (
-                          <Badge key={ch} variant="secondary" className="text-xs">
-                            {ch}
-                          </Badge>
+                      <div className="flex flex-wrap gap-1 max-w-[260px]">
+                        {(f.accountChannels || []).slice(0, 3).map((c) => (
+                          <AccountBadge
+                            key={`${c.accountId}|${c.postType ?? ""}`}
+                            account={c.account}
+                            postType={c.postType}
+                          />
                         ))}
-                        {(f.channels || []).length > 3 && (
+                        {(f.accountChannels || []).length > 3 && (
                           <span className="text-xs text-muted-foreground">
-                            +{(f.channels || []).length - 3}
+                            +{(f.accountChannels || []).length - 3}
                           </span>
                         )}
                       </div>
@@ -1233,7 +1357,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                     Title
                   </th>
                   <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Platform
+                    Account
                   </th>
                   <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
                     Published
@@ -1286,8 +1410,18 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {(item.platform || []).join(", ") || "—"}
+                    <td className="px-3 py-2.5">
+                      {item.account ? (
+                        <AccountBadge
+                          account={item.account}
+                          postType={item.postType}
+                          variant="compact"
+                        />
+                      ) : (
+                        <span className="text-muted-foreground">
+                          {(item.platform || []).join(", ") || "—"}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground tabular-nums">
                       {formatDate(item.publishedDate)}
@@ -1463,40 +1597,68 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
             </div>
 
             <div className="space-y-2">
-              <Label>Channels</Label>
+              <Label>Accounts</Label>
               <Popover open={childChannelsOpen} onOpenChange={setChildChannelsOpen}>
-                <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
-                  {childChannels.length === 0 ? (
-                    <span className="text-muted-foreground">Select channels…</span>
+                <PopoverTrigger className="flex min-h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs hover:bg-accent cursor-pointer">
+                  {childSelections.length === 0 ? (
+                    <span className="text-muted-foreground">Select accounts…</span>
                   ) : (
-                    <span className="flex items-center gap-1 overflow-hidden">
-                      <span className="truncate">{childChannels.slice(0, 2).join(", ")}</span>
-                      {childChannels.length > 2 && (
+                    <span className="flex flex-wrap items-center gap-1 overflow-hidden">
+                      {childSelections.slice(0, 3).map((s) => {
+                        const opt = channelOptions.find((o) => selectionKey(o) === selectionKey(s));
+                        const account = opt?.account ?? accounts.find((a) => a.id === s.accountId) ?? null;
+                        return (
+                          <AccountBadge
+                            key={selectionKey(s)}
+                            account={account}
+                            postType={s.postType}
+                          />
+                        );
+                      })}
+                      {childSelections.length > 3 && (
                         <span className="shrink-0 rounded bg-muted text-[10px] font-medium text-muted-foreground px-1.5 py-0.5">
-                          +{childChannels.length - 2}
+                          +{childSelections.length - 3}
                         </span>
                       )}
                     </span>
                   )}
                   <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
                 </PopoverTrigger>
-                <PopoverContent className="w-72 p-0" align="start">
+                <PopoverContent className="w-80 p-0" align="start">
                   <Command>
-                    <CommandInput placeholder="Search channels…" />
+                    <CommandInput placeholder="Search accounts…" />
                     <CommandList>
-                      <CommandEmpty>No channels found.</CommandEmpty>
+                      <CommandEmpty>No accounts found.</CommandEmpty>
                       <CommandGroup>
-                        {ALL_CHANNELS.map((ch) => {
-                          const selected = childChannels.includes(ch);
+                        {channelOptions.map((opt) => {
+                          const isSelected = childSelectionLookup.has(opt.key);
+                          const postTypeLabel = opt.postType
+                            ? POST_TYPE_SHORT_LABEL[opt.postType]
+                            : null;
                           return (
-                            <CommandItem key={ch} value={ch} onSelect={() => toggleChildChannel(ch)}>
+                            <CommandItem
+                              key={opt.key}
+                              value={`${opt.account.handle} ${opt.account.platform} ${opt.postType ?? ""}`}
+                              onSelect={() =>
+                                toggleChildSelection({
+                                  accountId: opt.accountId,
+                                  postType: opt.postType,
+                                })
+                              }
+                            >
                               <span className="flex items-center gap-2 w-full">
-                                <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${selected ? "bg-primary border-primary" : "border-input"}`}>
-                                  {selected && (
+                                <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${isSelected ? "bg-primary border-primary" : "border-input"}`}>
+                                  {isSelected && (
                                     <svg className="w-3 h-3 text-primary-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                                   )}
                                 </span>
-                                <span className="text-sm">{ch}</span>
+                                <PlatformIcon platform={opt.platform} size={13} />
+                                <span className="text-sm font-medium">@{opt.account.handle}</span>
+                                {postTypeLabel && (
+                                  <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
+                                    {postTypeLabel}
+                                  </span>
+                                )}
                               </span>
                             </CommandItem>
                           );

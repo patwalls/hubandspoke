@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
+  accounts,
+  brands,
   formats,
   productionItems,
 } from "@/lib/db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
+import { getChannelsForFormats } from "@/lib/format-channels";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -46,6 +49,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       cursor = row.parentFormatId;
     }
 
+    // Pull channels for the format + all children in one query so each row
+    // can be enriched without an N+1.
+    const formatIdsForChannels = [format.id, ...children.map((c) => c.id)];
+    const channelsByFormat = await getChannelsForFormats(formatIdsForChannels);
+
     const allItems = await db
       .select()
       .from(productionItems)
@@ -78,6 +86,32 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       }
     });
 
+    // Resolve account_id → account so the items table can render an
+    // AccountBadge instead of the legacy `platform` string list.
+    const itemAccountIds = Array.from(
+      new Set(items.map((i) => i.accountId).filter((x): x is string => Boolean(x)))
+    );
+    const accountById = new Map<
+      string,
+      { id: string; platform: string; handle: string; displayName: string | null; brandSlug: string; brandLabel: string }
+    >();
+    if (itemAccountIds.length) {
+      const accountRows = await db
+        .select({
+          id: accounts.id,
+          platform: accounts.platform,
+          handle: accounts.handle,
+          displayName: accounts.displayName,
+          brandSlug: brands.slug,
+          brandLabel: brands.label,
+        })
+        .from(accounts)
+        .innerJoin(brands, eq(brands.id, accounts.brandId))
+        .where(inArray(accounts.id, itemAccountIds))
+        .orderBy(asc(accounts.handle));
+      for (const a of accountRows) accountById.set(a.id, a);
+    }
+
     // Presign archived S3 objects so the items table can fall back to a durable
     // cover when the upstream `thumbnail` CDN URL has expired.
     const keys = new Set<string>();
@@ -97,8 +131,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     );
 
     return NextResponse.json({
-      format,
-      children,
+      format: {
+        ...format,
+        accountChannels: channelsByFormat.get(format.id) ?? [],
+      },
+      children: children.map((c) => ({
+        ...c,
+        accountChannels: channelsByFormat.get(c.id) ?? [],
+      })),
       ancestors,
       items: items.map((i) => ({
         id: i.id,
@@ -118,6 +158,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         status: i.status,
         viewsEstimated: i.viewsEstimated ?? false,
         descriptProjectUrl: i.descriptProjectUrl,
+        accountId: i.accountId,
+        postType: i.postType,
+        account: i.accountId ? accountById.get(i.accountId) ?? null : null,
       })),
       metrics: {
         totalPosts,
