@@ -758,8 +758,14 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
   const [utmCampaign, setUtmCampaign] = useState("");
-  const [manychatKeyword, setManychatKeyword] = useState("");
-  const [manychatLink, setManychatLink] = useState("");
+  // ManyChat dialog state — paired fields don't fit the auto-persist-on-blur
+  // pattern (typing one then tabbing out 400s), so they live in a modal that
+  // submits both at once.
+  const [manychatDialogOpen, setManychatDialogOpen] = useState(false);
+  const [manychatDraftKeyword, setManychatDraftKeyword] = useState("");
+  const [manychatDraftLink, setManychatDraftLink] = useState("");
+  const [manychatDraftError, setManychatDraftError] = useState<string | null>(null);
+  const [manychatSaving, setManychatSaving] = useState(false);
   const [sourceType, setSourceType] = useState<string>("original");
   const [pendingKill, setPendingKill] = useState<{ previousStatus: string } | null>(
     null,
@@ -885,8 +891,6 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
     setPublishedLink(item.publishedLink || "");
     setPublishedDate(item.publishedDate || "");
     setUtmCampaign(item.utmCampaign || "");
-    setManychatKeyword(item.manychatKeyword || "");
-    setManychatLink(item.manychatLink || "");
     setSourceType(item.sourceType || "original");
   }, []);
 
@@ -2298,59 +2302,61 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
         </PropertyRowSolo>
 
         {/* ManyChat IG comment-to-DM trigger. Hidden for non-IG posts since
-            the lookup endpoint only fires from the IG comment automation. The
-            two fields are paired at the API — saving one always sends both. */}
+            the lookup endpoint only fires from the IG comment automation.
+            Editing happens in a modal — the two fields must save together
+            (per-account uniqueness on keyword) so the inline auto-save
+            pattern doesn't fit. */}
         {postType?.startsWith("instagram_") && (
           <PropertyRowSolo>
-            <PropertyRow label="ManyChat phrase">
-              <Input
-                value={manychatKeyword}
-                onChange={(e) => setManychatKeyword(e.target.value)}
-                onBlur={() => {
-                  const nextKeyword = manychatKeyword.trim();
-                  const nextLink = manychatLink.trim();
-                  const prevKeyword = item.manychatKeyword ?? "";
-                  const prevLink = item.manychatLink ?? "";
-                  if (nextKeyword === prevKeyword && nextLink === prevLink) return;
-                  void persistField({
-                    manychatKeyword: nextKeyword,
-                    manychatLink: nextLink,
-                  }).then((ok) => {
-                    if (!ok) {
-                      setManychatKeyword(prevKeyword);
-                      setManychatLink(prevLink);
-                    }
-                  });
-                }}
-                aria-label="ManyChat trigger phrase"
-                className={cn(PROPERTY_INPUT_CLASS, "font-mono")}
-                placeholder="e.g. guide saas"
-              />
-            </PropertyRow>
-            <PropertyRow label="ManyChat link">
-              <Input
-                value={manychatLink}
-                onChange={(e) => setManychatLink(e.target.value)}
-                onBlur={() => {
-                  const nextKeyword = manychatKeyword.trim();
-                  const nextLink = manychatLink.trim();
-                  const prevKeyword = item.manychatKeyword ?? "";
-                  const prevLink = item.manychatLink ?? "";
-                  if (nextKeyword === prevKeyword && nextLink === prevLink) return;
-                  void persistField({
-                    manychatKeyword: nextKeyword,
-                    manychatLink: nextLink,
-                  }).then((ok) => {
-                    if (!ok) {
-                      setManychatKeyword(prevKeyword);
-                      setManychatLink(prevLink);
-                    }
-                  });
-                }}
-                aria-label="ManyChat destination link"
-                className={PROPERTY_INPUT_CLASS}
-                placeholder="https://…"
-              />
+            <PropertyRow label="ManyChat trigger">
+              {item.manychatKeyword ? (
+                <div className="flex items-center gap-2 px-2 py-1 min-w-0 w-full">
+                  <code className="text-xs px-1.5 py-0.5 rounded bg-muted text-foreground shrink-0">
+                    {item.manychatKeyword}
+                  </code>
+                  <span className="text-xs text-muted-foreground shrink-0">→</span>
+                  <a
+                    href={item.manychatLink ?? undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate min-w-0 flex-1"
+                    title={item.manychatLink ?? ""}
+                  >
+                    {item.manychatLink}
+                  </a>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs shrink-0"
+                    onClick={() => {
+                      setManychatDraftKeyword(item.manychatKeyword ?? "");
+                      setManychatDraftLink(item.manychatLink ?? "");
+                      setManychatDraftError(null);
+                      setManychatDialogOpen(true);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                </div>
+              ) : (
+                <div className="px-2 py-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      setManychatDraftKeyword("");
+                      setManychatDraftLink("");
+                      setManychatDraftError(null);
+                      setManychatDialogOpen(true);
+                    }}
+                  >
+                    + Add ManyChat trigger
+                  </Button>
+                </div>
+              )}
             </PropertyRow>
           </PropertyRowSolo>
         )}
@@ -3135,6 +3141,115 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
         saving={saveState.kind === "saving"}
         onConfirm={confirmKill}
       />
+
+      {/* ManyChat trigger editor. Both fields submit together so we never
+          hit the "keyword without link" 400 from the API. */}
+      <Dialog
+        open={manychatDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && !manychatSaving) setManychatDialogOpen(false);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {item.manychatKeyword ? "Edit ManyChat trigger" : "Add ManyChat trigger"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              When someone comments the phrase on this Instagram post, ManyChat DMs them this link.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="manychat-phrase">Trigger phrase</Label>
+              <Input
+                id="manychat-phrase"
+                value={manychatDraftKeyword}
+                onChange={(e) => setManychatDraftKeyword(e.target.value)}
+                placeholder="e.g. guide saas"
+                className="font-mono"
+                autoFocus
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Lowercased on save. 3-32 characters. Letters, numbers, space, hyphen, underscore.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="manychat-link">Destination link</Label>
+              <Input
+                id="manychat-link"
+                type="url"
+                value={manychatDraftLink}
+                onChange={(e) => setManychatDraftLink(e.target.value)}
+                placeholder="https://…"
+              />
+            </div>
+            {manychatDraftError && (
+              <p className="text-xs text-destructive">{manychatDraftError}</p>
+            )}
+            <div className="flex justify-between gap-2 pt-2">
+              {item.manychatKeyword ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={manychatSaving}
+                  onClick={async () => {
+                    setManychatSaving(true);
+                    setManychatDraftError(null);
+                    const ok = await persistField({
+                      manychatKeyword: "",
+                      manychatLink: "",
+                    });
+                    setManychatSaving(false);
+                    if (ok) setManychatDialogOpen(false);
+                  }}
+                >
+                  Remove
+                </Button>
+              ) : (
+                <span />
+              )}
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setManychatDialogOpen(false)}
+                  disabled={manychatSaving}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={
+                    manychatSaving ||
+                    !manychatDraftKeyword.trim() ||
+                    !manychatDraftLink.trim()
+                  }
+                  onClick={async () => {
+                    setManychatSaving(true);
+                    setManychatDraftError(null);
+                    const ok = await persistField({
+                      manychatKeyword: manychatDraftKeyword.trim(),
+                      manychatLink: manychatDraftLink.trim(),
+                    });
+                    setManychatSaving(false);
+                    if (ok) setManychatDialogOpen(false);
+                    // Failures land in saveState/toast via persistField — copy
+                    // the latest error into the dialog so it's visible there.
+                    else if (saveState.kind === "error") {
+                      setManychatDraftError(saveState.message);
+                    }
+                  }}
+                >
+                  {manychatSaving ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );
