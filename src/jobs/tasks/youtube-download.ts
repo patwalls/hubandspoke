@@ -198,6 +198,9 @@ function runYtDlp(args: {
     const ytArgs = [
       "-f",
       "bv*[height<=1440]+ba/b[height<=1440]",
+      // Prefer H.264 over AV1/VP9 — Descript's URL import rejects AV1.
+      "-S",
+      "vcodec:h264",
       "--merge-output-format",
       "mp4",
       "--ffmpeg-location",

@@ -89,6 +89,9 @@ function runYtDlp(url: string, outputPath: string, clients: string): Promise<voi
       [
         "-f",
         `bv*[height<=${MAX_HEIGHT}]+ba/b[height<=${MAX_HEIGHT}]`,
+        // Prefer H.264 over AV1/VP9 — Descript's URL import rejects AV1.
+        "-S",
+        "vcodec:h264",
         "--merge-output-format",
         "mp4",
         "--ffmpeg-location",
