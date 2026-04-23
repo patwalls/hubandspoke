@@ -40,16 +40,18 @@ function BrandAvatar({ brand, size = 28 }: { brand: BrandRow; size?: number }) {
     .join("");
   if (!errored && brand.avatarUrl) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={brand.avatarUrl}
-        alt=""
-        width={size}
-        height={size}
-        onError={() => setErrored(true)}
-        className="rounded-full object-cover bg-muted shrink-0"
+      <span
+        className="relative shrink-0 inline-block rounded-full overflow-hidden bg-muted"
         style={{ width: size, height: size }}
-      />
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={brand.avatarUrl}
+          alt=""
+          onError={() => setErrored(true)}
+          className="h-full w-full object-cover"
+        />
+      </span>
     );
   }
   return (
