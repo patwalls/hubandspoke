@@ -13,7 +13,8 @@
  *   X          GET /v1/twitter/profile?handle=<handle>
  *   TikTok     GET /v1/tiktok/profile?handle=<handle>
  *   Threads    GET /v1/threads/profile?handle=<handle>
- *   LinkedIn   GET /v1/linkedin/profile?url=<full-profile-URL>
+ *   LinkedIn   GET /v1/linkedin/profile?url=<.../in/<handle>>    (personal)
+ *              GET /v1/linkedin/company?url=<.../company/<handle>> (company page)
  *
  * Partial writes: only columns with a non-null SC value get updated.
  * Avoids wiping a previously-refreshed follower count when a transient
@@ -137,14 +138,39 @@ async function fetchTikTokUser(handle: string): Promise<AccountRefreshResult | n
   };
 }
 
-async function fetchLinkedinProfile(handle: string): Promise<AccountRefreshResult | null> {
-  // LinkedIn's SC endpoint requires a full profile URL, not a handle.
-  // Build it from the handle — `patrickwalls` → https://www.linkedin.com/in/patrickwalls.
-  const url = `https://www.linkedin.com/in/${handle}`;
+async function fetchLinkedin(
+  handle: string,
+  storedUrl: string | null
+): Promise<AccountRefreshResult | null> {
+  // LinkedIn has two account kinds — personal profiles (linkedin.com/in/…)
+  // and company pages (linkedin.com/company/…) — served by different SC
+  // endpoints. Route by the stored URL when we have one; otherwise probe
+  // /in/ first and fall back to /company/ on miss.
+  const kind = storedUrl?.includes("/company/")
+    ? "company"
+    : storedUrl?.includes("/in/")
+      ? "personal"
+      : null;
+
+  if (kind === "company") {
+    return fetchLinkedinCompany(storedUrl!);
+  }
+  if (kind === "personal") {
+    return fetchLinkedinPersonal(storedUrl!);
+  }
+  const personal = await fetchLinkedinPersonal(`https://www.linkedin.com/in/${handle}`);
+  if (personal) return personal;
+  return fetchLinkedinCompany(`https://www.linkedin.com/company/${handle}`);
+}
+
+async function fetchLinkedinPersonal(url: string): Promise<AccountRefreshResult | null> {
   const json = await scFetchJson<Record<string, unknown>>("/v1/linkedin/profile", { url });
-  if (!json) return null;
+  // SC returns HTTP 404 → null on non-personal / private profiles;
+  // scFetchJson already collapses that. But defensively drop payloads
+  // that come back without a `name` (seen on private accounts).
+  if (!json || typeof json.name !== "string") return null;
   return {
-    displayName: (json.name as string | undefined) ?? null,
+    displayName: json.name,
     avatarUrl: (json.image as string | undefined) ?? null,
     bio: (json.about as string | undefined) ?? (json.headline as string | undefined) ?? null,
     followerCount: pickInt(json, ["followers"]),
@@ -153,6 +179,30 @@ async function fetchLinkedinProfile(handle: string): Promise<AccountRefreshResul
     followingCount: pickInt(json, ["connections"]),
     location: (json.location as string | undefined) ?? null,
     url,
+    metadata: json,
+  };
+}
+
+async function fetchLinkedinCompany(url: string): Promise<AccountRefreshResult | null> {
+  const json = await scFetchJson<Record<string, unknown>>("/v1/linkedin/company", { url });
+  if (!json || typeof json.name !== "string") return null;
+  const loc = (json.location ?? {}) as Record<string, unknown>;
+  const locParts = [loc.city, loc.state, loc.country].filter(
+    (v): v is string => typeof v === "string" && v.length > 0
+  );
+  const location =
+    locParts.length > 0
+      ? locParts.join(", ")
+      : (json.headquarters as string | undefined) ?? null;
+  return {
+    displayName: json.name,
+    avatarUrl: (json.logo as string | undefined) ?? null,
+    bio: (json.description as string | undefined) ?? (json.slogan as string | undefined) ?? null,
+    followerCount: pickInt(json, ["followers"]),
+    bannerUrl: (json.coverImage as string | undefined) ?? null,
+    location,
+    externalId: (json.id as string | undefined) ?? null,
+    url: (json.url as string | undefined) ?? url,
     metadata: json,
   };
 }
@@ -204,7 +254,7 @@ export async function refreshAccount(accountId: string): Promise<void> {
         result = await fetchTikTokUser(handle);
         break;
       case "linkedin":
-        result = await fetchLinkedinProfile(handle);
+        result = await fetchLinkedin(handle, account.url);
         break;
       case "threads":
         result = await fetchThreadsUser(handle);
