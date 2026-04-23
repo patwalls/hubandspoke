@@ -31,6 +31,7 @@ export interface PickerAccount extends AccountBadgeAccount {
   brandLabel: string;
   brandSlug: string;
   isActive: boolean;
+  avatarUrl: string | null;
 }
 
 interface AccountPostTypePickerProps {

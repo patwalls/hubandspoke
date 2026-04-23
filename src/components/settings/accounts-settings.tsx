@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AccountAvatar } from "@/components/ui/account-avatar";
 
 /** Compact 1.2K / 48.2M number formatter. Falls back to — when null. */
 function formatCount(n: number | null): string {
@@ -12,35 +13,6 @@ function formatCount(n: number | null): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   return n.toLocaleString();
-}
-
-/** Round avatar. Falls back to a colored dot with the platform's first
- *  letter when SC hasn't given us an image URL yet (e.g. un-refreshed
- *  account). Kept local to this component to avoid growing a cross-cutting
- *  Avatar primitive with per-platform fallback colors. */
-function AccountAvatar({
-  account,
-}: {
-  account: { avatarUrl: string | null; handle: string; platform: string };
-}) {
-  const [errored, setErrored] = useState(false);
-  if (account.avatarUrl && !errored) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={account.avatarUrl}
-        alt=""
-        onError={() => setErrored(true)}
-        className="size-8 rounded-full object-cover bg-muted shrink-0"
-      />
-    );
-  }
-  const initial = (account.handle[0] ?? "?").toUpperCase();
-  return (
-    <span className="size-8 rounded-full bg-muted text-muted-foreground text-xs font-medium flex items-center justify-center shrink-0">
-      {initial}
-    </span>
-  );
 }
 
 interface AccountRow {
@@ -102,6 +74,9 @@ export function AccountsSettingsContent({
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editHandle, setEditHandle] = useState("");
+  const [editPlatform, setEditPlatform] = useState("youtube");
   const [error, setError] = useState<string | null>(null);
 
   const scopedAccounts = scopeBrandSlug
@@ -141,6 +116,40 @@ export function AccountsSettingsContent({
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function startEdit(a: AccountRow) {
+    setEditingId(a.id);
+    setEditHandle(a.handle);
+    setEditPlatform(a.platform);
+    setError(null);
+  }
+
+  async function saveEdit(accountId: string) {
+    const handle = editHandle.trim().replace(/^@/, "");
+    if (!handle) {
+      setError("Handle cannot be empty");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/accounts/${accountId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ handle, platform: editPlatform }),
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(msg ?? `HTTP ${res.status}`);
+      }
+      setEditingId(null);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
       setSaving(false);
     }
@@ -287,21 +296,53 @@ export function AccountsSettingsContent({
                 {rows.map((a) => (
                   <tr key={a.id} className="border-t border-border">
                     <td className="px-3 py-2">
-                      <AccountAvatar account={a} />
+                      <AccountAvatar
+                        avatarUrl={a.avatarUrl}
+                        platform={a.platform}
+                        handle={a.handle}
+                        size={32}
+                        withPlatformBadge={false}
+                      />
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs">{a.platform}</td>
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {editingId === a.id ? (
+                        <select
+                          className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+                          value={editPlatform}
+                          onChange={(e) => setEditPlatform(e.target.value)}
+                        >
+                          {PLATFORM_OPTIONS.map((p) => (
+                            <option key={p.value} value={p.value}>
+                              {p.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        a.platform
+                      )}
+                    </td>
                     <td className="px-3 py-2">
-                      <span className="inline-flex items-center gap-1">
-                        @{a.handle}
-                        {a.verified && (
-                          <span
-                            title="Platform-verified"
-                            className="text-blue-600 text-[11px]"
-                          >
-                            ✓
-                          </span>
-                        )}
-                      </span>
+                      {editingId === a.id ? (
+                        <Input
+                          className="h-7 w-40"
+                          value={editHandle}
+                          onChange={(e) => setEditHandle(e.target.value)}
+                          placeholder="handle"
+                          autoFocus
+                        />
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          @{a.handle}
+                          {a.verified && (
+                            <span
+                              title="Platform-verified"
+                              className="text-blue-600 text-[11px]"
+                            >
+                              ✓
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">
                       <div className="flex flex-col gap-0.5">
@@ -349,14 +390,42 @@ export function AccountsSettingsContent({
                       )}
                     </td>
                     <td className="text-right px-3 py-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={refreshingId === a.id || a.platform === "newsletter" || a.platform === "other"}
-                        onClick={() => handleRefresh(a.id)}
-                      >
-                        {refreshingId === a.id ? "..." : "Refresh"}
-                      </Button>
+                      {editingId === a.id ? (
+                        <div className="inline-flex gap-1">
+                          <Button
+                            size="sm"
+                            disabled={saving}
+                            onClick={() => saveEdit(a.id)}
+                          >
+                            {saving ? "..." : "Save"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setEditingId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="inline-flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => startEdit(a)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={refreshingId === a.id || a.platform === "newsletter" || a.platform === "other"}
+                            onClick={() => handleRefresh(a.id)}
+                          >
+                            {refreshingId === a.id ? "..." : "Refresh"}
+                          </Button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}

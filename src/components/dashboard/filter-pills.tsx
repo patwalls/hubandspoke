@@ -5,6 +5,7 @@ import { addDays, format, parse, startOfYear } from "date-fns";
 import { ChevronDownIcon, CheckIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PlatformIcon } from "@/components/ui/platform-icon";
+import { AccountAvatar } from "@/components/ui/account-avatar";
 import {
   Popover,
   PopoverContent,
@@ -16,6 +17,7 @@ export interface FilterAccount {
   id: string;
   platform: string;
   handle: string;
+  avatarUrl: string | null;
   brandSlug: string;
   brandLabel: string;
 }
@@ -351,7 +353,14 @@ export function FilterPills({
     ...visibleAccounts.map((a) => ({
       value: a.id,
       label: `@${a.handle}`,
-      icon: <PlatformIcon platform={a.platform} size={12} />,
+      icon: (
+        <AccountAvatar
+          avatarUrl={a.avatarUrl}
+          platform={a.platform}
+          handle={a.handle}
+          size={18}
+        />
+      ),
     })),
   ];
 

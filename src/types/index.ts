@@ -109,6 +109,7 @@ export interface PrimaryRowMeta {
   platform: string;
   handle: string;
   postType: string | null;
+  avatarUrl: string | null;
 }
 
 export interface ContentReportData {

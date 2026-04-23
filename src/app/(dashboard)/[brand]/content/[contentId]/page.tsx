@@ -44,6 +44,7 @@ export default async function BrandContentDetailPage({
     platform: a.platform,
     handle: a.handle,
     displayName: a.displayName,
+    avatarUrl: a.avatarUrl,
     isActive: a.isActive,
   }));
 

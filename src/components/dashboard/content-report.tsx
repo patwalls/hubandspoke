@@ -66,6 +66,7 @@ export function ContentReport() {
             id: string;
             platform: string;
             handle: string;
+            avatarUrl: string | null;
             brandSlug: string;
             brandLabel: string;
           }>;

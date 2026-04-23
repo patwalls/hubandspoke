@@ -253,6 +253,7 @@ export async function getContentReport(
       accountPlatform: accounts.platform,
       accountHandle: accounts.handle,
       accountDisplayName: accounts.displayName,
+      accountAvatarUrl: accounts.avatarUrl,
       accountBrandSlug: brands.slug,
       accountBrandLabel: brands.label,
     })
@@ -286,6 +287,7 @@ export async function getContentReport(
     platform: string;
     handle: string;
     postType: string | null;
+    avatarUrl: string | null;
   };
   const primaryRowMetaByKey = new Map<string, PrimaryRowMeta>();
   const itemToRowKey = new Map<string, string>();
@@ -323,6 +325,7 @@ export async function getContentReport(
         platform: r.accountPlatform,
         handle: r.accountHandle,
         postType: pt,
+        avatarUrl: r.accountAvatarUrl ?? null,
       });
     }
   }
@@ -506,6 +509,7 @@ export async function getProductionPipeline(
       accountPlatform: accounts.platform,
       accountHandle: accounts.handle,
       accountDisplayName: accounts.displayName,
+      accountAvatarUrl: accounts.avatarUrl,
       accountBrandSlug: brands.slug,
       accountBrandLabel: brands.label,
     })

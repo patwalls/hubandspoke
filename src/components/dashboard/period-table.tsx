@@ -7,6 +7,7 @@ import { ChevronRightIcon } from "lucide-react";
 import type { MetricData, Period, PrimaryRowMeta } from "@/types";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { PlatformIcon } from "@/components/ui/platform-icon";
+import { AccountAvatar } from "@/components/ui/account-avatar";
 import { PLATFORM_META, POST_TYPE_SHORT_LABEL, toPlatform } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { cn } from "@/lib/utils";
@@ -244,7 +245,12 @@ export function PeriodTable({
           // exactly the case that's ambiguous here ("@starter_story" sitting
           // next to "@starter_story · Post" with no Reel label).
           <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm">
-            <PlatformIcon platform={rowMeta[row].platform} size={14} />
+            <AccountAvatar
+              avatarUrl={rowMeta[row].avatarUrl}
+              platform={rowMeta[row].platform}
+              handle={rowMeta[row].handle}
+              size={20}
+            />
             <span>@{rowMeta[row].handle}</span>
             {rowMeta[row].postType ? (
               <span className="text-muted-foreground">

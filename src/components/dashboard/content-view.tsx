@@ -53,6 +53,7 @@ export function ContentView({ brand }: ContentViewProps) {
             platform: string;
             handle: string;
             displayName: string | null;
+            avatarUrl: string | null;
             isActive: boolean;
           }>;
         };
