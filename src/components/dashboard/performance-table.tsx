@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import type { ProductionItem } from "@/types";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,6 +82,7 @@ function getFreshness(item: ProductionItem): {
 }
 
 export function PerformanceTable({ items, brand, formats, accounts, onPostCreated }: PerformanceTableProps) {
+  const router = useRouter();
   const hasThumbnails = items.some((item) => coverImageUrl(item));
   const hasPerformanceSync = items.some((item) => item.lastPerformanceSyncAt);
   const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
@@ -265,6 +268,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
           return;
         }
         const data = await res.json();
+        const newItemHref = data.id ? `/${brand}/content/${data.id}` : null;
         setSaveResult({
           success: true,
           autoFetched: data.autoFetched,
@@ -272,6 +276,18 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             ? "Post created! Metrics auto-fetched from YouTube (1 credit)."
             : "Post created successfully.",
         });
+        onPostCreated?.();
+        setDialogOpen(false);
+        if (newItemHref) {
+          toast.success("Post created", {
+            action: {
+              label: "View post",
+              onClick: () => router.push(newItemHref),
+            },
+          });
+          router.push(newItemHref);
+        }
+        return;
       }
       onPostCreated?.();
       setTimeout(() => setDialogOpen(false), 1200);
