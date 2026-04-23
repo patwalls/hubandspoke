@@ -77,6 +77,7 @@ async function runFfmpeg(inPath, outPath) {
   return new Promise((resolve, reject) => {
     const ffArgs = [
       "-y",
+      "-threads", "2",
       "-i", inPath,
       "-c:v", "libx264",
       "-preset", "veryfast",
@@ -85,6 +86,7 @@ async function runFfmpeg(inPath, outPath) {
       "-c:a", "aac",
       "-b:a", "128k",
       "-movflags", "+faststart",
+      "-threads", "2",
       outPath,
     ];
     const proc = spawn(ffmpegInstaller.path, ffArgs, {
@@ -187,7 +189,7 @@ async function loadCandidates() {
         AND descript_project_id IS NULL
         AND youtube_download_source = 'yt-dlp'
         AND media_s3_uploaded_at < '2026-04-23 03:00:00+00'
-      ORDER BY media_s3_uploaded_at DESC`,
+      ORDER BY media_size_bytes ASC NULLS LAST`,
   );
   return rows;
 }
