@@ -100,6 +100,10 @@ export interface ProductionItem {
   predictedViewsSnapshot?: number | null;
   predictedViewsSnapshotAt?: string | null;
   prediction?: ViewPrediction | null;
+  /** ManyChat IG comment-to-DM trigger phrase (lowercase, normalized).
+   *  Paired with manychatLink — both set or both null. */
+  manychatKeyword?: string | null;
+  manychatLink?: string | null;
   createdAt: string;
   updatedAt: string;
 }

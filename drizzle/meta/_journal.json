@@ -267,6 +267,13 @@
       "when": 1776971236276,
       "tag": "0037_clever_major_mapleleaf",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1776972851126,
+      "tag": "0038_flippant_nomad",
+      "breakpoints": true
     }
   ]
 }

@@ -758,6 +758,8 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
   const [utmCampaign, setUtmCampaign] = useState("");
+  const [manychatKeyword, setManychatKeyword] = useState("");
+  const [manychatLink, setManychatLink] = useState("");
   const [sourceType, setSourceType] = useState<string>("original");
   const [pendingKill, setPendingKill] = useState<{ previousStatus: string } | null>(
     null,
@@ -883,6 +885,8 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
     setPublishedLink(item.publishedLink || "");
     setPublishedDate(item.publishedDate || "");
     setUtmCampaign(item.utmCampaign || "");
+    setManychatKeyword(item.manychatKeyword || "");
+    setManychatLink(item.manychatLink || "");
     setSourceType(item.sourceType || "original");
   }, []);
 
@@ -2292,6 +2296,64 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
             />
           </PropertyRow>
         </PropertyRowSolo>
+
+        {/* ManyChat IG comment-to-DM trigger. Hidden for non-IG posts since
+            the lookup endpoint only fires from the IG comment automation. The
+            two fields are paired at the API — saving one always sends both. */}
+        {postType?.startsWith("instagram_") && (
+          <PropertyRowSolo>
+            <PropertyRow label="ManyChat phrase">
+              <Input
+                value={manychatKeyword}
+                onChange={(e) => setManychatKeyword(e.target.value)}
+                onBlur={() => {
+                  const nextKeyword = manychatKeyword.trim();
+                  const nextLink = manychatLink.trim();
+                  const prevKeyword = item.manychatKeyword ?? "";
+                  const prevLink = item.manychatLink ?? "";
+                  if (nextKeyword === prevKeyword && nextLink === prevLink) return;
+                  void persistField({
+                    manychatKeyword: nextKeyword,
+                    manychatLink: nextLink,
+                  }).then((ok) => {
+                    if (!ok) {
+                      setManychatKeyword(prevKeyword);
+                      setManychatLink(prevLink);
+                    }
+                  });
+                }}
+                aria-label="ManyChat trigger phrase"
+                className={cn(PROPERTY_INPUT_CLASS, "font-mono")}
+                placeholder="e.g. guide saas"
+              />
+            </PropertyRow>
+            <PropertyRow label="ManyChat link">
+              <Input
+                value={manychatLink}
+                onChange={(e) => setManychatLink(e.target.value)}
+                onBlur={() => {
+                  const nextKeyword = manychatKeyword.trim();
+                  const nextLink = manychatLink.trim();
+                  const prevKeyword = item.manychatKeyword ?? "";
+                  const prevLink = item.manychatLink ?? "";
+                  if (nextKeyword === prevKeyword && nextLink === prevLink) return;
+                  void persistField({
+                    manychatKeyword: nextKeyword,
+                    manychatLink: nextLink,
+                  }).then((ok) => {
+                    if (!ok) {
+                      setManychatKeyword(prevKeyword);
+                      setManychatLink(prevLink);
+                    }
+                  });
+                }}
+                aria-label="ManyChat destination link"
+                className={PROPERTY_INPUT_CLASS}
+                placeholder="https://…"
+              />
+            </PropertyRow>
+          </PropertyRowSolo>
+        )}
 
         {deleteError && (
           <div className="text-sm px-3 py-2 bg-red-50 text-red-700 border-t border-red-200">

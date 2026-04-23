@@ -15,7 +15,11 @@ export default auth((req) => {
   const isInviteApi =
     pathname === "/api/invites/validate" ||
     pathname === "/api/invites/accept";
-  if (isAuthApi || isCronApi || isInviteApi) return NextResponse.next();
+  // ManyChat's External Request hits /api/manychat/* without a session. The
+  // route handler enforces auth via the `x-manychat-secret` header.
+  const isManychatApi = pathname.startsWith("/api/manychat");
+  if (isAuthApi || isCronApi || isInviteApi || isManychatApi)
+    return NextResponse.next();
 
   const isPublic = PUBLIC_PAGES.has(pathname);
   const loggedIn = !!req.auth;

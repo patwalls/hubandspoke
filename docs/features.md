@@ -36,6 +36,7 @@ removing, or deprecating anything.
 | AI summary (for clip-idea prompt context) | Active | `POST /api/production-items/[id]/summary` | `productionItems` (cached) | |
 | Direct media upload (bypass YouTube download) | Active | `POST /api/uploads/s3-presign`, `POST /api/uploads/confirm`, `POST /api/uploads/download` | `productionItems` (mediaS3Key, posterS3Key) | Triggers `descript-transcribe` on confirm |
 | **Old cross-post fit fields on productionItems** | **Deprecated** | (no live writers) | `productionItems.crossPostFitGood`, `crossPostFitReasoning` | Replaced by `crossPostFitVerdicts`; columns kept for back-data only |
+| ManyChat IG comment-to-DM | Active | Item detail form (instagram_* posts) → `manychatKeyword` + `manychatLink`; `POST /api/manychat/lookup` | `productionItems.manychat_keyword`, `manychat_link` | One ManyChat automation calls our endpoint with the comment text; we return the matching post's link. Per-account uniqueness on keyword. See [ManyChat setup](#manychat-setup). |
 
 ---
 
@@ -147,6 +148,46 @@ removing, or deprecating anything.
 | Local backfill scripts | Active | `scripts/backfill-*.mjs`, `scripts/archive-yt-local.ts` (residential IP for bot-checked YT), `scripts/run-evergreen-scan.ts` | varies | Run via `heroku run` or local `node --env-file=.env.local` |
 | Bootstrap drizzle migrations on existing DB | Active (one-shot) | `scripts/bootstrap-drizzle-migrations.mjs` | `drizzle.__drizzle_migrations` | Already run on prod 2026-04-19 |
 | `scripts/add-*.mjs` / `scripts/create-*-table.mjs` | **Deprecated** | — | — | Pre-2026-04 ALTER TABLE pattern that caused outages. Don't extend. |
+
+---
+
+## ManyChat setup
+
+One-time configuration for the IG comment-to-DM automation. Per-post keyword
++ link mappings live entirely in our DB; ManyChat just forwards the comment
+text to `POST /api/manychat/lookup` and DMs back whatever link we return.
+
+**Why this shape:** ManyChat's API has no Keywords/Triggers endpoint and can't
+create/edit Flows programmatically. Inverting the relationship — ManyChat
+calls us — gets the same outcome with a single, never-edited automation.
+
+**Env var:**
+- `MANYCHAT_WEBHOOK_SECRET` — shared secret pasted into the External Request's
+  `x-manychat-secret` header. Generate with `openssl rand -hex 32`. Required
+  in `.env.local` and Heroku config.
+
+**ManyChat automation: `IG Comment → Hub & Spoke Lookup`**
+1. Trigger: Post or Reel comment → `any post or reel` + `any word`
+2. Opening DM: static `"Got it! Tap below and I'll send you the link 👇"` with
+   button `Send me the link`. (IG forces the first private reply to be static.)
+3. After button: External Request action
+   - `POST https://hubandspoke.starterstory.com/api/manychat/lookup`
+   - Headers: `x-manychat-secret: $MANYCHAT_WEBHOOK_SECRET`,
+     `Content-Type: application/json`
+   - Body: `{ "comment_text": "{{last_input_text}}" }`
+   - Response mapping → Custom Fields:
+     - `found` → `cuf_manychat_found` (boolean)
+     - `link` → `cuf_manychat_link` (text)
+     - `post_title` → `cuf_manychat_post_title` (text)
+4. Condition `cuf_manychat_found is true`
+   - **Yes:** DM `Here's the link from "{{cuf_manychat_post_title}}":\n{{cuf_manychat_link}}`
+   - **Otherwise:** DM `Hmm, I couldn't find that one — make sure you copied the exact phrase from the caption!`
+
+**Per-post workflow:** in the item detail (any `instagram_*` post type), fill in
+`ManyChat phrase` + `ManyChat link`. Phrase is normalized (lowercase, collapsed
+whitespace) on save; uniqueness is per-account. Lookup matches exact first,
+then word-boundary contains, so `"send me guide saas pls"` still hits a stored
+phrase of `guide saas`.
 
 ---
 
