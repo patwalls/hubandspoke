@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findKeywordMatch } from "@/lib/services/manychat";
 import {
+  sendInstagramDirectMessage,
   sendInstagramPrivateReply,
   verifyMetaSignature,
 } from "@/lib/services/instagram";
@@ -43,6 +44,20 @@ type CommentChangeValue = {
   text?: string;      // the comment body
   from?: { id?: string; username?: string };
   media?: { id?: string };
+};
+
+// DM webhook payload shape. Lives under `entry[].messaging[]` (NOT changes[]).
+// `is_echo` marks our own outbound DMs that Meta loops back through the same
+// webhook — must be skipped or we'd loop forever every time we send.
+type MessagingEvent = {
+  sender?: { id?: string };
+  recipient?: { id?: string };
+  timestamp?: number;
+  message?: {
+    mid?: string;
+    text?: string;
+    is_echo?: boolean;
+  };
 };
 
 /**
@@ -90,6 +105,8 @@ export async function POST(request: NextRequest) {
 
   for (const entry of entries) {
     if (!entry || typeof entry !== "object") continue;
+
+    // Comments are delivered under `entry[].changes[]` with field === "comments".
     const changes = "changes" in entry ? ((entry as { changes: unknown }).changes as unknown[]) : [];
     for (const change of changes) {
       if (!change || typeof change !== "object") continue;
@@ -128,6 +145,52 @@ export async function POST(request: NextRequest) {
       } else {
         console.log(
           `[instagram/webhook] DM sent comment_id=${commentId} message_id=${result.messageId}`
+        );
+      }
+    }
+
+    // DMs are delivered under `entry[].messaging[]`. Different envelope from
+    // comments — text lives at message.text, sender id at sender.id, and we
+    // MUST skip is_echo (our own outbound DMs come back through this webhook).
+    const messaging =
+      "messaging" in entry ? ((entry as { messaging: unknown }).messaging as unknown[]) : [];
+    for (const event of messaging as MessagingEvent[]) {
+      if (!event || typeof event !== "object") continue;
+      if (!event.message) continue; // Skip delivery/read/postback events
+      if (event.message.is_echo) continue; // Skip echoes of our own outbound DMs
+
+      const senderId = event.sender?.id ?? "";
+      const messageText = event.message.text ?? "";
+      const messageId = event.message.mid ?? "";
+
+      if (!senderId) {
+        console.log("[instagram/webhook] skipping DM with no sender id");
+        continue;
+      }
+      if (ourBusinessId && senderId === ourBusinessId) {
+        // Defensive: skip if somehow the sender is us.
+        continue;
+      }
+      if (!messageText) {
+        // Non-text message (sticker, image, etc.). Nothing to look up.
+        continue;
+      }
+
+      const match = await findKeywordMatch(messageText);
+      console.log(
+        `[instagram/webhook] dm mid=${messageId} from=${senderId} text=${JSON.stringify(messageText)} match=${match ? "yes" : "no"}`
+      );
+      if (!match) continue;
+
+      const reply = `Here's the link from "${match.post_title}":\n\n${match.link}`;
+      const result = await sendInstagramDirectMessage(senderId, reply);
+      if (!result.ok) {
+        console.error(
+          `[instagram/webhook] DM reply failed sender=${senderId} status=${result.status} error=${result.error}`
+        );
+      } else {
+        console.log(
+          `[instagram/webhook] DM reply sent sender=${senderId} message_id=${result.messageId}`
         );
       }
     }

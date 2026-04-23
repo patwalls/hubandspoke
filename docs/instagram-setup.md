@@ -6,8 +6,12 @@ in the Meta App Dashboard and Graph API Explorer.
 
 ## What this enables
 
-When a viewer comments on any `@starter_story` IG post, Meta sends a webhook
-to `/api/instagram/webhook`. We look up the comment text in `productionItems.manychat_keyword`. If matched, we send a DM with the configured link via Meta's Send API (private reply mechanism).
+Two trigger paths, both backed by the same DB lookup:
+
+1. **Comment trigger:** viewer comments a configured keyword on any `@starter_story` post → Meta hits our webhook → we DM the link via the Send API's *private reply* form (bypasses the 24h messaging window).
+2. **DM trigger:** viewer DMs a configured keyword to `@starter_story` → Meta hits our webhook → we DM the link back via the Send API's *standard message* form (24h window is open since they just messaged us).
+
+Both are handled by `/api/instagram/webhook` against the same keyword DB (`productionItems.manychat_keyword`).
 
 ## Prerequisites
 
@@ -110,8 +114,10 @@ heroku config:set INSTAGRAM_BUSINESS_ID=<value> --app hubandspoke
 3. **Callback URL:** `https://hubandspoke.starterstory.com/api/instagram/webhook`
 4. **Verify Token:** the value of `META_VERIFY_TOKEN` from `.env.local` (locally generated as `423f478af0e73088cce5f641b39cda801296aa84bac91adb` — also set this on Heroku before this step or the handshake will fail)
 5. Click **Verify and Save** — Meta hits our GET endpoint. Should succeed on first try.
-6. Subscribe to the **`comments`** field (the only one we need).
-7. Then in the same Instagram subscription panel, add the `@starter_story` account by selecting it and clicking **Subscribe** on the `comments` field.
+6. Subscribe to BOTH fields:
+   - **`comments`** — for comment-triggered DMs
+   - **`messages`** — for DM-triggered DM replies
+7. Then in the same Instagram subscription panel, add the `@starter_story` account by selecting it and clicking **Subscribe** on both fields above.
 
 ## Step 7 — App Review for `instagram_manage_messages`
 
@@ -141,13 +147,14 @@ curl -i "https://hubandspoke.starterstory.com/api/instagram/webhook?hub.mode=sub
 curl -i "https://hubandspoke.starterstory.com/api/instagram/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=test123"
 ```
 
-Then comment a configured keyword on a real IG post (as your admin account, since that works pre-review):
+Then exercise both trigger paths (as your admin account — works pre-review):
 
 ```
 heroku logs --app hubandspoke --tail | grep "instagram/webhook"
 ```
 
-You should see one line per comment with the `match=yes/no` flag, and a `DM sent` line if it matched.
+- **Comment test:** comment a configured keyword on a real IG post. Look for `comment_id=... match=yes` followed by `DM sent`.
+- **DM test:** open a DM with `@starter_story` from a different account (or any account that's not the page admin echo) and message the configured keyword. Look for `dm mid=... match=yes` followed by `DM reply sent`.
 
 ---
 

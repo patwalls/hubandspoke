@@ -16,21 +16,11 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 const GRAPH_VERSION = "v25.0";
 const SEND_ENDPOINT = `https://graph.instagram.com/${GRAPH_VERSION}/me/messages`;
 
-/**
- * Send a private reply to a specific comment via the Instagram Send API.
- * The `comment_id` recipient form bypasses the 24-hour messaging window —
- * but it's a one-shot per comment per commenter, and only valid for 7 days
- * after the comment was posted.
- *
- * Returns Meta's `message_id` on success, or a structured error.
- */
-export async function sendInstagramPrivateReply(
-  commentId: string,
-  message: string
-): Promise<
+type SendResult =
   | { ok: true; messageId: string }
-  | { ok: false; status: number; error: string }
-> {
+  | { ok: false; status: number; error: string };
+
+async function postToSendApi(body: object): Promise<SendResult> {
   const token = process.env.INSTAGRAM_PAGE_ACCESS_TOKEN;
   if (!token) {
     return {
@@ -46,10 +36,7 @@ export async function sendInstagramPrivateReply(
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({
-      recipient: { comment_id: commentId },
-      message: { text: message },
-    }),
+    body: JSON.stringify(body),
   });
 
   // Meta returns { message_id, recipient_id } on success or { error: { message,
@@ -74,6 +61,37 @@ export async function sendInstagramPrivateReply(
       ? String((payload as { message_id: unknown }).message_id)
       : "";
   return { ok: true, messageId };
+}
+
+/**
+ * Send a private reply to a specific comment via the Instagram Send API.
+ * The `comment_id` recipient form bypasses the 24-hour messaging window —
+ * but it's a one-shot per comment per commenter, and only valid for 7 days
+ * after the comment was posted.
+ */
+export function sendInstagramPrivateReply(
+  commentId: string,
+  message: string
+): Promise<SendResult> {
+  return postToSendApi({
+    recipient: { comment_id: commentId },
+    message: { text: message },
+  });
+}
+
+/**
+ * Send a standard DM to an Instagram user by their IGSID. Subject to the
+ * 24-hour messaging window — only call this in response to an inbound message
+ * from that user (which is the only path that uses this in the webhook).
+ */
+export function sendInstagramDirectMessage(
+  recipientIgsid: string,
+  message: string
+): Promise<SendResult> {
+  return postToSendApi({
+    recipient: { id: recipientIgsid },
+    message: { text: message },
+  });
 }
 
 /**
