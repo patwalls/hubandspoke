@@ -1757,8 +1757,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       {/* Content detail tabs — pill style with HubSpot orange active state */}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DetailTab)}>
         <TabsList
-          variant="line"
-          className="flex h-auto w-full justify-start gap-1 rounded-none bg-transparent p-0"
+          className="flex h-auto w-full justify-start gap-1 rounded-none bg-transparent p-0 shadow-none"
         >
           {availableTabs.map((tab) => (
             <TabsTrigger
@@ -1767,7 +1766,7 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
               className={cn(
                 "group/tab flex-initial h-9 rounded-md px-3 text-sm font-medium transition-colors",
                 "text-muted-foreground hover:bg-muted hover:text-foreground",
-                "data-active:bg-orange-100 data-active:text-orange-700",
+                "data-active:!bg-orange-100 data-active:!text-orange-700 data-active:!shadow-none",
                 "after:!hidden",
               )}
             >
