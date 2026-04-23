@@ -17,6 +17,9 @@ import { UserChip } from "./user-chip";
 interface SettingsPageContentProps {
   brand: string;
   brandLabel: string;
+  /** Hide the top "Settings / Configure {brandLabel}" block. Use when the
+   *  enclosing page already owns a page-level header. */
+  hideHeader?: boolean;
 }
 
 interface AssignableUser {
@@ -41,6 +44,7 @@ const WEEK_DAYS = [
 export function SettingsPageContent({
   brand,
   brandLabel,
+  hideHeader = false,
 }: SettingsPageContentProps) {
   const [weeklyGoal, setWeeklyGoal] = useState<string>("");
   const [savedGoal, setSavedGoal] = useState<number | null>(null);
@@ -213,14 +217,16 @@ export function SettingsPageContent({
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-          Settings
-        </h1>
-        <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-          Configure {brandLabel}
-        </p>
-      </div>
+      {!hideHeader && (
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
+            Settings
+          </h1>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            Configure {brandLabel}
+          </p>
+        </div>
+      )}
 
       <form
         onSubmit={handleSave}

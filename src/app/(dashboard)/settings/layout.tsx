@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getEnabledBrands } from "@/lib/db/brands";
 import { SettingsSidebarNav } from "@/components/settings/sidebar-nav";
 
 export default async function SettingsLayout({
@@ -13,11 +12,6 @@ export default async function SettingsLayout({
     redirect("/login");
   }
 
-  const brandLinks = (await getEnabledBrands()).map((b) => ({
-    slug: b.slug,
-    label: b.label,
-  }));
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-6 md:gap-8">
       <aside className="md:sticky md:top-4 self-start">
@@ -29,7 +23,7 @@ export default async function SettingsLayout({
             Manage your workspace
           </p>
         </div>
-        <SettingsSidebarNav brands={brandLinks} />
+        <SettingsSidebarNav />
       </aside>
       <main>{children}</main>
     </div>

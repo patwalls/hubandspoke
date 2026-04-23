@@ -4,11 +4,11 @@ interface LegacyBrandSettingsPageProps {
   params: Promise<{ brand: string }>;
 }
 
-// Brand settings moved under /settings/brands/[brand] so the global Settings
-// sidebar stays visible. Bookmarks and stale links land here first.
+// Brand settings moved under /[brand]/accounts alongside the brand's social
+// accounts. Bookmarks and stale links land here first.
 export default async function LegacyBrandSettingsPage({
   params,
 }: LegacyBrandSettingsPageProps) {
   const { brand } = await params;
-  redirect(`/settings/brands/${brand}`);
+  redirect(`/${brand}/accounts`);
 }

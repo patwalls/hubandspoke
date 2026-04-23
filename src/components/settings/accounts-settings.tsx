@@ -85,9 +85,18 @@ const PLATFORM_OPTIONS = [
 export function AccountsSettingsContent({
   accounts,
   brands,
+  scopeBrandSlug = null,
+  hideHeader = false,
 }: {
   accounts: AccountRow[];
   brands: BrandOption[];
+  /** If set, hide the grouped brand header, show only this brand's rows,
+   *  and lock the Add-account form's brand selector. */
+  scopeBrandSlug?: string | null;
+  /** Hide the top "Accounts" title/description block (the Add-account
+   *  button moves inline with the section). Use when the enclosing page
+   *  already owns a page-level header. */
+  hideHeader?: boolean;
 }) {
   const router = useRouter();
   const [showAdd, setShowAdd] = useState(false);
@@ -95,8 +104,14 @@ export function AccountsSettingsContent({
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const scopedAccounts = scopeBrandSlug
+    ? accounts.filter((a) => a.brandSlug === scopeBrandSlug)
+    : accounts;
+
   // New-account form
-  const [newBrand, setNewBrand] = useState(brands[0]?.slug ?? "");
+  const [newBrand, setNewBrand] = useState(
+    scopeBrandSlug ?? brands[0]?.slug ?? ""
+  );
   const [newPlatform, setNewPlatform] = useState("youtube");
   const [newHandle, setNewHandle] = useState("");
 
@@ -151,7 +166,7 @@ export function AccountsSettingsContent({
   }
 
   const byBrand = new Map<string, AccountRow[]>();
-  for (const a of accounts) {
+  for (const a of scopedAccounts) {
     if (!byBrand.has(a.brandLabel)) byBrand.set(a.brandLabel, []);
     byBrand.get(a.brandLabel)!.push(a);
   }
@@ -159,13 +174,17 @@ export function AccountsSettingsContent({
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">Accounts</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Social accounts that production items get tagged to. Scrape Creators
-            refresh pulls follower counts and avatars weekly.
-          </p>
-        </div>
+        {hideHeader ? (
+          <div />
+        ) : (
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Accounts</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Social accounts that production items get tagged to. Scrape Creators
+              refresh pulls follower counts and avatars weekly.
+            </p>
+          </div>
+        )}
         <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
           {showAdd ? "Cancel" : "Add account"}
         </Button>
@@ -184,9 +203,10 @@ export function AccountsSettingsContent({
               <Label htmlFor="new-brand">Brand</Label>
               <select
                 id="new-brand"
-                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm disabled:opacity-60"
                 value={newBrand}
                 onChange={(e) => setNewBrand(e.target.value)}
+                disabled={scopeBrandSlug != null}
               >
                 {brands.map((b) => (
                   <option key={b.slug} value={b.slug}>
@@ -231,9 +251,11 @@ export function AccountsSettingsContent({
 
       {Array.from(byBrand.entries()).map(([brandLabel, rows]) => (
         <section key={brandLabel} className="space-y-2">
-          <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            {brandLabel}
-          </h3>
+          {scopeBrandSlug == null && (
+            <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              {brandLabel}
+            </h3>
+          )}
           <div className="rounded-lg border border-border overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">

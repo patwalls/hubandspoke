@@ -1,31 +1,14 @@
-import { notFound } from "next/navigation";
-import type { Metadata } from "next";
-import { fetchBrandBySlug } from "@/lib/db/brands";
-import { SettingsPageContent } from "@/components/dashboard/settings-page";
+import { redirect } from "next/navigation";
 
-interface BrandSettingsPageProps {
+interface LegacyBrandGoalsPageProps {
   params: Promise<{ brand: string }>;
 }
 
-export async function generateMetadata({
+// Per-brand production settings moved under /[brand]/accounts alongside the
+// brand's social accounts. Bookmarks land here and redirect through.
+export default async function LegacyBrandGoalsPage({
   params,
-}: BrandSettingsPageProps): Promise<Metadata> {
+}: LegacyBrandGoalsPageProps) {
   const { brand } = await params;
-  const brandConfig = await fetchBrandBySlug(brand);
-  return {
-    title: brandConfig ? `Settings · ${brandConfig.label}` : "Settings",
-  };
-}
-
-export default async function BrandSettingsPage({
-  params,
-}: BrandSettingsPageProps) {
-  const { brand } = await params;
-  const brandConfig = await fetchBrandBySlug(brand);
-
-  if (!brandConfig) {
-    notFound();
-  }
-
-  return <SettingsPageContent brand={brand} brandLabel={brandConfig.label} />;
+  redirect(`/${brand}/accounts`);
 }

@@ -4,20 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-interface BrandLink {
-  slug: string;
-  label: string;
-}
-
 const SECTIONS = [
   { href: "/settings/brands", label: "Brands" },
-  { href: "/settings/accounts", label: "Accounts" },
   { href: "/settings/users", label: "Users" },
   { href: "/settings/sync-errors", label: "Sync errors" },
   { href: "/settings/jobs", label: "Jobs" },
 ] as const;
 
-export function SettingsSidebarNav({ brands }: { brands: BrandLink[] }) {
+export function SettingsSidebarNav() {
   const pathname = usePathname();
 
   const itemClass = (active: boolean) =>
@@ -39,17 +33,6 @@ export function SettingsSidebarNav({ brands }: { brands: BrandLink[] }) {
           {s.label}
         </Link>
       ))}
-      <div className="mt-3 px-2 text-[11px] uppercase tracking-wide text-muted-foreground">
-        Brand goals
-      </div>
-      {brands.map((b) => {
-        const href = `/settings/brands/${b.slug}`;
-        return (
-          <Link key={b.slug} href={href} className={itemClass(pathname === href)}>
-            {b.label}
-          </Link>
-        );
-      })}
     </nav>
   );
 }
