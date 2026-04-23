@@ -11,46 +11,53 @@ export interface DescriptClipResolvePayload {
   triggerId: string;
   jobId: string;
   derivativeItemId?: string;
+  /** Epoch ms. Set on the first invocation; carried forward across re-enqueues. */
+  deadlineAt?: number;
 }
 
 const POLL_INTERVAL_MS = 5000;
-const DEADLINE_MS = 2 * 60 * 1000;
+const DEADLINE_MS = 10 * 60 * 1000;
 
 /**
- * Poll a Descript repurpose-agent job until it stops, extract the resulting
- * compositionId from the agent response, and persist it on the trigger row
- * (+ the derivative production_item if one was created). Replaces the
- * previous fire-and-forget promise at src/app/api/descript/clip-out/route.ts.
+ * Do one poll of a Descript repurpose-agent job. If it's stopped, write the
+ * compositionId. If not, self-re-enqueue with a 5s delay. Keeping each
+ * invocation <1s means SIGTERM during a deploy never catches us mid-poll,
+ * so the job's lock never leaks.
  */
 export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
-  const { triggerId, jobId, derivativeItemId } =
-    rawPayload as DescriptClipResolvePayload;
+  const payload = rawPayload as DescriptClipResolvePayload;
+  const deadlineAt = payload.deadlineAt ?? Date.now() + DEADLINE_MS;
 
-  const deadline = Date.now() + DEADLINE_MS;
-  while (Date.now() < deadline) {
-    const job = await fetchDescriptJob(jobId);
-    if (job.job_state === "stopped") {
-      const compositionId = extractCompositionIdFromAgentResponse(
-        job.result?.agent_response
-      );
+  const job = await fetchDescriptJob(payload.jobId);
+  if (job.job_state === "stopped") {
+    const compositionId = extractCompositionIdFromAgentResponse(
+      job.result?.agent_response,
+    );
+    await db
+      .update(repurposeTriggers)
+      .set({ descriptCompositionId: compositionId })
+      .where(eq(repurposeTriggers.id, payload.triggerId));
+    if (payload.derivativeItemId && compositionId) {
       await db
-        .update(repurposeTriggers)
+        .update(productionItems)
         .set({ descriptCompositionId: compositionId })
-        .where(eq(repurposeTriggers.id, triggerId));
-      if (derivativeItemId && compositionId) {
-        await db
-          .update(productionItems)
-          .set({ descriptCompositionId: compositionId })
-          .where(eq(productionItems.id, derivativeItemId));
-      }
-      helpers.logger.info(
-        `descript-clip-resolve ok trigger=${triggerId} composition=${compositionId ?? "none"}`
-      );
-      return;
+        .where(eq(productionItems.id, payload.derivativeItemId));
     }
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    helpers.logger.info(
+      `descript-clip-resolve ok trigger=${payload.triggerId} composition=${compositionId ?? "none"}`,
+    );
+    return;
   }
-  throw new Error(
-    `Descript job ${jobId} did not stop within ${DEADLINE_MS / 1000}s`
+
+  if (Date.now() >= deadlineAt) {
+    throw new Error(
+      `Descript job ${payload.jobId} did not stop before deadline`,
+    );
+  }
+
+  await helpers.addJob(
+    "descript-clip-resolve",
+    { ...payload, deadlineAt },
+    { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
   );
 };

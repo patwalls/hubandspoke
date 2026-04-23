@@ -26,27 +26,41 @@ export interface ClipIdeaPreciseCutPayload {
   clipIdeaId: string;
   triggerId: string;
   derivativeItemId: string;
+  /** Set once the upload has been handed to Descript; subsequent runs only poll. */
+  uploadJobId?: string;
+  /** Epoch ms. Set on the first poll; carried forward across re-enqueues. */
+  deadlineAt?: number;
 }
 
 const POLL_INTERVAL_MS = 5000;
-const DEADLINE_MS = 10 * 60 * 1000;
+const DEADLINE_MS = 30 * 60 * 1000;
 
 /**
- * Precise-cut flow: download the source video from S3, trim to
- * [startSec, endSec] with ffmpeg stream-copy, request a signed upload URL
- * from Descript's import endpoint, PUT the trimmed bytes, then poll until
- * the import job stops. On success, backfills descriptProjectId /
- * descriptProjectUrl onto both the repurpose_trigger and the derivative
- * production_item. All tempfiles are removed in a finally block.
+ * Precise-cut flow, split across two phases so each task invocation stays
+ * short enough to survive a deploy:
+ *
+ *   1. First run (no uploadJobId in payload): download from S3, ffmpeg-trim,
+ *      create a Descript project + signed upload URL, PUT the bytes, then
+ *      enqueue a continuation carrying the Descript upload jobId.
+ *   2. Continuation runs: one poll per invocation. If the import job is
+ *      stopped, persist descriptCompositionId on the trigger + derivative.
+ *      Otherwise self-re-enqueue with a 5s delay.
  *
  * Idempotency: the derivative production_item is uniq-constrained on
  * source_clip_idea_id, so a retry after a partial failure re-finds the same
  * derivative row and updates it. The Descript side may create a duplicate
- * project on retry — acceptable since retries should be rare.
+ * project if phase 1 is retried after a partial failure — acceptable since
+ * retries should be rare.
  */
 export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
-  const { clipIdeaId, triggerId, derivativeItemId } =
-    rawPayload as ClipIdeaPreciseCutPayload;
+  const payload = rawPayload as ClipIdeaPreciseCutPayload;
+  const { clipIdeaId, triggerId, derivativeItemId } = payload;
+  const deadlineAt = payload.deadlineAt ?? Date.now() + DEADLINE_MS;
+
+  if (payload.uploadJobId) {
+    await pollUploadOnce(helpers, payload, deadlineAt);
+    return;
+  }
 
   const [row] = await db
     .select({
@@ -128,25 +142,57 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
       })
       .where(eq(productionItems.id, derivativeItemId));
 
-    const deadline = Date.now() + DEADLINE_MS;
-    while (Date.now() < deadline) {
-      const job = await fetchDescriptJob(upload.jobId);
-      if (job.job_state === "stopped") {
-        helpers.logger.info(
-          `precise-cut ok clip=${clipIdeaId} project=${upload.projectId}`,
-        );
-        return;
-      }
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-    }
-    throw new Error(
-      `Descript import ${upload.jobId} did not stop within ${DEADLINE_MS / 1000}s`,
+    await helpers.addJob(
+      "clip-idea-precise-cut",
+      { ...payload, uploadJobId: upload.jobId, deadlineAt },
+      { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
     );
   } finally {
     await safeUnlink(sourcePath);
     await safeUnlink(clipPath);
   }
 };
+
+async function pollUploadOnce(
+  helpers: Parameters<Task>[1],
+  payload: ClipIdeaPreciseCutPayload,
+  deadlineAt: number,
+): Promise<void> {
+  const uploadJobId = payload.uploadJobId!;
+  const job = await fetchDescriptJob(uploadJobId);
+  if (job.job_state === "stopped") {
+    // Import creates exactly one composition (the one we declared in
+    // add_compositions). Persist its id so the UI can exit "Clip
+    // processing…" and deep-link into the composition.
+    const compositionId = job.result?.created_compositions?.[0]?.id;
+    if (compositionId) {
+      await db
+        .update(repurposeTriggers)
+        .set({ descriptCompositionId: compositionId })
+        .where(eq(repurposeTriggers.id, payload.triggerId));
+      await db
+        .update(productionItems)
+        .set({ descriptCompositionId: compositionId })
+        .where(eq(productionItems.id, payload.derivativeItemId));
+    }
+    helpers.logger.info(
+      `precise-cut ok clip=${payload.clipIdeaId} composition=${compositionId ?? "none"}`,
+    );
+    return;
+  }
+
+  if (Date.now() >= deadlineAt) {
+    throw new Error(
+      `Descript import ${uploadJobId} did not stop before deadline`,
+    );
+  }
+
+  await helpers.addJob(
+    "clip-idea-precise-cut",
+    { ...payload, deadlineAt },
+    { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+  );
+}
 
 async function downloadToFile(url: string, destPath: string): Promise<void> {
   const res = await fetch(url);

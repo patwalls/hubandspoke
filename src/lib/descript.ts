@@ -102,6 +102,9 @@ interface DescriptJobResponse {
     status?: string;
     project_changed?: boolean;
     agent_response?: string;
+    // Populated on import/project_media jobs — one entry per composition
+    // created by the import (precise-cut creates exactly one).
+    created_compositions?: Array<{ id: string; name: string }>;
     // Populated on publish jobs.
     composition_id?: string;
     share_url?: string;
