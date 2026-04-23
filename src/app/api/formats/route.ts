@@ -107,9 +107,7 @@ export async function POST(request: NextRequest) {
       brand,
       viewThreshold,
       editor,
-      editorAsanaGid,
       producer,
-      producerAsanaGid,
       instructions,
       parentFormatId,
     } = body as {
@@ -118,9 +116,7 @@ export async function POST(request: NextRequest) {
       brand?: string;
       viewThreshold?: number | null;
       editor?: string | null;
-      editorAsanaGid?: string | null;
       producer?: string | null;
-      producerAsanaGid?: string | null;
       instructions?: string | null;
       parentFormatId?: string | null;
     };
@@ -150,9 +146,7 @@ export async function POST(request: NextRequest) {
         channels: [],
         viewThreshold: viewThreshold || null,
         editor: editor || null,
-        editorAsanaGid: editorAsanaGid || null,
         producer: producer || null,
-        producerAsanaGid: producerAsanaGid || null,
         instructions: instructions || null,
         parentFormatId: parentFormatId || null,
       })
@@ -181,9 +175,7 @@ export async function PUT(request: NextRequest) {
       accountChannels,
       viewThreshold,
       editor,
-      editorAsanaGid,
       producer,
-      producerAsanaGid,
       instructions,
       parentFormatId,
     } = body as {
@@ -192,9 +184,7 @@ export async function PUT(request: NextRequest) {
       accountChannels?: FormatChannelInput[];
       viewThreshold?: number | null;
       editor?: string | null;
-      editorAsanaGid?: string | null;
       producer?: string | null;
-      producerAsanaGid?: string | null;
       instructions?: string | null;
       parentFormatId?: string | null;
     };
@@ -235,9 +225,7 @@ export async function PUT(request: NextRequest) {
         name,
         viewThreshold: viewThreshold || null,
         editor: editor || null,
-        editorAsanaGid: editorAsanaGid || null,
         producer: producer || null,
-        producerAsanaGid: producerAsanaGid || null,
         instructions: instructions || null,
         parentFormatId: parentFormatId || null,
         updatedAt: new Date(),

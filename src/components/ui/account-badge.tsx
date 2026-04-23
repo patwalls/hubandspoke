@@ -90,7 +90,7 @@ export function AccountBadge({
     return (
       <span
         className={cn(
-          "inline-flex items-center gap-1.5 text-xs whitespace-nowrap",
+          "inline-flex items-center gap-1.5 text-xs whitespace-nowrap min-w-0",
           className
         )}
         title={
@@ -105,7 +105,7 @@ export function AccountBadge({
           handle={account.handle}
           size={avatarSize}
         />
-        <span className="font-medium text-foreground">@{account.handle}</span>
+        <span className="font-medium text-foreground truncate max-w-[200px]">@{account.handle}</span>
         {showPostTypeSuffix && (
           <span className="text-muted-foreground">
             · {POST_TYPE_SHORT_LABEL[postType as PostType]}

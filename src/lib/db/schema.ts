@@ -484,11 +484,8 @@ export const formats = pgTable(
     event: text("event"),
     viewThreshold: integer("view_threshold"),
     contentOwner: text("content_owner"), // deprecated — use editor/producer
-    contentOwnerAsanaGid: text("content_owner_asana_gid"), // deprecated
     editor: text("editor"),
-    editorAsanaGid: text("editor_asana_gid"),
     producer: text("producer"),
-    producerAsanaGid: text("producer_asana_gid"),
     instructions: text("instructions"),
     // NULL parent = root (pillar). ON DELETE SET NULL promotes direct children
     // to roots so we don't silently wipe entire subtrees.
