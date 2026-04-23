@@ -192,7 +192,7 @@ function runYtDlp(args: {
   return new Promise((resolvePromise, rejectPromise) => {
     const ytArgs = [
       "-f",
-      "bv*[height<=1080]+ba/b[height<=1080]",
+      "bv*[height<=1440]+ba/b[height<=1440]",
       "--merge-output-format",
       "mp4",
       "--ffmpeg-location",
