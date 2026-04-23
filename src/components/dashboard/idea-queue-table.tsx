@@ -248,7 +248,7 @@ function IdeaQueueRow({
             <AccountBadge
               account={item.account}
               postType={item.postType}
-              variant="compact"
+              variant="avatar"
             />
           ) : (
             item.platform?.map((p) => (

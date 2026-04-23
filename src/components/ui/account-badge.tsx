@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { PlatformIcon } from "@/components/ui/platform-icon";
+import { AccountAvatar } from "@/components/ui/account-avatar";
 import {
   PLATFORM_META,
   POST_TYPE_SHORT_LABEL,
@@ -12,20 +13,27 @@ import type { PostType } from "@/lib/platform-field-schemas";
  * Minimum shape this badge needs. `AccountWithBrand` from @/lib/db/accounts
  * satisfies it, but the narrow type keeps the component usable from
  * contexts that only have a subset of fields (e.g. a joined SELECT).
+ *
+ * `avatarUrl` is optional — the "avatar" variant falls back to a handle
+ * initial when it's missing, so older callers that don't select it still
+ * render cleanly.
  */
 export interface AccountBadgeAccount {
   platform: string;
   handle: string;
   displayName?: string | null;
+  avatarUrl?: string | null;
 }
 
 interface AccountBadgeProps {
   account: AccountBadgeAccount | null | undefined;
   postType?: PostType | string | null;
-  /** "compact" hides the post-type suffix even when the platform has
-   *  multiple types — used in tight table cells where the icon alone is
-   *  enough to disambiguate. */
-  variant?: "default" | "compact";
+  /** - "default": pill with platform icon + @handle + post-type suffix.
+   *  - "compact": same pill, hides post-type suffix (table cells).
+   *  - "avatar":  round avatar with platform-badge overlay + @handle;
+   *               no pill, for list rows where the avatar carries the
+   *               identity and we want a lighter, chromeless look. */
+  variant?: "default" | "compact" | "avatar";
   className?: string;
   size?: number;
 }
@@ -67,6 +75,39 @@ export function AccountBadge({
     platformHasMultiplePostTypes(p) &&
     postType &&
     postType !== PLATFORM_META[p].defaultPostType;
+
+  if (variant === "avatar") {
+    // Chromeless: avatar (with platform-badge overlay) + @handle. The
+    // overlay carries the platform identity, so we don't need the pill
+    // border or a separate icon slot. Post-type suffix still shows when
+    // the platform has ambiguity (e.g. Instagram Reel vs Post).
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 text-xs whitespace-nowrap",
+          className
+        )}
+        title={
+          showPostTypeSuffix
+            ? `${account.displayName ?? account.handle} · ${PLATFORM_META[p].label} · ${POST_TYPE_SHORT_LABEL[postType as PostType] ?? ""}`
+            : `${account.displayName ?? account.handle} · ${PLATFORM_META[p].label}`
+        }
+      >
+        <AccountAvatar
+          avatarUrl={account.avatarUrl ?? null}
+          platform={account.platform}
+          handle={account.handle}
+          size={20}
+        />
+        <span className="font-medium text-foreground">@{account.handle}</span>
+        {showPostTypeSuffix && (
+          <span className="text-muted-foreground">
+            · {POST_TYPE_SHORT_LABEL[postType as PostType]}
+          </span>
+        )}
+      </span>
+    );
+  }
 
   return (
     <span

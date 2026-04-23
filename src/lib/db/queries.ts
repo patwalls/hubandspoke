@@ -27,6 +27,7 @@ type UserExtras = {
     platform: string;
     handle: string;
     displayName: string | null;
+    avatarUrl: string | null;
     brandSlug: string;
     brandLabel: string;
   } | null;
@@ -272,6 +273,7 @@ export async function getContentReport(
           platform: r.accountPlatform!,
           handle: r.accountHandle!,
           displayName: r.accountDisplayName,
+          avatarUrl: r.accountAvatarUrl ?? null,
           brandSlug: r.accountBrandSlug!,
           brandLabel: r.accountBrandLabel!,
         },
@@ -537,6 +539,7 @@ export async function getProductionPipeline(
             platform: r.accountPlatform!,
             handle: r.accountHandle!,
             displayName: r.accountDisplayName,
+            avatarUrl: r.accountAvatarUrl ?? null,
             brandSlug: r.accountBrandSlug!,
             brandLabel: r.accountBrandLabel!,
           }

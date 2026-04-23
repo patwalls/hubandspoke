@@ -130,6 +130,7 @@ export async function GET(request: NextRequest) {
             platform: r.accountPlatform!,
             handle: r.accountHandle!,
             displayName: r.accountDisplayName,
+            avatarUrl: r.accountAvatarUrl ?? null,
             brandSlug: r.accountBrandSlug!,
             brandLabel: r.accountBrandLabel!,
           },

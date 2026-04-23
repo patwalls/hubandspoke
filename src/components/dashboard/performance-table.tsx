@@ -578,7 +578,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                       <AccountBadge
                         account={item.account}
                         postType={item.postType}
-                        variant="compact"
+                        variant="avatar"
                       />
                     ) : (
                       item.platform?.map((p) => (

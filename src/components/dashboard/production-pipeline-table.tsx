@@ -305,7 +305,7 @@ export function ProductionPipelineTable({
                         <AccountBadge
                           account={item.account}
                           postType={item.postType}
-                          variant="compact"
+                          variant="avatar"
                         />
                       ) : (
                         item.platform?.map((p) => (

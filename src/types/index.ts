@@ -26,6 +26,7 @@ export interface ProductionItem {
     platform: string;
     handle: string;
     displayName: string | null;
+    avatarUrl: string | null;
     brandSlug: string;
     brandLabel: string;
   } | null;
