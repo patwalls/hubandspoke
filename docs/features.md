@@ -20,6 +20,7 @@ removing, or deprecating anything.
 | Content library / list | Active | `/(dashboard)/[brand]/content`, `GET /api/production-items/search` | `productionItems` | Filter by status / format / account / post-type |
 | Item detail (metadata, comments, drafts, transcript) | Active | `/(dashboard)/[brand]/content/[contentId]`, `GET\|PATCH\|DELETE /api/production-items/[id]` | `productionItems`, `contentComments`, `contentDrafts`, `transcripts` | |
 | Manual item creation | Active | `POST /api/production-items` | `productionItems` | For platforms API can't pull from |
+| Add post from link (URL → pre-filled dialog) | Active | "+ Add Post" dropdown on the performance table → `POST /api/production-items/preview-link` | `productionItems`, `accounts` | Paste a social URL; SC API fills title/date/metrics/thumbnail/author; user reviews then saves |
 | Repost (same platform) | Active | `POST /api/production-items/[id]/repost` | `productionItems` (sourceType=`repost`, repostedFromItemId) | |
 | Cross-post (different platform, manual) | Active | `POST /api/production-items/[id]/cross-post` | `productionItems` (sourceType=`cross_post`) | Manual companion to the auto cross-post-scan |
 | Cross-post (auto suggestions) | Active | `cross-post-scan` cron (daily 16:00 UTC) | `crossPostRules`, `crossPostFitVerdicts`, `productionItems` | Suggestions land as `Idea` rows |

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { ProductionItem } from "@/types";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -85,6 +91,13 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
   const [editingItem, setEditingItem] = useState<ProductionItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // "new"       = blank manual-entry dialog (today's behavior)
+  // "from-link" = shows a paste-URL + Fetch row at the top that auto-fills
+  //               all fields from the preview-link API. Edit mode leaves
+  //               this null so the fetch row doesn't render.
+  const [addMode, setAddMode] = useState<"new" | "from-link" | null>(null);
+  const [fetchingPreview, setFetchingPreview] = useState(false);
+  const [previewWarning, setPreviewWarning] = useState<string | null>(null);
 
   // Form fields
   const [formTitle, setFormTitle] = useState("");
@@ -103,6 +116,11 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
   const [formClicks, setFormClicks] = useState("");
   const [formLeads, setFormLeads] = useState("");
   const [formSalesAmount, setFormSalesAmount] = useState("");
+  // Set by "Add from link" fetch; sent through to POST so the new row
+  // carries a real thumbnail + author without a second SC call on save.
+  // The dialog doesn't expose inputs for these — they're pass-through.
+  const [previewThumbnail, setPreviewThumbnail] = useState<string | null>(null);
+  const [previewAuthorHandle, setPreviewAuthorHandle] = useState<string | null>(null);
   const [saveResult, setSaveResult] = useState<{ success: boolean; autoFetched?: boolean; message: string } | null>(null);
 
   const isYouTubeLink =
@@ -110,8 +128,9 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
 
   const isEditing = editingItem !== null;
 
-  function openAddDialog() {
+  function openAddDialog(mode: "new" | "from-link" = "new") {
     setEditingItem(null);
+    setAddMode(mode);
     setFormTitle("");
     setFormPlatforms([]);
     setFormAccountId(null);
@@ -125,8 +144,58 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
     setFormClicks("");
     setFormLeads("");
     setFormSalesAmount("");
+    setPreviewThumbnail(null);
+    setPreviewAuthorHandle(null);
+    setPreviewWarning(null);
     setSaveResult(null);
     setDialogOpen(true);
+  }
+
+  async function handleFetchFromLink() {
+    const url = formLink.trim();
+    if (!url) return;
+    setFetchingPreview(true);
+    setPreviewWarning(null);
+    try {
+      const res = await fetch("/api/production-items/preview-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, brand }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setPreviewWarning(err.error || `Fetch failed (${res.status}).`);
+        return;
+      }
+      const data = await res.json();
+      if (data.title) setFormTitle(data.title);
+      if (data.publishedDate) setFormDate(data.publishedDate);
+      if (data.publishedLink) setFormLink(data.publishedLink);
+      if (data.views != null) setFormViews(String(data.views));
+      if (data.likes != null) setFormLikes(String(data.likes));
+      if (data.comments != null) setFormComments(String(data.comments));
+      if (data.thumbnail) setPreviewThumbnail(data.thumbnail);
+      if (data.authorHandle) setPreviewAuthorHandle(data.authorHandle);
+
+      // Set account + post type, and derive the legacy platform label the
+      // same way the AccountPostTypePicker's onChange does so handleSave's
+      // `!formPlatforms.length` gate passes without a second user click.
+      if (data.accountId) {
+        setFormAccountId(data.accountId);
+        setFormPostType(data.postType ?? null);
+        const a = accounts?.find((x) => x.id === data.accountId);
+        if (a) {
+          const legacyLabel = `${a.platform}:@${a.handle}${data.postType ? `:${data.postType}` : ""}`;
+          setFormPlatforms([legacyLabel]);
+        }
+      }
+
+      if (data.warning) setPreviewWarning(data.warning);
+    } catch (err) {
+      setPreviewWarning(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFetchingPreview(false);
+    }
   }
 
   function togglePlatform(p: string) {
@@ -168,9 +237,9 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
         }
         setSaveResult({ success: true, message: "Post updated successfully." });
       } else {
-        // Create new item. Metrics (views/likes/comments/clicks/leads/sales)
-        // are never entered by hand — they arrive via sync jobs (YouTube
-        // Analytics, Social Champ, manual refresh) after the item exists.
+        // Create new item. Metrics + thumbnail + authorHandle may come from
+        // the Add-from-link preview; pass them through so the row lands with
+        // correct data and no extra SC call on the server.
         const res = await fetch("/api/production-items", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -183,6 +252,11 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             publishedLink: formLink || null,
             publishedDate: formDate,
             brand,
+            views: formViews ? parseInt(formViews, 10) : null,
+            likes: formLikes ? parseInt(formLikes, 10) : null,
+            comments: formComments ? parseInt(formComments, 10) : null,
+            thumbnail: previewThumbnail,
+            authorHandle: previewAuthorHandle,
           }),
         });
         if (!res.ok) {
@@ -304,9 +378,32 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             placeholder="Search title, format, platform…"
             className="h-8 w-48 sm:w-64 text-xs"
           />
-          <Button variant="outline" size="sm" onClick={openAddDialog}>
-            + Add Post
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              + Add Post
+              <svg
+                className="ml-1 h-3 w-3 shrink-0 opacity-60"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => openAddDialog("new")}>
+                Create new
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => openAddDialog("from-link")}>
+                Add from link
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -314,9 +411,55 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{isEditing ? "Edit Post" : "Add New Post"}</DialogTitle>
+            <DialogTitle>
+              {isEditing
+                ? "Edit Post"
+                : addMode === "from-link"
+                  ? "Add Post From Link"
+                  : "Add New Post"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {addMode === "from-link" && !isEditing && (
+              <div className="space-y-2 rounded-lg border border-dashed border-blue-300 bg-blue-50/50 p-3">
+                <Label className="text-xs font-medium">
+                  Paste published post URL
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={formLink}
+                    onChange={(e) => setFormLink(e.target.value)}
+                    placeholder="https://instagram.com/p/… or https://x.com/…/status/…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !fetchingPreview && formLink.trim()) {
+                        e.preventDefault();
+                        handleFetchFromLink();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleFetchFromLink}
+                    disabled={fetchingPreview || !formLink.trim()}
+                  >
+                    {fetchingPreview ? "Fetching…" : "Fetch"}
+                  </Button>
+                </div>
+                {previewWarning && (
+                  <p className="text-xs text-amber-700">{previewWarning}</p>
+                )}
+                {previewThumbnail && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewThumbnail}
+                    alt="Preview"
+                    className="h-20 w-auto rounded border border-border object-cover"
+                  />
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Title</Label>
               <Input
@@ -372,19 +515,21 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                 </Select>
               </div>
             )}
-            <div className="space-y-2">
-              <Label>Published Link</Label>
-              <Input
-                value={formLink}
-                onChange={(e) => setFormLink(e.target.value)}
-                placeholder="https://..."
-              />
-              {!isEditing && isYouTubeLink && (
-                <p className="text-xs text-blue-600">
-                  YouTube link detected — views, likes, and comments will be auto-fetched.
-                </p>
-              )}
-            </div>
+            {addMode !== "from-link" && (
+              <div className="space-y-2">
+                <Label>Published Link</Label>
+                <Input
+                  value={formLink}
+                  onChange={(e) => setFormLink(e.target.value)}
+                  placeholder="https://..."
+                />
+                {!isEditing && isYouTubeLink && (
+                  <p className="text-xs text-blue-600">
+                    YouTube link detected — views, likes, and comments will be auto-fetched.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Published Date</Label>
               <Input
@@ -394,9 +539,10 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
               />
             </div>
 
-            {/* Metrics section — edit-only. New posts never carry hand-entered
-                metrics; sync jobs fill them in after the item exists. */}
-            {isEditing && (
+            {/* Metrics section — editable on edit, or after a successful
+                from-link fetch so the user can review/adjust before save.
+                Clicks/leads/sales stay edit-only; no SC API returns them. */}
+            {(isEditing || addMode === "from-link") && (
               <div className="space-y-3 rounded-lg border border-dashed border-gray-300 p-3">
                 <p className="text-xs text-muted-foreground font-medium">
                   Metrics
@@ -430,36 +576,38 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Clicks</Label>
-                    <Input
-                      type="number"
-                      value={formClicks}
-                      onChange={(e) => setFormClicks(e.target.value)}
-                      placeholder="0"
-                    />
+                {isEditing && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Clicks</Label>
+                      <Input
+                        type="number"
+                        value={formClicks}
+                        onChange={(e) => setFormClicks(e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Leads</Label>
+                      <Input
+                        type="number"
+                        value={formLeads}
+                        onChange={(e) => setFormLeads(e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Sales $</Label>
+                      <Input
+                        type="number"
+                        value={formSalesAmount}
+                        onChange={(e) => setFormSalesAmount(e.target.value)}
+                        placeholder="0"
+                        step="0.01"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Leads</Label>
-                    <Input
-                      type="number"
-                      value={formLeads}
-                      onChange={(e) => setFormLeads(e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Sales $</Label>
-                    <Input
-                      type="number"
-                      value={formSalesAmount}
-                      onChange={(e) => setFormSalesAmount(e.target.value)}
-                      placeholder="0"
-                      step="0.01"
-                    />
-                  </div>
-                </div>
+                )}
               </div>
             )}
 
@@ -496,7 +644,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                   ? (isEditing ? "Saving..." : "Creating...")
                   : isEditing
                     ? "Save Changes"
-                    : isYouTubeLink
+                    : addMode !== "from-link" && isYouTubeLink
                       ? "Create & Fetch Metrics"
                       : "Create Post"}
               </Button>

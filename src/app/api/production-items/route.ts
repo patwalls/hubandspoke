@@ -64,7 +64,10 @@ async function pushUtmCampaignToNotion(
  * POST /api/production-items
  *
  * Manually create a production item (for platforms the API can't pull from).
- * If the published link is a YouTube URL, auto-fetches metrics.
+ * If the published link is a YouTube URL and no metrics are supplied, auto-
+ * fetches them. The Add-from-link client flow pre-fetches via
+ * /api/production-items/preview-link and POSTs the metrics directly —
+ * we skip the second SC call in that case to save a credit.
  *
  * Body: {
  *   title: string
@@ -76,6 +79,8 @@ async function pushUtmCampaignToNotion(
  *   views?: number
  *   likes?: number
  *   comments?: number
+ *   thumbnail?: string
+ *   authorHandle?: string
  * }
  */
 export async function POST(request: NextRequest) {
@@ -93,6 +98,8 @@ export async function POST(request: NextRequest) {
       views,
       likes,
       comments,
+      thumbnail: bodyThumbnail,
+      authorHandle: bodyAuthorHandle,
     } = body;
 
     if (!title || !platform?.length || !publishedDate || !brand) {
@@ -106,18 +113,23 @@ export async function POST(request: NextRequest) {
     let finalLikes = likes ?? null;
     let finalComments = comments ?? null;
     let finalViewsEstimated = false;
-    let thumbnail: string | null = null;
+    let thumbnail: string | null =
+      typeof bodyThumbnail === "string" && bodyThumbnail ? bodyThumbnail : null;
     let youtubeId: string | null = null;
     let youtubeUrl: string | null = null;
     let autoFetched = false;
 
-    // Auto-fetch metrics for YouTube URLs
+    // Auto-fetch metrics for YouTube URLs — but only when the caller didn't
+    // already hand us metrics (e.g. via the preview-link flow). Skipping the
+    // second fetch avoids burning an SC credit on every "Add from link" save.
     const isYouTube =
       publishedLink &&
       (publishedLink.includes("youtube.com") ||
         publishedLink.includes("youtu.be"));
+    const clientSuppliedMetrics =
+      views != null || likes != null || comments != null;
 
-    if (isYouTube) {
+    if (isYouTube && !clientSuppliedMetrics) {
       try {
         const { fetchSingleVideo } = await import(
           "@/lib/services/matg-sync"
@@ -126,7 +138,7 @@ export async function POST(request: NextRequest) {
         finalViews = video.viewCountInt;
         finalLikes = video.likeCountInt;
         finalComments = video.commentCountInt;
-        thumbnail = video.thumbnail || null;
+        thumbnail = thumbnail ?? video.thumbnail ?? null;
         youtubeId = video.id;
         youtubeUrl = video.url;
         autoFetched = true;
@@ -153,6 +165,16 @@ export async function POST(request: NextRequest) {
     const producerUserId = bodyProducerUserId ?? resolved.producerUserId;
     const editorUserId = bodyEditorUserId ?? resolved.editorUserId;
 
+    const authorHandle: string | null =
+      typeof bodyAuthorHandle === "string" && bodyAuthorHandle
+        ? bodyAuthorHandle
+        : null;
+
+    // Stamp a sync time if either the server auto-fetched OR the client
+    // hands us fresh metrics (preview-link flow already talked to SC).
+    const lastPerformanceSyncAt =
+      autoFetched || clientSuppliedMetrics ? new Date() : null;
+
     const utmCampaign = await generateUtmCampaign(title);
     const [created] = await db
       .insert(productionItems)
@@ -174,10 +196,11 @@ export async function POST(request: NextRequest) {
         thumbnail,
         youtubeId,
         youtubeUrl,
+        authorHandle,
         isExternal: false,
         producerUserId,
         editorUserId,
-        lastPerformanceSyncAt: autoFetched ? new Date() : null,
+        lastPerformanceSyncAt,
       })
       .returning();
 
