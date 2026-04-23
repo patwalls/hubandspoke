@@ -2,7 +2,6 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { DashboardNav } from "@/components/dashboard/nav";
-import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 
@@ -15,16 +14,6 @@ export default async function FormatsLayout({
   if (!session?.user) {
     redirect("/login");
   }
-
-  const rows = await getBrands();
-  const defaultBrand = await getDefaultBrandSlug();
-  const brands = rows.map((b) => ({
-    slug: b.slug,
-    label: b.label,
-    avatar: b.avatarUrl,
-    color: b.color,
-    disabled: b.disabled,
-  }));
 
   const [userRow] = session.user.id
     ? await db
@@ -40,8 +29,6 @@ export default async function FormatsLayout({
         userEmail={session.user.email || ""}
         userName={userRow?.name ?? null}
         userAvatarUrl={userRow?.avatarUrl ?? null}
-        brands={brands}
-        defaultBrand={defaultBrand}
       />
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {children}

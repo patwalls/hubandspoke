@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BRANDS, DEFAULT_BRAND } from "@/lib/config/brands";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { GlobalSearch } from "@/components/dashboard/global-search";
 import {
@@ -16,22 +17,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// Shape passed down from the (server) layout. Mirrors BrandListEntry from
-// @/lib/db/brands but redeclared locally so the component doesn't import a
-// server-only module (React Server Component boundary). `avatar` replaces the
-// DB's `avatarUrl` to keep the existing JSX unchanged.
-type Brand = {
-  slug: string;
-  label: string;
-  avatar: string | null;
-  color: string | null;
-  disabled: boolean;
-};
+type Brand = (typeof BRANDS)[number];
 
-function getBrandFromPath(pathname: string, brands: Brand[], fallback: string): string {
+function getBrandFromPath(pathname: string): string {
   const segment = pathname.split("/")[1];
-  const match = brands.find((b) => b.slug === segment);
-  return match ? match.slug : fallback;
+  const match = BRANDS.find((b) => b.slug === segment);
+  return match ? match.slug : DEFAULT_BRAND;
 }
 
 function BrandAvatar({ brand, size = 22 }: { brand: Brand; size?: number }) {
@@ -70,16 +61,6 @@ function BrandAvatar({ brand, size = 22 }: { brand: Brand; size?: number }) {
     </span>
   );
 }
-
-// Context the layout passes down so child client components (this file's nav
-// + SectionTabs) can read the dynamic brand list without re-fetching.
-type NavProps = {
-  userEmail: string;
-  userName: string | null;
-  userAvatarUrl: string | null;
-  brands: Brand[];
-  defaultBrand: string;
-};
 
 function UserAvatar({
   name,
@@ -126,16 +107,20 @@ function UserAvatar({
   );
 }
 
+type NavProps = {
+  userEmail: string;
+  userName?: string | null;
+  userAvatarUrl?: string | null;
+};
+
 export function DashboardNav({
   userEmail,
-  userName,
-  userAvatarUrl,
-  brands,
-  defaultBrand,
+  userName = null,
+  userAvatarUrl = null,
 }: NavProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
+  const currentBrand = getBrandFromPath(pathname);
   const isOnFormats = pathname.endsWith("/formats");
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -190,7 +175,7 @@ export function DashboardNav({
               </svg>
             </span>
             <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
-              {brands.map((brand) => {
+              {BRANDS.map((brand) => {
                 const isActive = currentBrand === brand.slug;
                 const href = isOnFormats ? `/${brand.slug}/formats` : `/${brand.slug}`;
 
@@ -322,15 +307,9 @@ export function DashboardNav({
   );
 }
 
-export function SectionTabs({
-  brands,
-  defaultBrand,
-}: {
-  brands: Brand[];
-  defaultBrand: string;
-}) {
+export function SectionTabs() {
   const pathname = usePathname();
-  const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
+  const currentBrand = getBrandFromPath(pathname);
 
   const tabs = [
     { href: `/${currentBrand}`, label: "Dashboard" },
