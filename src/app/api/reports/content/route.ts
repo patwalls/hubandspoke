@@ -14,6 +14,9 @@ export async function GET(request: NextRequest) {
     endDate: searchParams.get("endDate") || defaultEnd,
     viewType: (searchParams.get("viewType") || "weekly") as "weekly" | "daily",
     platform: searchParams.get("platform") || "all",
+    platformKey: searchParams.get("platformKey") || "all",
+    accountId: searchParams.get("accountId") || "all",
+    postType: searchParams.get("postType") || "all",
     format: searchParams.get("format") || "all",
     source: searchParams.get("source") || "all",
   };

@@ -139,6 +139,38 @@ export function platformKindsFor(platforms: string[] | null): Set<PlatformKind> 
   return out;
 }
 
+/**
+ * Resolve the SC platform kind from a canonical `post_type`. Preferred over
+ * `platformKindsFor` — a post type is 1:1 with an SC endpoint, so callers
+ * that have the post type should use this and avoid the fuzzy string match.
+ * Returns null for post types with no SC coverage (newsletter).
+ */
+export function platformKindFromPostType(
+  postType: string | null | undefined
+): PlatformKind | null {
+  switch (postType) {
+    case "youtube_long":
+    case "youtube_shorts":
+      return "youtube";
+    case "youtube_community":
+      return "youtube_community";
+    case "instagram_reel":
+    case "instagram_post":
+    case "instagram_story":
+      return "instagram";
+    case "x":
+      return "twitter";
+    case "threads":
+      return "threads";
+    case "linkedin":
+      return "linkedin";
+    case "tiktok":
+      return "tiktok";
+    default:
+      return null;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /*  Per-item refresh                                                   */
 /* ------------------------------------------------------------------ */
@@ -188,6 +220,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       publishedLink: productionItems.publishedLink,
       youtubeUrl: productionItems.youtubeUrl,
       platform: productionItems.platform,
+      postType: productionItems.postType,
     })
     .from(productionItems)
     .where(eq(productionItems.id, itemId))
@@ -199,7 +232,17 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
 
   const url = item.publishedLink || item.youtubeUrl || "";
   const platforms = (item.platform as string[] | null) ?? [];
-  const kinds = platformKindsFor(item.platform as string[] | null);
+  // Prefer post_type (canonical, 1:1 with endpoint) when the item has it
+  // set; fall back to the legacy string-array matcher for rows that haven't
+  // been backfilled yet (none should exist in prod, but this covers the
+  // staging-import edge case).
+  const kinds = new Set<PlatformKind>();
+  const kindFromPostType = platformKindFromPostType(item.postType);
+  if (kindFromPostType) {
+    kinds.add(kindFromPostType);
+  } else {
+    for (const k of platformKindsFor(item.platform as string[] | null)) kinds.add(k);
+  }
 
   // Apply the likes-multiplier estimator on platforms where SC doesn't return
   // view counts (LinkedIn, YouTube Community, Instagram Photo, Threads

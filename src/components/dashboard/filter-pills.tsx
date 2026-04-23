@@ -4,6 +4,7 @@ import { useState } from "react";
 import { addDays, format, parse, startOfYear } from "date-fns";
 import { ChevronDownIcon, CheckIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PlatformIcon } from "@/components/ui/platform-icon";
 import {
   Popover,
   PopoverContent,
@@ -11,19 +12,36 @@ import {
 } from "@/components/ui/popover";
 import { getQuickRange } from "@/lib/utils/dates";
 
+export interface FilterAccount {
+  id: string;
+  platform: string;
+  handle: string;
+  brandLabel: string;
+}
+
 interface FilterPillsProps {
   startDate: string;
   endDate: string;
   viewType: string;
-  selectedPlatform: string;
+  /** Canonical platform key (youtube, instagram, …) or "all". Replaces the
+   *  legacy channel-string platform filter. */
+  selectedPlatformKey: string;
+  /** accounts.id or "all". */
+  selectedAccountId: string;
+  /** Canonical post_type or "all". */
+  selectedPostType: string;
   selectedFormat: string;
   selectedSource: string;
-  platforms: string[];
+  /** Picker options fetched from the server. Accounts drive the "Account"
+   *  dropdown; post types are a static canonical set. */
+  accounts: FilterAccount[];
   formats: string[];
   onStartDateChange: (d: string) => void;
   onEndDateChange: (d: string) => void;
   onViewTypeChange: (v: string) => void;
-  onPlatformChange: (v: string) => void;
+  onPlatformKeyChange: (v: string) => void;
+  onAccountChange: (v: string) => void;
+  onPostTypeChange: (v: string) => void;
   onFormatChange: (v: string) => void;
   onSourceChange: (v: string) => void;
 }
@@ -93,7 +111,15 @@ function rangeLabel(startDate: string, endDate: string): string {
 const PILL_TRIGGER_CLASSES =
   "inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border bg-card text-sm hover:bg-accent transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-function PillContent({ label, value }: { label?: string; value: string }) {
+function PillContent({
+  label,
+  value,
+  icon,
+}: {
+  label?: string;
+  value: string;
+  icon?: React.ReactNode;
+}) {
   return (
     <>
       {label && (
@@ -102,6 +128,7 @@ function PillContent({ label, value }: { label?: string; value: string }) {
           <span className="text-border">|</span>
         </>
       )}
+      {icon}
       <span className="text-foreground font-medium">{value}</span>
       <ChevronDownIcon className="h-3.5 w-3.5 text-muted-foreground" />
     </>
@@ -111,10 +138,12 @@ function PillContent({ label, value }: { label?: string; value: string }) {
 function OptionRow({
   active,
   label,
+  icon,
   onClick,
 }: {
   active: boolean;
   label: string;
+  icon?: React.ReactNode;
   onClick: () => void;
 }) {
   return (
@@ -128,7 +157,10 @@ function OptionRow({
           : "text-foreground hover:bg-accent"
       )}
     >
-      <span className="truncate">{label}</span>
+      <span className="flex min-w-0 items-center gap-2">
+        {icon}
+        <span className="truncate">{label}</span>
+      </span>
       {active && <CheckIcon className="h-3.5 w-3.5 shrink-0" />}
     </button>
   );
@@ -239,7 +271,7 @@ export function SelectPill({
 }: {
   label?: string;
   value: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; icon?: React.ReactNode }[];
   onChange: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -247,7 +279,11 @@ export function SelectPill({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger className={PILL_TRIGGER_CLASSES}>
-        <PillContent label={label} value={current?.label ?? value} />
+        <PillContent
+          label={label}
+          value={current?.label ?? value}
+          icon={current?.icon}
+        />
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -257,6 +293,7 @@ export function SelectPill({
           <OptionRow
             key={o.value}
             label={o.label}
+            icon={o.icon}
             active={o.value === value}
             onClick={() => {
               onChange(o.value);
@@ -273,22 +310,77 @@ export function FilterPills({
   startDate,
   endDate,
   viewType,
-  selectedPlatform,
+  selectedPlatformKey,
+  selectedAccountId,
+  selectedPostType,
   selectedFormat,
   selectedSource,
-  platforms,
+  accounts,
   formats,
   onStartDateChange,
   onEndDateChange,
   onViewTypeChange,
-  onPlatformChange,
+  onPlatformKeyChange,
+  onAccountChange,
+  onPostTypeChange,
   onFormatChange,
   onSourceChange,
 }: FilterPillsProps) {
-  const platformOptions = [
+  // Canonical platforms — fixed list that the `accounts.platform` column
+  // takes values from. Mirrors PLATFORM_META ordering in src/lib/platforms.ts.
+  const platformKeyOptions = [
     { value: "all", label: "All platforms" },
-    ...platforms.map((p) => ({ value: p, label: p })),
+    { value: "youtube", label: "YouTube", icon: <PlatformIcon platform="youtube" size={12} /> },
+    { value: "instagram", label: "Instagram", icon: <PlatformIcon platform="instagram" size={12} /> },
+    { value: "x", label: "X", icon: <PlatformIcon platform="x" size={12} /> },
+    { value: "tiktok", label: "TikTok", icon: <PlatformIcon platform="tiktok" size={12} /> },
+    { value: "linkedin", label: "LinkedIn", icon: <PlatformIcon platform="linkedin" size={12} /> },
+    { value: "threads", label: "Threads", icon: <PlatformIcon platform="threads" size={12} /> },
+    { value: "newsletter", label: "Newsletter", icon: <PlatformIcon platform="newsletter" size={12} /> },
+    { value: "other", label: "Other", icon: <PlatformIcon platform="other" size={12} /> },
   ];
+
+  // Accounts: always show the full list, but hide ones whose platform
+  // doesn't match the selected platform filter (cascade).
+  const visibleAccounts = selectedPlatformKey === "all"
+    ? accounts
+    : accounts.filter((a) => a.platform === selectedPlatformKey);
+  const accountOptions = [
+    { value: "all", label: "All accounts" },
+    ...visibleAccounts.map((a) => ({
+      value: a.id,
+      label: `@${a.handle}`,
+      icon: <PlatformIcon platform={a.platform} size={12} />,
+    })),
+  ];
+
+  // Post types: fixed canonical set; cascade by selected platform when one
+  // is picked (YouTube → long/short/community, etc.).
+  const POST_TYPE_OPTS = [
+    { value: "youtube_long", label: "YouTube video", platform: "youtube" },
+    { value: "youtube_shorts", label: "YouTube short", platform: "youtube" },
+    { value: "youtube_community", label: "YouTube community", platform: "youtube" },
+    { value: "instagram_reel", label: "Instagram reel", platform: "instagram" },
+    { value: "instagram_post", label: "Instagram post", platform: "instagram" },
+    { value: "instagram_story", label: "Instagram story", platform: "instagram" },
+    { value: "x", label: "X post", platform: "x" },
+    { value: "tiktok", label: "TikTok video", platform: "tiktok" },
+    { value: "linkedin", label: "LinkedIn post", platform: "linkedin" },
+    { value: "threads", label: "Threads post", platform: "threads" },
+    { value: "newsletter", label: "Newsletter", platform: "newsletter" },
+  ];
+  const visiblePostTypes = selectedPlatformKey === "all"
+    ? POST_TYPE_OPTS
+    : POST_TYPE_OPTS.filter((pt) => pt.platform === selectedPlatformKey);
+  const postTypeOptions = [
+    { value: "all", label: "All post types" },
+    ...visiblePostTypes.map((pt) => ({
+      value: pt.value,
+      label: pt.label,
+      icon: <PlatformIcon platform={pt.platform} size={12} />,
+    })),
+  ];
+
   const formatOptions = [
     { value: "all", label: "All formats" },
     ...formats.map((f) => ({ value: f, label: f })),
@@ -305,9 +397,31 @@ export function FilterPills({
       <SelectPill value={viewType} options={INTERVALS} onChange={onViewTypeChange} />
       <SelectPill
         label="Platform"
-        value={selectedPlatform}
-        options={platformOptions}
-        onChange={onPlatformChange}
+        value={selectedPlatformKey}
+        options={platformKeyOptions}
+        onChange={(v) => {
+          onPlatformKeyChange(v);
+          // Reset dependent filters when the parent changes so they
+          // can't point at options that are no longer visible.
+          if (v !== "all") {
+            const acct = accounts.find((a) => a.id === selectedAccountId);
+            if (acct && acct.platform !== v) onAccountChange("all");
+            const pt = POST_TYPE_OPTS.find((p) => p.value === selectedPostType);
+            if (pt && pt.platform !== v) onPostTypeChange("all");
+          }
+        }}
+      />
+      <SelectPill
+        label="Account"
+        value={selectedAccountId}
+        options={accountOptions}
+        onChange={onAccountChange}
+      />
+      <SelectPill
+        label="Post type"
+        value={selectedPostType}
+        options={postTypeOptions}
+        onChange={onPostTypeChange}
       />
       <SelectPill
         label="Format"

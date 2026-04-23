@@ -16,6 +16,7 @@ import { renderInstructions } from "@/lib/utils/markdown";
 import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
 import { platformClass } from "@/lib/badge-colors";
+import { AccountBadge } from "@/components/ui/account-badge";
 import type { ProductionItem } from "@/types";
 
 interface AssignableUser {
@@ -240,17 +241,25 @@ export function TriageDialog({
                 Cross-post
               </span>
             )}
-            {(item.platform || []).map((p) => (
-              <span
-                key={p}
-                className={cn(
-                  "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                  platformClass(p)
-                )}
-              >
-                {p}
-              </span>
-            ))}
+            {item.account ? (
+              <AccountBadge
+                account={item.account}
+                postType={item.postType}
+                variant="compact"
+              />
+            ) : (
+              (item.platform || []).map((p) => (
+                <span
+                  key={p}
+                  className={cn(
+                    "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                    platformClass(p)
+                  )}
+                >
+                  {p}
+                </span>
+              ))
+            )}
             {item.format && !isSourced && (
               <span className="text-xs text-muted-foreground">
                 · {item.format}

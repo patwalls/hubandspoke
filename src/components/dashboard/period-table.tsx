@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
-import type { MetricData, Period } from "@/types";
+import { ChevronRightIcon } from "lucide-react";
+import type { MetricData, Period, PrimaryRowMeta } from "@/types";
+import { AccountBadge } from "@/components/ui/account-badge";
+import { PlatformIcon } from "@/components/ui/platform-icon";
+import { PLATFORM_META, toPlatform } from "@/lib/platforms";
+import { cn } from "@/lib/utils";
 
 function formatPeriodTooltip(p: Period): string {
   const s = new Date(p.start + "T00:00:00");
@@ -34,12 +39,15 @@ interface PeriodTableProps {
   periods: Period[];
   metrics: Record<string, MetricData>;
   tabs: { key: MetricKey; label: string }[];
-  // When provided, numeric cells become links to the content list filtered
-  // by the corresponding row label (platform or format) and the period's
-  // date range. Row totals use the full periods range; the Total row skips
-  // the row filter; grand total drops both.
   brand?: string;
   filterKey?: "platform" | "format";
+  /** Optional per-row metadata. When present the primary table groups rows
+   *  by `meta.platform` (YouTube, Instagram, …) and renders collapsible
+   *  parent rows with summed totals. Expand a platform row to fan out its
+   *  per-account children. Passed through as-is by the format-scoped
+   *  tables (which don't have account metadata) — the fallback branch
+   *  renders the legacy flat list. */
+  rowMeta?: Record<string, PrimaryRowMeta>;
 }
 
 function formatValue(value: number, metricKey: MetricKey): string {
@@ -61,8 +69,12 @@ export function PeriodTable({
   tabs,
   brand,
   filterKey = "platform",
+  rowMeta,
 }: PeriodTableProps) {
   const [activeTab, setActiveTab] = useState<MetricKey>(tabs[0].key);
+  const [expandedPlatforms, setExpandedPlatforms] = useState<Set<string>>(
+    () => new Set(),
+  );
   const rangeStart = periods[0]?.start ?? "";
   const rangeEnd = periods[periods.length - 1]?.end ?? "";
   const linkable = Boolean(brand);
@@ -88,6 +100,35 @@ export function PeriodTable({
   const data = metrics[activeTab] || {};
   const rows = Object.keys(data).sort();
 
+  // Grouping: when rowMeta is supplied, bucket rows by their platform so
+  // the UI can render collapsible platform parents. Rows without meta go
+  // into a "Misc" bucket rendered flat at the bottom.
+  const groups = useMemo(() => {
+    if (!rowMeta) return null;
+    const byPlatform = new Map<string, { platform: string; rows: string[] }>();
+    const misc: string[] = [];
+    for (const row of rows) {
+      const meta = rowMeta[row];
+      if (!meta?.platform) {
+        misc.push(row);
+        continue;
+      }
+      const p = meta.platform;
+      if (!byPlatform.has(p)) byPlatform.set(p, { platform: p, rows: [] });
+      byPlatform.get(p)!.rows.push(row);
+    }
+    // Stable order: sort platforms alphabetically by label, then children
+    // alphabetically by row label.
+    const sortedPlatforms = Array.from(byPlatform.values()).sort((a, b) =>
+      PLATFORM_META[toPlatform(a.platform)].label.localeCompare(
+        PLATFORM_META[toPlatform(b.platform)].label
+      )
+    );
+    for (const g of sortedPlatforms) g.rows.sort();
+    return { platforms: sortedPlatforms, misc: misc.sort() };
+  }, [rowMeta, rows]);
+
+  // Per-row totals (reused by flat + grouped renders).
   const rowTotals: Record<string, number> = {};
   rows.forEach((row) => {
     if (activeTab === "viewsPerPost") {
@@ -100,6 +141,50 @@ export function PeriodTable({
       rowTotals[row] = Object.values(data[row] || {}).reduce((a, b) => a + b, 0);
     }
   });
+
+  // Platform-level aggregation for grouped render. Sum the children's
+  // per-period values; viewsPerPost is a weighted average via the
+  // underlying production/views sums so it stays meaningful.
+  const sumPeriodForRows = (
+    childRows: string[],
+    periodLabel: string,
+    which: MetricKey,
+  ): number => {
+    if (which === "viewsPerPost") {
+      let prod = 0;
+      let views = 0;
+      for (const r of childRows) {
+        prod += metrics["production"]?.[r]?.[periodLabel] || 0;
+        views += metrics["views"]?.[r]?.[periodLabel] || 0;
+      }
+      return prod > 0 ? Math.round(views / prod) : 0;
+    }
+    return childRows.reduce(
+      (sum, r) => sum + ((metrics[which] || {})[r]?.[periodLabel] || 0),
+      0,
+    );
+  };
+  const sumRangeForRows = (
+    childRows: string[],
+    which: MetricKey,
+  ): number => {
+    if (which === "viewsPerPost") {
+      let prod = 0;
+      let views = 0;
+      for (const r of childRows) {
+        prod += Object.values(metrics["production"]?.[r] || {}).reduce(
+          (a, b) => a + b,
+          0,
+        );
+        views += Object.values(metrics["views"]?.[r] || {}).reduce(
+          (a, b) => a + b,
+          0,
+        );
+      }
+      return prod > 0 ? Math.round(views / prod) : 0;
+    }
+    return childRows.reduce((sum, r) => sum + (rowTotals[r] || 0), 0);
+  };
 
   const periodTotals: Record<string, number> = {};
   periods.forEach((p) => {
@@ -133,6 +218,115 @@ export function PeriodTable({
     grandTotal = Object.values(rowTotals).reduce((a, b) => a + b, 0);
   }
 
+  function togglePlatform(platform: string) {
+    setExpandedPlatforms((prev) => {
+      const next = new Set(prev);
+      if (next.has(platform)) next.delete(platform);
+      else next.add(platform);
+      return next;
+    });
+  }
+
+  // Render helpers — a platform parent row and a per-account child row.
+  // Both live alongside the legacy flat render so format-scoped tables
+  // (no rowMeta) keep their current shape.
+  const renderChildRow = (row: string) => (
+    <tr
+      key={row}
+      className="border-b border-border/50 hover:bg-accent/20 transition-colors"
+    >
+      <td className="sticky left-0 bg-card px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-foreground z-10 pl-10">
+        {rowMeta?.[row] ? (
+          <AccountBadge
+            account={{
+              platform: rowMeta[row].platform,
+              handle: rowMeta[row].handle,
+            }}
+            postType={rowMeta[row].postType}
+            className="border-none bg-transparent px-0 py-0 text-xs sm:text-sm"
+            size={14}
+          />
+        ) : (
+          row
+        )}
+      </td>
+      {periods.map((p) => {
+        const value = data[row]?.[p.label] || 0;
+        const display = formatValue(value, activeTab);
+        return (
+          <td
+            key={p.label}
+            className={`px-2 py-2 text-center tabular-nums ${
+              value === 0 ? "text-border" : "text-foreground"
+            }`}
+          >
+            {cellContent(display, value, row, p.start, p.end)}
+          </td>
+        );
+      })}
+      <td className="px-3 py-2 text-center font-semibold text-foreground bg-accent/30 tabular-nums">
+        {cellContent(
+          formatValue(rowTotals[row], activeTab),
+          rowTotals[row],
+          row,
+          rangeStart,
+          rangeEnd,
+        )}
+      </td>
+    </tr>
+  );
+
+  const renderPlatformParent = (
+    platform: string,
+    childRows: string[],
+    expanded: boolean,
+  ) => {
+    const platformLabel = PLATFORM_META[toPlatform(platform)].label;
+    const rangeTotal = sumRangeForRows(childRows, activeTab);
+    return (
+      <tr
+        key={`platform-${platform}`}
+        onClick={() => togglePlatform(platform)}
+        className={cn(
+          "border-b border-border hover:bg-accent/40 transition-colors cursor-pointer select-none",
+          expanded && "bg-accent/20",
+        )}
+      >
+        <td className="sticky left-0 bg-inherit px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-foreground z-10">
+          <div className="flex items-center gap-2">
+            <ChevronRightIcon
+              className={cn(
+                "size-3.5 text-muted-foreground transition-transform",
+                expanded && "rotate-90",
+              )}
+            />
+            <PlatformIcon platform={platform} size={14} />
+            <span>{platformLabel}</span>
+            <span className="text-[10px] font-normal text-muted-foreground tabular-nums">
+              {childRows.length}
+            </span>
+          </div>
+        </td>
+        {periods.map((p) => {
+          const v = sumPeriodForRows(childRows, p.label, activeTab);
+          return (
+            <td
+              key={p.label}
+              className={`px-2 py-2 text-center tabular-nums font-medium ${
+                v === 0 ? "text-border" : "text-foreground"
+              }`}
+            >
+              {formatValue(v, activeTab)}
+            </td>
+          );
+        })}
+        <td className="px-3 py-2 text-center font-semibold text-foreground bg-accent/40 tabular-nums">
+          {formatValue(rangeTotal, activeTab)}
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
       <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
@@ -160,7 +354,7 @@ export function PeriodTable({
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-border bg-accent/50">
-              <th className="sticky left-0 bg-accent/50 px-3 sm:px-4 py-2.5 text-left font-medium text-muted-foreground min-w-[120px] sm:min-w-[180px] z-10 font-mono uppercase tracking-wider text-[10px]">
+              <th className="sticky left-0 bg-accent/50 px-3 sm:px-4 py-2.5 text-left font-medium text-muted-foreground min-w-[120px] sm:min-w-[220px] z-10 font-mono uppercase tracking-wider text-[10px]">
                 Metric
               </th>
               {periods.map((p) => (
@@ -178,41 +372,54 @@ export function PeriodTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr
-                key={row}
-                className="border-b border-border/50 hover:bg-accent/30 transition-colors"
-              >
-                <td className="sticky left-0 bg-card px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-foreground z-10">
-                  {row}
-                </td>
-                {periods.map((p) => {
-                  const value = data[row]?.[p.label] || 0;
-                  const display = formatValue(value, activeTab);
+            {groups ? (
+              <>
+                {groups.platforms.map((g) => {
+                  const expanded = expandedPlatforms.has(g.platform);
                   return (
-                    <td
-                      key={p.label}
-                      className={`px-2 py-2 text-center tabular-nums ${
-                        value === 0
-                          ? "text-border"
-                          : "text-foreground"
-                      }`}
-                    >
-                      {cellContent(display, value, row, p.start, p.end)}
-                    </td>
+                    <>
+                      {renderPlatformParent(g.platform, g.rows, expanded)}
+                      {expanded && g.rows.map((row) => renderChildRow(row))}
+                    </>
                   );
                 })}
-                <td className="px-3 py-2 text-center font-semibold text-foreground bg-accent/30 tabular-nums">
-                  {cellContent(
-                    formatValue(rowTotals[row], activeTab),
-                    rowTotals[row],
-                    row,
-                    rangeStart,
-                    rangeEnd,
-                  )}
-                </td>
-              </tr>
-            ))}
+                {groups.misc.map((row) => renderChildRow(row))}
+              </>
+            ) : (
+              rows.map((row) => (
+                <tr
+                  key={row}
+                  className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                >
+                  <td className="sticky left-0 bg-card px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-foreground z-10">
+                    {row}
+                  </td>
+                  {periods.map((p) => {
+                    const value = data[row]?.[p.label] || 0;
+                    const display = formatValue(value, activeTab);
+                    return (
+                      <td
+                        key={p.label}
+                        className={`px-2 py-2 text-center tabular-nums ${
+                          value === 0 ? "text-border" : "text-foreground"
+                        }`}
+                      >
+                        {cellContent(display, value, row, p.start, p.end)}
+                      </td>
+                    );
+                  })}
+                  <td className="px-3 py-2 text-center font-semibold text-foreground bg-accent/30 tabular-nums">
+                    {cellContent(
+                      formatValue(rowTotals[row], activeTab),
+                      rowTotals[row],
+                      row,
+                      rangeStart,
+                      rangeEnd,
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
             <tr className="border-t-2 border-border bg-accent/50 font-semibold">
               <td className="sticky left-0 bg-accent/50 px-3 sm:px-4 py-2 text-xs sm:text-sm text-foreground z-10 font-mono uppercase tracking-wider text-[10px]">
                 Total

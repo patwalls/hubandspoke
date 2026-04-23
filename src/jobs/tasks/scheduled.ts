@@ -11,8 +11,12 @@ import { runCrossPostScan } from "@/lib/services/cross-post-scan";
 import { syncAllMATG } from "@/lib/services/matg-sync";
 import { selectEnrichmentCandidates } from "@/lib/services/enrichment/orchestrator";
 import { selectHookCandidates } from "@/lib/services/hook-extract/orchestrator";
+import { db } from "@/lib/db";
+import { accounts } from "@/lib/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
 import type { EnrichItemPayload } from "./enrich-item";
 import type { ExtractHookPayload } from "./extract-hook";
+import type { AccountRefreshPayload } from "./account-refresh";
 
 function timed(name: string, fn: () => Promise<unknown>): Task {
   return async (_payload, helpers) => {
@@ -87,3 +91,33 @@ export const evergreenScanTask: Task = timed("evergreen-scan", () =>
 export const crossPostScanTask: Task = timed("cross-post-scan", () =>
   runCrossPostScan()
 );
+
+/**
+ * Weekly fan-out: enqueue one `account-refresh` per active account with an
+ * SC-supported platform. Skipped platforms (newsletter, "other") don't get
+ * refreshed — the service stamps them as "no coverage" on a manual refresh
+ * but we don't waste cron ticks on them.
+ */
+export const accountRefreshSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("account-refresh-sweep start");
+  const rows = await db
+    .select({ id: accounts.id, platform: accounts.platform, handle: accounts.handle })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.isActive, true),
+        inArray(accounts.platform, ["youtube", "instagram", "x", "tiktok", "linkedin", "threads"])
+      )
+    );
+  for (const row of rows) {
+    const payload: AccountRefreshPayload = { accountId: row.id };
+    await helpers.addJob("account-refresh", payload as never, {
+      jobKey: `account-refresh-${row.id}`,
+      jobKeyMode: "unsafe_dedupe",
+    });
+  }
+  helpers.logger.info(
+    `account-refresh-sweep fanned out ${rows.length} accounts (${Date.now() - start}ms)`
+  );
+};

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -56,6 +56,12 @@ import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
 import { cn } from "@/lib/utils";
 import { platformClass, statusClass } from "@/lib/badge-colors";
+import {
+  AccountPostTypePicker,
+  type PickerAccount,
+} from "@/components/ui/account-post-type-picker";
+import { AccountBadge } from "@/components/ui/account-badge";
+import type { PostType } from "@/lib/platform-field-schemas";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
 import {
   ContentDraftPanel,
@@ -100,6 +106,13 @@ interface RepostRow {
   mediaContentType: string | null;
   status: string | null;
   platform: string[] | null;
+  postType: string | null;
+  account: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+  } | null;
   publishedDate: string | null;
   publishedLink: string | null;
   views: number | null;
@@ -176,35 +189,10 @@ interface DetailResponse {
 interface ContentDetailProps {
   brand: string;
   contentId: string;
+  /** Every account (across brands) for the picker dropdown. Loaded once
+   *  on the server page; the picker grouping uses `brandLabel`. */
+  accounts: PickerAccount[];
 }
-
-const SS_PLATFORMS = [
-  "YouTube (SS)",
-  "YouTube (SS Build)",
-  "YouTube Shorts",
-  "YouTube Community",
-  "Instagram Post",
-  "Instagram Reel",
-  "Instagram Story",
-  "X (Starter Story)",
-  "X (Pat Walls)",
-  "LinkedIn",
-  "TikTok",
-  "Threads",
-  "Newsletter",
-];
-
-const MATG_PLATFORMS = [
-  "YouTube",
-  "YouTube Shorts",
-  "Instagram Post",
-  "Instagram Reel",
-  "Instagram Story",
-  "X",
-  "LinkedIn",
-  "TikTok",
-  "Threads",
-];
 
 const STATUS_OPTIONS = [
   "Idea",
@@ -305,7 +293,7 @@ const DETAIL_TAB_VALUES = [
 ] as const;
 type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
-export function ContentDetail({ brand, contentId }: ContentDetailProps) {
+export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -753,6 +741,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
   // Form state
   const [title, setTitle] = useState("");
   const [platforms, setPlatforms] = useState<string[]>([]);
+  // Account + post_type are the new authoritative fields for "which
+  // channel". `platforms` stays around until the finalize migration drops
+  // the legacy jsonb column — we keep writing it from here so downstream
+  // readers that still inspect platform[] get consistent data.
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const [postType, setPostType] = useState<PostType | null>(null);
   const [format, setFormat] = useState("");
   const [formatPickerOpen, setFormatPickerOpen] = useState(false);
   const [formatSearch, setFormatSearch] = useState("");
@@ -863,11 +857,24 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     };
   }, []);
 
-  const platformOptions = brand === "matg" ? MATG_PLATFORMS : SS_PLATFORMS;
+  // Derive platform-string options from the legacy platform[] array so the
+  // cross-post suggestion UI + any other legacy readers keep working during
+  // the account rollout. Pulled from seen-in-data rather than the deleted
+  // config file; duplicates are fine because the consumer dedupes.
+  const platformOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const a of accounts) {
+      if (a.brandSlug !== brand) continue;
+      seen.add(`${a.platform}:${a.handle}`);
+    }
+    return Array.from(seen);
+  }, [accounts, brand]);
 
   const applyItem = useCallback((item: ProductionItem, pillarRef: PillarRef | null) => {
     setTitle(item.title || "");
     setPlatforms(item.platform || []);
+    setAccountId(item.accountId ?? null);
+    setPostType((item.postType as PostType | null) ?? null);
     setFormat(item.format || "");
     setStatus(item.status || "");
     setPillar(pillarRef);
@@ -1317,15 +1324,22 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                 Cross-post
               </Badge>
             )}
-            {(item.platform || []).map((p) => (
-              <Badge
-                key={p}
-                variant="secondary"
-                className={cn("border", platformClass(p))}
-              >
-                {p}
-              </Badge>
-            ))}
+            {item.account ? (
+              <AccountBadge
+                account={item.account}
+                postType={item.postType}
+              />
+            ) : (
+              (item.platform || []).map((p) => (
+                <Badge
+                  key={p}
+                  variant="secondary"
+                  className={cn("border", platformClass(p))}
+                >
+                  {p}
+                </Badge>
+              ))
+            )}
             {item.format && (
               <span className="text-xs text-muted-foreground">
                 · {item.format}
@@ -1938,27 +1952,24 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
         </div>
 
         <PropertyRowGroup single={isPrePublish}>
-          <PropertyRow label="Platform">
-            <Select
-              value={platforms[0] || ""}
-              onValueChange={(v) => {
-                const next = v ? [v] : [];
-                setPlatforms(next);
-                void persistField({ platform: next });
-              }}
+          <PropertyRow label="Account">
+            <AccountPostTypePicker
+              accounts={accounts}
+              accountId={accountId}
+              postType={postType}
+              publishedLink={publishedLink || null}
+              brandSlug={brand}
               disabled={isYouTube}
-            >
-              <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Platform">
-                <SelectValue placeholder="Select platform…" />
-              </SelectTrigger>
-              <SelectContent>
-                {platformOptions.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={({ accountId: nextId, postType: nextType }) => {
+                setAccountId(nextId);
+                setPostType(nextType);
+                void persistField({
+                  accountId: nextId,
+                  postType: nextType,
+                });
+              }}
+              className="w-full"
+            />
           </PropertyRow>
 
           <PropertyRow label="Format">
@@ -2411,6 +2422,13 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
           id: string;
           title: string | null;
           platform: string[] | null;
+          postType: string | null;
+          account: {
+            id: string;
+            platform: string;
+            handle: string;
+            displayName: string | null;
+          } | null;
           format: string | null;
           status: string | null;
           publishedDate: string | null;
@@ -2429,6 +2447,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             id: d.id,
             title: d.title,
             platform: d.platform,
+            postType: d.postType ?? null,
+            account: d.account ?? null,
             format: d.format,
             status: d.status,
             publishedDate: d.publishedDate,
@@ -2446,6 +2466,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             id: r.id,
             title: r.title,
             platform: r.platform,
+            postType: r.postType ?? null,
+            account: r.account ?? null,
             format: null,
             status: r.status,
             publishedDate: r.publishedDate,
@@ -2463,6 +2485,8 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
             id: c.id,
             title: c.title,
             platform: c.platform,
+            postType: c.postType ?? null,
+            account: c.account ?? null,
             format: null,
             status: c.status,
             publishedDate: c.publishedDate,
@@ -2590,17 +2614,25 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-1">
-                          {d.platform?.map((p) => (
-                            <span
-                              key={p}
-                              className={cn(
-                                "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                                platformClass(p)
-                              )}
-                            >
-                              {p}
-                            </span>
-                          ))}
+                          {d.account ? (
+                            <AccountBadge
+                              account={d.account}
+                              postType={d.postType}
+                              variant="compact"
+                            />
+                          ) : (
+                            d.platform?.map((p) => (
+                              <span
+                                key={p}
+                                className={cn(
+                                  "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                                  platformClass(p)
+                                )}
+                              >
+                                {p}
+                              </span>
+                            ))
+                          )}
                         </div>
                       </td>
                       <td className="px-3 py-2 text-sm text-muted-foreground">

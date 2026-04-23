@@ -13,4 +13,5 @@ export const CRONTAB = `
 0 15 * * * evergreen-scan
 0 16 * * * cross-post-scan
 */20 * * * * youtube-download-sweep
+0 17 * * 1 account-refresh-sweep
 `.trim();

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { DashboardNav } from "@/components/dashboard/nav";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
+import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
 
 export default async function FormatsLayout({
   children,
@@ -23,12 +24,24 @@ export default async function FormatsLayout({
         .limit(1)
     : [];
 
+  const brandRows = await getBrands();
+  const defaultBrand = await getDefaultBrandSlug();
+  const brands = brandRows.map((b) => ({
+    slug: b.slug,
+    label: b.label,
+    avatar: b.avatarUrl,
+    color: b.color,
+    disabled: b.disabled,
+  }));
+
   return (
     <div className="min-h-screen bg-gray-50">
       <DashboardNav
         userEmail={session.user.email || ""}
         userName={userRow?.name ?? null}
         userAvatarUrl={userRow?.avatarUrl ?? null}
+        brands={brands}
+        defaultBrand={defaultBrand}
       />
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {children}

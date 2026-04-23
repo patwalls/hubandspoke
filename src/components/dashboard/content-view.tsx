@@ -6,6 +6,7 @@ import { format, subDays } from "date-fns";
 import { FilterPills } from "./filter-pills";
 import { PerformanceTable } from "./performance-table";
 import type { ContentReportData } from "@/types";
+import type { PickerAccount } from "@/components/ui/account-post-type-picker";
 
 interface ContentViewProps {
   brand: string;
@@ -26,12 +27,44 @@ export function ContentView({ brand }: ContentViewProps) {
   const [startDate, setStartDate] = useState(searchParams.get("startDate") || defaultStart);
   const [endDate, setEndDate] = useState(searchParams.get("endDate") || defaultEnd);
   const [viewType, setViewType] = useState(searchParams.get("viewType") || "weekly");
-  const [selectedPlatform, setSelectedPlatform] = useState(searchParams.get("platform") || "all");
+  const [selectedPlatformKey, setSelectedPlatformKey] = useState(searchParams.get("platformKey") || "all");
+  const [selectedAccountId, setSelectedAccountId] = useState(searchParams.get("accountId") || "all");
+  const [selectedPostType, setSelectedPostType] = useState(searchParams.get("postType") || "all");
   const [selectedFormat, setSelectedFormat] = useState(searchParams.get("format") || "all");
   const [selectedSource, setSelectedSource] = useState(searchParams.get("source") || "all");
 
   const [data, setData] = useState<ContentReportData | null>(null);
   const [loading, setLoading] = useState(true);
+  // Fetched once per mount — the create-item dialog's account picker reads
+  // this. Kept narrow (no filtering yet); add-form picker filters by
+  // `brandSlug` prop so all-brand fetch is fine.
+  const [accounts, setAccounts] = useState<PickerAccount[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/accounts");
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          accounts: Array<{
+            id: string;
+            brandSlug: string;
+            brandLabel: string;
+            platform: string;
+            handle: string;
+            displayName: string | null;
+            isActive: boolean;
+          }>;
+        };
+        if (!cancelled) setAccounts(json.accounts);
+      } catch {
+        /* non-fatal — picker just shows empty state */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const apiBase = REPORT_API[brand] || REPORT_API["starter-story"];
 
@@ -42,7 +75,9 @@ export function ContentView({ brand }: ContentViewProps) {
         startDate,
         endDate,
         viewType,
-        platform: selectedPlatform,
+        platformKey: selectedPlatformKey,
+        accountId: selectedAccountId,
+        postType: selectedPostType,
         format: selectedFormat,
         source: selectedSource,
       });
@@ -62,7 +97,7 @@ export function ContentView({ brand }: ContentViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, startDate, endDate, viewType, selectedPlatform, selectedFormat, selectedSource]);
+  }, [apiBase, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource]);
 
   useEffect(() => {
     fetchReport();
@@ -81,15 +116,19 @@ export function ContentView({ brand }: ContentViewProps) {
         startDate={startDate}
         endDate={endDate}
         viewType={viewType}
-        selectedPlatform={selectedPlatform}
+        selectedPlatformKey={selectedPlatformKey}
+        selectedAccountId={selectedAccountId}
+        selectedPostType={selectedPostType}
         selectedFormat={selectedFormat}
         selectedSource={selectedSource}
-        platforms={data?.platforms ?? []}
+        accounts={accounts}
         formats={data?.formats ?? []}
         onStartDateChange={setStartDate}
         onEndDateChange={setEndDate}
         onViewTypeChange={setViewType}
-        onPlatformChange={setSelectedPlatform}
+        onPlatformKeyChange={setSelectedPlatformKey}
+        onAccountChange={setSelectedAccountId}
+        onPostTypeChange={setSelectedPostType}
         onFormatChange={setSelectedFormat}
         onSourceChange={setSelectedSource}
       />
@@ -109,6 +148,7 @@ export function ContentView({ brand }: ContentViewProps) {
           items={data.items}
           brand={brand}
           formats={data.formats}
+          accounts={accounts}
           onPostCreated={fetchReport}
         />
       ) : (

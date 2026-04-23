@@ -11,6 +11,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  primaryKey,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -29,6 +30,21 @@ export const productionItems = pgTable(
     platform: jsonb("platform").$type<string[]>(),
     format: text("format"),
     brand: text("brand").default("starter-story").notNull(),
+    // Account the item was posted to (or is destined for). FK to `accounts`.
+    // Replaces the legacy `platform` string-array for identity (which handle /
+    // channel this lives on). Nullable during the accounts rollout backfill;
+    // NOT NULL after the finalize migration. onDelete: "restrict" mirrors the
+    // producer/editor pattern — can't delete an account that still owns items.
+    accountId: uuid("account_id").references((): AnyPgColumn => accounts.id, {
+      onDelete: "restrict",
+    }),
+    // Canonical post-type key — one of youtube_long | youtube_shorts |
+    // youtube_community | instagram_reel | instagram_post | instagram_story |
+    // x | tiktok | linkedin | threads | newsletter. Replaces the implicit
+    // post-type-in-platform-string convention. See src/lib/post-types.ts for
+    // the source of truth. Nullable for legacy/oddball rows (e.g. "SS Case
+    // Study") that don't map to a canonical social post shape.
+    postType: text("post_type"),
     campaign: text("campaign"),
     utmCampaign: text("utm_campaign"),
     publishedLink: text("published_link"),
@@ -213,6 +229,8 @@ export const productionItems = pgTable(
     index("idx_production_items_published_date").on(table.publishedDate),
     index("idx_production_items_status").on(table.status),
     index("idx_production_items_brand").on(table.brand),
+    index("idx_production_items_account").on(table.accountId),
+    index("idx_production_items_post_type").on(table.postType),
     index("idx_production_items_last_perf_sync").on(table.lastPerformanceSyncAt),
     index("idx_production_items_enrichment_pending").on(
       table.enrichmentCompletedAt
@@ -525,6 +543,17 @@ export const crossPostRules = pgTable(
     sourcePlatform: text("source_platform").notNull(),
     viewThreshold: integer("view_threshold").notNull(),
     targetPlatform: text("target_platform").notNull(),
+    // Account-scoped replacements for (brand, source_platform, target_platform).
+    // Nullable during the accounts rollout backfill; NOT NULL after the
+    // finalize migration drops the string columns.
+    sourceAccountId: uuid("source_account_id").references(
+      (): AnyPgColumn => accounts.id,
+      { onDelete: "cascade" }
+    ),
+    targetAccountId: uuid("target_account_id").references(
+      (): AnyPgColumn => accounts.id,
+      { onDelete: "cascade" }
+    ),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -539,6 +568,8 @@ export const crossPostRules = pgTable(
       table.sourcePlatform,
       table.targetPlatform
     ),
+    index("idx_cross_post_rules_source_account").on(table.sourceAccountId),
+    index("idx_cross_post_rules_target_account").on(table.targetAccountId),
   ]
 );
 
@@ -782,6 +813,125 @@ export const notifications = pgTable(
       .on(table.userId)
       .where(sql`${table.readAt} IS NULL`),
   ],
+);
+
+// First-class brand registry. Seeded from the old `src/lib/config/brands.ts`
+// constants during the accounts rollout; from there on, brands are added/edited
+// via the settings UI. Folds the old `brand_settings` row (1:1 by slug) into
+// the same table — weekly goal + week start day + default producer/editor all
+// live here. The `brand_settings` table is dropped in the finalize migration.
+export const brands = pgTable(
+  "brands",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    slug: text("slug").notNull().unique(),
+    label: text("label").notNull(),
+    avatarUrl: text("avatar_url"),
+    // Tailwind gradient (e.g. "from-emerald-500 to-emerald-700") preserved from
+    // the old config. Kept as plain text so a new brand can set any gradient
+    // without a code change.
+    color: text("color"),
+    disabled: boolean("disabled").notNull().default(false),
+    weeklyGoal: integer("weekly_goal"),
+    // 0 = Sunday .. 6 = Saturday. Controls dashboard week buckets.
+    weekStartDay: integer("week_start_day").notNull().default(0),
+    defaultProducerUserId: uuid("default_producer_user_id").references(
+      () => users.id,
+      { onDelete: "set null" }
+    ),
+    defaultEditorUserId: uuid("default_editor_user_id").references(
+      () => users.id,
+      { onDelete: "set null" }
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [uniqueIndex("idx_brands_slug_lower").on(sql`lower(${table.slug})`)]
+);
+
+// Social account / channel identity. One row per (platform, handle) — e.g. the
+// Starter Story YouTube channel is one row regardless of whether an item is a
+// long video, a short, or a community post (post type lives on production_items
+// instead). "X (Starter Story)" and "X (Pat Walls)" are two rows; same handle
+// on different platforms is two rows. Scrape Creators account-level data
+// (follower count, avatar, bio) is refreshed into these rows by the
+// account-refresh task.
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    brandId: uuid("brand_id")
+      .notNull()
+      .references(() => brands.id, { onDelete: "restrict" }),
+    // Canonical platform key: youtube | instagram | x | tiktok | linkedin |
+    // threads | newsletter | other. Finer-grained post-type lives on the
+    // production item (`post_type`), not here — one YouTube channel can host
+    // long videos, shorts, and community posts.
+    platform: text("platform").notNull(),
+    handle: text("handle").notNull(),
+    displayName: text("display_name"),
+    url: text("url"),
+    avatarUrl: text("avatar_url"),
+    // Platform-native identifier (YouTube channelId UC…, IG pk/id, X rest_id).
+    // Stored when Scrape Creators returns it so downstream syncs can key off
+    // the stable id instead of the mutable handle.
+    externalId: text("external_id"),
+    bio: text("bio"),
+    followerCount: integer("follower_count"),
+    // Misc SC fields we want to surface later without a schema change
+    // (verified flag, country, channel-level view totals, etc.).
+    metadata: jsonb("metadata"),
+    isActive: boolean("is_active").notNull().default(true),
+    // Replaces the hardcoded NOTION_AUTHORITATIVE_PLATFORMS set. When true,
+    // Notion sync owns items on this account (long-form YouTube pillars);
+    // when false, the account is Hub & Spoke-owned and Notion is ignored.
+    syncedFromNotion: boolean("synced_from_notion").notNull().default(false),
+    lastRefreshedAt: timestamp("last_refreshed_at", { withTimezone: true }),
+    lastRefreshError: text("last_refresh_error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    // Global identity is (platform, lower(handle)). Keeps case variants from
+    // producing duplicate rows (e.g. "Starterstory" vs "starterstory").
+    uniqueIndex("uniq_accounts_platform_handle").on(
+      table.platform,
+      sql`lower(${table.handle})`
+    ),
+    index("idx_accounts_brand").on(table.brandId),
+    index("idx_accounts_platform").on(table.platform),
+  ]
+);
+
+// Users can "link" accounts to their profile — powers the "my accounts"
+// filter, default notification routing, and (eventually) per-user default
+// producer/editor assignments. No permission gating: any admin can see and
+// edit any account. Composite PK (user_id, account_id) blocks duplicates.
+export const userAccounts = pgTable(
+  "user_accounts",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    linkedAt: timestamp("linked_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.accountId] }),
+    index("idx_user_accounts_account").on(table.accountId),
+  ]
 );
 
 export const syncLogs = pgTable("sync_logs", {

@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
-  brandSettings,
+  brands,
   formats,
   productionItems,
   users,
@@ -102,11 +102,11 @@ export async function resolveAssignees(
   if (!producerUserId || !editorUserId) {
     const [bs] = await db
       .select({
-        defaultProducerUserId: brandSettings.defaultProducerUserId,
-        defaultEditorUserId: brandSettings.defaultEditorUserId,
+        defaultProducerUserId: brands.defaultProducerUserId,
+        defaultEditorUserId: brands.defaultEditorUserId,
       })
-      .from(brandSettings)
-      .where(eq(brandSettings.brand, input.brand))
+      .from(brands)
+      .where(eq(brands.slug, input.brand))
       .limit(1);
     if (bs) {
       if (!producerUserId) producerUserId = bs.defaultProducerUserId ?? null;

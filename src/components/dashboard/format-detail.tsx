@@ -36,6 +36,9 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { channelsForBrand } from "@/lib/config/channels";
+import { ChannelChip } from "@/components/ui/channel-chip";
+import { PlatformIcon } from "@/components/ui/platform-icon";
+import { normalizePlatform } from "@/lib/platform-field-schemas";
 import { applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 
@@ -842,17 +845,17 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           <div className="space-y-2">
             <Label>Channels</Label>
             <Popover open={channelsPopoverOpen} onOpenChange={setChannelsPopoverOpen}>
-              <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+              <PopoverTrigger className="flex min-h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs hover:bg-accent cursor-pointer">
                 {channels.length === 0 ? (
                   <span className="text-muted-foreground">Select channels…</span>
                 ) : (
-                  <span className="flex items-center gap-1 overflow-hidden">
-                    <span className="truncate">
-                      {channels.slice(0, 2).join(", ")}
-                    </span>
-                    {channels.length > 2 && (
+                  <span className="flex flex-wrap items-center gap-1 overflow-hidden">
+                    {channels.slice(0, 3).map((ch) => (
+                      <ChannelChip key={ch} channel={ch} />
+                    ))}
+                    {channels.length > 3 && (
                       <span className="shrink-0 rounded bg-muted text-[10px] font-medium text-muted-foreground px-1.5 py-0.5">
-                        +{channels.length - 2}
+                        +{channels.length - 3}
                       </span>
                     )}
                   </span>
@@ -867,6 +870,12 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                     <CommandGroup>
                       {ALL_CHANNELS.map((ch) => {
                         const selected = channels.includes(ch);
+                        const postType = normalizePlatform(ch);
+                        const platform = postType?.startsWith("youtube_")
+                          ? "youtube"
+                          : postType?.startsWith("instagram_")
+                          ? "instagram"
+                          : postType ?? "other";
                         return (
                           <CommandItem
                             key={ch}
@@ -885,6 +894,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                                   <svg className="w-3 h-3 text-primary-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                                 )}
                               </span>
+                              <PlatformIcon platform={platform} size={13} />
                               <span className="text-sm">{ch}</span>
                             </span>
                           </CommandItem>

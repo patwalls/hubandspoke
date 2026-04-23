@@ -34,6 +34,10 @@ import {
 } from "./youtube-download";
 import { youtubeDownloadSweepTask } from "./youtube-download-sweep";
 import {
+  accountRefreshTask,
+  type AccountRefreshPayload,
+} from "./account-refresh";
+import {
   performanceDecayTask,
   notionSyncTask,
   enrichmentSweepTask,
@@ -41,6 +45,7 @@ import {
   matgSyncTask,
   evergreenScanTask,
   crossPostScanTask,
+  accountRefreshSweepTask,
 } from "./scheduled";
 
 export interface TaskPayloads {
@@ -53,6 +58,7 @@ export interface TaskPayloads {
   "enrich-item": EnrichItemPayload;
   "extract-hook": ExtractHookPayload;
   "youtube-download": YoutubeDownloadPayload;
+  "account-refresh": AccountRefreshPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
@@ -62,6 +68,7 @@ export interface TaskPayloads {
   "evergreen-scan": Record<string, never>;
   "cross-post-scan": Record<string, never>;
   "youtube-download-sweep": Record<string, never>;
+  "account-refresh-sweep": Record<string, never>;
 }
 
 const helloTask: Task = async (payload, helpers) => {
@@ -79,6 +86,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "enrich-item": enrichItemTask,
   "extract-hook": extractHookTask,
   "youtube-download": youtubeDownloadTask,
+  "account-refresh": accountRefreshTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,
@@ -87,4 +95,5 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "evergreen-scan": evergreenScanTask,
   "cross-post-scan": crossPostScanTask,
   "youtube-download-sweep": youtubeDownloadSweepTask,
+  "account-refresh-sweep": accountRefreshSweepTask,
 };

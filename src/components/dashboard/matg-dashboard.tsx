@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { format, subDays } from "date-fns";
-import { FilterPills } from "./filter-pills";
+import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable } from "./period-table";
 import type { ContentReportData } from "@/types";
@@ -31,12 +31,29 @@ export function MATGDashboard() {
   const [startDate, setStartDate] = useState(searchParams.get("startDate") || defaultStart);
   const [endDate, setEndDate] = useState(searchParams.get("endDate") || defaultEnd);
   const [viewType, setViewType] = useState(searchParams.get("viewType") || "weekly");
-  const [selectedPlatform, setSelectedPlatform] = useState(searchParams.get("platform") || "all");
+  const [selectedPlatformKey, setSelectedPlatformKey] = useState(searchParams.get("platformKey") || "all");
+  const [selectedAccountId, setSelectedAccountId] = useState(searchParams.get("accountId") || "all");
+  const [selectedPostType, setSelectedPostType] = useState(searchParams.get("postType") || "all");
   const [selectedFormat, setSelectedFormat] = useState(searchParams.get("format") || "all");
   const [selectedSource, setSelectedSource] = useState(searchParams.get("source") || "all");
 
   // Data
   const [data, setData] = useState<ContentReportData | null>(null);
+  const [accounts, setAccounts] = useState<FilterAccount[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/accounts");
+        if (!res.ok) return;
+        const json = (await res.json()) as { accounts: FilterAccount[] };
+        if (!cancelled) setAccounts(json.accounts);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /* ---------------------------------------------------------------- */
   /*  Data fetching                                                    */
@@ -48,7 +65,9 @@ export function MATGDashboard() {
         startDate,
         endDate,
         viewType,
-        platform: selectedPlatform,
+        platformKey: selectedPlatformKey,
+        accountId: selectedAccountId,
+        postType: selectedPostType,
         format: selectedFormat,
         source: selectedSource,
       });
@@ -57,7 +76,7 @@ export function MATGDashboard() {
     } catch (err) {
       console.error("Failed to fetch data:", err);
     }
-  }, [startDate, endDate, viewType, selectedPlatform, selectedFormat, selectedSource]);
+  }, [startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource]);
 
   useEffect(() => {
     fetchReport();
@@ -112,15 +131,19 @@ export function MATGDashboard() {
         startDate={startDate}
         endDate={endDate}
         viewType={viewType}
-        selectedPlatform={selectedPlatform}
+        selectedPlatformKey={selectedPlatformKey}
+        selectedAccountId={selectedAccountId}
+        selectedPostType={selectedPostType}
         selectedFormat={selectedFormat}
         selectedSource={selectedSource}
-        platforms={data?.platforms ?? []}
+        accounts={accounts}
         formats={data?.formats ?? []}
         onStartDateChange={setStartDate}
         onEndDateChange={setEndDate}
         onViewTypeChange={setViewType}
-        onPlatformChange={setSelectedPlatform}
+        onPlatformKeyChange={setSelectedPlatformKey}
+        onAccountChange={setSelectedAccountId}
+        onPostTypeChange={setSelectedPostType}
         onFormatChange={setSelectedFormat}
         onSourceChange={setSelectedSource}
       />
@@ -139,6 +162,7 @@ export function MATGDashboard() {
           tabs={PLATFORM_TABS}
           brand="matg"
           filterKey={data.showingFormats ? "format" : "platform"}
+          rowMeta={data.showingFormats ? undefined : data.primaryRowMeta}
         />
       )}
     </div>

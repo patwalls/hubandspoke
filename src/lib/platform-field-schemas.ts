@@ -1,10 +1,11 @@
 import type { FormatFieldSchema } from "@/lib/db/schema";
 
-// Canonical platform keys. Historical `productionItems.platform[]` values
-// collapse to these via normalizePlatform() — "Twitter"/"X"/"X (Starter
-// Story)" / "X (Pat Walls)" all map to `x`, the four YouTube variants to
-// `youtube_long`, and so on.
-export type PlatformKey =
+// Canonical post-type keys — the value stored in `production_items.post_type`.
+// Account identity lives on `production_items.account_id`; post_type only
+// describes the *shape* of the post (what fields it has, what simulator to
+// render). One account can host multiple post types (a YouTube channel carries
+// long-form videos, shorts, and community posts).
+export type PostType =
   | "x"
   | "instagram_reel"
   | "instagram_post"
@@ -17,13 +18,17 @@ export type PlatformKey =
   | "tiktok"
   | "threads";
 
+/** @deprecated renamed to PostType. Kept as a type alias during the accounts
+ *  rollout so downstream imports don't break mid-PR. Delete after sweep. */
+export type PlatformKey = PostType;
+
 const SCHEMA_VERSION = 1;
 
 // Field schemas are keyed by *platform* (where the post lives), not by
 // format (the editorial template). A Reel-format item that gets cross-posted
 // to X still needs tweet-shaped fields. format.instructions carries the
 // editorial voice; platform carries the output shape.
-export const PLATFORM_FIELD_SCHEMAS: Record<PlatformKey, FormatFieldSchema> = {
+export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
   x: {
     version: SCHEMA_VERSION,
     fields: [
@@ -229,10 +234,10 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PlatformKey, FormatFieldSchema> = {
   },
 };
 
-// Map any historical platform string to a canonical key. Returns null if we
-// haven't wired that platform yet — callers should surface a clear
+// Map any historical platform string to a canonical post-type key. Returns
+// null if we haven't wired that platform yet — callers should surface a clear
 // "unsupported platform" error rather than silently falling back.
-export function normalizePlatform(raw: string): PlatformKey | null {
+export function normalizePlatform(raw: string): PostType | null {
   const s = raw.trim().toLowerCase();
   if (!s) return null;
 
@@ -262,13 +267,24 @@ export function normalizePlatform(raw: string): PlatformKey | null {
   return null;
 }
 
-// Convenience lookup: given a raw platform array, return the first key we
-// recognize plus the leftover raw strings. Lets callers surface a hint about
-// secondary platforms (e.g. "drafting for X; also posts to LinkedIn").
+// Given an explicit post_type (stored on the production item), return the
+// draft field schema. Prefer this over resolveSchemaForPlatforms — the latter
+// exists only for legacy call sites that still inspect the platform[] array
+// during the accounts rollout.
+export function getSchemaForPostType(
+  postType: PostType | string | null | undefined
+): FormatFieldSchema | null {
+  if (!postType) return null;
+  return PLATFORM_FIELD_SCHEMAS[postType as PostType] ?? null;
+}
+
+/** @deprecated Use `getSchemaForPostType(item.postType)` instead. Retained for
+ *  legacy call sites that only have the raw platform[] array until the
+ *  accounts rollout sweep is done. */
 export function resolveSchemaForPlatforms(
   platforms: string[] | null,
 ): {
-  key: PlatformKey | null;
+  key: PostType | null;
   raw: string | null;
   otherPlatforms: string[];
   schema: FormatFieldSchema | null;

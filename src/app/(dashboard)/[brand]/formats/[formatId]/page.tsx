@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats } from "@/lib/db/schema";
-import { BRANDS } from "@/lib/config/brands";
+import { fetchBrandBySlug } from "@/lib/db/brands";
 import { FormatDetail } from "@/components/dashboard/format-detail";
 
 interface FormatDetailPageProps {
@@ -26,7 +26,7 @@ export default async function BrandFormatDetailPage({
   params,
 }: FormatDetailPageProps) {
   const { brand, formatId } = await params;
-  const brandConfig = BRANDS.find((b) => b.slug === brand);
+  const brandConfig = await fetchBrandBySlug(brand);
 
   if (!brandConfig) {
     notFound();

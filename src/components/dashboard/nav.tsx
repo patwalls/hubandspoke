@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { BRANDS, DEFAULT_BRAND } from "@/lib/config/brands";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { GlobalSearch } from "@/components/dashboard/global-search";
 import {
@@ -17,12 +16,26 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type Brand = (typeof BRANDS)[number];
+// Brand shape passed down from the (server) layout — mirrors BrandListEntry
+// from @/lib/db/brands but redeclared locally so this client component
+// doesn't pull in a server-only module. `avatar` maps to the DB's
+// `avatar_url` to keep the existing JSX unchanged.
+type Brand = {
+  slug: string;
+  label: string;
+  avatar: string | null;
+  color: string | null;
+  disabled: boolean;
+};
 
-function getBrandFromPath(pathname: string): string {
+function getBrandFromPath(
+  pathname: string,
+  brands: Brand[],
+  fallback: string
+): string {
   const segment = pathname.split("/")[1];
-  const match = BRANDS.find((b) => b.slug === segment);
-  return match ? match.slug : DEFAULT_BRAND;
+  const match = brands.find((b) => b.slug === segment);
+  return match ? match.slug : fallback;
 }
 
 function BrandAvatar({ brand, size = 22 }: { brand: Brand; size?: number }) {
@@ -111,16 +124,20 @@ type NavProps = {
   userEmail: string;
   userName?: string | null;
   userAvatarUrl?: string | null;
+  brands: Brand[];
+  defaultBrand: string;
 };
 
 export function DashboardNav({
   userEmail,
   userName = null,
   userAvatarUrl = null,
+  brands,
+  defaultBrand,
 }: NavProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const currentBrand = getBrandFromPath(pathname);
+  const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
   const isOnFormats = pathname.endsWith("/formats");
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -175,7 +192,7 @@ export function DashboardNav({
               </svg>
             </span>
             <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
-              {BRANDS.map((brand) => {
+              {brands.map((brand) => {
                 const isActive = currentBrand === brand.slug;
                 const href = isOnFormats ? `/${brand.slug}/formats` : `/${brand.slug}`;
 
@@ -307,9 +324,15 @@ export function DashboardNav({
   );
 }
 
-export function SectionTabs() {
+export function SectionTabs({
+  brands,
+  defaultBrand,
+}: {
+  brands: Brand[];
+  defaultBrand: string;
+}) {
   const pathname = usePathname();
-  const currentBrand = getBrandFromPath(pathname);
+  const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
 
   const tabs = [
     { href: `/${currentBrand}`, label: "Dashboard" },

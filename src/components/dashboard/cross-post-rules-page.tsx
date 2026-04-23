@@ -4,13 +4,37 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AccountBadge } from "@/components/ui/account-badge";
+import { PlatformIcon } from "@/components/ui/platform-icon";
+
+interface PickedAccount {
+  id: string;
+  platform: string;
+  handle: string;
+  displayName: string | null;
+  brandLabel: string;
+}
 
 interface CrossPostRule {
   id: string;
   brand: string;
   sourcePlatform: string;
-  viewThreshold: number;
   targetPlatform: string;
+  sourceAccountId: string | null;
+  targetAccountId: string | null;
+  sourceAccount: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+  } | null;
+  targetAccount: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+  } | null;
+  viewThreshold: number;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -19,21 +43,27 @@ interface CrossPostRule {
 interface Props {
   brand: string;
   brandLabel: string;
-  channels: string[];
+  /** Accounts available as source/target options. Filtered to the current
+   *  brand by the server page. */
+  accounts: PickedAccount[];
 }
 
 export function CrossPostRulesPageContent({
   brand,
   brandLabel,
-  channels,
+  accounts,
 }: Props) {
   const [rules, setRules] = useState<CrossPostRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // New-rule form
-  const [sourcePlatform, setSourcePlatform] = useState(channels[0] ?? "");
-  const [targetPlatform, setTargetPlatform] = useState(channels[1] ?? "");
+  // New-rule form — stores account IDs (UUIDs), not legacy strings.
+  const [sourceAccountId, setSourceAccountId] = useState<string>(
+    accounts[0]?.id ?? ""
+  );
+  const [targetAccountId, setTargetAccountId] = useState<string>(
+    accounts[1]?.id ?? ""
+  );
   const [viewThreshold, setViewThreshold] = useState("10000");
   const [saving, setSaving] = useState(false);
 
@@ -65,16 +95,19 @@ export function CrossPostRulesPageContent({
       if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
         throw new Error("Threshold must be a non-negative whole number");
       }
-      if (sourcePlatform === targetPlatform) {
-        throw new Error("Source and target platforms must differ");
+      if (!sourceAccountId || !targetAccountId) {
+        throw new Error("Pick a source and target account");
+      }
+      if (sourceAccountId === targetAccountId) {
+        throw new Error("Source and target accounts must differ");
       }
       const res = await fetch("/api/cross-post-rules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           brand,
-          sourcePlatform,
-          targetPlatform,
+          sourceAccountId,
+          targetAccountId,
           viewThreshold: n,
           active: true,
         }),
@@ -125,9 +158,17 @@ export function CrossPostRulesPageContent({
   }
 
   async function remove(rule: CrossPostRule) {
+    const srcLabel =
+      rule.sourceAccount
+        ? `@${rule.sourceAccount.handle}`
+        : rule.sourcePlatform;
+    const tgtLabel =
+      rule.targetAccount
+        ? `@${rule.targetAccount.handle}`
+        : rule.targetPlatform;
     if (
       !confirm(
-        `Delete rule: ${rule.sourcePlatform} ≥ ${rule.viewThreshold.toLocaleString()} → ${rule.targetPlatform}?`
+        `Delete rule: ${srcLabel} ≥ ${rule.viewThreshold.toLocaleString()} → ${tgtLabel}?`
       )
     )
       return;
@@ -143,6 +184,14 @@ export function CrossPostRulesPageContent({
     }
   }
 
+  function renderAccountOption(a: PickedAccount) {
+    return (
+      <option key={a.id} value={a.id}>
+        {a.platform} — @{a.handle}
+      </option>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -150,9 +199,9 @@ export function CrossPostRulesPageContent({
           Cross-post rules
         </h1>
         <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-          {brandLabel} — when a published post on the source platform hits the
+          {brandLabel} — when a published post on the source account hits the
           view threshold, a cross-post idea is auto-queued for the target
-          platform.
+          account.
         </p>
       </div>
 
@@ -160,25 +209,30 @@ export function CrossPostRulesPageContent({
         onSubmit={addRule}
         className="rounded-lg border border-border bg-card p-5 space-y-4"
       >
-        <h2 className="text-base font-semibold text-foreground">
-          Add a rule
-        </h2>
+        <h2 className="text-base font-semibold text-foreground">Add a rule</h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px_1fr] gap-3 items-end">
           <div className="space-y-1.5">
-            <Label htmlFor="source-platform">Source platform</Label>
-            <select
-              id="source-platform"
-              value={sourcePlatform}
-              onChange={(e) => setSourcePlatform(e.target.value)}
-              className="w-full h-9 rounded-md border border-input bg-background px-2.5 text-sm"
-            >
-              {channels.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <Label htmlFor="source-account">Source account</Label>
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                <PlatformIcon
+                  platform={
+                    accounts.find((a) => a.id === sourceAccountId)?.platform ??
+                    "other"
+                  }
+                  size={14}
+                />
+              </span>
+              <select
+                id="source-account"
+                value={sourceAccountId}
+                onChange={(e) => setSourceAccountId(e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background pl-8 pr-2.5 text-sm"
+              >
+                {accounts.map(renderAccountOption)}
+              </select>
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -195,19 +249,26 @@ export function CrossPostRulesPageContent({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="target-platform">Target platform</Label>
-            <select
-              id="target-platform"
-              value={targetPlatform}
-              onChange={(e) => setTargetPlatform(e.target.value)}
-              className="w-full h-9 rounded-md border border-input bg-background px-2.5 text-sm"
-            >
-              {channels.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <Label htmlFor="target-account">Target account</Label>
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                <PlatformIcon
+                  platform={
+                    accounts.find((a) => a.id === targetAccountId)?.platform ??
+                    "other"
+                  }
+                  size={14}
+                />
+              </span>
+              <select
+                id="target-account"
+                value={targetAccountId}
+                onChange={(e) => setTargetAccountId(e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background pl-8 pr-2.5 text-sm"
+              >
+                {accounts.map(renderAccountOption)}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -243,8 +304,17 @@ export function CrossPostRulesPageContent({
             <tbody>
               {rules.map((rule) => (
                 <tr key={rule.id} className="border-t border-border">
-                  <td className="px-5 py-2 text-foreground">
-                    {rule.sourcePlatform}
+                  <td className="px-5 py-2">
+                    {rule.sourceAccount ? (
+                      <AccountBadge
+                        account={rule.sourceAccount}
+                        variant="compact"
+                      />
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {rule.sourcePlatform}
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-2">
                     <input
@@ -257,8 +327,17 @@ export function CrossPostRulesPageContent({
                       className="w-28 h-8 rounded-md border border-input bg-background px-2 text-sm"
                     />
                   </td>
-                  <td className="px-5 py-2 text-foreground">
-                    {rule.targetPlatform}
+                  <td className="px-5 py-2">
+                    {rule.targetAccount ? (
+                      <AccountBadge
+                        account={rule.targetAccount}
+                        variant="compact"
+                      />
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {rule.targetPlatform}
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-2">
                     <button

@@ -200,6 +200,8 @@ export async function PUT(request: NextRequest) {
       id,
       title,
       platform,
+      accountId,
+      postType,
       format,
       publishedLink,
       publishedDate,
@@ -237,6 +239,11 @@ export async function PUT(request: NextRequest) {
 
     if (title !== undefined) updateData.title = title;
     if (platform !== undefined) updateData.platform = platform;
+    // Account/post_type are the new source of truth; the legacy `platform`
+    // jsonb column is still written from the client for backward compat
+    // until the finalize migration drops it.
+    if (accountId !== undefined) updateData.accountId = accountId || null;
+    if (postType !== undefined) updateData.postType = postType || null;
     if (format !== undefined) updateData.format = format || null;
     if (publishedLink !== undefined) updateData.publishedLink = publishedLink || null;
     if (publishedDate !== undefined) updateData.publishedDate = publishedDate;

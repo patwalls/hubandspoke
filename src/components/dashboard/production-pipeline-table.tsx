@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { platformClass } from "@/lib/badge-colors";
+import { AccountBadge } from "@/components/ui/account-badge";
 import type { ProductionItem } from "@/types";
 
 interface ProductionPipelineTableProps {
@@ -300,18 +301,26 @@ export function ProductionPipelineTable({
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1 min-w-0">
-                      {item.platform?.map((p) => (
-                        <span
-                          key={p}
-                          className={cn(
-                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border max-w-full truncate",
-                            platformClass(p)
-                          )}
-                          title={p}
-                        >
-                          {p}
-                        </span>
-                      ))}
+                      {item.account ? (
+                        <AccountBadge
+                          account={item.account}
+                          postType={item.postType}
+                          variant="compact"
+                        />
+                      ) : (
+                        item.platform?.map((p) => (
+                          <span
+                            key={p}
+                            className={cn(
+                              "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border max-w-full truncate",
+                              platformClass(p)
+                            )}
+                            title={p}
+                          >
+                            {p}
+                          </span>
+                        ))
+                      )}
                     </div>
                   </td>
                   <td className="px-3 py-2 w-[40%]">

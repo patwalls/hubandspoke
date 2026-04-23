@@ -10,6 +10,25 @@ export interface ProductionItem {
   publishedDate: string | null;
   status: string | null;
   platform: string[] | null;
+  /** Canonical post_type key (youtube_long, instagram_reel, x, …). Populated
+   *  from `production_items.post_type`. Null only for legacy "other" items
+   *  (SS Case Study, Paid Ad, null-platform rows). */
+  postType: string | null;
+  /** FK to `accounts`. Populated by the accounts backfill for every item.
+   *  Joined account context is on `account`. */
+  accountId: string | null;
+  /** Joined account summary — platform/handle/displayName shaped for the
+   *  UI badge. Populated when the row comes out of queries.ts's joined
+   *  item selector. Null while old code paths are still reading the
+   *  pre-join shape. */
+  account: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+    brandSlug: string;
+    brandLabel: string;
+  } | null;
   format: string | null;
   brand: string;
   campaign: string | null;
@@ -85,6 +104,13 @@ export interface MetricData {
   };
 }
 
+export interface PrimaryRowMeta {
+  label: string;
+  platform: string;
+  handle: string;
+  postType: string | null;
+}
+
 export interface ContentReportData {
   periods: Period[];
   byPlatform: {
@@ -107,6 +133,10 @@ export interface ContentReportData {
   formats: string[];
   showingFormats: boolean;
   weeklyGoal: number | null;
+  /** Keyed by the row's display label — same label used as the key
+   *  inside `byPlatform.*`. When present the UI renders an
+   *  AccountBadge instead of the raw text. */
+  primaryRowMeta?: Record<string, PrimaryRowMeta>;
 }
 
 export interface SyncLog {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { productionItems, formats } from "@/lib/db/schema";
+import { productionItems, formats, accounts, brands } from "@/lib/db/schema";
 import { and, eq, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
 import { getBrandSettings } from "@/lib/db/queries";
@@ -50,6 +50,9 @@ export async function GET(request: NextRequest) {
   const endDate = searchParams.get("endDate") || defaultEnd;
   const viewType = (searchParams.get("viewType") || "weekly") as "weekly" | "daily";
   const platformFilter = searchParams.get("platform") || "all";
+  const platformKeyFilter = searchParams.get("platformKey") || "all";
+  const accountIdFilter = searchParams.get("accountId") || "all";
+  const postTypeFilter = searchParams.get("postType") || "all";
   const formatFilter = searchParams.get("format") || "all";
   const sourceFilter = searchParams.get("source") || "all";
 
@@ -77,6 +80,16 @@ export async function GET(request: NextRequest) {
         sql`${productionItems.platform}::jsonb @> ${JSON.stringify([platformFilter])}::jsonb`
       );
     }
+    // New-world filters (prefer these over the legacy string filter above).
+    if (accountIdFilter !== "all") {
+      conditions.push(eq(productionItems.accountId, accountIdFilter));
+    }
+    if (platformKeyFilter !== "all") {
+      conditions.push(eq(accounts.platform, platformKeyFilter));
+    }
+    if (postTypeFilter !== "all") {
+      conditions.push(eq(productionItems.postType, postTypeFilter));
+    }
 
     if (formatFilter !== "all") {
       conditions.push(eq(productionItems.format, formatFilter));
@@ -88,10 +101,39 @@ export async function GET(request: NextRequest) {
       conditions.push(eq(productionItems.isExternal, true));
     }
 
-    const items = await db
-      .select()
+    // Join accounts+brands so each returned item carries a shaped
+    // `account` for the UI's AccountBadge — avoids the N+1 lookup the
+    // dashboard used to do on the client.
+    const rows = await db
+      .select({
+        item: productionItems,
+        accountId: accounts.id,
+        accountPlatform: accounts.platform,
+        accountHandle: accounts.handle,
+        accountDisplayName: accounts.displayName,
+        accountBrandSlug: brands.slug,
+        accountBrandLabel: brands.label,
+      })
       .from(productionItems)
+      .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
+      .leftJoin(brands, eq(brands.id, accounts.brandId))
       .where(and(...conditions));
+    const items = rows.map((r) => r.item);
+    const accountByItemId = new Map(
+      rows
+        .filter((r) => r.accountId)
+        .map((r) => [
+          r.item.id,
+          {
+            id: r.accountId!,
+            platform: r.accountPlatform!,
+            handle: r.accountHandle!,
+            displayName: r.accountDisplayName,
+            brandSlug: r.accountBrandSlug!,
+            brandLabel: r.accountBrandLabel!,
+          },
+        ])
+    );
 
     // Always show all MATG platforms, even those with 0 output
     const MATG_PLATFORMS = [
@@ -121,6 +163,56 @@ export async function GET(request: NextRequest) {
     const platformList = Array.from(allPlatforms).sort();
     const formatList = Array.from(allFormats).sort();
 
+    // Primary rows are per (account, post_type) instead of raw platform
+    // strings — mirrors the starter-story shape. See getContentReport in
+    // src/lib/db/queries.ts for the spec.
+    type PrimaryRowMeta = {
+      label: string;
+      platform: string;
+      handle: string;
+      postType: string | null;
+    };
+    const postTypeShort: Record<string, string> = {
+      youtube_long: "Long",
+      youtube_shorts: "Short",
+      youtube_community: "Community",
+      instagram_reel: "Reel",
+      instagram_post: "Post",
+      instagram_story: "Story",
+      x: "Post",
+      tiktok: "Video",
+      linkedin: "Post",
+      threads: "Post",
+      newsletter: "Issue",
+    };
+    const platformHasMultipleTypes = (p: string): boolean =>
+      p === "youtube" || p === "instagram";
+    const primaryRowMetaByKey = new Map<string, PrimaryRowMeta>();
+    const itemToRowKey = new Map<string, string>();
+    for (const r of rows) {
+      if (!r.accountId || !r.accountHandle || !r.accountPlatform) continue;
+      const pt = r.item.postType ?? null;
+      const key = `${r.accountPlatform}|${r.accountHandle}|${pt ?? ""}`;
+      itemToRowKey.set(r.item.id, key);
+      if (!primaryRowMetaByKey.has(key)) {
+        const label = pt && platformHasMultipleTypes(r.accountPlatform)
+          ? `@${r.accountHandle} · ${postTypeShort[pt] ?? pt}`
+          : `@${r.accountHandle}`;
+        primaryRowMetaByKey.set(key, {
+          label,
+          platform: r.accountPlatform,
+          handle: r.accountHandle,
+          postType: pt,
+        });
+      }
+    }
+    const primaryRowMetaList = Array.from(primaryRowMetaByKey.values()).sort(
+      (a, b) => a.label.localeCompare(b.label)
+    );
+    const primaryRowMeta: Record<string, PrimaryRowMeta> = Object.fromEntries(
+      primaryRowMetaList.map((m) => [m.label, m])
+    );
+
     // Determine if we show formats in primary table
     const showingFormats = platformFilter !== "all" && formatFilter === "all";
 
@@ -129,7 +221,7 @@ export async function GET(request: NextRequest) {
       primaryRows = [...formatList];
       if (items.some((i) => !i.format)) primaryRows.push("(No Format)");
     } else {
-      primaryRows = platformList;
+      primaryRows = primaryRowMetaList.map((m) => m.label);
     }
 
     // Initialize metric data
@@ -177,15 +269,14 @@ export async function GET(request: NextRequest) {
           primarySales[formatKey][period.label] += sales;
         }
       } else {
-        const platforms = (item.platform as string[]) || [];
-        platforms.forEach((p) => {
-          if (primaryProduction[p]) {
-            primaryProduction[p][period.label] += 1;
-            primaryViews[p][period.label] += views;
-            primaryLeads[p][period.label] += leads;
-            primarySales[p][period.label] += sales;
-          }
-        });
+        const rowKey = itemToRowKey.get(item.id);
+        const label = rowKey ? primaryRowMetaByKey.get(rowKey)?.label : null;
+        if (label && primaryProduction[label]) {
+          primaryProduction[label][period.label] += 1;
+          primaryViews[label][period.label] += views;
+          primaryLeads[label][period.label] += leads;
+          primarySales[label][period.label] += sales;
+        }
       }
 
       const fKey = item.format || "(No Format)";
@@ -224,6 +315,9 @@ export async function GET(request: NextRequest) {
       publishedDate: item.publishedDate,
       status: item.status,
       platform: item.platform as string[] | null,
+      postType: item.postType ?? null,
+      accountId: item.accountId ?? null,
+      account: accountByItemId.get(item.id) ?? null,
       format: item.format,
       brand: item.brand,
       campaign: item.campaign,
@@ -275,6 +369,7 @@ export async function GET(request: NextRequest) {
       formats: formatList,
       showingFormats,
       weeklyGoal,
+      primaryRowMeta,
     };
 
     return NextResponse.json(data);

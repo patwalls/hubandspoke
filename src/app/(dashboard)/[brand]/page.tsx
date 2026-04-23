@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ContentReport } from "@/components/dashboard/content-report";
 import { MATGDashboard } from "@/components/dashboard/matg-dashboard";
-import { BRANDS } from "@/lib/config/brands";
+import { fetchBrandBySlug } from "@/lib/db/brands";
 
 interface BrandPageProps {
   params: Promise<{ brand: string }>;
@@ -11,15 +11,15 @@ interface BrandPageProps {
 
 export async function generateMetadata({ params }: BrandPageProps): Promise<Metadata> {
   const { brand } = await params;
-  const brandConfig = BRANDS.find((b) => b.slug === brand);
-  return { title: brandConfig ? `Dashboard · ${brandConfig.label}` : "Dashboard" };
+  const brandRow = await fetchBrandBySlug(brand);
+  return { title: brandRow ? `Dashboard · ${brandRow.label}` : "Dashboard" };
 }
 
 export default async function BrandDashboardPage({ params }: BrandPageProps) {
   const { brand } = await params;
-  const brandConfig = BRANDS.find((b) => b.slug === brand);
+  const brandRow = await fetchBrandBySlug(brand);
 
-  if (!brandConfig) {
+  if (!brandRow) {
     notFound();
   }
 

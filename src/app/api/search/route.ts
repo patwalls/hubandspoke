@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, asc, desc, eq, ilike, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { formats, productionItems } from "@/lib/db/schema";
+import { accounts, formats, productionItems } from "@/lib/db/schema";
 
 const CONTENT_LIMIT = 12;
 const FORMAT_LIMIT = 8;
@@ -28,11 +28,16 @@ export async function GET(request: NextRequest) {
         title: productionItems.title,
         format: productionItems.format,
         platform: productionItems.platform,
+        postType: productionItems.postType,
         status: productionItems.status,
         publishedDate: productionItems.publishedDate,
         views: productionItems.views,
+        accountId: accounts.id,
+        accountPlatform: accounts.platform,
+        accountHandle: accounts.handle,
       })
       .from(productionItems)
+      .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
       .where(
         and(
           eq(productionItems.brand, brand),
@@ -59,5 +64,26 @@ export async function GET(request: NextRequest) {
       .limit(FORMAT_LIMIT),
   ]);
 
-  return NextResponse.json({ content: contentRows, formats: formatRows });
+  // Flatten the joined `account` fields into a nested object so the UI can
+  // pass it directly to <AccountBadge>.
+  const content = contentRows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    format: r.format,
+    platform: r.platform as string[] | null,
+    postType: r.postType,
+    status: r.status,
+    publishedDate: r.publishedDate,
+    views: r.views,
+    account: r.accountId && r.accountPlatform && r.accountHandle
+      ? {
+          id: r.accountId,
+          platform: r.accountPlatform,
+          handle: r.accountHandle,
+          displayName: null,
+        }
+      : null,
+  }));
+
+  return NextResponse.json({ content, formats: formatRows });
 }

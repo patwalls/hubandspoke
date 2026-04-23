@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { BRANDS } from "@/lib/config/brands";
-import { channelsForBrand } from "@/lib/config/channels";
+import { fetchBrandBySlug } from "@/lib/db/brands";
+import { getAccountsForBrand } from "@/lib/db/accounts";
 import { CrossPostRulesPageContent } from "@/components/dashboard/cross-post-rules-page";
 
 interface CrossPostRulesPageProps {
@@ -12,10 +12,10 @@ export async function generateMetadata({
   params,
 }: CrossPostRulesPageProps): Promise<Metadata> {
   const { brand } = await params;
-  const brandConfig = BRANDS.find((b) => b.slug === brand);
+  const brandRow = await fetchBrandBySlug(brand);
   return {
-    title: brandConfig
-      ? `Cross-post rules · ${brandConfig.label}`
+    title: brandRow
+      ? `Cross-post rules · ${brandRow.label}`
       : "Cross-post rules",
   };
 }
@@ -24,16 +24,27 @@ export default async function BrandCrossPostRulesPage({
   params,
 }: CrossPostRulesPageProps) {
   const { brand } = await params;
-  const brandConfig = BRANDS.find((b) => b.slug === brand);
-  if (!brandConfig) notFound();
+  const brandRow = await fetchBrandBySlug(brand);
+  if (!brandRow) notFound();
 
-  const channels = channelsForBrand(brand);
+  // Only pickable accounts — active, non-"other" platforms. The picker's
+  // options sort by platform then handle for a predictable order.
+  const rawAccounts = await getAccountsForBrand(brand);
+  const accounts = rawAccounts
+    .filter((a) => a.isActive && a.platform !== "other")
+    .map((a) => ({
+      id: a.id,
+      platform: a.platform,
+      handle: a.handle,
+      displayName: a.displayName,
+      brandLabel: a.brandLabel,
+    }));
 
   return (
     <CrossPostRulesPageContent
       brand={brand}
-      brandLabel={brandConfig.label}
-      channels={channels}
+      brandLabel={brandRow.label}
+      accounts={accounts}
     />
   );
 }

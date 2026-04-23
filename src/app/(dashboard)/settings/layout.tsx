@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { BRANDS } from "@/lib/config/brands";
+import { getEnabledBrands } from "@/lib/db/brands";
 import { SettingsSidebarNav } from "@/components/settings/sidebar-nav";
 
 export default async function SettingsLayout({
@@ -13,7 +13,7 @@ export default async function SettingsLayout({
     redirect("/login");
   }
 
-  const brandLinks = BRANDS.filter((b) => !b.disabled).map((b) => ({
+  const brandLinks = (await getEnabledBrands()).map((b) => ({
     slug: b.slug,
     label: b.label,
   }));

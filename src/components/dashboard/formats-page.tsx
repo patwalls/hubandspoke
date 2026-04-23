@@ -44,6 +44,8 @@ import {
 } from "@/components/ui/table";
 import { UserChip } from "./user-chip";
 import { SS_CHANNELS, MATG_CHANNELS } from "@/lib/config/channels";
+import { ChannelChip } from "@/components/ui/channel-chip";
+import { cn } from "@/lib/utils";
 import { applyStarterTemplate } from "@/lib/format-skill";
 
 interface AsanaMember {
@@ -474,17 +476,25 @@ export function FormatsPageContent({ brand }: { brand: string }) {
 
               <div className="space-y-2">
                 <Label>Channels</Label>
-                <div className="flex flex-wrap gap-2">
-                  {ALL_CHANNELS.map((ch) => (
-                    <Badge
-                      key={ch}
-                      variant={channels.includes(ch) ? "default" : "outline"}
-                      className="cursor-pointer"
-                      onClick={() => toggleChannel(ch)}
-                    >
-                      {ch}
-                    </Badge>
-                  ))}
+                <div className="flex flex-wrap gap-1.5">
+                  {ALL_CHANNELS.map((ch) => {
+                    const selected = channels.includes(ch);
+                    return (
+                      <button
+                        key={ch}
+                        type="button"
+                        onClick={() => toggleChannel(ch)}
+                        className={cn(
+                          "transition-colors cursor-pointer",
+                          selected
+                            ? "ring-2 ring-primary ring-offset-1 rounded-md"
+                            : "opacity-70 hover:opacity-100"
+                        )}
+                      >
+                        <ChannelChip channel={ch} />
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="space-y-2">
@@ -765,13 +775,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {f.channels?.map((ch) => (
-                        <Badge
-                          key={ch}
-                          variant="secondary"
-                          className="text-xs"
-                        >
-                          {ch}
-                        </Badge>
+                        <ChannelChip key={ch} channel={ch} />
                       ))}
                     </div>
                   </TableCell>

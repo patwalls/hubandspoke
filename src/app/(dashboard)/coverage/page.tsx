@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getCoverageMap, type CoverageRow } from "@/lib/db/queries";
-import { BRANDS } from "@/lib/config/brands";
+import { getBrands } from "@/lib/db/brands";
 
 export const metadata: Metadata = { title: "Coverage" };
 export const dynamic = "force-dynamic";
@@ -30,8 +30,8 @@ function fmtCell(count: number, total: number): {
   return { text, className: "text-red-600 font-medium" };
 }
 
-function brandLabel(slug: string): string {
-  return BRANDS.find((b) => b.slug === slug)?.label ?? slug;
+function brandLabel(slug: string, labels: Map<string, string>): string {
+  return labels.get(slug) ?? slug;
 }
 
 function sumRows(rows: CoverageRow[]): CoverageRow {
@@ -73,6 +73,7 @@ export default async function CoveragePage() {
     byBrand.get(r.brand)!.push(r);
   }
   const brands = Array.from(byBrand.keys()).sort();
+  const brandLabels = new Map((await getBrands()).map((b) => [b.slug, b.label]));
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -99,7 +100,7 @@ export default async function CoveragePage() {
         return (
           <section key={brand}>
             <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-2">
-              {brandLabel(brand)}
+              {brandLabel(brand, brandLabels)}
               <span className="ml-2 text-muted-foreground/70 normal-case">
                 ({total.total.toLocaleString()} published)
               </span>

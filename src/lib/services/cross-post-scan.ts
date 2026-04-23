@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  accounts,
   contentEvents,
   crossPostFitVerdicts,
   crossPostRules,
@@ -11,6 +12,7 @@ import {
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import {
   classifyCrossPostFit,
   type PastCrossPostKill,
@@ -73,10 +75,40 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
 
   if (rules.length === 0) return result;
 
+  // Bulk-fetch every account any rule references (source or target). Lets
+  // us resolve FK-based rules without N+1 lookups downstream.
+  const referencedAccountIds = new Set<string>();
+  for (const r of rules) {
+    if (r.sourceAccountId) referencedAccountIds.add(r.sourceAccountId);
+    if (r.targetAccountId) referencedAccountIds.add(r.targetAccountId);
+  }
+  const accountById = new Map<
+    string,
+    { id: string; platform: string; handle: string }
+  >();
+  if (referencedAccountIds.size > 0) {
+    const rows = await db
+      .select({
+        id: accounts.id,
+        platform: accounts.platform,
+        handle: accounts.handle,
+      })
+      .from(accounts)
+      .where(inArray(accounts.id, Array.from(referencedAccountIds)));
+    for (const r of rows) accountById.set(r.id, r);
+  }
+
   const pastKillReasons = await fetchPastCrossPostKillReasons();
 
   for (const rule of rules) {
     result.rulesEvaluated++;
+
+    // Source matcher: prefer the account FK when the rule was created
+    // account-aware; fall back to the legacy jsonb string match for older
+    // rules that predate the rollout.
+    const sourceMatcher = rule.sourceAccountId
+      ? eq(productionItems.accountId, rule.sourceAccountId)
+      : sql`${productionItems.platform} ? ${rule.sourcePlatform}`;
 
     const candidates = await db
       .select({
@@ -84,6 +116,8 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
         title: productionItems.title,
         thumbnail: productionItems.thumbnail,
         platform: productionItems.platform,
+        accountId: productionItems.accountId,
+        postType: productionItems.postType,
         views: productionItems.views,
         brand: productionItems.brand,
         publishedDate: productionItems.publishedDate,
@@ -100,7 +134,7 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
           eq(productionItems.sourceType, "original"),
           eq(productionItems.status, "Published"),
           gte(productionItems.views, rule.viewThreshold),
-          sql`${productionItems.platform} ? ${rule.sourcePlatform}`,
+          sourceMatcher,
           gte(
             productionItems.publishedDate,
             sql`(now() - interval '${sql.raw(String(RECENCY_WINDOW_DAYS))} days')::date`
@@ -117,15 +151,35 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
       rule.targetPlatform
     );
 
+    // Derive the target post type from the rule's target account once per
+    // iteration. Used both for the "already cross-posted?" check and the
+    // eventual insert.
+    const targetAccount = rule.targetAccountId
+      ? accountById.get(rule.targetAccountId) ?? null
+      : null;
+    const targetPostType = targetAccount
+      ? PLATFORM_META[toPlatform(targetAccount.platform)].defaultPostType
+      : null;
+
     for (const candidate of candidates) {
       result.candidatesConsidered++;
 
+      // Fast-path "already exists" check against the legacy platform[]
+      // shape. Items synced from Notion or manually-authored before the
+      // accounts rollout still carry this. Keep as a cheap pre-filter.
       const existingPlatforms = (candidate.platform ?? []) as string[];
       if (existingPlatforms.includes(rule.targetPlatform)) {
         result.skippedExisting++;
         continue;
       }
 
+      // Duplicate-suppression: look for a prior cross_post row already
+      // pointing at this source and target. Match on target_account_id when
+      // the rule is account-scoped; fall back to the legacy platform[]
+      // matcher for older rules.
+      const targetDupMatcher = rule.targetAccountId
+        ? eq(productionItems.accountId, rule.targetAccountId)
+        : sql`${productionItems.platform} ? ${rule.targetPlatform}`;
       const existing = await db
         .select({ id: productionItems.id })
         .from(productionItems)
@@ -133,7 +187,7 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
           and(
             eq(productionItems.sourceType, "cross_post"),
             eq(productionItems.repostedFromItemId, candidate.id),
-            sql`${productionItems.platform} ? ${rule.targetPlatform}`
+            targetDupMatcher
           )
         )
         .limit(1);
@@ -143,7 +197,14 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
         continue;
       }
 
-      if (isNotionAuthoritative([rule.targetPlatform])) {
+      // Notion authority check. `isNotionAuthoritative` now accepts a
+      // post_type as well as the legacy platform[] array; feed it whichever
+      // we've got.
+      if (
+        isNotionAuthoritative(
+          targetPostType ?? rule.targetPlatform
+        )
+      ) {
         result.skippedExisting++;
         continue;
       }
@@ -235,6 +296,11 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
           thumbnail: candidate.thumbnail,
           status: "Idea",
           platform: [rule.targetPlatform],
+          // Populate the new-world fields when the rule is account-scoped.
+          // Legacy string-only rules still write the platform[] column
+          // above so nothing downstream breaks during the rollout.
+          accountId: rule.targetAccountId ?? null,
+          postType: targetPostType ?? null,
           sourceType: "cross_post",
           repostedFromItemId: candidate.id,
           format: candidate.format,

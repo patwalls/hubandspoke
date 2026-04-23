@@ -1,30 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { brandSettings } from "@/lib/db/schema";
+import { brands } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { BRANDS } from "@/lib/config/brands";
-
-const VALID_BRANDS = new Set<string>(BRANDS.map((b) => b.slug));
+import { fetchBrandBySlug, invalidateBrandCache } from "@/lib/db/brands";
 
 export async function GET(request: NextRequest) {
   const brand = request.nextUrl.searchParams.get("brand");
-  if (!brand || !VALID_BRANDS.has(brand)) {
-    return NextResponse.json({ error: "Unknown brand" }, { status: 400 });
+  if (!brand) {
+    return NextResponse.json({ error: "Missing brand" }, { status: 400 });
   }
 
   try {
-    const [row] = await db
-      .select()
-      .from(brandSettings)
-      .where(eq(brandSettings.brand, brand))
-      .limit(1);
-
+    const row = await fetchBrandBySlug(brand);
+    if (!row) {
+      return NextResponse.json({ error: "Unknown brand" }, { status: 400 });
+    }
     return NextResponse.json({
-      brand,
-      weeklyGoal: row?.weeklyGoal ?? null,
-      weekStartDay: row?.weekStartDay ?? 0,
-      defaultProducerUserId: row?.defaultProducerUserId ?? null,
-      defaultEditorUserId: row?.defaultEditorUserId ?? null,
+      brand: row.slug,
+      weeklyGoal: row.weeklyGoal ?? null,
+      weekStartDay: row.weekStartDay ?? 0,
+      defaultProducerUserId: row.defaultProducerUserId ?? null,
+      defaultEditorUserId: row.defaultEditorUserId ?? null,
     });
   } catch (error) {
     console.error("Error fetching brand settings:", error);
@@ -52,13 +48,17 @@ export async function PUT(request: NextRequest) {
       defaultEditorUserId?: string | null;
     };
 
-    if (!brand || !VALID_BRANDS.has(brand)) {
+    if (!brand) {
+      return NextResponse.json({ error: "Missing brand" }, { status: 400 });
+    }
+    const existing = await fetchBrandBySlug(brand);
+    if (!existing) {
       return NextResponse.json({ error: "Unknown brand" }, { status: 400 });
     }
 
     // Only overwrite fields the caller actually sent. `null` is a valid value
     // (clears the default → global fallback); `undefined` means "leave alone".
-    const patch: Partial<typeof brandSettings.$inferInsert> = { updatedAt: new Date() };
+    const patch: Partial<typeof brands.$inferInsert> = { updatedAt: new Date() };
 
     if (weeklyGoal !== undefined) {
       if (weeklyGoal === null) {
@@ -92,22 +92,15 @@ export async function PUT(request: NextRequest) {
     }
 
     const [row] = await db
-      .insert(brandSettings)
-      .values({
-        brand,
-        weeklyGoal: patch.weeklyGoal ?? null,
-        weekStartDay: patch.weekStartDay ?? 0,
-        defaultProducerUserId: patch.defaultProducerUserId ?? null,
-        defaultEditorUserId: patch.defaultEditorUserId ?? null,
-      })
-      .onConflictDoUpdate({
-        target: brandSettings.brand,
-        set: patch,
-      })
+      .update(brands)
+      .set(patch)
+      .where(eq(brands.slug, brand))
       .returning();
 
+    invalidateBrandCache();
+
     return NextResponse.json({
-      brand: row.brand,
+      brand: row.slug,
       weeklyGoal: row.weeklyGoal,
       weekStartDay: row.weekStartDay,
       defaultProducerUserId: row.defaultProducerUserId,

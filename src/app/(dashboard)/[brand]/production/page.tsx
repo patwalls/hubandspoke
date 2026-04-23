@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { BRANDS } from "@/lib/config/brands";
+import { fetchBrandBySlug } from "@/lib/db/brands";
 import { ProductionView } from "@/components/dashboard/production-view";
 
 interface BrandProductionPageProps {
@@ -12,7 +12,7 @@ export async function generateMetadata({
   params,
 }: BrandProductionPageProps): Promise<Metadata> {
   const { brand } = await params;
-  const brandConfig = BRANDS.find((b) => b.slug === brand);
+  const brandConfig = await fetchBrandBySlug(brand);
   return {
     title: brandConfig ? `Production · ${brandConfig.label}` : "Production",
   };
@@ -22,7 +22,7 @@ export default async function BrandProductionPage({
   params,
 }: BrandProductionPageProps) {
   const { brand } = await params;
-  const brandConfig = BRANDS.find((b) => b.slug === brand);
+  const brandConfig = await fetchBrandBySlug(brand);
 
   if (!brandConfig) {
     notFound();

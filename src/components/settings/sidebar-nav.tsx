@@ -10,6 +10,8 @@ interface BrandLink {
 }
 
 const SECTIONS = [
+  { href: "/settings/brands", label: "Brands" },
+  { href: "/settings/accounts", label: "Accounts" },
   { href: "/settings/users", label: "Users" },
   { href: "/settings/sync-errors", label: "Sync errors" },
   { href: "/settings/jobs", label: "Jobs" },

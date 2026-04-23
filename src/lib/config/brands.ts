@@ -1,34 +1,12 @@
-export const BRANDS = [
-  {
-    slug: "starter-story",
-    label: "Starter Story",
-    avatar: "/brands/starter-story.jpg",
-    color: "from-emerald-500 to-emerald-700",
-    disabled: false,
-  },
-  {
-    slug: "matg",
-    label: "Marketing Against The Grain",
-    avatar: "/brands/matg.jpg",
-    color: "from-orange-500 to-rose-600",
-    disabled: false,
-  },
-  {
-    slug: "my-first-million",
-    label: "My First Million",
-    avatar: "/brands/my-first-million.jpg",
-    color: "from-amber-500 to-yellow-600",
-    disabled: true,
-  },
-  {
-    slug: "science-of-scaling",
-    label: "Science Of Scaling",
-    avatar: "/brands/science-of-scaling.jpg",
-    color: "from-sky-500 to-indigo-600",
-    disabled: true,
-  },
-] as const;
+// Brand data now lives in the `brands` table. Fetch via `@/lib/db/brands`
+// (server-only) — `getBrands()`, `fetchBrandBySlug()`, etc.
+//
+// This file retains `DEFAULT_BRAND` so top-level redirect targets stay a
+// cheap synchronous constant. Any code that used to import { BRANDS } should
+// switch to `await getBrands()` from `@/lib/db/brands`.
 
-export type BrandSlug = (typeof BRANDS)[number]["slug"];
+export const DEFAULT_BRAND = "starter-story";
 
-export const DEFAULT_BRAND: BrandSlug = "starter-story";
+/** @deprecated Route params are plain strings now — the brand list is
+ *  data-driven. Kept so existing imports compile during the cutover. */
+export type BrandSlug = string;

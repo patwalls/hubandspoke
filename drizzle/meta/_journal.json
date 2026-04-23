@@ -232,6 +232,13 @@
       "when": 1776904606323,
       "tag": "0032_slippery_johnny_blaze",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1776913378891,
+      "tag": "0033_chemical_mach_iv",
+      "breakpoints": true
     }
   ]
 }

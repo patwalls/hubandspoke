@@ -5,6 +5,33 @@ import { and, eq, notInArray, sql } from "drizzle-orm";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { findAccount } from "@/lib/db/accounts";
+import type { PostType } from "@/lib/platform-field-schemas";
+
+/**
+ * Map a Notion-side channel label to a seeded `accounts` row + post_type.
+ * Notion only flows long-form YouTube items (see isNotionAuthoritative), so
+ * the recognized labels here are the four YouTube variants. Returns null if
+ * the channel doesn't match — caller should log + skip persistence.
+ */
+async function resolveNotionChannel(
+  channel: string,
+  _publishedLink: string | null
+): Promise<{ accountId: string; postType: PostType } | null> {
+  // Channel strings already go through `remapChannelName` upstream so we
+  // see normalized "YouTube (SS)" / "YouTube (SS Build)" / "YouTube".
+  const lower = channel.trim().toLowerCase();
+  let handle: string;
+  if (lower === "youtube (ss build)") handle = "starterstorybuild";
+  else if (lower === "youtube (ss)" || lower === "youtube") handle = "starterstory";
+  else return null;
+  const acct = await findAccount({
+    brandSlug: "starter-story",
+    platform: "youtube",
+    handle,
+  });
+  return acct ? { accountId: acct.id, postType: "youtube_long" } : null;
+}
 
 const DATABASE_ID = "8cb6cee4163d4282a5c87991ea689bde";
 
@@ -407,6 +434,20 @@ export async function syncFromNotion(): Promise<{
         : rawPlatform;
       const formatName = await extractFormat(properties, notion);
 
+      // Resolve account_id + post_type from the first (primary) channel.
+      // Notion only owns long-form YouTube, so this hits the two seeded YT
+      // accounts (starterstory / starterstorybuild). The resolveNotionChannel
+      // helper centralizes the mapping and returns null on miss (logged).
+      const primaryChannel = platform?.[0] ?? null;
+      const accountResolution = primaryChannel
+        ? await resolveNotionChannel(primaryChannel, publishedLink)
+        : null;
+      if (primaryChannel && !accountResolution) {
+        console.warn(
+          `[notion-sync] no account match for Notion channel "${primaryChannel}" on page ${notionId}`
+        );
+      }
+
       const producer = extractPerson(properties, "Producer");
       const editor = extractPerson(properties, "Editor/Creator");
 
@@ -426,6 +467,8 @@ export async function syncFromNotion(): Promise<{
         publishedDate: extractPublishDate(properties),
         status: extractStatus(properties),
         platform,
+        accountId: accountResolution?.accountId ?? null,
+        postType: accountResolution?.postType ?? null,
         format: formatName,
         campaign: extractCampaign(properties),
         publishedLink,

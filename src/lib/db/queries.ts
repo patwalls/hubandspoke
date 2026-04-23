@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { productionItems, formats, brandSettings, users } from "@/lib/db/schema";
+import { productionItems, formats, brands, users, accounts } from "@/lib/db/schema";
 import { aliasedTable } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, inArray, sql } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
@@ -19,6 +19,17 @@ type UserExtras = {
   producerAvatarUrl?: string | null;
   editorUserName?: string | null;
   editorAvatarUrl?: string | null;
+  /** Joined-account summary for UI badges. When absent the consumer falls
+   *  back to the legacy platform[] string; populated by queries that
+   *  already join accounts (detail + list endpoints post-accounts-PR). */
+  account?: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+    brandSlug: string;
+    brandLabel: string;
+  } | null;
 };
 
 function mapProductionItem(
@@ -35,6 +46,9 @@ function mapProductionItem(
     publishedDate: item.publishedDate,
     status: item.status,
     platform: item.platform as string[] | null,
+    postType: item.postType ?? null,
+    accountId: item.accountId ?? null,
+    account: extras.account ?? null,
     format: item.format,
     brand: item.brand,
     campaign: item.campaign,
@@ -106,9 +120,9 @@ async function attachPresignedCoverUrls(items: ProductionItem[]): Promise<void> 
 
 export async function getWeeklyGoal(brand: string): Promise<number | null> {
   const [row] = await db
-    .select({ weeklyGoal: brandSettings.weeklyGoal })
-    .from(brandSettings)
-    .where(eq(brandSettings.brand, brand))
+    .select({ weeklyGoal: brands.weeklyGoal })
+    .from(brands)
+    .where(eq(brands.slug, brand))
     .limit(1);
   return row?.weeklyGoal ?? null;
 }
@@ -121,11 +135,11 @@ export type BrandSettings = {
 export async function getBrandSettings(brand: string): Promise<BrandSettings> {
   const [row] = await db
     .select({
-      weeklyGoal: brandSettings.weeklyGoal,
-      weekStartDay: brandSettings.weekStartDay,
+      weeklyGoal: brands.weeklyGoal,
+      weekStartDay: brands.weekStartDay,
     })
-    .from(brandSettings)
-    .where(eq(brandSettings.brand, brand))
+    .from(brands)
+    .where(eq(brands.slug, brand))
     .limit(1);
   return {
     weeklyGoal: row?.weeklyGoal ?? null,
@@ -151,7 +165,16 @@ interface ReportParams {
   startDate: string;
   endDate: string;
   viewType: "weekly" | "daily";
-  platform: string;
+  /** Legacy string filter — kept during the accounts rollout for URL
+   *  compatibility. Prefer the three new filters below. */
+  platform?: string;
+  /** Canonical platform key (`youtube`, `instagram`, …) or "all". Filters
+   *  via `accounts.platform` (joined). */
+  platformKey?: string;
+  /** `accounts.id` or "all". */
+  accountId?: string;
+  /** Canonical post_type or "all". */
+  postType?: string;
   format: string;
   source: string;
 }
@@ -159,7 +182,17 @@ interface ReportParams {
 export async function getContentReport(
   params: ReportParams
 ): Promise<ContentReportData> {
-  const { startDate, endDate, viewType, platform, format, source } = params;
+  const {
+    startDate,
+    endDate,
+    viewType,
+    platform,
+    platformKey,
+    accountId,
+    postType,
+    format,
+    source,
+  } = params;
 
   const { weeklyGoal, weekStartDay } = await getBrandSettings("starter-story");
 
@@ -181,8 +214,20 @@ export async function getContentReport(
     isNotNull(productionItems.platform),
   ];
 
-  if (platform !== "all") {
-    // Filter where platform JSONB array contains the value
+  // New-world filters. `accountId` picks a single account; `platformKey`
+  // scopes to one canonical platform (matched via the joined accounts row);
+  // `postType` scopes to one canonical post_type.
+  if (accountId && accountId !== "all") {
+    conditions.push(eq(productionItems.accountId, accountId));
+  }
+  if (platformKey && platformKey !== "all") {
+    conditions.push(eq(accounts.platform, platformKey));
+  }
+  if (postType && postType !== "all") {
+    conditions.push(eq(productionItems.postType, postType));
+  }
+  // Legacy string filter, retained for URL back-compat.
+  if (platform && platform !== "all") {
     conditions.push(
       sql`${productionItems.platform}::jsonb @> ${JSON.stringify([platform])}::jsonb`
     );
@@ -198,12 +243,93 @@ export async function getContentReport(
     conditions.push(eq(productionItems.isExternal, true));
   }
 
-  const items = await db
-    .select()
+  // Join accounts+brands so each item carries a shaped `account` for the
+  // UI's AccountBadge. Falls back to null when an item predates the
+  // accounts backfill (shouldn't happen in practice; kept defensive).
+  const rows = await db
+    .select({
+      item: productionItems,
+      accountId: accounts.id,
+      accountPlatform: accounts.platform,
+      accountHandle: accounts.handle,
+      accountDisplayName: accounts.displayName,
+      accountBrandSlug: brands.slug,
+      accountBrandLabel: brands.label,
+    })
     .from(productionItems)
+    .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
+    .leftJoin(brands, eq(brands.id, accounts.brandId))
     .where(and(...conditions));
+  const items = rows.map((r) => r.item);
+  const accountByItemId = new Map(
+    rows
+      .filter((r) => r.accountId)
+      .map((r) => [
+        r.item.id,
+        {
+          id: r.accountId!,
+          platform: r.accountPlatform!,
+          handle: r.accountHandle!,
+          displayName: r.accountDisplayName,
+          brandSlug: r.accountBrandSlug!,
+          brandLabel: r.accountBrandLabel!,
+        },
+      ])
+  );
 
-  // Get all platforms and formats
+  // Primary rows are now keyed by (account handle, post_type) instead of
+  // the legacy platform string. Each row carries a shaped meta record so
+  // the dashboard can render `[icon] @handle · PostType` in place of
+  // "Instagram Reel" / "X (Pat Walls)" labels. An accounts-rollout win.
+  type PrimaryRowMeta = {
+    label: string;
+    platform: string;
+    handle: string;
+    postType: string | null;
+  };
+  const primaryRowMetaByKey = new Map<string, PrimaryRowMeta>();
+  const itemToRowKey = new Map<string, string>();
+
+  // Short-form labels per canonical post_type, matching the UI's
+  // POST_TYPE_SHORT_LABEL. Inlined here to avoid a server → lib/ client
+  // dependency; keep in sync.
+  const postTypeShort: Record<string, string> = {
+    youtube_long: "Long",
+    youtube_shorts: "Short",
+    youtube_community: "Community",
+    instagram_reel: "Reel",
+    instagram_post: "Post",
+    instagram_story: "Story",
+    x: "Post",
+    tiktok: "Video",
+    linkedin: "Post",
+    threads: "Post",
+    newsletter: "Issue",
+  };
+  const platformHasMultipleTypes = (p: string): boolean =>
+    p === "youtube" || p === "instagram";
+
+  for (const r of rows) {
+    if (!r.accountId || !r.accountHandle || !r.accountPlatform) continue;
+    const pt = r.item.postType ?? null;
+    const key = `${r.accountPlatform}|${r.accountHandle}|${pt ?? ""}`;
+    itemToRowKey.set(r.item.id, key);
+    if (!primaryRowMetaByKey.has(key)) {
+      const label = pt && platformHasMultipleTypes(r.accountPlatform)
+        ? `@${r.accountHandle} · ${postTypeShort[pt] ?? pt}`
+        : `@${r.accountHandle}`;
+      primaryRowMetaByKey.set(key, {
+        label,
+        platform: r.accountPlatform,
+        handle: r.accountHandle,
+        postType: pt,
+      });
+    }
+  }
+
+  // Keep `allPlatforms` around too — still used for the FilterPills
+  // "Platform" picker (legacy-string values). Drops in a follow-up once
+  // the filter swaps to account ids.
   const allPlatforms = new Set<string>();
   const allFormats = new Set<string>();
 
@@ -226,14 +352,22 @@ export async function getContentReport(
   // Determine if we show platforms or formats in the primary table
   const showingFormats = platform !== "all" && format === "all";
 
-  // Determine rows for the primary table
+  // Rows: either per-(account, post_type) (label) or per-format.
+  const primaryRowMetaList = Array.from(primaryRowMetaByKey.values()).sort(
+    (a, b) => a.label.localeCompare(b.label)
+  );
   let primaryRows: string[];
   if (showingFormats) {
     primaryRows = [...formatList];
     if (items.some((i) => !i.format)) primaryRows.push("(No Format)");
   } else {
-    primaryRows = platformList;
+    primaryRows = primaryRowMetaList.map((m) => m.label);
   }
+  // Expose the meta map (keyed by row label) so the UI can render an
+  // icon + handle badge for each row.
+  const primaryRowMeta: Record<string, PrimaryRowMeta> = Object.fromEntries(
+    primaryRowMetaList.map((m) => [m.label, m])
+  );
 
   // Initialize metric data structures
   const initMetricData = (rows: string[]): MetricData => {
@@ -281,15 +415,16 @@ export async function getContentReport(
         primarySales[formatKey][period.label] += sales;
       }
     } else {
-      const platforms = (item.platform as string[]) || [];
-      platforms.forEach((p) => {
-        if (primaryProduction[p]) {
-          primaryProduction[p][period.label] += 1;
-          primaryViews[p][period.label] += views;
-          primaryLeads[p][period.label] += leads;
-          primarySales[p][period.label] += sales;
-        }
-      });
+      // Resolve the row label from the item's composite account key.
+      // Skip if the item predates the accounts backfill (no account FK).
+      const rowKey = itemToRowKey.get(item.id);
+      const label = rowKey ? primaryRowMetaByKey.get(rowKey)?.label : null;
+      if (label && primaryProduction[label]) {
+        primaryProduction[label][period.label] += 1;
+        primaryViews[label][period.label] += views;
+        primaryLeads[label][period.label] += leads;
+        primarySales[label][period.label] += sales;
+      }
     }
 
     // Format table aggregation (always)
@@ -321,7 +456,9 @@ export async function getContentReport(
   const primaryViewsPerPost = calcViewsPerPost(primaryProduction, primaryViews);
   const formatViewsPerPost = calcViewsPerPost(formatProduction, formatViews);
 
-  const mappedItems: ProductionItem[] = items.map((it) => mapProductionItem(it));
+  const mappedItems: ProductionItem[] = items.map((it) =>
+    mapProductionItem(it, { account: accountByItemId.get(it.id) ?? null })
+  );
   await attachPresignedCoverUrls(mappedItems);
 
   return {
@@ -346,6 +483,9 @@ export async function getContentReport(
     formats: formatList,
     showingFormats,
     weeklyGoal,
+    // New metadata consumed by the UI to render `[icon] @handle · Type`
+    // row labels in place of raw platform strings.
+    primaryRowMeta,
   };
 }
 
@@ -362,10 +502,18 @@ export async function getProductionPipeline(
       producerAvatarUrl: producers.avatarUrl,
       editorUserName: editors.name,
       editorAvatarUrl: editors.avatarUrl,
+      accountId: accounts.id,
+      accountPlatform: accounts.platform,
+      accountHandle: accounts.handle,
+      accountDisplayName: accounts.displayName,
+      accountBrandSlug: brands.slug,
+      accountBrandLabel: brands.label,
     })
     .from(productionItems)
     .leftJoin(producers, eq(producers.id, productionItems.producerUserId))
     .leftJoin(editors, eq(editors.id, productionItems.editorUserId))
+    .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
+    .leftJoin(brands, eq(brands.id, accounts.brandId))
     .where(
       and(
         eq(productionItems.brand, brand),
@@ -379,6 +527,16 @@ export async function getProductionPipeline(
       producerAvatarUrl: r.producerAvatarUrl,
       editorUserName: r.editorUserName,
       editorAvatarUrl: r.editorAvatarUrl,
+      account: r.accountId
+        ? {
+            id: r.accountId,
+            platform: r.accountPlatform!,
+            handle: r.accountHandle!,
+            displayName: r.accountDisplayName,
+            brandSlug: r.accountBrandSlug!,
+            brandLabel: r.accountBrandLabel!,
+          }
+        : null,
     })
   );
 }

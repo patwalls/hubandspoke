@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { platformClass, statusClass } from "@/lib/badge-colors";
+import { AccountBadge } from "@/components/ui/account-badge";
 import {
   recordVisit,
   useFrequent,
@@ -33,9 +34,16 @@ type ContentHit = {
   title: string | null;
   format: string | null;
   platform: string[] | null;
+  postType: string | null;
   status: string | null;
   publishedDate: string | null;
   views: number | null;
+  account: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+  } | null;
 };
 
 type FormatHit = {
@@ -397,22 +405,33 @@ function ContentRow({ hit, title }: { hit: ContentHit; title: string }) {
               {hit.format}
             </span>
           ) : null}
-          {platforms.slice(0, 2).map((p) => (
-            <span
-              key={p}
-              className={cn(
-                "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none",
-                platformClass(p),
-              )}
-            >
-              {p}
-            </span>
-          ))}
-          {platforms.length > 2 ? (
-            <span className="shrink-0 text-[10px] text-muted-foreground">
-              +{platforms.length - 2}
-            </span>
-          ) : null}
+          {hit.account ? (
+            <AccountBadge
+              account={hit.account}
+              postType={hit.postType}
+              variant="compact"
+              size={11}
+            />
+          ) : (
+            <>
+              {platforms.slice(0, 2).map((p) => (
+                <span
+                  key={p}
+                  className={cn(
+                    "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none",
+                    platformClass(p),
+                  )}
+                >
+                  {p}
+                </span>
+              ))}
+              {platforms.length > 2 ? (
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  +{platforms.length - 2}
+                </span>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-0.5">

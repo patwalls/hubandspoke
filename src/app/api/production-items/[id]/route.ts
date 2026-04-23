@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
+  accounts,
+  brands,
   contentDrafts,
   productionItemMedia,
   productionItems,
@@ -127,6 +129,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         mediaContentType: productionItems.mediaContentType,
         status: productionItems.status,
         platform: productionItems.platform,
+        postType: productionItems.postType,
+        accountId: productionItems.accountId,
         publishedDate: productionItems.publishedDate,
         publishedLink: productionItems.publishedLink,
         views: productionItems.views,
@@ -352,6 +356,72 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     const urlFor = (key: string | null): string | null =>
       key ? (presignedByKey.get(key) ?? null) : null;
 
+    // Build a single joined-account lookup for every row type this route
+    // returns (derivatives, reposts, crossPosts, topPerformers). Avoids an
+    // N+1 per list; one IN query per distinct accountId.
+    const accountIdsToLookup = new Set<string>();
+    for (const list of [derivatives, reposts, crossPosts, topPerformers]) {
+      for (const r of list as Array<{ accountId?: string | null }>) {
+        if (r.accountId) accountIdsToLookup.add(r.accountId);
+      }
+    }
+    const accountById = new Map<
+      string,
+      {
+        id: string;
+        platform: string;
+        handle: string;
+        displayName: string | null;
+        brandSlug: string;
+        brandLabel: string;
+      }
+    >();
+    if (accountIdsToLookup.size > 0) {
+      const accountRows = await db
+        .select({
+          id: accounts.id,
+          platform: accounts.platform,
+          handle: accounts.handle,
+          displayName: accounts.displayName,
+          brandSlug: brands.slug,
+          brandLabel: brands.label,
+        })
+        .from(accounts)
+        .innerJoin(brands, eq(brands.id, accounts.brandId))
+        .where(inArray(accounts.id, Array.from(accountIdsToLookup)));
+      for (const r of accountRows) accountById.set(r.id, r);
+    }
+    const accountFor = (accountId: string | null | undefined) =>
+      accountId ? accountById.get(accountId) ?? null : null;
+
+    // Joined account summary for the UI's AccountBadge / picker. Null when
+    // the item predates the accounts backfill (shouldn't happen in prod but
+    // kept defensive).
+    let joinedAccount: {
+      id: string;
+      platform: string;
+      handle: string;
+      displayName: string | null;
+      brandSlug: string;
+      brandLabel: string;
+    } | null = null;
+    if (item.accountId) {
+      const [row] = await db
+        .select({
+          id: accounts.id,
+          platform: accounts.platform,
+          handle: accounts.handle,
+          displayName: accounts.displayName,
+          brandSlug: brands.slug,
+          brandLabel: brands.label,
+        })
+        .from(accounts)
+        .innerJoin(brands, eq(brands.id, accounts.brandId))
+        .where(eq(accounts.id, item.accountId))
+        .limit(1);
+      joinedAccount = row ?? null;
+    }
+
     return NextResponse.json({
       item: {
         ...item,
@@ -362,6 +432,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           : null,
         posterUrl: urlFor(item.posterS3Key),
         mediaUrl: urlFor(item.mediaS3Key),
+        account: joinedAccount,
       },
       transcript: itemTranscript
         ? {
@@ -384,6 +455,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           : null,
         posterUrl: urlFor(d.posterS3Key),
         mediaUrl: urlFor(d.mediaS3Key),
+        account: accountFor(d.accountId),
       })),
       formatNames: brandFormats.map((f) => f.name),
       formats: brandFormats,
@@ -401,12 +473,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         createdAt: r.createdAt.toISOString(),
         posterUrl: urlFor(r.posterS3Key),
         mediaUrl: urlFor(r.mediaS3Key),
+        account: accountFor(r.accountId),
       })),
       crossPosts: crossPosts.map((r) => ({
         ...r,
         createdAt: r.createdAt.toISOString(),
         posterUrl: urlFor(r.posterS3Key),
         mediaUrl: urlFor(r.mediaS3Key),
+        account: accountFor(r.accountId),
       })),
       repostedFrom,
       currentDraft: currentDraft ?? null,

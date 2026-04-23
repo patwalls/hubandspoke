@@ -25,11 +25,21 @@ import { cn } from "@/lib/utils";
 import { platformClass } from "@/lib/badge-colors";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
+import { AccountBadge } from "@/components/ui/account-badge";
+import {
+  AccountPostTypePicker,
+  type PickerAccount,
+} from "@/components/ui/account-post-type-picker";
+import type { PostType } from "@/lib/platform-field-schemas";
 
 interface PerformanceTableProps {
   items: ProductionItem[];
   brand: string;
   formats?: string[];
+  /** Accounts the create-item dialog can pick from. When absent the
+   *  dialog falls back to the legacy string picker (older callers that
+   *  haven't been updated yet still render). */
+  accounts?: PickerAccount[];
   onPostCreated?: () => void;
 }
 
@@ -63,35 +73,7 @@ function getFreshness(item: ProductionItem): {
   return { color: "text-muted-foreground", label: `${Math.floor(days)}d ago`, dotClass: "bg-gray-400" };
 }
 
-const SS_PLATFORMS = [
-  "YouTube (SS)",
-  "YouTube (SS Build)",
-  "YouTube Shorts",
-  "YouTube Community",
-  "Instagram Post",
-  "Instagram Reel",
-  "Instagram Story",
-  "X (Starter Story)",
-  "X (Pat Walls)",
-  "LinkedIn",
-  "TikTok",
-  "Threads",
-  "Newsletter",
-];
-
-const MATG_PLATFORMS = [
-  "YouTube",
-  "YouTube Shorts",
-  "Instagram Post",
-  "Instagram Reel",
-  "Instagram Story",
-  "X",
-  "LinkedIn",
-  "TikTok",
-  "Threads",
-];
-
-export function PerformanceTable({ items, brand, formats, onPostCreated }: PerformanceTableProps) {
+export function PerformanceTable({ items, brand, formats, accounts, onPostCreated }: PerformanceTableProps) {
   const hasThumbnails = items.some((item) => coverImageUrl(item));
   const hasPerformanceSync = items.some((item) => item.lastPerformanceSyncAt);
   const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
@@ -107,6 +89,11 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
   // Form fields
   const [formTitle, setFormTitle] = useState("");
   const [formPlatforms, setFormPlatforms] = useState<string[]>([]);
+  // Account + post_type for new items (new-world fields). Kept alongside
+  // formPlatforms so we can still populate the legacy jsonb column for
+  // backward compat until the finalize migration drops it.
+  const [formAccountId, setFormAccountId] = useState<string | null>(null);
+  const [formPostType, setFormPostType] = useState<PostType | null>(null);
   const [formFormat, setFormFormat] = useState("");
   const [formLink, setFormLink] = useState("");
   const [formDate, setFormDate] = useState(todayLocalISO());
@@ -118,8 +105,6 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
   const [formSalesAmount, setFormSalesAmount] = useState("");
   const [saveResult, setSaveResult] = useState<{ success: boolean; autoFetched?: boolean; message: string } | null>(null);
 
-  const platformOptions = brand === "matg" ? MATG_PLATFORMS : SS_PLATFORMS;
-
   const isYouTubeLink =
     formLink.includes("youtube.com") || formLink.includes("youtu.be");
 
@@ -129,6 +114,8 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
     setEditingItem(null);
     setFormTitle("");
     setFormPlatforms([]);
+    setFormAccountId(null);
+    setFormPostType(null);
     setFormFormat("");
     setFormLink("");
     setFormDate(todayLocalISO());
@@ -161,6 +148,8 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
             id: editingItem!.id,
             title: formTitle,
             platform: formPlatforms,
+            accountId: formAccountId,
+            postType: formPostType,
             format: formFormat || null,
             publishedLink: formLink || null,
             publishedDate: formDate,
@@ -186,6 +175,8 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
           body: JSON.stringify({
             title: formTitle,
             platform: formPlatforms,
+            accountId: formAccountId,
+            postType: formPostType,
             format: formFormat || null,
             publishedLink: formLink || null,
             publishedDate: formDate,
@@ -336,19 +327,34 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
               />
             </div>
             <div className="space-y-2">
-              <Label>Platform</Label>
-              <div className="flex flex-wrap gap-2">
-                {platformOptions.map((p) => (
-                  <Badge
-                    key={p}
-                    variant={formPlatforms.includes(p) ? "default" : "outline"}
-                    className="cursor-pointer"
-                    onClick={() => togglePlatform(p)}
-                  >
-                    {p}
-                  </Badge>
-                ))}
-              </div>
+              <Label>Account</Label>
+              {accounts && accounts.length > 0 ? (
+                <AccountPostTypePicker
+                  accounts={accounts}
+                  accountId={formAccountId}
+                  postType={formPostType}
+                  publishedLink={formLink || null}
+                  brandSlug={brand}
+                  onChange={({ accountId: id, postType: type }) => {
+                    setFormAccountId(id);
+                    setFormPostType(type);
+                    // Derive a legacy platform-string for backward compat
+                    // with the jsonb column — picks the account's handle
+                    // plus the post type so it's unique per (account,type).
+                    const a = accounts.find((x) => x.id === id);
+                    if (a) {
+                      const legacyLabel = `${a.platform}:@${a.handle}${type ? `:${type}` : ""}`;
+                      setFormPlatforms([legacyLabel]);
+                    } else {
+                      setFormPlatforms([]);
+                    }
+                  }}
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No accounts available — add one in Settings → Accounts.
+                </p>
+              )}
             </div>
             {formats && formats.length > 0 && (
               <div className="space-y-2">
@@ -568,17 +574,25 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-1">
-                    {item.platform?.map((p) => (
-                      <span
-                        key={p}
-                        className={cn(
-                          "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                          platformClass(p)
-                        )}
-                      >
-                        {p}
-                      </span>
-                    ))}
+                    {item.account ? (
+                      <AccountBadge
+                        account={item.account}
+                        postType={item.postType}
+                        variant="compact"
+                      />
+                    ) : (
+                      item.platform?.map((p) => (
+                        <span
+                          key={p}
+                          className={cn(
+                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                            platformClass(p)
+                          )}
+                        >
+                          {p}
+                        </span>
+                      ))
+                    )}
                   </div>
                 </td>
                 <td className="px-3 py-2 text-sm text-muted-foreground">{item.format || "-"}</td>

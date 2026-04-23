@@ -16,8 +16,27 @@ import { productionItems, syncLogs } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { findAccountForBrandPlatform } from "@/lib/db/accounts";
+import type { PostType } from "@/lib/platform-field-schemas";
 
 import { SC_BASE, headers } from "@/lib/services/sc-client";
+
+/**
+ * Per-call-site cache of (brand,platform)→account_id. MATG has one account
+ * per platform, so each sync function grabs the right id once, then tags
+ * every inserted item. Throws if the account hasn't been seeded — the sync
+ * would otherwise write rows with a null account_id that the finalize
+ * migration would reject.
+ */
+async function matgAccountId(platform: string): Promise<string> {
+  const a = await findAccountForBrandPlatform({ brandSlug: "matg", platform });
+  if (!a) {
+    throw new Error(
+      `[matg-sync] no seeded MATG account for platform=${platform}; seed via scripts/backfill-accounts.mjs`
+    );
+  }
+  return a.id;
+}
 
 const MATG_YT_HANDLE = "MATGpod";
 const MATG_IG_HANDLE = "matgpod";
@@ -406,6 +425,8 @@ async function syncYouTubeVideos(): Promise<SyncResult> {
   const videos = await fetchYouTubeVideos();
   result.fetched = videos.length;
 
+  const accountId = await matgAccountId("youtube");
+  const postType: PostType = "youtube_long";
   const links = videos.map((v) => v.url).filter(Boolean);
   const existingMap = await getExistingByLinks(links);
 
@@ -422,6 +443,8 @@ async function syncYouTubeVideos(): Promise<SyncResult> {
         publishedDate,
         status: "Published" as const,
         platform: ["YouTube"] as string[],
+        accountId,
+        postType,
         format: "Business Interview",
         brand: "matg" as const,
         publishedLink: video.url,
@@ -465,6 +488,8 @@ async function syncYouTubeShorts(): Promise<SyncResult> {
   const shorts = await fetchYouTubeShorts();
   result.fetched = shorts.length;
 
+  const accountId = await matgAccountId("youtube");
+  const postType: PostType = "youtube_shorts";
   const links = shorts.map((s) => s.url).filter(Boolean);
   const existingMap = await getExistingByLinks(links);
 
@@ -481,6 +506,8 @@ async function syncYouTubeShorts(): Promise<SyncResult> {
         publishedDate,
         status: "Published" as const,
         platform: ["YouTube Shorts"] as string[],
+        accountId,
+        postType,
         format: "YouTube Short",
         brand: "matg" as const,
         publishedLink: short.url,
@@ -526,6 +553,7 @@ async function syncInstagram(): Promise<SyncResult> {
   const posts = await fetchInstagramPosts();
   result.fetched = posts.length;
 
+  const accountId = await matgAccountId("instagram");
   const links = posts.map((p) => p.url || `https://www.instagram.com/p/${p.code}/`).filter(Boolean);
   const existingMap = await getExistingByLinks(links);
 
@@ -542,6 +570,7 @@ async function syncInstagram(): Promise<SyncResult> {
       const isReel = post.product_type === "clips" || post.media_type === 2;
       const platformLabel = isReel ? "Instagram Reel" : "Instagram Post";
       const formatLabel = isReel ? "Instagram Reel" : "Instagram Post";
+      const postType: PostType = isReel ? "instagram_reel" : "instagram_post";
 
       const data = {
         title: caption ? caption.slice(0, 120) + (caption.length > 120 ? "..." : "") : "(No caption)",
@@ -549,6 +578,8 @@ async function syncInstagram(): Promise<SyncResult> {
         publishedDate,
         status: "Published" as const,
         platform: [platformLabel] as string[],
+        accountId,
+        postType,
         format: formatLabel,
         brand: "matg" as const,
         publishedLink: postUrl,
@@ -595,6 +626,8 @@ async function syncTwitter(): Promise<SyncResult> {
   const tweets = await fetchTwitterTweets();
   result.fetched = tweets.length;
 
+  const accountId = await matgAccountId("x");
+  const postType: PostType = "x";
   const links = tweets.map((t) => t.url).filter(Boolean);
   const existingMap = await getExistingByLinks(links);
 
@@ -618,6 +651,8 @@ async function syncTwitter(): Promise<SyncResult> {
         publishedDate,
         status: "Published" as const,
         platform: ["X"] as string[],
+        accountId,
+        postType,
         format: "Tweet",
         brand: "matg" as const,
         publishedLink: tweetUrl,

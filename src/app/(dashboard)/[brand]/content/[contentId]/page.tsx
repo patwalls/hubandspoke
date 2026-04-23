@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
-import { BRANDS } from "@/lib/config/brands";
+import { fetchBrandBySlug } from "@/lib/db/brands";
+import { getAccounts } from "@/lib/db/accounts";
 import { ContentDetail } from "@/components/dashboard/content-detail";
 
 interface ContentDetailPageProps {
@@ -26,11 +27,25 @@ export default async function BrandContentDetailPage({
   params,
 }: ContentDetailPageProps) {
   const { brand, contentId } = await params;
-  const brandConfig = BRANDS.find((b) => b.slug === brand);
+  const brandConfig = await fetchBrandBySlug(brand);
 
   if (!brandConfig) {
     notFound();
   }
 
-  return <ContentDetail brand={brand} contentId={contentId} />;
+  // Fetch accounts once on the server and thread through so the picker can
+  // render without an extra round-trip. Keep the shape minimal — the picker
+  // only needs id/brand/platform/handle/displayName.
+  const accountRows = await getAccounts();
+  const accounts = accountRows.map((a) => ({
+    id: a.id,
+    brandSlug: a.brandSlug,
+    brandLabel: a.brandLabel,
+    platform: a.platform,
+    handle: a.handle,
+    displayName: a.displayName,
+    isActive: a.isActive,
+  }));
+
+  return <ContentDetail brand={brand} contentId={contentId} accounts={accounts} />;
 }
