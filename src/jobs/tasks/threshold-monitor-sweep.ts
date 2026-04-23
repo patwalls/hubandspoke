@@ -123,11 +123,14 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
             .limit(1);
 
           // Create the repurposed production item
+          // Title follows the pattern: "SourceFormat → TargetFormat (OriginalTitle)"
+          const repurposedTitle = `${sourceFormat.name} → ${targetFormat.name} (${item.title})`;
+
           const [created] = await db
             .insert(productionItems)
             .values({
               brand: item.brand,
-              title: item.title,
+              title: repurposedTitle,
               thumbnail: item.thumbnail,
               status: "Idea",
               format: targetFormat.name,
