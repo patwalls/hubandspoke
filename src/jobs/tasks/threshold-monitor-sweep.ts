@@ -5,6 +5,8 @@ import {
   productionItems,
   formats,
   repurposeTriggers,
+  formatChannels,
+  accounts,
 } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -113,9 +115,14 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
             format: targetFormat.name,
           });
 
+          // Look up the account for this format (if configured)
+          const [formatChannel] = await db
+            .select({ accountId: formatChannels.accountId })
+            .from(formatChannels)
+            .where(eq(formatChannels.formatId, targetFormat.id))
+            .limit(1);
+
           // Create the repurposed production item
-          // Note: accountId is intentionally not set — creators should assign
-          // the appropriate account based on the target format and their needs.
           const [created] = await db
             .insert(productionItems)
             .values({
@@ -126,10 +133,10 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
               format: targetFormat.name,
               sourceType: "repurposed",
               pillarContentItemId: item.id,
+              accountId: formatChannel?.accountId ?? null,
               producerUserId: assignees.producerUserId,
               editorUserId: assignees.editorUserId,
               utmCampaign: await generateUtmCampaign(item.title),
-              // accountId: null — left unassigned for manual assignment
             })
             .returning({ id: productionItems.id });
 
