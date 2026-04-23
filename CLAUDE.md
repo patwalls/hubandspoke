@@ -1,5 +1,21 @@
 # Hub & Spoke - Content Command Center
 
+## Documentation — read first, update in the same commit
+
+Three docs in `docs/` are the source of truth for what this project does and how it runs:
+- `docs/automation.md` — every cron, worker task, and on-demand job (entity lifecycles, dependency graph, operational rules)
+- `docs/features.md` — feature & surface inventory; also the cleanup backlog (Active / Legacy / Deprecated / Planned-removal)
+- `docs/conventions.md` — rules for adding tasks/cron/schemas, idempotency expectations, payload conventions, every-place-to-update checklists
+
+**Read the relevant doc before starting the work**, not after — the goal is to notice existing patterns and avoid drift, not to patch the doc at the end.
+
+**Before you `git commit`, check the staged paths:**
+- Anything under `src/jobs/**` or `src/lib/services/**` → `docs/automation.md` MUST be staged in the same commit.
+- A new/removed/renamed user-facing route, API endpoint, or major column (`src/app/(dashboard)/**`, `src/app/api/**`, `src/lib/db/schema.ts`) → `docs/features.md` MUST be staged in the same commit.
+- A new task / cron / schema pattern that future contributors will copy → `docs/conventions.md` may need updating; check.
+
+If a change genuinely doesn't warrant a doc update (pure rename, internal refactor, typo fix, dependency bump), say so in the commit message — otherwise update the doc in the same commit.
+
 ## Project Context
 Standalone content reporting dashboard carved out from the Starter Story Rails app. Syncs content production data from Notion and displays analytics across platforms.
 
