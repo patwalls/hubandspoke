@@ -1978,6 +1978,7 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
           </PropertyRow>
 
           <PropertyRow label="Format">
+          <div className="flex items-center gap-2 w-full">
           <Popover
             open={formatPickerOpen}
             onOpenChange={(open) => {
@@ -1987,7 +1988,7 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
           >
             <PopoverTrigger
               aria-label="Format"
-              className="flex h-8 w-full items-center justify-between rounded-sm border-0 bg-transparent px-2 text-sm hover:bg-muted/50 cursor-pointer transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex h-8 flex-1 min-w-0 items-center justify-between rounded-sm border-0 bg-transparent px-2 text-sm hover:bg-muted/50 cursor-pointer transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               {format ? (
                 <span className="truncate">{format}</span>
@@ -2065,6 +2066,19 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
               </Command>
             </PopoverContent>
           </Popover>
+          {currentFormat && (
+            <Link
+              href={`/${brand}/formats/${currentFormat.id}`}
+              title="Open format"
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "sm" }),
+                "shrink-0"
+              )}
+            >
+              <ExternalLinkIcon className="w-3.5 h-3.5" />
+            </Link>
+          )}
+          </div>
           </PropertyRow>
         </PropertyRowGroup>
 
