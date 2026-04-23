@@ -6,16 +6,25 @@ import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { BRANDS, DEFAULT_BRAND } from "@/lib/config/brands";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { GlobalSearch } from "@/components/dashboard/global-search";
 
-type Brand = (typeof BRANDS)[number];
+// Shape passed down from the (server) layout. Mirrors BrandListEntry from
+// @/lib/db/brands but redeclared locally so the component doesn't import a
+// server-only module (React Server Component boundary). `avatar` replaces the
+// DB's `avatarUrl` to keep the existing JSX unchanged.
+type Brand = {
+  slug: string;
+  label: string;
+  avatar: string | null;
+  color: string | null;
+  disabled: boolean;
+};
 
-function getBrandFromPath(pathname: string): string {
+function getBrandFromPath(pathname: string, brands: Brand[], fallback: string): string {
   const segment = pathname.split("/")[1];
-  const match = BRANDS.find((b) => b.slug === segment);
-  return match ? match.slug : DEFAULT_BRAND;
+  const match = brands.find((b) => b.slug === segment);
+  return match ? match.slug : fallback;
 }
 
 function BrandAvatar({ brand, size = 22 }: { brand: Brand; size?: number }) {
@@ -55,9 +64,17 @@ function BrandAvatar({ brand, size = 22 }: { brand: Brand; size?: number }) {
   );
 }
 
-export function DashboardNav({ userEmail }: { userEmail: string }) {
+// Context the layout passes down so child client components (this file's nav
+// + SectionTabs) can read the dynamic brand list without re-fetching.
+type NavProps = {
+  userEmail: string;
+  brands: Brand[];
+  defaultBrand: string;
+};
+
+export function DashboardNav({ userEmail, brands, defaultBrand }: NavProps) {
   const pathname = usePathname();
-  const currentBrand = getBrandFromPath(pathname);
+  const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
   const isOnFormats = pathname.endsWith("/formats");
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -112,7 +129,7 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
               </svg>
             </span>
             <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
-              {BRANDS.map((brand) => {
+              {brands.map((brand) => {
                 const isActive = currentBrand === brand.slug;
                 const href = isOnFormats ? `/${brand.slug}/formats` : `/${brand.slug}`;
 
@@ -160,12 +177,6 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <Link
-              href="/my-work"
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors hidden sm:inline"
-            >
-              My Work
-            </Link>
             <button
               type="button"
               onClick={() => setSearchOpen(true)}
@@ -198,9 +209,15 @@ export function DashboardNav({ userEmail }: { userEmail: string }) {
   );
 }
 
-export function SectionTabs() {
+export function SectionTabs({
+  brands,
+  defaultBrand,
+}: {
+  brands: Brand[];
+  defaultBrand: string;
+}) {
   const pathname = usePathname();
-  const currentBrand = getBrandFromPath(pathname);
+  const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
 
   const tabs = [
     { href: `/${currentBrand}`, label: "Dashboard" },
