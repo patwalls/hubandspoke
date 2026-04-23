@@ -47,6 +47,13 @@ import {
 import type { PostType } from "@/lib/platform-field-schemas";
 import { applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
+import {
+  PropertyRow,
+  PropertyRowGroup,
+  PropertyRowSolo,
+  PROPERTY_INPUT_CLASS,
+  PROPERTY_TRIGGER_CLASS,
+} from "./property-row";
 
 interface AccountChannelSelection {
   accountId: string;
@@ -185,6 +192,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   // New-derivative dialog state.
@@ -650,6 +658,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   async function handleSave() {
     if (!data) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const body = {
         id: formatId,
@@ -672,9 +681,18 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
       if (res.ok) {
         setSavedAt(Date.now());
         await load();
+      } else {
+        const json = await res.json().catch(() => ({}));
+        const msg =
+          json.error ||
+          `Save failed (HTTP ${res.status}). Check the server logs.`;
+        console.error("Save failed:", res.status, json);
+        setSaveError(msg);
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Save failed";
       console.error("Save failed:", err);
+      setSaveError(msg);
     } finally {
       setSaving(false);
     }
@@ -803,29 +821,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         </Button>
       </div>
 
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-            {name || "(unnamed)"}
-          </h1>
-          <Badge
-            variant="secondary"
-            className={
-              isPillar
-                ? "bg-blue-100 text-blue-700"
-                : "bg-purple-100 text-purple-700"
-            }
-          >
-            {isPillar ? "Pillar" : "Repurposed"}
-          </Badge>
-        </div>
-        <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-          {metrics.totalPosts} published post{metrics.totalPosts === 1 ? "" : "s"}
-          {metrics.lastPublished && ` · last published ${formatDate(metrics.lastPublished)}`}
-        </p>
-      </div>
-
       {/* Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-lg border border-border bg-card p-4">
@@ -863,24 +858,36 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         </div>
       </div>
 
-      {/* Edit form */}
-      <div className="rounded-lg border border-border bg-card p-5 space-y-5">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">Format details</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Edits save when you click Save changes.
-          </p>
+      {/* Format editor — title + property rows */}
+      <div>
+        <div className="flex items-center gap-2 flex-wrap mb-1">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="(unnamed)"
+            className="text-xl sm:text-2xl font-semibold h-auto py-1 px-2 border-0 bg-transparent shadow-none focus-visible:ring-1 focus-visible:ring-ring hover:bg-muted/30 rounded-sm flex-1 min-w-0"
+          />
+          <Badge
+            variant="secondary"
+            className={
+              isPillar
+                ? "bg-blue-100 text-blue-700"
+                : "bg-purple-100 text-purple-700"
+            }
+          >
+            {isPillar ? "Pillar" : "Repurposed"}
+          </Badge>
         </div>
+        <p className="text-xs sm:text-sm text-muted-foreground mb-4 px-2">
+          {metrics.totalPosts} published post{metrics.totalPosts === 1 ? "" : "s"}
+          {metrics.lastPublished && ` · last published ${formatDate(metrics.lastPublished)}`}
+        </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>Parent Format</Label>
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <PropertyRowGroup>
+            <PropertyRow label="Parent format">
             <Popover open={parentPopoverOpen} onOpenChange={setParentPopoverOpen}>
-              <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
                 {selectedParent ? (
                   <span className="flex items-center gap-2 truncate">
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 shrink-0">
@@ -940,19 +947,10 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                 </Command>
               </PopoverContent>
             </Popover>
-            {ancestors.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Chain: {ancestors.map((a) => a.name).join(" → ")} → <strong>{name}</strong>
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="space-y-2">
-            <Label>Accounts</Label>
+            </PropertyRow>
+            <PropertyRow label="Accounts">
             <Popover open={channelsPopoverOpen} onOpenChange={setChannelsPopoverOpen}>
-              <PopoverTrigger className="flex min-h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs hover:bg-accent cursor-pointer">
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex min-h-8 items-center justify-between gap-2 cursor-pointer text-left`}>
                 {selections.length === 0 ? (
                   <span className="text-muted-foreground">Select accounts…</span>
                 ) : (
@@ -1027,20 +1025,21 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                 </Command>
               </PopoverContent>
             </Popover>
-          </div>
-          <div className="space-y-2">
-            <Label>View Threshold</Label>
+            </PropertyRow>
+          </PropertyRowGroup>
+          <PropertyRowGroup>
+            <PropertyRow label="View threshold">
             <Input
               type="number"
               value={viewThreshold}
               onChange={(e) => setViewThreshold(e.target.value)}
               placeholder="e.g. 50000"
+              className={PROPERTY_INPUT_CLASS}
             />
-          </div>
-          <div className="space-y-2">
-            <Label>Editor (Content Creator)</Label>
+            </PropertyRow>
+            <PropertyRow label="Editor">
             <Popover open={editorPopoverOpen} onOpenChange={setEditorPopoverOpen}>
-              <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
                 {editor ? (
                   <span className="flex items-center gap-2 truncate">
                     <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
@@ -1098,11 +1097,10 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                 </Command>
               </PopoverContent>
             </Popover>
-          </div>
-          <div className="space-y-2">
-            <Label>Producer (Reviewer + Publisher)</Label>
+            </PropertyRow>
+            <PropertyRow label="Producer">
             <Popover open={producerPopoverOpen} onOpenChange={setProducerPopoverOpen}>
-              <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
                 {producer ? (
                   <span className="flex items-center gap-2 truncate">
                     <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium shrink-0">
@@ -1160,44 +1158,56 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                 </Command>
               </PopoverContent>
             </Popover>
-          </div>
-        </div>
+            </PropertyRow>
+          </PropertyRowGroup>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Label className="text-sm">Skill</Label>
-              <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-indigo-700">
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.5 6.5L21 11l-6.5 2.5L12 20l-2.5-6.5L3 11l6.5-2.5L12 2z"/></svg>
-                Claude-powered
-              </span>
+          <PropertyRowSolo>
+            <div className="px-3 py-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm text-muted-foreground">Skill</Label>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-indigo-700">
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.5 6.5L21 11l-6.5 2.5L12 20l-2.5-6.5L3 11l6.5-2.5L12 2z"/></svg>
+                    Claude-powered
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInstructions(applyStarterTemplate(instructions))}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Load starter template
+                </button>
+              </div>
+              <Textarea
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                rows={10}
+                placeholder="Teach Claude this format: what it is, why it works, how to pick the moment, what to avoid. Click “Load starter template” for the structure."
+                className="font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">
+                A single skill definition. Claude reads it to dispatch Repurpose actions (e.g. Descript clipping) and it&apos;s attached to every Asana task.
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setInstructions(applyStarterTemplate(instructions))}
-              className="text-xs text-primary hover:underline"
-            >
-              Load starter template
-            </button>
-          </div>
-          <Textarea
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            rows={10}
-            placeholder="Teach Claude this format: what it is, why it works, how to pick the moment, what to avoid. Click “Load starter template” for the structure."
-            className="font-mono text-xs"
-          />
-          <p className="text-xs text-muted-foreground">
-            A single skill definition. Claude reads it to dispatch Repurpose actions (e.g. Descript clipping) and it&apos;s attached to every Asana task.
-          </p>
+          </PropertyRowSolo>
         </div>
 
-        <div className="flex items-center gap-2 pt-1">
+        {ancestors.length > 0 && (
+          <p className="text-xs text-muted-foreground mt-2 px-2">
+            Chain: {ancestors.map((a) => a.name).join(" → ")} → <strong>{name}</strong>
+          </p>
+        )}
+
+        <div className="flex items-center gap-2 mt-4">
           <Button onClick={handleSave} disabled={saving}>
             {saving ? "Saving…" : "Save changes"}
           </Button>
-          {savedAt && Date.now() - savedAt < 4000 && (
+          {savedAt && Date.now() - savedAt < 4000 && !saveError && (
             <span className="text-xs text-primary">Saved.</span>
+          )}
+          {saveError && (
+            <span className="text-xs text-red-600">{saveError}</span>
           )}
         </div>
       </div>
