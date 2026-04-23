@@ -115,9 +115,12 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
             format: targetFormat.name,
           });
 
-          // Look up the account for this format (if configured)
+          // Look up the account and post_type for this format (if configured)
           const [formatChannel] = await db
-            .select({ accountId: formatChannels.accountId })
+            .select({
+              accountId: formatChannels.accountId,
+              postType: formatChannels.postType,
+            })
             .from(formatChannels)
             .where(eq(formatChannels.formatId, targetFormat.id))
             .limit(1);
@@ -137,6 +140,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
               sourceType: "repurposed",
               pillarContentItemId: item.id,
               accountId: formatChannel?.accountId ?? null,
+              postType: formatChannel?.postType ?? null,
               producerUserId: assignees.producerUserId,
               editorUserId: assignees.editorUserId,
               utmCampaign: await generateUtmCampaign(item.title),
