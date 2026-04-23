@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { MoreHorizontalIcon, Trash2Icon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -811,14 +812,25 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         >
           ← Formats
         </Link>
-        <Button
-          variant="outline"
-          onClick={handleDelete}
-          disabled={deleting}
-          className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300 hover:bg-red-50"
-        >
-          {deleting ? "Deleting…" : "Delete format"}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+            disabled={deleting}
+            title="Actions for this format"
+          >
+            <MoreHorizontalIcon className="size-3.5" /> Actions
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem
+              disabled={deleting}
+              onClick={handleDelete}
+              className="text-red-600 focus:text-red-700 focus:bg-red-50"
+            >
+              <Trash2Icon className="size-3.5" />
+              {deleting ? "Deleting…" : "Delete format"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Metrics */}
