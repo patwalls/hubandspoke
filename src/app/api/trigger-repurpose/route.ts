@@ -5,16 +5,20 @@ import { triggerRepurposeTasks } from "@/lib/services/asana";
  * POST /api/trigger-repurpose
  *
  * Body: {
- *   formatId: string        – the source format whose threshold was crossed
- *   videoTitle?: string      – optional title for the Asana task name
- *   views?: number           – current view count at time of trigger
+ *   formatId: string                  – the source format whose threshold was crossed
+ *   sourceProductionItemId?: string    – the production item ID (for pillar content title)
+ *   videoTitle?: string               – fallback title if sourceProductionItemId not provided
+ *   views?: number                    – current view count at time of trigger
+ *   contentLink?: string              – link to the content
  * }
  *
  * Creates one Asana task per repurpose target and returns a summary.
+ * Task names follow the format: "{sourceFormat} → {targetFormat} ({pillarContentTitle})"
  */
 export async function POST(request: NextRequest) {
   try {
-    const { formatId, videoTitle, views, contentLink } = await request.json();
+    const { formatId, sourceProductionItemId, videoTitle, views, contentLink } =
+      await request.json();
 
     if (!formatId) {
       return NextResponse.json(
@@ -24,6 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await triggerRepurposeTasks(formatId, {
+      sourceProductionItemId,
       videoTitle,
       views,
       contentLink,

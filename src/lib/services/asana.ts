@@ -58,7 +58,7 @@ export async function createAsanaTask(opts: {
 /* ------------------------------------------------------------------ */
 
 import { db } from "@/lib/db";
-import { formats } from "@/lib/db/schema";
+import { formats, productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 export interface TriggerResult {
@@ -128,12 +128,20 @@ async function resolveAssigneeGid(
 }
 
 /**
- * Given a source format ID, look up its repurpose targets and create
- * one Asana task per target.  Returns a summary of what was created.
+ * Given a source format ID and production item ID, look up its repurpose targets
+ * and create one Asana task per target. Task names follow the pattern:
+ * "{sourceFormat} → {targetFormat} ({pillarContentTitle})"
+ *
+ * Returns a summary of what was created.
  */
 export async function triggerRepurposeTasks(
   sourceFormatId: string,
-  meta?: { videoTitle?: string; views?: number; contentLink?: string }
+  meta?: {
+    videoTitle?: string;
+    views?: number;
+    contentLink?: string;
+    sourceProductionItemId?: string;
+  }
 ): Promise<TriggerResult> {
   // 1. Fetch the source format
   const [source] = await db
@@ -153,6 +161,31 @@ export async function triggerRepurposeTasks(
     return { sourceFormat: source.name, tasksCreated: [] };
   }
 
+  // 3. Load the source production item to get pillar content title
+  let pillarTitle: string | null = null;
+  if (meta?.sourceProductionItemId) {
+    const [sourceItem] = await db
+      .select({
+        title: productionItems.title,
+        pillarContentItemId: productionItems.pillarContentItemId,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, meta.sourceProductionItemId))
+      .limit(1);
+
+    if (sourceItem && sourceItem.pillarContentItemId) {
+      const [pillarItem] = await db
+        .select({ title: productionItems.title })
+        .from(productionItems)
+        .where(eq(productionItems.id, sourceItem.pillarContentItemId))
+        .limit(1);
+      pillarTitle = pillarItem?.title ?? null;
+    } else if (sourceItem) {
+      // If no pillar, use the source item's title
+      pillarTitle = sourceItem.title;
+    }
+  }
+
   // 4. Create one Asana task per target format
   const tasksCreated: TriggerResult["tasksCreated"] = [];
 
@@ -163,9 +196,16 @@ export async function triggerRepurposeTasks(
   for (const target of targetFormats) {
     if (!target) continue;
 
-    const taskName = meta?.videoTitle
-      ? `[Repurpose] ${target.name}: ${meta.videoTitle}`
-      : `[Repurpose] ${target.name} from ${source.name}`;
+    // Construct task name: "{sourceFormat} → {targetFormat} ({pillarTitle})"
+    // Falls back to old format if pillarTitle not available
+    let taskName: string;
+    if (pillarTitle) {
+      taskName = `${source.name} → ${target.name} (${pillarTitle})`;
+    } else {
+      taskName = meta?.videoTitle
+        ? `[Repurpose] ${target.name}: ${meta.videoTitle}`
+        : `[Repurpose] ${target.name} from ${source.name}`;
+    }
 
     const channels = (target.channels as string[])?.join(", ") || "N/A";
     const editorName = target.editor || "Unassigned";
