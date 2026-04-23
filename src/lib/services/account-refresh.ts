@@ -1,16 +1,23 @@
 /**
  * Scrape Creators account-level fetchers. Pulls channel/profile metadata
- * (display name, avatar, bio, follower count, platform-native id) for the
- * accounts we've seeded. Runs on demand from the settings UI and on a
- * weekly cron via `src/jobs/tasks/account-refresh.ts`.
+ * (display name, avatar, bio, followers/following/posts/views, verified
+ * flag, banner, location) for seeded accounts. Runs on demand from the
+ * settings UI and on a weekly cron via `src/jobs/tasks/account-refresh.ts`.
  *
- * Separate from the per-post fetchers in `performance-decay.ts` / the
- * enrichment modules — those hit `/v1/{platform}/post`, this hits
- * `/v1/{platform}/channel` or `/v1/{platform}/profile`.
+ * Endpoint paths were confirmed by probing SC directly — see the table
+ * below. The earlier version of this module had wrong paths for X,
+ * TikTok, Threads, and LinkedIn; every 404 there is fixed.
  *
- * Failure mode: any SC error or 404 is caught, stamped on
- * `accounts.last_refresh_error`, and surfaced in the UI. Partial results
- * (e.g. SC returns display name but not follower count) are persisted as-is.
+ *   YouTube    GET /v1/youtube/channel?handle=@<handle>
+ *   Instagram  GET /v1/instagram/profile?handle=<handle>
+ *   X          GET /v1/twitter/profile?handle=<handle>
+ *   TikTok     GET /v1/tiktok/profile?handle=<handle>
+ *   Threads    GET /v1/threads/profile?handle=<handle>
+ *   LinkedIn   GET /v1/linkedin/profile?url=<full-profile-URL>
+ *
+ * Partial writes: only columns with a non-null SC value get updated.
+ * Avoids wiping a previously-refreshed follower count when a transient
+ * endpoint failure returns half a payload.
  */
 import { db } from "@/lib/db";
 import { accounts } from "@/lib/db/schema";
@@ -23,6 +30,12 @@ interface AccountRefreshResult {
   avatarUrl?: string | null;
   bio?: string | null;
   followerCount?: number | null;
+  followingCount?: number | null;
+  postCount?: number | null;
+  totalViews?: number | null;
+  verified?: boolean | null;
+  bannerUrl?: string | null;
+  location?: string | null;
   externalId?: string | null;
   url?: string | null;
   metadata?: Record<string, unknown> | null;
@@ -31,89 +44,130 @@ interface AccountRefreshResult {
 // ─── Per-platform fetchers ────────────────────────────────────────────────
 
 async function fetchYouTubeChannel(handle: string): Promise<AccountRefreshResult | null> {
-  // SC accepts either a handle (without the leading @) or a full URL.
-  const json = await scFetchJson<Record<string, unknown>>("/v1/youtube/channel", { handle });
+  // SC accepts `@handle` or a full URL; we normalize to `@handle` since
+  // that's how the account.handle column stores it.
+  const h = handle.startsWith("@") ? handle : `@${handle}`;
+  const json = await scFetchJson<Record<string, unknown>>("/v1/youtube/channel", { handle: h });
   if (!json) return null;
+  // `avatar.image.sources[0].url` / `banner[0].url` — defensive walk.
+  const avatarUrl = pickString(json, ["avatar.image.sources.0.url", "avatar.url"]);
+  const bannerUrl = pickString(json, ["banner.0.url", "banner.image.sources.0.url"]);
   return {
-    displayName: (json.name as string | undefined) ?? (json.title as string | undefined) ?? null,
-    avatarUrl: (json.avatar as string | undefined) ?? (json.thumbnail as string | undefined) ?? null,
+    displayName: (json.name as string | undefined) ?? null,
+    avatarUrl,
     bio: (json.description as string | undefined) ?? null,
-    followerCount: pickInt(json, ["subscriberCountInt", "subscriberCount", "subscribers"]),
-    externalId: (json.id as string | undefined) ?? (json.channelId as string | undefined) ?? null,
-    url: (json.url as string | undefined) ?? null,
+    followerCount: pickInt(json, ["subscriberCount"]),
+    postCount: pickInt(json, ["videoCount"]),
+    totalViews: pickInt(json, ["viewCount"]),
+    verified: pickBool(json, ["isVerified"]),
+    bannerUrl,
+    externalId: (json.channelId as string | undefined) ?? null,
+    url: (json.channel as string | undefined) ?? null,
     metadata: json,
   };
 }
 
 async function fetchInstagramProfile(handle: string): Promise<AccountRefreshResult | null> {
-  const json = await scFetchJson<Record<string, unknown>>("/v1/instagram/profile", { handle });
+  const json = await scFetchJson<{ data?: { user?: Record<string, unknown> } } & Record<string, unknown>>(
+    "/v1/instagram/profile",
+    { handle }
+  );
   if (!json) return null;
-  // SC IG profile nests data under `data.user` on some endpoints; tolerate both.
-  const user = ((json as { data?: { user?: Record<string, unknown> } }).data?.user ?? json) as Record<string, unknown>;
+  const user = (json.data?.user ?? json) as Record<string, unknown>;
   return {
     displayName: (user.full_name as string | undefined) ?? (user.username as string | undefined) ?? null,
     avatarUrl: (user.profile_pic_url_hd as string | undefined) ?? (user.profile_pic_url as string | undefined) ?? null,
     bio: (user.biography as string | undefined) ?? null,
-    followerCount: pickInt(user, ["follower_count", "edge_followed_by.count", "followers"]),
-    externalId: (user.id as string | undefined) ?? (user.pk as string | undefined) ?? null,
+    followerCount: pickInt(user, ["edge_followed_by.count", "follower_count"]),
+    followingCount: pickInt(user, ["edge_follow.count", "following_count"]),
+    // IG doesn't expose a `post_count` directly, but `edge_owner_to_timeline_media.count` is the total feed post count.
+    postCount: pickInt(user, ["edge_owner_to_timeline_media.count", "media_count"]),
+    verified: pickBool(user, ["is_verified"]),
+    externalId: (user.fbid as string | undefined) ?? (user.id as string | undefined) ?? null,
     url: `https://www.instagram.com/${handle}`,
-    metadata: user,
+    metadata: json,
   };
 }
 
 async function fetchXUser(handle: string): Promise<AccountRefreshResult | null> {
-  const json = await scFetchJson<Record<string, unknown>>("/v1/twitter/user", { handle });
+  const json = await scFetchJson<Record<string, unknown>>("/v1/twitter/profile", { handle });
   if (!json) return null;
-  const legacy = (json as { legacy?: Record<string, unknown> }).legacy ?? json;
+  const core = (json.core ?? {}) as Record<string, unknown>;
+  const legacy = (json.legacy ?? {}) as Record<string, unknown>;
+  const locWrap = (json.location ?? {}) as Record<string, unknown>;
   return {
-    displayName: (legacy.name as string | undefined) ?? null,
-    avatarUrl: (legacy.profile_image_url_https as string | undefined) ?? null,
+    displayName: (core.name as string | undefined) ?? (legacy.name as string | undefined) ?? null,
+    avatarUrl: pickString(json, ["avatar.image_url"]) ?? (legacy.profile_image_url_https as string | undefined) ?? null,
     bio: (legacy.description as string | undefined) ?? null,
     followerCount: pickInt(legacy, ["followers_count"]),
-    externalId: (json.rest_id as string | undefined) ?? null,
+    followingCount: pickInt(legacy, ["friends_count"]),
+    postCount: pickInt(legacy, ["statuses_count"]),
+    verified: pickBool(json, ["is_blue_verified"]),
+    bannerUrl: (legacy.profile_banner_url as string | undefined) ?? null,
+    location: (locWrap.location as string | undefined) ?? (legacy.location as string | undefined) ?? null,
+    externalId: (json.id as string | undefined) ?? (json.rest_id as string | undefined) ?? null,
     url: `https://x.com/${handle}`,
     metadata: json,
   };
 }
 
 async function fetchTikTokUser(handle: string): Promise<AccountRefreshResult | null> {
-  const json = await scFetchJson<Record<string, unknown>>("/v2/tiktok/user", { handle });
+  const json = await scFetchJson<Record<string, unknown>>("/v1/tiktok/profile", { handle });
   if (!json) return null;
-  const user = (json as { user?: Record<string, unknown> }).user ?? json;
+  const user = (json.user ?? {}) as Record<string, unknown>;
+  const stats = (json.stats ?? json.statsV2 ?? {}) as Record<string, unknown>;
   return {
-    displayName: (user.nickname as string | undefined) ?? null,
-    avatarUrl: (user.avatar_larger as string | undefined) ?? (user.avatar_thumb as string | undefined) ?? null,
+    displayName: (user.nickname as string | undefined) ?? (user.uniqueId as string | undefined) ?? null,
+    avatarUrl:
+      (user.avatarLarger as string | undefined) ??
+      (user.avatarMedium as string | undefined) ??
+      (user.avatarThumb as string | undefined) ??
+      null,
     bio: (user.signature as string | undefined) ?? null,
-    followerCount: pickInt(user, ["follower_count", "fans"]),
-    externalId: (user.id as string | undefined) ?? (user.sec_uid as string | undefined) ?? null,
+    followerCount: pickInt(stats, ["followerCount"]),
+    followingCount: pickInt(stats, ["followingCount"]),
+    postCount: pickInt(stats, ["videoCount"]),
+    // TikTok exposes a "heartCount" (lifetime likes across all videos) —
+    // closer in spirit to `total_views` than anything else we have for
+    // other platforms. Keeping it in metadata for now; don't mis-label.
+    verified: pickBool(user, ["verified"]),
+    externalId: (user.id as string | undefined) ?? (user.secUid as string | undefined) ?? null,
     url: `https://www.tiktok.com/@${handle}`,
     metadata: json,
   };
 }
 
 async function fetchLinkedinProfile(handle: string): Promise<AccountRefreshResult | null> {
-  const json = await scFetchJson<Record<string, unknown>>("/v1/linkedin/profile", { handle });
+  // LinkedIn's SC endpoint requires a full profile URL, not a handle.
+  // Build it from the handle — `patrickwalls` → https://www.linkedin.com/in/patrickwalls.
+  const url = `https://www.linkedin.com/in/${handle}`;
+  const json = await scFetchJson<Record<string, unknown>>("/v1/linkedin/profile", { url });
   if (!json) return null;
   return {
-    displayName: (json.fullName as string | undefined) ?? (json.name as string | undefined) ?? null,
-    avatarUrl: (json.profilePicture as string | undefined) ?? (json.avatar as string | undefined) ?? null,
-    bio: (json.about as string | undefined) ?? (json.summary as string | undefined) ?? null,
-    followerCount: pickInt(json, ["followersCount", "followers"]),
-    externalId: (json.id as string | undefined) ?? null,
-    url: (json.url as string | undefined) ?? `https://www.linkedin.com/in/${handle}`,
+    displayName: (json.name as string | undefined) ?? null,
+    avatarUrl: (json.image as string | undefined) ?? null,
+    bio: (json.about as string | undefined) ?? (json.headline as string | undefined) ?? null,
+    followerCount: pickInt(json, ["followers"]),
+    // `connections` is LinkedIn's separate concept (mutual). Closest to
+    // "following_count" semantically for a personal profile.
+    followingCount: pickInt(json, ["connections"]),
+    location: (json.location as string | undefined) ?? null,
+    url,
     metadata: json,
   };
 }
 
 async function fetchThreadsUser(handle: string): Promise<AccountRefreshResult | null> {
-  const json = await scFetchJson<Record<string, unknown>>("/v1/threads/user", { handle });
+  const json = await scFetchJson<Record<string, unknown>>("/v1/threads/profile", { handle });
   if (!json) return null;
   return {
     displayName: (json.full_name as string | undefined) ?? (json.username as string | undefined) ?? null,
     avatarUrl: (json.profile_pic_url as string | undefined) ?? null,
     bio: (json.biography as string | undefined) ?? null,
-    followerCount: pickInt(json, ["follower_count", "followers"]),
-    externalId: (json.id as string | undefined) ?? (json.pk as string | undefined) ?? null,
+    followerCount: pickInt(json, ["follower_count"]),
+    totalViews: pickInt(json, ["text_post_app_public_views"]),
+    verified: pickBool(json, ["is_verified"]),
+    externalId: (json.pk as string | undefined) ?? (json.id as string | undefined) ?? null,
     url: `https://www.threads.net/@${handle}`,
     metadata: json,
   };
@@ -123,11 +177,9 @@ async function fetchThreadsUser(handle: string): Promise<AccountRefreshResult | 
 
 /**
  * Refresh the given account: fetch SC data for its platform+handle, write
- * back to `accounts`, stamp success / error. Returns the refreshed row.
- *
- * Platforms with no SC coverage (newsletter, "other") stamp
- * `lastRefreshedAt` + a descriptive error message and return — the sweep
- * won't retry them every run.
+ * back to `accounts`, stamp success / error. Platforms without an SC
+ * account endpoint (newsletter, "other") stamp a descriptive error and
+ * return so the weekly sweep doesn't retry them every run.
  */
 export async function refreshAccount(accountId: string): Promise<void> {
   const account = await getAccountById(accountId);
@@ -194,9 +246,8 @@ export async function refreshAccount(accountId: string): Promise<void> {
     return;
   }
 
-  // Partial-update: only overwrite columns SC gave us a value for. Don't
-  // wipe a previously-set follower count with null just because this run
-  // missed it.
+  // Partial-update: only overwrite columns SC gave us a value for. Avoids
+  // wiping a previously-set follower count if this run happened to miss it.
   const patch: Partial<typeof accounts.$inferInsert> = {
     lastRefreshedAt: new Date(),
     lastRefreshError: null,
@@ -206,6 +257,12 @@ export async function refreshAccount(accountId: string): Promise<void> {
   if (result.avatarUrl != null) patch.avatarUrl = result.avatarUrl;
   if (result.bio != null) patch.bio = result.bio;
   if (result.followerCount != null) patch.followerCount = result.followerCount;
+  if (result.followingCount != null) patch.followingCount = result.followingCount;
+  if (result.postCount != null) patch.postCount = result.postCount;
+  if (result.totalViews != null) patch.totalViews = result.totalViews;
+  if (result.verified != null) patch.verified = result.verified;
+  if (result.bannerUrl != null) patch.bannerUrl = result.bannerUrl;
+  if (result.location != null) patch.location = result.location;
   if (result.externalId != null) patch.externalId = result.externalId;
   if (result.url != null) patch.url = result.url;
   if (result.metadata) patch.metadata = result.metadata;
@@ -215,21 +272,46 @@ export async function refreshAccount(accountId: string): Promise<void> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+/** Walk a dotted path through a JSON-ish object, returning the first
+ *  numeric value found. Supports array indices (`path.0.count`). */
 function pickInt(obj: Record<string, unknown>, keys: string[]): number | null {
   for (const key of keys) {
-    // Support "edge_followed_by.count" dotted-path lookups for IG.
-    const parts = key.split(".");
-    let cur: unknown = obj;
-    for (const p of parts) {
-      if (cur && typeof cur === "object" && p in (cur as Record<string, unknown>)) {
-        cur = (cur as Record<string, unknown>)[p];
-      } else {
-        cur = undefined;
-        break;
-      }
-    }
-    if (typeof cur === "number" && Number.isFinite(cur)) return Math.floor(cur);
-    if (typeof cur === "string" && /^\d+$/.test(cur)) return parseInt(cur, 10);
+    const v = walk(obj, key);
+    if (typeof v === "number" && Number.isFinite(v)) return Math.floor(v);
+    if (typeof v === "string" && /^\d+$/.test(v)) return parseInt(v, 10);
   }
   return null;
+}
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const v = walk(obj, key);
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return null;
+}
+
+function pickBool(obj: Record<string, unknown>, keys: string[]): boolean | null {
+  for (const key of keys) {
+    const v = walk(obj, key);
+    if (typeof v === "boolean") return v;
+  }
+  return null;
+}
+
+function walk(obj: Record<string, unknown>, path: string): unknown {
+  const parts = path.split(".");
+  let cur: unknown = obj;
+  for (const p of parts) {
+    if (cur == null) return undefined;
+    if (Array.isArray(cur)) {
+      const idx = Number(p);
+      cur = Number.isInteger(idx) ? cur[idx] : undefined;
+    } else if (typeof cur === "object") {
+      cur = (cur as Record<string, unknown>)[p];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
 }

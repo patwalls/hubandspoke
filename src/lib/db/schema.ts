@@ -882,8 +882,26 @@ export const accounts = pgTable(
     externalId: text("external_id"),
     bio: text("bio"),
     followerCount: integer("follower_count"),
-    // Misc SC fields we want to surface later without a schema change
-    // (verified flag, country, channel-level view totals, etc.).
+    /** Accounts this account follows. Helps gauge whether it's an
+     *  actively-curating identity vs a broadcast channel. */
+    followingCount: integer("following_count"),
+    /** Lifetime total posts / videos / tweets on the platform. Useful for
+     *  posting-cadence sanity checks and audience-growth ratios. */
+    postCount: integer("post_count"),
+    /** Lifetime total views on the account (YouTube channel-level views,
+     *  Threads public view count). Null on platforms that don't expose it. */
+    totalViews: bigint("total_views", { mode: "number" }),
+    /** Platform verification flag (YouTube isVerified, X is_blue_verified,
+     *  IG is_verified, TikTok verified, Threads is_verified). */
+    verified: boolean("verified"),
+    /** Platform header image URL (YouTube channel banner, X profile banner).
+     *  Nullable — most platforms don't expose one. */
+    bannerUrl: text("banner_url"),
+    /** Free-text location the user has set on their profile (X + LinkedIn). */
+    location: text("location"),
+    // Misc SC fields — keep the full response here as a future-proof
+    // escape hatch. The promoted columns above are the ones we actually
+    // render in the UI.
     metadata: jsonb("metadata"),
     isActive: boolean("is_active").notNull().default(true),
     // Replaces the hardcoded NOTION_AUTHORITATIVE_PLATFORMS set. When true,

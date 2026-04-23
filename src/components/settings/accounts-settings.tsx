@@ -6,6 +6,43 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+/** Compact 1.2K / 48.2M number formatter. Falls back to — when null. */
+function formatCount(n: number | null): string {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return n.toLocaleString();
+}
+
+/** Round avatar. Falls back to a colored dot with the platform's first
+ *  letter when SC hasn't given us an image URL yet (e.g. un-refreshed
+ *  account). Kept local to this component to avoid growing a cross-cutting
+ *  Avatar primitive with per-platform fallback colors. */
+function AccountAvatar({
+  account,
+}: {
+  account: { avatarUrl: string | null; handle: string; platform: string };
+}) {
+  const [errored, setErrored] = useState(false);
+  if (account.avatarUrl && !errored) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={account.avatarUrl}
+        alt=""
+        onError={() => setErrored(true)}
+        className="size-8 rounded-full object-cover bg-muted shrink-0"
+      />
+    );
+  }
+  const initial = (account.handle[0] ?? "?").toUpperCase();
+  return (
+    <span className="size-8 rounded-full bg-muted text-muted-foreground text-xs font-medium flex items-center justify-center shrink-0">
+      {initial}
+    </span>
+  );
+}
+
 interface AccountRow {
   id: string;
   brandSlug: string;
@@ -15,7 +52,14 @@ interface AccountRow {
   displayName: string | null;
   url: string | null;
   avatarUrl: string | null;
+  bannerUrl: string | null;
+  bio: string | null;
   followerCount: number | null;
+  followingCount: number | null;
+  postCount: number | null;
+  totalViews: number | null;
+  verified: boolean | null;
+  location: string | null;
   isActive: boolean;
   syncedFromNotion: boolean;
   lastRefreshedAt: string | null;
@@ -194,10 +238,25 @@ export function AccountsSettingsContent({
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
                 <tr>
+                  <th className="text-left px-3 py-2" />
                   <th className="text-left px-3 py-2">Platform</th>
                   <th className="text-left px-3 py-2">Handle</th>
                   <th className="text-left px-3 py-2">Display name</th>
-                  <th className="text-right px-3 py-2">Followers</th>
+                  <th className="text-right px-3 py-2" title="Followers / subscribers">
+                    Followers
+                  </th>
+                  <th className="text-right px-3 py-2" title="Following / friends / connections">
+                    Following
+                  </th>
+                  <th className="text-right px-3 py-2" title="Posts / videos / tweets">
+                    Posts
+                  </th>
+                  <th
+                    className="text-right px-3 py-2"
+                    title="Lifetime channel / profile views (YouTube, Threads)"
+                  >
+                    Views
+                  </th>
                   <th className="text-left px-3 py-2">Last refresh</th>
                   <th className="text-right px-3 py-2" />
                 </tr>
@@ -205,23 +264,56 @@ export function AccountsSettingsContent({
               <tbody>
                 {rows.map((a) => (
                   <tr key={a.id} className="border-t border-border">
+                    <td className="px-3 py-2">
+                      <AccountAvatar account={a} />
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs">{a.platform}</td>
-                    <td className="px-3 py-2">@{a.handle}</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex items-center gap-1">
+                        @{a.handle}
+                        {a.verified && (
+                          <span
+                            title="Platform-verified"
+                            className="text-blue-600 text-[11px]"
+                          >
+                            ✓
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 text-muted-foreground">
-                      {a.displayName ?? "—"}
-                      {a.syncedFromNotion && (
-                        <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-800">
-                          Notion
+                      <div className="flex flex-col gap-0.5">
+                        <span>
+                          {a.displayName ?? "—"}
+                          {a.syncedFromNotion && (
+                            <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-800">
+                              Notion
+                            </span>
+                          )}
+                          {!a.isActive && (
+                            <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700">
+                              inactive
+                            </span>
+                          )}
                         </span>
-                      )}
-                      {!a.isActive && (
-                        <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700">
-                          inactive
-                        </span>
-                      )}
+                        {a.location && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {a.location}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="text-right px-3 py-2 text-muted-foreground tabular-nums">
-                      {a.followerCount != null ? a.followerCount.toLocaleString() : "—"}
+                      {formatCount(a.followerCount)}
+                    </td>
+                    <td className="text-right px-3 py-2 text-muted-foreground tabular-nums">
+                      {formatCount(a.followingCount)}
+                    </td>
+                    <td className="text-right px-3 py-2 text-muted-foreground tabular-nums">
+                      {formatCount(a.postCount)}
+                    </td>
+                    <td className="text-right px-3 py-2 text-muted-foreground tabular-nums">
+                      {formatCount(a.totalViews)}
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {a.lastRefreshError ? (
