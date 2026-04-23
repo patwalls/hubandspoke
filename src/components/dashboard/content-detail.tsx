@@ -2301,12 +2301,14 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
           </PropertyRow>
         </PropertyRowSolo>
 
-        {/* ManyChat IG comment-to-DM trigger. Hidden for non-IG posts since
-            the lookup endpoint only fires from the IG comment automation.
-            Editing happens in a modal — the two fields must save together
-            (per-account uniqueness on keyword) so the inline auto-save
-            pattern doesn't fit. */}
-        {postType?.startsWith("instagram_") && (
+        {/* ManyChat IG comment-to-DM trigger. Hidden entirely for now —
+            the ManyChat dispatcher is broken (Last Text Input doesn't carry
+            the IG comment) and the Meta direct replacement is pending App
+            Review. Flip `false` to `postType?.startsWith("instagram_")`
+            once the Meta webhook path is verified end-to-end. Keeps the
+            data model + dialog component intact; just hides the entry
+            point so non-admin users don't see a knob that doesn't fire. */}
+        {false && postType?.startsWith("instagram_") && (
           <PropertyRowSolo>
             <PropertyRow label="ManyChat trigger">
               {item.manychatKeyword ? (
