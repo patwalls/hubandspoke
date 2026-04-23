@@ -1,22 +1,24 @@
-// Re-encode a production_item's S3 media from whatever codec it's in to H.264
-// so Descript's URL import will accept it. Audio is always re-encoded to AAC
-// to guarantee MP4 compatibility regardless of the source container.
+// Re-encode production_item media from AV1/VP9 → H.264 so Descript's URL
+// import will accept it. Audio is always re-encoded to AAC to guarantee
+// MP4 compatibility.
 //
-// Usage: node --env-file=.env.local scripts/transcode-to-h264.mjs <itemId>
-//        heroku run --app hubandspoke node scripts/transcode-to-h264.mjs <itemId>
+// Usage:
+//   node scripts/transcode-to-h264.mjs <itemId>      # single item
+//   node scripts/transcode-to-h264.mjs --batch       # all yt-dlp candidates
+//   node scripts/transcode-to-h264.mjs --batch --dry # probe only, no writes
 //
-// After a successful transcode the script probes Descript's import endpoint
-// with a presigned GET URL; a non-200 response means Descript still rejects
-// the file. The probe project is not persisted on the item.
+// In batch mode, only items without an existing descript_project_id are
+// considered (files already imported to Descript must have been H.264). Each
+// candidate is codec-probed via `ffmpeg -i <presignedUrl>`; items already
+// reporting h264 are skipped. Skipping happens before any download, so probe
+// cost is just a small range-GET over HTTP.
 
 import { spawn } from "child_process";
 import { stat, unlink } from "fs/promises";
-import { createReadStream } from "fs";
+import { createReadStream, createWriteStream } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { Readable } from "stream";
 import { pipeline } from "stream/promises";
-import { createWriteStream } from "fs";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import {
   S3Client,
@@ -27,9 +29,15 @@ import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import pg from "pg";
 
-const itemId = process.argv[2];
-if (!itemId) {
-  console.error("Usage: node scripts/transcode-to-h264.mjs <itemId>");
+const args = process.argv.slice(2);
+const BATCH = args.includes("--batch");
+const DRY = args.includes("--dry");
+const SINGLE_ID = args.find((a) => !a.startsWith("--"));
+
+if (!BATCH && !SINGLE_ID) {
+  console.error(
+    "Usage: node scripts/transcode-to-h264.mjs <itemId> | --batch [--dry]",
+  );
   process.exit(1);
 }
 
@@ -40,56 +48,34 @@ const s3 = new S3Client({ region: process.env.AWS_REGION || "us-east-1" });
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === "off"
-    ? false
-    : { rejectUnauthorized: false },
+  ssl:
+    process.env.DATABASE_SSL === "off"
+      ? false
+      : { rejectUnauthorized: false },
 });
 
-const { rows } = await pool.query(
-  "SELECT id, title, media_s3_key FROM production_items WHERE id = $1",
-  [itemId],
-);
-if (rows.length === 0) {
-  console.error(`item ${itemId} not found`);
-  process.exit(1);
-}
-const { media_s3_key: key, title } = rows[0];
-if (!key) {
-  console.error(`item ${itemId} has no media_s3_key`);
-  process.exit(1);
-}
-console.log(`[transcode] item=${itemId} title=${title}`);
-console.log(`[transcode] key=${key}`);
-
-const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
-console.log(
-  `[transcode] source size=${head.ContentLength} contentType=${head.ContentType}`,
-);
-
-const inPath = join(tmpdir(), `transcode-in-${itemId}.mp4`);
-const outPath = join(tmpdir(), `transcode-out-${itemId}.mp4`);
-
-async function cleanup() {
-  await unlink(inPath).catch(() => {});
-  await unlink(outPath).catch(() => {});
+async function probeCodec(url) {
+  // ffmpeg exits non-zero when given only `-i` (no output), but prints
+  // stream info to stderr first. We parse "Video: <codec>," out of that.
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegInstaller.path, ["-hide_banner", "-i", url], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    proc.stderr.on("data", (b) => {
+      stderr += b.toString();
+    });
+    proc.on("close", () => {
+      const m = stderr.match(/Video: ([a-zA-Z0-9_]+)/);
+      resolve(m ? m[1].toLowerCase() : null);
+    });
+    proc.on("error", () => resolve(null));
+  });
 }
 
-try {
-  // 1. Download source to /tmp.
-  const getRes = await s3.send(
-    new GetObjectCommand({ Bucket: BUCKET, Key: key }),
-  );
-  if (!getRes.Body) throw new Error("S3 Get returned no body");
-  await pipeline(getRes.Body, createWriteStream(inPath));
-  const inStat = await stat(inPath);
-  console.log(`[transcode] downloaded ${inStat.size} bytes`);
-
-  // 2. ffmpeg re-encode: video → H.264 (CRF 22, veryfast), audio → AAC 128k.
-  //    Veryfast keeps total wall time to single-digit minutes for ~100MB files
-  //    on Heroku's shared CPU; CRF 22 is visually indistinguishable from the
-  //    source for our use case (transcripts / clip extraction).
-  await new Promise((resolve, reject) => {
-    const args = [
+async function runFfmpeg(inPath, outPath) {
+  return new Promise((resolve, reject) => {
+    const ffArgs = [
       "-y",
       "-i", inPath,
       "-c:v", "libx264",
@@ -101,82 +87,127 @@ try {
       "-movflags", "+faststart",
       outPath,
     ];
-    console.log(`[transcode] ffmpeg ${args.join(" ")}`);
-    const proc = spawn(ffmpegInstaller.path, args, {
+    const proc = spawn(ffmpegInstaller.path, ffArgs, {
       stdio: ["ignore", "ignore", "pipe"],
     });
     let lastLine = "";
     proc.stderr.on("data", (b) => {
-      const s = b.toString();
-      const lines = s.split(/\r?\n/).filter(Boolean);
+      const lines = b.toString().split(/\r?\n/).filter(Boolean);
       if (lines.length) lastLine = lines[lines.length - 1];
     });
     proc.on("error", reject);
     proc.on("close", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited ${code}: ${lastLine.slice(0, 300)}`));
+      else
+        reject(new Error(`ffmpeg exited ${code}: ${lastLine.slice(0, 300)}`));
     });
   });
-  const outStat = await stat(outPath);
-  console.log(`[transcode] encoded ${outStat.size} bytes`);
+}
 
-  // 3. Upload back to the same key (overwrite).
-  const upload = new Upload({
-    client: s3,
-    params: {
-      Bucket: BUCKET,
-      Key: key,
-      Body: createReadStream(outPath),
-      ContentType: "video/mp4",
-    },
-  });
-  await upload.done();
-  console.log(`[transcode] uploaded to s3://${BUCKET}/${key}`);
+async function transcodeItem({ id, title, key }) {
+  const t0 = Date.now();
+  console.log(`\n=== ${id} — ${title}`);
 
-  // 4. Update DB size + content type.
-  await pool.query(
-    `UPDATE production_items
-       SET media_size_bytes = $2,
-           media_content_type = 'video/mp4',
-           media_s3_uploaded_at = NOW(),
-           updated_at = NOW()
-     WHERE id = $1`,
-    [itemId, outStat.size],
-  );
-  console.log(`[transcode] db updated`);
-
-  // 5. Probe Descript with a presigned GET URL. We DO NOT persist the project
-  //    on the item — this is just a validation round-trip.
   const probeUrl = await getSignedUrl(
     s3,
     new GetObjectCommand({ Bucket: BUCKET, Key: key }),
-    { expiresIn: 7200 },
+    { expiresIn: 1800 },
   );
-  const probeBody = {
-    project_name: `__probe__ ${title}`,
-    add_media: { main: { url: probeUrl } },
-    add_compositions: [
-      { name: `__probe__ ${title}`, clips: [{ media: "main" }] },
-    ],
-  };
-  const probeRes = await fetch(
-    "https://descriptapi.com/v1/jobs/import/project_media",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.DESCRIPT_API_TOKEN}`,
-      },
-      body: JSON.stringify(probeBody),
-    },
-  );
-  const probeText = await probeRes.text();
-  console.log(`[probe] status=${probeRes.status}`);
-  console.log(`[probe] body=${probeText.slice(0, 500)}`);
-  if (!probeRes.ok) {
-    process.exitCode = 2;
+  const codec = await probeCodec(probeUrl);
+  console.log(`  codec: ${codec ?? "unknown"}`);
+  if (codec === "h264") {
+    console.log("  skip (already H.264)");
+    return { outcome: "skipped", codec };
   }
+  if (DRY) {
+    console.log(`  dry-run — would transcode from ${codec}`);
+    return { outcome: "would-transcode", codec };
+  }
+
+  const head = await s3.send(
+    new HeadObjectCommand({ Bucket: BUCKET, Key: key }),
+  );
+  console.log(`  source size=${head.ContentLength}`);
+
+  const inPath = join(tmpdir(), `transcode-in-${id}.mp4`);
+  const outPath = join(tmpdir(), `transcode-out-${id}.mp4`);
+
+  try {
+    const getRes = await s3.send(
+      new GetObjectCommand({ Bucket: BUCKET, Key: key }),
+    );
+    if (!getRes.Body) throw new Error("S3 Get returned no body");
+    await pipeline(getRes.Body, createWriteStream(inPath));
+
+    await runFfmpeg(inPath, outPath);
+    const outStat = await stat(outPath);
+    console.log(`  encoded ${outStat.size} bytes`);
+
+    const upload = new Upload({
+      client: s3,
+      params: {
+        Bucket: BUCKET,
+        Key: key,
+        Body: createReadStream(outPath),
+        ContentType: "video/mp4",
+      },
+    });
+    await upload.done();
+    await pool.query(
+      `UPDATE production_items
+         SET media_size_bytes = $2,
+             media_content_type = 'video/mp4',
+             media_s3_uploaded_at = NOW(),
+             updated_at = NOW()
+       WHERE id = $1`,
+      [id, outStat.size],
+    );
+    console.log(`  done in ${Math.round((Date.now() - t0) / 1000)}s`);
+    return { outcome: "transcoded", codec };
+  } finally {
+    await unlink(inPath).catch(() => {});
+    await unlink(outPath).catch(() => {});
+  }
+}
+
+async function loadCandidates() {
+  if (SINGLE_ID) {
+    const { rows } = await pool.query(
+      "SELECT id, title, media_s3_key AS key FROM production_items WHERE id = $1",
+      [SINGLE_ID],
+    );
+    return rows;
+  }
+  const { rows } = await pool.query(
+    `SELECT id, title, media_s3_key AS key
+       FROM production_items
+      WHERE media_s3_key IS NOT NULL
+        AND descript_project_id IS NULL
+        AND youtube_download_source = 'yt-dlp'
+      ORDER BY media_s3_uploaded_at DESC`,
+  );
+  return rows;
+}
+
+try {
+  const candidates = await loadCandidates();
+  console.log(`candidates: ${candidates.length}`);
+
+  const stats = { skipped: 0, transcoded: 0, wouldTranscode: 0, failed: 0 };
+  for (const row of candidates) {
+    try {
+      const res = await transcodeItem(row);
+      if (res.outcome === "skipped") stats.skipped++;
+      else if (res.outcome === "transcoded") stats.transcoded++;
+      else if (res.outcome === "would-transcode") stats.wouldTranscode++;
+    } catch (err) {
+      stats.failed++;
+      console.error(
+        `  FAILED ${row.id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+  console.log(`\nsummary ${JSON.stringify(stats)}`);
 } finally {
-  await cleanup();
   await pool.end();
 }
