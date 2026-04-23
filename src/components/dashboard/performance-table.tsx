@@ -113,9 +113,6 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
   const [formFormat, setFormFormat] = useState("");
   const [formLink, setFormLink] = useState("");
   const [formDate, setFormDate] = useState(todayLocalISO());
-  const [formViews, setFormViews] = useState("");
-  const [formLikes, setFormLikes] = useState("");
-  const [formComments, setFormComments] = useState("");
   const [formClicks, setFormClicks] = useState("");
   const [formLeads, setFormLeads] = useState("");
   const [formSalesAmount, setFormSalesAmount] = useState("");
@@ -141,9 +138,6 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
     setFormFormat("");
     setFormLink("");
     setFormDate(todayLocalISO());
-    setFormViews("");
-    setFormLikes("");
-    setFormComments("");
     setFormClicks("");
     setFormLeads("");
     setFormSalesAmount("");
@@ -174,9 +168,6 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
       if (data.title) setFormTitle(data.title);
       if (data.publishedDate) setFormDate(data.publishedDate);
       if (data.publishedLink) setFormLink(data.publishedLink);
-      if (data.views != null) setFormViews(String(data.views));
-      if (data.likes != null) setFormLikes(String(data.likes));
-      if (data.comments != null) setFormComments(String(data.comments));
       if (data.thumbnail) setPreviewThumbnail(data.thumbnail);
       if (data.authorHandle) setPreviewAuthorHandle(data.authorHandle);
 
@@ -225,9 +216,6 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             format: formFormat || null,
             publishedLink: formLink || null,
             publishedDate: formDate,
-            views: formViews ? parseInt(formViews, 10) : null,
-            likes: formLikes ? parseInt(formLikes, 10) : null,
-            comments: formComments ? parseInt(formComments, 10) : null,
             clicks: formClicks ? parseInt(formClicks, 10) : null,
             leads: formLeads ? parseInt(formLeads, 10) : null,
             salesAmount: formSalesAmount || null,
@@ -255,9 +243,6 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             publishedLink: formLink || null,
             publishedDate: formDate,
             brand,
-            views: formViews ? parseInt(formViews, 10) : null,
-            likes: formLikes ? parseInt(formLikes, 10) : null,
-            comments: formComments ? parseInt(formComments, 10) : null,
             thumbnail: previewThumbnail,
             authorHandle: previewAuthorHandle,
           }),
@@ -555,75 +540,46 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
               />
             </div>
 
-            {/* Metrics section — editable on edit, or after a successful
-                from-link fetch so the user can review/adjust before save.
-                Clicks/leads/sales stay edit-only; no SC API returns them. */}
-            {(isEditing || addMode === "from-link") && (
+            {/* Attribution metrics — only editable on an existing post.
+                Views/likes/comments are never edited by hand; the
+                performance-decay sweep pulls them from the platform API.
+                Clicks/leads/sales have no upstream source so they stay
+                manual. */}
+            {isEditing && (
               <div className="space-y-3 rounded-lg border border-dashed border-gray-300 p-3">
                 <p className="text-xs text-muted-foreground font-medium">
-                  Metrics
+                  Attribution
                 </p>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-xs">Views</Label>
+                    <Label className="text-xs">Clicks</Label>
                     <Input
                       type="number"
-                      value={formViews}
-                      onChange={(e) => setFormViews(e.target.value)}
+                      value={formClicks}
+                      onChange={(e) => setFormClicks(e.target.value)}
                       placeholder="0"
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Likes</Label>
+                    <Label className="text-xs">Leads</Label>
                     <Input
                       type="number"
-                      value={formLikes}
-                      onChange={(e) => setFormLikes(e.target.value)}
+                      value={formLeads}
+                      onChange={(e) => setFormLeads(e.target.value)}
                       placeholder="0"
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Comments</Label>
+                    <Label className="text-xs">Sales $</Label>
                     <Input
                       type="number"
-                      value={formComments}
-                      onChange={(e) => setFormComments(e.target.value)}
+                      value={formSalesAmount}
+                      onChange={(e) => setFormSalesAmount(e.target.value)}
                       placeholder="0"
+                      step="0.01"
                     />
                   </div>
                 </div>
-                {isEditing && (
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Clicks</Label>
-                      <Input
-                        type="number"
-                        value={formClicks}
-                        onChange={(e) => setFormClicks(e.target.value)}
-                        placeholder="0"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Leads</Label>
-                      <Input
-                        type="number"
-                        value={formLeads}
-                        onChange={(e) => setFormLeads(e.target.value)}
-                        placeholder="0"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Sales $</Label>
-                      <Input
-                        type="number"
-                        value={formSalesAmount}
-                        onChange={(e) => setFormSalesAmount(e.target.value)}
-                        placeholder="0"
-                        step="0.01"
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
