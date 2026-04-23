@@ -93,6 +93,10 @@ export interface ProductionItem {
   hookSource?: string | null;
   hookExtractor?: string | null;
   hookExtractedAt?: string | null;
+  /** One-sentence description of the cover image produced by the vision
+   *  sweep. Populated for posts with a posterS3Key. Null until processed. */
+  coverDescription?: string | null;
+  visionExtractedAt?: string | null;
   predictedViewsSnapshot?: number | null;
   predictedViewsSnapshotAt?: string | null;
   prediction?: ViewPrediction | null;

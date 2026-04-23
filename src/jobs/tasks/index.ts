@@ -29,6 +29,7 @@ import {
 import { enrichItemTask, type EnrichItemPayload } from "./enrich-item";
 import { extractHookTask, type ExtractHookPayload } from "./extract-hook";
 import { hookFallbackTask, type HookFallbackPayload } from "./hook-fallback";
+import { visionExtractTask, type VisionExtractPayload } from "./vision-extract";
 import {
   youtubeDownloadTask,
   type YoutubeDownloadPayload,
@@ -44,6 +45,7 @@ import {
   enrichmentSweepTask,
   hookExtractSweepTask,
   hookFallbackSweepTask,
+  visionExtractSweepTask,
   matgSyncTask,
   evergreenScanTask,
   crossPostScanTask,
@@ -61,6 +63,7 @@ export interface TaskPayloads {
   "enrich-item": EnrichItemPayload;
   "extract-hook": ExtractHookPayload;
   "hook-fallback": HookFallbackPayload;
+  "vision-extract": VisionExtractPayload;
   "youtube-download": YoutubeDownloadPayload;
   "account-refresh": AccountRefreshPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
@@ -69,6 +72,7 @@ export interface TaskPayloads {
   "enrichment-sweep": Record<string, never>;
   "hook-extract-sweep": Record<string, never>;
   "hook-fallback-sweep": Record<string, never>;
+  "vision-extract-sweep": Record<string, never>;
   "matg-sync": Record<string, never>;
   "evergreen-scan": Record<string, never>;
   "cross-post-scan": Record<string, never>;
@@ -92,6 +96,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "enrich-item": enrichItemTask,
   "extract-hook": extractHookTask,
   "hook-fallback": hookFallbackTask,
+  "vision-extract": visionExtractTask,
   "youtube-download": youtubeDownloadTask,
   "account-refresh": accountRefreshTask,
   "performance-decay": performanceDecayTask,
@@ -99,6 +104,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "enrichment-sweep": enrichmentSweepTask,
   "hook-extract-sweep": hookExtractSweepTask,
   "hook-fallback-sweep": hookFallbackSweepTask,
+  "vision-extract-sweep": visionExtractSweepTask,
   "matg-sync": matgSyncTask,
   "evergreen-scan": evergreenScanTask,
   "cross-post-scan": crossPostScanTask,

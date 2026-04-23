@@ -253,6 +253,13 @@
       "when": 1776955568611,
       "tag": "0035_classy_galactus",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1776967872703,
+      "tag": "0036_even_selene",
+      "breakpoints": true
     }
   ]
 }

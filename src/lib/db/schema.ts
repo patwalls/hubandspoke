@@ -218,6 +218,17 @@ export const productionItems = pgTable(
     hookExtractedAt: timestamp("hook_extracted_at", {
       withTimezone: true,
     }),
+    // One-sentence visual description of the cover image (Haiku vision).
+    // Independent signal from the hook — populated even when there's no
+    // on-screen overlay text to extract. Useful for search and for feeding
+    // visual context to the clip-idea agent.
+    coverDescription: text("cover_description"),
+    // Stamped once per item when the vision sweep has processed the poster.
+    // One-shot: NULL → eligible; timestamp → done (success or no-clear-hook).
+    // Also the coverage signal for how much visual data we've captured.
+    visionExtractedAt: timestamp("vision_extracted_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

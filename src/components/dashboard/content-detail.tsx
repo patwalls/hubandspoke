@@ -1557,6 +1557,8 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
               hook={item.hook}
               hookSource={item.hookSource}
               hookExtractedAt={item.hookExtractedAt}
+              coverDescription={item.coverDescription}
+              visionExtractedAt={item.visionExtractedAt}
               contentBody={item.contentBody}
               contentBodyFetchedAt={item.contentBodyFetchedAt}
               contentBodySource={item.contentBodySource}

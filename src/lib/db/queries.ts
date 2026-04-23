@@ -704,9 +704,11 @@ export interface HookSourceBreakdown {
   brand: string;
   total: number;
   withHook: number;
+  withCoverDescription: number;
   bySource: {
     clip_idea: number;
     llm: number;
+    vision: number;
     content_body: number;
     title: number;
     manual: number;
@@ -721,34 +723,54 @@ export interface HookSourceBreakdown {
  * (LLM/clip_idea) or just title-fallback.
  */
 export async function getHookSourceBreakdown(): Promise<HookSourceBreakdown[]> {
-  const rows = (await db.execute(sql`
-    SELECT
-      pi.brand AS brand,
-      pi.hook_source AS hook_source,
-      COUNT(*)::int AS n,
-      COUNT(*) FILTER (WHERE pi.hook IS NOT NULL)::int AS n_with_hook
-    FROM production_items pi
-    WHERE pi.status = 'Published'
-    GROUP BY pi.brand, pi.hook_source
-    ORDER BY pi.brand ASC
-  `)) as unknown as Array<{
-    brand: string;
-    hook_source: string | null;
-    n: number;
-    n_with_hook: number;
-  }>;
+  const [bySourceRows, coverRows] = await Promise.all([
+    db.execute(sql`
+      SELECT
+        pi.brand AS brand,
+        pi.hook_source AS hook_source,
+        COUNT(*)::int AS n,
+        COUNT(*) FILTER (WHERE pi.hook IS NOT NULL)::int AS n_with_hook
+      FROM production_items pi
+      WHERE pi.status = 'Published'
+      GROUP BY pi.brand, pi.hook_source
+      ORDER BY pi.brand ASC
+    `) as unknown as Promise<
+      Array<{
+        brand: string;
+        hook_source: string | null;
+        n: number;
+        n_with_hook: number;
+      }>
+    >,
+    db.execute(sql`
+      SELECT
+        pi.brand AS brand,
+        COUNT(*) FILTER (WHERE pi.cover_description IS NOT NULL)::int AS n_with_cover
+      FROM production_items pi
+      WHERE pi.status = 'Published'
+      GROUP BY pi.brand
+    `) as unknown as Promise<
+      Array<{ brand: string; n_with_cover: number }>
+    >,
+  ]);
+
+  const coverByBrand = new Map(
+    coverRows.map((r) => [r.brand, Number(r.n_with_cover)])
+  );
 
   const byBrand = new Map<string, HookSourceBreakdown>();
-  for (const r of rows) {
+  for (const r of bySourceRows) {
     let entry = byBrand.get(r.brand);
     if (!entry) {
       entry = {
         brand: r.brand,
         total: 0,
         withHook: 0,
+        withCoverDescription: coverByBrand.get(r.brand) ?? 0,
         bySource: {
           clip_idea: 0,
           llm: 0,
+          vision: 0,
           content_body: 0,
           title: 0,
           manual: 0,
@@ -766,6 +788,7 @@ export async function getHookSourceBreakdown(): Promise<HookSourceBreakdown[]> {
     switch (r.hook_source) {
       case "clip_idea":
       case "llm":
+      case "vision":
       case "content_body":
       case "title":
       case "manual":

@@ -12,12 +12,14 @@ import { syncAllMATG } from "@/lib/services/matg-sync";
 import { selectEnrichmentCandidates } from "@/lib/services/enrichment/orchestrator";
 import { selectHookCandidates } from "@/lib/services/hook-extract/orchestrator";
 import { selectHookFallbackCandidates } from "@/lib/services/hook-extract/fallback";
+import { selectVisionCandidates } from "@/lib/services/hook-extract/vision";
 import { db } from "@/lib/db";
 import { accounts } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import type { EnrichItemPayload } from "./enrich-item";
 import type { ExtractHookPayload } from "./extract-hook";
 import type { HookFallbackPayload } from "./hook-fallback";
+import type { VisionExtractPayload } from "./vision-extract";
 import type { AccountRefreshPayload } from "./account-refresh";
 
 function timed(name: string, fn: () => Promise<unknown>): Task {
@@ -106,6 +108,27 @@ export const hookFallbackSweepTask: Task = async (_payload, helpers) => {
   }
   helpers.logger.info(
     `hook-fallback-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
+  );
+};
+/**
+ * Cron parent task: run Haiku 4.5 vision on the poster image of every
+ * short-form / video post to read the on-screen hook and build a one-line
+ * cover description. Gated on vision_extracted_at IS NULL so it runs once
+ * per item. Cost ~$0.001/item — small batch per sweep.
+ */
+export const visionExtractSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("vision-extract-sweep start");
+  const candidates = await selectVisionCandidates();
+  for (const productionItemId of candidates) {
+    const payload: VisionExtractPayload = { productionItemId };
+    await helpers.addJob("vision-extract", payload as never, {
+      jobKey: `vision-extract-${productionItemId}`,
+      jobKeyMode: "unsafe_dedupe",
+    });
+  }
+  helpers.logger.info(
+    `vision-extract-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
   );
 };
 export const matgSyncTask: Task = timed("matg-sync", () => syncAllMATG());

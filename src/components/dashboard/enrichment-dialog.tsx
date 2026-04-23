@@ -44,6 +44,8 @@ interface Props {
   hook?: string | null;
   hookSource?: string | null;
   hookExtractedAt?: string | null;
+  coverDescription?: string | null;
+  visionExtractedAt?: string | null;
   contentBody?: string | null;
   contentBodyFetchedAt?: string | null;
   contentBodySource?: string | null;
@@ -91,6 +93,8 @@ function hookSourceLabel(source: string | null | undefined): string {
       return "from clip idea";
     case "llm":
       return "extracted by LLM";
+    case "vision":
+      return "read from cover image";
     case "content_body":
       return "from post body";
     case "title":
@@ -141,6 +145,8 @@ export function EnrichmentButton(props: Props) {
     hook,
     hookSource,
     hookExtractedAt,
+    coverDescription,
+    visionExtractedAt,
     contentBody,
     contentBodyFetchedAt,
     contentBodySource,
@@ -326,6 +332,27 @@ export function EnrichmentButton(props: Props) {
               </p>
             )}
           </Section>
+
+          {/* Cover description — Haiku vision summary of what the poster
+              looks like. Independent signal from the hook. */}
+          {(coverDescription || visionExtractedAt) && (
+            <Section
+              title="Cover description"
+              subtitle={
+                visionExtractedAt
+                  ? `Vision · ${fmtTimestamp(visionExtractedAt)}`
+                  : null
+              }
+            >
+              {coverDescription ? (
+                <p className="text-[13px] leading-snug">{coverDescription}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Processed, but no description returned.
+                </p>
+              )}
+            </Section>
+          )}
 
           {/* Caption / body */}
           {contentBody ? (

@@ -73,6 +73,7 @@ const HOOK_SOURCE_LABELS: Array<{
 }> = [
   { key: "clip_idea", label: "Clip idea" },
   { key: "llm", label: "LLM" },
+  { key: "vision", label: "Vision" },
   { key: "content_body", label: "Post body" },
   { key: "title", label: "Title" },
   { key: "manual", label: "Manual" },
@@ -129,7 +130,7 @@ export default async function CoveragePage() {
             </h3>
             {hooks && hooks.total > 0 && (
               <div className="rounded-lg border border-border p-3">
-                <div className="flex items-baseline justify-between mb-2">
+                <div className="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
                   <h4 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
                     Hook sources
                   </h4>
@@ -137,9 +138,13 @@ export default async function CoveragePage() {
                     {hooks.withHook.toLocaleString()} / {hooks.total.toLocaleString()} with hook
                     {" "}
                     ({Math.round((hooks.withHook / hooks.total) * 100)}%)
+                    <span className="mx-2 text-muted-foreground/50">·</span>
+                    {hooks.withCoverDescription.toLocaleString()} / {hooks.total.toLocaleString()} with cover description
+                    {" "}
+                    ({Math.round((hooks.withCoverDescription / hooks.total) * 100)}%)
                   </span>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
+                <div className="grid grid-cols-2 md:grid-cols-7 gap-2 text-xs">
                   {HOOK_SOURCE_LABELS.map(({ key, label }) => {
                     const count = hooks.bySource[key];
                     const pct = hooks.withHook
@@ -232,8 +237,9 @@ export default async function CoveragePage() {
       <p className="text-xs text-muted-foreground">
         Signals update on their own schedules: enrichment sweep fires at :20
         past the hour, hook-extract (LLM, short-form w/ transcript) at :40,
-        hook-fallback (title / body for the rest) at :50, performance decay
-        is continuous, transcripts publish via Descript on demand.
+        hook-fallback (title / body for the rest) at :50, vision (Haiku
+        reading the cover image) at :55, performance decay is continuous,
+        transcripts publish via Descript on demand.
       </p>
     </div>
   );

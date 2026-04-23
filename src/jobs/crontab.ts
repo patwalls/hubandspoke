@@ -11,6 +11,7 @@ export const CRONTAB = `
 20 * * * * enrichment-sweep
 40 * * * * hook-extract-sweep
 50 * * * * hook-fallback-sweep
+55 * * * * vision-extract-sweep
 0 13 * * * matg-sync
 0 15 * * * evergreen-scan
 0 16 * * * cross-post-scan
