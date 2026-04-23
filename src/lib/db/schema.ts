@@ -478,7 +478,11 @@ export const formats = pgTable(
   "formats",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    name: text("name").notNull().unique(),
+    // Display name. Uniqueness scoped to (brand, lower(name)) below — names
+    // are free-form across brands, and we rely on the index (not a global
+    // UNIQUE) to prevent within-brand duplicates that would confuse
+    // `production_items.format` (a text reference, not an FK) lookups.
+    name: text("name").notNull(),
     brand: text("brand").default("starter-story").notNull(),
     channels: jsonb("channels").$type<string[]>().default([]),
     event: text("event"),
@@ -503,7 +507,13 @@ export const formats = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => [index("idx_formats_parent_format_id").on(table.parentFormatId)]
+  (table) => [
+    index("idx_formats_parent_format_id").on(table.parentFormatId),
+    uniqueIndex("uniq_formats_brand_name_lower").on(
+      table.brand,
+      sql`lower(${table.name})`
+    ),
+  ]
 );
 
 // Per-format publishing targets in the new account+post_type model. Replaces

@@ -260,6 +260,13 @@
       "when": 1776967872703,
       "tag": "0036_even_selene",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1776971236276,
+      "tag": "0037_clever_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }
