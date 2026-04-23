@@ -9,6 +9,7 @@ import { enrichTwitterItem } from "./twitter";
 import { enrichThreadsItem } from "./threads";
 import { enrichLinkedInItem } from "./linkedin";
 import { enrichTikTokItem } from "./tiktok";
+import { maybeEnqueueDescriptTranscribe } from "@/lib/services/transcribe-after-upload";
 import type { EnrichmentResult } from "./types";
 
 /** Items per sweep tick. Conservative — first sweep after deploy will be the
@@ -109,6 +110,15 @@ export async function enrichSingleItem(
       enrichmentAttempts: sql`${productionItems.enrichmentAttempts} + 1`,
     })
     .where(eq(productionItems.id, itemId));
+
+  // If this enrichment just wrote a new mediaS3Key, kick off a Descript
+  // transcribe — every archived video/audio item should get a transcript
+  // even when the platform's native transcript source (SC captions on
+  // YouTube, SC transcript on IG reels <2 min) didn't produce one. Noop
+  // when the item already has a transcript or a Descript project.
+  if (result.updates.mediaS3Key) {
+    await maybeEnqueueDescriptTranscribe(itemId);
+  }
 
   return result;
 }

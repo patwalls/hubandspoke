@@ -19,6 +19,10 @@ import {
   type ClipIdeaPreciseCutPayload,
 } from "./clip-idea-precise-cut";
 import {
+  descriptTranscribeTask,
+  type DescriptTranscribePayload,
+} from "./descript-transcribe";
+import {
   notificationSendTask,
   type NotificationSendPayload,
 } from "./notification-send";
@@ -44,6 +48,7 @@ export interface TaskPayloads {
   "transcript-finish": TranscriptFinishPayload;
   "descript-clip-resolve": DescriptClipResolvePayload;
   "clip-idea-precise-cut": ClipIdeaPreciseCutPayload;
+  "descript-transcribe": DescriptTranscribePayload;
   "notification-send": NotificationSendPayload;
   "enrich-item": EnrichItemPayload;
   "extract-hook": ExtractHookPayload;
@@ -69,6 +74,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "transcript-finish": transcriptFinishTask,
   "descript-clip-resolve": descriptClipResolveTask,
   "clip-idea-precise-cut": clipIdeaPreciseCutTask,
+  "descript-transcribe": descriptTranscribeTask,
   "notification-send": notificationSendTask,
   "enrich-item": enrichItemTask,
   "extract-hook": extractHookTask,

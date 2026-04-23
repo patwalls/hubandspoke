@@ -10,6 +10,7 @@ import { Upload } from "@aws-sdk/lib-storage";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { bucketName, buildKey, s3Client } from "@/lib/s3";
+import { maybeEnqueueDescriptTranscribe } from "@/lib/services/transcribe-after-upload";
 
 export interface YoutubeDownloadPayload {
   productionItemId: string;
@@ -154,6 +155,10 @@ export const youtubeDownloadTask: Task = async (rawPayload, helpers) => {
     helpers.logger.info(
       `youtube-download ok id=${productionItemId} bytes=${fileStat.size} (${Date.now() - startTime}ms)`,
     );
+
+    // Now that the full video is in S3, kick off Descript transcription.
+    // No-ops when the item already has a transcript or the flag is off.
+    await maybeEnqueueDescriptTranscribe(productionItemId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await db

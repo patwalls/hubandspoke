@@ -1,12 +1,8 @@
 import { spawn } from "child_process";
 import { randomUUID } from "crypto";
-import { createReadStream, createWriteStream } from "fs";
-import { stat, unlink } from "fs/promises";
+import { stat } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { Readable } from "stream";
-import type { ReadableStream as NodeReadableStream } from "stream/web";
-import { pipeline } from "stream/promises";
 import type { Task } from "graphile-worker";
 import { eq } from "drizzle-orm";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
@@ -21,6 +17,11 @@ import {
   fetchDescriptJob,
 } from "@/lib/descript";
 import { getPresignedGetUrl } from "@/lib/s3";
+import {
+  downloadToFile,
+  putFileToUrl,
+  safeUnlink,
+} from "./descript-upload-helpers";
 
 export interface ClipIdeaPreciseCutPayload {
   clipIdeaId: string;
@@ -194,17 +195,6 @@ async function pollUploadOnce(
   );
 }
 
-async function downloadToFile(url: string, destPath: string): Promise<void> {
-  const res = await fetch(url);
-  if (!res.ok || !res.body) {
-    throw new Error(`S3 download failed: HTTP ${res.status}`);
-  }
-  await pipeline(
-    Readable.fromWeb(res.body as unknown as NodeReadableStream),
-    createWriteStream(destPath),
-  );
-}
-
 async function ffmpegTrim(args: {
   ffmpegPath: string;
   inputPath: string;
@@ -265,32 +255,3 @@ async function ffmpegTrim(args: {
   }
 }
 
-async function putFileToUrl(
-  filePath: string,
-  url: string,
-  contentType: string,
-  contentLength: number,
-): Promise<void> {
-  const stream = createReadStream(filePath);
-  const res = await fetch(url, {
-    method: "PUT",
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": String(contentLength),
-    },
-    body: stream as unknown as BodyInit,
-    duplex: "half",
-  } as RequestInit & { duplex: "half" });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Descript upload PUT failed: HTTP ${res.status} ${text.slice(0, 300)}`);
-  }
-}
-
-async function safeUnlink(path: string): Promise<void> {
-  try {
-    await unlink(path);
-  } catch {
-    // Missing tempfile on cleanup is fine — nothing to do.
-  }
-}

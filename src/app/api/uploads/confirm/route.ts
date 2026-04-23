@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { headObject } from "@/lib/s3";
+import { maybeEnqueueDescriptTranscribe } from "@/lib/services/transcribe-after-upload";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -57,6 +58,10 @@ export async function POST(request: NextRequest) {
       updatedAt: new Date(),
     })
     .where(eq(productionItems.id, itemId));
+
+  // Bytes are in S3 — let Descript transcribe if the feature flag is on
+  // and this item doesn't already have a transcript.
+  await maybeEnqueueDescriptTranscribe(itemId);
 
   return NextResponse.json({
     success: true,

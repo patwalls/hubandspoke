@@ -50,29 +50,64 @@ async function fetchFirstCompositionId(projectId: string): Promise<string | null
   return json.compositions?.[0]?.id ?? null;
 }
 
+export type PublishPollResult =
+  | { kind: "pending" }
+  | { kind: "stopped"; shareUrl: string; compositionId: string | null };
+
+/**
+ * One fetch of a Descript publish job. Returns `pending` while the job is
+ * still running/queued, `stopped` once it's completed successfully, or
+ * throws a TranscriptFetchError on terminal failure. Callers that want a
+ * bounded blocking wait can wrap this in a loop ({@link waitForPublishJob});
+ * callers in a graphile-worker context should re-enqueue themselves on
+ * `pending` so each task invocation stays short enough to survive a deploy.
+ */
+export async function pollPublishJobOnce(
+  jobId: string
+): Promise<PublishPollResult> {
+  const job = await fetchDescriptJob(jobId);
+  if (
+    job.job_state === "running" ||
+    job.job_state === "pending" ||
+    job.job_state === "queued"
+  ) {
+    return { kind: "pending" };
+  }
+  if (job.job_state !== "stopped" || job.result?.status !== "success") {
+    throw new TranscriptFetchError(
+      `Publish job ended in state=${job.job_state} status=${job.result?.status ?? "unknown"}`,
+      "publish_failed"
+    );
+  }
+  const shareUrl = job.result.share_url;
+  if (!shareUrl) {
+    throw new TranscriptFetchError(
+      "Publish job finished without share_url",
+      "publish_failed"
+    );
+  }
+  return {
+    kind: "stopped",
+    shareUrl,
+    compositionId: job.result.composition_id ?? null,
+  };
+}
+
 async function waitForPublishJob(jobId: string): Promise<{
   shareUrl: string;
   compositionId: string | null;
 }> {
   for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-    const job = await fetchDescriptJob(jobId);
-    if (job.job_state === "running" || job.job_state === "pending" || job.job_state === "queued") {
-      continue;
+    const poll = await pollPublishJobOnce(jobId);
+    if (poll.kind === "stopped") {
+      return { shareUrl: poll.shareUrl, compositionId: poll.compositionId };
     }
-    if (job.job_state !== "stopped" || job.result?.status !== "success") {
-      throw new TranscriptFetchError(
-        `Publish job ended in state=${job.job_state} status=${job.result?.status ?? "unknown"}`,
-        "publish_failed"
-      );
-    }
-    const shareUrl = job.result.share_url;
-    if (!shareUrl) {
-      throw new TranscriptFetchError("Publish job finished without share_url", "publish_failed");
-    }
-    return { shareUrl, compositionId: job.result.composition_id ?? null };
   }
-  throw new TranscriptFetchError("Publish job did not complete within 3 minutes", "publish_timeout");
+  throw new TranscriptFetchError(
+    "Publish job did not complete within 3 minutes",
+    "publish_timeout"
+  );
 }
 
 function countWords(text: string): number {
@@ -164,43 +199,65 @@ export async function startDescriptTranscriptFetch(
 }
 
 /**
- * Finish a transcript fetch that was kicked off by
- * {@link startDescriptTranscriptFetch}: poll the publish job, fetch the
- * published WEBVTT, parse, and upsert the transcripts row. Blocks for up to
- * ~3 minutes — must be called outside the HTTP response path on Heroku.
+ * Once a Descript publish job has finished (shareUrl in hand), fetch the
+ * published project's WEBVTT, parse it, and upsert the transcripts row.
+ * Pure — no polling, no syncLogs. Callers that want those semantics wrap
+ * this; see {@link finishDescriptTranscriptFetch}.
  */
-export async function finishDescriptTranscriptFetch(
+export async function saveDescriptTranscriptFromShareUrl(
   productionItemId: string,
-  publishJobId: string,
-  startedAt: Date
+  shareUrl: string
 ): Promise<FetchResult> {
-  try {
-    const { shareUrl } = await waitForPublishJob(publishJobId);
-    const slug = extractShareSlug(shareUrl);
-    if (!slug) {
-      throw new TranscriptFetchError(`Could not parse slug from ${shareUrl}`, "publish_failed");
-    }
+  const slug = extractShareSlug(shareUrl);
+  if (!slug) {
+    throw new TranscriptFetchError(
+      `Could not parse slug from ${shareUrl}`,
+      "publish_failed"
+    );
+  }
 
-    const published = await fetchPublishedProject(slug);
-    const rawVtt = published.subtitles;
-    if (!rawVtt || rawVtt.trim().length === 0) {
-      throw new TranscriptFetchError("Published project has no subtitles", "no_subtitles");
-    }
+  const published = await fetchPublishedProject(slug);
+  const rawVtt = published.subtitles;
+  if (!rawVtt || rawVtt.trim().length === 0) {
+    throw new TranscriptFetchError(
+      "Published project has no subtitles",
+      "no_subtitles"
+    );
+  }
 
-    const segments: VttCue[] = parseVtt(rawVtt);
-    if (segments.length === 0) {
-      throw new TranscriptFetchError("VTT parser produced zero segments", "parse_empty");
-    }
+  const segments: VttCue[] = parseVtt(rawVtt);
+  if (segments.length === 0) {
+    throw new TranscriptFetchError(
+      "VTT parser produced zero segments",
+      "parse_empty"
+    );
+  }
 
-    const fullText = segments.map((s) => s.text).join(" ");
-    const durationSec = segments[segments.length - 1].endSec;
-    const wordCount = countWords(fullText);
-    const publishedAt = new Date();
+  const fullText = segments.map((s) => s.text).join(" ");
+  const durationSec = segments[segments.length - 1].endSec;
+  const wordCount = countWords(fullText);
+  const publishedAt = new Date();
 
-    const [row] = await db
-      .insert(transcripts)
-      .values({
-        productionItemId,
+  const [row] = await db
+    .insert(transcripts)
+    .values({
+      productionItemId,
+      source: "descript",
+      language: "en",
+      rawVtt,
+      fullText,
+      segments,
+      wordCount,
+      durationSec: durationSec.toFixed(3),
+      descriptPublishedSlug: slug,
+      descriptShareUrl: shareUrl,
+      descriptPublishedAt: publishedAt,
+      fetchedAt: publishedAt,
+      error: null,
+    })
+    .onConflictDoUpdate({
+      target: transcripts.productionItemId,
+      set: {
         source: "descript",
         language: "en",
         rawVtt,
@@ -213,27 +270,38 @@ export async function finishDescriptTranscriptFetch(
         descriptPublishedAt: publishedAt,
         fetchedAt: publishedAt,
         error: null,
-      })
-      .onConflictDoUpdate({
-        target: transcripts.productionItemId,
-        set: {
-          source: "descript",
-          language: "en",
-          rawVtt,
-          fullText,
-          segments,
-          wordCount,
-          durationSec: durationSec.toFixed(3),
-          descriptPublishedSlug: slug,
-          descriptShareUrl: shareUrl,
-          descriptPublishedAt: publishedAt,
-          fetchedAt: publishedAt,
-          error: null,
-          updatedAt: sql`now()`,
-        },
-      })
-      .returning({ id: transcripts.id });
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning({ id: transcripts.id });
 
+  return {
+    productionItemId,
+    transcriptId: row.id,
+    segmentCount: segments.length,
+    wordCount,
+    durationSec,
+    shareUrl,
+  };
+}
+
+/**
+ * Finish a transcript fetch that was kicked off by
+ * {@link startDescriptTranscriptFetch}: poll the publish job, fetch the
+ * published WEBVTT, parse, and upsert the transcripts row. Blocks for up to
+ * ~3 minutes — must be called outside the HTTP response path on Heroku.
+ */
+export async function finishDescriptTranscriptFetch(
+  productionItemId: string,
+  publishJobId: string,
+  startedAt: Date
+): Promise<FetchResult> {
+  try {
+    const { shareUrl } = await waitForPublishJob(publishJobId);
+    const result = await saveDescriptTranscriptFromShareUrl(
+      productionItemId,
+      shareUrl
+    );
     await db.insert(syncLogs).values({
       syncType: "transcript-fetch",
       status: "success",
@@ -241,15 +309,7 @@ export async function finishDescriptTranscriptFetch(
       startedAt,
       completedAt: new Date(),
     });
-
-    return {
-      productionItemId,
-      transcriptId: row.id,
-      segmentCount: segments.length,
-      wordCount,
-      durationSec,
-      shareUrl,
-    };
+    return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db.insert(syncLogs).values({
