@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   const params = {
     startDate: searchParams.get("startDate") || defaultStart,
     endDate: searchParams.get("endDate") || defaultEnd,
-    viewType: (searchParams.get("viewType") || "weekly") as "weekly" | "daily",
+    viewType: (searchParams.get("viewType") || "weekly") as "weekly" | "daily" | "monthly",
     platform: searchParams.get("platform") || "all",
     platformKey: searchParams.get("platformKey") || "all",
     accountId: searchParams.get("accountId") || "all",

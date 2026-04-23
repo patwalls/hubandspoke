@@ -165,7 +165,7 @@ import type { ContentReportData, MetricData, ProductionItem } from "@/types";
 interface ReportParams {
   startDate: string;
   endDate: string;
-  viewType: "weekly" | "daily";
+  viewType: "weekly" | "daily" | "monthly";
   /** Legacy string filter — kept during the accounts rollout for URL
    *  compatibility. Prefer the three new filters below. */
   platform?: string;

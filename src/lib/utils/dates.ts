@@ -3,6 +3,9 @@ import {
   endOfWeek,
   addWeeks,
   addDays,
+  startOfMonth,
+  endOfMonth,
+  addMonths,
   format,
   isAfter,
   isBefore,
@@ -20,7 +23,7 @@ export type WeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export function buildPeriods(
   startDate: Date,
   endDate: Date,
-  viewType: "weekly" | "daily",
+  viewType: "weekly" | "daily" | "monthly",
   weekStartsOn: WeekStartsOn = 0
 ): Period[] {
   const periods: Period[] = [];
@@ -48,6 +51,20 @@ export function buildPeriods(
 
       weekNum++;
       current = addWeeks(current, 1);
+    }
+  } else if (viewType === "monthly") {
+    let current = startOfMonth(startDate);
+    while (!isAfter(current, endDate)) {
+      const monthEnd = endOfMonth(current);
+      const periodEnd = isAfter(monthEnd, endDate) ? endDate : monthEnd;
+
+      periods.push({
+        label: format(current, "MMM yyyy"),
+        start: format(current, "yyyy-MM-dd"),
+        end: format(periodEnd, "yyyy-MM-dd"),
+      });
+
+      current = addMonths(current, 1);
     }
   } else {
     let current = startDate;
