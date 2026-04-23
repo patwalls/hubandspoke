@@ -6,6 +6,7 @@
 // Edit this file to change a schedule. No Heroku Scheduler involvement.
 export const CRONTAB = `
 0 * * * * performance-decay
+15 * * * * threshold-monitor-sweep
 30 * * * * notion-sync
 20 * * * * enrichment-sweep
 40 * * * * hook-extract-sweep

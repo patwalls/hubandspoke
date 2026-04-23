@@ -49,6 +49,7 @@ import {
   crossPostScanTask,
   accountRefreshSweepTask,
 } from "./scheduled";
+import { thresholdMonitorSweepTask } from "./threshold-monitor-sweep";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -73,6 +74,7 @@ export interface TaskPayloads {
   "cross-post-scan": Record<string, never>;
   "youtube-download-sweep": Record<string, never>;
   "account-refresh-sweep": Record<string, never>;
+  "threshold-monitor-sweep": Record<string, never>;
 }
 
 const helloTask: Task = async (payload, helpers) => {
@@ -102,4 +104,5 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "cross-post-scan": crossPostScanTask,
   "youtube-download-sweep": youtubeDownloadSweepTask,
   "account-refresh-sweep": accountRefreshSweepTask,
+  "threshold-monitor-sweep": thresholdMonitorSweepTask,
 };
