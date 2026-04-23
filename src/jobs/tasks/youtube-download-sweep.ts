@@ -41,6 +41,10 @@ export const youtubeDownloadSweepTask: Task = async (_payload, helpers) => {
     await helpers.addJob("youtube-download", payload as never, {
       jobKey: `yt-dl-${id}`,
       jobKeyMode: "unsafe_dedupe",
+      // Bot-check / age-gated / deleted are deterministic — graphile's default
+      // 25 retries just burns worker slots. The sweep's `youtubeDownloadAttempts < MAX_ATTEMPTS`
+      // gate already paces retries across sweep cycles.
+      maxAttempts: 2,
     });
   }
 

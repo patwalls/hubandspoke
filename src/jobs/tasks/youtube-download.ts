@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { createReadStream } from "fs";
-import { stat, unlink } from "fs/promises";
+import { stat, unlink, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import type { Task } from "graphile-worker";
@@ -26,6 +26,18 @@ const YT_DLP_PATH = resolve(process.cwd(), "node_modules/.yt-dlp-bin/yt-dlp");
 // throttled formats. Abort if we're still going after this.
 const DOWNLOAD_TIMEOUT_MS = 20 * 60 * 1000;
 
+// Player-client strategies, tried in order until one succeeds. YouTube
+// challenges the default `web` client hard from datacenter IPs but is less
+// aggressive with embedded/TV clients. `default,-android_sdkless` keeps the
+// normal web/android stack minus the client YouTube is actively killing.
+// Order matters: start with the strategies most likely to yield a full 1080p
+// stream (web), fall through to thinner clients if bot-checked.
+const PLAYER_CLIENT_STRATEGIES: ReadonlyArray<{ name: string; clients: string }> = [
+  { name: "default_minus_sdkless", clients: "default,-android_sdkless" },
+  { name: "tv_embedded", clients: "tv_embedded,web_embedded,mweb" },
+  { name: "android_vr_mweb", clients: "android_vr,mweb,web_safari" },
+];
+
 /**
  * Downloads one YouTube video to S3 and populates the existing media_s3_*
  * columns on its production_item row. Idempotent: skips if the row already
@@ -33,8 +45,12 @@ const DOWNLOAD_TIMEOUT_MS = 20 * 60 * 1000;
  *
  * Failure modes are best-effort — YouTube throttles datacenter IPs hard, and
  * age-gated/geo-blocked videos can't be grabbed without cookies. Each failure
- * bumps youtube_download_attempts + records the error, and the sweep stops
+ * bumps youtube_download_attempts + records the error; the sweep stops
  * retrying after 5 tries.
+ *
+ * Cookies: if YT_DLP_COOKIES is set, its contents are written to /tmp and
+ * passed via --cookies. Export once from a logged-in Google account (throwaway
+ * recommended) with a browser extension that outputs Netscape cookies.txt.
  */
 export const youtubeDownloadTask: Task = async (rawPayload, helpers) => {
   const { productionItemId, force } = rawPayload as YoutubeDownloadPayload;
@@ -65,17 +81,42 @@ export const youtubeDownloadTask: Task = async (rawPayload, helpers) => {
   }
 
   const tmpPath = join(tmpdir(), `yt-dl-${productionItemId}.mp4`);
+  const cookiesPath = await maybeWriteCookies(productionItemId);
   helpers.logger.info(
-    `youtube-download start id=${productionItemId} url=${item.youtubeUrl}`,
+    `youtube-download start id=${productionItemId} url=${item.youtubeUrl} cookies=${cookiesPath ? "yes" : "no"}`,
   );
 
   try {
-    await runYtDlp({
-      url: item.youtubeUrl,
-      outputPath: tmpPath,
-      ffmpegPath: ffmpegInstaller.path,
-      logger: helpers.logger,
-    });
+    const errors: string[] = [];
+    let succeeded = false;
+    for (const strategy of PLAYER_CLIENT_STRATEGIES) {
+      // Wipe any tempfile from a previous failed strategy before retrying.
+      await unlink(tmpPath).catch(() => {});
+      try {
+        await runYtDlp({
+          url: item.youtubeUrl,
+          outputPath: tmpPath,
+          ffmpegPath: ffmpegInstaller.path,
+          cookiesPath,
+          playerClients: strategy.clients,
+          logger: helpers.logger,
+        });
+        helpers.logger.info(
+          `youtube-download yt-dlp ok id=${productionItemId} strategy=${strategy.name}`,
+        );
+        succeeded = true;
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        helpers.logger.info(
+          `youtube-download strategy=${strategy.name} failed: ${msg.slice(0, 200)}`,
+        );
+        errors.push(`[${strategy.name}] ${msg}`);
+      }
+    }
+    if (!succeeded) {
+      throw new Error(`all strategies failed: ${errors.join(" || ").slice(0, 450)}`);
+    }
 
     const fileStat = await stat(tmpPath);
     const key = buildKey(productionItemId, `${item.youtubeId ?? "video"}.mp4`);
@@ -128,13 +169,24 @@ export const youtubeDownloadTask: Task = async (rawPayload, helpers) => {
     throw err;
   } finally {
     await unlink(tmpPath).catch(() => {});
+    if (cookiesPath) await unlink(cookiesPath).catch(() => {});
   }
 };
+
+async function maybeWriteCookies(productionItemId: string): Promise<string | null> {
+  const raw = process.env.YT_DLP_COOKIES;
+  if (!raw) return null;
+  const path = join(tmpdir(), `yt-dl-cookies-${productionItemId}.txt`);
+  await writeFile(path, raw, { mode: 0o600 });
+  return path;
+}
 
 function runYtDlp(args: {
   url: string;
   outputPath: string;
   ffmpegPath: string;
+  cookiesPath: string | null;
+  playerClients: string;
   logger: { info: (msg: string) => void; error: (msg: string) => void };
 }): Promise<void> {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -151,10 +203,15 @@ function runYtDlp(args: {
       "--restrict-filenames",
       "--concurrent-fragments",
       "4",
+      "--extractor-args",
+      `youtube:player_client=${args.playerClients}`,
       "-o",
       args.outputPath,
-      args.url,
     ];
+    if (args.cookiesPath) {
+      ytArgs.push("--cookies", args.cookiesPath);
+    }
+    ytArgs.push(args.url);
 
     const proc = spawn(YT_DLP_PATH, ytArgs, {
       stdio: ["ignore", "pipe", "pipe"],

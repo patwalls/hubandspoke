@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, Share2Icon, Trash2Icon, TrendingUpIcon } from "lucide-react";
+import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, RepeatIcon, Share2Icon, Trash2Icon, TrendingUpIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { buildDescriptCompositionUrl } from "@/lib/descript";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -53,6 +53,7 @@ import { ContentActivity } from "./content-activity";
 import { TranscriptButton } from "./transcript-dialog";
 import { EnrichmentButton, type EnrichmentMedia } from "./enrichment-dialog";
 import { coverImageUrl } from "@/lib/cover-image";
+import { CoverImg } from "./cover-img";
 import { cn } from "@/lib/utils";
 import { platformClass, statusClass } from "@/lib/badge-colors";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
@@ -803,6 +804,27 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
     [actionPending, brand, contentId, router],
   );
 
+  const handleRepost = useCallback(async () => {
+    if (actionPending) return;
+    setActionPending(true);
+    try {
+      const res = await fetch(`/api/production-items/${contentId}/repost`, {
+        method: "POST",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Failed to create repost");
+        return;
+      }
+      toast.success("Repost idea created");
+      router.push(`/${brand}/content/${json.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create repost");
+    } finally {
+      setActionPending(false);
+    }
+  }, [actionPending, brand, contentId, router]);
+
   const handleDuplicate = useCallback(async () => {
     if (actionPending) return;
     setActionPending(true);
@@ -1236,17 +1258,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3 flex-wrap">
-            {(() => {
-              const cover = coverImageUrl(item);
-              return cover ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={cover}
-                  alt=""
-                  className="w-16 h-10 rounded object-cover shrink-0"
-                />
-              ) : null;
-            })()}
+            <CoverImg
+              src={coverImageUrl(item)}
+              className="w-16 h-10 rounded object-cover shrink-0"
+            />
             <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
               {item.title || "(Untitled)"}
             </h1>
@@ -1621,6 +1636,12 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       )}
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
+                  <DropdownMenuItem
+                    disabled={actionPending}
+                    onClick={() => void handleRepost()}
+                  >
+                    <RepeatIcon className="size-3.5" /> Repost
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={actionPending}
                     onClick={() => void handleDuplicate()}
@@ -2251,16 +2272,11 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                       key={perf.id}
                       className="flex gap-3 p-3 rounded border border-border hover:bg-accent/50 transition"
                     >
-                      {(() => {
-                        const cover = coverImageUrl(perf);
-                        return cover ? (
-                          <img
-                            src={cover}
-                            alt={perf.title || "Content thumbnail"}
-                            className="h-16 w-16 rounded object-cover flex-shrink-0"
-                          />
-                        ) : null;
-                      })()}
+                      <CoverImg
+                        src={coverImageUrl(perf)}
+                        alt={perf.title || "Content thumbnail"}
+                        className="h-16 w-16 rounded object-cover flex-shrink-0"
+                      />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-foreground line-clamp-2">
                           {perf.title || "Untitled"}
@@ -2450,14 +2466,10 @@ export function ContentDetail({ brand, contentId }: ContentDetailProps) {
                     >
                       <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                         <div className="flex items-center gap-3">
-                          {d.cover ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
-                              src={d.cover}
-                              alt=""
-                              className="w-20 h-12 rounded object-cover shrink-0"
-                            />
-                          ) : null}
+                          <CoverImg
+                            src={d.cover}
+                            className="w-20 h-12 rounded object-cover shrink-0"
+                          />
                           <div className="flex flex-col gap-0.5 min-w-0">
                             <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
                               {d.kind === "repost" && (

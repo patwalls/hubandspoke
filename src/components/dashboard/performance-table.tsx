@@ -24,6 +24,7 @@ import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
 import { platformClass } from "@/lib/badge-colors";
 import { coverImageUrl } from "@/lib/cover-image";
+import { CoverImg } from "./cover-img";
 
 interface PerformanceTableProps {
   items: ProductionItem[];
@@ -530,20 +531,12 @@ export function PerformanceTable({ items, brand, formats, onPostCreated }: Perfo
               >
                 <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                   <div className="flex items-center gap-3">
-                    {(() => {
-                      if (!hasThumbnails) return null;
-                      const cover = coverImageUrl(item);
-                      return cover ? (
-                        <img
-                          src={cover}
-                          alt=""
-                          className="h-12 w-auto rounded shrink-0"
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                          }}
-                        />
-                      ) : null;
-                    })()}
+                    {hasThumbnails && (
+                      <CoverImg
+                        src={coverImageUrl(item)}
+                        className="h-12 w-auto rounded shrink-0"
+                      />
+                    )}
                     <div className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
                         <Link
