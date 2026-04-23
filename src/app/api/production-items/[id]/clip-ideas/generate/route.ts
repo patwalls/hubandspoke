@@ -70,6 +70,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
         platform: productionItems.platform,
         format: productionItems.format,
         views: productionItems.views,
+        hook: productionItems.hook,
       })
       .from(productionItems)
       .where(
@@ -89,6 +90,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
         platform: d.platform as string[] | null,
         format: d.format,
         views: d.views,
+        hook: d.hook,
       }));
 
     const topPerfRows = await topShortFormPerformers({
@@ -101,6 +103,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       platform: r.platform,
       format: r.format,
       views: r.views,
+      hook: r.hook,
     }));
 
     const result = await generateClipIdeas({

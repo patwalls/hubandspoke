@@ -198,6 +198,9 @@ export async function assignClipIdea(args: {
         sourceClipIdeaId: args.clipIdeaId,
         producerUserId: args.decidedByUserId,
         editorUserId: args.editorUserId,
+        hook: row.hook,
+        hookSource: "clip_idea",
+        hookExtractedAt: new Date(),
       })
       .returning({ id: productionItems.id });
     created = rows[0];
@@ -348,6 +351,9 @@ export async function createClipIdeaInDescript(args: {
         editorUserId: args.actorUserId,
         descriptProjectId: row.descriptProjectId,
         descriptProjectUrl: agent.projectUrl,
+        hook: row.hook,
+        hookSource: "clip_idea",
+        hookExtractedAt: new Date(),
       })
       .returning({ id: productionItems.id });
     created = rows[0];
@@ -446,6 +452,9 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
         sourceClipIdeaId: args.clipIdeaId,
         producerUserId: args.actorUserId,
         editorUserId: args.actorUserId,
+        hook: row.hook,
+        hookSource: "clip_idea",
+        hookExtractedAt: new Date(),
       })
       .returning({ id: productionItems.id });
     created = rows[0];

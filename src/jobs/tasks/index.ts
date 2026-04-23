@@ -23,10 +23,12 @@ import {
   type NotificationSendPayload,
 } from "./notification-send";
 import { enrichItemTask, type EnrichItemPayload } from "./enrich-item";
+import { extractHookTask, type ExtractHookPayload } from "./extract-hook";
 import {
   performanceDecayTask,
   notionSyncTask,
   enrichmentSweepTask,
+  hookExtractSweepTask,
   matgSyncTask,
   evergreenScanTask,
   crossPostScanTask,
@@ -39,10 +41,12 @@ export interface TaskPayloads {
   "clip-idea-precise-cut": ClipIdeaPreciseCutPayload;
   "notification-send": NotificationSendPayload;
   "enrich-item": EnrichItemPayload;
+  "extract-hook": ExtractHookPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
   "enrichment-sweep": Record<string, never>;
+  "hook-extract-sweep": Record<string, never>;
   "matg-sync": Record<string, never>;
   "evergreen-scan": Record<string, never>;
   "cross-post-scan": Record<string, never>;
@@ -60,9 +64,11 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "clip-idea-precise-cut": clipIdeaPreciseCutTask,
   "notification-send": notificationSendTask,
   "enrich-item": enrichItemTask,
+  "extract-hook": extractHookTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,
+  "hook-extract-sweep": hookExtractSweepTask,
   "matg-sync": matgSyncTask,
   "evergreen-scan": evergreenScanTask,
   "cross-post-scan": crossPostScanTask,

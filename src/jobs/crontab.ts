@@ -8,6 +8,7 @@ export const CRONTAB = `
 0 * * * * performance-decay
 30 * * * * notion-sync
 20 * * * * enrichment-sweep
+40 * * * * hook-extract-sweep
 0 13 * * * matg-sync
 0 15 * * * evergreen-scan
 0 16 * * * cross-post-scan

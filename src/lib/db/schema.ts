@@ -178,6 +178,20 @@ export const productionItems = pgTable(
     predictedViewsSnapshotAt: timestamp("predicted_views_snapshot_at", {
       withTimezone: true,
     }),
+    // Verbatim 1–2 sentence opening of the post — the hook that stopped the
+    // scroll. Fed back into the clip-idea agent as exemplar data so "this hook
+    // + this view count" trains the next batch of suggestions. Three fill
+    // paths: copied from clip_ideas.hook on promotion (hookSource='clip_idea'),
+    // LLM-extracted from transcript by the hook-extract sweep
+    // (hookSource='llm'), or hand-edited (hookSource='manual'). NULL = not yet
+    // extracted; short-form only in practice (sweep only considers short-form
+    // platforms).
+    hook: text("hook"),
+    hookSource: text("hook_source"),
+    hookExtractor: text("hook_extractor"),
+    hookExtractedAt: timestamp("hook_extracted_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -192,6 +206,10 @@ export const productionItems = pgTable(
     index("idx_production_items_last_perf_sync").on(table.lastPerformanceSyncAt),
     index("idx_production_items_enrichment_pending").on(
       table.enrichmentCompletedAt
+    ),
+    index("idx_production_items_hook_pending").on(
+      table.status,
+      table.hookExtractedAt
     ),
     index("idx_production_items_pillar_notion").on(table.pillarContentNotionId),
     index("idx_production_items_pillar_item").on(table.pillarContentItemId),

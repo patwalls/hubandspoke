@@ -10,7 +10,9 @@ import { runEvergreenScan } from "@/lib/services/evergreen-scan";
 import { runCrossPostScan } from "@/lib/services/cross-post-scan";
 import { syncAllMATG } from "@/lib/services/matg-sync";
 import { selectEnrichmentCandidates } from "@/lib/services/enrichment/orchestrator";
+import { selectHookCandidates } from "@/lib/services/hook-extract/orchestrator";
 import type { EnrichItemPayload } from "./enrich-item";
+import type { ExtractHookPayload } from "./extract-hook";
 
 function timed(name: string, fn: () => Promise<unknown>): Task {
   return async (_payload, helpers) => {
@@ -55,6 +57,27 @@ export const enrichmentSweepTask: Task = async (_payload, helpers) => {
   }
   helpers.logger.info(
     `enrichment-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
+  );
+};
+/**
+ * Cron parent task: select published short-form items missing a hook and
+ * enqueue one `extract-hook` child per item. Separate from `enrichment-sweep`
+ * because hook extraction is LLM-gated (Haiku), not SC-gated — mixing the
+ * two would confuse retry semantics and error columns.
+ */
+export const hookExtractSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("hook-extract-sweep start");
+  const candidates = await selectHookCandidates();
+  for (const productionItemId of candidates) {
+    const payload: ExtractHookPayload = { productionItemId };
+    await helpers.addJob("extract-hook", payload as never, {
+      jobKey: `extract-hook-${productionItemId}`,
+      jobKeyMode: "unsafe_dedupe",
+    });
+  }
+  helpers.logger.info(
+    `hook-extract-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
   );
 };
 export const matgSyncTask: Task = timed("matg-sync", () => syncAllMATG());

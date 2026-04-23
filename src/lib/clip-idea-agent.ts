@@ -1,10 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// Sonnet 4.6 for creative judgment. Prompt V2: dedicated HOOK section,
-// verbatim quote requirement, performance grounding, estimatedViews replaces
-// the earlier confidence %.
+// Sonnet 4.6 for creative judgment. Prompt V4: performance context now feeds
+// the actual verbatim hook of each top-performer (when available) instead of
+// the post title. Title is a weak proxy for the hook on Notion-synced /
+// cross-posted items — the real opening line is the training signal.
 const MODEL = "claude-sonnet-4-6";
-export const PROMPT_VERSION = 3;
+export const PROMPT_VERSION = 4;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You are an expert short-form video editor. Given a long-form transcript plus examples of what has worked for this brand, you identify the 10 moments most likely to perform as standalone short-form clips (Reels, TikTok, YouTube Shorts).
@@ -191,6 +192,11 @@ export interface PerfRow {
   platform: string[] | null;
   views: number | null;
   format?: string | null;
+  // Verbatim opening of the short, when we have it. Populated by the
+  // hook-extract sweep (or copied from clip_ideas.hook on promotion). Titles
+  // for Notion-synced / cross-posted items are promotional, not hooks — prefer
+  // this field when present.
+  hook?: string | null;
 }
 
 export interface GenerateArgs {
@@ -209,7 +215,13 @@ function formatPerfRow(r: PerfRow): string {
   ) ?? r.platform?.[0] ?? "?";
   const views = r.views != null ? `${r.views.toLocaleString()} views` : "—";
   const fmt = r.format ? ` · ${r.format}` : "";
-  return `- "${r.title ?? "(untitled)"}" — ${platform}${fmt} — ${views}`;
+  const hook = r.hook?.trim();
+  if (hook) {
+    return `- HOOK: "${hook}" — ${platform}${fmt} — ${views}`;
+  }
+  // Fall back to title with a marker so the LLM knows this isn't a verified
+  // opening line — usually a promotional title, not the hook the viewer heard.
+  return `- TITLE: "${r.title ?? "(untitled)"}" — ${platform}${fmt} — ${views}`;
 }
 
 export async function generateClipIdeas(
@@ -220,7 +232,7 @@ export async function generateClipIdeas(
   const derivativesBlock =
     args.derivatives.length > 0
       ? [
-          `DERIVATIVES OF THIS PILLAR (clips already made from this same long-form video, with actual view counts):`,
+          `DERIVATIVES OF THIS PILLAR (clips already made from this same long-form video, with actual view counts). Lines prefixed HOOK: show the verbatim opening line of each short; lines prefixed TITLE: fall back to the post title because no hook is on file — treat those as weaker signal.`,
           args.derivatives.map(formatPerfRow).join("\n"),
         ].join("\n")
       : `DERIVATIVES OF THIS PILLAR: (none yet — this is the first short-form pass.)`;
@@ -228,7 +240,7 @@ export async function generateClipIdeas(
   const topPerformersBlock =
     args.topPerformers.length > 0
       ? [
-          `TOP-PERFORMING SHORT-FORM CLIPS BRAND-WIDE (examples of hooks + angles that actually landed for this audience — titles are usually the hook):`,
+          `TOP-PERFORMING SHORT-FORM CLIPS BRAND-WIDE — the openings that actually stopped the scroll on this audience, ranked by real view counts. Lines prefixed HOOK: are verbatim opening lines; lines prefixed TITLE: are promotional titles where the hook isn't on file (weaker signal). Use the HOOK lines as your pattern-matching ground truth for what hooks land with this brand's viewers.`,
           args.topPerformers.map(formatPerfRow).join("\n"),
         ].join("\n")
       : `TOP-PERFORMING SHORT-FORM CLIPS BRAND-WIDE: (none available.)`;

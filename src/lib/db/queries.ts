@@ -393,6 +393,7 @@ export interface TopShortFormRow {
   views: number | null;
   publishedDate: string | null;
   pillarContentItemId: string | null;
+  hook: string | null;
 }
 
 /**
@@ -444,6 +445,7 @@ export async function topShortFormPerformers(params: {
       views: productionItems.views,
       publishedDate: productionItems.publishedDate,
       pillarContentItemId: productionItems.pillarContentItemId,
+      hook: productionItems.hook,
     })
     .from(productionItems)
     .where(and(...conditions))
@@ -453,5 +455,86 @@ export async function topShortFormPerformers(params: {
   return rows.map((r) => ({
     ...r,
     platform: r.platform as string[] | null,
+  }));
+}
+
+/* ------------------------------------------------------------------ */
+/*  Coverage map                                                       */
+/* ------------------------------------------------------------------ */
+
+export interface CoverageRow {
+  brand: string;
+  platform: string;
+  total: number;
+  hasTranscript: number;
+  hasEnrichment: number;
+  hasPerfSync: number;
+  hasMedia: number;
+  hasAuthor: number;
+  hasHook: number;
+  hasClipIdeas: number;
+  hasEvergreen: number;
+}
+
+/**
+ * One row per (brand, primary platform) counting how many published items
+ * have each durable data signal. Used by the `/coverage` page to spot data
+ * gaps before running a backfill. "Primary platform" = first element of the
+ * jsonb `platform` array; cross-posts still count once per row.
+ *
+ * Hook-column comment: `has_hook` is always 0 until migration NNNN adds the
+ * `hook` column on production_items. Intentional — the page shipped first so
+ * the gap is visible before we spend on Haiku calls.
+ */
+export async function getCoverageMap(): Promise<CoverageRow[]> {
+  const rows = (await db.execute(sql`
+    SELECT
+      pi.brand AS brand,
+      COALESCE(pi.platform->>0, 'Unknown') AS platform,
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE t.id IS NOT NULL)::int AS has_transcript,
+      COUNT(*) FILTER (WHERE pi.enrichment_completed_at IS NOT NULL)::int AS has_enrichment,
+      COUNT(*) FILTER (WHERE pi.last_performance_sync_at IS NOT NULL)::int AS has_perf_sync,
+      COUNT(*) FILTER (WHERE pi.media_s3_key IS NOT NULL)::int AS has_media,
+      COUNT(*) FILTER (WHERE pi.author_handle IS NOT NULL)::int AS has_author,
+      COUNT(*) FILTER (WHERE pi.hook IS NOT NULL)::int AS has_hook,
+      COUNT(*) FILTER (WHERE ci_exists.one IS NOT NULL)::int AS has_clip_ideas,
+      COUNT(*) FILTER (WHERE pi.evergreen_evaluated_at IS NOT NULL)::int AS has_evergreen
+    FROM production_items pi
+    LEFT JOIN transcripts t ON t.production_item_id = pi.id
+    LEFT JOIN LATERAL (
+      SELECT 1 AS one FROM clip_ideas
+      WHERE source_production_item_id = pi.id
+      LIMIT 1
+    ) ci_exists ON TRUE
+    WHERE pi.status = 'Published'
+    GROUP BY pi.brand, platform
+    ORDER BY pi.brand ASC, total DESC
+  `)) as unknown as Array<{
+    brand: string;
+    platform: string;
+    total: number;
+    has_transcript: number;
+    has_enrichment: number;
+    has_perf_sync: number;
+    has_media: number;
+    has_author: number;
+    has_hook: number;
+    has_clip_ideas: number;
+    has_evergreen: number;
+  }>;
+
+  return rows.map((r) => ({
+    brand: r.brand,
+    platform: r.platform,
+    total: Number(r.total),
+    hasTranscript: Number(r.has_transcript),
+    hasEnrichment: Number(r.has_enrichment),
+    hasPerfSync: Number(r.has_perf_sync),
+    hasMedia: Number(r.has_media),
+    hasAuthor: Number(r.has_author),
+    hasHook: Number(r.has_hook),
+    hasClipIdeas: Number(r.has_clip_ideas),
+    hasEvergreen: Number(r.has_evergreen),
   }));
 }
