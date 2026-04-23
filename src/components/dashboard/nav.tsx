@@ -1,13 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { GlobalSearch } from "@/components/dashboard/global-search";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // Shape passed down from the (server) layout. Mirrors BrandListEntry from
 // @/lib/db/brands but redeclared locally so the component doesn't import a
@@ -68,12 +75,66 @@ function BrandAvatar({ brand, size = 22 }: { brand: Brand; size?: number }) {
 // + SectionTabs) can read the dynamic brand list without re-fetching.
 type NavProps = {
   userEmail: string;
+  userName: string | null;
+  userAvatarUrl: string | null;
   brands: Brand[];
   defaultBrand: string;
 };
 
-export function DashboardNav({ userEmail, brands, defaultBrand }: NavProps) {
+function UserAvatar({
+  name,
+  email,
+  avatarUrl,
+  size = 24,
+}: {
+  name: string | null;
+  email: string;
+  avatarUrl: string | null;
+  size?: number;
+}) {
+  const [errored, setErrored] = useState(false);
+  const source = name || email;
+  const initials = source
+    .split(/[\s@.]+/)
+    .filter((w) => /[A-Za-z0-9]/.test(w[0] ?? ""))
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join("");
+
+  if (!errored && avatarUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={avatarUrl}
+        alt=""
+        width={size}
+        height={size}
+        onError={() => setErrored(true)}
+        className="rounded-full object-cover bg-muted"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+
+  return (
+    <span
+      className="rounded-full bg-gradient-to-br from-[#ff7a59] to-[#ff5c35] text-white font-semibold flex items-center justify-center select-none"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
+    >
+      {initials || "?"}
+    </span>
+  );
+}
+
+export function DashboardNav({
+  userEmail,
+  userName,
+  userAvatarUrl,
+  brands,
+  defaultBrand,
+}: NavProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
   const isOnFormats = pathname.endsWith("/formats");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -190,13 +251,65 @@ export function DashboardNav({ userEmail, brands, defaultBrand }: NavProps) {
               </kbd>
             </button>
             <NotificationBell />
-            <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[150px]">{userEmail}</span>
-            <button
-              onClick={handleSignOut}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Sign Out
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Account menu"
+                className="flex items-center gap-1.5 rounded-full p-0.5 pr-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <UserAvatar
+                  name={userName}
+                  email={userEmail}
+                  avatarUrl={userAvatarUrl}
+                />
+                <svg
+                  viewBox="0 0 24 24"
+                  width="12"
+                  height="12"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                  className="opacity-70"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-56">
+                <div className="flex items-center gap-2.5 px-2 py-2">
+                  <UserAvatar
+                    name={userName}
+                    email={userEmail}
+                    avatarUrl={userAvatarUrl}
+                    size={32}
+                  />
+                  <div className="min-w-0 flex-1">
+                    {userName ? (
+                      <div className="text-sm font-medium text-foreground truncate">
+                        {userName}
+                      </div>
+                    ) : null}
+                    <div className="text-xs text-muted-foreground truncate">
+                      {userEmail}
+                    </div>
+                  </div>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => router.push("/settings")}
+                  className="cursor-pointer"
+                >
+                  Settings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleSignOut}
+                  className="cursor-pointer"
+                >
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
