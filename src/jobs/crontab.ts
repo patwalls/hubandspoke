@@ -12,4 +12,5 @@ export const CRONTAB = `
 0 13 * * * matg-sync
 0 15 * * * evergreen-scan
 0 16 * * * cross-post-scan
+*/20 * * * * youtube-download-sweep
 `.trim();

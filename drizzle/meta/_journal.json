@@ -225,6 +225,13 @@
       "when": 1776903088153,
       "tag": "0031_fine_crystal",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1776904606323,
+      "tag": "0032_slippery_johnny_blaze",
+      "breakpoints": true
     }
   ]
 }

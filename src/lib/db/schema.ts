@@ -121,6 +121,16 @@ export const productionItems = pgTable(
     }),
     enrichmentAttempts: integer("enrichment_attempts").default(0).notNull(),
     enrichmentError: text("enrichment_error"),
+    // YouTube archive state. Independent of `enrichment*` because download is
+    // best-effort (Heroku datacenter IPs get rate-limited by YouTube; some
+    // videos are age-gated/geo-blocked). Success fills `mediaS3Key` et al;
+    // failure bumps attempts + writes the last error. The sweep stops
+    // retrying after 5 attempts.
+    youtubeDownloadAttempts: integer("youtube_download_attempts")
+      .default(0)
+      .notNull(),
+    youtubeDownloadError: text("youtube_download_error"),
+    youtubeDownloadSource: text("youtube_download_source"),
     // Raw Notion page ID of the pillar (captured directly from the "Pillar
     // Content" relation during sync). Kept alongside the resolved FK so we can
     // still reconcile if a pillar is re-synced out of order.
