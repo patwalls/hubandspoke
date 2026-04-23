@@ -154,12 +154,16 @@ export async function syncMATGYouTube(): Promise<YouTubeSyncResult> {
         const publishedDate = video.publishedTime
           ? video.publishedTime.split("T")[0]
           : parseRelativeTime(video.publishedTimeText);
+        const publishedAt = video.publishedTime
+          ? new Date(video.publishedTime)
+          : null;
 
         const videoData = {
           title: video.title,
           youtubeUrl: video.url,
           thumbnail: video.thumbnail,
           publishedDate,
+          publishedAt,
           status: "Published",
           platform: ["YouTube"] as string[],
           format: "Business Interview", // default pillar format — editable in dashboard

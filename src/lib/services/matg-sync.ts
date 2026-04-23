@@ -435,12 +435,16 @@ async function syncYouTubeVideos(): Promise<SyncResult> {
       const publishedDate = video.publishedTime
         ? video.publishedTime.split("T")[0]
         : parseRelativeTime(video.publishedTimeText);
+      const publishedAt = video.publishedTime
+        ? new Date(video.publishedTime)
+        : null;
 
       const data = {
         title: video.title,
         youtubeUrl: video.url,
         thumbnail: video.thumbnail,
         publishedDate,
+        publishedAt,
         status: "Published" as const,
         platform: ["YouTube"] as string[],
         accountId,
@@ -498,12 +502,16 @@ async function syncYouTubeShorts(): Promise<SyncResult> {
       const publishedDate = short.publishDate
         ? short.publishDate.split("T")[0]
         : null;
+      const publishedAt = short.publishDate
+        ? new Date(short.publishDate)
+        : null;
 
       const data = {
         title: short.title,
         youtubeUrl: short.url,
         thumbnail: null as string | null, // shorts don't have thumbnails in API response
         publishedDate,
+        publishedAt,
         status: "Published" as const,
         platform: ["YouTube Shorts"] as string[],
         accountId,
@@ -561,6 +569,7 @@ async function syncInstagram(): Promise<SyncResult> {
     try {
       const postUrl = post.url || `https://www.instagram.com/p/${post.code}/`;
       const publishedDate = unixToDate(post.taken_at);
+      const publishedAt = post.taken_at ? new Date(post.taken_at * 1000) : null;
       const caption = typeof post.caption === "object" && post.caption?.text
         ? post.caption.text
         : null;
@@ -576,6 +585,7 @@ async function syncInstagram(): Promise<SyncResult> {
         title: caption ? caption.slice(0, 120) + (caption.length > 120 ? "..." : "") : "(No caption)",
         thumbnail,
         publishedDate,
+        publishedAt,
         status: "Published" as const,
         platform: [platformLabel] as string[],
         accountId,
@@ -637,6 +647,9 @@ async function syncTwitter(): Promise<SyncResult> {
       if (!legacy) continue;
 
       const publishedDate = parseTwitterDate(legacy.created_at);
+      const publishedAt = legacy.created_at
+        ? new Date(legacy.created_at)
+        : null;
       const tweetUrl = tweet.url;
       const viewCount = tweet.views?.count ? parseInt(tweet.views.count, 10) : null;
       const thumbnail = legacy.entities?.media?.[0]?.media_url_https || null;
@@ -649,6 +662,7 @@ async function syncTwitter(): Promise<SyncResult> {
         title,
         thumbnail,
         publishedDate,
+        publishedAt,
         status: "Published" as const,
         platform: ["X"] as string[],
         accountId,

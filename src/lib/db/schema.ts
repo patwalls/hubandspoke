@@ -26,6 +26,12 @@ export const productionItems = pgTable(
     thumbnail: text("thumbnail"),
     title: text("title"),
     publishedDate: date("published_date"),
+    // Precise publish moment for sort tie-breaking within a day. Populated
+    // from the platform API when available (SC response timestamps during
+    // sync / "Add from link"), or stamped when an item transitions to
+    // status = "Published" in-app. Nullable for historic rows; the content
+    // view falls back to midnight of `publishedDate` when this is null.
+    publishedAt: timestamp("published_at", { withTimezone: true }),
     status: text("status"),
     platform: jsonb("platform").$type<string[]>(),
     format: text("format"),
@@ -245,6 +251,7 @@ export const productionItems = pgTable(
   },
   (table) => [
     index("idx_production_items_published_date").on(table.publishedDate),
+    index("idx_production_items_published_at").on(table.publishedAt),
     index("idx_production_items_status").on(table.status),
     index("idx_production_items_brand").on(table.brand),
     index("idx_production_items_account").on(table.accountId),

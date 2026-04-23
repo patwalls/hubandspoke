@@ -317,6 +317,7 @@ export async function GET(request: NextRequest) {
       thumbnail: item.thumbnail,
       title: item.title,
       publishedDate: item.publishedDate,
+      publishedAt: item.publishedAt?.toISOString() ?? null,
       status: item.status,
       platform: item.platform as string[] | null,
       postType: item.postType ?? null,

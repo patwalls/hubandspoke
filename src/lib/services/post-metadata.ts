@@ -18,6 +18,12 @@ export interface LinkMetadata {
   postType: PostType | null;
   title: string | null;
   publishedDate: string | null; // YYYY-MM-DD
+  /**
+   * Precise publish moment as an ISO 8601 string, when the platform API
+   * reports one. Used by the content view to break ties between posts
+   * published on the same day.
+   */
+  publishedAt: string | null;
   views: number | null;
   likes: number | null;
   comments: number | null;
@@ -36,6 +42,7 @@ function emptyMetadata(url: string, warning: string | null = null): LinkMetadata
     postType: null,
     title: null,
     publishedDate: null,
+    publishedAt: null,
     views: null,
     likes: null,
     comments: null,
@@ -62,6 +69,16 @@ function toYmd(d: Date | null): string | null {
 function unixToYmd(ts: number | null | undefined): string | null {
   if (!ts) return null;
   return toYmd(new Date(ts * 1000));
+}
+
+function toIso(d: Date | null): string | null {
+  if (!d || isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function unixToIso(ts: number | null | undefined): string | null {
+  if (!ts) return null;
+  return toIso(new Date(ts * 1000));
 }
 
 function parseRelativeTime(text: string | null | undefined): string | null {
@@ -171,11 +188,15 @@ async function fetchYouTube(url: string, base: LinkMetadata): Promise<LinkMetada
   const publishedDate =
     (data.publishedTime && data.publishedTime.split("T")[0]) ||
     parseRelativeTime(data.publishedTimeText);
+  const publishedAt = data.publishedTime
+    ? toIso(new Date(data.publishedTime))
+    : null;
 
   return {
     ...base,
     title: truncateTitle(data.title),
     publishedDate,
+    publishedAt,
     views: data.viewCountInt ?? null,
     likes: data.likeCountInt ?? null,
     comments: data.commentCountInt ?? null,
@@ -222,6 +243,7 @@ async function fetchInstagram(url: string, base: LinkMetadata): Promise<LinkMeta
     ...base,
     title: truncateTitle(caption) ?? "(No caption)",
     publishedDate: unixToYmd(media.taken_at_timestamp ?? null),
+    publishedAt: unixToIso(media.taken_at_timestamp ?? null),
     views: media.video_play_count ?? media.video_view_count ?? null,
     likes: media.edge_media_preview_like?.count ?? null,
     comments: media.edge_media_to_parent_comment?.count ?? null,
@@ -269,6 +291,9 @@ async function fetchTwitter(url: string, base: LinkMetadata): Promise<LinkMetada
   const publishedDate = legacy.created_at
     ? toYmd(new Date(legacy.created_at))
     : null;
+  const publishedAt = legacy.created_at
+    ? toIso(new Date(legacy.created_at))
+    : null;
   const fullText = legacy.full_text ?? "";
   const handle = tweet.core?.user_results?.result?.legacy?.screen_name ?? null;
 
@@ -276,6 +301,7 @@ async function fetchTwitter(url: string, base: LinkMetadata): Promise<LinkMetada
     ...base,
     title: truncateTitle(fullText),
     publishedDate,
+    publishedAt,
     views: tweet.views?.count ? parseInt(tweet.views.count, 10) : null,
     likes: legacy.favorite_count ?? null,
     comments: legacy.reply_count ?? null,
@@ -308,6 +334,7 @@ async function fetchTikTok(url: string, base: LinkMetadata): Promise<LinkMetadat
     ...base,
     title: truncateTitle(detail.desc),
     publishedDate: unixToYmd(detail.create_time ?? null),
+    publishedAt: unixToIso(detail.create_time ?? null),
     views: detail.statistics?.play_count ?? null,
     likes: detail.statistics?.digg_count ?? null,
     comments: detail.statistics?.comment_count ?? null,
@@ -339,6 +366,7 @@ async function fetchThreads(url: string, base: LinkMetadata): Promise<LinkMetada
     ...base,
     title: truncateTitle(caption),
     publishedDate: unixToYmd(publishedTs),
+    publishedAt: unixToIso(publishedTs),
     views: post.view_counts ?? null,
     likes: post.like_count ?? null,
     comments: post.text_post_app_info?.direct_reply_count ?? null,
@@ -376,10 +404,16 @@ async function fetchLinkedIn(url: string, base: LinkMetadata): Promise<LinkMetad
     (data.postedDateTimestamp
       ? toYmd(new Date(data.postedDateTimestamp))
       : null);
+  const publishedAt = data.postedDateTimestamp
+    ? toIso(new Date(data.postedDateTimestamp))
+    : data.postedDate
+      ? toIso(new Date(data.postedDate))
+      : null;
   return {
     ...base,
     title: truncateTitle(body),
     publishedDate,
+    publishedAt,
     likes: data.likeCount ?? null,
     comments: data.commentCount ?? null,
     thumbnail: data.images?.[0]?.url ?? null,

@@ -1,0 +1,2 @@
+ALTER TABLE "production_items" ADD COLUMN "published_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "idx_production_items_published_at" ON "production_items" USING btree ("published_at");

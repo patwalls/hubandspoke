@@ -17,7 +17,7 @@ removing, or deprecating anything.
 
 | Feature | Status | Entry points | Backing tables | Notes |
 |---|---|---|---|---|
-| Content library / list | Active | `/(dashboard)/[brand]/content`, `GET /api/production-items/search` | `productionItems` | Filter by status / format / account / post-type |
+| Content library / list | Active | `/(dashboard)/[brand]/content`, `GET /api/production-items/search` | `productionItems` | Filter by status / format / account / post-type. Sort-by-Published uses `publishedAt` (timestamp) for same-day tie-breaking, falling back to `publishedDate` midnight when null |
 | Item detail (metadata, comments, drafts, transcript) | Active | `/(dashboard)/[brand]/content/[contentId]`, `GET\|PATCH\|DELETE /api/production-items/[id]` | `productionItems`, `contentComments`, `contentDrafts`, `transcripts` | |
 | Manual item creation | Active | `POST /api/production-items` | `productionItems` | For platforms API can't pull from |
 | Add post from link (URL → pre-filled dialog) | Active | "+ Add Post" dropdown on the performance table → `POST /api/production-items/preview-link` | `productionItems`, `accounts` | Paste a social URL; SC API fills title/date/metrics/thumbnail/author; user reviews then saves |

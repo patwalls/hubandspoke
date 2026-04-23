@@ -136,6 +136,7 @@ export async function POST(request: NextRequest) {
       format,
       publishedLink,
       publishedDate,
+      publishedAt: bodyPublishedAt,
       brand,
       views,
       likes,
@@ -224,6 +225,14 @@ export async function POST(request: NextRequest) {
     const lastPerformanceSyncAt =
       autoFetched || clientSuppliedMetrics ? new Date() : null;
 
+    // Precise publish moment. Prefer the platform-reported timestamp (from
+    // preview-link). Otherwise stamp now — new rows are created with
+    // status = "Published", so "created at" is a good proxy.
+    const publishedAt =
+      typeof bodyPublishedAt === "string" && bodyPublishedAt
+        ? new Date(bodyPublishedAt)
+        : new Date();
+
     const utmCampaign = await generateUtmCampaign(title);
     let created;
     try {
@@ -237,6 +246,7 @@ export async function POST(request: NextRequest) {
           format: format || null,
           publishedLink: publishedLink || null,
           publishedDate,
+          publishedAt,
           brand,
           status: "Published",
           utmCampaign,
@@ -304,6 +314,7 @@ export async function PUT(request: NextRequest) {
       format,
       publishedLink,
       publishedDate,
+      publishedAt: bodyPublishedAt,
       status,
       pillarContentItemId,
       producerUserId,
@@ -348,6 +359,10 @@ export async function PUT(request: NextRequest) {
     if (format !== undefined) updateData.format = format || null;
     if (publishedLink !== undefined) updateData.publishedLink = publishedLink || null;
     if (publishedDate !== undefined) updateData.publishedDate = publishedDate;
+    if (bodyPublishedAt !== undefined) {
+      updateData.publishedAt =
+        bodyPublishedAt === null ? null : new Date(bodyPublishedAt);
+    }
     if (status !== undefined) updateData.status = status || null;
     if (utmCampaign !== undefined) {
       const trimmed = typeof utmCampaign === "string" ? utmCampaign.trim() : "";
@@ -447,10 +462,22 @@ export async function PUT(request: NextRequest) {
           platform: productionItems.platform,
           pillarContentItemId: productionItems.pillarContentItemId,
           predictedViewsSnapshot: productionItems.predictedViewsSnapshot,
+          publishedAt: productionItems.publishedAt,
         })
         .from(productionItems)
         .where(eq(productionItems.id, id))
         .limit(1);
+      // Stamp a precise publish moment the first time an item flips to
+      // Published, so same-day sort tie-breaking reflects the order things
+      // actually went live in-app. Don't clobber an existing value (platform
+      // timestamp or explicit admin edit) on subsequent edits.
+      if (
+        current &&
+        current.publishedAt == null &&
+        updateData.publishedAt === undefined
+      ) {
+        updateData.publishedAt = new Date();
+      }
       if (current && current.predictedViewsSnapshot == null) {
         const nextPlatform =
           platform !== undefined

@@ -61,6 +61,19 @@ type SortKey =
   | "leads"
   | "salesAmount";
 
+function publishedSortMs(item: ProductionItem): number | null {
+  if (item.publishedAt) {
+    const t = new Date(item.publishedAt).getTime();
+    if (!isNaN(t)) return t;
+  }
+  if (item.publishedDate) {
+    // Parse as UTC midnight so ordering is stable regardless of viewer TZ.
+    const t = new Date(`${item.publishedDate}T00:00:00Z`).getTime();
+    if (!isNaN(t)) return t;
+  }
+  return null;
+}
+
 function getFreshness(item: ProductionItem): {
   color: string;
   label: string;
@@ -121,6 +134,9 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
   // The dialog doesn't expose inputs for these — they're pass-through.
   const [previewThumbnail, setPreviewThumbnail] = useState<string | null>(null);
   const [previewAuthorHandle, setPreviewAuthorHandle] = useState<string | null>(null);
+  // Precise publish timestamp captured from preview-link (ISO string).
+  // Forwarded to POST so same-day sort puts this row in the right spot.
+  const [previewPublishedAt, setPreviewPublishedAt] = useState<string | null>(null);
   const [saveResult, setSaveResult] = useState<{ success: boolean; autoFetched?: boolean; message: string } | null>(null);
 
   const isYouTubeLink =
@@ -143,6 +159,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
     setFormSalesAmount("");
     setPreviewThumbnail(null);
     setPreviewAuthorHandle(null);
+    setPreviewPublishedAt(null);
     setPreviewWarning(null);
     setSaveResult(null);
     setDialogOpen(true);
@@ -170,6 +187,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
       if (data.publishedLink) setFormLink(data.publishedLink);
       if (data.thumbnail) setPreviewThumbnail(data.thumbnail);
       if (data.authorHandle) setPreviewAuthorHandle(data.authorHandle);
+      if (data.publishedAt) setPreviewPublishedAt(data.publishedAt);
 
       // Set account + post type, and derive the legacy platform label the
       // same way the AccountPostTypePicker's onChange does so handleSave's
@@ -242,6 +260,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             format: formFormat || null,
             publishedLink: formLink || null,
             publishedDate: formDate,
+            publishedAt: previewPublishedAt,
             brand,
             thumbnail: previewThumbnail,
             authorHandle: previewAuthorHandle,
@@ -332,6 +351,18 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
     : items;
 
   const sorted = [...filtered].sort((a, b) => {
+    // Sorting by "Published" uses publishedAt when we have it (precise
+    // platform timestamp or in-app publish moment) and falls back to
+    // midnight of publishedDate for historic rows. The visible column
+    // still renders as YYYY-MM-DD — this only affects sort order.
+    if (sortKey === "publishedDate") {
+      const aT = publishedSortMs(a);
+      const bT = publishedSortMs(b);
+      if (aT == null && bT == null) return 0;
+      if (aT == null) return 1;
+      if (bT == null) return -1;
+      return sortDir === "asc" ? aT - bT : bT - aT;
+    }
     const aVal = a[sortKey];
     const bVal = b[sortKey];
     if (aVal == null && bVal == null) return 0;

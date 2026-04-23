@@ -8,6 +8,9 @@ export interface ProductionItem {
   thumbnail: string | null;
   title: string | null;
   publishedDate: string | null;
+  /** Precise publish moment (ISO string). When present, the content view
+   *  uses this for sort tie-breaking within a day. */
+  publishedAt: string | null;
   status: string | null;
   platform: string[] | null;
   /** Canonical post_type key (youtube_long, instagram_reel, x, …). Populated

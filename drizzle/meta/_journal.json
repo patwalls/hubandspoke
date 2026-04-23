@@ -274,6 +274,13 @@
       "when": 1776972851126,
       "tag": "0038_flippant_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1776980411309,
+      "tag": "0039_mighty_oracle",
+      "breakpoints": true
     }
   ]
 }

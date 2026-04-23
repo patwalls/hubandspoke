@@ -137,6 +137,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Outputs:** upserts to `productionItems` (brand=`matg`); writes `syncLogs`
 - **Downstream:** none
 - **Rules:** throws if any MATG account is not seeded — keeps surprises visible
+- **Timestamps:** captures the platform-reported publish moment into `productionItems.publishedAt` (YouTube `publishedTime`, IG `taken_at`, X `legacy.created_at`) so the content view can sort same-day posts by true publish order. Falls back to null when the response lacks a timestamp; the app's sort then uses `publishedDate` midnight.
 
 ### `evergreen-scan` — daily classifier
 - **Trigger:** cron `0 15 * * *` (daily 15:00 UTC)
@@ -322,6 +323,8 @@ Idea → Draft → Queue → Published
                        (terminal — metrics + enrichment continue)
 Any → Killed (logs to contentEvents with reason)
 ```
+
+On the first transition into `Published`, `src/app/api/production-items/route.ts` (PUT) stamps `productionItems.publishedAt` with `now()` if it is still null. Platform-reported timestamps from MATG sync and the Add-from-link preview take precedence; the in-app stamp is only a fallback. Subsequent edits do not clobber the value.
 
 ### Account lifecycle
 

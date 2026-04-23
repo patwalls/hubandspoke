@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
       platform: metadata.platform,
       title: metadata.title,
       publishedDate: metadata.publishedDate,
+      publishedAt: metadata.publishedAt,
       publishedLink: metadata.normalizedUrl,
       views: metadata.views,
       likes: metadata.likes,
