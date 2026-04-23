@@ -66,10 +66,15 @@ export function ContentReport() {
             id: string;
             platform: string;
             handle: string;
+            brandSlug: string;
             brandLabel: string;
           }>;
         };
-        if (!cancelled) setAccounts(json.accounts);
+        // This dashboard is Starter Story only — drop any other brand's
+        // accounts so the filter dropdown isn't polluted.
+        if (!cancelled) {
+          setAccounts(json.accounts.filter((a) => a.brandSlug === "starter-story"));
+        }
       } catch {}
     })();
     return () => {

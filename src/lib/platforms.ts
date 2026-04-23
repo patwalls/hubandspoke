@@ -79,11 +79,11 @@ export const PLATFORM_META: Record<Platform, PlatformMeta> = {
   },
 };
 
-/** Short, platform-specific label for a post type ("Short" / "Reel" / "Long"
- *  / …). Used in AccountBadge when the platform has >1 post type and the
- *  current one isn't the default. */
+/** Short, platform-specific label for a post type ("Short" / "Reel" /
+ *  "Long form" / …). Used in AccountBadge when the platform has >1 post
+ *  type and the current one isn't the default. */
 export const POST_TYPE_SHORT_LABEL: Record<PostType, string> = {
-  youtube_long: "Long",
+  youtube_long: "Long form",
   youtube_shorts: "Short",
   youtube_community: "Community",
   instagram_reel: "Reel",

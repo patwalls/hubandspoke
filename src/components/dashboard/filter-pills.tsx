@@ -16,6 +16,7 @@ export interface FilterAccount {
   id: string;
   platform: string;
   handle: string;
+  brandSlug: string;
   brandLabel: string;
 }
 

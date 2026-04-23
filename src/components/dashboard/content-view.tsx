@@ -56,7 +56,10 @@ export function ContentView({ brand }: ContentViewProps) {
             isActive: boolean;
           }>;
         };
-        if (!cancelled) setAccounts(json.accounts);
+        // Scope the Account filter dropdown to the brand we're viewing —
+        // otherwise MATG's dashboard lists Starter Story accounts and vice
+        // versa.
+        if (!cancelled) setAccounts(json.accounts.filter((a) => a.brandSlug === brand));
       } catch {
         /* non-fatal — picker just shows empty state */
       }
@@ -64,7 +67,7 @@ export function ContentView({ brand }: ContentViewProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [brand]);
 
   const apiBase = REPORT_API[brand] || REPORT_API["starter-story"];
 

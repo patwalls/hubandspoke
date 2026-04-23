@@ -7,7 +7,8 @@ import { ChevronRightIcon } from "lucide-react";
 import type { MetricData, Period, PrimaryRowMeta } from "@/types";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { PlatformIcon } from "@/components/ui/platform-icon";
-import { PLATFORM_META, toPlatform } from "@/lib/platforms";
+import { PLATFORM_META, POST_TYPE_SHORT_LABEL, toPlatform } from "@/lib/platforms";
+import type { PostType } from "@/lib/platform-field-schemas";
 import { cn } from "@/lib/utils";
 
 function formatPeriodTooltip(p: Period): string {
@@ -235,17 +236,22 @@ export function PeriodTable({
       key={row}
       className="border-b border-border/50 hover:bg-accent/20 transition-colors"
     >
-      <td className="sticky left-0 bg-card px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-foreground z-10 pl-10">
+      <td className="sticky left-0 bg-card pr-3 sm:pr-4 py-2 pl-10 sm:pl-14 text-xs sm:text-sm font-medium text-foreground z-10">
         {rowMeta?.[row] ? (
-          <AccountBadge
-            account={{
-              platform: rowMeta[row].platform,
-              handle: rowMeta[row].handle,
-            }}
-            postType={rowMeta[row].postType}
-            className="border-none bg-transparent px-0 py-0 text-xs sm:text-sm"
-            size={14}
-          />
+          // Build the label inline so we always show the post-type suffix
+          // inside this grouped view — AccountBadge's default suppresses
+          // it when the post_type equals the platform's default, which is
+          // exactly the case that's ambiguous here ("@starter_story" sitting
+          // next to "@starter_story · Post" with no Reel label).
+          <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm">
+            <PlatformIcon platform={rowMeta[row].platform} size={14} />
+            <span>@{rowMeta[row].handle}</span>
+            {rowMeta[row].postType ? (
+              <span className="text-muted-foreground">
+                · {POST_TYPE_SHORT_LABEL[rowMeta[row].postType as PostType] ?? rowMeta[row].postType}
+              </span>
+            ) : null}
+          </span>
         ) : (
           row
         )}

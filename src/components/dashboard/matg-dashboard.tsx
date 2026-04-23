@@ -47,7 +47,10 @@ export function MATGDashboard() {
         const res = await fetch("/api/accounts");
         if (!res.ok) return;
         const json = (await res.json()) as { accounts: FilterAccount[] };
-        if (!cancelled) setAccounts(json.accounts);
+        // MATG dashboard — only show MATG accounts in the filter dropdown.
+        if (!cancelled) {
+          setAccounts(json.accounts.filter((a) => a.brandSlug === "matg"));
+        }
       } catch {}
     })();
     return () => {
