@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, RepeatIcon, Share2Icon, Trash2Icon, TrendingUpIcon } from "lucide-react";
+import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, Trash2Icon, TrendingUpIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { buildDescriptCompositionUrl } from "@/lib/descript";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
@@ -1773,18 +1773,29 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
                       {isSyncing ? "Syncing…" : "Sync metrics"}
                     </DropdownMenuItem>
                   )}
+                  {(status !== "Killed" || !isYouTube) && (
+                    <DropdownMenuSeparator />
+                  )}
+                  {status !== "Killed" && (
+                    <DropdownMenuItem
+                      variant="destructive"
+                      disabled={actionPending}
+                      onClick={() =>
+                        setPendingKill({ previousStatus: status })
+                      }
+                    >
+                      <SkullIcon className="size-3.5" /> Kill
+                    </DropdownMenuItem>
+                  )}
                   {!isYouTube && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        variant="destructive"
-                        disabled={deleting}
-                        onClick={() => void handleDelete()}
-                      >
-                        <Trash2Icon className="size-3.5" />
-                        {deleting ? "Deleting…" : "Delete post"}
-                      </DropdownMenuItem>
-                    </>
+                    <DropdownMenuItem
+                      variant="destructive"
+                      disabled={deleting}
+                      onClick={() => void handleDelete()}
+                    >
+                      <Trash2Icon className="size-3.5" />
+                      {deleting ? "Deleting…" : "Delete post"}
+                    </DropdownMenuItem>
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
