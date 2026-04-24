@@ -766,6 +766,12 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
   const [utmCampaign, setUtmCampaign] = useState("");
   const [sourceType, setSourceType] = useState<string>("original");
   const [dmKeywordDialogOpen, setDmKeywordDialogOpen] = useState(false);
+  // Destination URL for the attached DM keyword slug. Fetched from the
+  // short-links proxy when shortLinkSlug changes, bumped by dmRefresh after a
+  // dialog save (so destination edits on the same slug re-fetch). Admin-only
+  // path — the proxy 403s otherwise.
+  const [dmDestinationUrl, setDmDestinationUrl] = useState<string | null>(null);
+  const [dmRefresh, setDmRefresh] = useState(0);
   const [pendingKill, setPendingKill] = useState<{ previousStatus: string } | null>(
     null,
   );
@@ -891,6 +897,27 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
     setUtmCampaign(item.utmCampaign || "");
     setSourceType(item.sourceType || "original");
   }, []);
+
+  const slugAttached = data?.item?.shortLinkSlug ?? null;
+  useEffect(() => {
+    if (!isAdmin || !slugAttached) {
+      setDmDestinationUrl(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/short-links/${encodeURIComponent(slugAttached)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((payload: { destinationUrl?: string } | null) => {
+        if (cancelled || !payload) return;
+        setDmDestinationUrl(payload.destinationUrl ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setDmDestinationUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, slugAttached, dmRefresh]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2267,7 +2294,7 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
           <PropertyRowSolo>
             <PropertyRow label="DM keyword">
               {item.shortLinkSlug ? (
-                <div className="flex items-center gap-2 px-2 py-1 min-w-0 w-full">
+                <div className="flex items-center gap-2 px-2 py-1 min-w-0 w-full flex-wrap">
                   <code className="text-xs px-1.5 py-0.5 rounded bg-muted text-foreground shrink-0">
                     {item.shortLinkSlug}
                   </code>
@@ -2276,15 +2303,29 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
                     href={`${shortLinksBaseUrl}/${item.shortLinkSlug}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate min-w-0 flex-1 font-mono"
+                    className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate font-mono"
                   >
                     {shortLinksBaseUrl.replace(/^https?:\/\//, "")}/{item.shortLinkSlug}
                   </a>
+                  {dmDestinationUrl && (
+                    <>
+                      <span className="text-xs text-muted-foreground shrink-0">→</span>
+                      <a
+                        href={dmDestinationUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-foreground/80 hover:text-foreground hover:underline truncate min-w-0 flex-1 font-mono"
+                        title={dmDestinationUrl}
+                      >
+                        {dmDestinationUrl.replace(/^https?:\/\//, "")}
+                      </a>
+                    </>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-7 px-2 text-xs shrink-0"
+                    className="h-7 px-2 text-xs shrink-0 ml-auto"
                     onClick={() => setDmKeywordDialogOpen(true)}
                   >
                     Edit
@@ -3095,6 +3136,7 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
         baseUrl={shortLinksBaseUrl}
         onSaved={async (nextSlug) => {
           await persistField({ shortLinkSlug: nextSlug });
+          setDmRefresh((k) => k + 1);
         }}
       />
 

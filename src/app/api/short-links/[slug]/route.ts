@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import {
   deleteShortLink,
+  getShortLink,
   ShortLinksApiError,
   updateShortLink,
 } from "@/lib/services/short-links";
@@ -33,6 +34,22 @@ function isHttpsUrl(value: string): boolean {
     return new URL(value).protocol === "https:";
   } catch {
     return false;
+  }
+}
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ slug: string }> },
+) {
+  const gate = await requireAdmin();
+  if (gate.error) return gate.error;
+  const { slug } = await params;
+  try {
+    const link = await getShortLink(slug);
+    if (!link) return NextResponse.json({ error: "short link not found" }, { status: 404 });
+    return NextResponse.json(link);
+  } catch (err) {
+    return handleApiError(err);
   }
 }
 
