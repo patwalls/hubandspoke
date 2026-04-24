@@ -244,7 +244,7 @@ export function AttachDmKeywordDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="max-w-6xl w-[95vw] max-h-[85vh] overflow-hidden flex flex-col">
+      <DialogContent className="!max-w-[min(1200px,95vw)] sm:!max-w-[min(1200px,95vw)] max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>
             {view === "edit"
