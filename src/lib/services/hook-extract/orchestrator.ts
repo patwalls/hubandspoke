@@ -16,7 +16,7 @@
  * land in the prompt quickly.
  */
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
@@ -24,8 +24,11 @@ import { productionItems, transcripts } from "@/lib/db/schema";
 const MODEL = "claude-haiku-4-5";
 export const EXTRACTOR_VERSION = `${MODEL}:v1`;
 
-/** Short-form platforms that have a "stop-scroll" hook to extract. */
-const SHORT_FORM_PLATFORMS = ["YouTube Shorts", "Instagram Reel", "TikTok"];
+/** Short-form post types that have a "stop-scroll" hook to extract.
+ *  Gated on `post_type` (canonical) rather than the legacy `platform[]`
+ *  label array — the latter silently misses rows written with the new
+ *  `kind:@handle:subtype` account-based format. */
+const SHORT_FORM_POST_TYPES = ["youtube_shorts", "instagram_reel", "tiktok"];
 
 /** Per-sweep cap — matches enrichment. First sweep after deploy is largest. */
 export const SWEEP_BATCH_LIMIT = 50;
@@ -40,14 +43,6 @@ const HOOK_WINDOW_SEC = 20;
 export async function selectHookCandidates(
   limit: number = SWEEP_BATCH_LIMIT
 ): Promise<string[]> {
-  const platformOr = sql.join(
-    SHORT_FORM_PLATFORMS.map(
-      (p) =>
-        sql`${productionItems.platform}::jsonb @> ${JSON.stringify([p])}::jsonb`
-    ),
-    sql` OR `
-  );
-
   const rows = await db
     .select({ id: productionItems.id })
     .from(productionItems)
@@ -59,7 +54,7 @@ export async function selectHookCandidates(
       and(
         eq(productionItems.status, "Published"),
         isNull(productionItems.hookExtractedAt),
-        sql`(${platformOr})`,
+        inArray(productionItems.postType, SHORT_FORM_POST_TYPES),
         sql`${transcripts.durationSec}::float >= ${MIN_DURATION_SEC}`,
         sql`COALESCE(${transcripts.wordCount}, 0) >= ${MIN_WORD_COUNT}`
       )

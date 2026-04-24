@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, or, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
-import { platformKindsFor, type PlatformKind } from "@/lib/services/performance-decay";
+import { resolveItemPlatformKinds, type PlatformKind } from "@/lib/services/performance-decay";
 import { enrichInstagramItem } from "./instagram";
 import { enrichYouTubeItem } from "./youtube";
 import { enrichYouTubeCommunityItem } from "./youtube-community";
@@ -66,6 +66,7 @@ export async function enrichSingleItem(
     .select({
       id: productionItems.id,
       platform: productionItems.platform,
+      postType: productionItems.postType,
       enrichmentCompletedAt: productionItems.enrichmentCompletedAt,
     })
     .from(productionItems)
@@ -77,9 +78,10 @@ export async function enrichSingleItem(
     return null;
   }
 
-  const kinds = platformKindsFor(
-    (item.platform as string[] | null) ?? null
-  );
+  const kinds = resolveItemPlatformKinds({
+    postType: item.postType,
+    platform: item.platform as string[] | null,
+  });
 
   let result: EnrichmentResult | null;
   try {
@@ -215,6 +217,7 @@ export async function runEnrichmentSweep(
     .select({
       id: productionItems.id,
       platform: productionItems.platform,
+      postType: productionItems.postType,
       publishedLink: productionItems.publishedLink,
       enrichmentAttempts: productionItems.enrichmentAttempts,
       updatedAt: productionItems.updatedAt,
@@ -227,9 +230,10 @@ export async function runEnrichmentSweep(
   summary.scanned = candidates.length;
 
   for (const item of candidates) {
-    const kinds = platformKindsFor(
-      (item.platform as string[] | null) ?? null
-    );
+    const kinds = resolveItemPlatformKinds({
+      postType: item.postType,
+      platform: item.platform as string[] | null,
+    });
 
     // Platform filter — applied here (after the SQL select) rather than in
     // SQL because `platform` is a jsonb array and JSON-path predicates are

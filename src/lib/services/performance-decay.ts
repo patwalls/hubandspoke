@@ -171,6 +171,27 @@ export function platformKindFromPostType(
   }
 }
 
+/**
+ * Single source of truth for "what SC endpoints does this item belong to?".
+ * Prefers `post_type` (canonical 1:1 with an endpoint) and falls back to the
+ * legacy `platform[]` string matcher for rows written before post_type rolled
+ * out. Every sweep filter AND executor should use this — keeping the filter
+ * and executor in sync is what prevents silent-skip bugs.
+ */
+export function resolveItemPlatformKinds(input: {
+  postType: string | null | undefined;
+  platform: string[] | null;
+}): Set<PlatformKind> {
+  const out = new Set<PlatformKind>();
+  const fromPostType = platformKindFromPostType(input.postType);
+  if (fromPostType) {
+    out.add(fromPostType);
+    return out;
+  }
+  for (const k of platformKindsFor(input.platform)) out.add(k);
+  return out;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Per-item refresh                                                   */
 /* ------------------------------------------------------------------ */
@@ -232,17 +253,10 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
 
   const url = item.publishedLink || item.youtubeUrl || "";
   const platforms = (item.platform as string[] | null) ?? [];
-  // Prefer post_type (canonical, 1:1 with endpoint) when the item has it
-  // set; fall back to the legacy string-array matcher for rows that haven't
-  // been backfilled yet (none should exist in prod, but this covers the
-  // staging-import edge case).
-  const kinds = new Set<PlatformKind>();
-  const kindFromPostType = platformKindFromPostType(item.postType);
-  if (kindFromPostType) {
-    kinds.add(kindFromPostType);
-  } else {
-    for (const k of platformKindsFor(item.platform as string[] | null)) kinds.add(k);
-  }
+  const kinds = resolveItemPlatformKinds({
+    postType: item.postType,
+    platform: item.platform as string[] | null,
+  });
 
   // Apply the likes-multiplier estimator on platforms where SC doesn't return
   // view counts (LinkedIn, YouTube Community, Instagram Photo, Threads
@@ -575,6 +589,7 @@ export async function getItemsDueForSync(): Promise<DueSyncSummary> {
       publishedDate: productionItems.publishedDate,
       lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
       platform: productionItems.platform,
+      postType: productionItems.postType,
     })
     .from(productionItems)
     .where(
@@ -598,7 +613,10 @@ export async function getItemsDueForSync(): Promise<DueSyncSummary> {
       lastPerformanceSyncAt: r.lastPerformanceSyncAt,
     });
     if (!check.needsSync) continue;
-    const kinds = platformKindsFor(r.platform as string[] | null);
+    const kinds = resolveItemPlatformKinds({
+      postType: r.postType,
+      platform: r.platform as string[] | null,
+    });
     if (kinds.size === 0) continue;
 
     items.push({
