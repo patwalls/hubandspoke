@@ -13,6 +13,7 @@ import { enqueueNotification } from "@/lib/services/notifications";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { enqueue } from "@/jobs/enqueue";
 
 function getNotion(): Client {
   const auth = process.env.NOTION_API_SECRET;
@@ -214,6 +215,27 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
+    // Kick off a platform-API metrics fetch for new items with a published
+    // link — unless we already have fresh metrics from the preview-link flow
+    // or the inline YouTube fetch. Saves waiting for the next hourly
+    // `performance-decay` sweep on X/Instagram/LinkedIn/TikTok/Threads rows
+    // that come in without pre-fetched metrics.
+    const hasFreshMetrics = autoFetched || clientSuppliedMetrics;
+    if (created.publishedLink && !hasFreshMetrics) {
+      try {
+        await enqueue(
+          "refresh-item-metrics",
+          { productionItemId: created.id },
+          {
+            jobKey: `refresh-item-metrics-${created.id}`,
+            jobKeyMode: "unsafe_dedupe",
+          }
+        );
+      } catch (err) {
+        console.error("[create] refresh-item-metrics enqueue failed", err);
+      }
+    }
+
     return NextResponse.json({ ...created, autoFetched }, { status: 201 });
   } catch (error) {
     console.error("Error creating production item:", error);
@@ -369,15 +391,27 @@ export async function PUT(request: NextRequest) {
     // If status is changing, capture from/to so we can write a content_events row.
     // Fetched before the UPDATE so the diff is accurate.
     let statusTransition: { from: string | null; to: string | null } | null = null;
-    if (status !== undefined) {
+    let publishedLinkAdded = false;
+    if (status !== undefined || publishedLink !== undefined) {
       const [existing] = await db
-        .select({ status: productionItems.status })
+        .select({
+          status: productionItems.status,
+          publishedLink: productionItems.publishedLink,
+        })
         .from(productionItems)
         .where(eq(productionItems.id, id))
         .limit(1);
-      const nextStatus: string | null = status || null;
-      if (existing && existing.status !== nextStatus) {
-        statusTransition = { from: existing.status, to: nextStatus };
+      if (existing && status !== undefined) {
+        const nextStatus: string | null = status || null;
+        if (existing.status !== nextStatus) {
+          statusTransition = { from: existing.status, to: nextStatus };
+        }
+      }
+      if (existing && publishedLink !== undefined) {
+        const nextLink: string | null = publishedLink || null;
+        if (!!nextLink && existing.publishedLink !== nextLink) {
+          publishedLinkAdded = true;
+        }
       }
     }
 
@@ -678,6 +712,29 @@ export async function PUT(request: NextRequest) {
         }).catch((err) =>
           console.error("[assignment] editor notify failed", err)
         );
+      }
+    }
+
+    // Kick off a platform-API metrics fetch when the row has just become
+    // Published with a link, OR when the published link was freshly added/
+    // changed on an already-Published row. Title/producer/clicks edits
+    // don't trigger — those don't change what the metrics pull would return.
+    const publishedNow =
+      statusTransition?.to === "Published" && !!updated.publishedLink;
+    const linkChangedOnPublished =
+      publishedLinkAdded && updated.status === "Published";
+    if (publishedNow || linkChangedOnPublished) {
+      try {
+        await enqueue(
+          "refresh-item-metrics",
+          { productionItemId: updated.id },
+          {
+            jobKey: `refresh-item-metrics-${updated.id}`,
+            jobKeyMode: "unsafe_dedupe",
+          }
+        );
+      } catch (err) {
+        console.error("[update] refresh-item-metrics enqueue failed", err);
       }
     }
 

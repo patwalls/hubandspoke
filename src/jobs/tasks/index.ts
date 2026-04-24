@@ -54,6 +54,10 @@ import {
   accountRefreshSweepTask,
 } from "./scheduled";
 import { thresholdMonitorSweepTask } from "./threshold-monitor-sweep";
+import {
+  refreshItemMetricsTask,
+  type RefreshItemMetricsPayload,
+} from "./refresh-item-metrics";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -69,6 +73,7 @@ export interface TaskPayloads {
   "hook-dispatch": HookDispatchPayload;
   "youtube-download": YoutubeDownloadPayload;
   "account-refresh": AccountRefreshPayload;
+  "refresh-item-metrics": RefreshItemMetricsPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
@@ -104,6 +109,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "hook-dispatch": hookDispatchTask,
   "youtube-download": youtubeDownloadTask,
   "account-refresh": accountRefreshTask,
+  "refresh-item-metrics": refreshItemMetricsTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,

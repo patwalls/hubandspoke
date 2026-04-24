@@ -22,12 +22,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
 import { platformClass } from "@/lib/badge-colors";
@@ -124,6 +130,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
   const [formAccountId, setFormAccountId] = useState<string | null>(null);
   const [formPostType, setFormPostType] = useState<PostType | null>(null);
   const [formFormat, setFormFormat] = useState("");
+  const [formatPopoverOpen, setFormatPopoverOpen] = useState(false);
   const [formLink, setFormLink] = useState("");
   const [formDate, setFormDate] = useState(todayLocalISO());
   const [formClicks, setFormClicks] = useState("");
@@ -533,18 +540,48 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             {formats && formats.length > 0 && (
               <div className="space-y-2">
                 <Label>Format</Label>
-                <Select value={formFormat} onValueChange={(v) => setFormFormat(v || "")}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select format..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {formats.map((f) => (
-                      <SelectItem key={f} value={f}>
-                        {f}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover open={formatPopoverOpen} onOpenChange={setFormatPopoverOpen}>
+                  <PopoverTrigger
+                    className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer"
+                  >
+                    <span className={cn(!formFormat && "text-muted-foreground")}>
+                      {formFormat || "Select format..."}
+                    </span>
+                    <svg
+                      className="ml-2 h-4 w-4 shrink-0 opacity-50"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search formats…" />
+                      <CommandList>
+                        <CommandEmpty>No formats found.</CommandEmpty>
+                        <CommandGroup>
+                          {formats.map((f) => (
+                            <CommandItem
+                              key={f}
+                              value={f}
+                              onSelect={() => {
+                                setFormFormat(f);
+                                setFormatPopoverOpen(false);
+                              }}
+                            >
+                              {f}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
             )}
             {addMode !== "from-link" && (

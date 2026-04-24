@@ -35,6 +35,8 @@ USER / API ENTRY POINTS
   POST /api/descript/clip-out                             → descript-clip-resolve
   POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve
   POST /api/clip-ideas/[id]/create-in-descript-precise    → clip-idea-precise-cut
+  POST /api/production-items (new row w/ link, no inline metrics) → refresh-item-metrics
+  PUT  /api/production-items (→ Published w/ link, or link added on Published) → refresh-item-metrics
   POST /api/production-items, /comments, /clip-ideas/triage  → notification-send
 
 AUTO-CHAINS (one task enqueues another)
@@ -216,6 +218,17 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - 20-min timeout per download
   - Skips if `mediaS3Key` set (unless `force=true`)
   - Errors truncated to 500 chars in `youtubeDownloadError`
+
+### `refresh-item-metrics` — on-demand per-item metrics pull
+- **Trigger:** enqueued by `POST /api/production-items` when a new row has a `publishedLink` and no inline metrics; enqueued by `PUT /api/production-items` when a row flips to `status='Published'` with a link, or when `publishedLink` is freshly added/changed on an already-Published row
+- **Files:** `src/jobs/tasks/refresh-item-metrics.ts`, `src/lib/services/performance-decay.ts:216` (`refreshItemMetrics`), `src/app/api/production-items/route.ts`
+- **Inputs:** `{ productionItemId }`
+- **Outputs:** same as `performance-decay`'s per-item path — writes `views`, `likes`, `comments`, `viewsEstimated`, `lastPerformanceSyncAt`, `lastPerformanceSyncError`, `thumbnail` (Instagram). Calls Scrape Creators (~1 credit).
+- **Downstream:** none
+- **Rules:**
+  - Same idempotent write path as the hourly sweep — jobKey `refresh-item-metrics-<id>` with `unsafe_dedupe` coalesces back-to-back saves
+  - A freshly-created row with inline metrics (YouTube auto-fetch, preview-link flow) is NOT enqueued — `lastPerformanceSyncAt` already stamped, no credit to spend
+  - Same decay-tier cadence still governs subsequent refreshes via the hourly `performance-decay` sweep — this task just fills the first sync window
 
 ### `account-refresh` — refresh one account
 - **Trigger:** enqueued by `account-refresh-sweep`; on-demand `POST /api/accounts/[id]/refresh?mode=async`
