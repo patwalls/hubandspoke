@@ -96,10 +96,16 @@ export async function GET(request: NextRequest) {
       conditions.push(eq(productionItems.format, formatFilter));
     }
 
-    if (sourceFilter === "internal") {
-      conditions.push(eq(productionItems.isExternal, false));
-    } else if (sourceFilter === "external") {
-      conditions.push(eq(productionItems.isExternal, true));
+    // Source filter classifies by sourceType (original / repost / cross_post).
+    // NULL is treated as "original" since that's the historical default.
+    if (sourceFilter === "original") {
+      conditions.push(
+        sql`(${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')`
+      );
+    } else if (sourceFilter === "repost") {
+      conditions.push(eq(productionItems.sourceType, "repost"));
+    } else if (sourceFilter === "cross_post") {
+      conditions.push(eq(productionItems.sourceType, "cross_post"));
     }
 
     // Join accounts+brands so each returned item carries a shaped

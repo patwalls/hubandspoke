@@ -40,6 +40,7 @@ import { platformClass } from "@/lib/badge-colors";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
 import { AccountBadge } from "@/components/ui/account-badge";
+import { SourceBadge } from "@/components/ui/source-badge";
 import {
   AccountPostTypePicker,
   type PickerAccount,
@@ -703,6 +704,9 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
               <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                 Format
               </th>
+              <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                Source
+              </th>
               <SortHeader label="Published" sortKeyName="publishedDate" />
               {hasPerformanceSync && (
                 <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
@@ -785,6 +789,9 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                   </div>
                 </td>
                 <td className="px-3 py-2 text-sm text-muted-foreground">{item.format || "-"}</td>
+                <td className="px-3 py-2">
+                  <SourceBadge sourceType={item.sourceType} />
+                </td>
                 <td className="px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
                   {item.publishedDate || "-"}
                 </td>
@@ -825,7 +832,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={hasPerformanceSync ? 12 : 11} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                <td colSpan={hasPerformanceSync ? 13 : 12} className="px-4 py-12 text-center text-muted-foreground text-sm">
                   {query
                     ? `No content items match “${search}”.`
                     : "No content items found for the selected filters."}

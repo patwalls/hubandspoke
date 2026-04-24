@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -153,6 +153,49 @@ interface FormatDetailProps {
   formatId: string;
 }
 
+function ContentSortHeader<K extends string>({
+  label,
+  sortKeyName,
+  sort,
+  onToggle,
+  align = "left",
+  className,
+}: {
+  label: string;
+  sortKeyName: K;
+  sort: { key: K; dir: "asc" | "desc" };
+  onToggle: (k: K) => void;
+  align?: "left" | "right";
+  className?: string;
+}) {
+  const active = sort.key === sortKeyName;
+  const arrow = !active ? "" : sort.dir === "asc" ? "↑" : "↓";
+  return (
+    <th
+      className={cn(
+        "px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground",
+        align === "right" ? "text-right" : "text-left",
+        className
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => onToggle(sortKeyName)}
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer",
+          align === "right" && "justify-end",
+          active && "text-foreground"
+        )}
+      >
+        <span>{label}</span>
+        <span className={cn("inline-block w-2 text-[10px]", !active && "opacity-0")} aria-hidden>
+          {arrow}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 function formatCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
@@ -298,6 +341,18 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [clipResult, setClipResult] = useState<
     { jobId: string; projectUrl: string; prompt: string; targetFormatName: string; window: { startSec: number; endSec: number } } | null
   >(null);
+
+  type ContentSortKey = "title" | "account" | "publishedDate" | "views" | "likes" | "leads";
+  const [contentSort, setContentSort] = useState<{ key: ContentSortKey; dir: "asc" | "desc" }>({
+    key: "views",
+    dir: "desc",
+  });
+  function toggleContentSort(key: ContentSortKey) {
+    setContentSort((prev) => {
+      if (prev.key === key) return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+      return { key, dir: key === "title" || key === "account" ? "asc" : "desc" };
+    });
+  }
 
   function openClipModal(item: ContentItem) {
     setClipItem(item);
@@ -731,6 +786,42 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
       setDeleting(false);
     }
   }
+
+  const sortedItems = useMemo(() => {
+    const list = data?.items ?? [];
+    const dir = contentSort.dir === "asc" ? 1 : -1;
+    const keyFn = (item: ContentItem): string | number | null => {
+      switch (contentSort.key) {
+        case "title":
+          return item.title?.toLowerCase() ?? null;
+        case "account":
+          return (
+            item.account?.handle?.toLowerCase() ??
+            item.platform?.[0]?.toLowerCase() ??
+            null
+          );
+        case "publishedDate":
+          return item.publishedDate ?? null;
+        case "views":
+          return item.views;
+        case "likes":
+          return item.likes;
+        case "leads":
+          return item.leads;
+      }
+    };
+    return [...list].sort((a, b) => {
+      const av = keyFn(a);
+      const bv = keyFn(b);
+      // Sort nulls to the bottom regardless of direction so empty rows don't
+      // dominate the top of an asc sort.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+  }, [data?.items, contentSort]);
 
   if (loading) {
     return (
@@ -1378,7 +1469,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
             All content
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            All posts in this format, sorted by views.
+            All posts in this format. Click a column header to sort.
           </p>
         </div>
         {items.length === 0 ? (
@@ -1390,29 +1481,17 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30 text-left">
-                  <th className="px-5 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Title
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Account
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Published
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
-                    Views
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
-                    Likes
-                  </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground text-right">
-                    Leads
-                  </th>
+                  <ContentSortHeader label="Title" sortKeyName="title" sort={contentSort} onToggle={toggleContentSort} className="px-5" />
+                  <ContentSortHeader label="Account" sortKeyName="account" sort={contentSort} onToggle={toggleContentSort} />
+                  <ContentSortHeader label="Published" sortKeyName="publishedDate" sort={contentSort} onToggle={toggleContentSort} />
+                  <ContentSortHeader label="Views" sortKeyName="views" sort={contentSort} onToggle={toggleContentSort} align="right" />
+                  <ContentSortHeader label="Likes" sortKeyName="likes" sort={contentSort} onToggle={toggleContentSort} align="right" />
+                  <ContentSortHeader label="Leads" sortKeyName="leads" sort={contentSort} onToggle={toggleContentSort} align="right" />
                   <th className="px-3 py-2 w-10" />
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {sortedItems.map((item) => (
                   <tr key={item.id} className="border-b border-border/50 last:border-b-0 hover:bg-accent/30">
                     <td className="px-5 py-2.5">
                       <div className="flex items-center gap-2 min-w-0">

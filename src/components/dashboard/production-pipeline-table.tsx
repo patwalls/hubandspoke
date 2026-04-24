@@ -5,6 +5,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { platformClass } from "@/lib/badge-colors";
 import { AccountBadge } from "@/components/ui/account-badge";
+import { SourceBadge } from "@/components/ui/source-badge";
 import type { ProductionItem } from "@/types";
 
 interface ProductionPipelineTableProps {
@@ -325,6 +326,7 @@ export function ProductionPipelineTable({
                   </td>
                   <td className="px-3 py-2 w-[40%]">
                     <div className="flex items-center gap-1.5 min-w-0">
+                      <SourceBadge sourceType={item.sourceType} />
                       <Link
                         href={`/${brand}/content/${item.id}`}
                         className="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors truncate min-w-0"

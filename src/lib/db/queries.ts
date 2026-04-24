@@ -242,10 +242,16 @@ export async function getContentReport(
     conditions.push(eq(productionItems.format, format));
   }
 
-  if (source === "internal") {
-    conditions.push(eq(productionItems.isExternal, false));
-  } else if (source === "external") {
-    conditions.push(eq(productionItems.isExternal, true));
+  // Source filter classifies by sourceType (original / repost / cross_post).
+  // NULL is treated as "original" since that's the historical default.
+  if (source === "original") {
+    conditions.push(
+      sql`(${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')`
+    );
+  } else if (source === "repost") {
+    conditions.push(eq(productionItems.sourceType, "repost"));
+  } else if (source === "cross_post") {
+    conditions.push(eq(productionItems.sourceType, "cross_post"));
   }
 
   // Join accounts+brands so each item carries a shaped `account` for the

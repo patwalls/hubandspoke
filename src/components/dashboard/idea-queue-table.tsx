@@ -7,6 +7,7 @@ import { BulkKillDialog } from "./bulk-kill-dialog";
 import { cn } from "@/lib/utils";
 import { platformClass } from "@/lib/badge-colors";
 import { AccountBadge } from "@/components/ui/account-badge";
+import { SourceBadge } from "@/components/ui/source-badge";
 import type { ProductionItem } from "@/types";
 
 type SortKey = "channel" | "content" | "format" | "views";
@@ -509,30 +510,7 @@ function IdeaQueueRow({
       </td>
       <td className="px-3 py-2">
         <div className="flex items-center gap-2 min-w-0">
-          {item.sourceType === "repost" && (
-            <span
-              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-900 border border-amber-200 shrink-0"
-              title="Reposting an existing piece of content"
-            >
-              Repost
-            </span>
-          )}
-          {item.sourceType === "cross_post" && (
-            <span
-              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-900 border border-indigo-200 shrink-0"
-              title="Same content syndicated to a different platform"
-            >
-              Cross-post
-            </span>
-          )}
-          {(!item.sourceType || item.sourceType === "original") && (
-            <span
-              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-900 border border-emerald-200 shrink-0"
-              title="Brand-new original content"
-            >
-              Original
-            </span>
-          )}
+          <SourceBadge sourceType={item.sourceType} />
           <button
             type="button"
             onClick={() => setOpen(true)}
