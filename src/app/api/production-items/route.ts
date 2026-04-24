@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Client } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { contentEvents, productionItems } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { contentEvents, productionItems, users } from "@/lib/db/schema";
+import { eq, inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
 import {
@@ -486,6 +486,8 @@ export async function PUT(request: NextRequest) {
       nextProducerUserId: string;
       nextEditorUserId: string;
     } | null = null;
+    let editorChangeNames: { from: string | null; to: string | null } | null =
+      null;
     if (producerUserId !== undefined || editorUserId !== undefined) {
       if (
         producerUserId !== undefined &&
@@ -535,6 +537,23 @@ export async function PUT(request: NextRequest) {
         nextProducerUserId: nextProducer,
         nextEditorUserId: nextEditor,
       };
+
+      if (assignmentDiff.editorChanged) {
+        const ids = [existing.editorUserId, nextEditor];
+        const rows = await db
+          .select({ id: users.id, name: users.name, email: users.email })
+          .from(users)
+          .where(inArray(users.id, ids));
+        const display = (u: (typeof rows)[number] | undefined): string | null => {
+          if (!u) return null;
+          if (u.name && u.name.trim()) return u.name;
+          return u.email.split("@")[0] ?? u.email;
+        };
+        editorChangeNames = {
+          from: display(rows.find((r) => r.id === existing.editorUserId)),
+          to: display(rows.find((r) => r.id === nextEditor)),
+        };
+      }
     }
 
     // Handle views + likes together so estimation stays in sync
@@ -612,6 +631,18 @@ export async function PUT(request: NextRequest) {
               payload: { type: "status_change", ...statusTransition },
             });
           }
+        }
+        if (row && editorChangeNames) {
+          await tx.insert(contentEvents).values({
+            contentItemId: id,
+            userId: actorUserId,
+            eventType: "editor_change",
+            payload: {
+              type: "editor_change",
+              from: editorChangeNames.from,
+              to: editorChangeNames.to,
+            },
+          });
         }
         return [row];
       });

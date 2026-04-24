@@ -27,7 +27,8 @@ interface CommentItem {
 
 type EventPayload =
   | { type: "status_change"; from: string | null; to: string | null }
-  | { type: "killed"; from: string | null; reason: string | null };
+  | { type: "killed"; from: string | null; reason: string | null }
+  | { type: "editor_change"; from: string | null; to: string | null };
 
 interface EventItem {
   kind: "event";
@@ -485,6 +486,35 @@ function EventBody({
           </>
         ) : null}{" "}
         to {to ? <StatusChip label={to} /> : <em>none</em>}
+      </span>
+    );
+  }
+  if (event.payload.type === "editor_change") {
+    const { from, to } = event.payload;
+    if (!from && to) {
+      return (
+        <span>
+          <span className="font-medium text-foreground">{actorName}</span> added{" "}
+          <span className="font-medium text-foreground">{to}</span> as the editor
+        </span>
+      );
+    }
+    return (
+      <span>
+        <span className="font-medium text-foreground">{actorName}</span> changed
+        editor
+        {from ? (
+          <>
+            {" "}
+            from <span className="font-medium text-foreground">{from}</span>
+          </>
+        ) : null}{" "}
+        to{" "}
+        {to ? (
+          <span className="font-medium text-foreground">{to}</span>
+        ) : (
+          <em>none</em>
+        )}
       </span>
     );
   }

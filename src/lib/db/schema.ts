@@ -820,7 +820,8 @@ export const contentComments = pgTable(
 // payload shape + a new renderer branch — no schema migration per event.
 export type ContentEventPayload =
   | { type: "status_change"; from: string | null; to: string | null }
-  | { type: "killed"; from: string | null; reason: string | null };
+  | { type: "killed"; from: string | null; reason: string | null }
+  | { type: "editor_change"; from: string | null; to: string | null };
 
 export const contentEvents = pgTable(
   "content_events",
