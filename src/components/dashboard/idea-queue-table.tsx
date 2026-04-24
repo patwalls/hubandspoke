@@ -525,6 +525,14 @@ function IdeaQueueRow({
               Cross-post
             </span>
           )}
+          {(!item.sourceType || item.sourceType === "original") && (
+            <span
+              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-900 border border-emerald-200 shrink-0"
+              title="Brand-new original content"
+            >
+              Original
+            </span>
+          )}
           <button
             type="button"
             onClick={() => setOpen(true)}

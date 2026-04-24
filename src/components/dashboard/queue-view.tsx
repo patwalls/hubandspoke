@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { IdeaQueueTable } from "./idea-queue-table";
 import { SelectPill } from "./filter-pills";
@@ -12,12 +13,12 @@ interface QueueViewProps {
   brand: string;
 }
 
-const SOURCES = [
-  { value: "all", label: "All sources" },
+const SOURCE_TABS = [
+  { value: "all", label: "All" },
   { value: "original", label: "Original" },
   { value: "repost", label: "Repost" },
   { value: "cross_post", label: "Cross-post" },
-];
+] as const;
 
 export function QueueView({ brand }: QueueViewProps) {
   const [items, setItems] = useState<ProductionItem[]>([]);
@@ -76,14 +77,14 @@ export function QueueView({ brand }: QueueViewProps) {
   }, [ideaItems]);
 
   const query = search.trim().toLowerCase();
-  const filtered = ideaItems.filter((item) => {
+
+  // Items filtered by everything *except* source — used to compute the count
+  // shown on each source tab so they reflect the active channel/format/search
+  // context.
+  const baseFiltered = ideaItems.filter((item) => {
     if (!matchesChannel(item, selectedPlatform)) return false;
     if (selectedFormat !== "all") {
       if (item.format !== selectedFormat) return false;
-    }
-    if (selectedSource !== "all") {
-      const source = item.sourceType ?? "original";
-      if (source !== selectedSource) return false;
     }
     if (query) {
       const haystack = [
@@ -100,12 +101,21 @@ export function QueueView({ brand }: QueueViewProps) {
     return true;
   });
 
-  const repostCount = filtered.filter(
-    (i) => i.sourceType === "repost"
-  ).length;
-  const crossPostCount = filtered.filter(
-    (i) => i.sourceType === "cross_post"
-  ).length;
+  const sourceCounts = useMemo(() => {
+    const counts = { all: 0, original: 0, repost: 0, cross_post: 0 };
+    for (const item of baseFiltered) {
+      counts.all += 1;
+      const source = item.sourceType ?? "original";
+      if (source in counts) counts[source as keyof typeof counts] += 1;
+    }
+    return counts;
+  }, [baseFiltered]);
+
+  const filtered = baseFiltered.filter((item) => {
+    if (selectedSource === "all") return true;
+    const source = item.sourceType ?? "original";
+    return source === selectedSource;
+  });
 
   return (
     <div className="space-y-6">
@@ -119,25 +129,6 @@ export function QueueView({ brand }: QueueViewProps) {
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
             Triage new ideas — assign an editor or kill.
-            {repostCount > 0 && (
-              <>
-                {" "}
-                <span className="text-amber-700">
-                  {repostCount} repost suggestion{repostCount === 1 ? "" : "s"}
-                </span>{" "}
-                waiting.
-              </>
-            )}
-            {crossPostCount > 0 && (
-              <>
-                {" "}
-                <span className="text-indigo-700">
-                  {crossPostCount} cross-post suggestion
-                  {crossPostCount === 1 ? "" : "s"}
-                </span>{" "}
-                waiting.
-              </>
-            )}
           </p>
         </div>
         <Input
@@ -147,6 +138,36 @@ export function QueueView({ brand }: QueueViewProps) {
           placeholder="Search title, format, channel, producer…"
           className="h-8 w-48 sm:w-72 text-xs"
         />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1 border-b border-border">
+        {SOURCE_TABS.map((tab) => {
+          const active = selectedSource === tab.value;
+          const count = sourceCounts[tab.value as keyof typeof sourceCounts];
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => setSelectedSource(tab.value)}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 h-9 -mb-px border-b-2 text-sm transition-colors cursor-pointer",
+                active
+                  ? "border-foreground text-foreground font-medium"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <span>{tab.label}</span>
+              <span
+                className={cn(
+                  "tabular-nums text-xs",
+                  active ? "text-muted-foreground" : "text-muted-foreground/70"
+                )}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -161,12 +182,6 @@ export function QueueView({ brand }: QueueViewProps) {
           value={selectedFormat}
           options={formatOptions}
           onChange={setSelectedFormat}
-        />
-        <SelectPill
-          label="Source"
-          value={selectedSource}
-          options={SOURCES}
-          onChange={setSelectedSource}
         />
       </div>
 
