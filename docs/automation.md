@@ -186,8 +186,24 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   ≤ ~100 credits (long + shorts).
 - **Dedup priority** (inside `loadExisting`):
   1. Match by `(accountId, platform_content_id)` — primary
-  2. Fall back to `publishedLink` match — covers legacy rows pre-column
-  3. Otherwise insert
+  2. For legacy rows missing the column, derive id on the fly from
+     `publishedLink` via `extractContentId` in `src/lib/platform-url.ts`
+     and match against the same map. Manual "Add from link" rows that
+     skipped populating the column still merge correctly.
+  3. Loose URL fallback (strip query string, fold `threads.com` →
+     `threads.net`, drop trailing slash) — only for URLs we can't parse
+     into an id at all (custom shortlinks, etc.)
+  4. Otherwise insert
+  - Manual writes (`POST/PUT /api/production-items`) call
+    `extractContentId` too, so freshly created rows always carry the
+    column even when the user paste contains tracking params or a
+    `threads.com` domain.
+- **Threads reply filter:** the user-timeline endpoint mixes top-level
+  posts and replies. Sync calls `isThreadsReply` and skips any post whose
+  `is_reply` / `reply_to_author` / `reply_to_id` / `parent_pk` markers are
+  set, so reply-with-CTA chains never enter analytics. Reply markers are
+  defensive across SC response shapes; first sync logs counts for
+  verification.
 - **Timestamps:** captures the platform-reported publish moment into
   `productionItems.publishedAt` (YouTube `publishedTime`, IG `taken_at`, X
   `legacy.created_at`, TikTok `create_time`) so the content view can sort

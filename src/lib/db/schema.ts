@@ -253,6 +253,13 @@ export const productionItems = pgTable(
     // fetched on demand; a single post reusing a pool slug picks up whatever
     // the slug currently points at.
     shortLinkSlug: text("short_link_slug"),
+    // True when this post is a reply rather than a top-level post — used to
+    // exclude reply-with-CTA chains (Threads especially) from analytics.
+    // Populated by the per-account content sync from the platform's reply
+    // markers (Threads: `text_post_app_info.is_reply` /
+    // `reply_to_author` / parent-pk fields). Defaults to false; sync skips
+    // inserting fresh replies and the cleanup script deletes legacy ones.
+    isReply: boolean("is_reply").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

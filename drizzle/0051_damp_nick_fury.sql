@@ -1,0 +1,1 @@
+ALTER TABLE "production_items" ADD COLUMN "is_reply" boolean DEFAULT false NOT NULL;

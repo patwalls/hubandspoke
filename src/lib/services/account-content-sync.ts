@@ -26,13 +26,14 @@
 
 import { db } from "@/lib/db";
 import { productionItems, syncLogs, accounts, brands } from "@/lib/db/schema";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { SC_BASE, headers } from "@/lib/services/sc-client";
 import type { SCTweet } from "@/lib/services/sc-fetchers";
+import { extractContentId, looseUrlKey } from "@/lib/platform-url";
 
 // ─── Support matrix ───────────────────────────────────────────────────────
 
@@ -208,9 +209,39 @@ interface SCThreadsPost {
   text_post_app_info?: {
     direct_reply_count?: number;
     view_counts?: number;
+    // Reply markers — Meta's internal API exposes one or more of these on
+    // posts that are replies in a chain rather than top-level posts. Field
+    // names vary across SC response shapes; we treat any truthy signal as
+    // "this is a reply" and exclude it from sync.
+    is_reply?: boolean;
+    reply_to_author?: { username?: string; pk?: string } | null;
+    reply_to_id?: string | null;
   };
   view_counts?: number;
   user?: { username?: string };
+  // Top-level reply markers seen in some SC response shapes.
+  is_reply?: boolean;
+  parent_pk?: string | null;
+  parent_post_pk?: string | null;
+  in_reply_to_id?: string | null;
+}
+
+/**
+ * Whether a Threads post is a reply rather than a top-level post. Defensive
+ * across the field-name variants we've seen — flips true if any reply
+ * marker is set. False positives are preferred over false negatives:
+ * dropping a top-level post is worse than missing one CTA reply, since the
+ * user is asking us to exclude replies entirely.
+ */
+function isThreadsReply(post: SCThreadsPost): boolean {
+  if (post.is_reply === true) return true;
+  if (post.parent_pk || post.parent_post_pk || post.in_reply_to_id) return true;
+  const tpai = post.text_post_app_info;
+  if (!tpai) return false;
+  if (tpai.is_reply === true) return true;
+  if (tpai.reply_to_author) return true;
+  if (tpai.reply_to_id) return true;
+  return false;
 }
 
 // ─── Date helpers ─────────────────────────────────────────────────────────
@@ -566,8 +597,25 @@ async function fetchThreadsLatest(
 ): Promise<{ items: NormalizedItem[]; credits: number }> {
   const data = await scGetJson("/v1/threads/user/posts", { handle });
   const posts: SCThreadsPost[] = data.posts || data.items || [];
+
+  // One-line trace per sync of which reply markers SC actually returned, so
+  // we can confirm `isThreadsReply` is checking the right field names. Drop
+  // this once we've seen real production traffic and confirmed coverage.
+  const replyCounts = posts.reduce(
+    (acc, p) => {
+      if (isThreadsReply(p)) acc.replies++;
+      else acc.topLevel++;
+      return acc;
+    },
+    { replies: 0, topLevel: 0 }
+  );
+  console.log(
+    `[threads-sync] handle=${handle} posts=${posts.length} top_level=${replyCounts.topLevel} replies_skipped=${replyCounts.replies}`
+  );
+
   const items: NormalizedItem[] = posts
     .filter((p) => p.pk)
+    .filter((p) => !isThreadsReply(p))
     .map((p) => {
       const body = p.caption?.text ?? "";
       const code = p.code;
@@ -597,26 +645,30 @@ async function fetchThreadsLatest(
 
 // ─── Upsert ───────────────────────────────────────────────────────────────
 
-/** Look up any productionItems that match a list of platformContentIds OR
- *  publishedLinks for this account. Returned maps are used to decide
- *  update-vs-insert per item. */
+/** Look up any productionItems for this account that might collide with an
+ *  incoming sync batch. Returns one map keyed by `platform_content_id` —
+ *  legacy rows that lack the column have it derived from `published_link`
+ *  on the fly so manual entries created before the column existed still
+ *  match. The looseUrl map is a last-ditch fallback for URLs we can't
+ *  parse (custom shortlinks etc.). */
 async function loadExisting(
   accountId: string,
   items: NormalizedItem[]
 ): Promise<{
   byContentId: Map<string, string>;
-  byLink: Map<string, string>;
+  byLooseUrl: Map<string, string>;
 }> {
   if (items.length === 0) {
-    return { byContentId: new Map(), byLink: new Map() };
+    return { byContentId: new Map(), byLooseUrl: new Map() };
   }
   const contentIds = items.map((i) => i.platformContentId).filter(Boolean);
-  const links = items.map((i) => i.publishedLink).filter(Boolean);
+
   const rows = await db
     .select({
       id: productionItems.id,
       platformContentId: productionItems.platformContentId,
       publishedLink: productionItems.publishedLink,
+      postType: productionItems.postType,
     })
     .from(productionItems)
     .where(
@@ -626,19 +678,31 @@ async function loadExisting(
           contentIds.length
             ? inArray(productionItems.platformContentId, contentIds)
             : undefined,
-          links.length
-            ? inArray(productionItems.publishedLink, links)
-            : undefined
+          and(
+            isNull(productionItems.platformContentId),
+            isNotNull(productionItems.publishedLink)
+          )
         )
       )
     );
+
   const byContentId = new Map<string, string>();
-  const byLink = new Map<string, string>();
+  const byLooseUrl = new Map<string, string>();
   for (const r of rows) {
-    if (r.platformContentId) byContentId.set(r.platformContentId, r.id);
-    if (r.publishedLink) byLink.set(r.publishedLink, r.id);
+    if (r.platformContentId) {
+      byContentId.set(r.platformContentId, r.id);
+      continue;
+    }
+    if (!r.publishedLink) continue;
+    const derived = extractContentId(r.postType, r.publishedLink);
+    if (derived) {
+      byContentId.set(derived, r.id);
+    } else {
+      const key = looseUrlKey(r.publishedLink);
+      if (key) byLooseUrl.set(key, r.id);
+    }
   }
-  return { byContentId, byLink };
+  return { byContentId, byLooseUrl };
 }
 
 async function upsertItems(
@@ -651,13 +715,16 @@ async function upsertItems(
   let errors = 0;
   if (items.length === 0) return { created, updated, errors };
 
-  const { byContentId, byLink } = await loadExisting(accountId, items);
+  const { byContentId, byLooseUrl } = await loadExisting(accountId, items);
 
   for (const item of items) {
     try {
+      const looseKey = item.publishedLink
+        ? looseUrlKey(item.publishedLink)
+        : null;
       const existingId =
         byContentId.get(item.platformContentId) ??
-        byLink.get(item.publishedLink) ??
+        (looseKey ? byLooseUrl.get(looseKey) : undefined) ??
         null;
 
       const baseUpdate = {

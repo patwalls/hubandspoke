@@ -330,7 +330,24 @@ export async function PUT(request: NextRequest) {
     if (accountId !== undefined) updateData.accountId = accountId || null;
     if (postType !== undefined) updateData.postType = postType || null;
     if (format !== undefined) updateData.format = format || null;
-    if (publishedLink !== undefined) updateData.publishedLink = publishedLink || null;
+    if (publishedLink !== undefined) {
+      updateData.publishedLink = publishedLink || null;
+      // Re-derive platform_content_id whenever the URL changes so the
+      // partial unique index `(account_id, platform_content_id)` keeps
+      // catching duplicates even when manual entry differs in trailing
+      // slash, query string, or domain (threads.com vs threads.net).
+      let pt: string | null = typeof postType === "string" ? postType : null;
+      if (postType === undefined) {
+        const [existing] = await db
+          .select({ postType: productionItems.postType })
+          .from(productionItems)
+          .where(eq(productionItems.id, id))
+          .limit(1);
+        pt = existing?.postType ?? null;
+      }
+      updateData.platformContentId =
+        extractContentId(pt, publishedLink) ?? null;
+    }
     if (publishedDate !== undefined) updateData.publishedDate = publishedDate;
     if (bodyPublishedAt !== undefined) {
       updateData.publishedAt =
