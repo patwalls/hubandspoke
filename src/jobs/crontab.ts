@@ -18,7 +18,7 @@ export const CRONTAB = `
 30 * * * * notion-sync
 20 * * * * enrichment-sweep
 40 * * * * hook-dispatch-sweep
-0 13 * * * account-content-sync-sweep
+*/30 * * * * account-content-sync-sweep
 0 15 * * * evergreen-scan
 */20 * * * * youtube-download-sweep
 0 17 * * 1 account-refresh-sweep

@@ -23,7 +23,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   *:40  hook-extract-sweep        → fan-out → extract-hook (per item, Haiku)
   *:50  hook-fallback-sweep       → fan-out → hook-fallback (per item, no LLM)
   */20  youtube-download-sweep    → fan-out → youtube-download → transcribe-whisper
-  13:00 account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
+  */30  account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
   (per-post) capture-velocity-snapshot → scheduled at publish+15m/30m/1h/2h/4h per item; writes one view_snapshots row
   (manual)     cross-post-scan    → LLM recommender, fired by the "Populate queue" button on /[brand]/queue → POST /api/cross-post-scan
@@ -136,8 +136,9 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - `MAX_ATTEMPTS = 5` defined locally (`youtube-download-sweep.ts:14`); same constant duplicated in `enrichment/orchestrator.ts:20`
   - Sweep gate paces retries; dyno-level maxAttempts only retries the same tick
 
-### `account-content-sync-sweep` — daily per-account content fan-out
-- **Trigger:** cron `0 13 * * *` (daily 13:00 UTC)
+### `account-content-sync-sweep` — per-account content fan-out (every 30 min)
+- **Trigger:** cron `*/30 * * * *` (every 30 minutes)
+- **Cost:** 22 SC credits per sweep at current volume (3 IG + 3 LinkedIn + 2 Threads + 3 TikTok + 3 X + 4 YouTube × 2 endpoints). 48 sweeps/day → ~1,056 SC calls/day. Tunable via `CRONTAB` in `src/jobs/crontab.ts`.
 - **Files:** `src/jobs/tasks/scheduled.ts` (`accountContentSyncSweepTask`)
 - **Inputs:** every active `accounts` row on an SC-supported platform
   (`youtube, instagram, tiktok, linkedin, x, threads`)
@@ -411,7 +412,7 @@ On the first transition into `Published`, `src/app/api/production-items/route.ts
 | Refresh (auto) | `account-refresh-sweep` cron, Mon 17:00 UTC | one `account-refresh` per active SC-supported account |
 | Refresh execution | `account-refresh` task | overwrites `displayName, avatarUrl, bio, followerCount, ..., metadata`; writes `lastRefreshError` on failure |
 | Content sync (manual) | `POST /api/accounts/[id]/sync-content?mode=latest\|backfill` (Sync button in accounts UI) | enqueues `account-content-sync` |
-| Content sync (auto) | `account-content-sync-sweep` cron, daily 13:00 UTC | one `account-content-sync` with `mode=latest` per active SC account |
+| Content sync (auto) | `account-content-sync-sweep` cron, every 30 min (`*/30 * * * *`) | one `account-content-sync` with `mode=latest` per active SC account. Frequent cadence is intentional — it bounds worst-case "new post detection lag" to 30 min so velocity-snapshot scheduling can catch the 1h / 2h / 4h checkpoints reliably |
 | Content sync execution | `account-content-sync` task | upserts `productionItems` keyed on `(account_id, platform_content_id)`; writes `lastContentSyncAt` / `lastContentSyncError` |
 
 **Notion authority flag:** `accounts.syncedFromNotion = true` means Notion

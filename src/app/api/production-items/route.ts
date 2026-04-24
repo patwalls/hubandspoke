@@ -802,13 +802,23 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    // NOTE: deliberately no `scheduleVelocitySnapshots` here. When an
-    // operator manually marks an item as Published in-app, the
-    // `publishedAt` stamp is "now" — often 1-3h after the real platform
-    // publish time, which would fire the velocity snapshots at the wrong
-    // ages. The authoritative `publishedAt` comes from Scrape Creators
-    // via `account-content-sync`, which schedules velocity snapshots at
-    // the real publish time. Nothing lost by skipping here.
+    // Catch the common operator flow: post on-platform, flip this Idea to
+    // Published in-app, paste the link. If the operator is marking at the
+    // real moment of posting (the typical case), `publishedAt` is accurate
+    // and the 5 velocity snapshots fire at the right ages. If they mark
+    // late, the capture-velocity-snapshot task's per-checkpoint window
+    // check skips out-of-window jobs — no misleading data. If
+    // account-content-sync later observes the same item with the real SC
+    // publish time, graphile-worker's default `jobKeyMode: "replace"` on
+    // the shared `velocity-{id}-{cp}` jobKey updates the `run_at` of any
+    // still-pending checkpoints to the corrected time.
+    if (publishedNow || linkChangedOnPublished) {
+      try {
+        await scheduleVelocitySnapshots(updated.id, updated.publishedAt);
+      } catch (err) {
+        console.error("[update] scheduleVelocitySnapshots failed", err);
+      }
+    }
 
     return NextResponse.json({
       ...updated,
