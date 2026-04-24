@@ -78,9 +78,12 @@ export async function POST(request: NextRequest) {
         displayName: displayName ?? null,
         url: url ?? null,
       })
-      .onConflictDoNothing({
-        target: [accounts.platform, accounts.handle],
-      })
+      // The unique index is on `(platform, lower(handle))` — an expression
+      // index that can't be named as an ON CONFLICT target by column list.
+      // Bare `onConflictDoNothing()` lets Postgres match any unique index,
+      // which is what we want: a case-insensitive handle clash on the same
+      // platform returns an empty row and we surface the 409 below.
+      .onConflictDoNothing()
       .returning();
 
     if (!row) {
