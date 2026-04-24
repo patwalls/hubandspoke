@@ -12,8 +12,12 @@ interface ContentViewProps {
   brand: string;
 }
 
-const REPORT_API: Record<string, string> = {
-  "starter-story": "/api/reports/content",
+// MATG has a legacy bespoke endpoint that hard-codes its brand slug and
+// does its own weekly-goal math. Every other brand goes through the
+// generic report endpoint, which takes `brand` as a query param. The old
+// fallback to `/api/reports/content` without a brand param meant any new
+// brand (e.g. my-first-million) silently showed Starter Story content.
+const LEGACY_REPORT_API: Record<string, string> = {
   matg: "/api/reports/matg",
 };
 
@@ -27,7 +31,11 @@ export function ContentView({ brand }: ContentViewProps) {
   const [startDate, setStartDate] = useState(searchParams.get("startDate") || defaultStart);
   const [endDate, setEndDate] = useState(searchParams.get("endDate") || defaultEnd);
   const [viewType, setViewType] = useState(searchParams.get("viewType") || "weekly");
-  const [selectedPlatformKey, setSelectedPlatformKey] = useState(searchParams.get("platformKey") || "all");
+  // Dashboard drill-through links build URLs with `?platform=<row-label>`;
+  // accept that as an alias so the filter survives the round-trip.
+  const [selectedPlatformKey, setSelectedPlatformKey] = useState(
+    searchParams.get("platformKey") || searchParams.get("platform") || "all"
+  );
   const [selectedAccountId, setSelectedAccountId] = useState(searchParams.get("accountId") || "all");
   const [selectedPostType, setSelectedPostType] = useState(searchParams.get("postType") || "all");
   const [selectedFormat, setSelectedFormat] = useState(searchParams.get("format") || "all");
@@ -70,12 +78,13 @@ export function ContentView({ brand }: ContentViewProps) {
     };
   }, [brand]);
 
-  const apiBase = REPORT_API[brand] || REPORT_API["starter-story"];
+  const apiBase = LEGACY_REPORT_API[brand] ?? "/api/reports/content";
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
+        brand,
         startDate,
         endDate,
         viewType,
@@ -101,7 +110,7 @@ export function ContentView({ brand }: ContentViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource]);
+  }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource]);
 
   useEffect(() => {
     fetchReport();

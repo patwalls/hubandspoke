@@ -261,6 +261,25 @@ async function scGetJson(path: string, query: Record<string, string>) {
   return res.json();
 }
 
+/** `scGetJson` variant that returns null on a 404 instead of throwing. Use
+ *  only for endpoints where "not found" is a legitimate empty state — e.g.
+ *  the YouTube Shorts feed on a channel that only posts long-form. Any
+ *  other non-OK status still surfaces as an error. */
+async function scGetJsonNullOn404(
+  path: string,
+  query: Record<string, string>
+): Promise<Record<string, unknown> | null> {
+  const qs = new URLSearchParams(query).toString();
+  const url = `${SC_BASE}${path}${qs ? `?${qs}` : ""}`;
+  const res = await fetch(url, { headers: headers() });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`SC ${path} ${res.status}: ${body.slice(0, 500)}`);
+  }
+  return res.json();
+}
+
 async function fetchYouTubeLong(
   handle: string,
   maxPages: number
@@ -309,10 +328,13 @@ async function fetchYouTubeLong(
 async function fetchYouTubeShortsLatest(
   handle: string
 ): Promise<{ items: NormalizedItem[]; credits: number }> {
-  const data = await scGetJson("/v1/youtube/channel/shorts", {
+  // SC returns 404 for channels with no Shorts feed (e.g. long-form-only
+  // podcasts). Treat that as an empty page, not a sync failure.
+  const data = await scGetJsonNullOn404("/v1/youtube/channel/shorts", {
     handle: handle.startsWith("@") ? handle : `@${handle}`,
   });
-  const shorts: SCShort[] = data.shorts || [];
+  if (!data) return { items: [], credits: 0 };
+  const shorts: SCShort[] = (data.shorts as SCShort[]) || [];
   const items: NormalizedItem[] = shorts
     .filter((s) => s.id && s.url)
     .map((s) => ({
@@ -337,10 +359,13 @@ async function fetchYouTubeShortsBackfill(
   // The /simple endpoint handles pagination internally and returns the full
   // catalog. SC charges more credits for it (one per underlying page), which
   // is still a better deal than doing the paging ourselves against /shorts.
-  const data = await scGetJson("/v1/youtube/channel/shorts/simple", {
+  // 404 means the channel has no Shorts feed — keep the long-form items
+  // already fetched and return empty rather than failing the whole backfill.
+  const data = await scGetJsonNullOn404("/v1/youtube/channel/shorts/simple", {
     handle: handle.startsWith("@") ? handle : `@${handle}`,
   });
-  const shorts: SCShort[] = data.shorts || data.videos || [];
+  if (!data) return { items: [], credits: 0 };
+  const shorts: SCShort[] = (data.shorts as SCShort[]) || (data.videos as SCShort[]) || [];
   const items: NormalizedItem[] = shorts
     .filter((s) => s.id && s.url)
     .map((s) => ({

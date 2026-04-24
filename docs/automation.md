@@ -171,7 +171,9 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - YouTube long → `continuationToken` (full catalog)
   - YouTube Shorts → `/v1/youtube/channel/shorts` for latest,
     `/v1/youtube/channel/shorts/simple` for backfill (SC handles pagination
-    internally; costs more credits)
+    internally; costs more credits). Both endpoints 404 on channels with
+    no Shorts feed (common for long-form-only podcasts) — we soft-fail and
+    return empty so the long-form pass still upserts.
   - Instagram → `next_max_id` until `more_available=false`
   - TikTok → `max_cursor` until `has_more=false`
   - LinkedIn → `page=1..7` (LinkedIn caps at 7 pages)
@@ -394,7 +396,7 @@ On the first transition into `Published`, `src/app/api/production-items/route.ts
 
 | Phase | Trigger | Effect |
 |---|---|---|
-| Create | manual `POST /api/accounts` (or seeded once during accounts rollout) | row in `accounts`, `isActive=true`; auto-enqueues an `account-refresh` and (on backfill-supported platforms) an `account-content-sync` with `mode=backfill, maxPages=50` |
+| Create | manual `POST /api/accounts` (or seeded once during accounts rollout) | row in `accounts`, `isActive=true`; for any SC-supported platform auto-enqueues `account-refresh` + `account-content-sync` with `mode=backfill, maxPages=50` (X / Threads fall through to single-page latest inside the task) |
 | Refresh (manual) | `POST /api/accounts/[id]/refresh?mode=async` (or `?mode=sync` for in-line) | enqueues `account-refresh` |
 | Refresh (auto) | `account-refresh-sweep` cron, Mon 17:00 UTC | one `account-refresh` per active SC-supported account |
 | Refresh execution | `account-refresh` task | overwrites `displayName, avatarUrl, bio, followerCount, ..., metadata`; writes `lastRefreshError` on failure |

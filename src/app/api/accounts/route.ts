@@ -5,10 +5,7 @@ import { accounts } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
 import { getAccounts, getAccountsForBrand } from "@/lib/db/accounts";
 import { enqueue } from "@/jobs/enqueue";
-import {
-  platformSupportsBackfill,
-  platformSupportsLatest,
-} from "@/lib/services/account-content-sync";
+import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -93,30 +90,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Kick off a one-shot backfill + profile refresh on create. Both are
-    // best-effort — if enqueue fails, the account still exists and the user
-    // can retry from the settings UI. Backfill skipped for platforms where
-    // SC can't paginate (x, threads, newsletter, other); refresh skipped
-    // for the two that have no profile endpoint.
-    if (platformSupportsBackfill(row.platform)) {
+    // Auto-sync on create: every SC-supported platform gets a content pull
+    // and a profile refresh. Best-effort — enqueue failures don't block the
+    // create response; the user can retry from the settings UI. For
+    // paginatable platforms (YouTube, Instagram, TikTok, LinkedIn)
+    // `mode: "backfill"` walks the full catalog; for latest-only platforms
+    // (X, Threads) the task collapses backfill to a single-page fetch
+    // internally. Newsletter/other are excluded: no SC coverage.
+    if (platformSupportsLatest(row.platform)) {
       try {
         await enqueue(
           "account-content-sync",
-          {
-            accountId: row.id,
-            mode: "backfill",
-            maxPages: 50,
-          },
+          { accountId: row.id, mode: "backfill", maxPages: 50 },
           {
             jobKey: `account-content-sync-${row.id}-backfill`,
             jobKeyMode: "unsafe_dedupe",
           }
         );
       } catch (err) {
-        console.error("account-content-sync backfill enqueue failed:", err);
+        console.error("account-content-sync enqueue failed:", err);
       }
-    }
-    if (platformSupportsLatest(row.platform)) {
       try {
         await enqueue(
           "account-refresh",
