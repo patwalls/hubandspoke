@@ -281,6 +281,13 @@
       "when": 1776980411309,
       "tag": "0039_mighty_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1777001140940,
+      "tag": "0040_drop_manychat_cols",
+      "breakpoints": true
     }
   ]
 }

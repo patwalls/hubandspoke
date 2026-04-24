@@ -13,48 +13,6 @@ import { enqueueNotification } from "@/lib/services/notifications";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
-import {
-  isValidKeyword,
-  isValidLink,
-  normalizeKeyword,
-} from "@/lib/services/manychat";
-
-/**
- * Normalize + validate a (keyword, link) pair from a request body. Both fields
- * must be present together — a keyword without a link is useless and vice
- * versa. Returns the normalized pair, or an error string for a 400 response.
- */
-function validateManychatPair(
-  rawKeyword: unknown,
-  rawLink: unknown
-):
-  | { ok: true; keyword: string | null; link: string | null }
-  | { ok: false; error: string } {
-  const keywordStr = typeof rawKeyword === "string" ? rawKeyword : "";
-  const linkStr = typeof rawLink === "string" ? rawLink.trim() : "";
-  const normalizedKeyword = normalizeKeyword(keywordStr);
-  if (!normalizedKeyword && !linkStr) {
-    return { ok: true, keyword: null, link: null };
-  }
-  if (!normalizedKeyword || !linkStr) {
-    return {
-      ok: false,
-      error:
-        "manychatKeyword and manychatLink must be set together (or both empty)",
-    };
-  }
-  if (!isValidKeyword(normalizedKeyword)) {
-    return {
-      ok: false,
-      error:
-        "manychatKeyword must be 3-32 chars (letters, numbers, space, hyphen, underscore)",
-    };
-  }
-  if (!isValidLink(linkStr)) {
-    return { ok: false, error: "manychatLink must be a valid https:// URL" };
-  }
-  return { ok: true, keyword: normalizedKeyword, link: linkStr };
-}
 
 function getNotion(): Client {
   const auth = process.env.NOTION_API_SECRET;
@@ -143,8 +101,6 @@ export async function POST(request: NextRequest) {
       comments,
       thumbnail: bodyThumbnail,
       authorHandle: bodyAuthorHandle,
-      manychatKeyword,
-      manychatLink,
     } = body;
 
     if (!title || !platform?.length || !publishedDate || !brand) {
@@ -152,11 +108,6 @@ export async function POST(request: NextRequest) {
         { error: "title, platform, publishedDate, and brand are required" },
         { status: 400 }
       );
-    }
-
-    const manychat = validateManychatPair(manychatKeyword, manychatLink);
-    if (!manychat.ok) {
-      return NextResponse.json({ error: manychat.error }, { status: 400 });
     }
 
     let finalViews = views ?? null;
@@ -234,57 +185,34 @@ export async function POST(request: NextRequest) {
         : new Date();
 
     const utmCampaign = await generateUtmCampaign(title);
-    let created;
-    try {
-      [created] = await db
-        .insert(productionItems)
-        .values({
-          title,
-          platform,
-          accountId: accountId || null,
-          postType: postType || null,
-          format: format || null,
-          publishedLink: publishedLink || null,
-          publishedDate,
-          publishedAt,
-          brand,
-          status: "Published",
-          utmCampaign,
-          views: finalViews,
-          likes: finalLikes,
-          comments: finalComments,
-          viewsEstimated: finalViewsEstimated,
-          thumbnail,
-          youtubeId,
-          youtubeUrl,
-          authorHandle,
-          isExternal: false,
-          producerUserId,
-          editorUserId,
-          lastPerformanceSyncAt,
-          manychatKeyword: manychat.keyword,
-          manychatLink: manychat.link,
-        })
-        .returning();
-    } catch (err) {
-      const code =
-        err && typeof err === "object" && "code" in err
-          ? String((err as { code: unknown }).code)
-          : null;
-      if (code === "23505") {
-        const constraint =
-          err && typeof err === "object" && "constraint" in err
-            ? String((err as { constraint: unknown }).constraint)
-            : "";
-        if (constraint.includes("manychat_keyword")) {
-          return NextResponse.json(
-            { error: "That ManyChat keyword is already in use on this account" },
-            { status: 409 }
-          );
-        }
-      }
-      throw err;
-    }
+    const [created] = await db
+      .insert(productionItems)
+      .values({
+        title,
+        platform,
+        accountId: accountId || null,
+        postType: postType || null,
+        format: format || null,
+        publishedLink: publishedLink || null,
+        publishedDate,
+        publishedAt,
+        brand,
+        status: "Published",
+        utmCampaign,
+        views: finalViews,
+        likes: finalLikes,
+        comments: finalComments,
+        viewsEstimated: finalViewsEstimated,
+        thumbnail,
+        youtubeId,
+        youtubeUrl,
+        authorHandle,
+        isExternal: false,
+        producerUserId,
+        editorUserId,
+        lastPerformanceSyncAt,
+      })
+      .returning();
 
     return NextResponse.json({ ...created, autoFetched }, { status: 201 });
   } catch (error) {
@@ -328,8 +256,6 @@ export async function PUT(request: NextRequest) {
       sourceType,
       killReason,
       utmCampaign,
-      manychatKeyword,
-      manychatLink,
     } = body;
 
     const VALID_SOURCE_TYPES = new Set(["original", "repost", "cross_post"]);
@@ -367,17 +293,6 @@ export async function PUT(request: NextRequest) {
     if (utmCampaign !== undefined) {
       const trimmed = typeof utmCampaign === "string" ? utmCampaign.trim() : "";
       updateData.utmCampaign = trimmed || null;
-    }
-
-    // ManyChat keyword + link travel as a pair; the form always sends both.
-    // If either is in the body we validate together and write both.
-    if (manychatKeyword !== undefined || manychatLink !== undefined) {
-      const manychat = validateManychatPair(manychatKeyword, manychatLink);
-      if (!manychat.ok) {
-        return NextResponse.json({ error: manychat.error }, { status: 400 });
-      }
-      updateData.manychatKeyword = manychat.keyword;
-      updateData.manychatLink = manychat.link;
     }
 
     // Pillar: accept itemId (or null to clear). Resolve target's notionId so we
@@ -652,24 +567,13 @@ export async function PUT(request: NextRequest) {
         return [row];
       });
     } catch (err) {
-      // 23505 = unique_violation. Two PUT-reachable unique constraints:
-      // utm_campaign (per-row) and manychat_keyword (per-account). Inspect
-      // the constraint name to surface a useful message.
+      // 23505 = unique_violation. Currently the only PUT-reachable unique
+      // constraint is utm_campaign (per-row).
       const code =
         err && typeof err === "object" && "code" in err
           ? String((err as { code: unknown }).code)
           : null;
       if (code === "23505") {
-        const constraint =
-          err && typeof err === "object" && "constraint" in err
-            ? String((err as { constraint: unknown }).constraint)
-            : "";
-        if (constraint.includes("manychat_keyword")) {
-          return NextResponse.json(
-            { error: "That ManyChat keyword is already in use on this account" },
-            { status: 409 }
-          );
-        }
         return NextResponse.json(
           { error: "That CTA UTM campaign is already taken" },
           { status: 409 }

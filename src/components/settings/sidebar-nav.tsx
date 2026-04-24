@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 const SECTIONS = [
   { href: "/settings/brands", label: "Brands" },
   { href: "/settings/users", label: "Users" },
+  { href: "/settings/links", label: "Short links" },
   { href: "/settings/sync-errors", label: "Sync errors" },
   { href: "/settings/jobs", label: "Jobs" },
 ] as const;

@@ -758,14 +758,6 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
   const [utmCampaign, setUtmCampaign] = useState("");
-  // ManyChat dialog state — paired fields don't fit the auto-persist-on-blur
-  // pattern (typing one then tabbing out 400s), so they live in a modal that
-  // submits both at once.
-  const [manychatDialogOpen, setManychatDialogOpen] = useState(false);
-  const [manychatDraftKeyword, setManychatDraftKeyword] = useState("");
-  const [manychatDraftLink, setManychatDraftLink] = useState("");
-  const [manychatDraftError, setManychatDraftError] = useState<string | null>(null);
-  const [manychatSaving, setManychatSaving] = useState(false);
   const [sourceType, setSourceType] = useState<string>("original");
   const [pendingKill, setPendingKill] = useState<{ previousStatus: string } | null>(
     null,
@@ -2301,65 +2293,6 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
           </PropertyRow>
         </PropertyRowSolo>
 
-        {/* Hidden again post-screencast. App Review reviewers don't log into
-            the app (we told them so in the submission), and DMs to non-testers
-            won't actually fire until Meta approves the messaging permission.
-            Flip the `false` back to enable when approval lands. */}
-        {false && postType?.startsWith("instagram_") && (
-          <PropertyRowSolo>
-            <PropertyRow label="Auto-DM trigger">
-              {item.manychatKeyword ? (
-                <div className="flex items-center gap-2 px-2 py-1 min-w-0 w-full">
-                  <code className="text-xs px-1.5 py-0.5 rounded bg-muted text-foreground shrink-0">
-                    {item.manychatKeyword}
-                  </code>
-                  <span className="text-xs text-muted-foreground shrink-0">→</span>
-                  <a
-                    href={item.manychatLink ?? undefined}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate min-w-0 flex-1"
-                    title={item.manychatLink ?? ""}
-                  >
-                    {item.manychatLink}
-                  </a>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs shrink-0"
-                    onClick={() => {
-                      setManychatDraftKeyword(item.manychatKeyword ?? "");
-                      setManychatDraftLink(item.manychatLink ?? "");
-                      setManychatDraftError(null);
-                      setManychatDialogOpen(true);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                </div>
-              ) : (
-                <div className="px-2 py-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => {
-                      setManychatDraftKeyword("");
-                      setManychatDraftLink("");
-                      setManychatDraftError(null);
-                      setManychatDialogOpen(true);
-                    }}
-                  >
-                    + Add auto-DM trigger
-                  </Button>
-                </div>
-              )}
-            </PropertyRow>
-          </PropertyRowSolo>
-        )}
-
         {deleteError && (
           <div className="text-sm px-3 py-2 bg-red-50 text-red-700 border-t border-red-200">
             {deleteError}
@@ -3140,115 +3073,6 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
         saving={saveState.kind === "saving"}
         onConfirm={confirmKill}
       />
-
-      {/* Auto-DM trigger editor. Both fields submit together so we never
-          hit the "keyword without link" 400 from the API. */}
-      <Dialog
-        open={manychatDialogOpen}
-        onOpenChange={(open) => {
-          if (!open && !manychatSaving) setManychatDialogOpen(false);
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {item.manychatKeyword ? "Edit auto-DM trigger" : "Add auto-DM trigger"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">
-              When someone comments this phrase on the Instagram post, we automatically DM them this link.
-            </p>
-            <div className="space-y-2">
-              <Label htmlFor="manychat-phrase">Trigger phrase</Label>
-              <Input
-                id="manychat-phrase"
-                value={manychatDraftKeyword}
-                onChange={(e) => setManychatDraftKeyword(e.target.value)}
-                placeholder="e.g. guide saas"
-                className="font-mono"
-                autoFocus
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Lowercased on save. 3-32 characters. Letters, numbers, space, hyphen, underscore.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="manychat-link">Destination link</Label>
-              <Input
-                id="manychat-link"
-                type="url"
-                value={manychatDraftLink}
-                onChange={(e) => setManychatDraftLink(e.target.value)}
-                placeholder="https://…"
-              />
-            </div>
-            {manychatDraftError && (
-              <p className="text-xs text-destructive">{manychatDraftError}</p>
-            )}
-            <div className="flex justify-between gap-2 pt-2">
-              {item.manychatKeyword ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                  disabled={manychatSaving}
-                  onClick={async () => {
-                    setManychatSaving(true);
-                    setManychatDraftError(null);
-                    const ok = await persistField({
-                      manychatKeyword: "",
-                      manychatLink: "",
-                    });
-                    setManychatSaving(false);
-                    if (ok) setManychatDialogOpen(false);
-                  }}
-                >
-                  Remove
-                </Button>
-              ) : (
-                <span />
-              )}
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setManychatDialogOpen(false)}
-                  disabled={manychatSaving}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  disabled={
-                    manychatSaving ||
-                    !manychatDraftKeyword.trim() ||
-                    !manychatDraftLink.trim()
-                  }
-                  onClick={async () => {
-                    setManychatSaving(true);
-                    setManychatDraftError(null);
-                    const ok = await persistField({
-                      manychatKeyword: manychatDraftKeyword.trim(),
-                      manychatLink: manychatDraftLink.trim(),
-                    });
-                    setManychatSaving(false);
-                    if (ok) setManychatDialogOpen(false);
-                    // Failures land in saveState/toast via persistField — copy
-                    // the latest error into the dialog so it's visible there.
-                    else if (saveState.kind === "error") {
-                      setManychatDraftError(saveState.message);
-                    }
-                  }}
-                >
-                  {manychatSaving ? "Saving…" : "Save"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
     </div>
   );

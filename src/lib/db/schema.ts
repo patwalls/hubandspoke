@@ -235,13 +235,6 @@ export const productionItems = pgTable(
     visionExtractedAt: timestamp("vision_extracted_at", {
       withTimezone: true,
     }),
-    // ManyChat IG comment-to-DM trigger phrase (e.g. "guide saas"). The phrase
-    // a viewer comments to receive `manychatLink` in DM. Stored normalized
-    // (lowercase + collapsed whitespace) so writes and lookups stay aligned.
-    // Uniqueness is per-account: two different IG accounts can reuse the same
-    // phrase without collision. NULL = post has no DM trigger configured.
-    manychatKeyword: text("manychat_keyword"),
-    manychatLink: text("manychat_link"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -280,12 +273,6 @@ export const productionItems = pgTable(
     uniqueIndex("uniq_production_items_source_clip_idea")
       .on(table.sourceClipIdeaId)
       .where(sql`${table.sourceClipIdeaId} IS NOT NULL`),
-    // Per-account uniqueness for ManyChat keywords. Lookup is via the
-    // /api/manychat/lookup endpoint; collisions inside an account would mean
-    // two posts answer the same comment text — disallow at the DB level.
-    uniqueIndex("uniq_production_items_manychat_keyword")
-      .on(table.accountId, table.manychatKeyword)
-      .where(sql`${table.manychatKeyword} IS NOT NULL`),
   ]
 );
 

@@ -36,8 +36,6 @@ removing, or deprecating anything.
 | AI summary (for clip-idea prompt context) | Active | `POST /api/production-items/[id]/summary` | `productionItems` (cached) | |
 | Direct media upload (bypass YouTube download) | Active | `POST /api/uploads/s3-presign`, `POST /api/uploads/confirm`, `POST /api/uploads/download` | `productionItems` (mediaS3Key, posterS3Key) | Triggers `descript-transcribe` on confirm |
 | **Old cross-post fit fields on productionItems** | **Deprecated** | (no live writers) | `productionItems.crossPostFitGood`, `crossPostFitReasoning` | Replaced by `crossPostFitVerdicts`; columns kept for back-data only |
-| IG comment-to-DM (Meta direct) | Active | Item detail form (instagram_* posts) → `manychatKeyword` + `manychatLink`; Meta webhook → `POST /api/instagram/webhook` → `findKeywordMatch` → IG Send API | `productionItems.manychat_keyword`, `manychat_link` | Meta delivers comment events directly. We look up the keyword and DM the link via the IG Private Reply API (bypasses 24h messaging window). Per-account uniqueness on keyword. See [docs/instagram-setup.md](./instagram-setup.md). |
-| **ManyChat IG lookup endpoint** | **Legacy** | `POST /api/manychat/lookup` (called by a ManyChat External Request) | `productionItems.manychat_keyword`, `manychat_link` | Replaced by the Meta direct path above. Kept in service during the migration; remove once Meta direct is verified. ManyChat couldn't pass the actual comment text to webhooks (carries `Last Text Input` which is the user's stale DM history). |
 
 ---
 
@@ -98,6 +96,7 @@ removing, or deprecating anything.
 |---|---|---|---|---|
 | Users & invites | Active | `/(dashboard)/settings/users`, `GET\|POST /api/users`, `POST\|DELETE /api/invites/[id]`, `POST /api/invites/validate`, `POST /api/invites/accept` | `users`, `invites` | |
 | Brands CRUD | Active | `/(dashboard)/settings/brands`, `/(dashboard)/settings/brands/[brand]`, `GET\|POST /api/brands`, `GET\|PATCH\|DELETE /api/brands/[slug]` | `brands` | Defaults (producer/editor, weekly goal) live here |
+| Short links admin (ManyChat redirect pool) | Active | `/(dashboard)/settings/links`, `GET\|POST\|PATCH\|DELETE /api/short-links/[slug]` | (none — data lives in the StarterStory Rails app's `short_links` table) | Admin-only UI for the ~20-keyword ManyChat pool. hubandspoke proxies CRUD to `SHORT_LINKS_API_URL` (the StarterStory REST API at `go.starterstory.com`) with `SHORT_LINKS_API_KEY`. The redirect + click tracking lives in the Rails app; this is a pure control plane. |
 | Global accounts settings | Active | `/(dashboard)/settings/accounts` | `accounts` | All brands |
 | Brand-scoped settings | Active | `/(dashboard)/[brand]/settings` | `brands`, `accounts` | |
 | Sync errors monitor | Active | `/(dashboard)/settings/sync-errors` | `syncLogs` | Notion / YouTube / MATG / performance |
@@ -152,29 +151,21 @@ removing, or deprecating anything.
 
 ---
 
-## IG comment-to-DM setup
+## IG comment-to-DM (fixed short-link pool)
 
-Per-post keyword + link mappings live entirely in our DB; the dispatcher path
-is what carries comment events to us and DMs back to the commenter.
+Both the Meta Graph API direct dispatcher and the earlier `POST /api/manychat/lookup`
+shim are gone. Replacement architecture:
 
-**Per-post workflow:** in the item detail (any `instagram_*` post type), fill in
-`ManyChat phrase` + `ManyChat link`. Phrase is normalized (lowercase, collapsed
-whitespace) on save; uniqueness is per-account. Lookup matches exact first,
-then word-boundary contains, so `"send me guide saas pls"` still hits a stored
-phrase of `guide saas`.
+- ~20 ManyChat automations, each hard-wired to a fixed keyword, DM a short link
+  like `https://go.starterstory.com/bootstrap`.
+- The redirect service lives in the StarterStory Rails app — `ShortLink` +
+  `ShortLinkClick` models, `go.starterstory.com/:slug` → `Go::RedirectsController#show`.
+- StarterStory exposes a REST API at `/api/v1/short_links` (bearer-token auth via
+  `HUBANDSPOKE_API_TOKEN`) so hubandspoke can manage the pool remotely.
+- hubandspoke owns `/settings/links` — admin-only UI, proxies CRUD through
+  `/api/short-links/...` to the Rails API (API key stays server-side).
 
-**Active dispatcher: Meta Graph API direct.** See
-[docs/instagram-setup.md](./instagram-setup.md) for the one-time Meta App
-Dashboard configuration. Why this shape: ManyChat's `Last Text Input` variable
-is the user's last DM/Story text, NOT the IG comment that triggered the
-flow — making per-comment lookups impossible. Meta delivers the actual comment
-text in the webhook payload.
-
-**Legacy dispatcher: ManyChat (kept until Meta direct is verified).** A single
-ManyChat automation `IG Comment → Hub & Spoke Lookup` calls
-`POST /api/manychat/lookup` with `{{last_input_text}}`. Works for the page
-admin only (whose `last_input_text` happens to be a valid keyword); broken for
-all other commenters. Tear down once the Meta direct path is proven.
+No tables, no redirect route, and no click-tracking code in hubandspoke.
 
 ---
 
