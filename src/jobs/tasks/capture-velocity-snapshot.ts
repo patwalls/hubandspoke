@@ -104,19 +104,30 @@ export const captureVelocitySnapshotTask: Task = async (
   const ageMs = Date.now() - new Date(item.publishedAt).getTime();
   const postAgeMinutes = Math.max(0, Math.floor(ageMs / 60_000));
 
-  await db
-    .insert(viewSnapshots)
-    .values({
+  // Plain ON CONFLICT DO NOTHING (no target) — drizzle's `target:` form
+  // can't match a partial unique index, and the pre-check above already
+  // handles the retry-idempotency case. If a true race slips through,
+  // the unique violation is caught below and the row is treated as a
+  // duplicate.
+  try {
+    await db.insert(viewSnapshots).values({
       productionItemId,
       views: refreshed.views,
       likes: refreshed.likes,
       comments: refreshed.comments,
       postAgeMinutes,
       checkpointKey,
-    })
-    .onConflictDoNothing({
-      target: [viewSnapshots.productionItemId, viewSnapshots.checkpointKey],
     });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/unique|duplicate key/i.test(msg)) {
+      helpers.logger.info(
+        `capture-velocity-snapshot race-caught item=${productionItemId} cp=${checkpointKey} — already inserted`
+      );
+      return;
+    }
+    throw err;
+  }
 
   helpers.logger.info(
     `capture-velocity-snapshot ok item=${productionItemId} cp=${checkpointKey} views=${refreshed.views} age=${postAgeMinutes}m credits=${refreshed.creditsUsed} (${Date.now() - start}ms)`
