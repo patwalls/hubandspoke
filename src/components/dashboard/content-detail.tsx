@@ -2301,16 +2301,9 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
           </PropertyRow>
         </PropertyRowSolo>
 
-        {/* ManyChat IG comment-to-DM trigger. Hidden entirely for now —
-            the ManyChat dispatcher is broken (Last Text Input doesn't carry
-            the IG comment) and the Meta direct replacement is pending App
-            Review. Flip `false` to `postType?.startsWith("instagram_")`
-            once the Meta webhook path is verified end-to-end. Keeps the
-            data model + dialog component intact; just hides the entry
-            point so non-admin users don't see a knob that doesn't fire. */}
-        {false && postType?.startsWith("instagram_") && (
+        {postType?.startsWith("instagram_") && (
           <PropertyRowSolo>
-            <PropertyRow label="ManyChat trigger">
+            <PropertyRow label="Auto-DM trigger">
               {item.manychatKeyword ? (
                 <div className="flex items-center gap-2 px-2 py-1 min-w-0 w-full">
                   <code className="text-xs px-1.5 py-0.5 rounded bg-muted text-foreground shrink-0">
@@ -2355,7 +2348,7 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
                       setManychatDialogOpen(true);
                     }}
                   >
-                    + Add ManyChat trigger
+                    + Add auto-DM trigger
                   </Button>
                 </div>
               )}
@@ -3144,7 +3137,7 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
         onConfirm={confirmKill}
       />
 
-      {/* ManyChat trigger editor. Both fields submit together so we never
+      {/* Auto-DM trigger editor. Both fields submit together so we never
           hit the "keyword without link" 400 from the API. */}
       <Dialog
         open={manychatDialogOpen}
@@ -3155,12 +3148,12 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {item.manychatKeyword ? "Edit ManyChat trigger" : "Add ManyChat trigger"}
+              {item.manychatKeyword ? "Edit auto-DM trigger" : "Add auto-DM trigger"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              When someone comments the phrase on this Instagram post, ManyChat DMs them this link.
+              When someone comments this phrase on the Instagram post, we automatically DM them this link.
             </p>
             <div className="space-y-2">
               <Label htmlFor="manychat-phrase">Trigger phrase</Label>
