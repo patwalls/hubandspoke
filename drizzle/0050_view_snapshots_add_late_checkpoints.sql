@@ -1,0 +1,2 @@
+ALTER TABLE "view_snapshots" DROP CONSTRAINT "view_snapshots_checkpoint_key_valid";--> statement-breakpoint
+ALTER TABLE "view_snapshots" ADD CONSTRAINT "view_snapshots_checkpoint_key_valid" CHECK ("view_snapshots"."checkpoint_key" IN ('15m', '30m', '1h', '2h', '4h', '8h', '24h', '48h'));

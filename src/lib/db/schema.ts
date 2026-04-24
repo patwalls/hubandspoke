@@ -756,7 +756,7 @@ export const viewSnapshots = pgTable(
     ),
     check(
       "view_snapshots_checkpoint_key_valid",
-      sql`${t.checkpointKey} IN ('15m', '30m', '1h', '2h', '4h')`
+      sql`${t.checkpointKey} IN ('15m', '30m', '1h', '2h', '4h', '8h', '24h', '48h')`
     ),
     check(
       "view_snapshots_post_age_nonneg",

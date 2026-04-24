@@ -351,6 +351,13 @@
       "when": 1777068921693,
       "tag": "0049_view_snapshots_check_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1777069487432,
+      "tag": "0050_view_snapshots_add_late_checkpoints",
+      "breakpoints": true
     }
   ]
 }

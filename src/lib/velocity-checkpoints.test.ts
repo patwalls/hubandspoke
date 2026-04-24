@@ -5,17 +5,20 @@ import {
 } from "./velocity-checkpoints";
 
 describe("VELOCITY_CHECKPOINTS", () => {
-  it("has exactly five checkpoints", () => {
-    expect(VELOCITY_CHECKPOINTS).toHaveLength(5);
+  it("has exactly eight checkpoints", () => {
+    expect(VELOCITY_CHECKPOINTS).toHaveLength(8);
   });
 
-  it("uses the expected keys in the expected order", () => {
+  it("uses the expected keys in the expected order (each roughly doubles)", () => {
     expect(VELOCITY_CHECKPOINTS.map((c) => c.key)).toEqual([
       "15m",
       "30m",
       "1h",
       "2h",
       "4h",
+      "8h",
+      "24h",
+      "48h",
     ]);
   });
 
@@ -66,6 +69,8 @@ describe("isVelocityCheckpointKey", () => {
     expect(isVelocityCheckpointKey("1H")).toBe(false);
     expect(isVelocityCheckpointKey("1h ")).toBe(false);
     expect(isVelocityCheckpointKey("60m")).toBe(false);
+    expect(isVelocityCheckpointKey("12h")).toBe(false);
+    expect(isVelocityCheckpointKey("72h")).toBe(false);
   });
 
   it("rejects arbitrary strings", () => {

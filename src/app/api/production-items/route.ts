@@ -17,6 +17,7 @@ import {
 import { enqueueNotification } from "@/lib/services/notifications";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
+import { extractContentId } from "@/lib/platform-url";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { enqueue } from "@/jobs/enqueue";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
@@ -192,6 +193,13 @@ export async function POST(request: NextRequest) {
         : new Date();
 
     const utmCampaign = await generateUtmCampaign(title);
+    // Single dedup key for content sync — derive it from the URL whenever
+    // possible. YouTube already extracts `youtubeId` above; reuse it so the
+    // partial unique index `(account_id, platform_content_id)` catches
+    // re-adds of the same post via a different URL shape (e.g. `?utm_source`,
+    // `threads.com` vs `threads.net`).
+    const platformContentId =
+      youtubeId ?? extractContentId(postType, publishedLink) ?? null;
     const [created] = await db
       .insert(productionItems)
       .values({
@@ -201,6 +209,7 @@ export async function POST(request: NextRequest) {
         postType: postType || null,
         format: format || null,
         publishedLink: publishedLink || null,
+        platformContentId,
         publishedDate,
         publishedAt,
         brand,

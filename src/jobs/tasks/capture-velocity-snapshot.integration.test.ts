@@ -101,32 +101,50 @@ async function makeItem(
 // ─── scheduleVelocitySnapshots ─────────────────────────────────────────
 
 describe("scheduleVelocitySnapshots", () => {
-  it("queues all 5 jobs when publishedAt is now (every window still open)", async () => {
+  it("queues all 8 jobs when publishedAt is now (every window still open)", async () => {
     const id = await makeItem({ publishedAt: new Date() });
 
     const result = await scheduleVelocitySnapshots(id, new Date());
 
-    expect(result.scheduled).toBe(5);
+    expect(result.scheduled).toBe(VELOCITY_CHECKPOINTS.length);
     expect(result.skippedPast).toBe(0);
     expect(result.skippedCaptured).toBe(0);
-    expect(mockedEnqueue).toHaveBeenCalledTimes(5);
+    expect(mockedEnqueue).toHaveBeenCalledTimes(VELOCITY_CHECKPOINTS.length);
 
     const keys = mockedEnqueue.mock.calls.map(
       (call) => (call[1] as { checkpointKey: string }).checkpointKey
     );
-    expect(keys.sort()).toEqual(["15m", "1h", "2h", "30m", "4h"]);
+    expect(new Set(keys)).toEqual(
+      new Set(VELOCITY_CHECKPOINTS.map((c) => c.key))
+    );
   });
 
-  it("skips checkpoints whose windows have closed", async () => {
-    // Published 5 hours ago → every window is closed (4h window ends at 300min = 5h)
+  it("skips every checkpoint when publishedAt is past the last window", async () => {
+    // 48h window closes at 4320 min (72h). A post 73h+ old has every
+    // window closed → no jobs enqueued.
+    const seventyThreeHoursAgo = new Date(Date.now() - 73 * 60 * 60_000);
+    const id = await makeItem({ publishedAt: seventyThreeHoursAgo });
+
+    const result = await scheduleVelocitySnapshots(id, seventyThreeHoursAgo);
+
+    expect(result.scheduled).toBe(0);
+    expect(result.skippedPast).toBe(VELOCITY_CHECKPOINTS.length);
+    expect(mockedEnqueue).not.toHaveBeenCalled();
+  });
+
+  it("partial scheduling when some windows have closed, others still open", async () => {
+    // 5h ≈ 300m. 15m/30m/1h/2h/4h windows all closed; 8h/24h/48h still open.
     const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60_000);
     const id = await makeItem({ publishedAt: fiveHoursAgo });
 
     const result = await scheduleVelocitySnapshots(id, fiveHoursAgo);
 
-    expect(result.scheduled).toBe(0);
     expect(result.skippedPast).toBe(5);
-    expect(mockedEnqueue).not.toHaveBeenCalled();
+    expect(result.scheduled).toBe(3);
+    const keys = mockedEnqueue.mock.calls.map(
+      (c) => (c[1] as { checkpointKey: string }).checkpointKey
+    );
+    expect(new Set(keys)).toEqual(new Set(["8h", "24h", "48h"]));
   });
 
   it("schedules a checkpoint immediately when target past but window still open", async () => {
@@ -137,7 +155,8 @@ describe("scheduleVelocitySnapshots", () => {
 
     const result = await scheduleVelocitySnapshots(id, twelveMinAgo);
 
-    expect(result.scheduled).toBe(5);
+    // Every checkpoint window still open — 8 jobs total.
+    expect(result.scheduled).toBe(VELOCITY_CHECKPOINTS.length);
     const call15m = mockedEnqueue.mock.calls.find(
       (c) => (c[1] as { checkpointKey: string }).checkpointKey === "15m"
     );
@@ -158,7 +177,8 @@ describe("scheduleVelocitySnapshots", () => {
 
     const result = await scheduleVelocitySnapshots(id, eighteenMinAgo);
 
-    expect(result.scheduled).toBe(5); // 15m still schedulable — inside window
+    // All 8 windows still open at age 18m → 8 jobs.
+    expect(result.scheduled).toBe(VELOCITY_CHECKPOINTS.length);
     const call15m = mockedEnqueue.mock.calls.find(
       (c) => (c[1] as { checkpointKey: string }).checkpointKey === "15m"
     );
@@ -206,13 +226,12 @@ describe("scheduleVelocitySnapshots", () => {
 
     const result = await scheduleVelocitySnapshots(id, new Date());
 
-    expect(result.scheduled).toBe(4);
+    expect(result.scheduled).toBe(VELOCITY_CHECKPOINTS.length - 1);
     expect(result.skippedCaptured).toBe(1);
     const keys = mockedEnqueue.mock.calls.map(
       (c) => (c[1] as { checkpointKey: string }).checkpointKey
     );
     expect(keys).not.toContain("15m");
-    expect(keys.sort()).toEqual(["1h", "2h", "30m", "4h"]);
   });
 
   it("uses per-checkpoint jobKeys so duplicate calls don't stack", async () => {
@@ -223,8 +242,9 @@ describe("scheduleVelocitySnapshots", () => {
       (c) => (c[2] as { jobKey?: string }).jobKey
     );
     expect(new Set(jobKeys).size).toBe(jobKeys.length); // all unique
+    const keyPattern = VELOCITY_CHECKPOINTS.map((c) => c.key).join("|");
     for (const key of jobKeys) {
-      expect(key).toMatch(new RegExp(`^velocity-${id}-(15m|30m|1h|2h|4h)$`));
+      expect(key).toMatch(new RegExp(`^velocity-${id}-(${keyPattern})$`));
     }
   });
 });

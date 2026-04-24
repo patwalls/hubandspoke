@@ -25,7 +25,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   */20  youtube-download-sweep    → fan-out → youtube-download → transcribe-whisper
   */30  account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
-  (per-post) capture-velocity-snapshot → scheduled at publish+15m/30m/1h/2h/4h per item; writes one view_snapshots row
+  (per-post) capture-velocity-snapshot → scheduled at publish+{15m,30m,1h,2h,4h,8h,24h,48h} per item; writes one view_snapshots row each
   (manual)     cross-post-scan    → LLM recommender, fired by the "Populate queue" button on /[brand]/queue → POST /api/cross-post-scan
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
 
@@ -235,11 +235,14 @@ The **checkpoint configuration** lives in `src/lib/velocity-checkpoints.ts` and 
 
 | Key | Target age | Acceptance window | Gap to next |
 |---|---:|---|---:|
-| `15m` | 15 | 9–22 | 1m |
-| `30m` | 30 | 23–45 | 1m |
-| `1h` | 60 | 46–90 | 10m |
-| `2h` | 120 | 100–179 | 36m |
-| `4h` | 240 | 215–300 | — |
+| `15m` | 15 min | 9–22 | 1 min |
+| `30m` | 30 min | 23–45 | 1 min |
+| `1h` | 60 min | 46–90 | 10 min |
+| `2h` | 120 min | 100–179 | 36 min |
+| `4h` | 240 min | 215–300 | 2 h |
+| `8h` | 8 h | 7–12 h | 8 h |
+| `24h` | 24 h | 20–36 h | 4 h |
+| `48h` | 48 h | 40–72 h | — |
 
 Windows are **non-overlapping** by design — any age maps to at most one checkpoint. Adjacent gaps are intentional and get rejected by the window check (indicates a job fired out of band).
 
@@ -296,8 +299,8 @@ captureVelocitySnapshotTask({ productionItemId, checkpointKey })
 
 #### Cost
 
-- **Per post:** exactly 5 SC calls if every checkpoint lands in its window. Fewer for late-discovered posts (whichever windows are still open).
-- **At current volume** (~17 Published originals/day): ~85 SC calls/day for velocity data.
+- **Per post:** up to 8 SC calls if every checkpoint lands in its window (early ones within hours of publish, late ones over 2 days). Fewer for late-discovered posts (whichever windows are still open).
+- **At current volume** (~17 Published originals/day): ~136 SC calls/day for velocity data (≤8 × 17). Still ~35× cheaper than the old `fresh-metrics-sync` design (~4,800/day).
 - Baseline `performance-decay` runs on the existing tiered cadence (hourly for <24h, 6h for 1–7d, etc.) independent of this.
 
 #### Enqueue callsites
