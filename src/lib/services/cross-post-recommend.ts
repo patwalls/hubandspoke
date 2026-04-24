@@ -147,6 +147,13 @@ function buildSystemPrompt(pastOutcomes: PastOutcome[] | undefined): string {
 ${lines.join("\n")}`;
 }
 
+export interface VelocityCheckpoint {
+  /** Label the LLM sees — "15m" | "30m" | "1h" | "2h" | "4h". */
+  label: string;
+  views: number;
+  ratio: number;
+}
+
 export async function recommendCrossPosts(params: {
   title: string | null;
   contentBody: string | null;
@@ -155,8 +162,10 @@ export async function recommendCrossPosts(params: {
   sourceAccountHandle: string | null;
   brand: string | null;
   publishedDate: string | null;
-  viewsAt1h: number | null;
-  velocityRatio: number | null;
+  /** Per-checkpoint velocity signal. Only checkpoints with both a
+   *  snapshot and a baseline make it in. The LLM can see the trajectory
+   *  (accelerating / stalled / already cooling) not just one number. */
+  velocityCheckpoints: VelocityCheckpoint[];
   hasVideo?: boolean;
   hasImage?: boolean;
   mediaCount?: number;
@@ -182,17 +191,24 @@ export async function recommendCrossPosts(params: {
       }`
   );
 
-  const velocityLine =
-    params.viewsAt1h != null && params.velocityRatio != null
-      ? `Velocity: ${params.viewsAt1h.toLocaleString()} views at ~1h (${params.velocityRatio.toFixed(1)}× this account+post-type's typical 1h pace)`
-      : `Velocity: unknown`;
+  const velocityBlock =
+    params.velocityCheckpoints.length > 0
+      ? [
+          "Velocity (baseline = median of same account + post-type, last 30 days):",
+          ...params.velocityCheckpoints.map((c) => {
+            const label = c.label.padStart(3, " ");
+            const views = c.views.toLocaleString().padStart(10, " ");
+            return `  ${label}: ${views} views (${c.ratio.toFixed(1)}× baseline)`;
+          }),
+        ].join("\n")
+      : "Velocity: no checkpoint data yet.";
 
   const userMessage = [
     `Source account handle: ${params.sourceAccountHandle ?? "(unknown)"}`,
     `Source platform / post type: ${params.sourcePlatform} / ${params.sourcePostType}`,
     `Brand: ${params.brand ?? "(none)"}`,
     `Originally published: ${params.publishedDate ?? "(unknown)"}`,
-    velocityLine,
+    velocityBlock,
     `Media on source: ${formatMedia(params)}`,
     `Title: "${params.title ?? "(none)"}"`,
     ``,

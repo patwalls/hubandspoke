@@ -25,7 +25,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   */20  youtube-download-sweep    → fan-out → youtube-download → transcribe-whisper
   13:00 account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
-  */15  fresh-metrics-sync        → snapshot views/likes/comments for items <72h old
+  (per-post) capture-velocity-snapshot → scheduled at publish+15m/30m/1h/2h/4h per item; writes one view_snapshots row
   (manual)     cross-post-scan    → LLM recommender, fired by the "Populate queue" button on /[brand]/queue → POST /api/cross-post-scan
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
 
@@ -206,15 +206,20 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Phase B: refill Idea queue, respect 30d repost spacing + hard-kill suppression
   - Cap: 10 pending suggestions in queue
 
-### `fresh-metrics-sync` — high-frequency metrics sweep for fresh items
-- **Trigger:** cron `*/15 * * * *` (every 15 minutes)
-- **Files:** `src/jobs/tasks/fresh-metrics-sync.ts`, `src/lib/services/performance-decay.ts`
-- **Inputs:** `productionItems` where `status='Published'`, `sourceType='original'`, `publishedAt > now() - 72h`
-- **Outputs:** `view_snapshots` (one row per item per sweep); `productionItems.{views,likes,comments}` via `refreshItemMetrics()`
-- **Downstream:** `cross-post-scan` reads `view_snapshots` for velocity.
+### `capture-velocity-snapshot` — per-post scheduled velocity snapshots
+- **Trigger:** per-item scheduled jobs. When an item transitions to Published with a real `publishedAt` (via `account-content-sync` from SC, or via `POST /api/production-items` with an SC-supplied timestamp), `scheduleVelocitySnapshots()` enqueues five jobs with `runAt = publishedAt + {15m, 30m, 1h, 2h, 4h}`. Checkpoints whose target time has already passed (late discovery) are skipped.
+- **Files:** `src/jobs/tasks/capture-velocity-snapshot.ts`, `src/lib/services/performance-decay.ts` (reuses `refreshItemMetrics()`)
+- **Inputs:** `{ productionItemId, checkpointKey }` payload; current item state in `production_items`.
+- **Outputs:** one `view_snapshots` row per job with `checkpoint_key` set (one of `"15m" | "30m" | "1h" | "2h" | "4h"`). Idempotent via the partial unique index `(production_item_id, checkpoint_key)`.
+- **Downstream:** `cross-post-scan` reads these rows for velocity.
 - **Rules:**
-  - Bounded scope (72h) keeps SC cost low (~+4,800 calls/day at default volume)
-  - Writes a snapshot only when SC returned a non-null view count; skips otherwise
+  - ~5 SC calls per published item (1 per checkpoint), not a blanket sweep. Replaces the `fresh-metrics-sync` design that was burning ~4,800 calls/day.
+  - Skips the SC call if the item was deleted or un-Published between enqueue and execution.
+  - Skips writing (but still pays 1 SC call) if the platform returned no view signal (LinkedIn/YT-Community with no likes yet).
+- **Enqueue callsites:**
+  - `src/lib/services/account-content-sync.ts` (primary — SC-authoritative publishedAt)
+  - `src/app/api/production-items/route.ts` POST handler (add-from-link flow; publishedAt comes from SC preview)
+  - *Not* the PUT handler's status-flip path — manual "I posted this" stamps `new Date()` which is usually wrong; wait for account-content-sync to see the post with the real SC time.
 
 ### `cross-post-scan` — velocity-gated cross-post recommendations
 - **Trigger:** **manual only.** Operator clicks "Populate queue" on the Cross-post tab of `/[brand]/queue`, which POSTs to `/api/cross-post-scan` with `{ maxIdeas: 10, maxCandidates: 20 }`. Not on cron — the graphile-worker task is still registered for ad-hoc enqueues but nothing fires it automatically.

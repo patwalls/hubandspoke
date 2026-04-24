@@ -29,6 +29,7 @@ import { productionItems, syncLogs, accounts, brands } from "@/lib/db/schema";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { SC_BASE, headers } from "@/lib/services/sc-client";
 import type { SCTweet } from "@/lib/services/sc-fetchers";
@@ -697,13 +698,23 @@ async function upsertItems(
           brand: brandSlug,
           format,
         });
-        await db.insert(productionItems).values({
-          ...baseUpdate,
-          format,
-          utmCampaign: await generateUtmCampaign(item.title),
-          producerUserId: assignees.producerUserId,
-          editorUserId: assignees.editorUserId,
-        });
+        const [inserted] = await db
+          .insert(productionItems)
+          .values({
+            ...baseUpdate,
+            format,
+            utmCampaign: await generateUtmCampaign(item.title),
+            producerUserId: assignees.producerUserId,
+            editorUserId: assignees.editorUserId,
+          })
+          .returning({ id: productionItems.id });
+        // Schedule the 5 velocity snapshots (15m/30m/1h/2h/4h after publish)
+        // so the cross-post scanner has real data when the operator hits
+        // "Populate queue". Checkpoints whose target time is already past
+        // (backfill of older posts) silently no-op.
+        if (inserted && item.publishedAt) {
+          await scheduleVelocitySnapshots(inserted.id, item.publishedAt);
+        }
         created++;
       }
     } catch (err) {

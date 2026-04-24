@@ -46,8 +46,12 @@ interface RepostedFromRef {
 interface CrossPostSignals {
   confidence: number | null;
   reasoning: string | null;
-  viewsAt1h: number | null;
-  velocityRatio: number | null;
+  /** Per-age-checkpoint view + ratio on the source item. Sorted 15m → 4h. */
+  checkpoints: Array<{
+    label: string;
+    views: number;
+    ratio: number | null;
+  }>;
 }
 
 interface ItemDetail {
@@ -1052,8 +1056,8 @@ function CrossPostReasoningPanel({
 }) {
   const hasV2Reasoning =
     !!signals?.reasoning && signals.reasoning.trim().length > 0;
-  const hasVelocity =
-    signals?.viewsAt1h != null || signals?.velocityRatio != null;
+  const checkpoints = signals?.checkpoints ?? [];
+  const hasCheckpoints = checkpoints.length > 0;
   const hasConfidence = signals?.confidence != null;
 
   return (
@@ -1062,32 +1066,58 @@ function CrossPostReasoningPanel({
         {reasoningLabel}
       </h3>
 
-      {(hasVelocity || hasConfidence) && (
+      {hasConfidence && (
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-          {hasConfidence && (
-            <span
-              className={cn(
-                "inline-flex items-center rounded px-1.5 py-0.5 font-medium",
-                signals!.confidence! >= 85
-                  ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                  : signals!.confidence! >= 70
-                  ? "bg-amber-100 text-amber-900 border border-amber-200"
-                  : "bg-muted text-muted-foreground border border-border"
-              )}
-            >
-              {signals!.confidence}% confidence
-            </span>
-          )}
-          {signals?.velocityRatio != null && (
-            <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5">
-              {signals.velocityRatio.toFixed(1)}× baseline
-            </span>
-          )}
-          {signals?.viewsAt1h != null && (
-            <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5">
-              {formatCompact(signals.viewsAt1h)} views @ 1h
-            </span>
-          )}
+          <span
+            className={cn(
+              "inline-flex items-center rounded px-1.5 py-0.5 font-medium",
+              signals!.confidence! >= 85
+                ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                : signals!.confidence! >= 70
+                ? "bg-amber-100 text-amber-900 border border-amber-200"
+                : "bg-muted text-muted-foreground border border-border"
+            )}
+          >
+            {signals!.confidence}% confidence
+          </span>
+        </div>
+      )}
+
+      {hasCheckpoints && (
+        <div className="rounded-md border border-border bg-muted/30 p-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+            Velocity after publish
+          </div>
+          <table className="w-full text-[11px] text-foreground">
+            <tbody>
+              {checkpoints.map((cp) => (
+                <tr key={cp.label}>
+                  <td className="pr-3 text-muted-foreground tabular-nums w-10">
+                    {cp.label}
+                  </td>
+                  <td className="pr-3 tabular-nums text-right w-20">
+                    {formatCompact(cp.views)}
+                  </td>
+                  <td className="text-muted-foreground tabular-nums">
+                    {cp.ratio != null ? (
+                      <span
+                        className={cn(
+                          cp.ratio >= 2 ? "text-emerald-700" : "",
+                          cp.ratio >= 4 ? "font-semibold" : ""
+                        )}
+                      >
+                        {cp.ratio.toFixed(1)}× baseline
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/70">
+                        no baseline yet
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

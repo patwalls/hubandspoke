@@ -40,20 +40,33 @@ import {
 // have a 45–75 min snapshot.
 const FRESH_WINDOW_HOURS = 72;
 
-// Post-age window used to compute "views at ~1h". We accept anything 45-75m
-// because the fresh-metrics cron runs every 15m so a window this wide
-// virtually guarantees a hit.
-const TARGET_AGE_MIN = 45;
-const TARGET_AGE_MAX = 75;
+// Velocity checkpoints: which post-age points the scanner reads from
+// `view_snapshots` to judge "how fast is this growing". Windows are wider
+// than 1× cron cadence so the 15-min fresh-metrics-sync reliably lands at
+// least one snapshot inside each window. Checkpoint data is *all* already
+// captured by the existing cron — adding a checkpoint here is zero-cost
+// on the SC API side, it just changes which snapshots the scanner reads.
+export const VELOCITY_CHECKPOINTS = [
+  { key: "15m", targetMinutes: 15, windowMin: 10, windowMax: 20 },
+  { key: "30m", targetMinutes: 30, windowMin: 22, windowMax: 38 },
+  { key: "1h", targetMinutes: 60, windowMin: 45, windowMax: 75 },
+  { key: "2h", targetMinutes: 120, windowMin: 105, windowMax: 135 },
+  { key: "4h", targetMinutes: 240, windowMin: 225, windowMax: 255 },
+] as const;
+type CheckpointKey = (typeof VELOCITY_CHECKPOINTS)[number]["key"];
+export type CheckpointMap = Partial<Record<CheckpointKey, number>>;
 
-// Baseline = median "views at ~1h" across the same account+postType over the
-// last BASELINE_WINDOW_DAYS. Only computed when a cohort has at least
-// MIN_COHORT_SIZE items — smaller than this is too noisy to compare against.
+// Baseline = median views at a given checkpoint across the same
+// account+postType over the last BASELINE_WINDOW_DAYS. Only computed per
+// checkpoint when that checkpoint's cohort has at least MIN_COHORT_SIZE
+// items — smaller than this is too noisy to compare against.
 const BASELINE_WINDOW_DAYS = 30;
 const MIN_COHORT_SIZE = 5;
 
-// Velocity gate. A candidate is "taking off" if its views_at_1h divided by
-// the account+postType baseline is >= this multiplier.
+// Velocity gate. A candidate is "taking off" if ANY checkpoint's
+// (candidate views / baseline) ratio is >= this multiplier. Forgiving by
+// design: early rockets without late data qualify via the 15m/30m
+// checkpoints; late bloomers with weak early reads qualify via 2h/4h.
 const VELOCITY_MIN_RATIO = 2.0;
 
 // Don't re-propose a source we've already considered in this window. Gives
@@ -109,6 +122,20 @@ export interface CrossPostScanResult {
   }>;
 }
 
+/** Per-checkpoint velocity signal for a single candidate item. Only
+ *  checkpoints whose windows actually produced a snapshot AND whose
+ *  baseline cohort met MIN_COHORT_SIZE make it into the list. */
+export interface CheckpointSignal {
+  /** Stable key — "15m" | "30m" | "1h" | "2h" | "4h". */
+  key: CheckpointKey;
+  /** Human-readable label used in LLM prompt + UI (same as key today). */
+  label: string;
+  /** Candidate's view count at that checkpoint (nearest-in-window). */
+  views: number;
+  /** views / baseline. Higher = growing faster than typical. */
+  ratio: number;
+}
+
 interface Candidate {
   id: string;
   title: string | null;
@@ -125,8 +152,12 @@ interface Candidate {
   mediaContentType: string | null;
   platform: string[] | null;
   sourceAccountHandle: string | null;
-  viewsAt1h: number;
-  velocityRatio: number;
+  /** Best ratio across all checkpoints; drives candidate ranking when
+   *  `maxCandidates` forces us to keep the top N. */
+  bestRatio: number;
+  /** Full checkpoint trajectory passed to the LLM so it can reason about
+   *  shape (accelerating vs. stalled-after-spike). */
+  checkpoints: CheckpointSignal[];
 }
 
 export async function runCrossPostScan(
@@ -185,12 +216,12 @@ export async function runCrossPostScan(
 
   if (rawCandidates.length === 0) return result;
 
-  // 2. Pull every candidate's best "views at ~1h" snapshot in one query.
+  // 2. Pull every candidate's per-checkpoint snapshots in one query.
   const candidateIds = rawCandidates.map((c) => c.id);
-  const viewsAt1hByItem = await fetchViewsAt1h(candidateIds);
+  const snapshotsByItem = await fetchCheckpointSnapshots(candidateIds);
 
-  // 3. Compute per-(account, postType) baselines in one query.
-  const baselines = await fetchBaselinesForGroups(
+  // 3. Compute per-(account, postType, checkpoint) baselines in one query.
+  const baselinesByGroup = await fetchCheckpointBaselines(
     rawCandidates
       .filter((c) => c.accountId && c.postType)
       .map((c) => ({ accountId: c.accountId!, postType: c.postType! }))
@@ -230,8 +261,8 @@ export async function runCrossPostScan(
   };
   interface QualifiedCandidate {
     raw: QualifiedRaw;
-    viewsAt1h: number;
-    velocityRatio: number;
+    bestRatio: number;
+    checkpoints: CheckpointSignal[];
   }
   const qualified: QualifiedCandidate[] = [];
   for (const raw of rawCandidates) {
@@ -241,17 +272,38 @@ export async function runCrossPostScan(
       result.candidatesDropped.noCompatibleTargets++;
       continue;
     }
-    const viewsAt1h = viewsAt1hByItem.get(raw.id);
-    if (viewsAt1h == null) continue; // No snapshot yet.
-    result.candidatesConsidered++;
 
-    const baseline = baselines.get(`${raw.accountId}:${raw.postType}`);
-    if (!baseline) {
+    const perItem = snapshotsByItem.get(raw.id) ?? {};
+    const baselines =
+      baselinesByGroup.get(`${raw.accountId}:${raw.postType}`) ?? {};
+
+    // Compute ratio at each checkpoint where we have both a candidate
+    // snapshot AND a baseline (cohort ≥ MIN_COHORT_SIZE).
+    const checkpoints: CheckpointSignal[] = [];
+    for (const cp of VELOCITY_CHECKPOINTS) {
+      const views = perItem[cp.key];
+      const baseline = baselines[cp.key];
+      if (views == null || baseline == null || baseline === 0) continue;
+      checkpoints.push({
+        key: cp.key,
+        label: cp.key,
+        views,
+        ratio: views / baseline,
+      });
+    }
+
+    if (checkpoints.length === 0) {
+      // Either no snapshots yet or no baseline cohort — can't judge.
       result.candidatesDropped.noBaseline++;
       continue;
     }
-    const velocityRatio = viewsAt1h / Math.max(baseline, 1);
-    if (velocityRatio < VELOCITY_MIN_RATIO) {
+    result.candidatesConsidered++;
+
+    const bestRatio = checkpoints.reduce(
+      (acc, c) => (c.ratio > acc ? c.ratio : acc),
+      0
+    );
+    if (bestRatio < VELOCITY_MIN_RATIO) {
       result.candidatesDropped.belowVelocity++;
       continue;
     }
@@ -261,20 +313,20 @@ export async function runCrossPostScan(
     }
     qualified.push({
       raw: raw as QualifiedRaw,
-      viewsAt1h,
-      velocityRatio,
+      bestRatio,
+      checkpoints,
     });
   }
 
-  // Top-N by velocity. When maxCandidates is Infinity this is effectively
+  // Top-N by best-ratio. When maxCandidates is Infinity this is effectively
   // a no-op sort; when the caller passes a real cap, we process only the
   // strongest-growing items.
   const topQualified = qualified
-    .sort((a, b) => b.velocityRatio - a.velocityRatio)
+    .sort((a, b) => b.bestRatio - a.bestRatio)
     .slice(0, Number.isFinite(maxCandidates) ? maxCandidates : qualified.length);
 
   // Phase 2 — LLM classification + decision logging.
-  for (const { raw, viewsAt1h, velocityRatio } of topQualified) {
+  for (const { raw, bestRatio, checkpoints } of topQualified) {
     // Enumerate candidate targets: all accounts in the source's brand that
     // (a) aren't the source account and (b) support at least one post type
     // in the source's compatibility list.
@@ -316,8 +368,8 @@ export async function runCrossPostScan(
       mediaContentType: raw.mediaContentType,
       platform: (raw.platform as string[] | null) ?? null,
       sourceAccountHandle: raw.accountHandle,
-      viewsAt1h,
-      velocityRatio,
+      bestRatio,
+      checkpoints,
     };
 
     const media = deriveMediaFromItem(candidate.mediaContentType);
@@ -335,8 +387,11 @@ export async function runCrossPostScan(
       sourceAccountHandle: candidate.sourceAccountHandle,
       brand: candidate.brand,
       publishedDate: candidate.publishedDate,
-      viewsAt1h: candidate.viewsAt1h,
-      velocityRatio: candidate.velocityRatio,
+      velocityCheckpoints: candidate.checkpoints.map((c) => ({
+        label: c.label,
+        views: c.views,
+        ratio: c.ratio,
+      })),
       hasVideo: finalMedia.hasVideo,
       hasImage: finalMedia.hasImage,
       mediaCount: finalMedia.mediaCount,
@@ -516,96 +571,86 @@ function deriveMediaFromItem(mediaContentType: string | null): MediaSignals {
 }
 
 /**
- * For each item, pick the view_snapshots row whose post_age_minutes is
- * closest to 60 within the [TARGET_AGE_MIN, TARGET_AGE_MAX] window. Returns
- * a map of itemId → views.
+ * For each item, pull every checkpoint snapshot recorded for it. Returns
+ * `Map<itemId, { "15m"?: number; "30m"?: number; ... }>`. Only rows tagged
+ * by the `capture-velocity-snapshot` job (checkpoint_key NOT NULL) are
+ * read — legacy untagged rows from the old fresh-metrics-sync are ignored.
  */
-async function fetchViewsAt1h(
+async function fetchCheckpointSnapshots(
   itemIds: string[]
-): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
+): Promise<Map<string, CheckpointMap>> {
+  const map = new Map<string, CheckpointMap>();
   if (itemIds.length === 0) return map;
 
-  const rows = await db.execute<{
-    production_item_id: string;
-    views: number;
-  }>(
-    sql`
-      SELECT DISTINCT ON (production_item_id)
-        production_item_id,
-        views
-      FROM view_snapshots
-      WHERE production_item_id IN (${sql.join(
-        itemIds.map((id) => sql`${id}::uuid`),
-        sql`, `
-      )})
-        AND post_age_minutes BETWEEN ${TARGET_AGE_MIN} AND ${TARGET_AGE_MAX}
-      ORDER BY production_item_id, abs(post_age_minutes - 60) ASC
-    `
-  );
+  const rows = await db
+    .select({
+      productionItemId: viewSnapshots.productionItemId,
+      views: viewSnapshots.views,
+      checkpointKey: viewSnapshots.checkpointKey,
+    })
+    .from(viewSnapshots)
+    .where(
+      and(
+        inArray(viewSnapshots.productionItemId, itemIds),
+        sql`${viewSnapshots.checkpointKey} IS NOT NULL`
+      )
+    );
+
   for (const row of rows) {
-    map.set(row.production_item_id, row.views);
+    if (!row.checkpointKey) continue;
+    const existing = map.get(row.productionItemId) ?? {};
+    existing[row.checkpointKey as CheckpointKey] = row.views;
+    map.set(row.productionItemId, existing);
   }
   return map;
 }
 
 /**
- * Baseline: for each (accountId, postType) group, compute the median
- * "views at ~1h" across the last BASELINE_WINDOW_DAYS of published originals
- * that have such a snapshot. Returns a map keyed `${accountId}:${postType}`.
- * Groups with fewer than MIN_COHORT_SIZE items are omitted (too noisy to
- * compare against).
+ * For each (accountId, postType) group, compute per-checkpoint median
+ * views over the last BASELINE_WINDOW_DAYS of published originals.
+ * Per-checkpoint cohort sizes are gated by MIN_COHORT_SIZE — a group may
+ * have a usable 1h baseline but no 15m baseline if early-checkpoint
+ * coverage is still sparse. Returns the partial map either way.
  */
-async function fetchBaselinesForGroups(
+async function fetchCheckpointBaselines(
   groups: Array<{ accountId: string; postType: string }>
-): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
+): Promise<Map<string, CheckpointMap>> {
+  const map = new Map<string, CheckpointMap>();
   if (groups.length === 0) return map;
 
-  const uniqueKeys = Array.from(
-    new Set(groups.map((g) => `${g.accountId}:${g.postType}`))
-  );
-
-  // One query: pre-aggregate the nearest-to-60m snapshot per item over the
-  // baseline window, then group by (accountId, postType) and compute median
-  // with percentile_cont plus a cohort count for the size gate.
   const rows = await db.execute<{
     account_id: string;
     post_type: string;
-    baseline: number;
-    cohort_size: number;
+    checkpoint_key: string;
+    baseline: string;
+    cohort_size: string;
   }>(
     sql`
-      WITH per_item AS (
-        SELECT DISTINCT ON (pi.id)
-          pi.account_id,
-          pi.post_type,
-          vs.views
-        FROM production_items pi
-        JOIN view_snapshots vs ON vs.production_item_id = pi.id
-        WHERE pi.source_type = 'original'
-          AND pi.status = 'Published'
-          AND pi.deleted_at IS NULL
-          AND pi.published_at >= (now() - interval '${sql.raw(
-            String(BASELINE_WINDOW_DAYS)
-          )} days')
-          AND vs.post_age_minutes BETWEEN ${TARGET_AGE_MIN} AND ${TARGET_AGE_MAX}
-        ORDER BY pi.id, abs(vs.post_age_minutes - 60) ASC
-      )
-      SELECT account_id,
-             post_type,
-             percentile_cont(0.5) WITHIN GROUP (ORDER BY views) AS baseline,
-             count(*) AS cohort_size
-      FROM per_item
-      GROUP BY account_id, post_type
+      SELECT
+        pi.account_id,
+        pi.post_type,
+        vs.checkpoint_key,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY vs.views) AS baseline,
+        count(*) AS cohort_size
+      FROM production_items pi
+      JOIN view_snapshots vs ON vs.production_item_id = pi.id
+      WHERE pi.source_type = 'original'
+        AND pi.status = 'Published'
+        AND pi.deleted_at IS NULL
+        AND pi.published_at >= (now() - interval '${sql.raw(
+          String(BASELINE_WINDOW_DAYS)
+        )} days')
+        AND vs.checkpoint_key IS NOT NULL
+      GROUP BY pi.account_id, pi.post_type, vs.checkpoint_key
       HAVING count(*) >= ${MIN_COHORT_SIZE}
     `
   );
 
   for (const row of rows) {
     const key = `${row.account_id}:${row.post_type}`;
-    if (!uniqueKeys.includes(key)) continue;
-    map.set(key, Number(row.baseline));
+    const existing = map.get(key) ?? {};
+    existing[row.checkpoint_key as CheckpointKey] = Number(row.baseline);
+    map.set(key, existing);
   }
   return map;
 }

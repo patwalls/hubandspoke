@@ -19,6 +19,7 @@ import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { enqueue } from "@/jobs/enqueue";
+import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 
 function getNotion(): Client {
   const auth = process.env.NOTION_API_SECRET;
@@ -239,6 +240,15 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.error("[create] refresh-item-metrics enqueue failed", err);
       }
+    }
+
+    // Schedule the 5 velocity-snapshot jobs so the cross-post scanner has
+    // view-count checkpoints at 15m/30m/1h/2h/4h after publish. No-op when
+    // the supplied publishedAt is already >4h old.
+    try {
+      await scheduleVelocitySnapshots(created.id, created.publishedAt);
+    } catch (err) {
+      console.error("[create] scheduleVelocitySnapshots failed", err);
     }
 
     return NextResponse.json({ ...created, autoFetched }, { status: 201 });
@@ -791,6 +801,14 @@ export async function PUT(request: NextRequest) {
         console.error("[update] refresh-item-metrics enqueue failed", err);
       }
     }
+
+    // NOTE: deliberately no `scheduleVelocitySnapshots` here. When an
+    // operator manually marks an item as Published in-app, the
+    // `publishedAt` stamp is "now" — often 1-3h after the real platform
+    // publish time, which would fire the velocity snapshots at the wrong
+    // ages. The authoritative `publishedAt` comes from Scrape Creators
+    // via `account-content-sync`, which schedules velocity snapshots at
+    // the real publish time. Nothing lost by skipping here.
 
     return NextResponse.json({
       ...updated,

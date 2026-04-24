@@ -195,15 +195,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     }
 
     // For cross-post items, also surface the scanner's decision: the LLM
-    // reasoning that got this into the queue, its confidence, and the
-    // velocity signal on the source post that triggered the suggestion.
-    // Used by the triage dialog to explain *why* this cross-post landed.
+    // reasoning, its confidence, and the per-checkpoint velocity signal on
+    // the source post (15m/30m/1h/2h/4h). Triage dialog renders these.
     let crossPostSignals:
       | {
           confidence: number | null;
           reasoning: string | null;
-          viewsAt1h: number | null;
-          velocityRatio: number | null;
+          checkpoints: Array<{ label: string; views: number; ratio: number | null }>;
         }
       | null = null;
     if (item.sourceType === "cross_post") {
@@ -217,59 +215,77 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         .orderBy(desc(crossPostDecisions.proposedAt))
         .limit(1);
 
-      let viewsAt1h: number | null = null;
-      let velocityRatio: number | null = null;
+      const checkpoints: Array<{
+        label: string;
+        views: number;
+        ratio: number | null;
+      }> = [];
       if (item.repostedFromItemId) {
-        const velocityRows = await db.execute<{
+        // Every checkpoint snapshot we have for the source item + the
+        // matching per-checkpoint baseline for its account+postType. One
+        // query for snapshots, one for baselines.
+        const snapshotRows = await db.execute<{
+          checkpoint_key: string;
           views: number;
           account_id: string;
           post_type: string;
         }>(sql`
-          SELECT DISTINCT ON (vs.production_item_id)
-            vs.views,
-            pi.account_id,
-            pi.post_type
-          FROM view_snapshots vs
-          JOIN production_items pi ON pi.id = vs.production_item_id
-          WHERE vs.production_item_id = ${item.repostedFromItemId}
-            AND vs.post_age_minutes BETWEEN 45 AND 75
-          ORDER BY vs.production_item_id, abs(vs.post_age_minutes - 60) ASC
-          LIMIT 1
+          SELECT vs.checkpoint_key,
+                 vs.views,
+                 pi.account_id,
+                 pi.post_type
+            FROM view_snapshots vs
+            JOIN production_items pi ON pi.id = vs.production_item_id
+           WHERE vs.production_item_id = ${item.repostedFromItemId}
+             AND vs.checkpoint_key IS NOT NULL
+          ORDER BY vs.checkpoint_key
         `);
-        if (velocityRows.length > 0) {
-          const row = velocityRows[0];
-          viewsAt1h = row.views;
-          const baselineRows = await db.execute<{ baseline: string }>(sql`
-            WITH per_item AS (
-              SELECT DISTINCT ON (pi.id)
-                vs.views
-              FROM production_items pi
-              JOIN view_snapshots vs ON vs.production_item_id = pi.id
-              WHERE pi.account_id = ${row.account_id}::uuid
-                AND pi.post_type = ${row.post_type}
-                AND pi.source_type = 'original'
-                AND pi.status = 'Published'
-                AND pi.deleted_at IS NULL
-                AND pi.published_at >= (now() - interval '30 days')
-                AND vs.post_age_minutes BETWEEN 45 AND 75
-              ORDER BY pi.id, abs(vs.post_age_minutes - 60) ASC
-            )
-            SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY views) AS baseline
-            FROM per_item
+
+        if (snapshotRows.length > 0) {
+          const { account_id, post_type } = snapshotRows[0];
+          const baselineRows = await db.execute<{
+            checkpoint_key: string;
+            baseline: string;
+          }>(sql`
+            SELECT vs.checkpoint_key,
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY vs.views) AS baseline
+              FROM view_snapshots vs
+              JOIN production_items pi ON pi.id = vs.production_item_id
+             WHERE pi.account_id = ${account_id}::uuid
+               AND pi.post_type = ${post_type}
+               AND pi.source_type = 'original'
+               AND pi.status = 'Published'
+               AND pi.deleted_at IS NULL
+               AND pi.published_at >= (now() - interval '30 days')
+               AND vs.checkpoint_key IS NOT NULL
+             GROUP BY vs.checkpoint_key
             HAVING count(*) >= 5
           `);
-          const baseline =
-            baselineRows.length > 0 ? Number(baselineRows[0].baseline) : null;
-          velocityRatio =
-            baseline != null && baseline > 0 ? row.views / baseline : null;
+          const baselineByKey = new Map(
+            baselineRows.map((r) => [r.checkpoint_key, Number(r.baseline)])
+          );
+          // Preserve the canonical 15m → 4h ordering.
+          const ORDER = ["15m", "30m", "1h", "2h", "4h"] as const;
+          const byKey = new Map(
+            snapshotRows.map((r) => [r.checkpoint_key, r.views])
+          );
+          for (const key of ORDER) {
+            const views = byKey.get(key);
+            if (views == null) continue;
+            const baseline = baselineByKey.get(key);
+            checkpoints.push({
+              label: key,
+              views,
+              ratio: baseline && baseline > 0 ? views / baseline : null,
+            });
+          }
         }
       }
 
       crossPostSignals = {
         confidence: item.crossPostConfidence,
         reasoning: decision?.reasoning ?? null,
-        viewsAt1h,
-        velocityRatio,
+        checkpoints,
       };
     }
 

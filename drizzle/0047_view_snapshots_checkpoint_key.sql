@@ -1,0 +1,2 @@
+ALTER TABLE "view_snapshots" ADD COLUMN "checkpoint_key" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "uniq_view_snapshots_item_checkpoint" ON "view_snapshots" USING btree ("production_item_id","checkpoint_key") WHERE "view_snapshots"."checkpoint_key" IS NOT NULL;

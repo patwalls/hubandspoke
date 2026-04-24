@@ -734,10 +734,19 @@ export const viewSnapshots = pgTable(
     // Age of the post when the snapshot was taken, in whole minutes. Makes
     // "find snapshot nearest to 60m" a simple index lookup.
     postAgeMinutes: integer("post_age_minutes").notNull(),
+    // Stable checkpoint tag ("15m" | "30m" | "1h" | "2h" | "4h") when the
+    // row was written by the `capture-velocity-snapshot` scheduled job.
+    // NULL for legacy / ad-hoc snapshots. The scanner reads only rows
+    // tagged here — cleaner than post-age window gymnastics, and the unique
+    // index below guarantees exactly one snapshot per (item, checkpoint).
+    checkpointKey: text("checkpoint_key"),
   },
   (t) => [
     index("idx_view_snapshots_item_taken").on(t.productionItemId, t.takenAt),
     index("idx_view_snapshots_item_age").on(t.productionItemId, t.postAgeMinutes),
+    uniqueIndex("uniq_view_snapshots_item_checkpoint")
+      .on(t.productionItemId, t.checkpointKey)
+      .where(sql`${t.checkpointKey} IS NOT NULL`),
   ]
 );
 

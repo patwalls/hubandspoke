@@ -58,7 +58,10 @@ import {
   refreshItemMetricsTask,
   type RefreshItemMetricsPayload,
 } from "./refresh-item-metrics";
-import { freshMetricsSyncTask } from "./fresh-metrics-sync";
+import {
+  captureVelocitySnapshotTask,
+  type CaptureVelocitySnapshotPayload,
+} from "./capture-velocity-snapshot";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -75,9 +78,9 @@ export interface TaskPayloads {
   "account-refresh": AccountRefreshPayload;
   "account-content-sync": AccountContentSyncPayload;
   "refresh-item-metrics": RefreshItemMetricsPayload;
+  "capture-velocity-snapshot": CaptureVelocitySnapshotPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
-  "fresh-metrics-sync": Record<string, never>;
   "notion-sync": Record<string, never>;
   "enrichment-sweep": Record<string, never>;
   "hook-extract-sweep": Record<string, never>;
@@ -112,8 +115,8 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "account-refresh": accountRefreshTask,
   "account-content-sync": accountContentSyncTask,
   "refresh-item-metrics": refreshItemMetricsTask,
+  "capture-velocity-snapshot": captureVelocitySnapshotTask,
   "performance-decay": performanceDecayTask,
-  "fresh-metrics-sync": freshMetricsSyncTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,
   "hook-extract-sweep": hookExtractSweepTask,

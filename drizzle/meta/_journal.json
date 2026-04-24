@@ -330,6 +330,13 @@
       "when": 1777052220023,
       "tag": "0046_cross_post_v2_additive",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1777057520192,
+      "tag": "0047_view_snapshots_checkpoint_key",
+      "breakpoints": true
     }
   ]
 }
