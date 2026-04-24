@@ -4,10 +4,13 @@ import { auth } from "@/lib/auth";
 import {
   getCoverageMap,
   getHookSourceBreakdown,
+  getVelocityCoverage,
   type CoverageRow,
   type HookSourceBreakdown,
+  type VelocityCoverageRow,
 } from "@/lib/db/queries";
 import { getBrands } from "@/lib/db/brands";
+import { VELOCITY_CHECKPOINTS } from "@/lib/velocity-checkpoints";
 
 export const metadata: Metadata = { title: "Coverage" };
 export const dynamic = "force-dynamic";
@@ -84,9 +87,10 @@ export default async function CoveragePage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const [rows, hookBreakdown] = await Promise.all([
+  const [rows, hookBreakdown, velocity] = await Promise.all([
     getCoverageMap(),
     getHookSourceBreakdown(),
+    getVelocityCoverage(),
   ]);
   const byBrand = new Map<string, CoverageRow[]>();
   for (const r of rows) {
@@ -96,6 +100,7 @@ export default async function CoveragePage() {
   const brands = Array.from(byBrand.keys()).sort();
   const brandLabels = new Map((await getBrands()).map((b) => [b.slug, b.label]));
   const hookByBrand = new Map(hookBreakdown.map((h) => [h.brand, h]));
+  const velocityByBrand = new Map(velocity.map((v) => [v.brand, v]));
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -128,6 +133,9 @@ export default async function CoveragePage() {
                 ({total.total.toLocaleString()} published)
               </span>
             </h3>
+            {velocityByBrand.has(brand) && (
+              <VelocitySection row={velocityByBrand.get(brand)!} />
+            )}
             {hooks && hooks.total > 0 && (
               <div className="rounded-lg border border-border p-3">
                 <div className="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
@@ -241,6 +249,68 @@ export default async function CoveragePage() {
         performance decay is continuous, transcripts publish via Descript on
         demand.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Per-brand velocity-snapshot coverage. One cell per checkpoint showing
+ * `captured / expected` among Published originals published in the last
+ * 14 days whose checkpoint window has closed. 100% is unrealistic —
+ * LinkedIn / YT-Community posts with no early engagement legitimately
+ * return no view signal. Anything below ~75% on a given checkpoint is
+ * worth investigating (worker outage, SC rate limits, schedule bug).
+ */
+function VelocitySection({ row }: { row: VelocityCoverageRow }) {
+  const hasAnyData = VELOCITY_CHECKPOINTS.some(
+    (cp) => (row.checkpoints[cp.key]?.expected ?? 0) > 0
+  );
+  if (!hasAnyData) return null;
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-baseline justify-between mb-2 gap-3 flex-wrap">
+        <h4 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+          Velocity snapshots — capture rate
+        </h4>
+        <span className="text-xs text-muted-foreground">
+          % of expected snapshots landing, per checkpoint (last 14 days)
+        </span>
+      </div>
+      <div className="grid grid-cols-4 md:grid-cols-8 gap-2 text-xs">
+        {VELOCITY_CHECKPOINTS.map((cp) => {
+          const cell = row.checkpoints[cp.key] ?? {
+            expected: 0,
+            captured: 0,
+          };
+          const pct =
+            cell.expected > 0
+              ? Math.round((cell.captured / cell.expected) * 100)
+              : null;
+          const className =
+            pct == null
+              ? "text-muted-foreground/70"
+              : pct >= 90
+                ? "text-muted-foreground"
+                : pct >= 75
+                  ? "text-amber-600"
+                  : "text-red-600 font-medium";
+          return (
+            <div key={cp.key} className="rounded-md bg-muted/40 px-2 py-1.5">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                {cp.key}
+              </div>
+              <div className={`font-medium tabular-nums ${className}`}>
+                {pct == null ? "—" : `${pct}%`}
+              </div>
+              <div className="text-[10px] text-muted-foreground/80 tabular-nums">
+                {cell.captured.toLocaleString()} /{" "}
+                {cell.expected.toLocaleString()}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

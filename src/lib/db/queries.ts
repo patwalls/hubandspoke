@@ -838,3 +838,100 @@ export async function getHookSourceBreakdown(): Promise<HookSourceBreakdown[]> {
     a.brand.localeCompare(b.brand)
   );
 }
+
+// ─── Velocity snapshot coverage ────────────────────────────────────────
+
+export interface VelocityCoverageCell {
+  /** Items eligible for this checkpoint: Published originals with a
+   *  non-null `publishedAt` older than the checkpoint's windowMax (so the
+   *  window has had its chance) AND published within the last 14 days
+   *  (so we measure recent tracking health, not ancient history). */
+  expected: number;
+  /** How many of those items have a `view_snapshots` row for this
+   *  checkpoint. */
+  captured: number;
+}
+
+export interface VelocityCoverageRow {
+  brand: string;
+  /** Keyed by `VelocityCheckpointKey` — "15m" | "30m" | "1h" | ... */
+  checkpoints: Record<string, VelocityCoverageCell>;
+}
+
+/**
+ * Per-brand velocity-snapshot capture rate.
+ *
+ * For each of the 8 checkpoints, counts:
+ *   - `expected` = Published originals with a publishedAt >= now-14d AND
+ *      <= now - windowMax. (Eligible: published recently enough that the
+ *      system was live, and long enough ago that the window has closed
+ *      and any scheduled job should have fired by now.)
+ *   - `captured` = how many of those have a `view_snapshots` row for
+ *      this checkpoint_key.
+ *
+ * `captured / expected` → the health metric the /coverage page shows.
+ * 100% is unrealistic — LinkedIn and YouTube Community posts legitimately
+ * return no view signal until some likes accrue, so their snapshots are
+ * correctly skipped (not a bug). Expect ≥80% on healthy weeks.
+ */
+export async function getVelocityCoverage(): Promise<VelocityCoverageRow[]> {
+  const rows = await db.execute<{
+    brand: string;
+    checkpoint_key: string;
+    expected: string;
+    captured: string;
+  }>(sql`
+    WITH checkpoints AS (
+      SELECT * FROM (VALUES
+        ('15m', 22),
+        ('30m', 45),
+        ('1h', 90),
+        ('2h', 179),
+        ('4h', 300),
+        ('8h', 720),
+        ('24h', 2160),
+        ('48h', 4320)
+      ) AS t(key, window_max_min)
+    ),
+    eligible AS (
+      SELECT
+        pi.id,
+        pi.brand,
+        cp.key AS checkpoint_key
+      FROM production_items pi
+      CROSS JOIN checkpoints cp
+      WHERE pi.status = 'Published'
+        AND pi.source_type = 'original'
+        AND pi.deleted_at IS NULL
+        AND pi.published_at IS NOT NULL
+        AND pi.published_at <= now() - (cp.window_max_min * interval '1 minute')
+        AND pi.published_at >= now() - interval '14 days'
+    )
+    SELECT
+      e.brand,
+      e.checkpoint_key,
+      count(*)::text AS expected,
+      count(vs.id)::text AS captured
+    FROM eligible e
+    LEFT JOIN view_snapshots vs
+      ON vs.production_item_id = e.id
+     AND vs.checkpoint_key = e.checkpoint_key
+    GROUP BY e.brand, e.checkpoint_key
+  `);
+
+  const byBrand = new Map<string, VelocityCoverageRow>();
+  for (const r of rows) {
+    let entry = byBrand.get(r.brand);
+    if (!entry) {
+      entry = { brand: r.brand, checkpoints: {} };
+      byBrand.set(r.brand, entry);
+    }
+    entry.checkpoints[r.checkpoint_key] = {
+      expected: Number(r.expected),
+      captured: Number(r.captured),
+    };
+  }
+  return Array.from(byBrand.values()).sort((a, b) =>
+    a.brand.localeCompare(b.brand)
+  );
+}
