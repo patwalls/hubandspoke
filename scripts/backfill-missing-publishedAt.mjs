@@ -1,14 +1,22 @@
 /**
- * One-shot backfill: set `published_at = created_at` for any Published
- * original row that has a null `published_at`.
+ * One-shot backfill for legacy Published originals with a null
+ * `published_at` timestamp.
  *
- * These are legacy items from before `publishedAt` was consistently
- * stamped on insert. They're silently invisible to velocity tracking
+ * Sources, in priority order:
+ *   1. `published_date` (the date-only field, set by Notion sync and
+ *      older ingestion paths). Treated as midnight UTC of that date —
+ *      approximate, but better than `created_at` which reflects when
+ *      our app *learned* about the post, not when it went live.
+ *   2. `created_at` (last resort, for rows with neither published_at
+ *      nor published_date).
+ *
+ * These rows are silently invisible to velocity tracking
  * (`scheduleVelocitySnapshots` no-ops on null) and to the cross-post
- * scanner's candidate pool (`publishedAt` gate). `created_at` is the
- * best approximation we have of the real publish moment.
+ * scanner's 72h candidate gate. Almost all of them are old enough that
+ * the velocity windows have long closed — the fix is primarily about
+ * data hygiene, not retroactive capture.
  *
- * Safe to run repeatedly — a row that already has `published_at` is
+ * Safe to run repeatedly — rows that already have `published_at` are
  * left alone.
  *
  * Defaults to dry-run. Pass --apply to commit.
@@ -35,24 +43,46 @@ const sql = postgres(databaseUrl, {
 
 async function main() {
   const candidates = await sql`
-    SELECT id, title, brand, created_at
+    SELECT id, title, brand, created_at, published_date
       FROM production_items
      WHERE status = 'Published'
        AND source_type = 'original'
        AND deleted_at IS NULL
        AND published_at IS NULL
-     ORDER BY created_at DESC
+     ORDER BY COALESCE(published_date, created_at::date) DESC
   `;
 
-  console.log(
-    `Found ${candidates.length} Published originals with null published_at. Mode: ${
-      dryRun ? "DRY RUN" : "APPLY"
-    }.`
-  );
+  let withDate = 0;
+  let withoutDate = 0;
   for (const c of candidates) {
+    if (c.published_date) withDate++;
+    else withoutDate++;
+  }
+
+  console.log(
+    `Found ${candidates.length} Published originals with null published_at.`
+  );
+  console.log(
+    `  ${withDate} have published_date → will use midnight of that date.`
+  );
+  console.log(
+    `  ${withoutDate} have neither → will fall back to created_at.`
+  );
+  console.log(`Mode: ${dryRun ? "DRY RUN" : "APPLY"}.`);
+  console.log("");
+
+  // Show a small sample so the operator can sanity-check.
+  const sample = candidates.slice(0, 5);
+  for (const c of sample) {
+    const source = c.published_date
+      ? `published_date=${c.published_date.toISOString().slice(0, 10)}`
+      : `created_at=${c.created_at.toISOString()}`;
     console.log(
-      `  ${c.id}  ${c.brand.padEnd(20)}  created=${c.created_at.toISOString()}  ${(c.title ?? "").slice(0, 60)}`
+      `  ${c.id}  ${c.brand.padEnd(20)}  ${source}  ${(c.title ?? "").slice(0, 60)}`
     );
+  }
+  if (candidates.length > sample.length) {
+    console.log(`  … and ${candidates.length - sample.length} more.`);
   }
 
   if (candidates.length === 0 || dryRun) {
@@ -64,9 +94,11 @@ async function main() {
     return;
   }
 
+  // Single UPDATE — COALESCE picks published_date (cast to timestamp at
+  // midnight UTC) when present, otherwise created_at.
   const updated = await sql`
     UPDATE production_items
-       SET published_at = created_at,
+       SET published_at = COALESCE(published_date::timestamptz, created_at),
            updated_at = now()
      WHERE status = 'Published'
        AND source_type = 'original'
