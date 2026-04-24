@@ -893,6 +893,17 @@ export async function getVelocityCoverage(): Promise<VelocityCoverageRow[]> {
         ('48h', 4320)
       ) AS t(key, window_max_min)
     ),
+    -- Use the earliest taken_at as the velocity-tracking-live-since
+    -- epoch. Items published before this point never had a chance to be
+    -- captured and would unfairly drag the denominator to 0%. If no
+    -- snapshots exist yet, COALESCE falls back to a far-future date so
+    -- the expected count is 0 and the UI section hides.
+    tracking_since AS (
+      SELECT COALESCE(
+        (SELECT min(taken_at) FROM view_snapshots),
+        '9999-12-31'::timestamptz
+      ) AS ts
+    ),
     eligible AS (
       SELECT
         pi.id,
@@ -900,12 +911,15 @@ export async function getVelocityCoverage(): Promise<VelocityCoverageRow[]> {
         cp.key AS checkpoint_key
       FROM production_items pi
       CROSS JOIN checkpoints cp
+      CROSS JOIN tracking_since t
       WHERE pi.status = 'Published'
         AND pi.source_type = 'original'
         AND pi.deleted_at IS NULL
         AND pi.published_at IS NOT NULL
         AND pi.published_at <= now() - (cp.window_max_min * interval '1 minute')
         AND pi.published_at >= now() - interval '14 days'
+        -- Only count items published after the capture system was running.
+        AND pi.published_at >= t.ts
     )
     SELECT
       e.brand,
