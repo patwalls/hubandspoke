@@ -156,16 +156,22 @@ removing, or deprecating anything.
 Both the Meta Graph API direct dispatcher and the earlier `POST /api/manychat/lookup`
 shim are gone. Replacement architecture:
 
-- ~20 ManyChat automations, each hard-wired to a fixed keyword, DM a short link
-  like `https://go.starterstory.com/bootstrap`.
+- ManyChat automations hard-wire each fixed keyword (e.g. `BOOTSTRAP`) to DM a
+  short link like `https://go.starterstory.com/bootstrap`.
 - The redirect service lives in the StarterStory Rails app — `ShortLink` +
   `ShortLinkClick` models, `go.starterstory.com/:slug` → `Go::RedirectsController#show`.
 - StarterStory exposes a REST API at `/api/v1/short_links` (bearer-token auth via
   `HUBANDSPOKE_API_TOKEN`) so hubandspoke can manage the pool remotely.
 - hubandspoke owns `/settings/links` — admin-only UI, proxies CRUD through
   `/api/short-links/...` to the Rails API (API key stays server-side).
-
-No tables, no redirect route, and no click-tracking code in hubandspoke.
+- On each `instagram_*` post-detail page, admins see an **"Attach DM keyword"**
+  row that opens a picker sorted by least-recently-used slug. Picking a slug
+  prompts for its destination URL (shared across all posts using that slug),
+  then two writes land: `PATCH /api/short-links/:slug` + `PUT /api/production-items`
+  setting `productionItems.short_link_slug`.
+- `productionItems.short_link_slug` is the only hubandspoke-side state for the
+  per-post attachment. No tables, no redirect route, and no click-tracking code
+  in hubandspoke — the slug is a pointer to the Rails-side short link.
 
 ---
 

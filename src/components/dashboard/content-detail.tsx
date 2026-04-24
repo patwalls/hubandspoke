@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, RepeatIcon, Share2Icon, Trash2Icon, TrendingUpIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { buildDescriptCompositionUrl } from "@/lib/descript";
+import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -192,6 +193,12 @@ interface ContentDetailProps {
   /** Every account (across brands) for the picker dropdown. Loaded once
    *  on the server page; the picker grouping uses `brandLabel`. */
   accounts: PickerAccount[];
+  /** Gates admin-only affordances (e.g. the DM-keyword picker). */
+  isAdmin: boolean;
+  /** Base host for the short-link service (e.g. https://go.starterstory.com).
+   *  Threaded from the server so the UI can render the full redirect URL
+   *  without needing a NEXT_PUBLIC_ env var. */
+  shortLinksBaseUrl: string;
 }
 
 const STATUS_OPTIONS = [
@@ -293,7 +300,7 @@ const DETAIL_TAB_VALUES = [
 ] as const;
 type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
-export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps) {
+export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksBaseUrl }: ContentDetailProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -752,13 +759,13 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
   const [formatSearch, setFormatSearch] = useState("");
   const [status, setStatus] = useState("");
   const [pillar, setPillar] = useState<PillarOption | null>(null);
-  const [producerUserId, setProducerUserId] = useState<string>("");
   const [editorUserId, setEditorUserId] = useState<string>("");
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
   const [utmCampaign, setUtmCampaign] = useState("");
   const [sourceType, setSourceType] = useState<string>("original");
+  const [dmKeywordDialogOpen, setDmKeywordDialogOpen] = useState(false);
   const [pendingKill, setPendingKill] = useState<{ previousStatus: string } | null>(
     null,
   );
@@ -878,7 +885,6 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
     setFormat(item.format || "");
     setStatus(item.status || "");
     setPillar(pillarRef);
-    setProducerUserId(item.producerUserId || "");
     setEditorUserId(item.editorUserId || "");
     setPublishedLink(item.publishedLink || "");
     setPublishedDate(item.publishedDate || "");
@@ -1264,10 +1270,6 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
   // Prefer the freshly-loaded assignable list (stays in sync with local
   // selections), and fall back to the detail endpoint's authoritative record
   // so we still render name + avatar even if the user isn't in the list.
-  const producerUser = producerUserId
-    ? assignableUsers.find((u) => u.id === producerUserId) ??
-      (data.producer?.id === producerUserId ? data.producer : null)
-    : null;
   const editorUser = editorUserId
     ? assignableUsers.find((u) => u.id === editorUserId) ??
       (data.editor?.id === editorUserId ? data.editor : null)
@@ -2161,39 +2163,7 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
           </PropertyRow>
         </PropertyRowSolo>
 
-        <PropertyRowGroup single={isPrePublish}>
-          <PropertyRow label="Producer">
-            <Select
-              value={producerUserId || ""}
-              onValueChange={(v) => {
-                if (!v) return;
-                setProducerUserId(v);
-                void persistField({ producerUserId: v });
-              }}
-            >
-              <SelectTrigger
-                aria-label="Producer"
-                className={cn(
-                  PROPERTY_TRIGGER_CLASS,
-                  "[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1"
-                )}
-              >
-                {producerUser ? (
-                  <UserChip user={producerUser} />
-                ) : (
-                  <span className="text-muted-foreground">Select producer</span>
-                )}
-              </SelectTrigger>
-              <SelectContent>
-                {assignableUsers.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    <UserChip user={u} />
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </PropertyRow>
-
+        <PropertyRowGroup single>
           <PropertyRow label="Editor">
             <Select
               value={editorUserId || ""}
@@ -2292,6 +2262,50 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
             />
           </PropertyRow>
         </PropertyRowSolo>
+
+        {isAdmin && postType?.startsWith("instagram_") && (
+          <PropertyRowSolo>
+            <PropertyRow label="DM keyword">
+              {item.shortLinkSlug ? (
+                <div className="flex items-center gap-2 px-2 py-1 min-w-0 w-full">
+                  <code className="text-xs px-1.5 py-0.5 rounded bg-muted text-foreground shrink-0">
+                    {item.shortLinkSlug}
+                  </code>
+                  <span className="text-xs text-muted-foreground shrink-0">→</span>
+                  <a
+                    href={`${shortLinksBaseUrl}/${item.shortLinkSlug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate min-w-0 flex-1 font-mono"
+                  >
+                    {shortLinksBaseUrl.replace(/^https?:\/\//, "")}/{item.shortLinkSlug}
+                  </a>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs shrink-0"
+                    onClick={() => setDmKeywordDialogOpen(true)}
+                  >
+                    Edit
+                  </Button>
+                </div>
+              ) : (
+                <div className="px-2 py-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setDmKeywordDialogOpen(true)}
+                  >
+                    + Attach DM keyword
+                  </Button>
+                </div>
+              )}
+            </PropertyRow>
+          </PropertyRowSolo>
+        )}
 
         {deleteError && (
           <div className="text-sm px-3 py-2 bg-red-50 text-red-700 border-t border-red-200">
@@ -3072,6 +3086,16 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
         title={title || item.title || ""}
         saving={saveState.kind === "saving"}
         onConfirm={confirmKill}
+      />
+
+      <AttachDmKeywordDialog
+        open={dmKeywordDialogOpen}
+        onOpenChange={setDmKeywordDialogOpen}
+        currentSlug={item.shortLinkSlug ?? null}
+        baseUrl={shortLinksBaseUrl}
+        onSaved={async (nextSlug) => {
+          await persistField({ shortLinkSlug: nextSlug });
+        }}
       />
 
     </div>

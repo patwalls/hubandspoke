@@ -256,6 +256,7 @@ export async function PUT(request: NextRequest) {
       sourceType,
       killReason,
       utmCampaign,
+      shortLinkSlug,
     } = body;
 
     const VALID_SOURCE_TYPES = new Set(["original", "repost", "cross_post"]);
@@ -293,6 +294,20 @@ export async function PUT(request: NextRequest) {
     if (utmCampaign !== undefined) {
       const trimmed = typeof utmCampaign === "string" ? utmCampaign.trim() : "";
       updateData.utmCampaign = trimmed || null;
+    }
+    if (shortLinkSlug !== undefined) {
+      if (shortLinkSlug === null || shortLinkSlug === "") {
+        updateData.shortLinkSlug = null;
+      } else if (typeof shortLinkSlug === "string") {
+        const normalized = shortLinkSlug.trim().toLowerCase();
+        if (!/^[a-z0-9_-]+$/.test(normalized)) {
+          return NextResponse.json(
+            { error: "shortLinkSlug may only contain letters, numbers, hyphens, underscores" },
+            { status: 400 },
+          );
+        }
+        updateData.shortLinkSlug = normalized;
+      }
     }
 
     // Pillar: accept itemId (or null to clear). Resolve target's notionId so we

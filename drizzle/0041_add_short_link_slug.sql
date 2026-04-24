@@ -1,0 +1,1 @@
+ALTER TABLE "production_items" ADD COLUMN "short_link_slug" text;

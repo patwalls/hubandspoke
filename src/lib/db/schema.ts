@@ -235,6 +235,12 @@ export const productionItems = pgTable(
     visionExtractedAt: timestamp("vision_extracted_at", {
       withTimezone: true,
     }),
+    // Slug in the StarterStory short-link pool (go.starterstory.com/<slug>) that
+    // this post's ManyChat auto-DM sends. NULL = no keyword attached. We don't
+    // store the destination URL here — it lives on the StarterStory side and is
+    // fetched on demand; a single post reusing a pool slug picks up whatever
+    // the slug currently points at.
+    shortLinkSlug: text("short_link_slug"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

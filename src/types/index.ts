@@ -103,6 +103,9 @@ export interface ProductionItem {
   predictedViewsSnapshot?: number | null;
   predictedViewsSnapshotAt?: string | null;
   prediction?: ViewPrediction | null;
+  /** Slug in the StarterStory short-link pool attached to this post's
+   *  auto-DM. NULL = no keyword wired up. */
+  shortLinkSlug?: string | null;
   createdAt: string;
   updatedAt: string;
 }
