@@ -177,6 +177,7 @@ export async function GET(request: NextRequest) {
     // src/lib/db/queries.ts for the spec.
     type PrimaryRowMeta = {
       label: string;
+      accountId: string;
       platform: string;
       handle: string;
       postType: string | null;
@@ -210,6 +211,7 @@ export async function GET(request: NextRequest) {
           : `@${r.accountHandle}`;
         primaryRowMetaByKey.set(key, {
           label,
+          accountId: r.accountId,
           platform: r.accountPlatform,
           handle: r.accountHandle,
           postType: pt,
