@@ -349,10 +349,10 @@ function CheckboxCell({
           onChange={(e) => onChange(e.target.checked)}
           className={cn(
             "col-start-1 row-start-1 size-4 appearance-none rounded-[5px] border bg-white cursor-pointer transition-colors",
-            "border-input hover:border-primary/60",
-            "checked:border-primary checked:bg-primary",
-            "indeterminate:border-primary indeterminate:bg-primary",
-            "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            "border-input hover:border-[#ff7a59]",
+            "checked:border-[#ff5c35] checked:bg-[#ff5c35]",
+            "indeterminate:border-[#ff5c35] indeterminate:bg-[#ff5c35]",
+            "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ff5c35]"
           )}
         />
         {/* Checkmark — visible only when checked */}
@@ -468,7 +468,9 @@ function IdeaQueueRow({
     <tr
       className={cn(
         "border-b border-border/50 transition-colors",
-        isSelected ? "bg-accent/60 hover:bg-accent" : "hover:bg-accent/30"
+        isSelected
+          ? "bg-[#ff7a59]/10 hover:bg-[#ff7a59]/15"
+          : "hover:bg-accent/30"
       )}
     >
       <td className="px-3 py-2 align-middle">
