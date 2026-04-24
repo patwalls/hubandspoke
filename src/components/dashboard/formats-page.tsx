@@ -38,6 +38,7 @@ import {
 import { UserChip } from "./user-chip";
 import { SS_CHANNELS, MATG_CHANNELS } from "@/lib/config/channels";
 import { ChannelChip } from "@/components/ui/channel-chip";
+import { AccountBadge } from "@/components/ui/account-badge";
 import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, channelKey } from "@/lib/channel-options";
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
@@ -710,7 +711,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
               <SortHeader label="Name" sortKeyName="name" />
               <TableHead>Channels</TableHead>
               <TableHead>Editor</TableHead>
-              <TableHead>Producer</TableHead>
               <SortHeader
                 label="Threshold"
                 sortKeyName="viewThreshold"
@@ -730,7 +730,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 ? parentNameById.get(f.parentFormatId) ?? null
                 : null;
               const editorUser = resolveUser(f.editor);
-              const producerUser = resolveUser(f.producer);
               return (
                 <TableRow key={f.id}>
                   <TableCell>
@@ -766,22 +765,24 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                     </span>
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {f.channels?.map((ch) => (
-                        <ChannelChip key={ch} channel={ch} />
+                    <div className="flex flex-wrap gap-1 max-w-[260px]">
+                      {(f.accountChannels ?? []).slice(0, 3).map((c) => (
+                        <AccountBadge
+                          key={`${c.accountId}|${c.postType ?? ""}`}
+                          account={c.account}
+                          postType={c.postType}
+                        />
                       ))}
+                      {(f.accountChannels ?? []).length > 3 && (
+                        <span className="text-xs text-muted-foreground">
+                          +{(f.accountChannels ?? []).length - 3}
+                        </span>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {editorUser ? (
                       <UserChip user={editorUser} size="xs" />
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {producerUser ? (
-                      <UserChip user={producerUser} size="xs" />
                     ) : (
                       "—"
                     )}
@@ -800,7 +801,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             {sorted.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={5}
                   className="text-center text-muted-foreground text-xs py-8"
                 >
                   {formats.length === 0

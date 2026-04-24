@@ -77,6 +77,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - **In-place scan**, not a fan-out — does the work directly because it's pure DB and cheap
   - Dedup key = `(productionItemId, sourceFormatId, targetFormatId)`. Once a trigger row exists for that triple, that target is never re-created for that parent (even if views drop and recover later).
   - Skips child formats with no `viewThreshold` set
+  - **Account pick is deterministic**: when the target format has multiple `formatChannels` rows, picks the oldest-added one (`ORDER BY created_at, id ASC LIMIT 1`). Fan-out-to-all-channels is a deliberate non-feature — one repurposed Idea per (parent, source, target) triple regardless of how many channels the target format publishes to.
   - Resolves producer/editor for the new item via `resolveAssignees()` chain
   - This task **replaces the Asana-based `/api/trigger-repurpose` flow** — same intent, different implementation. No external systems.
 

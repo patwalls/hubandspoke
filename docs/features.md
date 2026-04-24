@@ -60,9 +60,10 @@ removing, or deprecating anything.
 | Format hierarchy (pillars + derivatives) | Active | `/(dashboard)/[brand]/formats`, `/(dashboard)/[brand]/formats/[formatId]`, `GET\|POST /api/formats`, `GET\|PATCH\|DELETE /api/formats/[id]` | `formats` (parentFormatId self-ref) | ON DELETE parent SET NULL → orphans become roots |
 | Format publishing channels | Active | Format detail UI | `formatChannels` (formatId, accountId, postType) | Replaces `formats.channels` JSONB |
 | Format top-performers report | Active | `GET /api/formats/top-performers` | `formats`, `productionItems` | |
-| **Old `formats.channels` JSONB** | **Legacy** | Read by some unmigrated pages | `formats.channels` | `setFormatChannels()` keeps both in sync; remove when all readers migrated |
+| **Old `formats.channels` JSONB** | **Legacy** | Write-only mirror — no live UI reader as of 2026-04-23 | `formats.channels` | `setFormatChannels()` still updates it; safe to drop column once no external consumer remains |
 | **`legacyChannelString()` helper** | **Legacy** | `src/lib/format-channels.ts` | — | Hardcoded (brand, platform, handle, postType) → chip-string map; dies with the JSONB |
 | **Asana editor/producer fields on formats** | **Deprecated** | (referenced only in legacy trigger-repurpose flow) | `formats.editorAsanaGid`, `producerAsanaGid`, `contentOwnerAsana*` | Replaced by `editorUserId` / `producerUserId` and `editorNotionUserId` / `producerNotionUserId` |
+| **Producer field (formats + content)** | **Hidden** | UI removed from formats index, format detail, content detail (2026-04-23). Column still written by `resolveAssignees()` on new items. | `formats.producer`/`producerUserId`, `productionItems.producerUserId` | Visual removal only; data preserved. Re-introduce the field or drop the columns in a later pass. |
 
 ---
 

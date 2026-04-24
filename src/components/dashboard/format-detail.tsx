@@ -188,7 +188,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
 
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
-  const [producerPopoverOpen, setProducerPopoverOpen] = useState(false);
   const [channelsPopoverOpen, setChannelsPopoverOpen] = useState(false);
   const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -207,7 +206,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [childProducerGid, setChildProducerGid] = useState("");
   const [childInstructions, setChildInstructions] = useState("");
   const [childEditorOpen, setChildEditorOpen] = useState(false);
-  const [childProducerOpen, setChildProducerOpen] = useState(false);
   const [childChannelsOpen, setChildChannelsOpen] = useState(false);
   const [savingChild, setSavingChild] = useState(false);
   const [childError, setChildError] = useState<string | null>(null);
@@ -1110,67 +1108,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
               </PopoverContent>
             </Popover>
             </PropertyRow>
-            <PropertyRow label="Producer">
-            <Popover open={producerPopoverOpen} onOpenChange={setProducerPopoverOpen}>
-              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
-                {producer ? (
-                  <span className="flex items-center gap-2 truncate">
-                    <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium shrink-0">
-                      {producer.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                    </span>
-                    <span className="truncate">{producer}</span>
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">Search team members…</span>
-                )}
-                <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-              </PopoverTrigger>
-              <PopoverContent className="w-72 p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search by name or email..." />
-                  <CommandList>
-                    <CommandEmpty>No team members found.</CommandEmpty>
-                    <CommandGroup>
-                      {producer && (
-                        <CommandItem
-                          onSelect={() => {
-                            setProducer("");
-                            setProducerAsanaGid("");
-                            setProducerPopoverOpen(false);
-                          }}
-                          className="text-muted-foreground"
-                        >
-                          <span className="text-sm">Clear selection</span>
-                        </CommandItem>
-                      )}
-                      {asanaMembers.map((m) => (
-                        <CommandItem
-                          key={m.gid}
-                          value={`${m.name} ${m.email}`}
-                          onSelect={() => {
-                            setProducer(m.name);
-                            setProducerAsanaGid(m.gid);
-                            setProducerPopoverOpen(false);
-                          }}
-                          data-checked={producerAsanaGid === m.gid ? "true" : undefined}
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium shrink-0">
-                              {m.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                            </span>
-                            <span className="flex flex-col">
-                              <span className="text-sm font-medium">{m.name}</span>
-                              <span className="text-xs text-muted-foreground">{m.email}</span>
-                            </span>
-                          </span>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-            </PropertyRow>
           </PropertyRowGroup>
 
           <PropertyRowSolo>
@@ -1260,9 +1197,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                   <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
                     Editor
                   </th>
-                  <th className="px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                    Producer
-                  </th>
                   <th className="px-3 py-2 w-10" />
                 </tr>
               </thead>
@@ -1311,16 +1245,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                             {f.editor.split(" ").map((n) => n[0]).join("").slice(0, 2)}
                           </span>
                           <span className="truncate max-w-[120px]">{f.editor}</span>
-                        </span>
-                      ) : "—"}
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {f.producer ? (
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-medium shrink-0">
-                            {f.producer.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                          </span>
-                          <span className="truncate max-w-[120px]">{f.producer}</span>
                         </span>
                       ) : "—"}
                     </td>
@@ -1751,68 +1675,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                           >
                             <span className="flex items-center gap-2">
                               <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
-                                {m.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                              </span>
-                              <span className="flex flex-col">
-                                <span className="text-sm font-medium">{m.name}</span>
-                                <span className="text-xs text-muted-foreground">{m.email}</span>
-                              </span>
-                            </span>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Producer (Reviewer + Publisher)</Label>
-              <Popover open={childProducerOpen} onOpenChange={setChildProducerOpen}>
-                <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
-                  {childProducer ? (
-                    <span className="flex items-center gap-2 truncate">
-                      <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium shrink-0">
-                        {childProducer.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                      </span>
-                      <span className="truncate">{childProducer}</span>
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">Search team members…</span>
-                  )}
-                  <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search by name or email..." />
-                    <CommandList>
-                      <CommandEmpty>No team members found.</CommandEmpty>
-                      <CommandGroup>
-                        {childProducer && (
-                          <CommandItem
-                            onSelect={() => {
-                              setChildProducer("");
-                              setChildProducerGid("");
-                              setChildProducerOpen(false);
-                            }}
-                            className="text-muted-foreground"
-                          >
-                            <span className="text-sm">Clear selection</span>
-                          </CommandItem>
-                        )}
-                        {asanaMembers.map((m) => (
-                          <CommandItem
-                            key={m.gid}
-                            value={`${m.name} ${m.email}`}
-                            onSelect={() => {
-                              setChildProducer(m.name);
-                              setChildProducerGid(m.gid);
-                              setChildProducerOpen(false);
-                            }}
-                          >
-                            <span className="flex items-center gap-2">
-                              <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium shrink-0">
                                 {m.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
                               </span>
                               <span className="flex flex-col">

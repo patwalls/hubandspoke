@@ -1,5 +1,5 @@
 import type { Task } from "graphile-worker";
-import { and, eq, gt, isNotNull, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   productionItems,
@@ -115,7 +115,11 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
             format: targetFormat.name,
           });
 
-          // Look up the account and post_type for this format (if configured)
+          // Look up the account and post_type for this format (if configured).
+          // A format can have multiple channels; pick the oldest-added one
+          // deterministically so the assigned account doesn't flip between
+          // sweep runs. Fan-out-to-all-channels is a larger behavior change
+          // and intentionally not done here.
           const [formatChannel] = await db
             .select({
               accountId: formatChannels.accountId,
@@ -123,6 +127,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
             })
             .from(formatChannels)
             .where(eq(formatChannels.formatId, targetFormat.id))
+            .orderBy(asc(formatChannels.createdAt), asc(formatChannels.id))
             .limit(1);
 
           // Create the repurposed production item
