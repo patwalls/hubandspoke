@@ -22,6 +22,12 @@ export const productionItems = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     notionId: text("notion_id").unique(),
     youtubeId: text("youtube_id").unique(),
+    // Platform-native content id (YouTube videoId, X rest_id, IG shortcode,
+    // TikTok aweme_id, LinkedIn activity urn, Threads post pk). Populated by
+    // the generalized per-account content sync so the same post is never
+    // re-inserted when a handle resyncs. URL-based dedup is still used as a
+    // fallback for legacy rows where this column has not been backfilled.
+    platformContentId: text("platform_content_id"),
     youtubeUrl: text("youtube_url"),
     thumbnail: text("thumbnail"),
     title: text("title"),
@@ -285,6 +291,12 @@ export const productionItems = pgTable(
     uniqueIndex("uniq_production_items_source_clip_idea")
       .on(table.sourceClipIdeaId)
       .where(sql`${table.sourceClipIdeaId} IS NOT NULL`),
+    // Dedup key for per-account content sync: a single platform-native id
+    // can only exist once per account. Partial so legacy rows without a
+    // populated platform_content_id remain valid.
+    uniqueIndex("uniq_production_items_account_platform_content_id")
+      .on(table.accountId, table.platformContentId)
+      .where(sql`${table.platformContentId} IS NOT NULL`),
   ]
 );
 
@@ -983,6 +995,10 @@ export const accounts = pgTable(
     syncedFromNotion: boolean("synced_from_notion").notNull().default(false),
     lastRefreshedAt: timestamp("last_refreshed_at", { withTimezone: true }),
     lastRefreshError: text("last_refresh_error"),
+    // Stamped by the per-account content sync (account-content-sync task).
+    // Distinct from lastRefreshedAt, which is the profile-metadata sweep.
+    lastContentSyncAt: timestamp("last_content_sync_at", { withTimezone: true }),
+    lastContentSyncError: text("last_content_sync_error"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

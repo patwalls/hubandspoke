@@ -4,6 +4,11 @@ import { db } from "@/lib/db";
 import { accounts } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
 import { getAccounts, getAccountsForBrand } from "@/lib/db/accounts";
+import { enqueue } from "@/jobs/enqueue";
+import {
+  platformSupportsBackfill,
+  platformSupportsLatest,
+} from "@/lib/services/account-content-sync";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -83,6 +88,44 @@ export async function POST(request: NextRequest) {
         { error: `Account ${platform}/@${cleanHandle} already exists` },
         { status: 409 }
       );
+    }
+
+    // Kick off a one-shot backfill + profile refresh on create. Both are
+    // best-effort — if enqueue fails, the account still exists and the user
+    // can retry from the settings UI. Backfill skipped for platforms where
+    // SC can't paginate (x, threads, newsletter, other); refresh skipped
+    // for the two that have no profile endpoint.
+    if (platformSupportsBackfill(row.platform)) {
+      try {
+        await enqueue(
+          "account-content-sync",
+          {
+            accountId: row.id,
+            mode: "backfill",
+            maxPages: 50,
+          },
+          {
+            jobKey: `account-content-sync-${row.id}-backfill`,
+            jobKeyMode: "unsafe_dedupe",
+          }
+        );
+      } catch (err) {
+        console.error("account-content-sync backfill enqueue failed:", err);
+      }
+    }
+    if (platformSupportsLatest(row.platform)) {
+      try {
+        await enqueue(
+          "account-refresh",
+          { accountId: row.id },
+          {
+            jobKey: `account-refresh-${row.id}`,
+            jobKeyMode: "unsafe_dedupe",
+          }
+        );
+      } catch (err) {
+        console.error("account-refresh enqueue failed:", err);
+      }
     }
 
     return NextResponse.json({ account: row });

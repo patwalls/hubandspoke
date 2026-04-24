@@ -45,6 +45,13 @@ interface AccountRow {
   syncedFromNotion: boolean;
   lastRefreshedAt: string | null;
   lastRefreshError: string | null;
+  lastContentSyncAt: string | null;
+  lastContentSyncError: string | null;
+  /** Whether this platform has an SC content-list endpoint we can pull
+   *  from. `x` and `threads` are `true` but only support latest mode. */
+  syncSupported: boolean;
+  /** Whether this platform supports historical backfill via SC pagination. */
+  backfillSupported: boolean;
   /** Live count of production items tagged to this account (excluding
    *  soft-deleted items). Drives the Content column and the "this will
    *  delete N pieces of content" line in the delete confirmation. */
@@ -87,6 +94,7 @@ export function AccountsSettingsContent({
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editHandle, setEditHandle] = useState("");
   const [editPlatform, setEditPlatform] = useState("youtube");
@@ -221,6 +229,37 @@ export function AccountsSettingsContent({
       setError(e instanceof Error ? e.message : "Failed to refresh");
     } finally {
       setRefreshingId(null);
+    }
+  }
+
+  /**
+   * Enqueue a per-account content sync. `mode=latest` is one SC page — cheap
+   * and idempotent. `mode=backfill` paginates back up to 50 pages on the
+   * supported platforms (YouTube / IG / TikTok / LinkedIn). Always async —
+   * the worker picks it up within ~1ms and the UI surfaces the new
+   * `lastContentSyncAt` on the next router refresh.
+   */
+  async function handleSync(
+    accountId: string,
+    mode: "latest" | "backfill" = "latest"
+  ) {
+    setSyncingId(accountId);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/accounts/${accountId}/sync-content?mode=${mode}`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(msg ?? `HTTP ${res.status}`);
+      }
+      // Give the worker a beat to at least start, then refresh the row.
+      setTimeout(() => router.refresh(), 1500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to queue sync");
+    } finally {
+      setSyncingId(null);
     }
   }
 
@@ -420,6 +459,12 @@ export function AccountsSettingsContent({
                     Views
                   </th>
                   <th className="text-left px-3 py-2">Last refresh</th>
+                  <th
+                    className="text-left px-3 py-2"
+                    title="When this account's posts were last pulled from Scrape Creators"
+                  >
+                    Last sync
+                  </th>
                   <th className="text-right px-3 py-2" />
                 </tr>
               </thead>
@@ -530,6 +575,20 @@ export function AccountsSettingsContent({
                         "never"
                       )}
                     </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {a.lastContentSyncError ? (
+                        <span
+                          className="text-red-600"
+                          title={a.lastContentSyncError}
+                        >
+                          error
+                        </span>
+                      ) : a.lastContentSyncAt ? (
+                        new Date(a.lastContentSyncAt).toLocaleDateString()
+                      ) : (
+                        "never"
+                      )}
+                    </td>
                     <td className="text-right px-3 py-2">
                       {editingId === a.id ? (
                         <div className="inline-flex gap-1">
@@ -562,9 +621,34 @@ export function AccountsSettingsContent({
                             variant="outline"
                             disabled={refreshingId === a.id || a.platform === "newsletter" || a.platform === "other"}
                             onClick={() => handleRefresh(a.id)}
+                            title="Refresh profile metadata (followers, avatar, bio)"
                           >
                             {refreshingId === a.id ? "..." : "Refresh"}
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={syncingId === a.id || !a.syncSupported}
+                            onClick={() => handleSync(a.id, "latest")}
+                            title={
+                              a.syncSupported
+                                ? "Pull the latest page of posts from Scrape Creators"
+                                : "Scrape Creators has no content-list endpoint for this platform"
+                            }
+                          >
+                            {syncingId === a.id ? "..." : "Sync"}
+                          </Button>
+                          {a.backfillSupported && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={syncingId === a.id}
+                              onClick={() => handleSync(a.id, "backfill")}
+                              title="Paginate back through the full catalog (up to 50 SC credits)"
+                            >
+                              Backfill
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="ghost"

@@ -302,6 +302,13 @@
       "when": 1777008536926,
       "tag": "0042_high_captain_britain",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1777009818525,
+      "tag": "0043_lively_ender_wiggin",
+      "breakpoints": true
     }
   ]
 }

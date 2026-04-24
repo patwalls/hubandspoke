@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
-import { fetchTweetByUrl } from "@/lib/services/matg-sync";
+import { fetchTweetByUrl } from "@/lib/services/sc-fetchers";
 
 export class TweetBodyFetchError extends Error {
   constructor(

@@ -46,6 +46,7 @@ removing, or deprecating anything.
 | Account registry (per-brand) | Active | `/(dashboard)/[brand]/accounts`, `GET\|POST /api/accounts`, `GET\|PATCH\|DELETE /api/accounts/[id]` | `accounts`, `brands` | Unique on (platform, lower(handle)) per brand. Table shows a Content column (live count of linked production items). DELETE = soft delete: stamps `accounts.deleted_at` + every linked `production_items.deleted_at` in one tx, also sets `isActive=false`. Server enforces `confirmHandle` echo; UI also forces the user to retype the handle. Restore: `UPDATE accounts SET deleted_at = NULL WHERE id = '…'; UPDATE production_items SET deleted_at = NULL WHERE account_id = '…';` |
 | Account refresh (manual) | Active | `POST /api/accounts/[id]/refresh` (sync or `?mode=async`) | `accounts` | Async path enqueues `account-refresh` task |
 | Account refresh (weekly auto) | Active | `account-refresh-sweep` cron (Mon 17:00 UTC) | `accounts` | Skips newsletter / `other` (no SC support) |
+| Content sync (manual, per account) | Active | "Sync" / "Backfill" buttons on accounts table, `POST /api/accounts/[id]/sync-content?mode=latest\|backfill` | `productionItems`, `accounts.lastContentSyncAt` | Enqueues `account-content-sync`. Backfill only available for platforms that paginate (YouTube / IG / TikTok / LinkedIn). See also the daily `account-content-sync-sweep` cron entry in External Integrations. |
 | Cross-posting rules | Active | `/(dashboard)/[brand]/accounts/cross-posting`, `GET\|POST /api/cross-post-rules`, `PATCH\|DELETE /api/cross-post-rules/[id]` | `crossPostRules` | Has new `sourceAccountId`/`targetAccountId` cols (nullable during rollout) |
 | Per-account weekly goals | Active | `/(dashboard)/[brand]/accounts/goals` | `brands.weeklyGoal`, `accounts` | |
 | Platform boundaries (limits/constraints UI) | Active | `/(dashboard)/[brand]/accounts/boundaries` | `accounts.metadata`, hardcoded mappings | |
@@ -122,7 +123,7 @@ removing, or deprecating anything.
 |---|---|---|---|---|
 | Notion sync (pull + push-back) | Active | `notion-sync` cron (every :30), `GET /api/cron/notion-sync` (manual) | `productionItems`, `syncLogs` | Only YouTube long-form is Notion-authoritative (`accounts.syncedFromNotion`) |
 | Performance metrics sync (SC) | Active | `performance-decay` cron (every :00), `GET /api/cron/performance-sync` | `productionItems` (views/likes/comments + lastPerformanceSyncAt) | Decay-tier gated |
-| MATG multi-platform sync | Active | `matg-sync` cron (daily 13:00 UTC), `GET /api/cron/youtube-sync` | `productionItems` (brand=`matg`), `accounts`, `syncLogs` | |
+| Per-account content sync | Active | `account-content-sync-sweep` cron (daily 13:00 UTC), "Sync" / "Backfill" buttons on accounts settings, auto-enqueue on `POST /api/accounts` | `productionItems` (upsert by `(account_id, platform_content_id)`), `accounts.lastContentSyncAt`, `syncLogs` | Generalized per-account replacement for the old MATG-only cron. `x` and `threads` only support latest mode; `newsletter`/`other` are skipped. Backfill is 50 pages by default. |
 | Enrichment (per-platform) | Active | `enrichment-sweep` cron (every :20), `GET /api/cron/enrichment-sweep` (on-demand backfill with platform/limit/force/itemId) | `productionItems` (many fields) | Dispatches to per-platform enrichers in `src/lib/services/enrichment/` |
 | Hook extraction (Haiku, short-form) | Active | `hook-extract-sweep` cron (every :40) | `productionItems.hook`, `hookExtractedAt`, `hookSource='haiku'` | Substring-validated to reject hallucinations |
 | Hook fallback (long-form / no-LLM) | Active | `hook-fallback-sweep` cron (every :50) | `productionItems.hook`, `hookExtractedAt` | Pure DB; gated on `hookExtractedAt IS NULL` so it can't override LLM/manual |
@@ -134,7 +135,7 @@ removing, or deprecating anything.
 | **Asana members API** | **Legacy** | `GET /api/asana-members` | — | Format detail / formats list still call this for the legacy picker; migrate to user dropdown |
 | **Trigger-repurpose webhook** | **Deprecated** | `POST /api/trigger-repurpose` | `repurposeTriggers` (legacy rows) | Asana flow superseded by `threshold-monitor-sweep` (auto-repurpose) for the cron path and Descript clip-out for the manual path; no current callers |
 | **`/api/cron/tick`** | **Active (debug)** | `GET /api/cron/tick?name=<task>` | — | Manual enqueue. Bare hit is a 200 noop. CRON_SECRET-gated. |
-| **`/api/cron/notion-sync`, `/youtube-sync`, `/performance-sync`** | **Active (manual)** | These routes still run their underlying sync inline | `syncLogs` etc. | Used for manual re-runs; the cron path now lives in `src/jobs/crontab.ts` |
+| **`/api/cron/notion-sync`, `/performance-sync`** | **Active (manual)** | These routes still run their underlying sync inline | `syncLogs` etc. | Used for manual re-runs; the cron path now lives in `src/jobs/crontab.ts`. (`/api/cron/youtube-sync` and `/api/sync/youtube` were removed when the MATG-only cron was folded into `account-content-sync-sweep`.) |
 | Image proxy (CORS / caching) | Active | `GET /api/image-proxy?url=…` | — | Server-side proxy for external images |
 
 ---

@@ -34,7 +34,7 @@ import {
   fetchLinkedInPostByUrl,
   fetchYouTubeCommunityPostByUrl,
   fetchTikTokVideoByUrl,
-} from "./matg-sync";
+} from "./sc-fetchers";
 import { estimateViewsFromLikes } from "./view-estimator";
 
 /* ------------------------------------------------------------------ */
@@ -548,7 +548,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
 }
 
 /* ------------------------------------------------------------------ */
-/*  Due-items query — used by the cron + the /api/sync/youtube status  */
+/*  Due-items query — exposed for the cron + the settings dashboard    */
 /* ------------------------------------------------------------------ */
 
 interface DueItem {

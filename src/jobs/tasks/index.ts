@@ -41,6 +41,10 @@ import {
   type AccountRefreshPayload,
 } from "./account-refresh";
 import {
+  accountContentSyncTask,
+  type AccountContentSyncPayload,
+} from "./account-content-sync";
+import {
   performanceDecayTask,
   notionSyncTask,
   enrichmentSweepTask,
@@ -48,10 +52,10 @@ import {
   hookFallbackSweepTask,
   visionExtractSweepTask,
   hookDispatchSweepTask,
-  matgSyncTask,
   evergreenScanTask,
   crossPostScanTask,
   accountRefreshSweepTask,
+  accountContentSyncSweepTask,
 } from "./scheduled";
 import { thresholdMonitorSweepTask } from "./threshold-monitor-sweep";
 import {
@@ -73,6 +77,7 @@ export interface TaskPayloads {
   "hook-dispatch": HookDispatchPayload;
   "youtube-download": YoutubeDownloadPayload;
   "account-refresh": AccountRefreshPayload;
+  "account-content-sync": AccountContentSyncPayload;
   "refresh-item-metrics": RefreshItemMetricsPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
@@ -82,11 +87,11 @@ export interface TaskPayloads {
   "hook-fallback-sweep": Record<string, never>;
   "vision-extract-sweep": Record<string, never>;
   "hook-dispatch-sweep": Record<string, never>;
-  "matg-sync": Record<string, never>;
   "evergreen-scan": Record<string, never>;
   "cross-post-scan": Record<string, never>;
   "youtube-download-sweep": Record<string, never>;
   "account-refresh-sweep": Record<string, never>;
+  "account-content-sync-sweep": Record<string, never>;
   "threshold-monitor-sweep": Record<string, never>;
 }
 
@@ -109,6 +114,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "hook-dispatch": hookDispatchTask,
   "youtube-download": youtubeDownloadTask,
   "account-refresh": accountRefreshTask,
+  "account-content-sync": accountContentSyncTask,
   "refresh-item-metrics": refreshItemMetricsTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
@@ -117,10 +123,10 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "hook-fallback-sweep": hookFallbackSweepTask,
   "vision-extract-sweep": visionExtractSweepTask,
   "hook-dispatch-sweep": hookDispatchSweepTask,
-  "matg-sync": matgSyncTask,
   "evergreen-scan": evergreenScanTask,
   "cross-post-scan": crossPostScanTask,
   "youtube-download-sweep": youtubeDownloadSweepTask,
   "account-refresh-sweep": accountRefreshSweepTask,
+  "account-content-sync-sweep": accountContentSyncSweepTask,
   "threshold-monitor-sweep": thresholdMonitorSweepTask,
 };

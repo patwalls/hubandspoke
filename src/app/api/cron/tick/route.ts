@@ -20,7 +20,7 @@ const SCHEDULED_TASK_NAMES: ReadonlyArray<keyof TaskPayloads> = [
   "notion-sync",
   "enrichment-sweep",
   "hook-dispatch-sweep",
-  "matg-sync",
+  "account-content-sync-sweep",
   "evergreen-scan",
   "cross-post-scan",
   "youtube-download-sweep",

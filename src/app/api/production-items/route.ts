@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
     if (isYouTube && !clientSuppliedMetrics) {
       try {
         const { fetchSingleVideo } = await import(
-          "@/lib/services/matg-sync"
+          "@/lib/services/sc-fetchers"
         );
         const video = await fetchSingleVideo(publishedLink);
         finalViews = video.viewCountInt;

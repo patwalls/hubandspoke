@@ -23,13 +23,15 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   *:40  hook-extract-sweep        → fan-out → extract-hook (per item, Haiku)
   *:50  hook-fallback-sweep       → fan-out → hook-fallback (per item, no LLM)
   */20  youtube-download-sweep    → fan-out → youtube-download → descript-transcribe
-  13:00 matg-sync                 → SC API. MATG content + metrics across platforms.
+  13:00 account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
   16:00 cross-post-scan           → per-rule LLM fit classifier + new Idea rows
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
 
 USER / API ENTRY POINTS
   POST /api/accounts/[id]/refresh?mode=async              → account-refresh
+  POST /api/accounts/[id]/sync-content?mode=latest|backfill → account-content-sync
+  POST /api/accounts (new account row)                    → account-content-sync (backfill) + account-refresh
   POST /api/production-items/[id]/transcript/fetch        → transcript-finish
   POST /api/uploads/confirm                               → descript-transcribe
   POST /api/descript/clip-out                             → descript-clip-resolve
@@ -133,14 +135,62 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - `MAX_ATTEMPTS = 5` defined locally (`youtube-download-sweep.ts:14`); same constant duplicated in `enrichment/orchestrator.ts:20`
   - Sweep gate paces retries; dyno-level maxAttempts only retries the same tick
 
-### `matg-sync` — daily MATG sync
+### `account-content-sync-sweep` — daily per-account content fan-out
 - **Trigger:** cron `0 13 * * *` (daily 13:00 UTC)
-- **Files:** `src/jobs/tasks/scheduled.ts:111`, `src/lib/services/matg-sync.ts`, `src/app/api/cron/youtube-sync/route.ts`
-- **Inputs:** seeded MATG `accounts` rows (YouTube, Shorts, Instagram `matgpod`, Twitter `matgpod`)
-- **Outputs:** upserts to `productionItems` (brand=`matg`); writes `syncLogs`
-- **Downstream:** none
-- **Rules:** throws if any MATG account is not seeded — keeps surprises visible
-- **Timestamps:** captures the platform-reported publish moment into `productionItems.publishedAt` (YouTube `publishedTime`, IG `taken_at`, X `legacy.created_at`) so the content view can sort same-day posts by true publish order. Falls back to null when the response lacks a timestamp; the app's sort then uses `publishedDate` midnight.
+- **Files:** `src/jobs/tasks/scheduled.ts` (`accountContentSyncSweepTask`)
+- **Inputs:** every active `accounts` row on an SC-supported platform
+  (`youtube, instagram, tiktok, linkedin, x, threads`)
+- **Outputs:** enqueues one `account-content-sync` per row with `mode=latest`, `jobKey: account-content-sync-{id}-latest`
+- **Downstream:** `account-content-sync`
+- **Rules:**
+  - Replaces the old MATG-only `matg-sync` cron. MATG handles are just
+    regular account rows now — no special-casing.
+  - Skips platforms with no SC content-list coverage (`newsletter`, `other`)
+  - `x` and `threads` are enqueued but always in `latest` mode (neither
+    platform's SC endpoint paginates)
+  - Sweeps use jobKey + `unsafe_dedupe` so overlapping ticks don't
+    double-enqueue a pending account
+
+### `account-content-sync` — sync one account's content
+- **Trigger:** enqueued by `account-content-sync-sweep`; on-demand
+  `POST /api/accounts/[id]/sync-content?mode=latest|backfill`; auto-enqueued
+  (with `mode=backfill`, `maxPages=50`) by `POST /api/accounts` on account
+  create
+- **Files:** `src/jobs/tasks/account-content-sync.ts`,
+  `src/lib/services/account-content-sync.ts`,
+  `src/app/api/accounts/[id]/sync-content/route.ts`
+- **Inputs:** `{ accountId, mode: "latest" | "backfill", maxPages?, sinceIso? }`
+- **Outputs:** upserts to `productionItems` keyed on
+  `(account_id, platform_content_id)` via the partial unique index
+  `uniq_production_items_account_platform_content_id`. Stamps
+  `accounts.lastContentSyncAt` on success, `lastContentSyncError` on
+  failure. Writes `syncLogs` with `sync_type=account-content-sync:<platform>`.
+- **Downstream:** none directly — the newly-synced items enter the normal
+  enrichment / hook / transcript lifecycle on the next sweep
+- **Per-platform pagination:**
+  - YouTube long → `continuationToken` (full catalog)
+  - YouTube Shorts → `/v1/youtube/channel/shorts` for latest,
+    `/v1/youtube/channel/shorts/simple` for backfill (SC handles pagination
+    internally; costs more credits)
+  - Instagram → `next_max_id` until `more_available=false`
+  - TikTok → `max_cursor` until `has_more=false`
+  - LinkedIn → `page=1..7` (LinkedIn caps at 7 pages)
+  - X → no cursor; SC returns top 100 by engagement, not chronological
+  - Threads → no cursor; platform exposes only ~20–30 recent posts
+- **Cost envelope:** 1 SC credit per page. `maxPages` defaults to 1 for
+  `latest`, 50 for `backfill`. A new YouTube account auto-backfill costs
+  ≤ ~100 credits (long + shorts).
+- **Dedup priority** (inside `loadExisting`):
+  1. Match by `(accountId, platform_content_id)` — primary
+  2. Fall back to `publishedLink` match — covers legacy rows pre-column
+  3. Otherwise insert
+- **Timestamps:** captures the platform-reported publish moment into
+  `productionItems.publishedAt` (YouTube `publishedTime`, IG `taken_at`, X
+  `legacy.created_at`, TikTok `create_time`) so the content view can sort
+  same-day posts by true publish order. Falls back to null when the
+  response lacks a timestamp.
+- **Errors:** any thrown error stamps `lastContentSyncError` and re-throws
+  so graphile-worker retries with backoff.
 
 ### `evergreen-scan` — daily classifier
 - **Trigger:** cron `0 15 * * *` (daily 15:00 UTC)
@@ -344,10 +394,13 @@ On the first transition into `Published`, `src/app/api/production-items/route.ts
 
 | Phase | Trigger | Effect |
 |---|---|---|
-| Create | manual `POST /api/accounts` (or seeded once during accounts rollout) | row in `accounts`, `isActive=true` |
+| Create | manual `POST /api/accounts` (or seeded once during accounts rollout) | row in `accounts`, `isActive=true`; auto-enqueues an `account-refresh` and (on backfill-supported platforms) an `account-content-sync` with `mode=backfill, maxPages=50` |
 | Refresh (manual) | `POST /api/accounts/[id]/refresh?mode=async` (or `?mode=sync` for in-line) | enqueues `account-refresh` |
 | Refresh (auto) | `account-refresh-sweep` cron, Mon 17:00 UTC | one `account-refresh` per active SC-supported account |
 | Refresh execution | `account-refresh` task | overwrites `displayName, avatarUrl, bio, followerCount, ..., metadata`; writes `lastRefreshError` on failure |
+| Content sync (manual) | `POST /api/accounts/[id]/sync-content?mode=latest\|backfill` (Sync button in accounts UI) | enqueues `account-content-sync` |
+| Content sync (auto) | `account-content-sync-sweep` cron, daily 13:00 UTC | one `account-content-sync` with `mode=latest` per active SC account |
+| Content sync execution | `account-content-sync` task | upserts `productionItems` keyed on `(account_id, platform_content_id)`; writes `lastContentSyncAt` / `lastContentSyncError` |
 
 **Notion authority flag:** `accounts.syncedFromNotion = true` means Notion
 owns items on this account (current convention: only YouTube long-form
@@ -436,7 +489,7 @@ Scaling web past 1 dyno without lowering worker concurrency or upgrading Postgre
 
 | System | Used by | Cost notes |
 |---|---|---|
-| Scrape Creators | `performance-decay`, `matg-sync`, `enrich-item`, `account-refresh`, `instagram-body-fetch.ts`, `tweet-body-fetch.ts` | ~1 credit per call; enrichment with media (`withMedia=true`) is ~10 |
+| Scrape Creators | `performance-decay`, `account-content-sync`, `enrich-item`, `account-refresh`, `instagram-body-fetch.ts`, `tweet-body-fetch.ts` | ~1 credit per call; enrichment with media (`withMedia=true`) is ~10; `account-content-sync` with `mode=backfill` spends up to `maxPages` credits per account |
 | Descript | `descript-transcribe`, `descript-clip-resolve`, `clip-idea-precise-cut` | Per-project + per-publish API calls |
 | Anthropic (Claude Haiku 4.5) | `extract-hook`; also draft-gen, repurpose-agent, fit-classifier, evergreen-scan, summary | Hook extraction ~$0.0005/item |
 | Notion | `notion-sync` (bi-directional) | Rate-limited; bulk push via service |
@@ -476,5 +529,5 @@ has a row in `docs/features.md`'s cleanup backlog.
 - **`MAX_ATTEMPTS = 5` is duplicated** between `enrichment/orchestrator.ts:20` and `youtube-download-sweep.ts:14`. Extract to a shared constant once we touch retry semantics.
 - **`selectEnrichmentCandidates()` and the legacy `selectEnrichmentItems()`** in `enrichment/orchestrator.ts` are nearly identical. Legacy path is the in-process loop used by `runEnrichmentSweep()` (called from `/api/cron/enrichment-sweep` with no `itemId`). Consolidate the query builder when we delete the legacy `runEnrichmentSweep` path.
 - **No central status-transition state machine.** Validation logic lives in the UI, the PATCH route, and the Notion push-back independently. Adding a new status today requires touching all three.
-- **`/api/cron/*` routes** still exist. `tick` is debug; the others (`notion-sync`, `youtube-sync`, `performance-sync`, `enrichment-sweep`) still run their underlying sync inline and are useful for manual re-runs. Could collapse to a single `?name=` parameterized route but not urgent.
+- **`/api/cron/*` routes** still exist. `tick` is debug; the others (`notion-sync`, `performance-sync`, `enrichment-sweep`) still run their underlying sync inline and are useful for manual re-runs. The old `/api/cron/youtube-sync` + `/api/sync/youtube` routes were removed alongside `matg-sync` — use `/api/cron/tick?name=account-content-sync-sweep` for a manual full-fleet sync.
 - **`assignees.ts` resolution chain** is duplicated implicitly: `source item → format → brand defaults → global` repeats in `notion-sync.ts`, `cross-post-scan.ts`, and the manual creation routes. Extract a single `resolveAssignees()` (already partially exists) and use it everywhere.

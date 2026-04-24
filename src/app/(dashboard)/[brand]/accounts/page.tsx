@@ -3,6 +3,10 @@ import { notFound } from "next/navigation";
 import { fetchBrandBySlug, getEnabledBrands } from "@/lib/db/brands";
 import { getAccounts, getContentCountsByAccount } from "@/lib/db/accounts";
 import { AccountsSettingsContent } from "@/components/settings/accounts-settings";
+import {
+  platformSupportsBackfill,
+  platformSupportsLatest,
+} from "@/lib/services/account-content-sync";
 
 interface BrandAccountsPageProps {
   params: Promise<{ brand: string }>;
@@ -56,6 +60,12 @@ export default async function BrandAccountsPage({
         syncedFromNotion: a.syncedFromNotion,
         lastRefreshedAt: a.lastRefreshedAt ? a.lastRefreshedAt.toISOString() : null,
         lastRefreshError: a.lastRefreshError,
+        lastContentSyncAt: a.lastContentSyncAt
+          ? a.lastContentSyncAt.toISOString()
+          : null,
+        lastContentSyncError: a.lastContentSyncError,
+        syncSupported: platformSupportsLatest(a.platform),
+        backfillSupported: platformSupportsBackfill(a.platform),
         contentCount: contentCounts.get(a.id) ?? 0,
       }))}
       brands={brands.map((b) => ({ slug: b.slug, label: b.label }))}

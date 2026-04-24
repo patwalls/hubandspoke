@@ -8,12 +8,12 @@ import { syncFromNotion } from "@/lib/services/notion-sync";
 import { syncPerformanceData } from "@/lib/services/performance-decay";
 import { runEvergreenScan } from "@/lib/services/evergreen-scan";
 import { runCrossPostScan } from "@/lib/services/cross-post-scan";
-import { syncAllMATG } from "@/lib/services/matg-sync";
 import { selectEnrichmentCandidates } from "@/lib/services/enrichment/orchestrator";
 import { selectHookCandidates } from "@/lib/services/hook-extract/orchestrator";
 import { selectHookFallbackCandidates } from "@/lib/services/hook-extract/fallback";
 import { selectVisionCandidates } from "@/lib/services/hook-extract/vision";
 import { selectDispatcherCandidates } from "@/lib/services/hook-extract/dispatcher";
+import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { db } from "@/lib/db";
 import { accounts } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
@@ -23,6 +23,7 @@ import type { HookFallbackPayload } from "./hook-fallback";
 import type { VisionExtractPayload } from "./vision-extract";
 import type { HookDispatchPayload } from "./hook-dispatch";
 import type { AccountRefreshPayload } from "./account-refresh";
+import type { AccountContentSyncPayload } from "./account-content-sync";
 
 function timed(name: string, fn: () => Promise<unknown>): Task {
   return async (_payload, helpers) => {
@@ -156,13 +157,48 @@ export const hookDispatchSweepTask: Task = async (_payload, helpers) => {
     `hook-dispatch-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
   );
 };
-export const matgSyncTask: Task = timed("matg-sync", () => syncAllMATG());
 export const evergreenScanTask: Task = timed("evergreen-scan", () =>
   runEvergreenScan()
 );
 export const crossPostScanTask: Task = timed("cross-post-scan", () =>
   runCrossPostScan()
 );
+
+/**
+ * Daily fan-out: enqueue one `account-content-sync` per active account on a
+ * platform that SC supports. Always runs in `latest` mode (1 page). Historical
+ * backfill is only triggered on account create or via the manual button.
+ * Replaces the old MATG-only sync — MATG handles are just regular accounts
+ * now.
+ */
+export const accountContentSyncSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("account-content-sync-sweep start");
+  const rows = await db
+    .select({
+      id: accounts.id,
+      platform: accounts.platform,
+      handle: accounts.handle,
+    })
+    .from(accounts)
+    .where(eq(accounts.isActive, true));
+  let enqueued = 0;
+  for (const row of rows) {
+    if (!platformSupportsLatest(row.platform)) continue;
+    const payload: AccountContentSyncPayload = {
+      accountId: row.id,
+      mode: "latest",
+    };
+    await helpers.addJob("account-content-sync", payload as never, {
+      jobKey: `account-content-sync-${row.id}-latest`,
+      jobKeyMode: "unsafe_dedupe",
+    });
+    enqueued++;
+  }
+  helpers.logger.info(
+    `account-content-sync-sweep fanned out ${enqueued}/${rows.length} accounts (${Date.now() - start}ms)`
+  );
+};
 
 /**
  * Weekly fan-out: enqueue one `account-refresh` per active account with an
