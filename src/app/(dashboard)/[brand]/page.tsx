@@ -35,7 +35,7 @@ export default async function BrandDashboardPage({ params }: BrandPageProps) {
         </div>
       }
     >
-      <ContentReport />
+      <ContentReport brand={brand} />
     </Suspense>
   );
 }

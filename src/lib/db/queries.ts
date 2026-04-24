@@ -164,6 +164,7 @@ import {
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
 
 interface ReportParams {
+  brand: string;
   startDate: string;
   endDate: string;
   viewType: "weekly" | "daily" | "monthly";
@@ -185,6 +186,7 @@ export async function getContentReport(
   params: ReportParams
 ): Promise<ContentReportData> {
   const {
+    brand,
     startDate,
     endDate,
     viewType,
@@ -196,7 +198,7 @@ export async function getContentReport(
     source,
   } = params;
 
-  const { weeklyGoal, weekStartDay } = await getBrandSettings("starter-story");
+  const { weeklyGoal, weekStartDay } = await getBrandSettings(brand);
 
   // Build periods
   const periods = buildPeriods(
@@ -206,9 +208,9 @@ export async function getContentReport(
     weekStartDay
   );
 
-  // Build query conditions — scoped to starter-story brand only
+  // Build query conditions — scoped to the requested brand
   const conditions = [
-    eq(productionItems.brand, "starter-story"),
+    eq(productionItems.brand, brand),
     isNotNull(productionItems.publishedDate),
     eq(productionItems.status, "Published"),
     gte(productionItems.publishedDate, startDate),
@@ -368,11 +370,11 @@ export async function getContentReport(
     if (item.format) allFormats.add(item.format);
   });
 
-  // Also include all SS format names (pillar + repurposed) from the formats table
+  // Also include brand-scoped format names (pillar + repurposed) from the formats table
   const dbFormats = await db
     .select({ name: formats.name })
     .from(formats)
-    .where(eq(formats.brand, "starter-story"));
+    .where(eq(formats.brand, brand));
   dbFormats.forEach((f) => allFormats.add(f.name));
 
   const platformList = Array.from(allPlatforms).sort();

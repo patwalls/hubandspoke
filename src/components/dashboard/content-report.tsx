@@ -16,7 +16,7 @@ const PLATFORM_TABS = [
   { key: "sales" as const, label: "Sales" },
 ];
 
-export function ContentReport() {
+export function ContentReport({ brand }: { brand: string }) {
   const searchParams = useSearchParams();
 
   const today = new Date();
@@ -71,23 +71,23 @@ export function ContentReport() {
             brandLabel: string;
           }>;
         };
-        // This dashboard is Starter Story only — drop any other brand's
-        // accounts so the filter dropdown isn't polluted.
+        // Scope the account dropdown to the brand this dashboard is rendering.
         if (!cancelled) {
-          setAccounts(json.accounts.filter((a) => a.brandSlug === "starter-story"));
+          setAccounts(json.accounts.filter((a) => a.brandSlug === brand));
         }
       } catch {}
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [brand]);
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
     try {
       const params = new URLSearchParams({
+        brand,
         startDate,
         endDate,
         viewType,
@@ -133,7 +133,7 @@ export function ContentReport() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource]);
+  }, [brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource]);
 
   useEffect(() => {
     fetchReport();
@@ -179,7 +179,7 @@ export function ContentReport() {
           weekStartDay={data.weekStartDay}
           currentPeriodLabel={currentPeriodLabel}
           weeklyGoal={data.weeklyGoal}
-          brand="starter-story"
+          brand={brand}
         />
       ) : !fetchError ? (
         <div className="flex items-center justify-center py-12">
@@ -226,7 +226,7 @@ export function ContentReport() {
           periods={data.periods}
           metrics={data.byPlatform}
           tabs={PLATFORM_TABS}
-          brand="starter-story"
+          brand={brand}
           filterKey={data.showingFormats ? "format" : "platform"}
           rowMeta={data.showingFormats ? undefined : data.primaryRowMeta}
         />

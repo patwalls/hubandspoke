@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
   const defaultEnd = format(today, "yyyy-MM-dd");
 
   const params = {
+    brand: searchParams.get("brand") || "starter-story",
     startDate: searchParams.get("startDate") || defaultStart,
     endDate: searchParams.get("endDate") || defaultEnd,
     viewType: (searchParams.get("viewType") || "weekly") as "weekly" | "daily" | "monthly",
