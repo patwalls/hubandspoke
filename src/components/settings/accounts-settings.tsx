@@ -7,6 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AccountAvatar } from "@/components/ui/account-avatar";
 import { PlatformIcon } from "@/components/ui/platform-icon";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 /** Compact 1.2K / 48.2M number formatter. Falls back to — when null. */
 function formatCount(n: number | null): string {
@@ -37,6 +45,10 @@ interface AccountRow {
   syncedFromNotion: boolean;
   lastRefreshedAt: string | null;
   lastRefreshError: string | null;
+  /** Live count of production items tagged to this account (excluding
+   *  soft-deleted items). Drives the Content column and the "this will
+   *  delete N pieces of content" line in the delete confirmation. */
+  contentCount: number;
 }
 
 interface BrandOption {
@@ -79,6 +91,12 @@ export function AccountsSettingsContent({
   const [editHandle, setEditHandle] = useState("");
   const [editPlatform, setEditPlatform] = useState("youtube");
   const [error, setError] = useState<string | null>(null);
+  // Delete-confirmation dialog state. `deleteTarget` is the row the dialog
+  // is confirming against (null = closed); `deleteConfirm` is the user's
+  // in-progress typing that must equal the row's handle before Delete unlocks.
+  const [deleteTarget, setDeleteTarget] = useState<AccountRow | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const scopedAccounts = scopeBrandSlug
     ? accounts.filter((a) => a.brandSlug === scopeBrandSlug)
@@ -153,6 +171,37 @@ export function AccountsSettingsContent({
       setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openDelete(a: AccountRow) {
+    setDeleteTarget(a);
+    setDeleteConfirm("");
+    setError(null);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    if (deleteConfirm.trim() !== deleteTarget.handle) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/accounts/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirmHandle: deleteTarget.handle }),
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(msg ?? `HTTP ${res.status}`);
+      }
+      setDeleteTarget(null);
+      setDeleteConfirm("");
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -259,6 +308,81 @@ export function AccountsSettingsContent({
         </div>
       )}
 
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteConfirm("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {deleteTarget ? `Delete @${deleteTarget.handle}?` : "Delete account?"}
+            </DialogTitle>
+            <DialogDescription>
+              {deleteTarget ? (
+                <>
+                  This will soft-delete this account and all{" "}
+                  <strong className="text-foreground">
+                    {deleteTarget.contentCount.toLocaleString()}
+                  </strong>{" "}
+                  {deleteTarget.contentCount === 1 ? "piece" : "pieces"} of
+                  content linked to it. The rows stay in the database and can
+                  be restored by an engineer, but they will disappear from
+                  every page of the app immediately.
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteTarget && (
+            <div className="space-y-2">
+              <Label htmlFor="delete-confirm">
+                Type{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                  {deleteTarget.handle}
+                </code>{" "}
+                to confirm:
+              </Label>
+              <Input
+                id="delete-confirm"
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                placeholder={deleteTarget.handle}
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteTarget(null);
+                setDeleteConfirm("");
+              }}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={
+                deleting ||
+                !deleteTarget ||
+                deleteConfirm.trim() !== deleteTarget.handle
+              }
+            >
+              {deleting ? "Deleting…" : "Delete account"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {Array.from(byBrand.entries()).map(([brandLabel, rows]) => (
         <section key={brandLabel} className="space-y-2">
           {scopeBrandSlug == null && (
@@ -282,6 +406,12 @@ export function AccountsSettingsContent({
                   </th>
                   <th className="text-right px-3 py-2" title="Posts / videos / tweets">
                     Posts
+                  </th>
+                  <th
+                    className="text-right px-3 py-2"
+                    title="Production items in Hub & Spoke tagged to this account"
+                  >
+                    Content
                   </th>
                   <th
                     className="text-right px-3 py-2"
@@ -384,6 +514,9 @@ export function AccountsSettingsContent({
                       {formatCount(a.postCount)}
                     </td>
                     <td className="text-right px-3 py-2 text-muted-foreground tabular-nums">
+                      {formatCount(a.contentCount)}
+                    </td>
+                    <td className="text-right px-3 py-2 text-muted-foreground tabular-nums">
                       {formatCount(a.totalViews)}
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
@@ -431,6 +564,14 @@ export function AccountsSettingsContent({
                             onClick={() => handleRefresh(a.id)}
                           >
                             {refreshingId === a.id ? "..." : "Refresh"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => openDelete(a)}
+                          >
+                            Delete
                           </Button>
                         </div>
                       )}

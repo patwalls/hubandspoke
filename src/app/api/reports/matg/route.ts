@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { productionItems, formats, accounts, brands } from "@/lib/db/schema";
-import { and, eq, gte, lte, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gte, lte, isNotNull, isNull, sql } from "drizzle-orm";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
 import { getBrandSettings } from "@/lib/db/queries";
 import { format, subDays } from "date-fns";
@@ -73,6 +73,7 @@ export async function GET(request: NextRequest) {
       isNotNull(productionItems.publishedDate),
       gte(productionItems.publishedDate, startDate),
       lte(productionItems.publishedDate, endDate),
+      isNull(productionItems.deletedAt),
     ];
 
     if (platformFilter !== "all") {

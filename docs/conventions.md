@@ -55,6 +55,24 @@ pattern. Backfills (data, not schema) still go in `scripts/backfill-*.mjs`.
 If the schema change adds/removes/renames a feature's backing table or major
 column, also update `docs/features.md`.
 
+## Soft-delete columns
+
+Two tables support soft delete today: `accounts.deleted_at` and
+`production_items.deleted_at` (both nullable timestamp). The `DELETE
+/api/accounts/[id]` endpoint stamps both in one transaction — deleting an
+account also cascades the flag to every production item linked to it.
+
+- **When adding a new user-visible list query** that reads `accounts` or
+  `production_items`, filter `isNull(…deletedAt)`. The account-read helpers
+  in `src/lib/db/accounts.ts` already do this; if you query the tables
+  directly in a new route, replicate the filter.
+- **When adding a by-id internal fetch** (enrichment, transcription,
+  background jobs): don't filter. In-flight work on a soft-deleted row is
+  harmless and filtering would break idempotency checks.
+- **Restore** is engineer-only via SQL: `UPDATE … SET deleted_at = NULL
+  WHERE id = '…';`. If a restore UI is ever needed it's a small addition to
+  the Accounts page.
+
 ## Removing a feature
 
 1. Mark the feature `Planned-removal` in `docs/features.md` with a short note

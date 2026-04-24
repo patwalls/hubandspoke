@@ -247,6 +247,12 @@ export const productionItems = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    // Soft-delete: stamped by the account-delete endpoint when the parent
+    // account is soft-deleted. User-visible list queries filter this column;
+    // by-id internal fetches (enrichment, transcription, etc.) don't, so in-
+    // flight jobs finish writing to a hidden row harmlessly. Restore by
+    // setting back to NULL.
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
     index("idx_production_items_published_date").on(table.publishedDate),
@@ -983,6 +989,11 @@ export const accounts = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    // Soft-delete. Stamped by DELETE /api/accounts/[id] inside a transaction
+    // that also stamps deleted_at on linked production_items. Every account-
+    // read query in src/lib/db/accounts.ts filters deleted_at IS NULL.
+    // Restore by nulling this + production_items.deleted_at.
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
     // Global identity is (platform, lower(handle)). Keeps case variants from

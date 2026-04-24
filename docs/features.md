@@ -43,7 +43,7 @@ removing, or deprecating anything.
 
 | Feature | Status | Entry points | Backing tables | Notes |
 |---|---|---|---|---|
-| Account registry (per-brand) | Active | `/(dashboard)/[brand]/accounts`, `GET\|POST /api/accounts`, `GET\|PATCH\|DELETE /api/accounts/[id]` | `accounts`, `brands` | Unique on (platform, lower(handle)) per brand |
+| Account registry (per-brand) | Active | `/(dashboard)/[brand]/accounts`, `GET\|POST /api/accounts`, `GET\|PATCH\|DELETE /api/accounts/[id]` | `accounts`, `brands` | Unique on (platform, lower(handle)) per brand. Table shows a Content column (live count of linked production items). DELETE = soft delete: stamps `accounts.deleted_at` + every linked `production_items.deleted_at` in one tx, also sets `isActive=false`. Server enforces `confirmHandle` echo; UI also forces the user to retype the handle. Restore: `UPDATE accounts SET deleted_at = NULL WHERE id = '…'; UPDATE production_items SET deleted_at = NULL WHERE account_id = '…';` |
 | Account refresh (manual) | Active | `POST /api/accounts/[id]/refresh` (sync or `?mode=async`) | `accounts` | Async path enqueues `account-refresh` task |
 | Account refresh (weekly auto) | Active | `account-refresh-sweep` cron (Mon 17:00 UTC) | `accounts` | Skips newsletter / `other` (no SC support) |
 | Cross-posting rules | Active | `/(dashboard)/[brand]/accounts/cross-posting`, `GET\|POST /api/cross-post-rules`, `PATCH\|DELETE /api/cross-post-rules/[id]` | `crossPostRules` | Has new `sourceAccountId`/`targetAccountId` cols (nullable during rollout) |

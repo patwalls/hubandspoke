@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
-import { accounts, brands, userAccounts } from "@/lib/db/schema";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { accounts, brands, productionItems, userAccounts } from "@/lib/db/schema";
+import { and, asc, count, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 
 export type Account = typeof accounts.$inferSelect;
 
@@ -22,6 +22,7 @@ export async function getAccounts(): Promise<AccountWithBrand[]> {
     })
     .from(accounts)
     .innerJoin(brands, eq(brands.id, accounts.brandId))
+    .where(isNull(accounts.deletedAt))
     .orderBy(asc(brands.label), asc(accounts.platform), asc(accounts.handle));
   return rows.map((r) => ({ ...r.account, brandSlug: r.brandSlug, brandLabel: r.brandLabel }));
 }
@@ -36,7 +37,10 @@ export async function getAccountsForBrand(
     .from(accounts)
     .innerJoin(brands, eq(brands.id, accounts.brandId))
     .where(
-      isUuid ? eq(accounts.brandId, brandIdOrSlug) : eq(brands.slug, brandIdOrSlug)
+      and(
+        isUuid ? eq(accounts.brandId, brandIdOrSlug) : eq(brands.slug, brandIdOrSlug),
+        isNull(accounts.deletedAt)
+      )
     )
     .orderBy(asc(accounts.platform), asc(accounts.handle));
   return rows.map((r) => ({ ...r.account, brandSlug: r.brandSlug, brandLabel: r.brandLabel }));
@@ -49,7 +53,7 @@ export async function getAccountById(
     .select({ account: accounts, brandSlug: brands.slug, brandLabel: brands.label })
     .from(accounts)
     .innerJoin(brands, eq(brands.id, accounts.brandId))
-    .where(eq(accounts.id, id))
+    .where(and(eq(accounts.id, id), isNull(accounts.deletedAt)))
     .limit(1);
   if (!row) return null;
   return { ...row.account, brandSlug: row.brandSlug, brandLabel: row.brandLabel };
@@ -63,7 +67,7 @@ export async function getAccountsByIds(
     .select({ account: accounts, brandSlug: brands.slug, brandLabel: brands.label })
     .from(accounts)
     .innerJoin(brands, eq(brands.id, accounts.brandId))
-    .where(inArray(accounts.id, ids));
+    .where(and(inArray(accounts.id, ids), isNull(accounts.deletedAt)));
   return rows.map((r) => ({ ...r.account, brandSlug: r.brandSlug, brandLabel: r.brandLabel }));
 }
 
@@ -75,7 +79,7 @@ export async function getAccountsForUser(
     .from(userAccounts)
     .innerJoin(accounts, eq(accounts.id, userAccounts.accountId))
     .innerJoin(brands, eq(brands.id, accounts.brandId))
-    .where(eq(userAccounts.userId, userId))
+    .where(and(eq(userAccounts.userId, userId), isNull(accounts.deletedAt)))
     .orderBy(asc(brands.label), asc(accounts.platform), asc(accounts.handle));
   return rows.map((r) => ({ ...r.account, brandSlug: r.brandSlug, brandLabel: r.brandLabel }));
 }
@@ -96,7 +100,8 @@ export async function findAccount(params: {
       and(
         eq(brands.slug, params.brandSlug),
         eq(accounts.platform, params.platform),
-        sql`lower(${accounts.handle}) = ${params.handle.toLowerCase()}`
+        sql`lower(${accounts.handle}) = ${params.handle.toLowerCase()}`,
+        isNull(accounts.deletedAt)
       )
     )
     .limit(1);
@@ -116,7 +121,11 @@ export async function findAccountForBrandPlatform(params: {
     .from(accounts)
     .innerJoin(brands, eq(brands.id, accounts.brandId))
     .where(
-      and(eq(brands.slug, params.brandSlug), eq(accounts.platform, params.platform))
+      and(
+        eq(brands.slug, params.brandSlug),
+        eq(accounts.platform, params.platform),
+        isNull(accounts.deletedAt)
+      )
     )
     .limit(2);
   if (rows.length !== 1) return null;
@@ -139,4 +148,26 @@ export async function hasLinked(
     )
     .limit(1);
   return Boolean(row);
+}
+
+/** Live count of content (production items) per account, excluding
+ *  soft-deleted items. One GROUP BY query for the whole table — cheap,
+ *  and lets the Accounts UI show "N pieces of content" per row without
+ *  N+1 fetches. */
+export async function getContentCountsByAccount(): Promise<Map<string, number>> {
+  const rows = await db
+    .select({ accountId: productionItems.accountId, n: count() })
+    .from(productionItems)
+    .where(
+      and(
+        isNotNull(productionItems.accountId),
+        isNull(productionItems.deletedAt)
+      )
+    )
+    .groupBy(productionItems.accountId);
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    if (r.accountId) map.set(r.accountId, Number(r.n));
+  }
+  return map;
 }

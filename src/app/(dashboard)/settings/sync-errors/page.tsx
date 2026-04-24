@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
-import { and, isNotNull, desc } from "drizzle-orm";
+import { and, isNotNull, isNull, desc } from "drizzle-orm";
 import { SyncErrorsTable } from "@/components/settings/sync-errors-table";
 
 export const metadata: Metadata = { title: "Sync errors · Settings" };
@@ -28,7 +28,8 @@ export default async function SyncErrorsPage() {
     .where(
       and(
         isNotNull(productionItems.lastPerformanceSyncError),
-        isNotNull(productionItems.lastPerformanceSyncAt)
+        isNotNull(productionItems.lastPerformanceSyncAt),
+        isNull(productionItems.deletedAt)
       )
     )
     .orderBy(desc(productionItems.lastPerformanceSyncAt));

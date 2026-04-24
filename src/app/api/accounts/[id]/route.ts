@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { accounts } from "@/lib/db/schema";
+import { accounts, productionItems } from "@/lib/db/schema";
 import { getAccountById } from "@/lib/db/accounts";
 
 const VALID_PLATFORMS = new Set([
@@ -116,4 +116,65 @@ export async function PATCH(
   await db.update(accounts).set(patch).where(eq(accounts.id, id));
   const updated = await getAccountById(id);
   return NextResponse.json({ account: updated });
+}
+
+/**
+ * Soft-delete an account + every production item linked to it. Both tables
+ * get a `deleted_at` timestamp stamped inside one transaction; nothing is
+ * physically removed. Restore with
+ *   UPDATE accounts SET deleted_at = NULL WHERE id = '...';
+ *   UPDATE production_items SET deleted_at = NULL WHERE account_id = '...';
+ *
+ * Requires the caller to echo the account's handle as `confirmHandle` — a
+ * server-side twin of the type-to-confirm dialog in the UI, so a misfired
+ * fetch from somewhere else can't nuke the wrong row.
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const { id } = await params;
+
+  const existing = await getAccountById(id);
+  if (!existing) {
+    return NextResponse.json({ error: "Account not found" }, { status: 404 });
+  }
+
+  const body = (await request.json().catch(() => ({}))) as {
+    confirmHandle?: string;
+  };
+  if (body.confirmHandle !== existing.handle) {
+    return NextResponse.json(
+      { error: "confirmHandle does not match the account handle" },
+      { status: 400 }
+    );
+  }
+
+  const now = new Date();
+  const deletedCount = await db.transaction(async (tx) => {
+    const stamped = await tx
+      .update(productionItems)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(productionItems.accountId, id),
+          isNull(productionItems.deletedAt)
+        )
+      )
+      .returning({ id: productionItems.id });
+    await tx
+      .update(accounts)
+      .set({ deletedAt: now, updatedAt: now, isActive: false })
+      .where(eq(accounts.id, id));
+    return stamped.length;
+  });
+
+  return NextResponse.json({
+    ok: true,
+    deletedProductionItems: deletedCount,
+  });
 }

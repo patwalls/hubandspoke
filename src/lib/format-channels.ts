@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { accounts, brands, formatChannels, formats } from "@/lib/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { PostType } from "@/lib/platform-field-schemas";
 
 // One persisted publishing target on a format: which social account, in what
@@ -141,7 +141,7 @@ export async function setFormatChannels(
         })
         .from(accounts)
         .innerJoin(brands, eq(brands.id, accounts.brandId))
-        .where(inArray(accounts.id, accountIds))
+        .where(and(inArray(accounts.id, accountIds), isNull(accounts.deletedAt)))
     : [];
   const accountById = new Map(accountRows.map((a) => [a.id, a]));
 

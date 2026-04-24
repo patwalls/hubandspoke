@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { productionItems, formats, brands, users, accounts } from "@/lib/db/schema";
 import { aliasedTable } from "drizzle-orm";
-import { and, eq, gte, lte, isNotNull, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
 
 export const PIPELINE_STATUSES = [
@@ -214,6 +214,7 @@ export async function getContentReport(
     gte(productionItems.publishedDate, startDate),
     lte(productionItems.publishedDate, endDate),
     isNotNull(productionItems.platform),
+    isNull(productionItems.deletedAt),
   ];
 
   // New-world filters. `accountId` picks a single account; `platformKey`
@@ -546,7 +547,8 @@ export async function getProductionPipeline(
     .where(
       and(
         eq(productionItems.brand, brand),
-        inArray(productionItems.status, PIPELINE_STATUSES as unknown as string[])
+        inArray(productionItems.status, PIPELINE_STATUSES as unknown as string[]),
+        isNull(productionItems.deletedAt)
       )
     );
 
@@ -613,6 +615,7 @@ export async function topShortFormPerformers(params: {
     eq(productionItems.status, "Published"),
     isNotNull(productionItems.views),
     sql`(${platformOr})`,
+    isNull(productionItems.deletedAt),
   ];
 
   if (excludeDerivativesOfPillarId) {

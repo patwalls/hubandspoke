@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, desc, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
@@ -45,6 +45,7 @@ export default async function MyWorkPage() {
           eq(productionItems.editorUserId, userId),
         ),
         sql`${productionItems.status} IS NULL OR ${productionItems.status} NOT IN (${sql.raw(TERMINAL.map((s) => `'${s}'`).join(","))})`,
+        isNull(productionItems.deletedAt),
       ),
     )
     .orderBy(desc(productionItems.updatedAt))

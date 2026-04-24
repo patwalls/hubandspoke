@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { fetchBrandBySlug, getEnabledBrands } from "@/lib/db/brands";
-import { getAccounts } from "@/lib/db/accounts";
+import { getAccounts, getContentCountsByAccount } from "@/lib/db/accounts";
 import { AccountsSettingsContent } from "@/components/settings/accounts-settings";
 
 interface BrandAccountsPageProps {
@@ -27,9 +27,10 @@ export default async function BrandAccountsPage({
   const brandConfig = await fetchBrandBySlug(brand);
   if (!brandConfig) notFound();
 
-  const [accounts, brands] = await Promise.all([
+  const [accounts, brands, contentCounts] = await Promise.all([
     getAccounts(),
     getEnabledBrands(),
+    getContentCountsByAccount(),
   ]);
 
   return (
@@ -55,6 +56,7 @@ export default async function BrandAccountsPage({
         syncedFromNotion: a.syncedFromNotion,
         lastRefreshedAt: a.lastRefreshedAt ? a.lastRefreshedAt.toISOString() : null,
         lastRefreshError: a.lastRefreshError,
+        contentCount: contentCounts.get(a.id) ?? 0,
       }))}
       brands={brands.map((b) => ({ slug: b.slug, label: b.label }))}
       scopeBrandSlug={brand}

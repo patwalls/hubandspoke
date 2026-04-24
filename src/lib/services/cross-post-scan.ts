@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   accounts,
@@ -94,7 +94,12 @@ export async function runCrossPostScan(): Promise<CrossPostScanResult> {
         handle: accounts.handle,
       })
       .from(accounts)
-      .where(inArray(accounts.id, Array.from(referencedAccountIds)));
+      .where(
+        and(
+          inArray(accounts.id, Array.from(referencedAccountIds)),
+          isNull(accounts.deletedAt)
+        )
+      );
     for (const r of rows) accountById.set(r.id, r);
   }
 

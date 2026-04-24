@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, ilike, isNotNull, ne, desc } from "drizzle-orm";
+import { and, eq, ilike, isNotNull, isNull, ne, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 
@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
   const conditions = [
     eq(productionItems.brand, brand),
     isNotNull(productionItems.notionId),
+    isNull(productionItems.deletedAt),
   ];
   if (excludeId) conditions.push(ne(productionItems.id, excludeId));
   if (q) conditions.push(ilike(productionItems.title, `%${q}%`));

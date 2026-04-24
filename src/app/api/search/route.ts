@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, desc, eq, ilike, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, formats, productionItems } from "@/lib/db/schema";
 
@@ -43,6 +43,7 @@ export async function GET(request: NextRequest) {
           eq(productionItems.brand, brand),
           isNotNull(productionItems.notionId),
           ilike(productionItems.title, pattern),
+          isNull(productionItems.deletedAt),
         ),
       )
       .orderBy(
