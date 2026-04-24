@@ -436,13 +436,13 @@ export function EnrichmentButton(props: Props) {
                           src={m.url}
                           poster={m.posterUrl ?? undefined}
                           controls
-                          className="w-full rounded-md border border-border aspect-square object-cover"
+                          className="w-full rounded-md border border-border max-h-[480px] object-contain bg-black"
                         />
                       ) : m.url ? (
                         <img
                           src={m.url}
                           alt={`Slide ${m.index + 1}`}
-                          className="w-full rounded-md border border-border aspect-square object-cover"
+                          className="w-full rounded-md border border-border max-h-[480px] object-contain"
                         />
                       ) : null}
                       <figcaption className="text-[11px] text-muted-foreground">
