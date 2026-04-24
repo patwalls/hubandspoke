@@ -208,19 +208,150 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Cap: 10 pending suggestions in queue
 
 ### `capture-velocity-snapshot` — per-post scheduled velocity snapshots
-- **Trigger:** per-item scheduled jobs. When an item transitions to Published with a real `publishedAt` (via `account-content-sync` from SC, or via `POST /api/production-items` with an SC-supplied timestamp), `scheduleVelocitySnapshots()` enqueues five jobs with `runAt = publishedAt + {15m, 30m, 1h, 2h, 4h}`. Checkpoints whose target time has already passed (late discovery) are skipped.
-- **Files:** `src/jobs/tasks/capture-velocity-snapshot.ts`, `src/lib/services/performance-decay.ts` (reuses `refreshItemMetrics()`)
-- **Inputs:** `{ productionItemId, checkpointKey }` payload; current item state in `production_items`.
-- **Outputs:** one `view_snapshots` row per job with `checkpoint_key` set (one of `"15m" | "30m" | "1h" | "2h" | "4h"`). Idempotent via the partial unique index `(production_item_id, checkpoint_key)`.
-- **Downstream:** `cross-post-scan` reads these rows for velocity.
-- **Rules:**
-  - ~5 SC calls per published item (1 per checkpoint), not a blanket sweep. Replaces the `fresh-metrics-sync` design that was burning ~4,800 calls/day.
-  - Skips the SC call if the item was deleted or un-Published between enqueue and execution.
-  - Skips writing (but still pays 1 SC call) if the platform returned no view signal (LinkedIn/YT-Community with no likes yet).
-- **Enqueue callsites:**
-  - `src/lib/services/account-content-sync.ts` (primary — SC-authoritative publishedAt)
-  - `src/app/api/production-items/route.ts` POST handler (add-from-link flow; publishedAt comes from SC preview)
-  - *Not* the PUT handler's status-flip path — manual "I posted this" stamps `new Date()` which is usually wrong; wait for account-content-sync to see the post with the real SC time.
+
+Measures how fast each Published original is growing by taking up to **five** Scrape-Creators view-count snapshots at fixed post ages (15m, 30m, 1h, 2h, 4h). The cross-post scanner reads those snapshots to decide which posts are "taking off."
+
+**Why this design.** Earlier iterations used a blanket `*/15` cron (`fresh-metrics-sync`) that hit SC for every item <72h old on every sweep — ~4,800 SC calls/day. That was both expensive and produced inconsistent data (a snapshot at age 14h tagged nothing meaningful). The per-post scheduled design fires exactly 5 SC calls per post, each aligned to a known age, yielding clean comparable data across items.
+
+#### Data model
+
+`view_snapshots` table (`src/lib/db/schema.ts`):
+
+| Column | Notes |
+|---|---|
+| `id` | bigserial PK |
+| `production_item_id` | FK → `production_items.id`, cascade-delete |
+| `views`, `likes`, `comments` | point-in-time counters. CHECK: `views >= 0`. |
+| `taken_at` | when this row was written |
+| `post_age_minutes` | actual age (in minutes) when snapshot was taken. Informational; may differ from checkpoint target by a few minutes due to worker dispatch latency. CHECK: `>= 0`. |
+| `checkpoint_key` | one of `'15m' \| '30m' \| '1h' \| '2h' \| '4h'`. **Authoritative** identifier for which checkpoint this snapshot represents. CHECK constraint enforced at the DB. |
+
+**Invariants** (enforced at the DB):
+- `checkpoint_key` is non-null and one of the 5 valid keys.
+- `UNIQUE (production_item_id, checkpoint_key)` — no item has two snapshots for the same checkpoint.
+- `post_age_minutes >= 0`, `views >= 0`.
+
+The **checkpoint configuration** lives in `src/lib/velocity-checkpoints.ts` and is the single source of truth for timing. Each entry is `{key, offsetMinutes, windowMin, windowMax}`:
+
+| Key | Target age | Acceptance window | Gap to next |
+|---|---:|---|---:|
+| `15m` | 15 | 9–22 | 1m |
+| `30m` | 30 | 23–45 | 1m |
+| `1h` | 60 | 46–90 | 10m |
+| `2h` | 120 | 100–179 | 36m |
+| `4h` | 240 | 215–300 | — |
+
+Windows are **non-overlapping** by design — any age maps to at most one checkpoint. Adjacent gaps are intentional and get rejected by the window check (indicates a job fired out of band).
+
+#### Lifecycle of one snapshot
+
+```
+Item becomes Published
+   │
+   ▼
+scheduleVelocitySnapshots(itemId, publishedAt)   // src/jobs/tasks/capture-velocity-snapshot.ts
+   │  ┌── SELECT already-captured checkpoints for this item
+   │  │     → skip those                         (skippedCaptured++)
+   │  ├── For each remaining checkpoint:
+   │  │     if now > publishedAt + windowMax:     (skippedPast++)
+   │  │       skip — window closed
+   │  │     else:
+   │  │       runAt = max(target, now + 5s)      // fire immediately if target past but window open
+   │  │       enqueue with jobKey `velocity-<id>-<cp>`   (scheduled++)
+   │
+   ▼  … runAt elapses, worker picks up job …
+captureVelocitySnapshotTask({ productionItemId, checkpointKey })
+   │  ┌── validate checkpointKey is a known key  (throw otherwise)
+   │  ├── SELECT item by id
+   │  │     missing / deleted       → log info, return (no SC call)
+   │  │     status !== 'Published'  → log info, return
+   │  │     publishedAt null        → log warn, return
+   │  ├── SELECT any existing snapshot for (item, checkpoint)
+   │  │     already captured        → log info, return (no SC call)
+   │  ├── compute age = now - publishedAt
+   │  │     age outside window      → log warn, return (no SC call)
+   │  ├── refreshItemMetrics(itemId)                            → 1 SC call
+   │  │     refresh failed / returned null views → log info, return
+   │  ├── INSERT into view_snapshots (views, age, checkpoint_key)
+   │  │     unique-key violation caught → log info, return
+   │  └── success
+```
+
+#### Edge cases and guards
+
+| Scenario | What happens |
+|---|---|
+| `publishedAt` is null at schedule time | `scheduleVelocitySnapshots` returns early; 0 jobs enqueued |
+| `publishedAt` is a string we can't parse | Same — returns early |
+| `publishedAt` is in the far past (4h+) | All 5 checkpoint windows already closed; 0 jobs enqueued; `skippedPast = 5` |
+| Item re-synced 30 min after publish | 15m window closed → skipped; 30m/1h/2h/4h scheduled. If 30m already captured (prior run), `skippedCaptured` increments instead |
+| Item discovered by sync at age 18m | 15m's target was 3 min ago but its window [9, 22] is still open → fire immediately at `now + 5s`; on execution, age ≈ 18, passes the window check, snapshot written |
+| Item's `publishedAt` corrected by a later SC sync | `scheduleVelocitySnapshots` called again via `account-content-sync` UPDATE branch. jobKey `replace` updates `runAt` on still-pending jobs to the corrected time. Already-fired jobs are not re-run |
+| Item deleted between schedule and fire | Task's `deletedAt` guard skips; no SC call |
+| Item un-published between schedule and fire | Task's `status !== 'Published'` guard skips; no SC call |
+| Job retries past its window (rare) | Task's age-within-window guard rejects; no SC call; no misleading row |
+| Two jobs race to write the same (item, cp) | DB unique index rejects the second; task catches `duplicate key` and logs; no crash |
+| Platform returns no view signal (LinkedIn with no likes yet) | Task logs "no-snapshot"; no row written; 1 SC credit spent |
+| Invalid `checkpointKey` in payload | Task throws up-front; graphile-worker marks the job failed; no DB work done |
+
+#### Cost
+
+- **Per post:** exactly 5 SC calls if every checkpoint lands in its window. Fewer for late-discovered posts (whichever windows are still open).
+- **At current volume** (~17 Published originals/day): ~85 SC calls/day for velocity data.
+- Baseline `performance-decay` runs on the existing tiered cadence (hourly for <24h, 6h for 1–7d, etc.) independent of this.
+
+#### Enqueue callsites
+
+| File | Branch | `publishedAt` source |
+|---|---|---|
+| `src/lib/services/account-content-sync.ts` | INSERT (new post discovered) | SC-reported timestamp |
+| `src/lib/services/account-content-sync.ts` | UPDATE (existing post re-synced) | SC-reported timestamp; corrects earlier wrong stamps |
+| `src/app/api/production-items/route.ts` | POST (add-from-link) | body `publishedAt` (from SC preview) or `new Date()` |
+| `src/app/api/production-items/route.ts` | PUT (status → Published OR link added on Published) | existing `publishedAt`, or stamped `new Date()` on fresh transition |
+
+#### Testing
+
+Full test suite (`src/lib/velocity-checkpoints.test.ts` + `src/jobs/tasks/capture-velocity-snapshot.integration.test.ts`) covers every edge case above. Run:
+```
+npm run test              # both unit + integration
+npm run test:unit         # unit only
+npm run test:integration  # hits DATABASE_URL from .env.local
+```
+Integration tests mock `refreshItemMetrics` (no SC credits spent) and the `enqueue` helper (no real worker jobs created). Disposable production_items fixtures are cleaned up per-test.
+
+#### Troubleshooting
+
+```sql
+-- How many snapshots and of what kind exist right now?
+SELECT checkpoint_key, count(*) AS rows,
+       min(post_age_minutes) AS min_age, max(post_age_minutes) AS max_age
+FROM view_snapshots GROUP BY 1 ORDER BY 1;
+
+-- Pending velocity jobs (should be 0-5 × recent-Published-items)
+SELECT key, run_at, attempts, last_error
+FROM graphile_worker.jobs
+WHERE task_identifier = 'capture-velocity-snapshot'
+ORDER BY run_at LIMIT 20;
+
+-- Any items failing repeatedly? (attempts >= 1 is a red flag; the task
+-- shouldn't normally throw)
+SELECT key, attempts, last_error
+FROM graphile_worker.jobs
+WHERE task_identifier = 'capture-velocity-snapshot' AND attempts >= 1;
+
+-- Recent Published originals that got no velocity data at all
+-- (likely null publishedAt or platform returned no views)
+SELECT pi.id, pi.title, pi.published_at
+FROM production_items pi
+LEFT JOIN view_snapshots vs ON vs.production_item_id = pi.id
+WHERE pi.status = 'Published'
+  AND pi.source_type = 'original'
+  AND pi.deleted_at IS NULL
+  AND pi.published_at > now() - interval '6 hours'
+GROUP BY pi.id, pi.title, pi.published_at
+HAVING count(vs.id) = 0
+ORDER BY pi.published_at DESC;
+```
 
 ### `cross-post-scan` — velocity-gated cross-post recommendations
 - **Trigger:** **manual only.** Operator clicks "Populate queue" on the Cross-post tab of `/[brand]/queue`, which POSTs to `/api/cross-post-scan` with `{ maxIdeas: 10, maxCandidates: 20 }`. Not on cron — the graphile-worker task is still registered for ad-hoc enqueues but nothing fires it automatically.

@@ -12,6 +12,7 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -736,14 +737,14 @@ export const viewSnapshots = pgTable(
     // age by a few minutes (worker dispatch latency, clock skew). The
     // scanner treats `checkpoint_key` as the authoritative "which
     // checkpoint is this" and uses `post_age_minutes` only for
-    // debugging / sparkline X-axis.
+    // debugging / sparkline X-axis. CHECK constraint rejects negatives.
     postAgeMinutes: integer("post_age_minutes").notNull(),
     // Stable checkpoint tag — one of the `VELOCITY_CHECKPOINTS` keys in
     // `src/lib/velocity-checkpoints.ts` ("15m" | "30m" | "1h" | "2h" |
-    // "4h"). Guaranteed non-null: only written by
-    // `capture-velocity-snapshot`, which is the sole writer for this
-    // table. Unique per (item, checkpoint) — retries / rediscovery
-    // can't produce duplicates.
+    // "4h"). Enforced at the DB level via a CHECK constraint so no
+    // future writer can sneak in an arbitrary string. Unique per
+    // (item, checkpoint) — retries / rediscovery can't produce
+    // duplicates.
     checkpointKey: text("checkpoint_key").notNull(),
   },
   (t) => [
@@ -753,6 +754,15 @@ export const viewSnapshots = pgTable(
       t.productionItemId,
       t.checkpointKey
     ),
+    check(
+      "view_snapshots_checkpoint_key_valid",
+      sql`${t.checkpointKey} IN ('15m', '30m', '1h', '2h', '4h')`
+    ),
+    check(
+      "view_snapshots_post_age_nonneg",
+      sql`${t.postAgeMinutes} >= 0`
+    ),
+    check("view_snapshots_views_nonneg", sql`${t.views} >= 0`),
   ]
 );
 

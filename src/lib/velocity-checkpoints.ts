@@ -15,12 +15,16 @@
 //   - scripts/backfill-velocity-snapshot-schedule.mjs (mjs boundary —
 //     keys are hardcoded but must match)
 
+// Windows are non-overlapping by design — a given post age maps to at most
+// one checkpoint. Adjacent gaps (e.g. ages 23-24 between 15m and 30m) are
+// fine: they just represent "scheduled job fired unusually out of band,
+// skip." The task's in-window check catches any fire outside these ranges.
 export const VELOCITY_CHECKPOINTS = [
-  { key: "15m", offsetMinutes: 15, windowMin: 8, windowMax: 25 },
-  { key: "30m", offsetMinutes: 30, windowMin: 20, windowMax: 45 },
-  { key: "1h", offsetMinutes: 60, windowMin: 45, windowMax: 90 },
-  { key: "2h", offsetMinutes: 120, windowMin: 100, windowMax: 150 },
-  { key: "4h", offsetMinutes: 240, windowMin: 210, windowMax: 270 },
+  { key: "15m", offsetMinutes: 15, windowMin: 9, windowMax: 22 },
+  { key: "30m", offsetMinutes: 30, windowMin: 23, windowMax: 45 },
+  { key: "1h", offsetMinutes: 60, windowMin: 46, windowMax: 90 },
+  { key: "2h", offsetMinutes: 120, windowMin: 100, windowMax: 179 },
+  { key: "4h", offsetMinutes: 240, windowMin: 215, windowMax: 300 },
 ] as const;
 
 export type VelocityCheckpoint = (typeof VELOCITY_CHECKPOINTS)[number];

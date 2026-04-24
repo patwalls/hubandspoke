@@ -344,6 +344,13 @@
       "when": 1777067784364,
       "tag": "0048_view_snapshots_checkpoint_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1777068921693,
+      "tag": "0049_view_snapshots_check_constraints",
+      "breakpoints": true
     }
   ]
 }

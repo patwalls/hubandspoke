@@ -17,7 +17,11 @@
     "worker:dev": "tsx --env-file=.env.local src/jobs/worker.ts",
     "worker:migrate": "node scripts/graphile-migrate.mjs",
     "dev:all": "concurrently -n web,worker -c blue,magenta \"npm run dev\" \"npm run worker:dev\"",
-    "postinstall": "node scripts/install-yt-dlp.mjs"
+    "postinstall": "node scripts/install-yt-dlp.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
@@ -68,12 +72,14 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/sanitize-html": "^2.16.1",
+    "@vitest/coverage-v8": "^4.1.5",
     "concurrently": "^9.2.1",
     "dotenv": "^17.4.1",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.5"
   }
 }

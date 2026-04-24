@@ -1,0 +1,3 @@
+ALTER TABLE "view_snapshots" ADD CONSTRAINT "view_snapshots_checkpoint_key_valid" CHECK ("view_snapshots"."checkpoint_key" IN ('15m', '30m', '1h', '2h', '4h'));--> statement-breakpoint
+ALTER TABLE "view_snapshots" ADD CONSTRAINT "view_snapshots_post_age_nonneg" CHECK ("view_snapshots"."post_age_minutes" >= 0);--> statement-breakpoint
+ALTER TABLE "view_snapshots" ADD CONSTRAINT "view_snapshots_views_nonneg" CHECK ("view_snapshots"."views" >= 0);

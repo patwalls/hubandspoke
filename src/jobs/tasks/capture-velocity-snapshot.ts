@@ -6,6 +6,7 @@ import { refreshItemMetrics } from "@/lib/services/performance-decay";
 import { enqueue } from "@/jobs/enqueue";
 import {
   VELOCITY_CHECKPOINTS,
+  isVelocityCheckpointKey,
   type VelocityCheckpointKey,
 } from "@/lib/velocity-checkpoints";
 
@@ -32,6 +33,23 @@ export const captureVelocitySnapshotTask: Task = async (
   const { productionItemId, checkpointKey } =
     rawPayload as CaptureVelocitySnapshotPayload;
   const start = Date.now();
+
+  // Reject payloads with an invalid checkpoint key. A bad key would
+  // otherwise silently fail the in-window lookup below and pollute
+  // view_snapshots with something a DB CHECK constraint now also
+  // rejects. Throwing here surfaces the bug immediately.
+  if (!isVelocityCheckpointKey(checkpointKey)) {
+    helpers.logger.error(
+      `capture-velocity-snapshot invalid payload item=${productionItemId} cp=${checkpointKey} — expected one of ${VELOCITY_CHECKPOINTS.map((c) => c.key).join("|")}`
+    );
+    throw new Error(
+      `capture-velocity-snapshot: invalid checkpointKey "${checkpointKey}"`
+    );
+  }
+
+  if (typeof productionItemId !== "string" || productionItemId.length === 0) {
+    throw new Error("capture-velocity-snapshot: missing productionItemId");
+  }
 
   const [item] = await db
     .select({
