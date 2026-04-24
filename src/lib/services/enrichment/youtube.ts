@@ -121,6 +121,20 @@ export async function enrichYouTubeItem(
     result.fields.descriptionFetched = true;
   }
 
+  // The SC listing endpoint (channel-videos) only returns ISO timestamps
+  // for the last few weeks; older items come through as "N months/years
+  // ago" and get dropped to null. /v1/youtube/video is authoritative, so
+  // capture its publishDate here and heal any null or previously-batched
+  // row. Parses "YYYY-MM-DD" (SC's usual shape) or a full ISO string.
+  if (data.publishDate) {
+    const d = new Date(data.publishDate);
+    if (!isNaN(d.getTime())) {
+      result.updates.publishedAt = d;
+      result.updates.publishedDate = d.toISOString().split("T")[0];
+      result.fields.publishDateFetched = true;
+    }
+  }
+
   const channel = data.channel;
   if (channel?.handle || channel?.title) {
     result.updates.authorHandle = channel.handle ?? null;

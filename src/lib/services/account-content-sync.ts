@@ -223,14 +223,19 @@ function parseRelativeTime(text: string): string | null {
   if (!match) return null;
   const num = parseInt(match[1], 10);
   const unit = match[2].toLowerCase();
+  // Only resolve units with day-level or finer precision. "N months/years
+  // ago" is intentionally dropped — every such item would otherwise collapse
+  // onto `today − N months` and batch an entire year of videos onto a
+  // single calendar day in the weekly dashboard. Leave publishedDate null;
+  // `enrichYouTubeItem` pulls the precise ISO from /v1/youtube/video on
+  // the next enrichment sweep and populates it authoritatively.
   switch (unit) {
     case "second": now.setSeconds(now.getSeconds() - num); break;
     case "minute": now.setMinutes(now.getMinutes() - num); break;
     case "hour":   now.setHours(now.getHours() - num); break;
     case "day":    now.setDate(now.getDate() - num); break;
     case "week":   now.setDate(now.getDate() - num * 7); break;
-    case "month":  now.setMonth(now.getMonth() - num); break;
-    case "year":   now.setFullYear(now.getFullYear() - num); break;
+    default:       return null;
   }
   return now.toISOString().split("T")[0];
 }

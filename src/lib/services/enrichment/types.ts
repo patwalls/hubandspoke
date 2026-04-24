@@ -15,6 +15,7 @@ export interface EnrichmentResult {
   fields: {
     captionFetched?: boolean;
     descriptionFetched?: boolean;
+    publishDateFetched?: boolean;
     posterArchived?: boolean;
     mediaArchived?: boolean;
     transcriptFetched?: boolean;
