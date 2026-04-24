@@ -2301,7 +2301,11 @@ export function ContentDetail({ brand, contentId, accounts }: ContentDetailProps
           </PropertyRow>
         </PropertyRowSolo>
 
-        {postType?.startsWith("instagram_") && (
+        {/* Hidden again post-screencast. App Review reviewers don't log into
+            the app (we told them so in the submission), and DMs to non-testers
+            won't actually fire until Meta approves the messaging permission.
+            Flip the `false` back to enable when approval lands. */}
+        {false && postType?.startsWith("instagram_") && (
           <PropertyRowSolo>
             <PropertyRow label="Auto-DM trigger">
               {item.manychatKeyword ? (
