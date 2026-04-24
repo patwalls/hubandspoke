@@ -429,8 +429,8 @@ export function AccountsSettingsContent({
               {brandLabel}
             </h3>
           )}
-          <div className="rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="rounded-lg border border-border overflow-x-auto">
+            <table className="w-full min-w-[1200px] text-sm">
               <thead className="bg-muted/40 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="text-left px-3 py-2" />
