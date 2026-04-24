@@ -301,13 +301,24 @@ function buildDescriptPrompt(args: {
  * descriptCompositionId back onto the new production item when the job
  * stops. The clip idea transitions to "assigned" exactly like the assign
  * path — same terminal state, same uniq-index guarantee.
+ *
+ * The agent path requires a pre-existing Descript project on the source
+ * (Underlord works by adding a new composition to an existing project).
+ * When the source has `mediaS3Key` but no Descript project yet — the
+ * common case now that Whisper transcripts don't require a Descript
+ * project upfront — we transparently fall through to the precise-cut
+ * path (ffmpeg-trim → new Descript project) so users get a clip without
+ * having to set up Descript manually first.
  */
 export async function createClipIdeaInDescript(args: {
   clipIdeaId: string;
   actorUserId: string;
-}): Promise<CreateClipIdeaInDescriptResult> {
+}): Promise<CreateClipIdeaInDescriptResult | CreateClipIdeaInDescriptPreciseCutResult> {
   const row = await loadAndGuardClipIdea(args.clipIdeaId);
   if (!row.descriptProjectId) {
+    if (row.mediaS3Key) {
+      return createClipIdeaInDescriptPreciseCut(args);
+    }
     throw new ClipIdeaSourceMissingDescriptProjectError();
   }
   const brand = row.sourceBrand ?? "starter-story";

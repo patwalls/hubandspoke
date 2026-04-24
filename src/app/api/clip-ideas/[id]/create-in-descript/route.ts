@@ -23,12 +23,18 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       clipIdeaId: id,
       actorUserId,
     });
+    // When the source had no Descript project we transparently fall through
+    // to the precise-cut path, which doesn't return descriptProjectUrl /
+    // descriptJobId yet (the worker backfills those on completion). Return
+    // them only when the agent path actually ran.
     return NextResponse.json({
       ok: true,
       newProductionItemId: result.newProductionItemId,
       sourceBrand: result.sourceBrand,
-      descriptProjectUrl: result.descriptProjectUrl,
-      descriptJobId: result.descriptJobId,
+      descriptProjectUrl:
+        "descriptProjectUrl" in result ? result.descriptProjectUrl : null,
+      descriptJobId:
+        "descriptJobId" in result ? result.descriptJobId : null,
     });
   } catch (err) {
     if (err instanceof ClipIdeaNotFoundError) {
