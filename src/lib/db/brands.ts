@@ -1,34 +1,25 @@
+import { cache } from "react";
 import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, sql } from "drizzle-orm";
 
-// Row type inferred from the Drizzle table. Exported so callers can type
-// props without importing the table definition directly.
 export type Brand = typeof brands.$inferSelect;
 
-// Brief shape used by nav tabs + brand pickers — just what we need to render
-// a link/avatar without pulling the full row (excludes timestamps, goals,
-// default assignee FKs).
 export type BrandListEntry = Pick<
   Brand,
   "id" | "slug" | "label" | "avatarUrl" | "color" | "disabled"
 >;
 
-// Request-scoped cache so a single render doesn't re-query for every
-// component that needs the brand list. Server components call getBrands()
-// freely; Next's React cache() would also work but this is simpler.
-let cached: { all: Brand[]; enabled: Brand[]; bySlug: Map<string, Brand> } | null = null;
-
-// Preferred display order for the nav / pickers. Any slug not listed here
-// falls to the end, sorted alphabetically. Cheaper than a sort_order column
-// since brands are stable — edit this file when the desired order changes.
 const BRAND_PRIORITY: Record<string, number> = {
   "starter-story": 0,
   "matg": 1,
 };
 
-async function load(): Promise<NonNullable<typeof cached>> {
-  if (cached) return cached;
+// React `cache()` is request-scoped: deduped within a render pass, cleared
+// between requests. A plain module-level `let` was process-scoped and
+// outlived invalidation calls on Next 16's RSC path, causing stale brand
+// state after PATCH /api/brands.
+const load = cache(async () => {
   const rows = await db.select().from(brands).orderBy(asc(brands.label));
   rows.sort((a, b) => {
     const pa = BRAND_PRIORITY[a.slug] ?? 99;
@@ -38,9 +29,8 @@ async function load(): Promise<NonNullable<typeof cached>> {
   });
   const enabled = rows.filter((b) => !b.disabled);
   const bySlug = new Map(rows.map((b) => [b.slug, b]));
-  cached = { all: rows, enabled, bySlug };
-  return cached;
-}
+  return { all: rows, enabled, bySlug };
+});
 
 export async function getBrands(): Promise<Brand[]> {
   return (await load()).all;
@@ -61,14 +51,11 @@ export async function getDefaultBrandSlug(): Promise<string> {
   return enabled[0]?.slug ?? "starter-story";
 }
 
-/** Invalidate the request-scoped cache. Call after mutations (create brand,
- *  edit brand settings) to ensure the next read sees the update. Required
- *  because the Map/array above are module-level. */
-export function invalidateBrandCache(): void {
-  cached = null;
-}
+/** No-op kept for call-site compatibility — `load` is request-scoped via
+ *  React `cache()`, so there's nothing to invalidate. */
+export function invalidateBrandCache(): void {}
 
-/** Single-row lookup that bypasses the cache — use from API route handlers
+/** Single-row lookup that bypasses any caching — use from API route handlers
  *  where freshness matters more than the round trip. */
 export async function fetchBrandBySlug(slug: string): Promise<Brand | null> {
   const [row] = await db
