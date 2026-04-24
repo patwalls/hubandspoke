@@ -19,15 +19,27 @@ function formatPeriodTooltip(p: Period): string {
   return `${format(s, "EEEE, MMMM do")} to ${format(e, "EEEE, MMMM do")}`;
 }
 
+type CellFilter =
+  | { kind: "platform"; platform: string }
+  | { kind: "account"; accountId: string; postType: string | null }
+  | { kind: "format"; format: string }
+  | null;
+
 function buildContentUrl(
   brand: string,
-  filterKey: "platform" | "format",
-  rowLabel: string | null,
+  filter: CellFilter,
   startDate: string,
   endDate: string,
 ): string {
   const params = new URLSearchParams();
-  if (rowLabel) params.set(filterKey, rowLabel);
+  if (filter?.kind === "platform") {
+    params.set("platformKey", filter.platform);
+  } else if (filter?.kind === "account") {
+    params.set("accountId", filter.accountId);
+    if (filter.postType) params.set("postType", filter.postType);
+  } else if (filter?.kind === "format") {
+    params.set("format", filter.format);
+  }
   params.set("startDate", startDate);
   params.set("endDate", endDate);
   return `/${brand}/content?${params.toString()}`;
@@ -84,14 +96,14 @@ export function PeriodTable({
   const cellContent = (
     displayValue: string,
     value: number,
-    rowLabel: string | null,
+    filter: CellFilter,
     periodStart: string,
     periodEnd: string,
   ) => {
     if (!linkable || value === 0) return displayValue;
     return (
       <Link
-        href={buildContentUrl(brand!, filterKey, rowLabel, periodStart, periodEnd)}
+        href={buildContentUrl(brand!, filter, periodStart, periodEnd)}
         className="hover:underline"
       >
         {displayValue}
@@ -265,6 +277,10 @@ export function PeriodTable({
       {periods.map((p) => {
         const value = data[row]?.[p.label] || 0;
         const display = formatValue(value, activeTab);
+        const meta = rowMeta?.[row];
+        const filter: CellFilter = meta
+          ? { kind: "account", accountId: meta.accountId, postType: meta.postType }
+          : null;
         return (
           <td
             key={p.label}
@@ -272,7 +288,7 @@ export function PeriodTable({
               value === 0 ? "text-border" : "text-foreground"
             }`}
           >
-            {cellContent(display, value, row, p.start, p.end)}
+            {cellContent(display, value, filter, p.start, p.end)}
           </td>
         );
       })}
@@ -280,7 +296,13 @@ export function PeriodTable({
         {cellContent(
           formatValue(rowTotals[row], activeTab),
           rowTotals[row],
-          row,
+          rowMeta?.[row]
+            ? {
+                kind: "account",
+                accountId: rowMeta[row].accountId,
+                postType: rowMeta[row].postType,
+              }
+            : null,
           rangeStart,
           rangeEnd,
         )}
@@ -295,6 +317,7 @@ export function PeriodTable({
   ) => {
     const platformLabel = PLATFORM_META[toPlatform(platform)].label;
     const rangeTotal = sumRangeForRows(childRows, activeTab);
+    const platformFilter: CellFilter = { kind: "platform", platform };
     return (
       <tr
         key={`platform-${platform}`}
@@ -324,16 +347,26 @@ export function PeriodTable({
           return (
             <td
               key={p.label}
+              onClick={(e) => e.stopPropagation()}
               className={`px-2 py-2 text-center tabular-nums font-medium ${
                 v === 0 ? "text-border" : "text-foreground"
               }`}
             >
-              {formatValue(v, activeTab)}
+              {cellContent(formatValue(v, activeTab), v, platformFilter, p.start, p.end)}
             </td>
           );
         })}
-        <td className="px-3 py-2 text-center font-semibold text-foreground bg-accent/40 tabular-nums">
-          {formatValue(rangeTotal, activeTab)}
+        <td
+          onClick={(e) => e.stopPropagation()}
+          className="px-3 py-2 text-center font-semibold text-foreground bg-accent/40 tabular-nums"
+        >
+          {cellContent(
+            formatValue(rangeTotal, activeTab),
+            rangeTotal,
+            platformFilter,
+            rangeStart,
+            rangeEnd,
+          )}
         </td>
       </tr>
     );
@@ -398,39 +431,45 @@ export function PeriodTable({
                 {groups.misc.map((row) => renderChildRow(row))}
               </>
             ) : (
-              rows.map((row) => (
-                <tr
-                  key={row}
-                  className="border-b border-border/50 hover:bg-accent/30 transition-colors"
-                >
-                  <td className="sticky left-0 bg-card px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-foreground z-10">
-                    {row}
-                  </td>
-                  {periods.map((p) => {
-                    const value = data[row]?.[p.label] || 0;
-                    const display = formatValue(value, activeTab);
-                    return (
-                      <td
-                        key={p.label}
-                        className={`px-2 py-2 text-center tabular-nums ${
-                          value === 0 ? "text-border" : "text-foreground"
-                        }`}
-                      >
-                        {cellContent(display, value, row, p.start, p.end)}
-                      </td>
-                    );
-                  })}
-                  <td className="px-3 py-2 text-center font-semibold text-foreground bg-accent/30 tabular-nums">
-                    {cellContent(
-                      formatValue(rowTotals[row], activeTab),
-                      rowTotals[row],
-                      row,
-                      rangeStart,
-                      rangeEnd,
-                    )}
-                  </td>
-                </tr>
-              ))
+              rows.map((row) => {
+                const flatFilter: CellFilter =
+                  filterKey === "format"
+                    ? { kind: "format", format: row }
+                    : { kind: "platform", platform: row };
+                return (
+                  <tr
+                    key={row}
+                    className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                  >
+                    <td className="sticky left-0 bg-card px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-foreground z-10">
+                      {row}
+                    </td>
+                    {periods.map((p) => {
+                      const value = data[row]?.[p.label] || 0;
+                      const display = formatValue(value, activeTab);
+                      return (
+                        <td
+                          key={p.label}
+                          className={`px-2 py-2 text-center tabular-nums ${
+                            value === 0 ? "text-border" : "text-foreground"
+                          }`}
+                        >
+                          {cellContent(display, value, flatFilter, p.start, p.end)}
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-2 text-center font-semibold text-foreground bg-accent/30 tabular-nums">
+                      {cellContent(
+                        formatValue(rowTotals[row], activeTab),
+                        rowTotals[row],
+                        flatFilter,
+                        rangeStart,
+                        rangeEnd,
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
             )}
             <tr className="border-t-2 border-border bg-accent/50 font-semibold">
               <td className="sticky left-0 bg-accent/50 px-3 sm:px-4 py-2 text-xs sm:text-sm text-foreground z-10 font-mono uppercase tracking-wider text-[10px]">

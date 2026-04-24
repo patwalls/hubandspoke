@@ -124,6 +124,7 @@ export interface MetricData {
 
 export interface PrimaryRowMeta {
   label: string;
+  accountId: string;
   platform: string;
   handle: string;
   postType: string | null;

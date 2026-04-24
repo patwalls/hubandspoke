@@ -296,6 +296,7 @@ export async function getContentReport(
   // "Instagram Reel" / "X (Pat Walls)" labels. An accounts-rollout win.
   type PrimaryRowMeta = {
     label: string;
+    accountId: string;
     platform: string;
     handle: string;
     postType: string | null;
@@ -356,6 +357,7 @@ export async function getContentReport(
       }
       primaryRowMetaByKey.set(key, {
         label,
+        accountId: r.accountId,
         platform: r.accountPlatform,
         handle: r.accountHandle,
         postType: pt,
