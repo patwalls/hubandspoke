@@ -156,6 +156,27 @@ export function BrandsSettingsContent({ brands }: { brands: BrandRow[] }) {
     }
   }
 
+  async function handleToggleDisabled(slug: string, disabled: boolean) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/brands/${slug}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ disabled }),
+      });
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(msg ?? `HTTP ${res.status}`);
+      }
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update brand");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -327,13 +348,24 @@ export function BrandsSettingsContent({ brands }: { brands: BrandRow[] }) {
                         </Button>
                       </div>
                     ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openEdit(b)}
-                      >
-                        Edit
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        {b.disabled && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleToggleDisabled(b.slug, false)}
+                            disabled={saving}
+                          >
+                            Enable
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openEdit(b)}
+                        >
+                          Edit
+                        </Button>
+                      </div>
                     )}
                   </td>
                 </tr>
