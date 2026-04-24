@@ -38,7 +38,7 @@ function getBrandFromPath(
   return match ? match.slug : fallback;
 }
 
-function BrandAvatar({ brand, size = 22 }: { brand: Brand; size?: number }) {
+function BrandAvatar({ brand, size = 20 }: { brand: Brand; size?: number }) {
   const [errored, setErrored] = useState(false);
   const initials = brand.label
     .split(" ")
