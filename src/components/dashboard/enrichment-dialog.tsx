@@ -61,6 +61,12 @@ interface Props {
   mediaSizeBytes?: number | null;
   mediaS3Key?: string | null;
   posterS3Key?: string | null;
+  /** Pointer to the Whisper-extracted audio file in S3 — shown in the Media
+   *  section so you can see everything we've archived, including the
+   *  derivative artifact the transcript pipeline produced. */
+  transcriptAudioS3Key?: string | null;
+  transcriptModel?: string | null;
+  transcriptDurationSec?: number | null;
   /** Full carousel — one entry per archived slide, index 0 == cover. Empty
    *  array for older items that were enriched pre-carousel support (the
    *  dialog falls back to the single `mediaUrl` / `posterUrl` fields). */
@@ -162,6 +168,9 @@ export function EnrichmentButton(props: Props) {
     mediaSizeBytes,
     mediaS3Key,
     posterS3Key,
+    transcriptAudioS3Key,
+    transcriptModel,
+    transcriptDurationSec,
     media = [],
     onSynced,
   } = props;
@@ -419,6 +428,19 @@ export function EnrichmentButton(props: Props) {
                   </a>
                 ) : (
                   "—"
+                )}
+              </dd>
+              <dt className="text-muted-foreground">Audio S3 key</dt>
+              <dd className="font-mono text-xs break-all">
+                {transcriptAudioS3Key || "—"}
+                {transcriptAudioS3Key && (transcriptModel || transcriptDurationSec) && (
+                  <span className="ml-2 text-muted-foreground font-sans">
+                    {transcriptModel ? `(${transcriptModel}` : "("}
+                    {transcriptDurationSec
+                      ? `, ${Math.floor(transcriptDurationSec / 60)}:${String(Math.floor(transcriptDurationSec % 60)).padStart(2, "0")}`
+                      : ""}
+                    )
+                  </span>
                 )}
               </dd>
             </dl>

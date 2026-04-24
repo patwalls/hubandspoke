@@ -300,31 +300,54 @@ export const productionItems = pgTable(
   ]
 );
 
-// One row per production item. Populated on demand (Stage 1) by publishing the
-// linked Descript composition and parsing the WEBVTT subtitles on the
-// published_projects endpoint. `rawVtt` is kept so re-parsing is possible
-// without re-publishing; `segments` is the parsed form used by the UI and by
-// getTranscriptForPrompt() for LLM calls.
+// One row per production item. Populated by the `transcribe-whisper` task:
+// ffmpeg extracts audio from the S3 media → OpenAI Whisper API returns
+// segment + word timestamps → we persist both. `segments` stays the shape
+// the UI and `getTranscriptForPrompt()` already expect (Descript rows
+// written before the Whisper migration still render through this field).
+// `words` is new and only populated for source='whisper' rows.
+// `audioS3Key` points at the extracted audio we keep in S3 so we can
+// re-run Whisper (or layer on diarization/vision) without re-downloading
+// the full video; `audioChunks` is the ordered list when we had to split
+// long audio to stay under Whisper's 25 MB per-request cap.
 export const transcripts = pgTable("transcripts", {
   id: uuid("id").defaultRandom().primaryKey(),
   productionItemId: uuid("production_item_id")
     .references(() => productionItems.id, { onDelete: "cascade" })
     .notNull()
     .unique(),
-  source: text("source").notNull().default("descript"),
+  source: text("source").notNull().default("whisper"),
   language: text("language").default("en"),
-  rawVtt: text("raw_vtt").notNull(),
+  // Raw WEBVTT kept for legacy `source='descript'` rows only; Whisper
+  // doesn't produce VTT, so this is nullable going forward.
+  rawVtt: text("raw_vtt"),
   fullText: text("full_text").notNull(),
   segments: jsonb("segments")
     .$type<Array<{ startSec: number; endSec: number; text: string; speaker?: string }>>()
     .notNull(),
+  // Word-level timestamps, populated by Whisper's `timestamp_granularities:
+  // ["word"]`. Null on legacy Descript rows.
+  words: jsonb("words").$type<
+    Array<{ word: string; startSec: number; endSec: number }>
+  >(),
   wordCount: integer("word_count"),
   durationSec: decimal("duration_sec"),
-  descriptPublishedSlug: text("descript_published_slug"),
-  descriptShareUrl: text("descript_share_url"),
-  descriptPublishedAt: timestamp("descript_published_at", {
-    withTimezone: true,
-  }),
+  // Model identifier, e.g. "whisper-1". Null on legacy rows.
+  model: text("model"),
+  // Pointer to the extracted audio in S3 — kept so future re-runs don't
+  // need to re-download the full video. Null on legacy (Descript-era)
+  // rows. For Whisper rows this is always chunks[0].key.
+  audioS3Bucket: text("audio_s3_bucket"),
+  audioS3Key: text("audio_s3_key"),
+  // Ordered list of audio chunks in S3 — one entry per Whisper call that
+  // produced this transcript. Single-element for short audio, multiple
+  // entries for long-form content we had to split to stay under OpenAI's
+  // 25 MB per-request limit. `startSec` is the offset in the original
+  // video so we can shift chunk-local Whisper timestamps back to global
+  // time. Null on legacy Descript-era rows.
+  audioChunks: jsonb("audio_chunks").$type<
+    Array<{ key: string; startSec: number }>
+  >(),
   fetchedAt: timestamp("fetched_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

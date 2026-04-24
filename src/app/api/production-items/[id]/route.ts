@@ -306,8 +306,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .select({
         fullText: transcripts.fullText,
         source: transcripts.source,
+        model: transcripts.model,
         wordCount: transcripts.wordCount,
         durationSec: transcripts.durationSec,
+        audioS3Bucket: transcripts.audioS3Bucket,
+        audioS3Key: transcripts.audioS3Key,
       })
       .from(transcripts)
       .where(eq(transcripts.productionItemId, id))
@@ -438,10 +441,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         ? {
             fullText: itemTranscript.fullText,
             source: itemTranscript.source,
+            model: itemTranscript.model,
             wordCount: itemTranscript.wordCount,
             durationSec: itemTranscript.durationSec
               ? parseFloat(itemTranscript.durationSec)
               : null,
+            audioS3Bucket: itemTranscript.audioS3Bucket,
+            audioS3Key: itemTranscript.audioS3Key,
           }
         : null,
       prediction,

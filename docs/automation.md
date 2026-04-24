@@ -18,11 +18,11 @@ If you're new to this codebase, read in this order:
 CRON ENTRIES (src/jobs/crontab.ts, UTC)
   *:00  performance-decay         → SC API. Writes views/likes/comments. Decay-tier-gated.
   *:15  threshold-monitor-sweep   → in-place scan. Auto-creates repurposed Idea items when views cross format thresholds.
-  *:20  enrichment-sweep          → fan-out → enrich-item (per item) → maybe descript-transcribe
+  *:20  enrichment-sweep          → fan-out → enrich-item (per item) → maybe transcribe-whisper
   *:30  notion-sync               → Notion API ⇄ productionItems (YouTube long-form authoritative)
   *:40  hook-extract-sweep        → fan-out → extract-hook (per item, Haiku)
   *:50  hook-fallback-sweep       → fan-out → hook-fallback (per item, no LLM)
-  */20  youtube-download-sweep    → fan-out → youtube-download → descript-transcribe
+  */20  youtube-download-sweep    → fan-out → youtube-download → transcribe-whisper
   13:00 account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
   16:00 cross-post-scan           → per-rule LLM fit classifier + new Idea rows
@@ -32,8 +32,8 @@ USER / API ENTRY POINTS
   POST /api/accounts/[id]/refresh?mode=async              → account-refresh
   POST /api/accounts/[id]/sync-content?mode=latest|backfill → account-content-sync
   POST /api/accounts (new account row)                    → account-content-sync (backfill) + account-refresh
-  POST /api/production-items/[id]/transcript/fetch        → transcript-finish
-  POST /api/uploads/confirm                               → descript-transcribe
+  POST /api/production-items/[id]/transcript/fetch        → transcribe-whisper
+  POST /api/uploads/confirm                               → transcribe-whisper
   POST /api/descript/clip-out                             → descript-clip-resolve
   POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve
   POST /api/clip-ideas/[id]/create-in-descript-precise    → clip-idea-precise-cut
@@ -42,8 +42,8 @@ USER / API ENTRY POINTS
   POST /api/production-items, /comments, /clip-ideas/triage  → notification-send
 
 AUTO-CHAINS (one task enqueues another)
-  enrich-item        ── if updates.mediaS3Key set ─→ descript-transcribe
-  youtube-download   ── on success ────────────────→ descript-transcribe
+  enrich-item        ── if updates.mediaS3Key set ─→ transcribe-whisper
+  youtube-download   ── on success ────────────────→ transcribe-whisper
   enqueueNotification() ───────────────────────────→ notification-send
 ```
 
@@ -130,7 +130,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Files:** `src/jobs/tasks/youtube-download-sweep.ts`
 - **Inputs:** `productionItems` where `status='Published' AND youtubeId IS NOT NULL AND mediaS3Key IS NULL AND youtubeDownloadAttempts < 5`, ordered by `publishedDate` DESC, limit 50
 - **Outputs:** enqueues one `youtube-download` job per candidate, `jobKey: yt-dl-{id}`, `maxAttempts: 2` (deterministic failures don't deserve graphile's default 25)
-- **Downstream:** `youtube-download` → `descript-transcribe`
+- **Downstream:** `youtube-download` → `transcribe-whisper`
 - **Rules:**
   - `MAX_ATTEMPTS = 5` defined locally (`youtube-download-sweep.ts:14`); same constant duplicated in `enrichment/orchestrator.ts:20`
   - Sweep gate paces retries; dyno-level maxAttempts only retries the same tick
@@ -232,7 +232,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Files:** `src/jobs/tasks/enrich-item.ts`, `src/lib/services/enrichment/orchestrator.ts:61-124` (`enrichSingleItem`), platform enrichers in `src/lib/services/enrichment/{instagram,youtube,youtube-community,twitter,threads,linkedin,tiktok}.ts`
 - **Inputs:** `{ productionItemId, force?, withMedia? }`
 - **Outputs:** writes per-platform enriched fields (caption, author, like counts, media URLs); on success stamps `enrichmentCompletedAt`, clears `enrichmentError`, increments `enrichmentAttempts`. On failure: increments `enrichmentAttempts`, writes `enrichmentError` (1000-char cap), throws.
-- **Downstream:** **if `result.updates.mediaS3Key` was set**, enqueues `descript-transcribe` via `maybeEnqueueDescriptTranscribe()` (`enrichment/orchestrator.ts:119-121`)
+- **Downstream:** **if `result.updates.mediaS3Key` was set**, enqueues `transcribe-whisper` via `maybeEnqueueWhisperTranscribe()` (`enrichment/orchestrator.ts`)
 - **Rules:**
   - Idempotent on `enrichmentCompletedAt` (skips unless `force=true`)
   - Returns `null` if no enricher matches the platform — sweep treats that as a no-op
@@ -262,7 +262,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Files:** `src/jobs/tasks/youtube-download.ts`
 - **Inputs:** `{ productionItemId, force? }`
 - **Outputs:** `productionItems.mediaS3Bucket`, `mediaS3Key`, `mediaS3UploadedAt`, `mediaSizeBytes`, `mediaContentType='video/mp4'`, `youtubeDownloadSource='yt-dlp'`, `youtubeDownloadAttempts++`, clears `youtubeDownloadError`
-- **Downstream:** on success enqueues `descript-transcribe` via `maybeEnqueueDescriptTranscribe`
+- **Downstream:** on success enqueues `transcribe-whisper` via `maybeEnqueueWhisperTranscribe`
 - **Rules:**
   - Tries 3 player-client strategies in order (web → embedded → mobile)
   - ffmpeg merges video + audio, prefers H.264
@@ -293,30 +293,20 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Per-platform endpoints; skips platforms without SC support
   - 1 SC credit per account
 
-### `descript-transcribe` — 4-phase Descript flow
-- **Trigger:** enqueued by `enrich-item` (on Instagram/TikTok media archive), by `youtube-download` (on success), and by `POST /api/uploads/confirm` (user direct upload). Gated at enqueue site by `DESCRIPT_TRANSCRIPT_FETCH_LIVE` env flag.
-- **Files:** `src/jobs/tasks/descript-transcribe.ts`, `src/lib/services/transcript-fetch.ts`, `src/lib/services/transcribe-after-upload.ts` (`maybeEnqueueDescriptTranscribe`)
-- **Inputs:** `{ productionItemId, uploadJobId?, compositionId?, publishJobId?, deadlineAt? }`
+### `transcribe-whisper` — Whisper transcription (ffmpeg + OpenAI)
+- **Trigger:** enqueued by `enrich-item` (when it sets `mediaS3Key`), by `youtube-download` (on success), by `POST /api/uploads/confirm` (user direct upload), and by `POST /api/production-items/[id]/transcript/fetch` (manual refetch). Operational kill switch: `WHISPER_TRANSCRIBE_LIVE=false` disables enqueue-side firing.
+- **Files:** `src/jobs/tasks/transcribe-whisper.ts`, `src/lib/services/whisper-transcribe.ts`, `src/lib/services/transcribe-after-upload.ts` (`maybeEnqueueWhisperTranscribe`)
+- **Inputs:** `{ productionItemId, audioS3Key?, audioS3Bucket?, audioChunks? }`
 - **Outputs (by phase):**
-  1. No `uploadJobId` → download S3, create Descript project, PUT bytes → writes `productionItems.descriptProjectId`, `descriptProjectUrl`
-  2. `uploadJobId` set → poll import job → writes `compositionId`
-  3. `compositionId` set → call `publishComposition()` → writes `publishJobId`
-  4. `publishJobId` set → poll publish job, parse VTT → upserts `transcripts` row (rawVtt, segments, fullText, source=`descript`)
+  1. No `audioS3Key` → download archived S3 video, ffmpeg segment-extract mono 16kHz opus audio into 10-min chunks (`<prefix>/audio/<itemId>/<runId>-NNN.ogg`), upload each, re-enqueue with chunk manifest carried on payload
+  2. `audioS3Key` set → for each chunk: fetch from S3, call OpenAI `whisper-1` with `verbose_json` + `timestamp_granularities: ["word", "segment"]` + an **item-aware prompt** (title + author names + description snippet) so Whisper biases proper nouns correctly. Offset chunk-local timestamps by `chunk.startSec`, merge, upsert `transcripts` row (source=`whisper`, model, segments, **words**, fullText, durationSec, language, audioS3Bucket, audioS3Key, audioChunks)
 - **Downstream:** none
 - **Rules:**
-  - **Skips at top of every run if a `transcripts` row already exists** for this item (don't pay Descript twice)
-  - **Short-invocation pattern**: each run does 1 HTTP poll, re-enqueues with 5s `runAt` delay. SIGTERM mid-run never leaks a lock on a multi-minute job.
-  - 30-min `deadlineAt` carried in payload; throws on expiry so graphile-worker stops retrying
-  - Clears `descriptProjectId` on import failure to allow retry with re-encode
-  - Once enqueued the job runs to completion even if `DESCRIPT_TRANSCRIPT_FETCH_LIVE` flips off
-
-### `transcript-finish` — user-triggered transcript ingest
-- **Trigger:** enqueued by `POST /api/production-items/[id]/transcript/fetch` (user clicks "Fetch Transcript" in item detail). Used when the publish job is already started by the API route and only the polling/parse remains.
-- **Files:** `src/jobs/tasks/transcript-finish.ts`, `src/lib/services/transcript-fetch.ts`
-- **Inputs:** `{ productionItemId, publishJobId, startedAtIso }` (ISO string — `Date` doesn't survive JSON)
-- **Outputs:** upserts `transcripts` row
-- **Downstream:** none
-- **Rules:** parallel path to phase 4 of `descript-transcribe`, used when the API route owns phases 1–3
+  - **Skips at top if a `transcripts` row with non-empty `fullText` exists** for this item (don't burn another API call). Legacy `source='descript'` rows count.
+  - **Short-invocation pattern**: phase 1 finishes with a re-enqueue for phase 2 (1s delay), so a SIGTERM during ffmpeg or Whisper doesn't waste the other half.
+  - Uses jobKey `transcribe-whisper:<id>` so back-to-back UI refetch clicks dedupe.
+  - **Chunking** handles long-form content (podcasts): each chunk is ≤10 min and stays under OpenAI's 25 MB per-request cap. For chunk N>0 the prompt appends the tail of running fullText so context carries across the cut (helps with mid-sentence splits and keeps name-bias sticky).
+  - Extracted audio stays in S3 — enables future re-runs (different model, diarization, vision) without re-downloading the full video. ~5 MB per 24-min video.
 
 ### `descript-clip-resolve` — poll Descript clip-out
 - **Trigger:** enqueued by `POST /api/descript/clip-out`; enqueued by `promote-clip-idea` service (clip-promotion via agent flow)
@@ -374,9 +364,9 @@ debugging "why didn't X happen to this post".
 1. **Hour :00** — `performance-decay` may fetch metrics (decay-tier-gated)
 2. **Hour :15** — `threshold-monitor-sweep` may auto-create one or more repurposed `Idea` rows if `views` crossed a child format's `viewThreshold`
 3. **Hour :20** — `enrichment-sweep` queues `enrich-item` if `enrichment_completed_at IS NULL`
-4. **`enrich-item`** writes platform-specific fields. **If it produces `mediaS3Key`** → auto-enqueues `descript-transcribe`
-5. **YouTube only**: every 20 min, `youtube-download-sweep` queues `youtube-download` if no `mediaS3Key` yet. On success → auto-enqueues `descript-transcribe`
-6. **`descript-transcribe`** runs through 4 phases, ends with `transcripts` row
+4. **`enrich-item`** writes platform-specific fields. **If it produces `mediaS3Key`** → auto-enqueues `transcribe-whisper`
+5. **YouTube only**: every 20 min, `youtube-download-sweep` queues `youtube-download` if no `mediaS3Key` yet. On success → auto-enqueues `transcribe-whisper`
+6. **`transcribe-whisper`** runs 2 phases (ffmpeg audio extract → OpenAI Whisper API), ends with `transcripts` row
 7. **Hour :40** — `hook-extract-sweep` queues `extract-hook` if short-form + has transcript + no hook yet
 8. **Hour :50** — `hook-fallback-sweep` queues `hook-fallback` for everything not covered by the LLM sweep
 9. **Daily 15:00** — `evergreen-scan` may classify isEvergreen and refill Idea queue
@@ -415,12 +405,14 @@ A `transcripts` row is 1:1 with a `productionItems` row (cascade delete).
 
 | Source | When | Notes |
 |---|---|---|
-| `descript` | After media S3 archive — `descript-transcribe` runs through 4 phases | Default path for archived video/audio without platform-native captions |
-| `youtube` | During enrichment, if SC returns YouTube auto-captions | Cheaper than Descript |
-| `instagram` | During enrichment, if SC returns IG auto-captions | Reels < 2 min |
+| `whisper` | After media S3 archive — `transcribe-whisper` runs (ffmpeg audio extract → OpenAI Whisper `whisper-1`) | Default path for archived video/audio. Writes word-level timestamps to `words` jsonb alongside segment-level. |
+| `scrape_creators_youtube` | During enrichment, if SC returns YouTube auto-captions | Cheaper — skips Whisper entirely when platform already has captions |
+| `scrape_creators_instagram` | During enrichment, if SC returns IG auto-captions | Reels < 2 min |
+| `scrape_creators_tiktok` | During enrichment, if SC returns TikTok auto-transcript | |
+| `descript` | **Legacy** — pre-Whisper migration. Still readable; new rows don't use this path | |
 
-**Re-fetch:** `POST /api/production-items/[id]/transcript/fetch` with
-`force=true` (only when the existing composition is unpublished).
+**Re-fetch:** `POST /api/production-items/[id]/transcript/fetch` enqueues a
+fresh `transcribe-whisper` (deduped via jobKey per item).
 
 **Consumed by:** hook extraction (LLM reads opening 20s), clip-idea
 generation (LLM reads segments with timestamps), search (fullText indexed),
@@ -455,12 +447,12 @@ update both the code and this list.
 - **graphile-worker default**: 25 retries with exponential backoff for any task we don't override.
 
 ### Long-job patterns
-- All Descript-touching tasks (`descript-transcribe`, `descript-clip-resolve`, `clip-idea-precise-cut`) use the **short-invocation / self-re-enqueue** pattern: each run does one HTTP poll then re-enqueues with `runAt: now+5s`. SIGTERM mid-poll never leaks a lock. 30-min `deadlineAt` carried in payload bounds the chain.
+- `transcribe-whisper` and the remaining Descript-touching tasks (`descript-clip-resolve`, `clip-idea-precise-cut`) use the **short-invocation / self-re-enqueue** pattern so a SIGTERM mid-run never leaks a lock on multi-minute work. Descript clip-touching tasks carry a 30-min `deadlineAt`; `transcribe-whisper` splits into phase 1 (ffmpeg extract + S3 upload) and phase 2 (Whisper API call + persist), re-enqueued 1s apart.
 - All other tasks complete in one run.
 
 ### Idempotency
 Every task that has a "did this already happen?" check at the top:
-- `descript-transcribe` — exits if `transcripts` row exists
+- `transcribe-whisper` — exits if a `transcripts` row with non-empty `fullText` exists (covers both prior Whisper runs and legacy Descript rows)
 - `enrich-item` — exits if `enrichmentCompletedAt` set (unless `force`)
 - `youtube-download` — exits if `mediaS3Key` set (unless `force`)
 - `hook-fallback` — only writes if `hookExtractedAt IS NULL`
@@ -501,11 +493,12 @@ Every sweep filter AND the per-item executor must resolve platform kinds through
 | System | Used by | Cost notes |
 |---|---|---|
 | Scrape Creators | `performance-decay`, `account-content-sync`, `enrich-item`, `account-refresh`, `instagram-body-fetch.ts`, `tweet-body-fetch.ts` | ~1 credit per call; enrichment with media (`withMedia=true`) is ~10; `account-content-sync` with `mode=backfill` spends up to `maxPages` credits per account |
-| Descript | `descript-transcribe`, `descript-clip-resolve`, `clip-idea-precise-cut` | Per-project + per-publish API calls |
+| Descript | `descript-clip-resolve`, `clip-idea-precise-cut` | Per-project API calls — used for clip editing only (transcript path moved to OpenAI Whisper 2026-04) |
+| OpenAI (Whisper) | `transcribe-whisper` | `whisper-1` at $0.006/min ⇒ ~$0.14 per 24-min video; kill-switch via `WHISPER_TRANSCRIBE_LIVE=false` |
 | Anthropic (Claude Haiku 4.5) | `extract-hook`; also draft-gen, repurpose-agent, fit-classifier, evergreen-scan, summary | Hook extraction ~$0.0005/item |
 | Notion | `notion-sync` (bi-directional) | Rate-limited; bulk push via service |
 | Postmark | `notification-send`, password reset, invite emails | |
-| AWS S3 | `youtube-download` (write), `descript-transcribe` (read), `clip-idea-precise-cut` (read), uploads route (write) | Long-term archive |
+| AWS S3 | `youtube-download` (write), `transcribe-whisper` (read video + write extracted audio), `clip-idea-precise-cut` (read), uploads route (write) | Long-term archive |
 | PostgreSQL | everything | See connection budget above |
 
 ---

@@ -7,10 +7,6 @@
 
 import type { Task } from "graphile-worker";
 import {
-  transcriptFinishTask,
-  type TranscriptFinishPayload,
-} from "./transcript-finish";
-import {
   descriptClipResolveTask,
   type DescriptClipResolvePayload,
 } from "./descript-clip-resolve";
@@ -19,9 +15,9 @@ import {
   type ClipIdeaPreciseCutPayload,
 } from "./clip-idea-precise-cut";
 import {
-  descriptTranscribeTask,
-  type DescriptTranscribePayload,
-} from "./descript-transcribe";
+  transcribeWhisperTask,
+  type TranscribeWhisperPayload,
+} from "./transcribe-whisper";
 import {
   notificationSendTask,
   type NotificationSendPayload,
@@ -65,10 +61,9 @@ import {
 
 export interface TaskPayloads {
   "hello": { message?: string };
-  "transcript-finish": TranscriptFinishPayload;
   "descript-clip-resolve": DescriptClipResolvePayload;
   "clip-idea-precise-cut": ClipIdeaPreciseCutPayload;
-  "descript-transcribe": DescriptTranscribePayload;
+  "transcribe-whisper": TranscribeWhisperPayload;
   "notification-send": NotificationSendPayload;
   "enrich-item": EnrichItemPayload;
   "extract-hook": ExtractHookPayload;
@@ -102,10 +97,9 @@ const helloTask: Task = async (payload, helpers) => {
 
 export const taskList: Record<keyof TaskPayloads, Task> = {
   "hello": helloTask,
-  "transcript-finish": transcriptFinishTask,
   "descript-clip-resolve": descriptClipResolveTask,
   "clip-idea-precise-cut": clipIdeaPreciseCutTask,
-  "descript-transcribe": descriptTranscribeTask,
+  "transcribe-whisper": transcribeWhisperTask,
   "notification-send": notificationSendTask,
   "enrich-item": enrichItemTask,
   "extract-hook": extractHookTask,

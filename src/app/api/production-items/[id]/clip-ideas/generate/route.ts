@@ -4,7 +4,7 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clipIdeas, productionItems } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
-import { getTranscriptForPrompt } from "@/lib/services/transcript-fetch";
+import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import {
   generateClipIdeas,
   GENERATED_BY,

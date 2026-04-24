@@ -34,7 +34,7 @@ removing, or deprecating anything.
 | Search (global) | Active | `GET /api/search` | `productionItems`, `formats`, `users`, `accounts` | |
 | Body fetch (IG caption, X tweet text) | Active | `POST /api/production-items/[id]/instagram-body/fetch`, `.../tweet-body/fetch` | `productionItems.contentBody` | One-click backfill from item detail |
 | AI summary (for clip-idea prompt context) | Active | `POST /api/production-items/[id]/summary` | `productionItems` (cached) | |
-| Direct media upload (bypass YouTube download) | Active | `POST /api/uploads/s3-presign`, `POST /api/uploads/confirm`, `POST /api/uploads/download` | `productionItems` (mediaS3Key, posterS3Key) | Triggers `descript-transcribe` on confirm |
+| Direct media upload (bypass YouTube download) | Active | `POST /api/uploads/s3-presign`, `POST /api/uploads/confirm`, `POST /api/uploads/download` | `productionItems` (mediaS3Key, posterS3Key) | Triggers `transcribe-whisper` on confirm |
 | **Old cross-post fit fields on productionItems** | **Deprecated** | (no live writers) | `productionItems.crossPostFitGood`, `crossPostFitReasoning` | Replaced by `crossPostFitVerdicts`; columns kept for back-data only |
 
 ---
@@ -129,7 +129,7 @@ removing, or deprecating anything.
 | Hook fallback (long-form / no-LLM) | Active | `hook-fallback-sweep` cron (every :50) | `productionItems.hook`, `hookExtractedAt` | Pure DB; gated on `hookExtractedAt IS NULL` so it can't override LLM/manual |
 | Evergreen classification | Active | `evergreen-scan` cron (daily 15:00 UTC) | `productionItems.isEvergreen`, `contentEvents` (suggestions) | Phase A classify, Phase B refill Idea queue |
 | YouTube media archive (yt-dlp → S3) | Active | `youtube-download-sweep` cron (every 20 min) → per-item `youtube-download` | `productionItems` (mediaS3Bucket/Key/UploadedAt, mediaSizeBytes, etc.) | Tries 3 player-client strategies; ffmpeg merges video+audio |
-| Descript transcribe | Active | Auto-enqueue from `enrich-item` and `youtube-download`; `POST /api/production-items/[id]/transcript/fetch` | `productionItems.descriptProjectId`, `transcripts` | 4-phase short-invocation with 30-min deadline |
+| Whisper transcription | Active | Auto-enqueue from `enrich-item` (when it sets `mediaS3Key`), `youtube-download`, `POST /api/uploads/confirm`; manual refetch via `POST /api/production-items/[id]/transcript/fetch` | `transcripts` (segments, **words**, fullText, model=`whisper-1`, audioS3Key) | ffmpeg audio extract → OpenAI Whisper API (`whisper-1`, `verbose_json`, word+segment timestamps). 2-phase short-invocation. Extracted audio archived to S3 for re-runs. Kill switch: `WHISPER_TRANSCRIBE_LIVE=false`. |
 | Descript clip resolve (agent flow) | Active | `POST /api/descript/clip-out` → `descript-clip-resolve` task | `repurposeTriggers.descriptCompositionId`, `productionItems` | |
 | Descript precise-cut clip | Active | `POST /api/clip-ideas/[id]/create-in-descript-precise` → `clip-idea-precise-cut` task | `repurposeTriggers`, `productionItems` | ffmpeg trim → Descript import → poll |
 | **Asana members API** | **Legacy** | `GET /api/asana-members` | — | Format detail / formats list still call this for the legacy picker; migrate to user dropdown |

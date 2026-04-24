@@ -9,7 +9,7 @@
 
 import postgres from "postgres";
 import { generateDraft, GENERATED_BY, PROMPT_VERSION } from "../src/lib/draft-agent";
-import { getTranscriptForPrompt } from "../src/lib/services/transcript-fetch";
+import { getTranscriptForPrompt } from "../src/lib/services/whisper-transcribe";
 import type { FormatFieldSchema } from "../src/lib/db/schema";
 
 const url = process.env.DATABASE_URL;

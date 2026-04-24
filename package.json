@@ -14,8 +14,9 @@
     "db:migrate": "node scripts/migrate.mjs",
     "db:studio": "drizzle-kit studio",
     "worker": "tsx src/jobs/worker.ts",
+    "worker:dev": "tsx --env-file=.env.local src/jobs/worker.ts",
     "worker:migrate": "node scripts/graphile-migrate.mjs",
-    "dev:all": "concurrently -n web,worker -c blue,magenta \"npm run dev\" \"npm run worker\"",
+    "dev:all": "concurrently -n web,worker -c blue,magenta \"npm run dev\" \"npm run worker:dev\"",
     "postinstall": "node scripts/install-yt-dlp.mjs"
   },
   "dependencies": {
@@ -44,6 +45,7 @@
     "lucide-react": "^1.7.0",
     "next": "16.2.3",
     "next-auth": "^5.0.0-beta.31",
+    "openai": "^6.34.0",
     "pg": "^8.20.0",
     "postgres": "^3.4.9",
     "postmark": "^4.0.7",

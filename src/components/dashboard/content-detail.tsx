@@ -145,8 +145,11 @@ interface TopPerformer {
 interface ItemTranscript {
   fullText: string;
   source: string;
+  model: string | null;
   wordCount: number | null;
   durationSec: number | null;
+  audioS3Bucket: string | null;
+  audioS3Key: string | null;
 }
 
 interface PredictionCohort {
@@ -1603,6 +1606,9 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
               mediaSizeBytes={item.mediaSizeBytes}
               mediaS3Key={item.mediaS3Key}
               posterS3Key={item.posterS3Key}
+              transcriptAudioS3Key={data.transcript?.audioS3Key ?? null}
+              transcriptModel={data.transcript?.model ?? null}
+              transcriptDurationSec={data.transcript?.durationSec ?? null}
               media={data.media}
               onSynced={load}
             />
@@ -1663,7 +1669,7 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
           })()}
           <TranscriptButton
             itemId={item.id}
-            hasDescriptProject={hasDescriptProject}
+            hasMedia={!!item.mediaS3Key}
             hasTranscript={data.transcript != null}
           />
           {(() => {

@@ -3,7 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentDrafts, formats, productionItems } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
-import { getTranscriptForPrompt } from "@/lib/services/transcript-fetch";
+import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import {
   generateDraft,
   GENERATED_BY,

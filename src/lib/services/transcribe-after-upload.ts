@@ -5,8 +5,7 @@ import { enqueue } from "@/jobs/enqueue";
 
 /**
  * Fire-and-forget: if an item has video/audio media archived to S3 and
- * isn't already transcribed (or mid-transcription), enqueue a Descript
- * transcribe run.
+ * isn't already transcribed, enqueue a Whisper transcribe run.
  *
  * Called from every site that finishes writing `mediaS3Key`:
  *   - enrichment orchestrator (IG / TikTok / Threads / X / LinkedIn /
@@ -14,23 +13,24 @@ import { enqueue } from "@/jobs/enqueue";
  *   - youtube-download task (yt-dlp pulls the full long-form video)
  *   - uploads/confirm route (user uploads a file directly)
  *
- * Guarded by DESCRIPT_TRANSCRIPT_FETCH_LIVE so the flag can be flipped off
- * if Descript spend needs capping without shipping a code change.
+ * Guarded by WHISPER_TRANSCRIBE_LIVE so transcription can be disabled
+ * without a code change if OpenAI spend needs capping. Default is enabled
+ * (flag unset or not "false" means live); this is a kill switch, not a
+ * rollout gate.
  *
  * Does not throw — logs and swallows so a failed enqueue never fails the
  * surrounding archive.
  */
-export async function maybeEnqueueDescriptTranscribe(
+export async function maybeEnqueueWhisperTranscribe(
   productionItemId: string,
 ): Promise<void> {
-  if (process.env.DESCRIPT_TRANSCRIPT_FETCH_LIVE !== "true") return;
+  if (process.env.WHISPER_TRANSCRIBE_LIVE === "false") return;
 
   try {
     const [item] = await db
       .select({
         mediaS3Key: productionItems.mediaS3Key,
         mediaContentType: productionItems.mediaContentType,
-        descriptProjectId: productionItems.descriptProjectId,
       })
       .from(productionItems)
       .where(eq(productionItems.id, productionItemId))
@@ -39,27 +39,25 @@ export async function maybeEnqueueDescriptTranscribe(
     if (!item) return;
     if (!item.mediaS3Key) return;
 
-    // Audio transcription is fine; images and unknown types aren't
-    // worth a Descript round trip.
     const ct = item.mediaContentType ?? "";
     if (!ct.startsWith("video/") && !ct.startsWith("audio/")) return;
 
-    // If a Descript project already exists on this item (from precise-cut,
-    // clip-out, or a prior transcribe run), assume the right pipeline is
-    // already handling it and don't double-enqueue.
-    if (item.descriptProjectId) return;
-
+    // Skip if we already have a transcript (Whisper or legacy Descript).
     const [existingTranscript] = await db
-      .select({ id: transcripts.id })
+      .select({ id: transcripts.id, fullText: transcripts.fullText })
       .from(transcripts)
       .where(eq(transcripts.productionItemId, productionItemId))
       .limit(1);
-    if (existingTranscript) return;
+    if (existingTranscript && existingTranscript.fullText.length > 0) return;
 
-    await enqueue("descript-transcribe", { productionItemId });
+    await enqueue(
+      "transcribe-whisper",
+      { productionItemId },
+      { jobKey: `transcribe-whisper:${productionItemId}` },
+    );
   } catch (err) {
     console.warn(
-      `[maybeEnqueueDescriptTranscribe] failed for ${productionItemId}:`,
+      `[maybeEnqueueWhisperTranscribe] failed for ${productionItemId}:`,
       err instanceof Error ? err.message : err,
     );
   }

@@ -13,7 +13,6 @@ import {
   CaptionsIcon,
   CheckIcon,
   CopyIcon,
-  ExternalLinkIcon,
   RefreshCwIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,23 +27,25 @@ interface TranscriptSegment {
 interface TranscriptPayload {
   id: string;
   source: string;
+  model: string | null;
   language: string | null;
   fullText: string;
   segments: TranscriptSegment[];
   wordCount: number | null;
   durationSec: number | null;
-  descriptShareUrl: string | null;
-  descriptPublishedAt: string | null;
   fetchedAt: string;
 }
 
 interface Props {
   itemId: string;
-  hasDescriptProject: boolean;
-  /** Whether the item has any transcript persisted (e.g. one auto-archived by
-   *  the SC enrichment sweep for an IG reel / YouTube video / TikTok). When
-   *  true, the dialog opens even without a Descript project — though the
-   *  "Fetch transcript" action stays gated on Descript. */
+  /** Whether this item has archived media we can transcribe. When false the
+   *  dialog only opens if an existing transcript (from the legacy Descript
+   *  pipeline or a platform-native source) is already persisted. */
+  hasMedia: boolean;
+  /** Whether the item has any transcript persisted (e.g. one auto-archived
+   *  by the SC enrichment sweep for an IG reel / YouTube video / TikTok).
+   *  When true, the dialog opens even without archived media — but the
+   *  "Fetch transcript" action stays gated on hasMedia. */
   hasTranscript?: boolean;
 }
 
@@ -57,7 +58,7 @@ function fmtTs(sec: number): string {
 
 export function TranscriptButton({
   itemId,
-  hasDescriptProject,
+  hasMedia,
   hasTranscript = false,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -114,10 +115,10 @@ export function TranscriptButton({
         return;
       }
 
-      // 202 Accepted: publish job kicked off server-side, now running in the
-      // background. Poll GET /transcript until the row appears (detected by a
-      // new fetchedAt) or 3 minutes elapse.
-      const DEADLINE_MS = 3 * 60 * 1000;
+      // 202 Accepted: the worker picked up a transcribe-whisper job (ffmpeg
+      // extract → Whisper API → persist). Poll GET /transcript until the
+      // row appears (detected by a new fetchedAt) or 5 minutes elapse.
+      const DEADLINE_MS = 5 * 60 * 1000;
       const POLL_MS = 5000;
       const started = Date.now();
       while (Date.now() - started < DEADLINE_MS) {
@@ -140,7 +141,7 @@ export function TranscriptButton({
       setFetchState({
         kind: "error",
         message:
-          "Transcript fetch timed out after 3 minutes. The publish may still finish — reopen this dialog shortly to check.",
+          "Transcript fetch timed out after 5 minutes. The job may still finish — reopen this dialog shortly to check.",
       });
     } catch (err) {
       setFetchState({
@@ -161,7 +162,7 @@ export function TranscriptButton({
     }
   }, [transcript]);
 
-  if (!hasDescriptProject && !hasTranscript) return null;
+  if (!hasMedia && !hasTranscript) return null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -170,7 +171,7 @@ export function TranscriptButton({
           <button
             type="button"
             className={buttonVariants({ variant: "outline", size: "sm" })}
-            title="View the transcript pulled from the Descript composition"
+            title="View the transcript"
           />
         }
       >
@@ -211,7 +212,7 @@ export function TranscriptButton({
               </>
             )}
           </Button>
-          {hasDescriptProject && (
+          {hasMedia && (
             <Button
               variant="outline"
               size="sm"
@@ -220,8 +221,8 @@ export function TranscriptButton({
               className="h-7 text-xs gap-1.5"
               title={
                 transcript
-                  ? "Re-publish the composition and re-fetch the transcript"
-                  : "Publish the Descript composition and fetch its transcript"
+                  ? "Re-transcribe the archived media with Whisper"
+                  : "Transcribe the archived media with Whisper"
               }
             >
               <RefreshCwIcon
@@ -236,20 +237,6 @@ export function TranscriptButton({
                   ? "Refetch"
                   : "Fetch transcript"}
             </Button>
-          )}
-          {transcript?.descriptShareUrl && (
-            <a
-              href={transcript.descriptShareUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(
-                buttonVariants({ variant: "outline", size: "sm" }),
-                "h-7 text-xs gap-1.5"
-              )}
-              title="Open the Descript share page"
-            >
-              <ExternalLinkIcon className="size-3.5" /> Descript share
-            </a>
           )}
         </div>
 
@@ -283,9 +270,9 @@ export function TranscriptButton({
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">
-              {hasDescriptProject
-                ? "No transcript yet. Click Fetch transcript to publish the Descript composition and pull its WEBVTT subtitles."
-                : "No transcript yet. The hourly enrichment sweep will fetch one automatically for supported platforms (IG reel, YouTube, TikTok, X video)."}
+              {hasMedia
+                ? "No transcript yet. Click Fetch transcript to transcribe the archived media."
+                : "No transcript yet. The hourly enrichment sweep will fetch one once media is archived."}
             </p>
           )}
         </div>

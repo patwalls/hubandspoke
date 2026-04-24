@@ -18,13 +18,12 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .select({
       id: transcripts.id,
       source: transcripts.source,
+      model: transcripts.model,
       language: transcripts.language,
       fullText: transcripts.fullText,
       segments: transcripts.segments,
       wordCount: transcripts.wordCount,
       durationSec: transcripts.durationSec,
-      descriptShareUrl: transcripts.descriptShareUrl,
-      descriptPublishedAt: transcripts.descriptPublishedAt,
       fetchedAt: transcripts.fetchedAt,
     })
     .from(transcripts)
