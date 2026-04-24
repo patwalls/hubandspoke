@@ -9,12 +9,17 @@ import { enqueue } from "@/jobs/enqueue";
 // Cross-post scanner reads these to judge how fast a post is growing. One
 // SC call per checkpoint per post, scheduled up front at publish time so
 // we never poll.
+// Each checkpoint has a target age + a tolerance window. If a job fires
+// outside its window (retry backoff, worker downtime), we skip the SC
+// call rather than capture a misleading snapshot tagged at the wrong
+// age. Windows are asymmetric around the target because late firing
+// (retry delay) is far more common than early firing.
 export const VELOCITY_CHECKPOINTS = [
-  { key: "15m", offsetMinutes: 15 },
-  { key: "30m", offsetMinutes: 30 },
-  { key: "1h", offsetMinutes: 60 },
-  { key: "2h", offsetMinutes: 120 },
-  { key: "4h", offsetMinutes: 240 },
+  { key: "15m", offsetMinutes: 15, windowMin: 8, windowMax: 25 },
+  { key: "30m", offsetMinutes: 30, windowMin: 20, windowMax: 45 },
+  { key: "1h", offsetMinutes: 60, windowMin: 45, windowMax: 90 },
+  { key: "2h", offsetMinutes: 120, windowMin: 100, windowMax: 150 },
+  { key: "4h", offsetMinutes: 240, windowMin: 210, windowMax: 270 },
 ] as const;
 export type VelocityCheckpointKey =
   (typeof VELOCITY_CHECKPOINTS)[number]["key"];
@@ -88,6 +93,22 @@ export const captureVelocitySnapshotTask: Task = async (
   if (existing) {
     helpers.logger.info(
       `capture-velocity-snapshot already-captured item=${productionItemId} cp=${checkpointKey}`
+    );
+    return;
+  }
+
+  // Age gate. If the job fires outside its checkpoint window (retry
+  // backoff, worker downtime, clock skew), skip the SC call instead of
+  // storing a snapshot mislabeled with the wrong age. The scanner tolerates
+  // missing checkpoints; it can't tolerate silently-wrong ones.
+  const ageMinutesAtFire = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(item.publishedAt).getTime()) / 60_000)
+  );
+  const cp = VELOCITY_CHECKPOINTS.find((c) => c.key === checkpointKey);
+  if (cp && (ageMinutesAtFire < cp.windowMin || ageMinutesAtFire > cp.windowMax)) {
+    helpers.logger.warn(
+      `capture-velocity-snapshot out-of-window item=${productionItemId} cp=${checkpointKey} age=${ageMinutesAtFire}m window=${cp.windowMin}-${cp.windowMax}m — skipping (no SC call)`
     );
     return;
   }
