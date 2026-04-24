@@ -118,7 +118,7 @@ export function ViewsSparkline({ points, height = 28, width = 160 }: Props) {
       </svg>
       {hoverPoint && hoverCoord && (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded border border-border bg-popover px-1.5 py-1 text-[10px] leading-tight text-foreground shadow-sm"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 whitespace-nowrap rounded border border-border bg-popover px-1.5 py-1 text-[10px] leading-tight text-foreground shadow-sm"
           style={{
             left: hoverCoord.x,
             top: Math.max(0, hoverCoord.y - 32),
@@ -127,10 +127,8 @@ export function ViewsSparkline({ points, height = 28, width = 160 }: Props) {
           <div className="tabular-nums font-medium">
             {hoverPoint.views.toLocaleString()} views
           </div>
-          <div className="text-muted-foreground tabular-nums">
-            {hoverPoint.checkpointKey
-              ? `@ ${hoverPoint.checkpointKey}`
-              : `@ ${formatAge(hoverPoint.postAgeMinutes)}`}
+          <div className="text-muted-foreground">
+            {labelForPoint(hoverPoint)}
           </div>
         </div>
       )}
@@ -138,8 +136,33 @@ export function ViewsSparkline({ points, height = 28, width = 160 }: Props) {
   );
 }
 
-function formatAge(minutes: number): string {
-  if (minutes < 60) return `${minutes}m`;
-  if (minutes < 60 * 24) return `${(minutes / 60).toFixed(1)}h`;
-  return `${(minutes / (60 * 24)).toFixed(1)}d`;
+// Human-readable labels for each of the 5 scheduled checkpoint keys. Kept
+// in sync with VELOCITY_CHECKPOINTS in src/jobs/tasks/capture-velocity-snapshot.ts.
+const CHECKPOINT_LABELS: Record<string, string> = {
+  "15m": "First 15 minutes",
+  "30m": "First 30 minutes",
+  "1h": "First hour",
+  "2h": "First 2 hours",
+  "4h": "First 4 hours",
+};
+
+function labelForPoint(p: ViewHistoryPoint): string {
+  if (p.checkpointKey && CHECKPOINT_LABELS[p.checkpointKey]) {
+    return CHECKPOINT_LABELS[p.checkpointKey];
+  }
+  // Legacy untagged snapshot (pre per-post-scheduled architecture). Fall
+  // back to a precise age description.
+  return `After ${formatAgePrecise(p.postAgeMinutes)}`;
+}
+
+function formatAgePrecise(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours < 24) {
+    return mins === 0 ? `${hours}h` : `${hours}h ${mins}m`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours === 0 ? `${days}d` : `${days}d ${remHours}h`;
 }
