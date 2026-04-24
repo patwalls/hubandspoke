@@ -731,22 +731,28 @@ export const viewSnapshots = pgTable(
     takenAt: timestamp("taken_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
-    // Age of the post when the snapshot was taken, in whole minutes. Makes
-    // "find snapshot nearest to 60m" a simple index lookup.
+    // Actual age of the post when the snapshot was taken, in whole
+    // minutes. Informational — may differ from the checkpoint's target
+    // age by a few minutes (worker dispatch latency, clock skew). The
+    // scanner treats `checkpoint_key` as the authoritative "which
+    // checkpoint is this" and uses `post_age_minutes` only for
+    // debugging / sparkline X-axis.
     postAgeMinutes: integer("post_age_minutes").notNull(),
-    // Stable checkpoint tag ("15m" | "30m" | "1h" | "2h" | "4h") when the
-    // row was written by the `capture-velocity-snapshot` scheduled job.
-    // NULL for legacy / ad-hoc snapshots. The scanner reads only rows
-    // tagged here — cleaner than post-age window gymnastics, and the unique
-    // index below guarantees exactly one snapshot per (item, checkpoint).
-    checkpointKey: text("checkpoint_key"),
+    // Stable checkpoint tag — one of the `VELOCITY_CHECKPOINTS` keys in
+    // `src/lib/velocity-checkpoints.ts` ("15m" | "30m" | "1h" | "2h" |
+    // "4h"). Guaranteed non-null: only written by
+    // `capture-velocity-snapshot`, which is the sole writer for this
+    // table. Unique per (item, checkpoint) — retries / rediscovery
+    // can't produce duplicates.
+    checkpointKey: text("checkpoint_key").notNull(),
   },
   (t) => [
     index("idx_view_snapshots_item_taken").on(t.productionItemId, t.takenAt),
     index("idx_view_snapshots_item_age").on(t.productionItemId, t.postAgeMinutes),
-    uniqueIndex("uniq_view_snapshots_item_checkpoint")
-      .on(t.productionItemId, t.checkpointKey)
-      .where(sql`${t.checkpointKey} IS NOT NULL`),
+    uniqueIndex("uniq_view_snapshots_item_checkpoint").on(
+      t.productionItemId,
+      t.checkpointKey
+    ),
   ]
 );
 

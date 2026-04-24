@@ -691,6 +691,13 @@ async function upsertItems(
           .update(productionItems)
           .set(baseUpdate)
           .where(eq(productionItems.id, existingId));
+        // Re-schedule velocity snapshots with the (possibly SC-corrected)
+        // publishedAt. If the item was already tracked, scheduleVelocity
+        // short-circuits already-captured checkpoints and updates run_at
+        // on still-pending ones via graphile-worker's jobKey replace.
+        if (item.publishedAt) {
+          await scheduleVelocitySnapshots(existingId, item.publishedAt);
+        }
         updated++;
       } else {
         const format = DEFAULT_FORMAT_BY_POST_TYPE[item.postType] ?? null;
@@ -710,8 +717,8 @@ async function upsertItems(
           .returning({ id: productionItems.id });
         // Schedule the 5 velocity snapshots (15m/30m/1h/2h/4h after publish)
         // so the cross-post scanner has real data when the operator hits
-        // "Populate queue". Checkpoints whose target time is already past
-        // (backfill of older posts) silently no-op.
+        // "Populate queue". Checkpoints whose windows have already closed
+        // (backfill of older posts) are silently skipped.
         if (inserted && item.publishedAt) {
           await scheduleVelocitySnapshots(inserted.id, item.publishedAt);
         }

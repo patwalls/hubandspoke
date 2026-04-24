@@ -23,6 +23,10 @@ import {
   type CandidateTarget,
   type PastOutcome,
 } from "@/lib/services/cross-post-recommend";
+import {
+  VELOCITY_CHECKPOINTS,
+  type VelocityCheckpointKey,
+} from "@/lib/velocity-checkpoints";
 
 // v2 cross-post scanner. Replaces the rules-driven scan.
 //
@@ -40,20 +44,10 @@ import {
 // have a 45–75 min snapshot.
 const FRESH_WINDOW_HOURS = 72;
 
-// Velocity checkpoints: which post-age points the scanner reads from
-// `view_snapshots` to judge "how fast is this growing". Windows are wider
-// than 1× cron cadence so the 15-min fresh-metrics-sync reliably lands at
-// least one snapshot inside each window. Checkpoint data is *all* already
-// captured by the existing cron — adding a checkpoint here is zero-cost
-// on the SC API side, it just changes which snapshots the scanner reads.
-export const VELOCITY_CHECKPOINTS = [
-  { key: "15m", targetMinutes: 15, windowMin: 10, windowMax: 20 },
-  { key: "30m", targetMinutes: 30, windowMin: 22, windowMax: 38 },
-  { key: "1h", targetMinutes: 60, windowMin: 45, windowMax: 75 },
-  { key: "2h", targetMinutes: 120, windowMin: 105, windowMax: 135 },
-  { key: "4h", targetMinutes: 240, windowMin: 225, windowMax: 255 },
-] as const;
-type CheckpointKey = (typeof VELOCITY_CHECKPOINTS)[number]["key"];
+// Velocity checkpoints. Imported from the shared module so the scheduler
+// (which chooses when jobs fire) and the scanner (which reads the
+// resulting snapshots by key) can never drift apart.
+type CheckpointKey = VelocityCheckpointKey;
 export type CheckpointMap = Partial<Record<CheckpointKey, number>>;
 
 // Baseline = median views at a given checkpoint across the same

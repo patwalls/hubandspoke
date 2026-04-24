@@ -1,28 +1,15 @@
 import type { Task } from "graphile-worker";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, viewSnapshots } from "@/lib/db/schema";
 import { refreshItemMetrics } from "@/lib/services/performance-decay";
 import { enqueue } from "@/jobs/enqueue";
+import {
+  VELOCITY_CHECKPOINTS,
+  type VelocityCheckpointKey,
+} from "@/lib/velocity-checkpoints";
 
-// Velocity checkpoints — the ages at which we want a view-count snapshot.
-// Cross-post scanner reads these to judge how fast a post is growing. One
-// SC call per checkpoint per post, scheduled up front at publish time so
-// we never poll.
-// Each checkpoint has a target age + a tolerance window. If a job fires
-// outside its window (retry backoff, worker downtime), we skip the SC
-// call rather than capture a misleading snapshot tagged at the wrong
-// age. Windows are asymmetric around the target because late firing
-// (retry delay) is far more common than early firing.
-export const VELOCITY_CHECKPOINTS = [
-  { key: "15m", offsetMinutes: 15, windowMin: 8, windowMax: 25 },
-  { key: "30m", offsetMinutes: 30, windowMin: 20, windowMax: 45 },
-  { key: "1h", offsetMinutes: 60, windowMin: 45, windowMax: 90 },
-  { key: "2h", offsetMinutes: 120, windowMin: 100, windowMax: 150 },
-  { key: "4h", offsetMinutes: 240, windowMin: 210, windowMax: 270 },
-] as const;
-export type VelocityCheckpointKey =
-  (typeof VELOCITY_CHECKPOINTS)[number]["key"];
+export type { VelocityCheckpointKey };
 
 export interface CaptureVelocitySnapshotPayload {
   productionItemId: string;
@@ -156,42 +143,76 @@ export const captureVelocitySnapshotTask: Task = async (
 };
 
 /**
- * Enqueue the five velocity-snapshot jobs for a newly-published item, each
- * with `runAt = publishedAt + checkpoint.offsetMinutes`. Checkpoints whose
- * target time has already passed (e.g. a sync that surfaces a post 2h after
- * publish) are silently skipped — we can't retroactively snapshot a moment
- * that's already gone.
+ * Enqueue velocity-snapshot jobs for an item, one per checkpoint still in
+ * play. Each job runs at `max(publishedAt + offsetMinutes, now + grace)` —
+ * if the target age has passed but the tolerance window is still open
+ * (e.g. account-content-sync discovers a post at age 16m), we fire
+ * immediately and the task's own window check validates at execution time.
+ * Checkpoints whose full window has already closed are skipped.
  *
- * `jobKey` is set per (item, checkpoint) so repeat callers (e.g. a sync run
- * seeing the same item twice) can't stack duplicate jobs. graphile-worker
- * overwrites the queued job's `runAt` on re-enqueue, so this is safe to
- * call more than once.
+ * Idempotent on two levels:
+ *   - Already-captured checkpoints (row in `view_snapshots`) are
+ *     short-circuited here so we don't add worker churn on repeat syncs.
+ *   - `jobKey: "velocity-<itemId>-<cp>"` + graphile-worker's default
+ *     `jobKeyMode: "replace"` means repeat calls with updated publishedAt
+ *     correct the `run_at` on still-pending jobs.
+ *
+ * Safe to call multiple times per item (POST/PUT on the web dyno, plus
+ * INSERT and UPDATE branches of account-content-sync).
  */
 export async function scheduleVelocitySnapshots(
   productionItemId: string,
   publishedAt: Date | string | null
-): Promise<{ scheduled: number; skippedPast: number }> {
-  if (!publishedAt) return { scheduled: 0, skippedPast: 0 };
+): Promise<{ scheduled: number; skippedPast: number; skippedCaptured: number }> {
+  if (!publishedAt) {
+    return { scheduled: 0, skippedPast: 0, skippedCaptured: 0 };
+  }
   const publishedMs =
     publishedAt instanceof Date
       ? publishedAt.getTime()
       : new Date(publishedAt).getTime();
-  if (Number.isNaN(publishedMs)) return { scheduled: 0, skippedPast: 0 };
+  if (Number.isNaN(publishedMs)) {
+    return { scheduled: 0, skippedPast: 0, skippedCaptured: 0 };
+  }
+
+  // Short-circuit any checkpoint that's already captured — avoids worker
+  // churn when repeat syncs rediscover the same item.
+  const alreadyCaptured = await db
+    .select({ checkpointKey: viewSnapshots.checkpointKey })
+    .from(viewSnapshots)
+    .where(
+      and(
+        eq(viewSnapshots.productionItemId, productionItemId),
+        isNotNull(viewSnapshots.checkpointKey)
+      )
+    );
+  const capturedKeys = new Set(
+    alreadyCaptured.map((r) => r.checkpointKey).filter((k): k is string => !!k)
+  );
 
   let scheduled = 0;
   let skippedPast = 0;
+  let skippedCaptured = 0;
   const now = Date.now();
-  // Leave a small head-start grace so we don't fire a job that'll just
-  // observe the post at age 14.9m and round to the "15m" checkpoint before
-  // the platform has had a chance to register any views.
-  const MIN_GRACE_MS = 60_000;
+  // Minimum lead time on a job's run_at — keeps the fire from racing with
+  // the insert that triggered the schedule.
+  const MIN_GRACE_MS = 5_000;
 
   for (const cp of VELOCITY_CHECKPOINTS) {
-    const runAtMs = publishedMs + cp.offsetMinutes * 60_000;
-    if (runAtMs <= now + MIN_GRACE_MS) {
+    if (capturedKeys.has(cp.key)) {
+      skippedCaptured++;
+      continue;
+    }
+    const targetMs = publishedMs + cp.offsetMinutes * 60_000;
+    const windowCloseMs = publishedMs + cp.windowMax * 60_000;
+    if (now > windowCloseMs) {
+      // Entire window already passed — no way to capture in-window.
       skippedPast++;
       continue;
     }
+    // If the target is past but the window is still open, fire as soon as
+    // graphile-worker can dequeue it. The task's window check validates.
+    const runAtMs = Math.max(targetMs, now + MIN_GRACE_MS);
     await enqueue(
       "capture-velocity-snapshot",
       { productionItemId, checkpointKey: cp.key },
@@ -202,5 +223,5 @@ export async function scheduleVelocitySnapshots(
     );
     scheduled++;
   }
-  return { scheduled, skippedPast };
+  return { scheduled, skippedPast, skippedCaptured };
 }

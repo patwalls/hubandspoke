@@ -337,6 +337,13 @@
       "when": 1777057520192,
       "tag": "0047_view_snapshots_checkpoint_key",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1777067784364,
+      "tag": "0048_view_snapshots_checkpoint_not_null",
+      "breakpoints": true
     }
   ]
 }
