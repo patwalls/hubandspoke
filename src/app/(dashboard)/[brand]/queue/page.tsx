@@ -36,7 +36,7 @@ export default async function BrandQueuePage({
         </div>
       }
     >
-      <QueueView brand={brand} />
+      <QueueView brand={brand} initialSource="all" />
     </Suspense>
   );
 }

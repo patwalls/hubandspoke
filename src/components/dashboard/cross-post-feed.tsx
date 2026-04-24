@@ -29,7 +29,7 @@ export function CrossPostFeed({ brand, brandLabel, data }: Props) {
         <p className="text-sm text-muted-foreground">
           {brandLabel} — pending suggestions live in the{" "}
           <Link
-            href={`/${brand}/queue`}
+            href={`/${brand}/queue/cross-post`}
             className="underline underline-offset-2 hover:text-foreground"
           >
             Queue

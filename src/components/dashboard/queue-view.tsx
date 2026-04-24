@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,25 +12,35 @@ import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 
+export type QueueSource = "all" | "original" | "repost" | "cross_post";
+
 interface QueueViewProps {
   brand: string;
+  initialSource: QueueSource;
 }
 
 const SOURCE_TABS = [
-  { value: "all", label: "All" },
-  { value: "original", label: "Original" },
-  { value: "repost", label: "Repost" },
-  { value: "cross_post", label: "Cross-post" },
+  { value: "all", label: "All", slug: "" },
+  { value: "original", label: "Original", slug: "original" },
+  { value: "repost", label: "Repost", slug: "repost" },
+  { value: "cross_post", label: "Cross-post", slug: "cross-post" },
 ] as const;
 
-export function QueueView({ brand }: QueueViewProps) {
+export function QueueView({ brand, initialSource }: QueueViewProps) {
+  const router = useRouter();
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedFormat, setSelectedFormat] = useState("all");
-  const [selectedSource, setSelectedSource] = useState("all");
+  const [selectedSource, setSelectedSource] = useState<QueueSource>(
+    initialSource
+  );
   const [populating, setPopulating] = useState(false);
+
+  useEffect(() => {
+    setSelectedSource(initialSource);
+  }, [initialSource]);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -209,11 +220,17 @@ export function QueueView({ brand }: QueueViewProps) {
         {SOURCE_TABS.map((tab) => {
           const active = selectedSource === tab.value;
           const count = sourceCounts[tab.value as keyof typeof sourceCounts];
+          const href = tab.slug
+            ? `/${brand}/queue/${tab.slug}`
+            : `/${brand}/queue`;
           return (
             <button
               key={tab.value}
               type="button"
-              onClick={() => setSelectedSource(tab.value)}
+              onClick={() => {
+                setSelectedSource(tab.value);
+                router.push(href);
+              }}
               className={cn(
                 "inline-flex items-center gap-1.5 px-3 h-9 -mb-px border-b-2 text-sm transition-colors cursor-pointer",
                 active

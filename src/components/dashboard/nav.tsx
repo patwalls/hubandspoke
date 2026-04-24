@@ -352,7 +352,8 @@ export function SectionTabs({
           pathname === tab.href ||
           (tab.label === "Dashboard" && pathname === "/") ||
           (tab.label === "Content" && pathname === "/content") ||
-          (tab.label === "Queue" && pathname === "/queue") ||
+          (tab.label === "Queue" &&
+            (pathname === "/queue" || pathname.startsWith(`${tab.href}/`))) ||
           (tab.label === "Production" && pathname === "/production") ||
           (tab.label === "Formats" && pathname === "/formats") ||
           (tab.label === "Accounts" && pathname.endsWith("/accounts"));
