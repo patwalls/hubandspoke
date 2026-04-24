@@ -8,6 +8,10 @@ import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkI
 import type { ProductionItem } from "@/types";
 import { buildDescriptCompositionUrl } from "@/lib/descript";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
+import {
+  ViewsSparkline,
+  type ViewHistoryPoint,
+} from "@/components/dashboard/views-sparkline";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -188,6 +192,10 @@ interface DetailResponse {
   currentDraft: DraftRow | null;
   hasFieldSchema: boolean;
   media?: EnrichmentMedia[];
+  /** Every `view_snapshots` row for this item, oldest → newest. Powers the
+   *  little sparkline on the Views stats card. Empty for items that
+   *  pre-date velocity tracking. */
+  viewHistory?: ViewHistoryPoint[];
 }
 
 interface ContentDetailProps {
@@ -1851,10 +1859,15 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             Views
           </p>
-          <div className="mt-2">
+          <div className="mt-2 flex items-end justify-between gap-3">
             <span className="text-3xl font-semibold text-foreground tabular-nums">
               {formatCompact(item.views)}
             </span>
+            {data?.viewHistory && data.viewHistory.length >= 2 ? (
+              <div title={`${data.viewHistory.length} snapshots`}>
+                <ViewsSparkline points={data.viewHistory} height={28} width={120} />
+              </div>
+            ) : null}
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
             {item.viewsEstimated ? "Estimated from likes" : "Reported"}
