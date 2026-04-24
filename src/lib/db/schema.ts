@@ -84,6 +84,11 @@ export const productionItems = pgTable(
     salesAmount: decimal("sales_amount", { precision: 12, scale: 2 }),
     ctrFirstHour: decimal("ctr_first_hour"),
     apvFirst24Hours: decimal("apv_first_24_hours"),
+    // Cross-post scanner confidence (0-100) captured at Idea creation time.
+    // Only populated for sourceType='cross_post' rows. The scanner's LLM
+    // recommender decides this; the UI surfaces it as a badge. Null for
+    // everything else.
+    crossPostConfidence: integer("cross_post_confidence"),
     producerEmail: text("producer_email"),
     producerNotionUserId: text("producer_notion_user_id"),
     producerName: text("producer_name"),
@@ -844,6 +849,7 @@ export const contentComments = pgTable(
 export type ContentEventPayload =
   | { type: "status_change"; from: string | null; to: string | null }
   | { type: "killed"; from: string | null; reason: string | null }
+  | { type: "accepted"; from: string | null; reason: string | null }
   | { type: "editor_change"; from: string | null; to: string | null };
 
 export const contentEvents = pgTable(

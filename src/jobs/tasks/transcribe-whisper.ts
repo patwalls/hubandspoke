@@ -6,7 +6,7 @@ import {
   extractAudioToS3,
   transcribeFromS3Audio,
   type AudioChunk,
-} from "@/lib/services/whisper-transcribe";
+} from "./whisper-pipeline";
 
 export interface TranscribeWhisperPayload {
   productionItemId: string;
