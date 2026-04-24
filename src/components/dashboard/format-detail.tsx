@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { cn } from "@/lib/utils";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -167,8 +169,27 @@ function formatDate(d: string | null): string {
   });
 }
 
+const FORMAT_TAB_VALUES = ["details", "derivatives", "content"] as const;
+type FormatTab = (typeof FORMAT_TAB_VALUES)[number];
+
 export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab: FormatTab = FORMAT_TAB_VALUES.includes(tabParam as FormatTab)
+    ? (tabParam as FormatTab)
+    : "details";
+  const setActiveTab = useCallback(
+    (next: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "details") params.delete("tab");
+      else params.set("tab", next);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const [data, setData] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -182,17 +203,18 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
   const [viewThreshold, setViewThreshold] = useState("");
   const [editor, setEditor] = useState("");
   const [editorAsanaGid, setEditorAsanaGid] = useState("");
-  const [producer, setProducer] = useState("");
-  const [producerAsanaGid, setProducerAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
 
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
   const [channelsPopoverOpen, setChannelsPopoverOpen] = useState(false);
   const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<
+    | { kind: "idle" }
+    | { kind: "saving" }
+    | { kind: "saved" }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
   const [deleting, setDeleting] = useState(false);
 
   // New-derivative dialog state.
@@ -544,8 +566,6 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     setViewThreshold(f.viewThreshold != null ? String(f.viewThreshold) : "");
     setEditor(f.editor || "");
     setEditorAsanaGid(f.editorAsanaGid || "");
-    setProducer(f.producer || "");
-    setProducerAsanaGid(f.producerAsanaGid || "");
     setInstructions(f.instructions || "");
     setParentFormatId(f.parentFormatId ?? null);
   }
@@ -625,7 +645,11 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     setSelections((prev) => {
       const k = selectionKey(s);
       const exists = prev.find((p) => selectionKey(p) === k);
-      return exists ? prev.filter((p) => selectionKey(p) !== k) : [...prev, s];
+      const next = exists
+        ? prev.filter((p) => selectionKey(p) !== k)
+        : [...prev, s];
+      void persistField({ accountChannels: next });
+      return next;
     });
   }
 
@@ -654,48 +678,43 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
     await load();
   }
 
-  async function handleSave() {
-    if (!data) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const body = {
-        id: formatId,
-        name,
-        brand,
-        accountChannels: selections,
-        viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
-        editor: editor || null,
-        editorAsanaGid: editorAsanaGid || null,
-        producer: producer || null,
-        producerAsanaGid: producerAsanaGid || null,
-        instructions: instructions || null,
-        parentFormatId,
-      };
-      const res = await fetch("/api/formats", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        setSavedAt(Date.now());
-        await load();
-      } else {
-        const json = await res.json().catch(() => ({}));
-        const msg =
-          json.error ||
-          `Save failed (HTTP ${res.status}). Check the server logs.`;
-        console.error("Save failed:", res.status, json);
-        setSaveError(msg);
+  // Autosave: send one-field patches to PUT /api/formats. The server-side
+  // partial-patch logic ignores missing keys, so this never clobbers
+  // untouched columns. Mirrors content-detail's `persistField` pattern so
+  // the two detail pages feel identical.
+  const persistField = useCallback(
+    async (patch: Record<string, unknown>): Promise<boolean> => {
+      setSaveState({ kind: "saving" });
+      try {
+        const res = await fetch("/api/formats", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: formatId, ...patch }),
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          const msg = json.error || `Save failed (HTTP ${res.status}).`;
+          console.error("[format autosave] failed:", res.status, json);
+          setSaveState({ kind: "error", message: msg });
+          return false;
+        }
+        setSaveState({ kind: "saved" });
+        // Name rename cascades to productionItems.format on the server, so
+        // a rename invalidates the items list. Reload to reflect the
+        // changed strings. Other patches don't affect joined data.
+        if ("name" in patch || "accountChannels" in patch) {
+          await load();
+        }
+        return true;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Save failed";
+        console.error("[format autosave] error:", err);
+        setSaveState({ kind: "error", message: msg });
+        return false;
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Save failed";
-      console.error("Save failed:", err);
-      setSaveError(msg);
-    } finally {
-      setSaving(false);
-    }
-  }
+    },
+    [formatId, load]
+  );
 
   async function handleDelete() {
     if (!confirm("Delete this format? This cannot be undone.")) return;
@@ -802,7 +821,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
 
   return (
     <div className="space-y-6">
-      {/* Breadcrumb / back */}
+      {/* Breadcrumb + autosave indicator + actions */}
       <div className="flex items-center justify-between gap-3">
         <Link
           href={`/${brand}/formats`}
@@ -810,28 +829,77 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         >
           ← Formats
         </Link>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-            disabled={deleting}
-            title="Actions for this format"
-          >
-            <MoreHorizontalIcon className="size-3.5" /> Actions
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem
+        <div className="flex items-center gap-3">
+          {saveState.kind === "saving" && (
+            <span className="text-xs text-muted-foreground">Saving…</span>
+          )}
+          {saveState.kind === "saved" && (
+            <span className="text-xs text-muted-foreground">Saved</span>
+          )}
+          {saveState.kind === "error" && (
+            <span className="text-xs text-red-600" title={saveState.message}>
+              Save failed
+            </span>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={buttonVariants({ variant: "outline", size: "sm" })}
               disabled={deleting}
-              onClick={handleDelete}
-              className="text-red-600 focus:text-red-700 focus:bg-red-50"
+              title="Actions for this format"
             >
-              <Trash2Icon className="size-3.5" />
-              {deleting ? "Deleting…" : "Delete format"}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <MoreHorizontalIcon className="size-3.5" /> Actions
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem
+                disabled={deleting}
+                onClick={handleDelete}
+                className="text-red-600 focus:text-red-700 focus:bg-red-50"
+              >
+                <Trash2Icon className="size-3.5" />
+                {deleting ? "Deleting…" : "Delete format"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
-      {/* Metrics */}
+      {/* Hero: big format title + subtitle */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => {
+              const next = name.trim();
+              if (next && next !== (data.format.name ?? "")) {
+                void persistField({ name: next });
+              } else if (!next) {
+                // Don't allow clearing — snap back to the saved value.
+                setName(data.format.name);
+              }
+            }}
+            placeholder="(unnamed)"
+            className="text-3xl sm:text-4xl font-bold tracking-tight h-auto py-1 px-2 border-0 bg-transparent shadow-none focus-visible:ring-1 focus-visible:ring-ring hover:bg-muted/30 rounded-sm flex-1 min-w-0"
+            aria-label="Format name"
+          />
+          <Badge
+            variant="secondary"
+            className={
+              isPillar
+                ? "bg-blue-100 text-blue-700"
+                : "bg-purple-100 text-purple-700"
+            }
+          >
+            {isPillar ? "Pillar" : "Derivative"}
+          </Badge>
+        </div>
+        <p className="text-sm text-muted-foreground px-2">
+          {metrics.totalPosts} published post{metrics.totalPosts === 1 ? "" : "s"}
+          {metrics.lastPublished && ` · last published ${formatDate(metrics.lastPublished)}`}
+        </p>
+      </div>
+
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
@@ -868,31 +936,44 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
         </div>
       </div>
 
-      {/* Format editor — title + property rows */}
-      <div>
-        <div className="flex items-center gap-2 flex-wrap mb-1">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="(unnamed)"
-            className="text-xl sm:text-2xl font-semibold h-auto py-1 px-2 border-0 bg-transparent shadow-none focus-visible:ring-1 focus-visible:ring-ring hover:bg-muted/30 rounded-sm flex-1 min-w-0"
-          />
-          <Badge
-            variant="secondary"
-            className={
-              isPillar
-                ? "bg-blue-100 text-blue-700"
-                : "bg-purple-100 text-purple-700"
-            }
-          >
-            {isPillar ? "Pillar" : "Repurposed"}
-          </Badge>
-        </div>
-        <p className="text-xs sm:text-sm text-muted-foreground mb-4 px-2">
-          {metrics.totalPosts} published post{metrics.totalPosts === 1 ? "" : "s"}
-          {metrics.lastPublished && ` · last published ${formatDate(metrics.lastPublished)}`}
-        </p>
+      {/* Tabs: Details / Derivatives / Content */}
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as FormatTab)}>
+        <TabsList
+          className="flex h-auto w-full justify-start gap-1 rounded-none bg-transparent p-0 shadow-none"
+        >
+          {[
+            { value: "details" as const, label: "Details", count: null as number | null },
+            { value: "derivatives" as const, label: "Derivatives", count: children.length },
+            { value: "content" as const, label: "Content", count: items.length },
+          ].map((tab) => (
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              className={cn(
+                "group/tab flex-initial h-9 rounded-md px-3 text-sm font-medium transition-colors",
+                "text-muted-foreground hover:bg-muted hover:text-foreground",
+                "data-active:!bg-orange-100 data-active:!text-orange-700 data-active:!shadow-none",
+                "after:!hidden",
+              )}
+            >
+              <span>{tab.label}</span>
+              {tab.count != null && tab.count > 0 && (
+                <span
+                  className={cn(
+                    "ml-1.5 inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-full px-1.5",
+                    "text-[10px] font-semibold tabular-nums",
+                    "bg-muted text-muted-foreground",
+                    "group-data-active/tab:bg-orange-200 group-data-active/tab:text-orange-800",
+                  )}
+                >
+                  {tab.count}
+                </span>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
 
+        <TabsContent value="details" className="pt-5 space-y-3">
         <div className="rounded-lg border border-border bg-card overflow-hidden">
           <PropertyRowGroup>
             <PropertyRow label="Parent format">
@@ -925,6 +1006,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                         onSelect={() => {
                           setParentFormatId(null);
                           setParentPopoverOpen(false);
+                          void persistField({ parentFormatId: null });
                         }}
                       >
                         <span className="flex items-center gap-2">
@@ -941,6 +1023,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                           onSelect={() => {
                             setParentFormatId(opt.id);
                             setParentPopoverOpen(false);
+                            void persistField({ parentFormatId: opt.id });
                           }}
                           data-checked={parentFormatId === opt.id ? "true" : undefined}
                         >
@@ -1043,6 +1126,11 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
               type="number"
               value={viewThreshold}
               onChange={(e) => setViewThreshold(e.target.value)}
+              onBlur={() => {
+                const saved = data.format.viewThreshold;
+                const next = viewThreshold ? parseInt(viewThreshold, 10) : null;
+                if (next !== saved) void persistField({ viewThreshold: next });
+              }}
               placeholder="e.g. 50000"
               className={PROPERTY_INPUT_CLASS}
             />
@@ -1074,6 +1162,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                             setEditor("");
                             setEditorAsanaGid("");
                             setEditorPopoverOpen(false);
+                            void persistField({ editor: null });
                           }}
                           className="text-muted-foreground"
                         >
@@ -1088,6 +1177,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                             setEditor(m.name);
                             setEditorAsanaGid(m.gid);
                             setEditorPopoverOpen(false);
+                            void persistField({ editor: m.name });
                           }}
                           data-checked={editorAsanaGid === m.gid ? "true" : undefined}
                         >
@@ -1122,7 +1212,11 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setInstructions(applyStarterTemplate(instructions))}
+                  onClick={() => {
+                    const next = applyStarterTemplate(instructions);
+                    setInstructions(next);
+                    void persistField({ instructions: next });
+                  }}
                   className="text-xs text-primary hover:underline"
                 >
                   Load starter template
@@ -1131,6 +1225,12 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
               <Textarea
                 value={instructions}
                 onChange={(e) => setInstructions(e.target.value)}
+                onBlur={() => {
+                  const saved = data.format.instructions ?? "";
+                  if (instructions !== saved) {
+                    void persistField({ instructions: instructions || null });
+                  }
+                }}
                 rows={10}
                 placeholder="Teach Claude this format: what it is, why it works, how to pick the moment, what to avoid. Click “Load starter template” for the structure."
                 className="font-mono text-xs"
@@ -1147,20 +1247,9 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
             Chain: {ancestors.map((a) => a.name).join(" → ")} → <strong>{name}</strong>
           </p>
         )}
+        </TabsContent>
 
-        <div className="flex items-center gap-2 mt-4">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : "Save changes"}
-          </Button>
-          {savedAt && Date.now() - savedAt < 4000 && !saveError && (
-            <span className="text-xs text-primary">Saved.</span>
-          )}
-          {saveError && (
-            <span className="text-xs text-red-600">{saveError}</span>
-          )}
-        </div>
-      </div>
-
+        <TabsContent value="derivatives" className="pt-5">
       {/* Derivatives — direct children in the repurpose tree */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
@@ -1279,7 +1368,9 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           </div>
         )}
       </div>
+        </TabsContent>
 
+        <TabsContent value="content" className="pt-5">
       {/* Content list */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
@@ -1434,6 +1525,8 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
           </div>
         )}
       </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Clip out modal */}
       <Dialog open={!!clipItem} onOpenChange={(o) => { if (!o) closeClipModal(); }}>

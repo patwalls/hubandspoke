@@ -168,19 +168,9 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const body = await request.json();
-    const {
-      id,
-      name,
-      accountChannels,
-      viewThreshold,
-      editor,
-      producer,
-      instructions,
-      parentFormatId,
-    } = body as {
+    const body = (await request.json()) as {
       id: string;
-      name: string;
+      name?: string;
       accountChannels?: FormatChannelInput[];
       viewThreshold?: number | null;
       editor?: string | null;
@@ -188,8 +178,14 @@ export async function PUT(request: NextRequest) {
       instructions?: string | null;
       parentFormatId?: string | null;
     };
+    const { id, accountChannels, parentFormatId } = body;
 
-    // Validate parent: existence, same brand, not self, not descendant (cycle).
+    if (!id) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+
+    // Validate parent when the patch actually touches parentFormatId. Missing
+    // key = don't touch the column (partial-patch semantics for autosave).
     if (parentFormatId) {
       if (parentFormatId === id) {
         return NextResponse.json({ error: "A format cannot be its own parent" }, { status: 400 });
@@ -218,18 +214,27 @@ export async function PUT(request: NextRequest) {
       .select({ name: formats.name })
       .from(formats)
       .where(eq(formats.id, id));
+    if (!existing) {
+      return NextResponse.json({ error: "Format not found" }, { status: 404 });
+    }
+
+    // Partial patch: only write columns the client actually sent. Missing
+    // keys preserve existing values — required for the autosave UI where
+    // each blur/select fires a one-field PUT.
+    const updateData: Record<string, unknown> = { updatedAt: new Date() };
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.viewThreshold !== undefined)
+      updateData.viewThreshold = body.viewThreshold || null;
+    if (body.editor !== undefined) updateData.editor = body.editor || null;
+    if (body.producer !== undefined) updateData.producer = body.producer || null;
+    if (body.instructions !== undefined)
+      updateData.instructions = body.instructions || null;
+    if (parentFormatId !== undefined)
+      updateData.parentFormatId = parentFormatId || null;
 
     const [updated] = await db
       .update(formats)
-      .set({
-        name,
-        viewThreshold: viewThreshold || null,
-        editor: editor || null,
-        producer: producer || null,
-        instructions: instructions || null,
-        parentFormatId: parentFormatId || null,
-        updatedAt: new Date(),
-      })
+      .set(updateData)
       .where(eq(formats.id, id))
       .returning();
 
@@ -238,10 +243,10 @@ export async function PUT(request: NextRequest) {
     }
 
     // If the name changed, update all production items that use the old name
-    if (existing && existing.name !== name) {
+    if (body.name !== undefined && existing.name !== body.name) {
       await db
         .update(productionItems)
-        .set({ format: name, updatedAt: new Date() })
+        .set({ format: body.name, updatedAt: new Date() })
         .where(eq(productionItems.format, existing.name));
     }
 
