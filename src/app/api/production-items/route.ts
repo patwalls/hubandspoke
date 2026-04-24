@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Client } from "@notionhq/client";
 import { db } from "@/lib/db";
-import { contentEvents, productionItems, users } from "@/lib/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import {
+  contentEvents,
+  crossPostDecisions,
+  productionItems,
+  users,
+} from "@/lib/db/schema";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
 import {
@@ -623,6 +628,24 @@ export async function PUT(request: NextRequest) {
                 reason: normalizedKillReason,
               },
             });
+            // Mirror the kill onto the cross_post_decisions row (if any) so
+            // the LLM feedback loop sees this kill regardless of which
+            // endpoint issued it.
+            if (row.sourceType === "cross_post") {
+              await tx
+                .update(crossPostDecisions)
+                .set({
+                  outcome: "killed",
+                  outcomeReason: normalizedKillReason,
+                  outcomeAt: new Date(),
+                })
+                .where(
+                  and(
+                    eq(crossPostDecisions.ideaItemId, id),
+                    isNull(crossPostDecisions.outcome)
+                  )
+                );
+            }
           } else {
             await tx.insert(contentEvents).values({
               contentItemId: id,

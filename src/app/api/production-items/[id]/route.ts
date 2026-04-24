@@ -4,13 +4,14 @@ import {
   accounts,
   brands,
   contentDrafts,
+  crossPostDecisions,
   productionItemMedia,
   productionItems,
   formats,
   transcripts,
   users,
 } from "@/lib/db/schema";
-import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   buildViewPredictorContext,
   predictViews,
@@ -191,6 +192,85 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           ...src,
           platform: (src.platform ?? null) as string[] | null,
         };
+    }
+
+    // For cross-post items, also surface the scanner's decision: the LLM
+    // reasoning that got this into the queue, its confidence, and the
+    // velocity signal on the source post that triggered the suggestion.
+    // Used by the triage dialog to explain *why* this cross-post landed.
+    let crossPostSignals:
+      | {
+          confidence: number | null;
+          reasoning: string | null;
+          viewsAt1h: number | null;
+          velocityRatio: number | null;
+        }
+      | null = null;
+    if (item.sourceType === "cross_post") {
+      const [decision] = await db
+        .select({
+          confidence: crossPostDecisions.confidence,
+          reasoning: crossPostDecisions.reasoning,
+        })
+        .from(crossPostDecisions)
+        .where(eq(crossPostDecisions.ideaItemId, item.id))
+        .orderBy(desc(crossPostDecisions.proposedAt))
+        .limit(1);
+
+      let viewsAt1h: number | null = null;
+      let velocityRatio: number | null = null;
+      if (item.repostedFromItemId) {
+        const velocityRows = await db.execute<{
+          views: number;
+          account_id: string;
+          post_type: string;
+        }>(sql`
+          SELECT DISTINCT ON (vs.production_item_id)
+            vs.views,
+            pi.account_id,
+            pi.post_type
+          FROM view_snapshots vs
+          JOIN production_items pi ON pi.id = vs.production_item_id
+          WHERE vs.production_item_id = ${item.repostedFromItemId}
+            AND vs.post_age_minutes BETWEEN 45 AND 75
+          ORDER BY vs.production_item_id, abs(vs.post_age_minutes - 60) ASC
+          LIMIT 1
+        `);
+        if (velocityRows.length > 0) {
+          const row = velocityRows[0];
+          viewsAt1h = row.views;
+          const baselineRows = await db.execute<{ baseline: string }>(sql`
+            WITH per_item AS (
+              SELECT DISTINCT ON (pi.id)
+                vs.views
+              FROM production_items pi
+              JOIN view_snapshots vs ON vs.production_item_id = pi.id
+              WHERE pi.account_id = ${row.account_id}::uuid
+                AND pi.post_type = ${row.post_type}
+                AND pi.source_type = 'original'
+                AND pi.status = 'Published'
+                AND pi.deleted_at IS NULL
+                AND pi.published_at >= (now() - interval '30 days')
+                AND vs.post_age_minutes BETWEEN 45 AND 75
+              ORDER BY pi.id, abs(vs.post_age_minutes - 60) ASC
+            )
+            SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY views) AS baseline
+            FROM per_item
+            HAVING count(*) >= 5
+          `);
+          const baseline =
+            baselineRows.length > 0 ? Number(baselineRows[0].baseline) : null;
+          velocityRatio =
+            baseline != null && baseline > 0 ? row.views / baseline : null;
+        }
+      }
+
+      crossPostSignals = {
+        confidence: item.crossPostConfidence,
+        reasoning: decision?.reasoning ?? null,
+        viewsAt1h,
+        velocityRatio,
+      };
     }
 
     // Resolve producer + editor user records for the assignee pickers.
@@ -489,6 +569,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         account: accountFor(r.accountId),
       })),
       repostedFrom,
+      crossPostSignals,
       currentDraft: currentDraft ?? null,
       hasFieldSchema,
       media: mediaRows.map((m) => ({

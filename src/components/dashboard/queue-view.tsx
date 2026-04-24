@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { IdeaQueueTable } from "./idea-queue-table";
@@ -27,6 +29,7 @@ export function QueueView({ brand }: QueueViewProps) {
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedFormat, setSelectedFormat] = useState("all");
   const [selectedSource, setSelectedSource] = useState("all");
+  const [populating, setPopulating] = useState(false);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -51,6 +54,68 @@ export function QueueView({ brand }: QueueViewProps) {
 
   useEffect(() => {
     fetchQueue();
+  }, [fetchQueue]);
+
+  const populateCrossPostQueue = useCallback(async () => {
+    setPopulating(true);
+    const started = Date.now();
+    try {
+      const res = await fetch("/api/cross-post-scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxIdeas: 10, maxCandidates: 20 }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      const json = (await res.json()) as {
+        result: {
+          ideasCreated: number;
+          candidatesConsidered: number;
+          proposalsLogged: number;
+          candidatesDropped: {
+            noBaseline: number;
+            belowVelocity: number;
+          };
+        };
+      };
+      const { ideasCreated, candidatesConsidered, proposalsLogged } =
+        json.result;
+      const secs = Math.round((Date.now() - started) / 1000);
+      if (ideasCreated > 0) {
+        toast.success(
+          `Added ${ideasCreated} cross-post idea${
+            ideasCreated === 1 ? "" : "s"
+          } (${secs}s)`,
+          {
+            description: `Considered ${candidatesConsidered} fast-growing post${
+              candidatesConsidered === 1 ? "" : "s"
+            }; LLM scored ${proposalsLogged} proposal${
+              proposalsLogged === 1 ? "" : "s"
+            }.`,
+            duration: 6000,
+          }
+        );
+      } else {
+        toast(
+          candidatesConsidered === 0
+            ? "No fast-growing posts in the last 72h to consider."
+            : `Scanner ran but admitted nothing. ${proposalsLogged} proposal${
+                proposalsLogged === 1 ? "" : "s"
+              } logged below the confidence floor.`,
+          { duration: 6000 }
+        );
+      }
+      await fetchQueue();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error("Populate failed", { description: message });
+    } finally {
+      setPopulating(false);
+    }
   }, [fetchQueue]);
 
   // Exclude long-form YouTube pillars — those live in Notion and don't belong
@@ -183,6 +248,46 @@ export function QueueView({ brand }: QueueViewProps) {
           options={formatOptions}
           onChange={setSelectedFormat}
         />
+        {selectedSource === "cross_post" && (
+          <div className="ml-auto">
+            <Button
+              type="button"
+              size="sm"
+              onClick={populateCrossPostQueue}
+              disabled={populating}
+              className="h-8"
+              title="Run the scanner and admit up to 10 high-confidence cross-post ideas to the queue. Manual only — no cron."
+            >
+              {populating ? (
+                <span className="inline-flex items-center gap-2">
+                  <svg
+                    className="animate-spin h-3.5 w-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Populating…
+                </span>
+              ) : (
+                "Populate queue"
+              )}
+            </Button>
+          </div>
+        )}
       </div>
 
       {loading ? (

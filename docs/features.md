@@ -23,7 +23,7 @@ removing, or deprecating anything.
 | Add post from link (URL → pre-filled dialog) | Active | "+ Add Post" dropdown on the performance table → `POST /api/production-items/preview-link` | `productionItems`, `accounts` | Paste a social URL; SC API fills title/date/metrics/thumbnail/author; user reviews then saves |
 | Repost (same platform) | Active | `POST /api/production-items/[id]/repost` | `productionItems` (sourceType=`repost`, repostedFromItemId) | |
 | Cross-post (different platform, manual) | Active | `POST /api/production-items/[id]/cross-post` | `productionItems` (sourceType=`cross_post`) | Manual companion to the auto cross-post-scan |
-| Cross-post (auto suggestions) | Active | `cross-post-scan` cron (daily 16:00 UTC) | `crossPostRules`, `crossPostFitVerdicts`, `productionItems` | Suggestions land as `Idea` rows |
+| Cross-post (manual suggestions v2) | Active | "Populate queue" button on `/[brand]/queue` Cross-post tab → `POST /api/cross-post-scan`; `fresh-metrics-sync` cron (every 15m) keeps the snapshot cohort fresh | `view_snapshots`, `cross_post_decisions`, `productionItems.crossPostConfidence` | Velocity-gated + LLM-recommended; scanner NOT on cron — operator clicks the button when they want up to 10 new ideas. Accept (→ `Assigned`) or kill on each row via the triage dialog; required reasons train future runs. |
 | Threshold-based auto-repurpose | Active | `threshold-monitor-sweep` cron (every :15) | `productionItems` (sourceType=`repurposed`, pillarContentItemId), `repurposeTriggers`, `formats` (parent→child + viewThreshold) | Replaces the Asana `/api/trigger-repurpose` flow with a pure-DB scan; new items land as `Idea` |
 | Duplicate item | Active | `POST /api/production-items/[id]/duplicate` | `productionItems` | |
 | Comments + activity feed | Active | `GET\|POST /api/production-items/[id]/comments`, `POST /api/production-items/[id]/activity` | `contentComments`, `contentEvents` | |
@@ -35,7 +35,9 @@ removing, or deprecating anything.
 | Body fetch (IG caption, X tweet text) | Active | `POST /api/production-items/[id]/instagram-body/fetch`, `.../tweet-body/fetch` | `productionItems.contentBody` | One-click backfill from item detail |
 | AI summary (for clip-idea prompt context) | Active | `POST /api/production-items/[id]/summary` | `productionItems` (cached) | |
 | Direct media upload (bypass YouTube download) | Active | `POST /api/uploads/s3-presign`, `POST /api/uploads/confirm`, `POST /api/uploads/download` | `productionItems` (mediaS3Key, posterS3Key) | Triggers `transcribe-whisper` on confirm |
-| **Old cross-post fit fields on productionItems** | **Deprecated** | (no live writers) | `productionItems.crossPostFitGood`, `crossPostFitReasoning` | Replaced by `crossPostFitVerdicts`; columns kept for back-data only |
+| **Old cross-post fit fields on productionItems** | **Deprecated** | (no live writers) | `productionItems.crossPostFitGood`, `crossPostFitReasoning` | Replaced by `cross_post_decisions`; columns kept for back-data only |
+| **`crossPostFitVerdicts` cache** | **Planned-removal** | (no live writers after v2 scanner ships) | `cross_post_fit_verdicts` table | Superseded by `cross_post_decisions`; drop in finalize migration |
+| **`crossPostRules` table + UI/API** | **Planned-removal** | (no live writers after v2 scanner ships; legacy rows retained during soak) | `cross_post_rules` | Rules replaced by LLM-driven recommender; drop in finalize migration |
 
 ---
 
@@ -47,7 +49,8 @@ removing, or deprecating anything.
 | Account refresh (manual) | Active | `POST /api/accounts/[id]/refresh` (sync or `?mode=async`) | `accounts` | Async path enqueues `account-refresh` task |
 | Account refresh (weekly auto) | Active | `account-refresh-sweep` cron (Mon 17:00 UTC) | `accounts` | Skips newsletter / `other` (no SC support) |
 | Content sync (manual, per account) | Active | "Sync" / "Backfill" buttons on accounts table, `POST /api/accounts/[id]/sync-content?mode=latest\|backfill` | `productionItems`, `accounts.lastContentSyncAt` | Enqueues `account-content-sync`. Backfill only available for platforms that paginate (YouTube / IG / TikTok / LinkedIn). See also the daily `account-content-sync-sweep` cron entry in External Integrations. |
-| Cross-posting rules | Active | `/(dashboard)/[brand]/accounts/cross-posting`, `GET\|POST /api/cross-post-rules`, `PATCH\|DELETE /api/cross-post-rules/[id]` | `crossPostRules` | Has new `sourceAccountId`/`targetAccountId` cols (nullable during rollout) |
+| Cross-post retrospective | Active | `/(dashboard)/[brand]/accounts/cross-posting` | `cross_post_decisions`, `contentEvents` | Recent decisions (last 30 days) + "What I've learned" (recent accept/kill reasons the LLM sees). Live triage lives in Queue now. |
+| Cross-post triage (accept/kill) | Active | Click a cross-post row in `/[brand]/queue` → `TriageDialog`; `POST /api/production-items/[id]/outcome` | `productionItems`, `contentEvents`, `cross_post_decisions` | Accept flips to `Assigned`; both actions require ≥10-char reason that feeds the LLM loop. |
 | Per-account weekly goals | Active | `/(dashboard)/[brand]/accounts/goals` | `brands.weeklyGoal`, `accounts` | |
 | Platform boundaries (limits/constraints UI) | Active | `/(dashboard)/[brand]/accounts/boundaries` | `accounts.metadata`, hardcoded mappings | |
 | User → account associations | Active | `userAccounts` table; populated via settings | `userAccounts` | Powers "my accounts" filter; not a permission gate |

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { UserChip } from "./user-chip";
 import { KillIdeaDialog } from "./kill-idea-dialog";
+import { AcceptIdeaDialog } from "./accept-idea-dialog";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
@@ -42,11 +43,19 @@ interface RepostedFromRef {
   evergreenReasoning: string | null;
 }
 
+interface CrossPostSignals {
+  confidence: number | null;
+  reasoning: string | null;
+  viewsAt1h: number | null;
+  velocityRatio: number | null;
+}
+
 interface ItemDetail {
   item: ProductionItem & { notionId?: string | null };
   pillar: PillarRef | null;
   formats: { id: string; name: string; instructions: string | null }[];
   repostedFrom: RepostedFromRef | null;
+  crossPostSignals?: CrossPostSignals | null;
 }
 
 interface TriageDialogProps {
@@ -116,6 +125,7 @@ export function TriageDialog({
   const [actionError, setActionError] = useState<string | null>(null);
   const [mode, setMode] = useState<RepostActionMode>("idle");
   const [killOpen, setKillOpen] = useState(false);
+  const [acceptOpen, setAcceptOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -128,6 +138,7 @@ export function TriageDialog({
     setActionError(null);
     setMode("idle");
     setKillOpen(false);
+    setAcceptOpen(false);
 
     (async () => {
       try {
@@ -208,13 +219,61 @@ export function TriageDialog({
     setKillOpen(true);
   }
 
+  function acceptIt() {
+    setAcceptOpen(true);
+  }
+
   async function confirmKill(reason: string | null) {
-    await updateStatus("Killed", { killReason: reason });
+    // For cross-post Ideas the kill goes through the outcome route so the
+    // reason is mirrored into cross_post_decisions (the LLM's feedback
+    // loop). Everything else still goes through the main PUT handler.
+    if (isCrossPost && reason && reason.trim().length >= 10) {
+      await submitOutcome("kill", reason);
+    } else {
+      await updateStatus("Killed", { killReason: reason });
+    }
     setKillOpen(false);
+  }
+
+  async function confirmAccept(reason: string) {
+    await submitOutcome("accept", reason);
+    setAcceptOpen(false);
+  }
+
+  async function submitOutcome(action: "accept" | "kill", reason: string) {
+    setSaving(true);
+    setActionError(null);
+    try {
+      const res = await fetch(
+        `/api/production-items/${item.id}/outcome`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, reason }),
+        }
+      );
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+      const status = action === "accept" ? "Assigned" : "Killed";
+      showTriageToast(status, undefined, item, brand, users);
+      onOpenChange(false);
+      onDone();
+    } catch (e) {
+      setActionError(
+        e instanceof Error
+          ? e.message
+          : `Failed to ${action === "accept" ? "accept" : "kill"}`
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   const pillar = detail?.pillar;
   const repostedFrom = detail?.repostedFrom ?? null;
+  const crossPostSignals = detail?.crossPostSignals ?? null;
   const formatInstructions =
     detail && item.format
       ? detail.formats.find((f) => f.name === item.format)?.instructions ?? null
@@ -276,6 +335,7 @@ export function TriageDialog({
             kind={isCrossPost ? "cross_post" : "repost"}
             loading={detailLoading}
             repostedFrom={repostedFrom}
+            crossPostSignals={crossPostSignals}
             item={item}
             brand={brand}
             users={users}
@@ -286,6 +346,7 @@ export function TriageDialog({
             onMarkPublished={(fields) => updateStatus("Published", fields)}
             onAssign={assignTo}
             onKill={killIt}
+            onAccept={acceptIt}
           />
         ) : (
           <OriginalBody
@@ -312,6 +373,13 @@ export function TriageDialog({
         saving={saving}
         onConfirm={confirmKill}
       />
+      <AcceptIdeaDialog
+        open={acceptOpen}
+        onOpenChange={setAcceptOpen}
+        title={item.title || ""}
+        saving={saving}
+        onConfirm={confirmAccept}
+      />
     </Dialog>
   );
 }
@@ -321,6 +389,7 @@ function SourcedBody({
   kind,
   loading,
   repostedFrom,
+  crossPostSignals,
   item,
   brand,
   users,
@@ -331,10 +400,12 @@ function SourcedBody({
   onMarkPublished,
   onAssign,
   onKill,
+  onAccept,
 }: {
   kind: "repost" | "cross_post";
   loading: boolean;
   repostedFrom: RepostedFromRef | null;
+  crossPostSignals: CrossPostSignals | null;
   item: ProductionItem;
   brand: string;
   users: AssignableUser[];
@@ -348,6 +419,7 @@ function SourcedBody({
   }) => Promise<unknown>;
   onAssign: (userId: string) => Promise<unknown>;
   onKill: () => void;
+  onAccept: () => void;
 }) {
   if (loading) {
     return (
@@ -379,20 +451,15 @@ function SourcedBody({
     <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
       {/* LEFT: context + actions */}
       <div className="md:col-span-5 space-y-4">
-        {isCrossPost && sourceChannel && targetChannel && (
-          <section className="space-y-1.5">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {reasoningLabel}
-            </h3>
-            <p className={`text-sm text-foreground leading-relaxed ${panelStyles} border rounded-md p-3`}>
-              Source ran on <span className="font-medium">{sourceChannel}</span>
-              {repostedFrom?.views != null && (
-                <> and hit {formatCompact(repostedFrom.views)} views</>
-              )}
-              . Re-post on <span className="font-medium">{targetChannel}</span>{" "}
-              with light tweaks for the platform.
-            </p>
-          </section>
+        {isCrossPost && (
+          <CrossPostReasoningPanel
+            reasoningLabel={reasoningLabel}
+            panelStyles={panelStyles}
+            signals={crossPostSignals}
+            sourceChannel={sourceChannel}
+            targetChannel={targetChannel}
+            sourceViews={repostedFrom?.views ?? null}
+          />
         )}
         {!isCrossPost && repostedFrom?.evergreenReasoning && (
           <section className="space-y-1.5">
@@ -405,16 +472,20 @@ function SourcedBody({
           </section>
         )}
 
-        <section className="space-y-2">
-          {mode === "idle" ? (
+        {isCrossPost ? (
+          // Cross-post triage: explicit Accept / Kill split with required
+          // reasons. Accept flips the Idea to Assigned (feeding the default
+          // editor chain); the reason lands in content_events so the LLM
+          // feedback loop trains on real operator decisions.
+          <section className="space-y-2">
             <div className="flex flex-col gap-2">
               <button
                 type="button"
-                onClick={() => setMode("form")}
+                onClick={onAccept}
                 disabled={saving}
                 className="inline-flex h-9 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
               >
-                I posted this ✓
+                Accept this cross-post
               </button>
               {repostedFrom?.publishedLink && (
                 <a
@@ -423,49 +494,82 @@ function SourcedBody({
                   rel="noopener noreferrer"
                   className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground hover:bg-accent"
                 >
-                  See post
+                  See source post
                   <ExternalLinkIcon className="size-3.5" />
                 </a>
               )}
             </div>
-          ) : (
-            <PostedForm
-              saving={saving}
-              onSubmit={onMarkPublished}
-              onCancel={() => setMode("idle")}
-              defaultChannel={targetChannel || sourceChannel}
-            />
-          )}
-          {actionError && (
-            <p className="text-[11px] text-red-600">{actionError}</p>
-          )}
-        </section>
-
-        {isCrossPost && mode === "idle" && (
-          <section className="space-y-2 border-t border-border pt-3">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Assign editor
-            </h3>
-            <div className="max-h-40 overflow-y-auto grid grid-cols-2 gap-1">
-              {users.length === 0 ? (
-                <div className="text-xs text-muted-foreground col-span-full">
-                  No assignable users found.
+            {actionError && (
+              <p className="text-[11px] text-red-600">{actionError}</p>
+            )}
+          </section>
+        ) : (
+          <>
+            <section className="space-y-2">
+              {mode === "idle" ? (
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMode("form")}
+                    disabled={saving}
+                    className="inline-flex h-9 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    I posted this ✓
+                  </button>
+                  {repostedFrom?.publishedLink && (
+                    <a
+                      href={repostedFrom.publishedLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground hover:bg-accent"
+                    >
+                      See post
+                      <ExternalLinkIcon className="size-3.5" />
+                    </a>
+                  )}
                 </div>
               ) : (
-                users.map((u) => (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => onAssign(u.id)}
-                    disabled={saving}
-                    className="flex items-center w-full text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-                  >
-                    <UserChip user={u} size="xs" />
-                  </button>
-                ))
+                <PostedForm
+                  saving={saving}
+                  onSubmit={onMarkPublished}
+                  onCancel={() => setMode("idle")}
+                  defaultChannel={targetChannel || sourceChannel}
+                />
               )}
-            </div>
-          </section>
+              {actionError && (
+                <p className="text-[11px] text-red-600">{actionError}</p>
+              )}
+            </section>
+
+            {/* Reposts still expose the editor-assign grid because a
+            * "repost" Idea can be handed off to someone to actually run. */}
+            {mode === "idle" && (
+              <section className="space-y-2 border-t border-border pt-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Assign editor
+                </h3>
+                <div className="max-h-40 overflow-y-auto grid grid-cols-2 gap-1">
+                  {users.length === 0 ? (
+                    <div className="text-xs text-muted-foreground col-span-full">
+                      No assignable users found.
+                    </div>
+                  ) : (
+                    users.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => onAssign(u.id)}
+                        disabled={saving}
+                        className="flex items-center w-full text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+                      >
+                        <UserChip user={u} size="xs" />
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+            )}
+          </>
         )}
 
         <div className="flex items-center justify-between border-t border-border pt-3">
@@ -924,6 +1028,88 @@ function TweetEmbed({ url }: { url: string }) {
         </p>
       )}
     </div>
+  );
+}
+
+// Cross-post-specific reasoning block. Prefers the v2 scanner's signals
+// (LLM reasoning + velocity + confidence) when present; falls back to the
+// hardcoded "Source ran on X" sentence for legacy cross-post rows created
+// before the v2 scanner landed.
+function CrossPostReasoningPanel({
+  reasoningLabel,
+  panelStyles,
+  signals,
+  sourceChannel,
+  targetChannel,
+  sourceViews,
+}: {
+  reasoningLabel: string;
+  panelStyles: string;
+  signals: CrossPostSignals | null;
+  sourceChannel: string;
+  targetChannel: string;
+  sourceViews: number | null;
+}) {
+  const hasV2Reasoning =
+    !!signals?.reasoning && signals.reasoning.trim().length > 0;
+  const hasVelocity =
+    signals?.viewsAt1h != null || signals?.velocityRatio != null;
+  const hasConfidence = signals?.confidence != null;
+
+  return (
+    <section className="space-y-1.5">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {reasoningLabel}
+      </h3>
+
+      {(hasVelocity || hasConfidence) && (
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          {hasConfidence && (
+            <span
+              className={cn(
+                "inline-flex items-center rounded px-1.5 py-0.5 font-medium",
+                signals!.confidence! >= 85
+                  ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                  : signals!.confidence! >= 70
+                  ? "bg-amber-100 text-amber-900 border border-amber-200"
+                  : "bg-muted text-muted-foreground border border-border"
+              )}
+            >
+              {signals!.confidence}% confidence
+            </span>
+          )}
+          {signals?.velocityRatio != null && (
+            <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5">
+              {signals.velocityRatio.toFixed(1)}× baseline
+            </span>
+          )}
+          {signals?.viewsAt1h != null && (
+            <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5">
+              {formatCompact(signals.viewsAt1h)} views @ 1h
+            </span>
+          )}
+        </div>
+      )}
+
+      <p
+        className={`text-sm text-foreground leading-relaxed ${panelStyles} border rounded-md p-3`}
+      >
+        {hasV2Reasoning ? (
+          signals!.reasoning
+        ) : sourceChannel && targetChannel ? (
+          <>
+            Source ran on <span className="font-medium">{sourceChannel}</span>
+            {sourceViews != null && (
+              <> and hit {formatCompact(sourceViews)} views</>
+            )}
+            . Re-post on <span className="font-medium">{targetChannel}</span>{" "}
+            with light tweaks for the platform.
+          </>
+        ) : (
+          "Legacy cross-post — no scanner reasoning captured."
+        )}
+      </p>
+    </section>
   );
 }
 

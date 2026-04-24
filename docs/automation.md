@@ -25,7 +25,8 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   */20  youtube-download-sweep    → fan-out → youtube-download → transcribe-whisper
   13:00 account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
-  16:00 cross-post-scan           → per-rule LLM fit classifier + new Idea rows
+  */15  fresh-metrics-sync        → snapshot views/likes/comments for items <72h old
+  (manual)     cross-post-scan    → LLM recommender, fired by the "Populate queue" button on /[brand]/queue → POST /api/cross-post-scan
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
 
 USER / API ENTRY POINTS
@@ -205,15 +206,29 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Phase B: refill Idea queue, respect 30d repost spacing + hard-kill suppression
   - Cap: 10 pending suggestions in queue
 
-### `cross-post-scan` — daily syndication ideas
-- **Trigger:** cron `0 16 * * *` (daily 16:00 UTC)
-- **Files:** `src/jobs/tasks/scheduled.ts:115`, `src/lib/services/cross-post-scan.ts`, `src/lib/services/cross-post-fit-classifier.ts`
-- **Inputs:** active `crossPostRules`; published items within 180 days; cached `crossPostFitVerdicts`
-- **Outputs:** `crossPostFitVerdicts` (cache), `productionItems` (new `Idea` rows for cross-posts), `contentEvents` (suggestions)
-- **Downstream:** none
+### `fresh-metrics-sync` — high-frequency metrics sweep for fresh items
+- **Trigger:** cron `*/15 * * * *` (every 15 minutes)
+- **Files:** `src/jobs/tasks/fresh-metrics-sync.ts`, `src/lib/services/performance-decay.ts`
+- **Inputs:** `productionItems` where `status='Published'`, `sourceType='original'`, `publishedAt > now() - 72h`
+- **Outputs:** `view_snapshots` (one row per item per sweep); `productionItems.{views,likes,comments}` via `refreshItemMetrics()`
+- **Downstream:** `cross-post-scan` reads `view_snapshots` for velocity.
 - **Rules:**
-  - Idempotent: skips (sourceItem, targetPlatform) pairs that already have a cross-post
-  - LLM gates per-rule suggestions; recent kill reasons fed to classifier
+  - Bounded scope (72h) keeps SC cost low (~+4,800 calls/day at default volume)
+  - Writes a snapshot only when SC returned a non-null view count; skips otherwise
+
+### `cross-post-scan` — velocity-gated cross-post recommendations
+- **Trigger:** **manual only.** Operator clicks "Populate queue" on the Cross-post tab of `/[brand]/queue`, which POSTs to `/api/cross-post-scan` with `{ maxIdeas: 10, maxCandidates: 20 }`. Not on cron — the graphile-worker task is still registered for ad-hoc enqueues but nothing fires it automatically.
+- **Files:** `src/app/api/cross-post-scan/route.ts` (entry), `src/jobs/tasks/scheduled.ts` (task wrapper), `src/lib/services/cross-post-scan.ts`, `src/lib/services/cross-post-recommend.ts`, `src/lib/cross-post-compat.ts`
+- **Inputs:** published originals <72h old with a ~1h `view_snapshots` row; `cross_post_decisions` (48h dedup); recent `contentEvents` of type `killed`/`accepted` on cross-posts (feedback loop)
+- **Outputs:** `cross_post_decisions` (one row per LLM proposal); `productionItems` (new `Idea` rows with `cross_post_confidence` for proposals admitted to the queue)
+- **Downstream:** operator accepts/kills via the cross-post feed → `contentEvents` + mirrored `cross_post_decisions.outcome`
+- **Rules:**
+  - **Velocity gate:** `views_at_1h >= 2.0× median for this account+post_type over last 30 days`; cohort <5 items skips the rule
+  - **Format compat:** hardcoded matrix in `src/lib/cross-post-compat.ts` filters candidate targets (tweet→LI/Threads/YT-community, reel→TikTok/YT-Shorts, etc.); LLM never sees incompatible pairs
+  - **LLM proposes 0-N targets per candidate** with a 0-100 confidence and written reasoning. Past kill + accept reasons are injected into the system prompt.
+  - **Queue discipline:** only admit Ideas with confidence ≥70; cap un-actioned cross-post Ideas at 12 per brand
+  - **48h dedup:** skip candidates already proposed within the window
+  - **Notion authority:** target post types owned by Notion are skipped (can't auto-create there)
 
 ### `account-refresh-sweep` — weekly metadata refresh
 - **Trigger:** cron `0 17 * * 1` (Mondays 17:00 UTC)
@@ -356,7 +371,7 @@ debugging "why didn't X happen to this post".
 | Manual API (`POST /api/production-items`) | `original` | UI form, for platforms API can't pull from | `Idea` or `Queue` |
 | Repost (`POST .../repost`) | `repost` | user button | `Idea` |
 | Cross-post (manual `POST .../cross-post`) | `cross_post` | user button | `Idea` |
-| Cross-post (auto, `cross-post-scan` cron) | `cross_post` | daily 16:00 UTC, fit-classifier passed | `Idea` |
+| Cross-post (manual scanner, `cross-post-scan`) | `cross_post` | operator clicks "Populate queue" on `/[brand]/queue` Cross-post tab | `Idea` |
 | Clip promotion (`POST /api/clip-ideas/[id]/triage`) | `clip` | user accepts a clip-idea | `Assigned` |
 | Threshold-based auto-repurpose (`threshold-monitor-sweep` cron) | `repurposed` | hourly :15, when parent views cross a child format's `viewThreshold` | `Idea` |
 

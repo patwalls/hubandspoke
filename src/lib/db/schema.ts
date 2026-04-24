@@ -712,6 +712,79 @@ export const crossPostFitVerdicts = pgTable(
   ]
 );
 
+// Point-in-time view counters for published items. Written by the
+// fresh-metrics-sync cron every ~15min for items in their first 72h so the
+// cross-post scanner can compute velocity (views at ~1h vs account+postType
+// baseline). Also the raw material for future views-over-time charts.
+// `postAgeMinutes` is computed at insert so we don't have to rejoin
+// productionItems.publishedAt for every query.
+export const viewSnapshots = pgTable(
+  "view_snapshots",
+  {
+    id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
+    productionItemId: uuid("production_item_id")
+      .notNull()
+      .references(() => productionItems.id, { onDelete: "cascade" }),
+    views: integer("views").notNull(),
+    likes: integer("likes"),
+    comments: integer("comments"),
+    takenAt: timestamp("taken_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // Age of the post when the snapshot was taken, in whole minutes. Makes
+    // "find snapshot nearest to 60m" a simple index lookup.
+    postAgeMinutes: integer("post_age_minutes").notNull(),
+  },
+  (t) => [
+    index("idx_view_snapshots_item_taken").on(t.productionItemId, t.takenAt),
+    index("idx_view_snapshots_item_age").on(t.productionItemId, t.postAgeMinutes),
+  ]
+);
+
+// Per-proposal log from the cross-post scanner. One row per target the LLM
+// proposed for a given source item, whether or not it became an Idea. Rows
+// with `ideaItemId` set correspond to Ideas actually created; null means the
+// proposal was logged but filtered out by the confidence floor or per-brand
+// queue cap. Supersedes `crossPostFitVerdicts` once the finalize migration
+// drops that table.
+export const crossPostDecisions = pgTable(
+  "cross_post_decisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sourceItemId: uuid("source_item_id")
+      .notNull()
+      .references(() => productionItems.id, { onDelete: "cascade" }),
+    targetAccountId: uuid("target_account_id")
+      .notNull()
+      .references((): AnyPgColumn => accounts.id, { onDelete: "cascade" }),
+    targetPostType: text("target_post_type").notNull(),
+    confidence: integer("confidence").notNull(),
+    reasoning: text("reasoning"),
+    proposedAt: timestamp("proposed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // Populated when the proposal cleared both the confidence floor and
+    // queue cap, and an Idea row was inserted for it. Null while the
+    // proposal was logged-only, or cleared once the Idea gets hard-deleted.
+    ideaItemId: uuid("idea_item_id").references(
+      (): AnyPgColumn => productionItems.id,
+      { onDelete: "set null" }
+    ),
+    // 'accepted' | 'killed' | 'stale'. Null until the operator or the stale
+    // sweep takes action. Written by the outcome route when the operator
+    // accepts/kills the Idea.
+    outcome: text("outcome"),
+    outcomeAt: timestamp("outcome_at", { withTimezone: true }),
+    outcomeReason: text("outcome_reason"),
+  },
+  (t) => [
+    index("idx_cross_post_decisions_source").on(t.sourceItemId),
+    index("idx_cross_post_decisions_target").on(t.targetAccountId),
+    index("idx_cross_post_decisions_idea").on(t.ideaItemId),
+    index("idx_cross_post_decisions_proposed").on(t.proposedAt),
+  ]
+);
+
 export const brandSettings = pgTable("brand_settings", {
   brand: text("brand").primaryKey(),
   weeklyGoal: integer("weekly_goal"),

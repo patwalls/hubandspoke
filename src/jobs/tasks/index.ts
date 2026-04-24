@@ -58,6 +58,7 @@ import {
   refreshItemMetricsTask,
   type RefreshItemMetricsPayload,
 } from "./refresh-item-metrics";
+import { freshMetricsSyncTask } from "./fresh-metrics-sync";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -76,6 +77,7 @@ export interface TaskPayloads {
   "refresh-item-metrics": RefreshItemMetricsPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
+  "fresh-metrics-sync": Record<string, never>;
   "notion-sync": Record<string, never>;
   "enrichment-sweep": Record<string, never>;
   "hook-extract-sweep": Record<string, never>;
@@ -111,6 +113,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "account-content-sync": accountContentSyncTask,
   "refresh-item-metrics": refreshItemMetricsTask,
   "performance-decay": performanceDecayTask,
+  "fresh-metrics-sync": freshMetricsSyncTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,
   "hook-extract-sweep": hookExtractSweepTask,

@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { fetchBrandBySlug } from "@/lib/db/brands";
-import { getAccountsForBrand } from "@/lib/db/accounts";
-import { CrossPostRulesPageContent } from "@/components/dashboard/cross-post-rules-page";
+import { loadCrossPostFeedData } from "@/lib/services/cross-post-feed-data";
+import { CrossPostFeed } from "@/components/dashboard/cross-post-feed";
 
 interface BrandCrossPostingPageProps {
   params: Promise<{ brand: string }>;
@@ -27,25 +27,7 @@ export default async function BrandCrossPostingPage({
   const brandRow = await fetchBrandBySlug(brand);
   if (!brandRow) notFound();
 
-  // Only pickable accounts — active, non-"other" platforms. The picker's
-  // options sort by platform then handle for a predictable order.
-  const rawAccounts = await getAccountsForBrand(brand);
-  const accounts = rawAccounts
-    .filter((a) => a.isActive && a.platform !== "other")
-    .map((a) => ({
-      id: a.id,
-      platform: a.platform,
-      handle: a.handle,
-      displayName: a.displayName,
-      brandLabel: a.brandLabel,
-    }));
+  const data = await loadCrossPostFeedData(brand);
 
-  return (
-    <CrossPostRulesPageContent
-      brand={brand}
-      brandLabel={brandRow.label}
-      accounts={accounts}
-      hideHeader
-    />
-  );
+  return <CrossPostFeed brand={brand} brandLabel={brandRow.label} data={data} />;
 }

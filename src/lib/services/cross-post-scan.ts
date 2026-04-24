@@ -2,45 +2,465 @@ import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   accounts,
+  brands,
   contentEvents,
-  crossPostFitVerdicts,
-  crossPostRules,
+  crossPostDecisions,
   productionItemMedia,
   productionItems,
-  syncLogs,
+  viewSnapshots,
 } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import {
-  classifyCrossPostFit,
-  type PastCrossPostKill,
-} from "@/lib/services/cross-post-fit-classifier";
+  compatibleTargetsFor,
+  hasAnyCompatibleTarget,
+} from "@/lib/cross-post-compat";
+import type { PostType } from "@/lib/platform-field-schemas";
+import {
+  recommendCrossPosts,
+  type CandidateTarget,
+  type PastOutcome,
+} from "@/lib/services/cross-post-recommend";
 
-// Cap flood risk: only consider items published within the last N days on the
-// first pass. Older evergreen content rides the existing repost queue. Tunable.
-const RECENCY_WINDOW_DAYS = 180;
+// v2 cross-post scanner. Replaces the rules-driven scan.
+//
+// Pipeline: find fast-growing originals (via view_snapshots), enumerate
+// format-compatible target accounts, let an LLM propose which ones are worth
+// cross-posting to (with confidence), log every proposal, then admit Ideas
+// to the operator's queue in confidence order subject to a per-brand cap.
+//
+// Feedback loop: past operator kills AND accepts (from content_events) are
+// fed back into the LLM prompt so the system learns what to propose / avoid
+// without anyone writing a policy doc.
 
-// How many recent operator kill reasons to feed into the classifier's system
-// prompt. Matches KILL_REASON_HISTORY in evergreen-scan.ts.
-const KILL_REASON_HISTORY = 10;
+// Only consider items published within this window. Matches the
+// fresh-metrics-sync window so by the time we scan, every candidate should
+// have a 45–75 min snapshot.
+const FRESH_WINDOW_HOURS = 72;
+
+// Post-age window used to compute "views at ~1h". We accept anything 45-75m
+// because the fresh-metrics cron runs every 15m so a window this wide
+// virtually guarantees a hit.
+const TARGET_AGE_MIN = 45;
+const TARGET_AGE_MAX = 75;
+
+// Baseline = median "views at ~1h" across the same account+postType over the
+// last BASELINE_WINDOW_DAYS. Only computed when a cohort has at least
+// MIN_COHORT_SIZE items — smaller than this is too noisy to compare against.
+const BASELINE_WINDOW_DAYS = 30;
+const MIN_COHORT_SIZE = 5;
+
+// Velocity gate. A candidate is "taking off" if its views_at_1h divided by
+// the account+postType baseline is >= this multiplier.
+const VELOCITY_MIN_RATIO = 2.0;
+
+// Don't re-propose a source we've already considered in this window. Gives
+// the operator time to act before the scanner touches it again.
+const DEDUP_WINDOW_HOURS = 48;
+
+// Only admit Ideas with confidence >= this floor. Below-floor proposals are
+// still logged in cross_post_decisions for retrospective.
+const MIN_CONFIDENCE = 70;
+
+// Per-brand cap on un-actioned cross-post Ideas. Default for automated
+// invocations; manual invocations (the "Populate queue" button) override
+// via `options.maxIdeas`.
+const MAX_PENDING_CROSSPOST_IDEAS = 12;
+
+// Hard cap on how many candidates go through the LLM in a single run.
+// Keeps LLM cost bounded on manual invocations where the caller picks the
+// top N by velocity. Default (no cap) keeps the prior behavior.
+const DEFAULT_MAX_CANDIDATES = Number.POSITIVE_INFINITY;
+
+// How many past accept + kill reasons to feed into the LLM per run.
+const FEEDBACK_HISTORY = 15;
+
+export interface RunCrossPostScanOptions {
+  /** Hard cap on how many velocity-qualified candidates get LLM-scored.
+   *  When more candidates qualify than this, we keep the top N by velocity
+   *  ratio. Useful for the manual button so a runaway click can't bill
+   *  dozens of LLM calls. */
+  maxCandidates?: number;
+  /** Cap on how many new Idea rows this run may insert *per brand*. Serves
+   *  as the upper bound of the operator's queue depth. */
+  maxIdeas?: number;
+}
 
 export interface CrossPostScanResult {
-  rulesEvaluated: number;
   candidatesConsidered: number;
-  suggestionsCreated: number;
-  skippedExisting: number;
-  skippedByLlm: number;
-  classifiedThisRun: number;
-  suggestionsDetails: Array<{
-    ruleId: string;
+  candidatesDropped: {
+    noCompatibleTargets: number;
+    noBaseline: number;
+    belowVelocity: number;
+    recentlyProposed: number;
+    llmFallback: number;
+  };
+  proposalsLogged: number;
+  ideasCreated: number;
+  ideasDetails: Array<{
     sourceItemId: string;
     newItemId: string;
-    targetPlatform: string;
+    targetAccountId: string;
+    targetPostType: string;
+    confidence: number;
     title: string;
   }>;
 }
+
+interface Candidate {
+  id: string;
+  title: string | null;
+  thumbnail: string | null;
+  brand: string;
+  accountId: string;
+  postType: string;
+  contentBody: string | null;
+  publishedDate: string | null;
+  publishedAt: Date;
+  format: string | null;
+  pillarContentNotionId: string | null;
+  pillarContentItemId: string | null;
+  mediaContentType: string | null;
+  platform: string[] | null;
+  sourceAccountHandle: string | null;
+  viewsAt1h: number;
+  velocityRatio: number;
+}
+
+export async function runCrossPostScan(
+  options: RunCrossPostScanOptions = {}
+): Promise<CrossPostScanResult> {
+  const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
+  const maxIdeas = options.maxIdeas ?? MAX_PENDING_CROSSPOST_IDEAS;
+
+  const result: CrossPostScanResult = {
+    candidatesConsidered: 0,
+    candidatesDropped: {
+      noCompatibleTargets: 0,
+      noBaseline: 0,
+      belowVelocity: 0,
+      recentlyProposed: 0,
+      llmFallback: 0,
+    },
+    proposalsLogged: 0,
+    ideasCreated: 0,
+    ideasDetails: [],
+  };
+
+  // 1. Candidate pool — originals published in the fresh window that have at
+  // least one view_snapshot in the target age window.
+  const rawCandidates = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      thumbnail: productionItems.thumbnail,
+      brand: productionItems.brand,
+      accountId: productionItems.accountId,
+      postType: productionItems.postType,
+      contentBody: productionItems.contentBody,
+      publishedDate: productionItems.publishedDate,
+      publishedAt: productionItems.publishedAt,
+      format: productionItems.format,
+      pillarContentNotionId: productionItems.pillarContentNotionId,
+      pillarContentItemId: productionItems.pillarContentItemId,
+      mediaContentType: productionItems.mediaContentType,
+      platform: productionItems.platform,
+      accountHandle: accounts.handle,
+    })
+    .from(productionItems)
+    .leftJoin(accounts, eq(productionItems.accountId, accounts.id))
+    .where(
+      and(
+        eq(productionItems.sourceType, "original"),
+        eq(productionItems.status, "Published"),
+        isNull(productionItems.deletedAt),
+        gte(
+          productionItems.publishedAt,
+          sql`(now() - interval '${sql.raw(String(FRESH_WINDOW_HOURS))} hours')`
+        )
+      )
+    );
+
+  if (rawCandidates.length === 0) return result;
+
+  // 2. Pull every candidate's best "views at ~1h" snapshot in one query.
+  const candidateIds = rawCandidates.map((c) => c.id);
+  const viewsAt1hByItem = await fetchViewsAt1h(candidateIds);
+
+  // 3. Compute per-(account, postType) baselines in one query.
+  const baselines = await fetchBaselinesForGroups(
+    rawCandidates
+      .filter((c) => c.accountId && c.postType)
+      .map((c) => ({ accountId: c.accountId!, postType: c.postType! }))
+  );
+
+  // 4. Pre-check 48h dedup in one query.
+  const recentlyProposed = await fetchRecentlyProposed(candidateIds);
+
+  // 5. Bulk-load all accounts grouped by brand slug — we'll need these for
+  // target enumeration.
+  const accountsByBrand = await fetchAccountsByBrand();
+
+  // 6. Fetch feedback (past accepts + kills) once for the whole run.
+  const pastOutcomes = await fetchPastOutcomes();
+
+  // Collect decisions-to-log before we start inserting, so we can score
+  // across candidates and admit Ideas in global-confidence order per brand.
+  interface PendingDecision {
+    candidate: Candidate;
+    targetAccountId: string;
+    targetPostType: string;
+    confidence: number;
+    reasoning: string;
+  }
+  const pending: PendingDecision[] = [];
+
+  // Phase 1 — qualify candidates. Apply all filters that don't need the
+  // LLM so we can sort survivors by velocity and cap LLM spend when the
+  // caller asked us to.
+  type RawCandidate = (typeof rawCandidates)[number];
+  // Narrows the nullable fields we already guarded during qualification so
+  // the LLM loop below can use them without non-null assertions.
+  type QualifiedRaw = Omit<RawCandidate, "accountId" | "postType" | "publishedAt"> & {
+    accountId: string;
+    postType: string;
+    publishedAt: Date;
+  };
+  interface QualifiedCandidate {
+    raw: QualifiedRaw;
+    viewsAt1h: number;
+    velocityRatio: number;
+  }
+  const qualified: QualifiedCandidate[] = [];
+  for (const raw of rawCandidates) {
+    if (!raw.accountId || !raw.postType) continue;
+    if (!raw.publishedAt) continue;
+    if (!hasAnyCompatibleTarget(raw.postType as PostType)) {
+      result.candidatesDropped.noCompatibleTargets++;
+      continue;
+    }
+    const viewsAt1h = viewsAt1hByItem.get(raw.id);
+    if (viewsAt1h == null) continue; // No snapshot yet.
+    result.candidatesConsidered++;
+
+    const baseline = baselines.get(`${raw.accountId}:${raw.postType}`);
+    if (!baseline) {
+      result.candidatesDropped.noBaseline++;
+      continue;
+    }
+    const velocityRatio = viewsAt1h / Math.max(baseline, 1);
+    if (velocityRatio < VELOCITY_MIN_RATIO) {
+      result.candidatesDropped.belowVelocity++;
+      continue;
+    }
+    if (recentlyProposed.has(raw.id)) {
+      result.candidatesDropped.recentlyProposed++;
+      continue;
+    }
+    qualified.push({
+      raw: raw as QualifiedRaw,
+      viewsAt1h,
+      velocityRatio,
+    });
+  }
+
+  // Top-N by velocity. When maxCandidates is Infinity this is effectively
+  // a no-op sort; when the caller passes a real cap, we process only the
+  // strongest-growing items.
+  const topQualified = qualified
+    .sort((a, b) => b.velocityRatio - a.velocityRatio)
+    .slice(0, Number.isFinite(maxCandidates) ? maxCandidates : qualified.length);
+
+  // Phase 2 — LLM classification + decision logging.
+  for (const { raw, viewsAt1h, velocityRatio } of topQualified) {
+    // Enumerate candidate targets: all accounts in the source's brand that
+    // (a) aren't the source account and (b) support at least one post type
+    // in the source's compatibility list.
+    const compats = compatibleTargetsFor(raw.postType as PostType);
+    const brandAccounts = accountsByBrand.get(raw.brand) ?? [];
+    const targets: CandidateTarget[] = [];
+    for (const acct of brandAccounts) {
+      if (acct.id === raw.accountId) continue;
+      const supported = PLATFORM_META[toPlatform(acct.platform)].postTypes;
+      for (const pt of supported) {
+        if (!compats.includes(pt as PostType)) continue;
+        if (isNotionAuthoritative(pt)) continue; // Can't auto-create on Notion-owned channels.
+        targets.push({
+          targetAccountId: acct.id,
+          handle: acct.handle,
+          platform: acct.platform,
+          postType: pt,
+        });
+      }
+    }
+    if (targets.length === 0) {
+      result.candidatesDropped.noCompatibleTargets++;
+      continue;
+    }
+
+    const candidate: Candidate = {
+      id: raw.id,
+      title: raw.title,
+      thumbnail: raw.thumbnail,
+      brand: raw.brand,
+      accountId: raw.accountId,
+      postType: raw.postType,
+      contentBody: raw.contentBody,
+      publishedDate: raw.publishedDate,
+      publishedAt: raw.publishedAt,
+      format: raw.format,
+      pillarContentNotionId: raw.pillarContentNotionId,
+      pillarContentItemId: raw.pillarContentItemId,
+      mediaContentType: raw.mediaContentType,
+      platform: (raw.platform as string[] | null) ?? null,
+      sourceAccountHandle: raw.accountHandle,
+      viewsAt1h,
+      velocityRatio,
+    };
+
+    const media = deriveMediaFromItem(candidate.mediaContentType);
+    const richMedia = await fetchMediaSignals([candidate.id]);
+    const finalMedia = richMedia.get(candidate.id) ?? media;
+
+    const sourceAccount = brandAccounts.find(
+      (a) => a.id === candidate.accountId
+    );
+    const rec = await recommendCrossPosts({
+      title: candidate.title,
+      contentBody: candidate.contentBody,
+      sourcePlatform: sourceAccount?.platform ?? "unknown",
+      sourcePostType: candidate.postType,
+      sourceAccountHandle: candidate.sourceAccountHandle,
+      brand: candidate.brand,
+      publishedDate: candidate.publishedDate,
+      viewsAt1h: candidate.viewsAt1h,
+      velocityRatio: candidate.velocityRatio,
+      hasVideo: finalMedia.hasVideo,
+      hasImage: finalMedia.hasImage,
+      mediaCount: finalMedia.mediaCount,
+      candidates: targets,
+      pastOutcomes,
+    });
+
+    if (rec.isFallback) {
+      result.candidatesDropped.llmFallback++;
+      continue;
+    }
+
+    // Log every proposal to cross_post_decisions so the operator can see
+    // what the model thought, even for low-confidence/unadmitted ones.
+    for (const p of rec.proposals) {
+      const [inserted] = await db
+        .insert(crossPostDecisions)
+        .values({
+          sourceItemId: candidate.id,
+          targetAccountId: p.targetAccountId,
+          targetPostType: p.targetPostType,
+          confidence: p.confidence,
+          reasoning: p.reasoning,
+        })
+        .returning({ id: crossPostDecisions.id });
+      result.proposalsLogged++;
+
+      pending.push({
+        candidate,
+        targetAccountId: p.targetAccountId,
+        targetPostType: p.targetPostType,
+        confidence: p.confidence,
+        reasoning: p.reasoning,
+      });
+
+      // Track the decision id so we can backfill idea_item_id if it gets
+      // admitted below.
+      (p as Proposal & { _decisionId: string })._decisionId = inserted.id;
+    }
+  }
+
+  // 7. Admit pending proposals to the Idea queue in confidence order,
+  // subject to MIN_CONFIDENCE and per-brand caps.
+  const sortedPending = pending
+    .filter((p) => p.confidence >= MIN_CONFIDENCE)
+    .sort((a, b) => b.confidence - a.confidence);
+
+  const slotsByBrand = new Map<string, number>();
+  for (const p of sortedPending) {
+    let slots = slotsByBrand.get(p.candidate.brand);
+    if (slots == null) {
+      const pendingCount = await countPendingCrossPostIdeas(p.candidate.brand);
+      slots = Math.max(0, maxIdeas - pendingCount);
+      slotsByBrand.set(p.candidate.brand, slots);
+    }
+    if (slots <= 0) continue;
+
+    // Insert the Idea row.
+    const assignees = await resolveAssignees({
+      brand: p.candidate.brand,
+      sourceItemId: p.candidate.id,
+      format: p.candidate.format,
+    });
+
+    const targetPlatformKey = (() => {
+      const ta = accountsByBrand
+        .get(p.candidate.brand)
+        ?.find((a) => a.id === p.targetAccountId);
+      return ta?.platform ?? null;
+    })();
+
+    const [inserted] = await db
+      .insert(productionItems)
+      .values({
+        brand: p.candidate.brand,
+        title: p.candidate.title,
+        thumbnail: p.candidate.thumbnail,
+        status: "Idea",
+        platform: targetPlatformKey ? [targetPlatformKey] : null,
+        accountId: p.targetAccountId,
+        postType: p.targetPostType,
+        sourceType: "cross_post",
+        repostedFromItemId: p.candidate.id,
+        format: p.candidate.format,
+        pillarContentNotionId: p.candidate.pillarContentNotionId,
+        pillarContentItemId: p.candidate.pillarContentItemId,
+        utmCampaign: await generateUtmCampaign(p.candidate.title),
+        producerUserId: assignees.producerUserId,
+        editorUserId: assignees.editorUserId,
+        crossPostConfidence: p.confidence,
+      })
+      .returning({ id: productionItems.id });
+
+    // Link back the decision row so the feed can show which decision
+    // produced which idea.
+    await db
+      .update(crossPostDecisions)
+      .set({ ideaItemId: inserted.id })
+      .where(
+        and(
+          eq(crossPostDecisions.sourceItemId, p.candidate.id),
+          eq(crossPostDecisions.targetAccountId, p.targetAccountId),
+          eq(crossPostDecisions.targetPostType, p.targetPostType),
+          isNull(crossPostDecisions.ideaItemId)
+        )
+      );
+
+    result.ideasCreated++;
+    result.ideasDetails.push({
+      sourceItemId: p.candidate.id,
+      newItemId: inserted.id,
+      targetAccountId: p.targetAccountId,
+      targetPostType: p.targetPostType,
+      confidence: p.confidence,
+      title: p.candidate.title ?? "(untitled)",
+    });
+
+    slotsByBrand.set(p.candidate.brand, slots - 1);
+  }
+
+  return result;
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────
 
 interface MediaSignals {
   hasVideo: boolean;
@@ -48,287 +468,11 @@ interface MediaSignals {
   mediaCount: number;
 }
 
-/**
- * For each active cross-post rule, scan published originals on the source
- * platform whose views cleared the rule's threshold and that don't already
- * have a cross-post row for the target platform. Queue a new cross-post idea
- * for each match.
- *
- * Idempotent: re-running skips any (source_item, target_platform) pair that
- * already has a cross_post row pointing at it.
- */
-export async function runCrossPostScan(): Promise<CrossPostScanResult> {
-  const result: CrossPostScanResult = {
-    rulesEvaluated: 0,
-    candidatesConsidered: 0,
-    suggestionsCreated: 0,
-    skippedExisting: 0,
-    skippedByLlm: 0,
-    classifiedThisRun: 0,
-    suggestionsDetails: [],
-  };
-
-  const rules = await db
-    .select()
-    .from(crossPostRules)
-    .where(eq(crossPostRules.active, true));
-
-  if (rules.length === 0) return result;
-
-  // Bulk-fetch every account any rule references (source or target). Lets
-  // us resolve FK-based rules without N+1 lookups downstream.
-  const referencedAccountIds = new Set<string>();
-  for (const r of rules) {
-    if (r.sourceAccountId) referencedAccountIds.add(r.sourceAccountId);
-    if (r.targetAccountId) referencedAccountIds.add(r.targetAccountId);
-  }
-  const accountById = new Map<
-    string,
-    { id: string; platform: string; handle: string }
-  >();
-  if (referencedAccountIds.size > 0) {
-    const rows = await db
-      .select({
-        id: accounts.id,
-        platform: accounts.platform,
-        handle: accounts.handle,
-      })
-      .from(accounts)
-      .where(
-        and(
-          inArray(accounts.id, Array.from(referencedAccountIds)),
-          isNull(accounts.deletedAt)
-        )
-      );
-    for (const r of rows) accountById.set(r.id, r);
-  }
-
-  const pastKillReasons = await fetchPastCrossPostKillReasons();
-
-  for (const rule of rules) {
-    result.rulesEvaluated++;
-
-    // Source matcher: prefer the account FK when the rule was created
-    // account-aware; fall back to the legacy jsonb string match for older
-    // rules that predate the rollout.
-    const sourceMatcher = rule.sourceAccountId
-      ? eq(productionItems.accountId, rule.sourceAccountId)
-      : sql`${productionItems.platform} ? ${rule.sourcePlatform}`;
-
-    const candidates = await db
-      .select({
-        id: productionItems.id,
-        title: productionItems.title,
-        thumbnail: productionItems.thumbnail,
-        platform: productionItems.platform,
-        accountId: productionItems.accountId,
-        postType: productionItems.postType,
-        views: productionItems.views,
-        brand: productionItems.brand,
-        publishedDate: productionItems.publishedDate,
-        format: productionItems.format,
-        pillarContentNotionId: productionItems.pillarContentNotionId,
-        pillarContentItemId: productionItems.pillarContentItemId,
-        contentBody: productionItems.contentBody,
-        mediaContentType: productionItems.mediaContentType,
-      })
-      .from(productionItems)
-      .where(
-        and(
-          eq(productionItems.brand, rule.brand),
-          eq(productionItems.sourceType, "original"),
-          eq(productionItems.status, "Published"),
-          gte(productionItems.views, rule.viewThreshold),
-          sourceMatcher,
-          gte(
-            productionItems.publishedDate,
-            sql`(now() - interval '${sql.raw(String(RECENCY_WINDOW_DAYS))} days')::date`
-          )
-        )
-      );
-
-    if (candidates.length === 0) continue;
-
-    const candidateIds = candidates.map((c) => c.id);
-    const mediaByItem = await fetchMediaSignals(candidateIds);
-    const verdictsByItem = await fetchCachedVerdicts(
-      candidateIds,
-      rule.targetPlatform
-    );
-
-    // Derive the target post type from the rule's target account once per
-    // iteration. Used both for the "already cross-posted?" check and the
-    // eventual insert.
-    const targetAccount = rule.targetAccountId
-      ? accountById.get(rule.targetAccountId) ?? null
-      : null;
-    const targetPostType = targetAccount
-      ? PLATFORM_META[toPlatform(targetAccount.platform)].defaultPostType
-      : null;
-
-    for (const candidate of candidates) {
-      result.candidatesConsidered++;
-
-      // Fast-path "already exists" check against the legacy platform[]
-      // shape. Items synced from Notion or manually-authored before the
-      // accounts rollout still carry this. Keep as a cheap pre-filter.
-      const existingPlatforms = (candidate.platform ?? []) as string[];
-      if (existingPlatforms.includes(rule.targetPlatform)) {
-        result.skippedExisting++;
-        continue;
-      }
-
-      // Duplicate-suppression: look for a prior cross_post row already
-      // pointing at this source and target. Match on target_account_id when
-      // the rule is account-scoped; fall back to the legacy platform[]
-      // matcher for older rules.
-      const targetDupMatcher = rule.targetAccountId
-        ? eq(productionItems.accountId, rule.targetAccountId)
-        : sql`${productionItems.platform} ? ${rule.targetPlatform}`;
-      const existing = await db
-        .select({ id: productionItems.id })
-        .from(productionItems)
-        .where(
-          and(
-            eq(productionItems.sourceType, "cross_post"),
-            eq(productionItems.repostedFromItemId, candidate.id),
-            targetDupMatcher
-          )
-        )
-        .limit(1);
-
-      if (existing.length > 0) {
-        result.skippedExisting++;
-        continue;
-      }
-
-      // Notion authority check. `isNotionAuthoritative` now accepts a
-      // post_type as well as the legacy platform[] array; feed it whichever
-      // we've got.
-      if (
-        isNotionAuthoritative(
-          targetPostType ?? rule.targetPlatform
-        )
-      ) {
-        result.skippedExisting++;
-        continue;
-      }
-
-      // LLM fit gate — per (source item × target platform). Verdicts are
-      // cached in crossPostFitVerdicts; a cached bad verdict skips the call,
-      // a cached good verdict proceeds without calling, absence triggers a
-      // fresh classification whose result is upserted.
-      const cachedVerdict = verdictsByItem.get(candidate.id);
-      const media = mediaByItem.get(candidate.id) ?? deriveMediaFromItem(candidate.mediaContentType);
-
-      if (cachedVerdict === false) {
-        result.skippedByLlm++;
-        continue;
-      }
-
-      if (
-        cachedVerdict === undefined &&
-        candidate.contentBody !== null &&
-        candidate.contentBody.trim().length > 0
-      ) {
-        const verdict = await classifyCrossPostFit({
-          title: candidate.title,
-          contentBody: candidate.contentBody,
-          sourcePlatform: rule.sourcePlatform,
-          targetPlatform: rule.targetPlatform,
-          publishedDate: candidate.publishedDate,
-          format: candidate.format,
-          brand: candidate.brand,
-          hasVideo: media.hasVideo,
-          hasImage: media.hasImage,
-          mediaCount: media.mediaCount,
-          pastKillReasons,
-        });
-
-        if (!verdict.isFallback) {
-          const now = new Date();
-          await db
-            .insert(crossPostFitVerdicts)
-            .values({
-              sourceItemId: candidate.id,
-              targetPlatform: rule.targetPlatform,
-              isGoodFit: verdict.isGoodFit,
-              reasoning: verdict.reasoning,
-              checkedAt: now,
-            })
-            .onConflictDoUpdate({
-              target: [
-                crossPostFitVerdicts.sourceItemId,
-                crossPostFitVerdicts.targetPlatform,
-              ],
-              set: {
-                isGoodFit: verdict.isGoodFit,
-                reasoning: verdict.reasoning,
-                checkedAt: now,
-              },
-            });
-
-          result.classifiedThisRun++;
-
-          await db.insert(syncLogs).values({
-            syncType: "cross-post-scan",
-            status: "success",
-            errorMessage: `classified item=${candidate.id} verdict=${
-              verdict.isGoodFit ? "good" : "bad"
-            } target=${rule.targetPlatform} reason=${verdict.reasoning}`,
-            startedAt: now,
-            completedAt: now,
-          });
-        }
-
-        if (!verdict.isGoodFit) {
-          result.skippedByLlm++;
-          continue;
-        }
-      }
-
-      const assignees = await resolveAssignees({
-        brand: candidate.brand,
-        sourceItemId: candidate.id,
-        format: candidate.format,
-      });
-
-      const [inserted] = await db
-        .insert(productionItems)
-        .values({
-          brand: candidate.brand,
-          title: candidate.title,
-          thumbnail: candidate.thumbnail,
-          status: "Idea",
-          platform: [rule.targetPlatform],
-          // Populate the new-world fields when the rule is account-scoped.
-          // Legacy string-only rules still write the platform[] column
-          // above so nothing downstream breaks during the rollout.
-          accountId: rule.targetAccountId ?? null,
-          postType: targetPostType ?? null,
-          sourceType: "cross_post",
-          repostedFromItemId: candidate.id,
-          format: candidate.format,
-          pillarContentNotionId: candidate.pillarContentNotionId,
-          pillarContentItemId: candidate.pillarContentItemId,
-          utmCampaign: await generateUtmCampaign(candidate.title),
-          producerUserId: assignees.producerUserId,
-          editorUserId: assignees.editorUserId,
-        })
-        .returning({ id: productionItems.id });
-
-      result.suggestionsCreated++;
-      result.suggestionsDetails.push({
-        ruleId: rule.id,
-        sourceItemId: candidate.id,
-        newItemId: inserted.id,
-        targetPlatform: rule.targetPlatform,
-        title: candidate.title ?? "(untitled)",
-      });
-    }
-  }
-
-  return result;
+interface Proposal {
+  targetAccountId: string;
+  targetPostType: string;
+  confidence: number;
+  reasoning: string;
 }
 
 async function fetchMediaSignals(
@@ -361,11 +505,7 @@ async function fetchMediaSignals(
 }
 
 function deriveMediaFromItem(mediaContentType: string | null): MediaSignals {
-  // Fallback for pre-carousel-enrichment rows: infer from the legacy
-  // single-media mediaContentType column. No row means we simply don't know.
-  if (!mediaContentType) {
-    return { hasVideo: false, hasImage: false, mediaCount: 0 };
-  }
+  if (!mediaContentType) return { hasVideo: false, hasImage: false, mediaCount: 0 };
   const isVideo = mediaContentType.startsWith("video/");
   const isImage = mediaContentType.startsWith("image/");
   return {
@@ -375,39 +515,184 @@ function deriveMediaFromItem(mediaContentType: string | null): MediaSignals {
   };
 }
 
-async function fetchCachedVerdicts(
-  itemIds: string[],
-  targetPlatform: string
-): Promise<Map<string, boolean>> {
-  const map = new Map<string, boolean>();
+/**
+ * For each item, pick the view_snapshots row whose post_age_minutes is
+ * closest to 60 within the [TARGET_AGE_MIN, TARGET_AGE_MAX] window. Returns
+ * a map of itemId → views.
+ */
+async function fetchViewsAt1h(
+  itemIds: string[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
   if (itemIds.length === 0) return map;
 
-  const rows = await db
-    .select({
-      sourceItemId: crossPostFitVerdicts.sourceItemId,
-      isGoodFit: crossPostFitVerdicts.isGoodFit,
-    })
-    .from(crossPostFitVerdicts)
-    .where(
-      and(
-        inArray(crossPostFitVerdicts.sourceItemId, itemIds),
-        eq(crossPostFitVerdicts.targetPlatform, targetPlatform)
-      )
-    );
-
-  for (const row of rows) map.set(row.sourceItemId, row.isGoodFit);
+  const rows = await db.execute<{
+    production_item_id: string;
+    views: number;
+  }>(
+    sql`
+      SELECT DISTINCT ON (production_item_id)
+        production_item_id,
+        views
+      FROM view_snapshots
+      WHERE production_item_id IN (${sql.join(
+        itemIds.map((id) => sql`${id}::uuid`),
+        sql`, `
+      )})
+        AND post_age_minutes BETWEEN ${TARGET_AGE_MIN} AND ${TARGET_AGE_MAX}
+      ORDER BY production_item_id, abs(post_age_minutes - 60) ASC
+    `
+  );
+  for (const row of rows) {
+    map.set(row.production_item_id, row.views);
+  }
   return map;
 }
 
-async function fetchPastCrossPostKillReasons(): Promise<PastCrossPostKill[]> {
-  // Join contentEvents → productionItems to find recently-killed cross-posts
-  // and tag each reason with the *target* platform that got killed. That's
-  // what the classifier needs to learn "don't pair videos with YouTube
-  // Community again" without us hand-coding the rule.
+/**
+ * Baseline: for each (accountId, postType) group, compute the median
+ * "views at ~1h" across the last BASELINE_WINDOW_DAYS of published originals
+ * that have such a snapshot. Returns a map keyed `${accountId}:${postType}`.
+ * Groups with fewer than MIN_COHORT_SIZE items are omitted (too noisy to
+ * compare against).
+ */
+async function fetchBaselinesForGroups(
+  groups: Array<{ accountId: string; postType: string }>
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (groups.length === 0) return map;
+
+  const uniqueKeys = Array.from(
+    new Set(groups.map((g) => `${g.accountId}:${g.postType}`))
+  );
+
+  // One query: pre-aggregate the nearest-to-60m snapshot per item over the
+  // baseline window, then group by (accountId, postType) and compute median
+  // with percentile_cont plus a cohort count for the size gate.
+  const rows = await db.execute<{
+    account_id: string;
+    post_type: string;
+    baseline: number;
+    cohort_size: number;
+  }>(
+    sql`
+      WITH per_item AS (
+        SELECT DISTINCT ON (pi.id)
+          pi.account_id,
+          pi.post_type,
+          vs.views
+        FROM production_items pi
+        JOIN view_snapshots vs ON vs.production_item_id = pi.id
+        WHERE pi.source_type = 'original'
+          AND pi.status = 'Published'
+          AND pi.deleted_at IS NULL
+          AND pi.published_at >= (now() - interval '${sql.raw(
+            String(BASELINE_WINDOW_DAYS)
+          )} days')
+          AND vs.post_age_minutes BETWEEN ${TARGET_AGE_MIN} AND ${TARGET_AGE_MAX}
+        ORDER BY pi.id, abs(vs.post_age_minutes - 60) ASC
+      )
+      SELECT account_id,
+             post_type,
+             percentile_cont(0.5) WITHIN GROUP (ORDER BY views) AS baseline,
+             count(*) AS cohort_size
+      FROM per_item
+      GROUP BY account_id, post_type
+      HAVING count(*) >= ${MIN_COHORT_SIZE}
+    `
+  );
+
+  for (const row of rows) {
+    const key = `${row.account_id}:${row.post_type}`;
+    if (!uniqueKeys.includes(key)) continue;
+    map.set(key, Number(row.baseline));
+  }
+  return map;
+}
+
+async function fetchRecentlyProposed(itemIds: string[]): Promise<Set<string>> {
+  const set = new Set<string>();
+  if (itemIds.length === 0) return set;
+
+  const rows = await db
+    .select({ sourceItemId: crossPostDecisions.sourceItemId })
+    .from(crossPostDecisions)
+    .where(
+      and(
+        inArray(crossPostDecisions.sourceItemId, itemIds),
+        gte(
+          crossPostDecisions.proposedAt,
+          sql`(now() - interval '${sql.raw(String(DEDUP_WINDOW_HOURS))} hours')`
+        )
+      )
+    );
+  for (const row of rows) set.add(row.sourceItemId);
+  return set;
+}
+
+async function fetchAccountsByBrand(): Promise<
+  Map<string, Array<{ id: string; platform: string; handle: string; brandId: string }>>
+> {
   const rows = await db
     .select({
+      id: accounts.id,
+      platform: accounts.platform,
+      handle: accounts.handle,
+      brandId: accounts.brandId,
+      brandSlug: brands.slug,
+    })
+    .from(accounts)
+    .innerJoin(brands, eq(brands.id, accounts.brandId))
+    .where(and(isNull(accounts.deletedAt), eq(accounts.isActive, true)));
+
+  const map = new Map<
+    string,
+    Array<{ id: string; platform: string; handle: string; brandId: string }>
+  >();
+  for (const r of rows) {
+    const list = map.get(r.brandSlug) ?? [];
+    list.push({
+      id: r.id,
+      platform: r.platform,
+      handle: r.handle,
+      brandId: r.brandId,
+    });
+    map.set(r.brandSlug, list);
+  }
+  return map;
+}
+
+async function countPendingCrossPostIdeas(brand: string): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.brand, brand),
+        eq(productionItems.sourceType, "cross_post"),
+        eq(productionItems.status, "Idea"),
+        isNull(productionItems.deletedAt)
+      )
+    );
+  return row?.n ?? 0;
+}
+
+/**
+ * Load the last FEEDBACK_HISTORY accept + kill events across all cross-post
+ * items, with a short tag describing the (source→target) pair. The LLM uses
+ * these as soft policy so the operator's taste gets learned.
+ */
+async function fetchPastOutcomes(): Promise<PastOutcome[]> {
+  // Pull killed and accepted events on cross-post items, joined back through
+  // production_items so we can tag each reason with the target account
+  // (platform/postType) it applied to. Killed events exist today; accepted
+  // events are emitted by the v2 outcome route.
+  const rows = await db
+    .select({
+      eventType: sql<string>`${contentEvents.payload}->>'type'`,
       reason: sql<string>`${contentEvents.payload}->>'reason'`,
-      platform: productionItems.platform,
+      targetPostType: productionItems.postType,
+      createdAt: contentEvents.createdAt,
     })
     .from(contentEvents)
     .innerJoin(
@@ -417,16 +702,17 @@ async function fetchPastCrossPostKillReasons(): Promise<PastCrossPostKill[]> {
     .where(
       and(
         eq(productionItems.sourceType, "cross_post"),
-        sql`${contentEvents.payload}->>'type' = 'killed'`,
+        sql`${contentEvents.payload}->>'type' IN ('killed', 'accepted')`,
         sql`${contentEvents.payload}->>'reason' IS NOT NULL`,
         sql`length(${contentEvents.payload}->>'reason') >= 10`
       )
     )
     .orderBy(desc(contentEvents.createdAt))
-    .limit(KILL_REASON_HISTORY);
+    .limit(FEEDBACK_HISTORY * 2);
 
   return rows.map((r) => ({
+    outcome: r.eventType === "accepted" ? "accepted" : "killed",
     reason: r.reason,
-    targetPlatform: ((r.platform ?? []) as string[])[0] ?? null,
+    pair: r.targetPostType ? `→ ${r.targetPostType}` : null,
   }));
 }
