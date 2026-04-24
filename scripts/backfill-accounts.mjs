@@ -384,15 +384,13 @@ try {
       const [{ n }] = await sql`SELECT COUNT(*)::int AS n FROM brands WHERE slug = ${b.slug}`;
       console.log(`  ${b.slug}: ${n > 0 ? "exists" : "would insert"}`);
     } else {
+      // DO NOTHING on conflict — once seeded, the brands table is edited via
+      // the UI (label, avatar, color, disabled). If this were DO UPDATE it
+      // would clobber user toggles on every release-phase run.
       await sql`
         INSERT INTO brands (slug, label, avatar_url, color, disabled)
         VALUES (${b.slug}, ${b.label}, ${b.avatarUrl}, ${b.color}, ${b.disabled})
-        ON CONFLICT (slug) DO UPDATE SET
-          label = EXCLUDED.label,
-          avatar_url = EXCLUDED.avatar_url,
-          color = EXCLUDED.color,
-          disabled = EXCLUDED.disabled,
-          updated_at = now()
+        ON CONFLICT (slug) DO NOTHING
       `;
     }
   }
