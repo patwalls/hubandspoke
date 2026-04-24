@@ -290,11 +290,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       };
     }
 
-    // View-over-time trajectory for the sparkline on the Views stats card.
-    // Returns every snapshot ever recorded for this item, ordered oldest →
-    // newest. Includes both checkpoint-tagged (capture-velocity-snapshot)
-    // and legacy untagged rows. The UI hides the sparkline when fewer
-    // than 2 points exist.
+    // View-over-time trajectory for the sparkline. Only the scheduled
+    // checkpoint-tagged snapshots (15m / 30m / 1h / 2h / 4h from publish)
+    // — these are the consistent, publish-time-aligned points we
+    // actually want to plot. Legacy untagged rows from the deleted
+    // fresh-metrics-sync cron era are ignored.
     const viewHistoryRowsRaw = await db
       .select({
         takenAt: viewSnapshots.takenAt,
@@ -303,7 +303,12 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         checkpointKey: viewSnapshots.checkpointKey,
       })
       .from(viewSnapshots)
-      .where(eq(viewSnapshots.productionItemId, item.id))
+      .where(
+        and(
+          eq(viewSnapshots.productionItemId, item.id),
+          isNotNull(viewSnapshots.checkpointKey)
+        )
+      )
       .orderBy(asc(viewSnapshots.takenAt));
     const viewHistoryRows = viewHistoryRowsRaw.map((r) => ({
       takenAt: r.takenAt.toISOString(),
