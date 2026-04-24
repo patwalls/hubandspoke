@@ -96,8 +96,13 @@ async function call<T>(
   return (await res.json()) as T;
 }
 
-export async function listShortLinks(opts: { includeArchived?: boolean } = {}): Promise<ShortLink[]> {
-  const qs = opts.includeArchived ? "?include_archived=true" : "";
+export async function listShortLinks(
+  opts: { includeArchived?: boolean; tag?: string } = {},
+): Promise<ShortLink[]> {
+  const params = new URLSearchParams();
+  if (opts.includeArchived) params.set("include_archived", "true");
+  if (opts.tag) params.set("tag", opts.tag);
+  const qs = params.toString() ? `?${params.toString()}` : "";
   const body = await call<{ short_links: RawShortLink[] }>(`/short_links${qs}`);
   return body.short_links.map(normalize);
 }

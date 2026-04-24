@@ -38,6 +38,12 @@ interface Props {
 
 type View = "loading" | "list" | "edit" | "new";
 
+// Convention: only slugs tagged "dm" are actually wired to a ManyChat DM.
+// Everything else (sponsor slugs, random redirects) is excluded from the picker
+// so it doesn't get attached to a post that won't trigger a DM. The
+// `/settings/links` admin page shows the whole pool; this picker does not.
+const DM_TAG = "dm";
+
 function formatLastClick(iso: string | null): string {
   if (!iso) return "never";
   const date = new Date(iso);
@@ -90,7 +96,7 @@ export function AttachDmKeywordDialog({
     setView("loading");
     setError(null);
     try {
-      const res = await fetch("/api/short-links?include_archived=true");
+      const res = await fetch(`/api/short-links?include_archived=true&tag=${DM_TAG}`);
       if (!res.ok) {
         const { error: msg } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(msg ?? `HTTP ${res.status}`);
@@ -201,7 +207,7 @@ export function AttachDmKeywordDialog({
       const res = await fetch(`/api/short-links`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ slug: slugValue, destinationUrl: urlValue }),
+        body: JSON.stringify({ slug: slugValue, destinationUrl: urlValue, tag: DM_TAG }),
       });
       if (!res.ok) {
         const { error: msg } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -238,7 +244,7 @@ export function AttachDmKeywordDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>
             {view === "edit"
@@ -262,9 +268,11 @@ export function AttachDmKeywordDialog({
         {view === "list" && (
           <div className="flex-1 min-h-0 flex flex-col gap-3">
             <p className="text-xs text-muted-foreground">
-              Pick a slug from the pool. Sorted by least-recently-used first so
-              stale slugs are easy to recycle. The DM sends{" "}
+              Pick a DM-keyword slug (tagged <code className="px-1 py-0.5 rounded bg-muted">{DM_TAG}</code>)
+              from the pool. Sorted by least-recently-used first so stale slugs
+              are easy to recycle. The DM sends{" "}
               <code className="px-1 py-0.5 rounded bg-muted">{baseUrl}/&lt;slug&gt;</code>.
+              Sponsor slugs and other non-DM redirects are hidden from this list.
             </p>
             <Input
               placeholder="Filter by slug or tag…"

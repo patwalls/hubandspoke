@@ -33,7 +33,8 @@ export async function GET(request: NextRequest) {
   if (gate.error) return gate.error;
   try {
     const includeArchived = request.nextUrl.searchParams.get("include_archived") === "true";
-    const links = await listShortLinks({ includeArchived });
+    const tag = request.nextUrl.searchParams.get("tag") ?? undefined;
+    const links = await listShortLinks({ includeArchived, tag });
     return NextResponse.json({ shortLinks: links });
   } catch (err) {
     return handleApiError(err);
