@@ -8,12 +8,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
-async function requireAdmin() {
+async function requireUser() {
   const session = await auth();
   if (!session?.user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  if (session.user.role !== "admin") {
-    return { error: NextResponse.json({ error: "Admins only" }, { status: 403 }) };
-  }
   return { session };
 }
 
@@ -29,7 +26,7 @@ function handleApiError(err: unknown) {
 }
 
 export async function GET(request: NextRequest) {
-  const gate = await requireAdmin();
+  const gate = await requireUser();
   if (gate.error) return gate.error;
   try {
     const includeArchived = request.nextUrl.searchParams.get("include_archived") === "true";
@@ -42,7 +39,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const gate = await requireAdmin();
+  const gate = await requireUser();
   if (gate.error) return gate.error;
   try {
     const body = await request.json();

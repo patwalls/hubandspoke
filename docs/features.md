@@ -101,7 +101,7 @@ removing, or deprecating anything.
 |---|---|---|---|---|
 | Users & invites | Active | `/(dashboard)/settings/users`, `GET\|POST /api/users`, `POST\|DELETE /api/invites/[id]`, `POST /api/invites/validate`, `POST /api/invites/accept` | `users`, `invites` | |
 | Brands CRUD | Active | `/(dashboard)/settings/brands`, `/(dashboard)/settings/brands/[brand]`, `GET\|POST /api/brands`, `GET\|PATCH\|DELETE /api/brands/[slug]` | `brands` | Defaults (producer/editor, weekly goal) live here |
-| Short links admin (ManyChat redirect pool) | Active | `/(dashboard)/settings/links`, `GET\|POST\|PATCH\|DELETE /api/short-links/[slug]` | (none — data lives in the StarterStory Rails app's `short_links` table) | Admin-only UI for the ~20-keyword ManyChat pool. hubandspoke proxies CRUD to `SHORT_LINKS_API_URL` (the StarterStory REST API at `go.starterstory.com`) with `SHORT_LINKS_API_KEY`. The redirect + click tracking lives in the Rails app; this is a pure control plane. |
+| Short links admin (ManyChat redirect pool) | Active | `/(dashboard)/settings/links`, `GET\|POST\|PATCH\|DELETE /api/short-links/[slug]` | (none — data lives in the StarterStory Rails app's `short_links` table) | `/settings/links` page is admin-only; the underlying API routes are open to any authenticated user so editors can attach/edit DM keywords on their posts. hubandspoke proxies CRUD to `SHORT_LINKS_API_URL` (the StarterStory REST API at `go.starterstory.com`) with `SHORT_LINKS_API_KEY`. The redirect + click tracking lives in the Rails app; this is a pure control plane. |
 | Global accounts settings | Active | `/(dashboard)/settings/accounts` | `accounts` | All brands |
 | Brand-scoped settings | Active | `/(dashboard)/[brand]/settings` | `brands`, `accounts` | |
 | Sync errors monitor | Active | `/(dashboard)/settings/sync-errors` | `syncLogs` | Notion / YouTube / MATG / performance |
@@ -168,8 +168,10 @@ shim are gone. Replacement architecture:
 - StarterStory exposes a REST API at `/api/v1/short_links` (bearer-token auth via
   `HUBANDSPOKE_API_TOKEN`) so hubandspoke can manage the pool remotely.
 - hubandspoke owns `/settings/links` — admin-only UI, proxies CRUD through
-  `/api/short-links/...` to the Rails API (API key stays server-side).
-- On each `instagram_*` post-detail page, admins see an **"Attach DM keyword"**
+  `/api/short-links/...` to the Rails API (API key stays server-side). The
+  API routes themselves are open to any authenticated user so editors can
+  attach/edit DM keywords on their own posts without needing admin.
+- On each `instagram_*` post-detail page, anyone can see an **"Attach DM keyword"**
   row that opens a picker sorted by least-recently-used slug. Picking a slug
   prompts for its destination URL (shared across all posts using that slug),
   then two writes land: `PATCH /api/short-links/:slug` + `PUT /api/production-items`

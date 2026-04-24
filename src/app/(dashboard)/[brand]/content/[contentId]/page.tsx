@@ -5,7 +5,6 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
 import { getAccounts } from "@/lib/db/accounts";
-import { auth } from "@/lib/auth";
 import { ContentDetail } from "@/components/dashboard/content-detail";
 
 interface ContentDetailPageProps {
@@ -49,8 +48,6 @@ export default async function BrandContentDetailPage({
     isActive: a.isActive,
   }));
 
-  const session = await auth();
-  const isAdmin = session?.user?.role === "admin";
   const shortLinksBaseUrl = process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.com";
 
   return (
@@ -58,7 +55,6 @@ export default async function BrandContentDetailPage({
       brand={brand}
       contentId={contentId}
       accounts={accounts}
-      isAdmin={isAdmin}
       shortLinksBaseUrl={shortLinksBaseUrl}
     />
   );

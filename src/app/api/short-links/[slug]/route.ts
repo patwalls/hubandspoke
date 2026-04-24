@@ -9,12 +9,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
-async function requireAdmin() {
+async function requireUser() {
   const session = await auth();
   if (!session?.user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  if (session.user.role !== "admin") {
-    return { error: NextResponse.json({ error: "Admins only" }, { status: 403 }) };
-  }
   return { session };
 }
 
@@ -41,7 +38,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const gate = await requireAdmin();
+  const gate = await requireUser();
   if (gate.error) return gate.error;
   const { slug } = await params;
   try {
@@ -57,7 +54,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const gate = await requireAdmin();
+  const gate = await requireUser();
   if (gate.error) return gate.error;
   const { slug } = await params;
   try {
@@ -93,7 +90,7 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const gate = await requireAdmin();
+  const gate = await requireUser();
   if (gate.error) return gate.error;
   const { slug } = await params;
   try {

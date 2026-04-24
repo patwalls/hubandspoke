@@ -196,8 +196,6 @@ interface ContentDetailProps {
   /** Every account (across brands) for the picker dropdown. Loaded once
    *  on the server page; the picker grouping uses `brandLabel`. */
   accounts: PickerAccount[];
-  /** Gates admin-only affordances (e.g. the DM-keyword picker). */
-  isAdmin: boolean;
   /** Base host for the short-link service (e.g. https://go.starterstory.com).
    *  Threaded from the server so the UI can render the full redirect URL
    *  without needing a NEXT_PUBLIC_ env var. */
@@ -303,7 +301,7 @@ const DETAIL_TAB_VALUES = [
 ] as const;
 type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
-export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksBaseUrl }: ContentDetailProps) {
+export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }: ContentDetailProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -903,7 +901,7 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
 
   const slugAttached = data?.item?.shortLinkSlug ?? null;
   useEffect(() => {
-    if (!isAdmin || !slugAttached) {
+    if (!slugAttached) {
       setDmDestinationUrl(null);
       return;
     }
@@ -920,7 +918,7 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, slugAttached, dmRefresh]);
+  }, [slugAttached, dmRefresh]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2307,7 +2305,7 @@ export function ContentDetail({ brand, contentId, accounts, isAdmin, shortLinksB
           </PropertyRow>
         </PropertyRowSolo>
 
-        {isAdmin && postType?.startsWith("instagram_") && (
+        {postType?.startsWith("instagram_") && (
           <PropertyRowSolo>
             <PropertyRow label="DM keyword">
               {item.shortLinkSlug ? (
