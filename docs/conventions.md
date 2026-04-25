@@ -55,6 +55,36 @@ pattern. Backfills (data, not schema) still go in `scripts/backfill-*.mjs`.
 If the schema change adds/removes/renames a feature's backing table or major
 column, also update `docs/features.md`.
 
+## Brand routing — the "All content" sentinel
+
+The brand sidebar contains one synthetic entry, `"All content"` (slug
+`"all"`), that lives outside the `brands` table. It's prepended to the
+brand list in `src/app/(dashboard)/layout.tsx`. Don't insert an `"all"`
+row into the `brands` table — every brand-keyed query (accounts FK
+joins, format lookups, brand-priority sort, the cross-post recommender)
+would treat it as a real brand and corrupt cross-brand state.
+
+`brand === "all"` is a recognized cross-brand sentinel in:
+
+- `getProductionPipeline`, `getContentReport`, `getWeeklyGoal`,
+  `getBrandSettings` (`src/lib/db/queries.ts`) — drop the
+  `eq(productionItems.brand, brand)` predicate.
+- `buildViewPredictorContext` (`src/lib/services/view-predictor.ts`)
+  — drop the same predicate so the predictor pulls historical context
+  from every brand at once.
+
+The route tree lives at `src/app/(dashboard)/all/`, mirroring
+`src/app/(dashboard)/coverage/` (the existing precedent for a
+non-brand sibling route). Only data-view pages (Dashboard, Content,
+Production, Queue) are mirrored — Formats, Accounts,
+cross-post-rules, settings are intentionally absent because they're
+brand-scoped configuration.
+
+When you add a new dashboard page, decide whether it has cross-brand
+meaning. If yes, mirror it under `/all/`; if no, leave the sidebar tab
+hidden when `currentBrand === "all"` (see
+`src/components/dashboard/nav.tsx` `SectionTabs`).
+
 ## Channel display strings
 
 The legacy display format `"PLATFORM (NAME)"` (e.g. `"X (Pat Walls)"`,

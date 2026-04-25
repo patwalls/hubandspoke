@@ -72,8 +72,14 @@ export function ContentReport({ brand }: { brand: string }) {
           }>;
         };
         // Scope the account dropdown to the brand this dashboard is rendering.
+        // `brand === "all"` is the cross-brand /all view — show every account
+        // so the picker isn't empty.
         if (!cancelled) {
-          setAccounts(json.accounts.filter((a) => a.brandSlug === brand));
+          setAccounts(
+            brand === "all"
+              ? json.accounts
+              : json.accounts.filter((a) => a.brandSlug === brand)
+          );
         }
       } catch {}
     })();

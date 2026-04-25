@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
-import { SearchIcon } from "lucide-react";
+import { LayoutGrid, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { GlobalSearch } from "@/components/dashboard/global-search";
@@ -40,6 +40,30 @@ function getBrandFromPath(
 
 function BrandAvatar({ brand, size = 20 }: { brand: Brand; size?: number }) {
   const [errored, setErrored] = useState(false);
+
+  // The synthetic "all" sidebar entry shouldn't show initials — "A" reads
+  // like a real brand acronym. A grid icon reads as "every brand at once"
+  // at a glance and stays visually distinct from real brand avatars.
+  if (brand.slug === "all") {
+    // Icon at ~58% of the avatar size so the four squares stay distinct
+    // without crowding the circle's edge. A heavier strokeWidth gives the
+    // glyph the same visual weight as the photo avatars used for real
+    // brands — without it, the All chip reads smaller than its neighbors.
+    const iconSize = Math.round(size * 0.58);
+    return (
+      <span
+        className={cn(
+          "rounded-full bg-gradient-to-br text-white flex items-center justify-center select-none shrink-0",
+          brand.color
+        )}
+        style={{ width: size, height: size }}
+        aria-hidden="true"
+      >
+        <LayoutGrid size={iconSize} strokeWidth={2.5} />
+      </span>
+    );
+  }
+
   const initials = brand.label
     .split(" ")
     .filter((w) => /[A-Za-z0-9]/.test(w[0] ?? ""))
@@ -196,7 +220,14 @@ export function DashboardNav({
             <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
               {brands.map((brand) => {
                 const isActive = currentBrand === brand.slug;
-                const href = isOnFormats ? `/${brand.slug}/formats` : `/${brand.slug}`;
+                // "all" only has a home — Formats/Accounts/etc. don't exist
+                // there, so collapse any cross-section navigation back to /all.
+                const href =
+                  brand.slug === "all"
+                    ? "/all"
+                    : isOnFormats
+                      ? `/${brand.slug}/formats`
+                      : `/${brand.slug}`;
 
                 if (brand.disabled) {
                   return (
@@ -336,14 +367,25 @@ export function SectionTabs({
   const pathname = usePathname();
   const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
 
-  const tabs = [
-    { href: `/${currentBrand}`, label: "Dashboard" },
-    { href: `/${currentBrand}/content`, label: "Content" },
-    { href: `/${currentBrand}/production`, label: "Production" },
-    { href: `/${currentBrand}/queue`, label: "Queue" },
-    { href: `/${currentBrand}/formats`, label: "Formats" },
-    { href: `/${currentBrand}/accounts`, label: "Accounts" },
-  ];
+  // The /all view aggregates data across brands; Formats and Accounts are
+  // brand-scoped configuration (format library, account goals/boundaries)
+  // and have no coherent cross-brand version, so they're hidden there.
+  const tabs =
+    currentBrand === "all"
+      ? [
+          { href: `/all`, label: "Dashboard" },
+          { href: `/all/content`, label: "Content" },
+          { href: `/all/production`, label: "Production" },
+          { href: `/all/queue`, label: "Queue" },
+        ]
+      : [
+          { href: `/${currentBrand}`, label: "Dashboard" },
+          { href: `/${currentBrand}/content`, label: "Content" },
+          { href: `/${currentBrand}/production`, label: "Production" },
+          { href: `/${currentBrand}/queue`, label: "Queue" },
+          { href: `/${currentBrand}/formats`, label: "Formats" },
+          { href: `/${currentBrand}/accounts`, label: "Accounts" },
+        ];
 
   return (
     <div className="inline-flex items-center gap-1 rounded-lg bg-muted/60 p-1">

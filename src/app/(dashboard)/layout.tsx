@@ -30,13 +30,29 @@ export default async function DashboardLayout({
   // column to the nav's existing prop shape.
   const brandRows = await getBrands();
   const defaultBrand = await getDefaultBrandSlug();
-  const brands = brandRows.map((b) => ({
-    slug: b.slug,
-    label: b.label,
-    avatar: b.avatarUrl,
-    color: b.color,
-    disabled: b.disabled,
-  }));
+  // Synthetic "All content" entry rendered to the left of every real brand.
+  // Not in the DB on purpose — making it a real `brands` row would pollute
+  // every brand-keyed query (accounts FK joins, format lookups, the
+  // brand-priority sort, the cross-post recommender). The /all routes
+  // recognize the slug as a sentinel; queries.ts drops the brand predicate
+  // when `brand === "all"`.
+  const allEntry = {
+    slug: "all",
+    label: "All",
+    avatar: null,
+    color: "from-slate-700 to-slate-900",
+    disabled: false,
+  };
+  const brands = [
+    allEntry,
+    ...brandRows.map((b) => ({
+      slug: b.slug,
+      label: b.label,
+      avatar: b.avatarUrl,
+      color: b.color,
+      disabled: b.disabled,
+    })),
+  ];
 
   return (
     <div className="min-h-screen bg-background">

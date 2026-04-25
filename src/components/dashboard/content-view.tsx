@@ -68,8 +68,15 @@ export function ContentView({ brand }: ContentViewProps) {
         };
         // Scope the Account filter dropdown to the brand we're viewing —
         // otherwise MATG's dashboard lists Starter Story accounts and vice
-        // versa.
-        if (!cancelled) setAccounts(json.accounts.filter((a) => a.brandSlug === brand));
+        // versa. `brand === "all"` is the cross-brand /all view; show every
+        // account in that case so the picker isn't empty.
+        if (!cancelled) {
+          setAccounts(
+            brand === "all"
+              ? json.accounts
+              : json.accounts.filter((a) => a.brandSlug === brand)
+          );
+        }
       } catch {
         /* non-fatal — picker just shows empty state */
       }
@@ -79,7 +86,13 @@ export function ContentView({ brand }: ContentViewProps) {
     };
   }, [brand]);
 
-  const apiBase = LEGACY_REPORT_API[brand] ?? "/api/reports/content";
+  // The cross-brand /all view never uses the MATG-specific endpoint, even
+  // though "matg" is a real brand slug — `brand === "all"` falls through to
+  // the generic report endpoint and the queries.ts side handles the
+  // no-filter aggregation.
+  const apiBase = brand === "all"
+    ? "/api/reports/content"
+    : LEGACY_REPORT_API[brand] ?? "/api/reports/content";
 
   const fetchReport = useCallback(async () => {
     setLoading(true);

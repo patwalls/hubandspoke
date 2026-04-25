@@ -417,6 +417,13 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             placeholder="Search title, format, platform…"
             className="h-8 w-48 sm:w-64 text-xs"
           />
+          {/*
+            Cross-brand /all view: hide the create-item entry point. New
+            items must be created against a real brand slug — POST
+            /api/production-items would happily store `brand="all"` and
+            corrupt filtering. Switch to a brand to add a post.
+          */}
+          {brand !== "all" && (
           <DropdownMenu>
             <DropdownMenuTrigger
               className={buttonVariants({ variant: "outline", size: "sm" })}
@@ -443,6 +450,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          )}
         </div>
       </div>
 

@@ -123,7 +123,9 @@ export async function buildViewPredictorContext(
     .from(productionItems)
     .where(
       and(
-        eq(productionItems.brand, brand),
+        // `brand="all"` is the cross-brand sentinel — drop the predicate so
+        // the predictor pulls historical context from every brand at once.
+        ...(brand === "all" ? [] : [eq(productionItems.brand, brand)]),
         eq(productionItems.status, "Published"),
         isNotNull(productionItems.views)
       )

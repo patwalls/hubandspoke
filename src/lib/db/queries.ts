@@ -128,6 +128,16 @@ async function attachPresignedCoverUrls(items: ProductionItem[]): Promise<void> 
 }
 
 export async function getWeeklyGoal(brand: string): Promise<number | null> {
+  if (brand === "all") {
+    // Cross-brand "All" view: sum every enabled brand's goal. Brands with a
+    // null goal contribute zero. Returns null if no brand has a goal set.
+    const rows = await db
+      .select({ weeklyGoal: brands.weeklyGoal })
+      .from(brands)
+      .where(eq(brands.disabled, false));
+    const sum = rows.reduce((acc, r) => acc + (r.weeklyGoal ?? 0), 0);
+    return sum > 0 ? sum : null;
+  }
   const [row] = await db
     .select({ weeklyGoal: brands.weeklyGoal })
     .from(brands)
@@ -142,6 +152,13 @@ export type BrandSettings = {
 };
 
 export async function getBrandSettings(brand: string): Promise<BrandSettings> {
+  if (brand === "all") {
+    // Cross-brand "All": sum-of-goals + Sunday week start. Picking one
+    // weekStartDay across brands is impossible; default to Sunday (the
+    // schema default) — week-keyed UI on /all renders against this.
+    const weeklyGoal = await getWeeklyGoal("all");
+    return { weeklyGoal, weekStartDay: 0 };
+  }
   const [row] = await db
     .select({
       weeklyGoal: brands.weeklyGoal,
@@ -215,9 +232,11 @@ export async function getContentReport(
     weekStartDay
   );
 
-  // Build query conditions — scoped to the requested brand
+  // Build query conditions — scoped to the requested brand. `brand="all"`
+  // is the cross-brand sentinel used by the /all view; we drop the brand
+  // predicate but keep every other filter (status, dates, etc.) intact so
+  // the same page renders unchanged for one brand or all.
   const conditions = [
-    eq(productionItems.brand, brand),
     isNotNull(productionItems.publishedDate),
     eq(productionItems.status, "Published"),
     gte(productionItems.publishedDate, startDate),
@@ -225,6 +244,9 @@ export async function getContentReport(
     isNotNull(productionItems.platform),
     isNull(productionItems.deletedAt),
   ];
+  if (brand !== "all") {
+    conditions.unshift(eq(productionItems.brand, brand));
+  }
 
   // New-world filters. `accountId` picks a single account; `platformKey`
   // scopes to one canonical platform (matched via the joined accounts row);
@@ -568,7 +590,9 @@ export async function getProductionPipeline(
     .leftJoin(clipIdeas, eq(clipIdeas.id, productionItems.sourceClipIdeaId))
     .where(
       and(
-        eq(productionItems.brand, brand),
+        // `brand="all"` is the cross-brand sentinel; drop the predicate
+        // entirely so /all/queue and /all/production aggregate everything.
+        ...(brand === "all" ? [] : [eq(productionItems.brand, brand)]),
         inArray(productionItems.status, PIPELINE_STATUSES as unknown as string[]),
         isNull(productionItems.deletedAt)
       )
