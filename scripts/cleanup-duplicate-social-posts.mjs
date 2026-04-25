@@ -304,7 +304,8 @@ async function phaseB() {
     }
 
     await sql.begin(async (tx) => {
-      // Repoint every FK from any loser → winner.
+      // 1) Repoint every FK from any loser → winner so cascading deletes
+      //    don't take useful children with them.
       for (const loser of losers) {
         for (const [table, col] of CHILD_FKS) {
           await tx.unsafe(
@@ -313,7 +314,15 @@ async function phaseB() {
           );
         }
       }
-      // Apply the merged field set to the winner.
+      // 2) Delete losers BEFORE updating the winner. Otherwise the winner's
+      //    UPDATE platform_content_id = ... would conflict with a loser
+      //    that still owns the (account_id, platform_content_id) unique
+      //    index in this same transaction.
+      for (const loser of losers) {
+        await tx`DELETE FROM production_items WHERE id = ${loser.id}`;
+      }
+      // 3) Apply the merged field set to the winner now that the unique
+      //    key is free.
       await tx`
         UPDATE production_items SET
           platform_content_id = ${fields.platform_content_id},
@@ -333,11 +342,6 @@ async function phaseB() {
           updated_at = now()
         WHERE id = ${winner.id}
       `;
-      // Delete the losers. Cascading FKs are now empty (we repointed
-      // everything), so DELETE doesn't drop anything we still want.
-      for (const loser of losers) {
-        await tx`DELETE FROM production_items WHERE id = ${loser.id}`;
-      }
     });
     merged++;
   }
