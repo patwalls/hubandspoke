@@ -11,6 +11,14 @@ export interface DescriptClipResolvePayload {
   triggerId: string;
   jobId: string;
   derivativeItemId?: string;
+  /** Set on the cold full-video path: when the import finishes, stamp the
+   *  source-composition id back on the pillar so subsequent clips use the
+   *  warm duplicate path. */
+  pillarItemId?: string;
+  /** True for `import/project_media` jobs (cold full-video upload); false /
+   *  unset for `agent` jobs (composition duplicate or AI clip). Switches how
+   *  we parse the new compositionId from the job result. */
+  importMode?: boolean;
   /** Epoch ms. Set on the first invocation; carried forward across re-enqueues. */
   deadlineAt?: number;
 }
@@ -19,10 +27,17 @@ const POLL_INTERVAL_MS = 5000;
 const DEADLINE_MS = 10 * 60 * 1000;
 
 /**
- * Do one poll of a Descript repurpose-agent job. If it's stopped, write the
- * compositionId. If not, self-re-enqueue with a 5s delay. Keeping each
- * invocation <1s means SIGTERM during a deploy never catches us mid-poll,
- * so the job's lock never leaks.
+ * Do one poll of a Descript job. If stopped, write the new compositionId.
+ * If not, self-re-enqueue with a 5s delay. Keeping each invocation <1s means
+ * SIGTERM during a deploy never catches us mid-poll, so the job's lock never
+ * leaks.
+ *
+ * Handles two job shapes:
+ *   - Agent jobs (default): compositionId lives in `result.agent_response`.
+ *     Used by the AI clip path AND the warm full-video duplicate path.
+ *   - Import jobs (importMode=true): compositionId lives in
+ *     `result.created_compositions[0].id`. Used by the cold full-video
+ *     upload — first clip on a pillar that has no Descript project yet.
  */
 export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
   const payload = rawPayload as DescriptClipResolvePayload;
@@ -30,9 +45,9 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
 
   const job = await fetchDescriptJob(payload.jobId);
   if (job.job_state === "stopped") {
-    const compositionId = extractCompositionIdFromAgentResponse(
-      job.result?.agent_response,
-    );
+    const compositionId = payload.importMode
+      ? job.result?.created_compositions?.[0]?.id ?? null
+      : extractCompositionIdFromAgentResponse(job.result?.agent_response);
     await db
       .update(repurposeTriggers)
       .set({ descriptCompositionId: compositionId })
@@ -43,8 +58,17 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
         .set({ descriptCompositionId: compositionId })
         .where(eq(productionItems.id, payload.derivativeItemId));
     }
+    // Cold full-video import: stamp the pillar with the source compositionId
+    // so the next clip on this pillar takes the warm (duplicate) path
+    // instead of re-uploading.
+    if (payload.pillarItemId && payload.importMode && compositionId) {
+      await db
+        .update(productionItems)
+        .set({ descriptCompositionId: compositionId })
+        .where(eq(productionItems.id, payload.pillarItemId));
+    }
     helpers.logger.info(
-      `descript-clip-resolve ok trigger=${payload.triggerId} composition=${compositionId ?? "none"}`,
+      `descript-clip-resolve ok trigger=${payload.triggerId} composition=${compositionId ?? "none"}${payload.importMode ? " (import)" : ""}`,
     );
     return;
   }

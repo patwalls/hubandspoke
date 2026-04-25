@@ -140,6 +140,38 @@ export function extractCompositionIdFromAgentResponse(
   return m ? m[1] : null;
 }
 
+/**
+ * Duplicate an existing composition inside a Descript project. Implemented
+ * as an agent prompt because Descript's REST API doesn't expose a direct
+ * /compositions/duplicate endpoint — the agent path can do it. Returns the
+ * standard {jobId, projectId, projectUrl} so callers can reuse the existing
+ * `descript-clip-resolve` poller (it polls until job_state=stopped and
+ * extracts the new compositionId from `agent_response`).
+ *
+ * Used by the "Full video in Descript" promote path: the pillar is uploaded
+ * to Descript exactly once and cached on the pillar's descriptProjectId;
+ * every subsequent clip from that pillar duplicates the source composition
+ * so editors get a fresh canvas to trim manually without re-uploading.
+ */
+export async function duplicateDescriptComposition(args: {
+  projectId: string;
+  sourceCompositionId: string;
+  newCompositionName: string;
+}): Promise<{ jobId: string; projectUrl: string; projectId: string; prompt: string }> {
+  const safeName = args.newCompositionName.replace(/"/g, '\\"');
+  const prompt = [
+    "Duplicate the existing main composition in this project — the one with",
+    `compositionId="${args.sourceCompositionId}".`,
+    `Name the new composition "${safeName}".`,
+    "Do not modify the source composition. Do not change any media, transcript,",
+    "or timing. The duplicate should be byte-identical to the source except",
+    "for the name. Reply with the new compositionId in the form",
+    'compositionId="<uuid>".',
+  ].join(" ");
+  const result = await invokeDescriptAgent({ projectId: args.projectId, prompt });
+  return { ...result, prompt };
+}
+
 export async function invokeDescriptAgent(args: {
   projectId: string;
   prompt: string;

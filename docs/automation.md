@@ -39,6 +39,7 @@ USER / API ENTRY POINTS
   POST /api/descript/clip-out                             → descript-clip-resolve
   POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve
   POST /api/clip-ideas/[id]/create-in-descript-precise    → clip-idea-precise-cut
+  POST /api/clip-ideas/[id]/create-in-descript-full       → descript-clip-resolve (importMode=true on cold path)
   POST /api/production-items (new row w/ link, no inline metrics) → refresh-item-metrics
   PUT  /api/production-items (→ Published w/ link, or link added on Published) → refresh-item-metrics
   POST /api/production-items, /comments, /clip-ideas/triage  → notification-send
@@ -526,12 +527,14 @@ ORDER BY pi.published_at DESC;
   - Extracted audio stays in S3 — enables future re-runs (different model, diarization, vision) without re-downloading the full video. ~5 MB per 24-min video.
 
 ### `descript-clip-resolve` — poll Descript clip-out
-- **Trigger:** enqueued by `POST /api/descript/clip-out`; enqueued by `promote-clip-idea` service (clip-promotion via agent flow)
+- **Trigger:** enqueued by `POST /api/descript/clip-out`; enqueued by `promote-clip-idea` service (agent flow + full-video flow)
 - **Files:** `src/jobs/tasks/descript-clip-resolve.ts`
-- **Inputs:** `{ triggerId, jobId, derivativeItemId?, deadlineAt? }`
-- **Outputs:** `repurposeTriggers.descriptCompositionId`; if `derivativeItemId`, also `productionItems.descriptCompositionId`
+- **Inputs:** `{ triggerId, jobId, derivativeItemId?, pillarItemId?, importMode?, deadlineAt? }`
+- **Outputs:** `repurposeTriggers.descriptCompositionId`; if `derivativeItemId`, also `productionItems.descriptCompositionId` on the derivative; if `pillarItemId` + `importMode`, also stamps composition on the pillar so future full-video clips skip the upload.
 - **Downstream:** none
-- **Rules:** polls every 5s, 10-min deadline; short-invocation re-enqueue
+- **Rules:**
+  - Polls every 5s, 10-min deadline; short-invocation re-enqueue
+  - `importMode=true` switches the result parse from `agent_response` (regex) to `created_compositions[0].id` (used by the cold full-video upload path)
 
 ### `clip-idea-precise-cut` — ffmpeg trim + Descript import
 - **Trigger:** enqueued by `promote-clip-idea` service (precise-cut path; user clicks "Cut precisely" in clip-ideas panel)

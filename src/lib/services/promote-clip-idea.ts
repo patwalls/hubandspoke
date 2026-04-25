@@ -7,7 +7,12 @@ import {
   repurposeTriggers,
   users,
 } from "@/lib/db/schema";
-import { invokeDescriptAgent } from "@/lib/descript";
+import {
+  createDescriptProjectFromUrl,
+  duplicateDescriptComposition,
+  invokeDescriptAgent,
+} from "@/lib/descript";
+import { getPresignedGetUrl } from "@/lib/s3";
 import { enqueue } from "@/jobs/enqueue";
 
 export async function killClipIdea(args: {
@@ -487,5 +492,173 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     editorName: editor.name,
     editorEmail: editor.email,
     newProductionItemId: productionItemId,
+  };
+}
+
+export type CreateClipIdeaInDescriptFullVideoResult = AssignClipIdeaResult & {
+  descriptProjectUrl: string | null;
+  descriptJobId: string;
+  /** "warm" when the pillar already had a Descript project (we duplicated
+   *  the composition); "cold" when we uploaded the pillar to Descript for
+   *  the first time. The cold path stamps the pillar so the next clip from
+   *  the same pillar takes the warm path. */
+  mode: "warm" | "cold";
+};
+
+/**
+ * Full-video promotion: hand the editor the entire pillar inside Descript so
+ * they can trim manually. Two paths:
+ *
+ *   - WARM: pillar already has a `descriptProjectId` + `descriptCompositionId`.
+ *     Just duplicate the existing composition (agent prompt). Cheap, no
+ *     re-upload.
+ *   - COLD: pillar has only an `mediaS3Key`. Upload it to Descript via a
+ *     presigned-URL import (Descript fetches the URL itself — no streaming
+ *     bytes through our worker). Stamp the new project_id + project_url on
+ *     the pillar so this is done exactly once. The first clip's working
+ *     composition IS the imported source composition; future clips from the
+ *     same pillar take the warm path and get a duplicate.
+ *
+ * Either way, the clip prod_item flips to Assigned with the pillar's
+ * project_id + project_url. The new compositionId fills in async via the
+ * existing `descript-clip-resolve` poller (extended to handle import jobs).
+ */
+export async function createClipIdeaInDescriptFullVideo(args: {
+  clipIdeaId: string;
+  actorUserId: string;
+}): Promise<CreateClipIdeaInDescriptFullVideoResult> {
+  const row = await loadAndGuardClipIdea(args.clipIdeaId);
+  const editor = await loadEditor(args.actorUserId);
+  const body = buildContentBody(row);
+  const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
+  const brand = row.sourceBrand ?? "starter-story";
+  const formatId = await ensurePromotedClipFormat(brand);
+
+  // Re-fetch the pillar — `loadAndGuardClipIdea` only returns mediaS3Key /
+  // descriptProjectId, but the warm path also needs descriptCompositionId
+  // and descriptProjectUrl, and we may need to write back to the pillar.
+  const [pillar] = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      descriptProjectId: productionItems.descriptProjectId,
+      descriptProjectUrl: productionItems.descriptProjectUrl,
+      descriptCompositionId: productionItems.descriptCompositionId,
+      mediaS3Key: productionItems.mediaS3Key,
+    })
+    .from(productionItems)
+    .where(eq(productionItems.id, row.sourceProductionItemId))
+    .limit(1);
+  if (!pillar) throw new ClipIdeaNotFoundError();
+
+  let mode: "warm" | "cold";
+  let jobId: string;
+  let projectId: string;
+  let projectUrl: string | null;
+  let descriptPrompt: string | null;
+  let pillarItemIdToStamp: string | undefined;
+  let importMode = false;
+
+  if (pillar.descriptProjectId && pillar.descriptCompositionId) {
+    mode = "warm";
+    const dup = await duplicateDescriptComposition({
+      projectId: pillar.descriptProjectId,
+      sourceCompositionId: pillar.descriptCompositionId,
+      newCompositionName: row.hook,
+    });
+    jobId = dup.jobId;
+    projectId = dup.projectId;
+    projectUrl = pillar.descriptProjectUrl ?? dup.projectUrl ?? null;
+    descriptPrompt = dup.prompt;
+  } else if (pillar.mediaS3Key) {
+    mode = "cold";
+    const presigned = await getPresignedGetUrl(pillar.mediaS3Key, 3600);
+    const projectName = pillar.title ?? `Pillar ${pillar.id.slice(0, 8)}`;
+    const importRes = await createDescriptProjectFromUrl({
+      projectName,
+      mediaUrl: presigned,
+    });
+    jobId = importRes.job_id;
+    projectId = importRes.project_id;
+    projectUrl = importRes.project_url;
+    descriptPrompt = null;
+    pillarItemIdToStamp = pillar.id;
+    importMode = true;
+
+    // Stamp the pillar with project_id + project_url + descriptImportedAt
+    // immediately. compositionId follows via the poll task. Future clips on
+    // this pillar will see descriptCompositionId set and take the warm path.
+    await db
+      .update(productionItems)
+      .set({
+        descriptProjectId: projectId,
+        descriptProjectUrl: projectUrl,
+        descriptImportedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, pillar.id));
+  } else {
+    throw new ClipIdeaSourceMissingMediaError();
+  }
+
+  // Flip the clip prod_item to Assigned with the pillar's project IDs.
+  await db
+    .update(productionItems)
+    .set({
+      status: "Assigned",
+      title: row.hook,
+      hook: row.hook,
+      contentBody: body,
+      producerUserId: args.actorUserId,
+      editorUserId: args.actorUserId,
+      descriptProjectId: projectId,
+      descriptProjectUrl: projectUrl,
+      updatedAt: new Date(),
+    })
+    .where(eq(productionItems.id, productionItemId));
+
+  const [trigger] = await db
+    .insert(repurposeTriggers)
+    .values({
+      productionItemId: row.sourceProductionItemId,
+      targetFormatId: formatId,
+      descriptJobId: jobId,
+      descriptProjectUrl: projectUrl,
+      descriptPrompt,
+      compositionName: row.hook,
+      descriptImportPath: "full-video",
+    })
+    .returning({ id: repurposeTriggers.id });
+
+  await enqueue("descript-clip-resolve", {
+    triggerId: trigger.id,
+    jobId,
+    derivativeItemId: productionItemId,
+    pillarItemId: pillarItemIdToStamp,
+    importMode,
+  });
+
+  await db
+    .update(clipIdeas)
+    .set({
+      status: "assigned",
+      acceptedEditorUserId: args.actorUserId,
+      acceptedProductionItemId: productionItemId,
+      decidedAt: new Date(),
+      decidedByUserId: args.actorUserId,
+    })
+    .where(eq(clipIdeas.id, args.clipIdeaId));
+
+  return {
+    sourceProductionItemId: row.sourceProductionItemId,
+    sourceTitle: row.sourceTitle,
+    sourceBrand: brand,
+    hook: row.hook,
+    editorName: editor.name,
+    editorEmail: editor.email,
+    newProductionItemId: productionItemId,
+    descriptProjectUrl: projectUrl,
+    descriptJobId: jobId,
+    mode,
   };
 }

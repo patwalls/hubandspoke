@@ -103,10 +103,33 @@ async function getInstagramAccountId(sql, brandSlug) {
 }
 
 // Repair pass: any pre-existing clip prod_item that was inserted by an earlier
-// run of this script (or by the generate route) before account_id wiring
-// landed gets its account_id / post_type / platform stamped now. Idempotent —
-// skips rows that already have all three set.
+// run of this script (or by the generate route) before all the channel-wiring
+// landed. Two repairs:
+//   (a) account_id / post_type / platform — the Instagram-Reel default
+//   (b) pillar_content_item_id — copied from clip_ideas.source_production_item_id
+// Single bulk UPDATE for (b) since it doesn't need per-brand resolution.
+// Then a per-row loop for (a) which does. Idempotent — skips rows already set.
 async function repairExistingClipProductionItems(sql, dryRun) {
+  // (b) Pillar reference — bulk UPDATE.
+  if (!dryRun) {
+    const pillar = await sql`
+      UPDATE production_items pi
+      SET pillar_content_item_id = ci.source_production_item_id,
+          updated_at = NOW()
+      FROM clip_ideas ci
+      WHERE pi.source_clip_idea_id = ci.id
+        AND pi.source_type = 'clip'
+        AND pi.deleted_at IS NULL
+        AND pi.pillar_content_item_id IS NULL
+        AND ci.source_production_item_id IS NOT NULL
+      RETURNING pi.id
+    `;
+    if (pillar.length > 0) {
+      console.log(`🔧 Stamped pillar_content_item_id on ${pillar.length} clip production_items`);
+    }
+  }
+
+  // (a) Channel wiring — needs per-brand Instagram account lookup.
   const rows = await sql`
     SELECT id, brand
     FROM production_items

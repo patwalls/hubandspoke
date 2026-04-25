@@ -178,7 +178,7 @@ export function ClipTriageDialog({
   );
 
   const runCreateInDescript = useCallback(
-    async (path: "agent" | "precise") => {
+    async (path: "agent" | "precise" | "full") => {
       if (!idea) return;
       setSaving(true);
       setError(null);
@@ -186,7 +186,9 @@ export function ClipTriageDialog({
         const url =
           path === "agent"
             ? `/api/clip-ideas/${idea.id}/create-in-descript`
-            : `/api/clip-ideas/${idea.id}/create-in-descript-precise`;
+            : path === "precise"
+              ? `/api/clip-ideas/${idea.id}/create-in-descript-precise`
+              : `/api/clip-ideas/${idea.id}/create-in-descript-full`;
         const res = await fetch(url, { method: "POST" });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -195,18 +197,26 @@ export function ClipTriageDialog({
         }
         const newId: string | undefined = json?.newProductionItemId;
         const brandSlug: string = json?.sourceBrand ?? brand;
-        toast.success(
+        const toastTitle =
           path === "agent"
             ? "Cutting clip in Descript (agent)…"
-            : "Trimming clip locally and uploading to Descript…",
-          {
-            duration: 6000,
-            description:
-              path === "agent"
-                ? "The new composition will appear on this item shortly."
-                : "The new Descript project will appear on this item when the upload finishes.",
-          },
-        );
+            : path === "precise"
+              ? "Trimming clip locally and uploading to Descript…"
+              : json?.mode === "cold"
+                ? "Uploading the full pillar to Descript…"
+                : "Duplicating the pillar composition in Descript…";
+        const toastDesc =
+          path === "agent"
+            ? "The new composition will appear on this item shortly."
+            : path === "precise"
+              ? "The new Descript project will appear on this item when the upload finishes."
+              : json?.mode === "cold"
+                ? "First clip from this pillar — uploading once. Future clips will be instant."
+                : "The new composition will appear on this item shortly.";
+        toast.success(toastTitle, {
+          duration: 6000,
+          description: toastDesc,
+        });
         onDone();
         onOpenChange(false);
         if (newId) {
@@ -312,7 +322,7 @@ export function ClipTriageDialog({
                 {error && <p className="text-xs text-red-600">{error}</p>}
               </div>
 
-              <div className="md:sticky md:top-0 self-start">
+              <div className="self-center">
                 <ShortsPreview
                   hook={hookDraft || idea.hook}
                   startSec={idea.startSec}
@@ -346,6 +356,19 @@ export function ClipTriageDialog({
                       <ChevronDownIcon className="size-3.5 ml-1" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-80">
+                      <DropdownMenuItem
+                        onClick={() => void runCreateInDescript("full")}
+                        className="flex flex-col items-start gap-0.5 py-2"
+                      >
+                        <span className="font-medium">
+                          Full video in Descript
+                        </span>
+                        <span className="text-[11px] text-muted-foreground leading-snug">
+                          Reuses the pillar&apos;s Descript project (uploads
+                          once) and duplicates the composition. Editor trims
+                          manually — no LLM cut.
+                        </span>
+                      </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => void runCreateInDescript("agent")}
                         className="flex flex-col items-start gap-0.5 py-2"
