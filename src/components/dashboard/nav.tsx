@@ -237,7 +237,7 @@ export function DashboardNav({
                       aria-disabled="true"
                       className="flex items-center gap-1.5 px-2 py-1 rounded-md text-sm text-muted-foreground/60 cursor-not-allowed select-none shrink-0"
                     >
-                      <span className="grayscale opacity-60">
+                      <span className="inline-flex items-center leading-none grayscale opacity-60">
                         <BrandAvatar brand={brand} />
                       </span>
                       <span className="hidden md:inline">{brand.label}</span>
@@ -260,7 +260,12 @@ export function DashboardNav({
                   >
                     <span
                       className={cn(
-                        "transition-transform group-hover:scale-110",
+                        // inline-flex + leading-none so the wrapper sizes to
+                        // the 20px avatar instead of generating a 25px line
+                        // box (the inline-block <img> child otherwise inflates
+                        // the parent button from 28→33px and breaks vertical
+                        // alignment with the icon-only "All" pill).
+                        "inline-flex items-center leading-none transition-transform group-hover:scale-110",
                         isActive ? "" : "opacity-90 group-hover:opacity-100"
                       )}
                     >
