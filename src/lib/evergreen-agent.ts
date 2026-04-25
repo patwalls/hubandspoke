@@ -68,7 +68,7 @@ You must call exactly one tool — never respond with plain text. Default to \`m
 
 export interface PastKillReason {
   reason: string;
-  platform?: string | null;
+  postType?: string | null;
 }
 
 function buildSystemPrompt(pastKills: PastKillReason[] | undefined): string {
@@ -77,8 +77,8 @@ function buildSystemPrompt(pastKills: PastKillReason[] | undefined): string {
     .filter((k) => typeof k.reason === "string" && k.reason.trim().length > 0)
     .slice(0, 10)
     .map((k) => {
-      const plat = k.platform ? ` [${k.platform}]` : "";
-      return `  - ${k.reason.trim()}${plat}`;
+      const tag = k.postType ? ` [${k.postType}]` : "";
+      return `  - ${k.reason.trim()}${tag}`;
     });
   if (lines.length === 0) return BASE_SYSTEM_PROMPT;
   return `${BASE_SYSTEM_PROMPT}
@@ -89,7 +89,7 @@ ${lines.join("\n")}`;
 
 export async function classifyEvergreen(params: {
   title: string;
-  platform: string[] | null;
+  postType: string | null;
   publishedDate: string | null;
   format?: string | null;
   contentBody?: string | null;
@@ -108,7 +108,7 @@ export async function classifyEvergreen(params: {
   const userMessage = [
     `Title: "${params.title}"`,
     `Format: ${params.format ?? "(none)"}`,
-    `Channels: ${params.platform?.join(", ") || "(none)"}`,
+    `Post type: ${params.postType ?? "(none)"}`,
     `Originally published: ${params.publishedDate ?? "(unknown)"}`,
     `Archived media available: ${params.hasArchivedMedia ? "yes" : "no"}`,
     ``,

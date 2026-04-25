@@ -88,11 +88,6 @@ interface FormatRow {
   id: string;
   name: string;
   brand: string;
-  // Legacy mirror — kept in sync server-side from format_channels so
-  // unmigrated consumers (recently-visited subtitle, formats list page) keep
-  // rendering correct strings. The editor + tables here use
-  // `accountChannels` instead.
-  channels: string[];
   accountChannels: AccountChannelWithAccount[];
   viewThreshold: number | null;
   editor: string | null;
@@ -661,7 +656,10 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
       kind: "format",
       id: formatId,
       title: f.name,
-      subtitle: f.channels?.join(" · ") || undefined,
+      subtitle:
+        (f.accountChannels ?? [])
+          .map((c) => `@${c.account.handle}`)
+          .join(" · ") || undefined,
       brand,
       href: `/${brand}/formats/${formatId}`,
     });

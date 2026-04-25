@@ -63,6 +63,7 @@ export function ContentView({ brand }: ContentViewProps) {
             displayName: string | null;
             avatarUrl: string | null;
             isActive: boolean;
+            syncedFromNotion: boolean;
           }>;
         };
         // Scope the Account filter dropdown to the brand we're viewing —

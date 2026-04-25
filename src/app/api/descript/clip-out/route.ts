@@ -7,6 +7,7 @@ import { invokeDescriptAgent } from "@/lib/descript";
 import { dispatchRepurpose, type RepurposeAction } from "@/lib/repurpose-agent";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { getChannelsForFormats } from "@/lib/format-channels";
 import { enqueue } from "@/jobs/enqueue";
 
 export async function POST(request: NextRequest) {
@@ -83,18 +84,16 @@ export async function POST(request: NextRequest) {
     };
   }
 
-  const channel = Array.isArray(target.channels) ? target.channels[0] : undefined;
+  const targetChannels = await getChannelsForFormats([target.id]);
+  const firstChannel = targetChannels.get(target.id)?.[0] ?? null;
+  const derivativeAccountId = firstChannel?.accountId ?? null;
+  const derivativePostType = firstChannel?.postType ?? null;
 
   const derivativeAssignees = await resolveAssignees({
     brand: item.brand,
     sourceItemId: item.id,
     format: target.name,
   });
-
-  // Derivatives born here are Hub & Spoke-native — no Notion page is created.
-  // The Notion sync's pull filter would skip non-authoritative platforms
-  // anyway, so there's no value in round-tripping through a Notion task page.
-  const platform = channel ? [channel] : null;
 
   if (action.kind === "descript_clip") {
     try {
@@ -110,7 +109,8 @@ export async function POST(request: NextRequest) {
           .values({
             brand: item.brand,
             title: action.compositionName,
-            platform,
+            accountId: derivativeAccountId,
+            postType: derivativePostType,
             format: target.name,
             status: "Idea",
             pillarContentNotionId: item.notionId,
@@ -169,7 +169,8 @@ export async function POST(request: NextRequest) {
       .values({
         brand: item.brand,
         title: action.taskName,
-        platform,
+        accountId: derivativeAccountId,
+        postType: derivativePostType,
         format: target.name,
         status: "Idea",
         pillarContentNotionId: item.notionId,

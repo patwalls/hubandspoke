@@ -60,13 +60,14 @@ import { EnrichmentButton, type EnrichmentMedia } from "./enrichment-dialog";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
 import { cn } from "@/lib/utils";
-import { platformClass, statusClass } from "@/lib/badge-colors";
+import { statusClass } from "@/lib/badge-colors";
 import {
   AccountPostTypePicker,
   type PickerAccount,
 } from "@/components/ui/account-post-type-picker";
 import { AccountBadge } from "@/components/ui/account-badge";
 import type { PostType } from "@/lib/platform-field-schemas";
+import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
 import {
   ContentDraftPanel,
@@ -756,11 +757,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
 
   // Form state
   const [title, setTitle] = useState("");
-  const [platforms, setPlatforms] = useState<string[]>([]);
-  // Account + post_type are the new authoritative fields for "which
-  // channel". `platforms` stays around until the finalize migration drops
-  // the legacy jsonb column — we keep writing it from here so downstream
-  // readers that still inspect platform[] get consistent data.
   const [accountId, setAccountId] = useState<string | null>(null);
   const [postType, setPostType] = useState<PostType | null>(null);
   const [format, setFormat] = useState("");
@@ -787,7 +783,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
   const [actionPending, setActionPending] = useState(false);
 
   const handleCrossPost = useCallback(
-    async (targetPlatform: string) => {
+    async (target: {
+      accountId: string;
+      postType: string | null;
+      label: string;
+    }) => {
       if (actionPending) return;
       setActionPending(true);
       try {
@@ -796,20 +796,23 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ targetPlatform }),
+            body: JSON.stringify({
+              targetAccountId: target.accountId,
+              targetPostType: target.postType,
+            }),
           },
         );
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
           if (res.status === 409 && json?.existingId) {
-            toast.info(`Already cross-posted to ${targetPlatform} — opening it.`);
+            toast.info(`Already cross-posted to ${target.label} — opening it.`);
             router.push(`/${brand}/content/${json.existingId}`);
             return;
           }
           toast.error(json?.error || "Failed to create cross-post");
           return;
         }
-        toast.success(`Cross-post idea created for ${targetPlatform}`);
+        toast.success(`Cross-post idea created for ${target.label}`);
         router.push(`/${brand}/content/${json.id}`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to create cross-post");
@@ -879,22 +882,32 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
     };
   }, []);
 
-  // Derive platform-string options from the legacy platform[] array so the
-  // cross-post suggestion UI + any other legacy readers keep working during
-  // the account rollout. Pulled from seen-in-data rather than the deleted
-  // config file; duplicates are fine because the consumer dedupes.
-  const platformOptions = useMemo(() => {
-    const seen = new Set<string>();
-    for (const a of accounts) {
-      if (a.brandSlug !== brand) continue;
-      seen.add(`${a.platform}:${a.handle}`);
-    }
-    return Array.from(seen);
-  }, [accounts, brand]);
+  // Cross-post target candidates: every active account on this brand, except
+  // the source's own account and any Notion-authoritative account (long-form
+  // YouTube). The submenu in the Actions dropdown filters out targets the
+  // source has already been cross-posted to.
+  const crossPostCandidates = useMemo(() => {
+    return accounts
+      .filter(
+        (a) =>
+          a.brandSlug === brand &&
+          a.isActive &&
+          !a.syncedFromNotion &&
+          a.id !== data?.item.accountId,
+      )
+      .map((a) => {
+        const postType = PLATFORM_META[toPlatform(a.platform)].defaultPostType;
+        return {
+          accountId: a.id,
+          postType: postType ?? null,
+          label: `@${a.handle}`,
+          account: a,
+        };
+      });
+  }, [accounts, brand, data?.item.accountId]);
 
   const applyItem = useCallback((item: ProductionItem, pillarRef: PillarRef | null) => {
     setTitle(item.title || "");
-    setPlatforms(item.platform || []);
     setAccountId(item.accountId ?? null);
     setPostType((item.postType as PostType | null) ?? null);
     setFormat(item.format || "");
@@ -1362,22 +1375,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
                 Cross-post
               </Badge>
             )}
-            {item.account ? (
-              <AccountBadge
-                account={item.account}
-                postType={item.postType}
-              />
-            ) : (
-              (item.platform || []).map((p) => (
-                <Badge
-                  key={p}
-                  variant="secondary"
-                  className={cn("border", platformClass(p))}
-                >
-                  {p}
-                </Badge>
-              ))
-            )}
+            <AccountBadge
+              account={item.account}
+              postType={item.postType}
+            />
+
             {item.format && (
               <span className="text-xs text-muted-foreground">
                 · {item.format}
@@ -1679,12 +1681,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
             hasTranscript={data.transcript != null}
           />
           {(() => {
-            const currentPlatforms = new Set(item.platform ?? []);
-            const alreadyCrossPostedPlatforms = new Set(
-              (data.crossPosts ?? []).flatMap((cp) => cp.platform ?? []),
-            );
-            const crossPostTargets = platformOptions.filter(
-              (p) => !currentPlatforms.has(p),
+            const alreadyCrossPostedAccountIds = new Set(
+              (data.crossPosts ?? [])
+                .map((cp) => cp.account?.id)
+                .filter((id): id is string => !!id),
             );
             const isSyncing = syncState.kind === "syncing";
             return (
@@ -1702,21 +1702,26 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
                       <Share2Icon className="size-3.5" /> Cross-post to…
                     </DropdownMenuSubTrigger>
                     <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
-                      {crossPostTargets.length === 0 ? (
+                      {crossPostCandidates.length === 0 ? (
                         <DropdownMenuItem disabled>
-                          No eligible platforms
+                          No eligible accounts
                         </DropdownMenuItem>
                       ) : (
-                        crossPostTargets.map((p) => {
-                          const alreadyDone =
-                            alreadyCrossPostedPlatforms.has(p);
+                        crossPostCandidates.map((c) => {
+                          const alreadyDone = alreadyCrossPostedAccountIds.has(
+                            c.accountId,
+                          );
                           return (
                             <DropdownMenuItem
-                              key={p}
+                              key={c.accountId}
                               disabled={alreadyDone || actionPending}
-                              onClick={() => void handleCrossPost(p)}
+                              onClick={() => void handleCrossPost(c)}
                             >
-                              {p}
+                              <AccountBadge
+                                account={c.account}
+                                postType={c.postType}
+                                variant="compact"
+                              />
                               {alreadyDone && (
                                 <span className="ml-auto text-[10px] text-muted-foreground">
                                   done
@@ -2716,25 +2721,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-1">
-                          {d.account ? (
-                            <AccountBadge
-                              account={d.account}
-                              postType={d.postType}
-                              variant="compact"
-                            />
-                          ) : (
-                            d.platform?.map((p) => (
-                              <span
-                                key={p}
-                                className={cn(
-                                  "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                                  platformClass(p)
-                                )}
-                              >
-                                {p}
-                              </span>
-                            ))
-                          )}
+                          <AccountBadge
+                            account={d.account}
+                            postType={d.postType}
+                            variant="compact"
+                          />
                         </div>
                       </td>
                       <td className="px-3 py-2 text-sm text-muted-foreground">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, desc, eq, ilike, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { accounts, formats, productionItems } from "@/lib/db/schema";
+import { accounts, formatChannels, formats, productionItems } from "@/lib/db/schema";
 
 const CONTENT_LIMIT = 12;
 const FORMAT_LIMIT = 8;
@@ -27,7 +27,6 @@ export async function GET(request: NextRequest) {
         id: productionItems.id,
         title: productionItems.title,
         format: productionItems.format,
-        platform: productionItems.platform,
         postType: productionItems.postType,
         status: productionItems.status,
         publishedDate: productionItems.publishedDate,
@@ -35,6 +34,7 @@ export async function GET(request: NextRequest) {
         accountId: accounts.id,
         accountPlatform: accounts.platform,
         accountHandle: accounts.handle,
+        accountDisplayName: accounts.displayName,
       })
       .from(productionItems)
       .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
@@ -57,7 +57,6 @@ export async function GET(request: NextRequest) {
       .select({
         id: formats.id,
         name: formats.name,
-        channels: formats.channels,
       })
       .from(formats)
       .where(and(eq(formats.brand, brand), ilike(formats.name, pattern)))
@@ -65,13 +64,56 @@ export async function GET(request: NextRequest) {
       .limit(FORMAT_LIMIT),
   ]);
 
+  // Pull format channels for the matched formats so the UI can render
+  // AccountBadge pills next to each format hit.
+  const formatIds = formatRows.map((f) => f.id);
+  const formatChannelRows = formatIds.length
+    ? await db
+        .select({
+          formatId: formatChannels.formatId,
+          postType: formatChannels.postType,
+          accountId: accounts.id,
+          accountPlatform: accounts.platform,
+          accountHandle: accounts.handle,
+          accountDisplayName: accounts.displayName,
+        })
+        .from(formatChannels)
+        .innerJoin(accounts, eq(accounts.id, formatChannels.accountId))
+        .where(inArray(formatChannels.formatId, formatIds))
+    : [];
+
+  const channelsByFormatId = new Map<
+    string,
+    Array<{
+      postType: string | null;
+      account: {
+        id: string;
+        platform: string;
+        handle: string;
+        displayName: string | null;
+      };
+    }>
+  >();
+  for (const row of formatChannelRows) {
+    const list = channelsByFormatId.get(row.formatId) ?? [];
+    list.push({
+      postType: row.postType,
+      account: {
+        id: row.accountId,
+        platform: row.accountPlatform,
+        handle: row.accountHandle,
+        displayName: row.accountDisplayName,
+      },
+    });
+    channelsByFormatId.set(row.formatId, list);
+  }
+
   // Flatten the joined `account` fields into a nested object so the UI can
   // pass it directly to <AccountBadge>.
   const content = contentRows.map((r) => ({
     id: r.id,
     title: r.title,
     format: r.format,
-    platform: r.platform as string[] | null,
     postType: r.postType,
     status: r.status,
     publishedDate: r.publishedDate,
@@ -81,10 +123,16 @@ export async function GET(request: NextRequest) {
           id: r.accountId,
           platform: r.accountPlatform,
           handle: r.accountHandle,
-          displayName: null,
+          displayName: r.accountDisplayName,
         }
       : null,
   }));
 
-  return NextResponse.json({ content, formats: formatRows });
+  const formatsOut = formatRows.map((f) => ({
+    id: f.id,
+    name: f.name,
+    channels: channelsByFormatId.get(f.id) ?? [],
+  }));
+
+  return NextResponse.json({ content, formats: formatsOut });
 }

@@ -47,6 +47,8 @@ export async function POST(_request: Request, context: RouteContext) {
       title: source.title,
       thumbnail: source.thumbnail,
       status: "Idea",
+      accountId: source.accountId,
+      postType: source.postType,
       platform: source.platform,
       sourceType: "repost",
       repostedFromItemId: source.id,

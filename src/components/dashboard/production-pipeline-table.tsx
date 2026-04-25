@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { platformClass } from "@/lib/badge-colors";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { SourceBadge } from "@/components/ui/source-badge";
 import type { ProductionItem } from "@/types";
@@ -187,7 +186,9 @@ export function ProductionPipelineTable({
             null
           );
         case "channel":
-          return item.platform?.[0]?.toLowerCase() ?? null;
+          return item.account
+            ? `${item.account.platform}:${item.account.handle.toLowerCase()}`
+            : null;
         case "content":
           return item.title?.toLowerCase() ?? null;
         case "format":
@@ -302,26 +303,11 @@ export function ProductionPipelineTable({
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1 min-w-0">
-                      {item.account ? (
-                        <AccountBadge
-                          account={item.account}
-                          postType={item.postType}
-                          variant="avatar"
-                        />
-                      ) : (
-                        item.platform?.map((p) => (
-                          <span
-                            key={p}
-                            className={cn(
-                              "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border max-w-full truncate",
-                              platformClass(p)
-                            )}
-                            title={p}
-                          >
-                            {p}
-                          </span>
-                        ))
-                      )}
+                      <AccountBadge
+                        account={item.account}
+                        postType={item.postType}
+                        variant="avatar"
+                      />
                     </div>
                   </td>
                   <td className="px-3 py-2 w-[40%]">

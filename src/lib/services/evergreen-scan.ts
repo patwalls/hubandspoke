@@ -1,46 +1,47 @@
 import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { contentEvents, productionItems } from "@/lib/db/schema";
+import { accounts, contentEvents, productionItems } from "@/lib/db/schema";
 import {
   classifyEvergreen,
   type PastKillReason,
 } from "@/lib/evergreen-agent";
 import { resolveAssignees } from "@/lib/services/assignees";
-import { isNotionAuthoritative } from "@/lib/platform";
+import { isNotionAuthoritativeAccount } from "@/lib/platform";
+import type { PostType } from "@/lib/platform-field-schemas";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 // Tunables. Keep at module top so the first operator to look at this file can
 // see every knob in one place.
 const MIN_VIEWS = 10_000;
-const MIN_REPOST_SPACING_DAYS = 30; // don't re-suggest the same (item, channel) pair within 30d
+const MIN_REPOST_SPACING_DAYS = 30; // don't re-suggest the same item within 30d
 const PENDING_QUEUE_TARGET = 10; // keep the Idea queue topped up to ~10 repost suggestions
 const CANDIDATE_POOL_SIZE = 80; // how many evergreen candidates to pull per run before picking suggestions
 const MAX_PER_PLATFORM = Math.ceil(PENDING_QUEUE_TARGET * 0.4); // diversity cap
 const RECLASSIFY_BATCH = 5; // re-examine items that were classified false before their body was captured
 const KILL_REASON_HISTORY = 10; // negative exemplars fed to the classifier prompt
 
-// Per-platform classification quotas. Each bucket has its own age gate because
-// shelf-life differs dramatically by platform. Twitter keeps the 365-day gate
-// (same audience scrolls the feed regularly, so reposts need real distance).
-// Instagram's algorithm redistributes to different viewers every time, so a
-// 90-day-old evergreen Reel is essentially new content. LinkedIn and Threads
-// fall between. Without per-platform gates, IG is blocked entirely because
-// no IG item in the DB is >1y old.
+// Per-post-type classification quotas. Each bucket has its own age gate because
+// shelf-life differs dramatically by platform. X keeps the 365-day gate (same
+// audience scrolls the feed regularly, so reposts need real distance). IG's
+// algorithm redistributes to different viewers every time, so a 90-day-old
+// evergreen Reel is essentially new content. LinkedIn and Threads fall between.
+// Without per-platform gates, IG is blocked entirely because no IG item in the
+// DB is >1y old.
 const CLASSIFY_QUOTAS: Array<{
   bucket: string;
-  channels: string[];
+  postTypes: PostType[];
   limit: number;
   minAgeDays: number;
 }> = [
-  { bucket: "twitter", channels: ["Twitter", "Twitter (Pat Walls)"], limit: 8, minAgeDays: 365 },
-  { bucket: "instagram", channels: ["Instagram Reel", "Instagram Post"], limit: 6, minAgeDays: 90 },
-  { bucket: "linkedin", channels: ["LinkedIn"], limit: 2, minAgeDays: 180 },
-  { bucket: "threads", channels: ["Threads"], limit: 2, minAgeDays: 180 },
-  { bucket: "youtube", channels: ["YouTube Community", "YouTube Shorts"], limit: 2, minAgeDays: 180 },
+  { bucket: "x", postTypes: ["x"], limit: 8, minAgeDays: 365 },
+  { bucket: "instagram", postTypes: ["instagram_reel", "instagram_post"], limit: 6, minAgeDays: 90 },
+  { bucket: "linkedin", postTypes: ["linkedin"], limit: 2, minAgeDays: 180 },
+  { bucket: "threads", postTypes: ["threads"], limit: 2, minAgeDays: 180 },
+  { bucket: "youtube", postTypes: ["youtube_community", "youtube_shorts"], limit: 2, minAgeDays: 180 },
 ];
 
-function isInstagramChannel(channel: string): boolean {
-  return channel.startsWith("Instagram");
+function isInstagramPostType(postType: string | null | undefined): boolean {
+  return !!postType && postType.startsWith("instagram_");
 }
 
 export interface EvergreenScanResult {
@@ -52,7 +53,8 @@ export interface EvergreenScanResult {
   suggestionsDetails: Array<{
     originalId: string;
     newItemId: string;
-    channel: string;
+    accountId: string;
+    postType: string;
     title: string;
   }>;
 }
@@ -61,15 +63,15 @@ export interface EvergreenScanResult {
  * Daily scan. Two phases:
  *   A. Classify a stratified batch of aged, high-view ORIGINAL items — per-platform
  *      quotas so low-volume channels (IG, LinkedIn) get evaluated instead of being
- *      starved by Twitter. Also re-classifies a small pool of items that were
- *      marked not-evergreen before their caption/media was captured.
+ *      starved by X. Also re-classifies a small pool of items that were marked
+ *      not-evergreen before their caption/media was captured.
  *   B. Refill the Idea queue with repost suggestions, applying a per-platform
- *      diversity cap and a permanent hard-suppression for any (item, channel)
- *      whose past repost was killed.
+ *      diversity cap and a permanent hard-suppression for any original whose
+ *      past repost was killed.
  *
  * Safe to re-run: Phase A only touches rows it hasn't seen (or that have
- * fresher body data), and Phase B skips any (item, channel) pair with a recent
- * or killed repost.
+ * fresher body data), and Phase B skips originals with a recent or killed
+ * repost.
  */
 export async function runEvergreenScan(): Promise<EvergreenScanResult> {
   const result: EvergreenScanResult = {
@@ -84,13 +86,13 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
   // Fetch once: recent kill reasons fed to the classifier as negative exemplars.
   const pastKillReasons = await fetchPastKillReasons();
 
-  // ─── Phase A: classify (stratified by platform, per-platform age gate) ──
+  // ─── Phase A: classify (stratified by post-type, per-platform age gate) ──
   for (const quota of CLASSIFY_QUOTAS) {
     const candidates = await db
       .select({
         id: productionItems.id,
         title: productionItems.title,
-        platform: productionItems.platform,
+        postType: productionItems.postType,
         publishedDate: productionItems.publishedDate,
         format: productionItems.format,
         contentBody: productionItems.contentBody,
@@ -107,10 +109,7 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
             productionItems.publishedDate,
             sql`(now() - interval '${sql.raw(String(quota.minAgeDays))} days')::date`
           ),
-          sql`${productionItems.platform} ?| array[${sql.join(
-            quota.channels.map((c) => sql`${c}`),
-            sql`, `
-          )}]::text[]`
+          inArray(productionItems.postType, quota.postTypes)
         )
       )
       .orderBy(desc(productionItems.views))
@@ -126,7 +125,7 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
     .select({
       id: productionItems.id,
       title: productionItems.title,
-      platform: productionItems.platform,
+      postType: productionItems.postType,
       publishedDate: productionItems.publishedDate,
       format: productionItems.format,
       contentBody: productionItems.contentBody,
@@ -155,8 +154,12 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
 
   // ─── Phase B: refill suggestion queue ────────────────────────────────
   const pending = await db
-    .select({ platform: productionItems.platform })
+    .select({
+      postType: productionItems.postType,
+      accountPlatform: accounts.platform,
+    })
     .from(productionItems)
+    .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
     .where(
       and(
         eq(productionItems.sourceType, "repost"),
@@ -168,21 +171,23 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
   const slots = Math.max(0, PENDING_QUEUE_TARGET - pendingCount);
   if (slots === 0) return result;
 
-  // Running per-channel counts, seeded from what's already pending.
-  const perChannelCount = new Map<string, number>();
+  // Running per-platform counts, seeded from what's already pending. Keyed by
+  // account.platform (e.g. "instagram") rather than per-post-type so a Reel
+  // and a Post both count toward the same diversity budget.
+  const perPlatformCount = new Map<string, number>();
   for (const p of pending) {
-    for (const ch of (p.platform ?? []) as string[]) {
-      perChannelCount.set(ch, (perChannelCount.get(ch) ?? 0) + 1);
-    }
+    const key = p.accountPlatform ?? "unknown";
+    perPlatformCount.set(key, (perPlatformCount.get(key) ?? 0) + 1);
   }
 
-  // Pool of evergreen originals ordered by views DESC. Fetching more than we
-  // need because many will be filtered out by the recency/kill/media guards.
+  // Pool of evergreen originals ordered by views DESC. Joined to accounts so
+  // we can read platform/syncedFromNotion without a second round-trip.
   const pool = await db
     .select({
       id: productionItems.id,
       title: productionItems.title,
-      platform: productionItems.platform,
+      accountId: productionItems.accountId,
+      postType: productionItems.postType,
       format: productionItems.format,
       brand: productionItems.brand,
       thumbnail: productionItems.thumbnail,
@@ -191,8 +196,11 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
       evergreenReasoning: productionItems.evergreenReasoning,
       contentBody: productionItems.contentBody,
       contentMediaUrl: productionItems.contentMediaUrl,
+      accountPlatform: accounts.platform,
+      accountSyncedFromNotion: accounts.syncedFromNotion,
     })
     .from(productionItems)
+    .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
     .where(
       and(
         eq(productionItems.sourceType, "original"),
@@ -212,7 +220,6 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
   const history = await db
     .select({
       repostedFromItemId: productionItems.repostedFromItemId,
-      platform: productionItems.platform,
       status: productionItems.status,
       createdAt: productionItems.createdAt,
     })
@@ -230,38 +237,39 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
         )
       )
     );
-  const blockedKey = new Set<string>();
+  const blockedOriginals = new Set<string>();
   for (const r of history) {
-    if (!r.repostedFromItemId) continue;
-    for (const ch of (r.platform ?? []) as string[]) {
-      blockedKey.add(`${r.repostedFromItemId}::${ch}`);
-    }
+    if (r.repostedFromItemId) blockedOriginals.add(r.repostedFromItemId);
   }
 
   for (const original of pool) {
     if (result.suggestionsCreated >= slots) break;
-    const channels = ((original.platform ?? []) as string[]).filter(
-      (ch) => !isNotionAuthoritative([ch])
-    );
-    if (channels.length === 0) continue;
+    // Skip Notion-authoritative originals (long-form YouTube) — those are
+    // tracked in Notion and the repost UX for them differs.
+    if (
+      isNotionAuthoritativeAccount({
+        syncedFromNotion: original.accountSyncedFromNotion,
+      })
+    ) {
+      continue;
+    }
+    // Skip originals missing the new accountId/postType — they need backfilling
+    // (see scripts/backfill-accounts.mjs) before they're repost-eligible.
+    if (!original.accountId || !original.postType) continue;
+    if (blockedOriginals.has(original.id)) continue;
 
-    // Pick the first channel that passes every guard: not a recent/killed
-    // (original, channel) pair, and not over the per-platform diversity cap.
-    const channel = channels.find((ch) => {
-      if (blockedKey.has(`${original.id}::${ch}`)) return false;
-      if ((perChannelCount.get(ch) ?? 0) >= MAX_PER_PLATFORM) return false;
-      // IG reposts need something to grab — caption or archived media. If the
-      // original has neither, skip (the operator can't do anything with it).
-      if (
-        isInstagramChannel(ch) &&
-        !original.contentBody?.trim() &&
-        !original.contentMediaUrl?.trim()
-      ) {
-        return false;
-      }
-      return true;
-    });
-    if (!channel) continue;
+    const platformKey = original.accountPlatform ?? "unknown";
+    if ((perPlatformCount.get(platformKey) ?? 0) >= MAX_PER_PLATFORM) continue;
+
+    // IG reposts need something to grab — caption or archived media. If the
+    // original has neither, skip (the operator can't do anything with it).
+    if (
+      isInstagramPostType(original.postType) &&
+      !original.contentBody?.trim() &&
+      !original.contentMediaUrl?.trim()
+    ) {
+      continue;
+    }
 
     const assignees = await resolveAssignees({
       brand: original.brand,
@@ -275,7 +283,8 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
         brand: original.brand,
         title: original.title,
         status: "Idea",
-        platform: [channel],
+        accountId: original.accountId,
+        postType: original.postType,
         format: original.format,
         thumbnail: original.thumbnail,
         sourceType: "repost",
@@ -287,15 +296,14 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
       })
       .returning({ id: productionItems.id });
 
-    // Block this (original, channel) for the rest of the run and bump the
-    // per-channel count toward the diversity cap.
-    blockedKey.add(`${original.id}::${channel}`);
-    perChannelCount.set(channel, (perChannelCount.get(channel) ?? 0) + 1);
+    blockedOriginals.add(original.id);
+    perPlatformCount.set(platformKey, (perPlatformCount.get(platformKey) ?? 0) + 1);
     result.suggestionsCreated++;
     result.suggestionsDetails.push({
       originalId: original.id,
       newItemId: inserted.id,
-      channel,
+      accountId: original.accountId,
+      postType: original.postType,
       title: original.title ?? "(untitled)",
     });
   }
@@ -307,7 +315,7 @@ async function classifyAndPersist(
   c: {
     id: string;
     title: string | null;
-    platform: string[] | null;
+    postType: string | null;
     publishedDate: string | null;
     format: string | null;
     contentBody: string | null;
@@ -318,31 +326,11 @@ async function classifyAndPersist(
   isReclassify: boolean
 ): Promise<void> {
   if (!c.title) return;
-  // Skip items whose only channels are Notion-authoritative long-form —
-  // those are tracked separately and repost UX for them differs.
-  const platform = (c.platform ?? []) as string[];
-  if (
-    isNotionAuthoritative(platform) &&
-    platform.every((p) => isNotionAuthoritative([p]))
-  ) {
-    await db
-      .update(productionItems)
-      .set({
-        isEvergreen: false,
-        evergreenEvaluatedAt: new Date(),
-        evergreenReasoning:
-          "Skipped: long-form Notion-authoritative content; not a repost candidate.",
-      })
-      .where(eq(productionItems.id, c.id));
-    result.classified++;
-    result.markedNotEvergreen++;
-    return;
-  }
 
   try {
     const verdict = await classifyEvergreen({
       title: c.title,
-      platform,
+      postType: c.postType,
       publishedDate: c.publishedDate,
       format: c.format,
       contentBody: c.contentBody,
@@ -372,11 +360,11 @@ async function classifyAndPersist(
 
 async function fetchPastKillReasons(): Promise<PastKillReason[]> {
   // Join against production_items so we can tag the reason with the killed
-  // item's channel — gives the classifier a little more signal per exemplar.
+  // item's post-type — gives the classifier a little more signal per exemplar.
   const rows = await db
     .select({
       reason: sql<string>`${contentEvents.payload}->>'reason'`,
-      platform: productionItems.platform,
+      postType: productionItems.postType,
     })
     .from(contentEvents)
     .innerJoin(
@@ -396,6 +384,6 @@ async function fetchPastKillReasons(): Promise<PastKillReason[]> {
 
   return rows.map((r) => ({
     reason: r.reason,
-    platform: ((r.platform ?? []) as string[])[0] ?? null,
+    postType: r.postType,
   }));
 }

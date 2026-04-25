@@ -36,7 +36,6 @@ import {
 } from "@/components/ui/command";
 import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
-import { platformClass } from "@/lib/badge-colors";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
 import { AccountBadge } from "@/components/ui/account-badge";
@@ -766,26 +765,12 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-1">
-                    {item.account ? (
-                      <AccountBadge
-                        account={item.account}
-                        postType={item.postType}
-                        variant="avatar"
-                        avatarSize={28}
-                      />
-                    ) : (
-                      item.platform?.map((p) => (
-                        <span
-                          key={p}
-                          className={cn(
-                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                            platformClass(p)
-                          )}
-                        >
-                          {p}
-                        </span>
-                      ))
-                    )}
+                    <AccountBadge
+                      account={item.account}
+                      postType={item.postType}
+                      variant="avatar"
+                      avatarSize={28}
+                    />
                   </div>
                 </td>
                 <td className="px-3 py-2 text-sm text-muted-foreground">{item.format || "-"}</td>

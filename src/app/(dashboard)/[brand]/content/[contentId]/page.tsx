@@ -46,6 +46,7 @@ export default async function BrandContentDetailPage({
     displayName: a.displayName,
     avatarUrl: a.avatarUrl,
     isActive: a.isActive,
+    syncedFromNotion: a.syncedFromNotion,
   }));
 
   const shortLinksBaseUrl = process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.com";

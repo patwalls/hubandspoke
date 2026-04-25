@@ -32,6 +32,7 @@ export interface PickerAccount extends AccountBadgeAccount {
   brandSlug: string;
   isActive: boolean;
   avatarUrl: string | null;
+  syncedFromNotion: boolean;
 }
 
 interface AccountPostTypePickerProps {

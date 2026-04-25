@@ -166,7 +166,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           title: string | null;
           publishedDate: string | null;
           publishedLink: string | null;
-          platform: string[] | null;
+          postType: string | null;
+          account: {
+            id: string;
+            platform: string;
+            handle: string;
+            displayName: string | null;
+          } | null;
           views: number | null;
           evergreenReasoning: string | null;
         }
@@ -181,17 +187,36 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           title: productionItems.title,
           publishedDate: productionItems.publishedDate,
           publishedLink: productionItems.publishedLink,
-          platform: productionItems.platform,
+          postType: productionItems.postType,
           views: productionItems.views,
           evergreenReasoning: productionItems.evergreenReasoning,
+          accountId: accounts.id,
+          accountPlatform: accounts.platform,
+          accountHandle: accounts.handle,
+          accountDisplayName: accounts.displayName,
         })
         .from(productionItems)
+        .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
         .where(eq(productionItems.id, item.repostedFromItemId))
         .limit(1);
       if (src)
         repostedFrom = {
-          ...src,
-          platform: (src.platform ?? null) as string[] | null,
+          id: src.id,
+          title: src.title,
+          publishedDate: src.publishedDate,
+          publishedLink: src.publishedLink,
+          postType: src.postType,
+          views: src.views,
+          evergreenReasoning: src.evergreenReasoning,
+          account:
+            src.accountId && src.accountPlatform && src.accountHandle
+              ? {
+                  id: src.accountId,
+                  platform: src.accountPlatform,
+                  handle: src.accountHandle,
+                  displayName: src.accountDisplayName,
+                }
+              : null,
         };
     }
 

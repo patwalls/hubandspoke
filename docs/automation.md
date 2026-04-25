@@ -309,6 +309,7 @@ captureVelocitySnapshotTask({ productionItemId, checkpointKey })
 | Item deleted between schedule and fire | Task's `deletedAt` guard skips; no SC call |
 | Item un-published between schedule and fire | Task's `status !== 'Published'` guard skips; no SC call |
 | Job retries past its window (rare) | Task's age-within-window guard rejects; no SC call; no misleading row |
+| `published_at` was rewritten between schedule and fire (e.g. account-content-sync briefly null'd it then a later sweep stamped a fresh value) | Task's stale-publishedAt guard rejects: if the item has been known to our app (`created_at`) for materially longer than the checkpoint's target age (+ 1h grace), it cannot plausibly be at this checkpoint right now. No SC call, no row written. The scheduler applies the same gate up-front to skip enqueueing in the first place. |
 | Two jobs race to write the same (item, cp) | DB unique index rejects the second; task catches `duplicate key` and logs; no crash |
 | Platform returns no view signal (LinkedIn with no likes yet) | Task logs "no-snapshot"; no row written; 1 SC credit spent |
 | Invalid `checkpointKey` in payload | Task throws up-front; graphile-worker marks the job failed; no DB work done |

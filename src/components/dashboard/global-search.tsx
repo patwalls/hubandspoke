@@ -20,7 +20,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { platformClass, statusClass } from "@/lib/badge-colors";
+import { statusClass } from "@/lib/badge-colors";
 import { AccountBadge } from "@/components/ui/account-badge";
 import {
   recordVisit,
@@ -29,27 +29,31 @@ import {
   type RecordVisitInput,
 } from "@/lib/hooks/use-recent-items";
 
+type SearchAccount = {
+  id: string;
+  platform: string;
+  handle: string;
+  displayName: string | null;
+};
+
 type ContentHit = {
   id: string;
   title: string | null;
   format: string | null;
-  platform: string[] | null;
   postType: string | null;
   status: string | null;
   publishedDate: string | null;
   views: number | null;
-  account: {
-    id: string;
-    platform: string;
-    handle: string;
-    displayName: string | null;
-  } | null;
+  account: SearchAccount | null;
 };
 
 type FormatHit = {
   id: string;
   name: string;
-  channels: string[] | null;
+  channels: Array<{
+    postType: string | null;
+    account: SearchAccount;
+  }> | null;
 };
 
 type SearchResponse = {
@@ -234,7 +238,10 @@ export function GlobalSearch({
                             kind: "content",
                             id: hit.id,
                             title,
-                            subtitle: [hit.format, hit.platform?.[0]]
+                            subtitle: [
+                              hit.format,
+                              hit.account ? `@${hit.account.handle}` : null,
+                            ]
                               .filter(Boolean)
                               .join(" · ") || undefined,
                             brand,
@@ -260,7 +267,10 @@ export function GlobalSearch({
                           kind: "format",
                           id: hit.id,
                           title: hit.name,
-                          subtitle: hit.channels?.join(" · ") || undefined,
+                          subtitle:
+                            hit.channels
+                              ?.map((c) => `@${c.account.handle}`)
+                              .join(" · ") || undefined,
                           brand,
                           href: `/${brand}/formats/${hit.id}`,
                         })
@@ -382,7 +392,6 @@ function EmptyStateGroups({
 }
 
 function ContentRow({ hit, title }: { hit: ContentHit; title: string }) {
-  const platforms = hit.platform ?? [];
   const date = formatShortDate(hit.publishedDate);
   const views = formatCompact(hit.views);
   return (
@@ -405,33 +414,12 @@ function ContentRow({ hit, title }: { hit: ContentHit; title: string }) {
               {hit.format}
             </span>
           ) : null}
-          {hit.account ? (
-            <AccountBadge
-              account={hit.account}
-              postType={hit.postType}
-              variant="compact"
-              size={11}
-            />
-          ) : (
-            <>
-              {platforms.slice(0, 2).map((p) => (
-                <span
-                  key={p}
-                  className={cn(
-                    "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none",
-                    platformClass(p),
-                  )}
-                >
-                  {p}
-                </span>
-              ))}
-              {platforms.length > 2 ? (
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  +{platforms.length - 2}
-                </span>
-              ) : null}
-            </>
-          )}
+          <AccountBadge
+            account={hit.account}
+            postType={hit.postType}
+            variant="compact"
+            size={11}
+          />
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-0.5">
@@ -457,12 +445,13 @@ function FormatRow({ hit }: { hit: FormatHit }) {
         {channels.length > 0 ? (
           <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
             {channels.slice(0, 4).map((c) => (
-              <span
-                key={c}
-                className="shrink-0 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
-              >
-                {c}
-              </span>
+              <AccountBadge
+                key={`${c.account.id}:${c.postType ?? ""}`}
+                account={c.account}
+                postType={c.postType}
+                variant="compact"
+                size={11}
+              />
             ))}
             {channels.length > 4 ? (
               <span className="shrink-0 text-[10px] text-muted-foreground">

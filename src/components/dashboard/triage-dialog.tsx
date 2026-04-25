@@ -16,7 +16,6 @@ import { AcceptIdeaDialog } from "./accept-idea-dialog";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
-import { platformClass } from "@/lib/badge-colors";
 import { AccountBadge } from "@/components/ui/account-badge";
 import type { ProductionItem } from "@/types";
 
@@ -38,7 +37,13 @@ interface RepostedFromRef {
   title: string | null;
   publishedDate: string | null;
   publishedLink: string | null;
-  platform: string[] | null;
+  postType: string | null;
+  account: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+  } | null;
   views: number | null;
   evergreenReasoning: string | null;
 }
@@ -304,25 +309,12 @@ export function TriageDialog({
                 Cross-post
               </span>
             )}
-            {item.account ? (
-              <AccountBadge
-                account={item.account}
-                postType={item.postType}
-                variant="compact"
-              />
-            ) : (
-              (item.platform || []).map((p) => (
-                <span
-                  key={p}
-                  className={cn(
-                    "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                    platformClass(p)
-                  )}
-                >
-                  {p}
-                </span>
-              ))
-            )}
+            <AccountBadge
+              account={item.account}
+              postType={item.postType}
+              variant="compact"
+            />
+
             {item.format && !isSourced && (
               <span className="text-xs text-muted-foreground">
                 · {item.format}
@@ -432,14 +424,12 @@ function SourcedBody({
   }
 
   const isCrossPost = kind === "cross_post";
-  const sourceChannel = repostedFrom?.platform?.[0] ?? "";
-  const targetChannel = (item.platform ?? [])[0] ?? "";
+  const sourceAccountLabel = repostedFrom?.account
+    ? `@${repostedFrom.account.handle}`
+    : "";
+  const targetAccountLabel = item.account ? `@${item.account.handle}` : "";
   const isTwitter =
-    sourceChannel === "X" ||
-    sourceChannel === "X (Starter Story)" ||
-    sourceChannel === "X (Pat Walls)" ||
-    sourceChannel === "Twitter" ||
-    sourceChannel === "Twitter (Pat Walls)" ||
+    repostedFrom?.account?.platform === "x" ||
     (repostedFrom?.publishedLink &&
       /^https:\/\/(?:www\.)?(?:twitter|x)\.com\//.test(
         repostedFrom.publishedLink
@@ -460,8 +450,8 @@ function SourcedBody({
             reasoningLabel={reasoningLabel}
             panelStyles={panelStyles}
             signals={crossPostSignals}
-            sourceChannel={sourceChannel}
-            targetChannel={targetChannel}
+            sourceChannel={sourceAccountLabel}
+            targetChannel={targetAccountLabel}
             sourceViews={repostedFrom?.views ?? null}
           />
         )}
@@ -537,7 +527,7 @@ function SourcedBody({
                   saving={saving}
                   onSubmit={onMarkPublished}
                   onCancel={() => setMode("idle")}
-                  defaultChannel={targetChannel || sourceChannel}
+                  defaultChannel={targetAccountLabel || sourceAccountLabel}
                 />
               )}
               {actionError && (

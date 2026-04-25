@@ -47,6 +47,7 @@ const TEST_ACCOUNT_ID = "0a947afe-a088-4aff-81f8-6fb08a4f4f0f"; // x @starter_st
 async function createTestItem(overrides: {
   publishedAt?: Date | null;
   status?: string;
+  createdAt?: Date;
 } = {}): Promise<string> {
   const [row] = await db
     .insert(productionItems)
@@ -61,6 +62,7 @@ async function createTestItem(overrides: {
       publishedAt: overrides.publishedAt ?? new Date(),
       producerUserId: TEST_USER_ID,
       editorUserId: TEST_USER_ID,
+      ...(overrides.createdAt ? { createdAt: overrides.createdAt } : {}),
     })
     .returning({ id: productionItems.id });
   return row.id;
@@ -91,7 +93,11 @@ afterEach(async () => {
 });
 
 async function makeItem(
-  overrides: { publishedAt?: Date | null; status?: string } = {}
+  overrides: {
+    publishedAt?: Date | null;
+    status?: string;
+    createdAt?: Date;
+  } = {}
 ): Promise<string> {
   const id = await createTestItem(overrides);
   CREATED.push(id);
@@ -232,6 +238,55 @@ describe("scheduleVelocitySnapshots", () => {
       (c) => (c[1] as { checkpointKey: string }).checkpointKey
     );
     expect(keys).not.toContain("15m");
+  });
+
+  it("refuses to schedule when item has been known for longer than the largest checkpoint window", async () => {
+    // Item known for 30 days, but publishedAt is "right now" (the bug:
+    // account-content-sync rewrote publishedAt to a fresh value on a
+    // long-known item). Every checkpoint should be rejected by the
+    // stale-publishedAt gate.
+    const longKnown = new Date(Date.now() - 30 * 24 * 60 * 60_000);
+    const id = await makeItem({
+      publishedAt: new Date(),
+      createdAt: longKnown,
+    });
+
+    const result = await scheduleVelocitySnapshots(id, new Date());
+
+    expect(result.scheduled).toBe(0);
+    expect(result.skippedPast).toBe(VELOCITY_CHECKPOINTS.length);
+    expect(mockedEnqueue).not.toHaveBeenCalled();
+  });
+
+  it("schedules late-stage checkpoints when item has been known for several hours", async () => {
+    // Item known for 6 hours (e.g. account-content-sync discovered it
+    // hours after publish). 15m/30m/1h/2h/4h checkpoint ages are within
+    // grace; only 8h/24h/48h would survive the stale-publishedAt gate
+    // when paired with a fresh publishedAt. Net: 8h/24h/48h scheduled,
+    // earlier ones rejected.
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60_000);
+    const id = await makeItem({
+      publishedAt: new Date(),
+      createdAt: sixHoursAgo,
+    });
+
+    const result = await scheduleVelocitySnapshots(id, new Date());
+
+    // 6h known → 360min knownForMs.
+    // 15m: 15 + 60 grace = 75min < 360 → REJECT
+    // 30m: 30 + 60 = 90 < 360 → REJECT
+    // 1h: 60 + 60 = 120 < 360 → REJECT
+    // 2h: 120 + 60 = 180 < 360 → REJECT
+    // 4h: 240 + 60 = 300 < 360 → REJECT
+    // 8h: 480 + 60 = 540 > 360 → ALLOW (window check then applies)
+    // 24h: 1440 + 60 = 1500 > 360 → ALLOW
+    // 48h: 2880 + 60 = 2940 > 360 → ALLOW
+    expect(result.skippedPast).toBe(5);
+    expect(result.scheduled).toBe(3);
+    const keys = mockedEnqueue.mock.calls.map(
+      (c) => (c[1] as { checkpointKey: string }).checkpointKey
+    );
+    expect(new Set(keys)).toEqual(new Set(["8h", "24h", "48h"]));
   });
 
   it("uses per-checkpoint jobKeys so duplicate calls don't stack", async () => {
@@ -407,6 +462,30 @@ describe("captureVelocitySnapshotTask", () => {
     );
 
     expect(mockedRefresh).not.toHaveBeenCalled();
+  });
+
+  it("refuses to write when item has been known longer than the checkpoint age", async () => {
+    // Reproduce the prod bug: item created 30 days ago, but publishedAt
+    // was retroactively stamped to "now" so an in-window check would
+    // pass on a 15m capture. The stale-publishedAt gate must reject.
+    const longKnown = new Date(Date.now() - 30 * 24 * 60 * 60_000);
+    const fakeFreshPublish = new Date(Date.now() - 15 * 60_000);
+    const id = await makeItem({
+      publishedAt: fakeFreshPublish,
+      createdAt: longKnown,
+    });
+
+    await captureVelocitySnapshotTask(
+      { productionItemId: id, checkpointKey: "15m" },
+      fakeHelpers()
+    );
+
+    expect(mockedRefresh).not.toHaveBeenCalled();
+    const rows = await db
+      .select()
+      .from(viewSnapshots)
+      .where(eq(viewSnapshots.productionItemId, id));
+    expect(rows).toHaveLength(0);
   });
 
   it("rejects an invalid checkpointKey payload up front", async () => {

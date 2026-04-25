@@ -36,13 +36,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { UserChip } from "./user-chip";
-import { SS_CHANNELS, MATG_CHANNELS } from "@/lib/config/channels";
-import { ChannelChip } from "@/components/ui/channel-chip";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, channelKey } from "@/lib/channel-options";
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
-import { cn } from "@/lib/utils";
 import { applyStarterTemplate } from "@/lib/format-skill";
 
 interface AsanaMember {
@@ -61,7 +58,6 @@ interface AssignableUser {
 interface FormatRow {
   id: string;
   name: string;
-  channels: string[];
   accountChannels: FormatChannelWithAccount[];
   viewThreshold: number | null;
   editor: string | null;
@@ -76,8 +72,6 @@ interface FormatRow {
 type SortKey = "name" | "viewThreshold" | "totalViews";
 
 export function FormatsPageContent({ brand }: { brand: string }) {
-  const ALL_CHANNELS = brand === "matg" ? MATG_CHANNELS : SS_CHANNELS;
-
   const [formats, setFormats] = useState<FormatRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -90,7 +84,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
 
   const [name, setName] = useState("");
-  const [channels, setChannels] = useState<string[]>([]);
   const [viewThreshold, setViewThreshold] = useState("");
   const [editor, setEditor] = useState("");
   const [editorAsanaGid, setEditorAsanaGid] = useState("");
@@ -147,7 +140,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
 
   function openCreate() {
     setName("");
-    setChannels([]);
     setViewThreshold("");
     setEditor("");
     setEditorAsanaGid("");
@@ -162,7 +154,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     const body = {
       name,
       brand,
-      channels,
       viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
       editor: editor || null,
       editorAsanaGid: editorAsanaGid || null,
@@ -180,12 +171,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
 
     setDialogOpen(false);
     fetchFormats();
-  }
-
-  function toggleChannel(channel: string) {
-    setChannels((prev) =>
-      prev.includes(channel) ? prev.filter((c) => c !== channel) : [...prev, channel]
-    );
   }
 
   function selectEditor(member: AsanaMember) {
@@ -481,29 +466,10 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label>Channels</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {ALL_CHANNELS.map((ch) => {
-                    const selected = channels.includes(ch);
-                    return (
-                      <button
-                        key={ch}
-                        type="button"
-                        onClick={() => toggleChannel(ch)}
-                        className={cn(
-                          "transition-colors cursor-pointer",
-                          selected
-                            ? "ring-2 ring-primary ring-offset-1 rounded-md"
-                            : "opacity-70 hover:opacity-100"
-                        )}
-                      >
-                        <ChannelChip channel={ch} />
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Add channels (account + post-type) on the format detail page after
+                creating.
+              </p>
               <div className="space-y-2">
                 <Label>View Threshold</Label>
                 <Input

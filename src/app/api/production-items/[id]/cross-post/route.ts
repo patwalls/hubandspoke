@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
-import { productionItems } from "@/lib/db/schema";
+import { accounts, productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
-import { isNotionAuthoritative } from "@/lib/platform";
+import { isNotionAuthoritativeAccount } from "@/lib/platform";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -14,10 +14,10 @@ interface RouteContext {
 /**
  * POST /api/production-items/[id]/cross-post
  *
- * Body: { targetPlatform: string }
+ * Body: { targetAccountId: string, targetPostType?: string | null }
  *
  * Creates a new `cross_post` production item from the source item for the
- * given target platform. Inherits title, thumbnail, format, pillar, and brand
+ * given target account. Inherits title, thumbnail, format, pillar, and brand
  * from the source. Status starts as "Idea". Returns the new item id so the
  * client can redirect to the detail page.
  */
@@ -37,23 +37,38 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  const targetPlatform =
-    typeof (body as { targetPlatform?: unknown }).targetPlatform === "string"
-      ? (body as { targetPlatform: string }).targetPlatform.trim()
+  const targetAccountId =
+    typeof (body as { targetAccountId?: unknown }).targetAccountId === "string"
+      ? (body as { targetAccountId: string }).targetAccountId.trim()
       : "";
+  const targetPostTypeRaw = (body as { targetPostType?: unknown }).targetPostType;
+  const targetPostType =
+    typeof targetPostTypeRaw === "string" && targetPostTypeRaw.trim().length > 0
+      ? targetPostTypeRaw.trim()
+      : null;
 
-  if (!targetPlatform) {
+  if (!targetAccountId) {
     return NextResponse.json(
-      { error: "targetPlatform is required" },
+      { error: "targetAccountId is required" },
       { status: 400 }
     );
   }
 
-  if (isNotionAuthoritative([targetPlatform])) {
+  const [target] = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.id, targetAccountId))
+    .limit(1);
+
+  if (!target) {
+    return NextResponse.json({ error: "Target account not found" }, { status: 404 });
+  }
+
+  if (isNotionAuthoritativeAccount(target)) {
     return NextResponse.json(
       {
         error:
-          "Target is a Notion-authoritative format; create that post in Notion instead.",
+          "Target account is Notion-authoritative; create that post in Notion instead.",
       },
       { status: 400 }
     );
@@ -69,10 +84,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Source item not found" }, { status: 404 });
   }
 
-  const sourcePlatforms = (source.platform ?? []) as string[];
-  if (sourcePlatforms.includes(targetPlatform)) {
+  if (source.accountId === targetAccountId && source.postType === targetPostType) {
     return NextResponse.json(
-      { error: "Source is already on the target platform" },
+      { error: "Source is already on the target account" },
       { status: 400 }
     );
   }
@@ -84,14 +98,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       and(
         eq(productionItems.sourceType, "cross_post"),
         eq(productionItems.repostedFromItemId, source.id),
-        sql`${productionItems.platform} ? ${targetPlatform}`
+        eq(productionItems.accountId, targetAccountId)
       )
     )
     .limit(1);
 
   if (existing) {
     return NextResponse.json(
-      { error: "A cross-post for this target platform already exists", existingId: existing.id },
+      { error: "A cross-post for this target account already exists", existingId: existing.id },
       { status: 409 }
     );
   }
@@ -109,7 +123,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       title: source.title,
       thumbnail: source.thumbnail,
       status: "Idea",
-      platform: [targetPlatform],
+      accountId: targetAccountId,
+      postType: targetPostType,
       sourceType: "cross_post",
       repostedFromItemId: source.id,
       format: source.format,
