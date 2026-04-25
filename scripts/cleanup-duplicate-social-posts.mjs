@@ -310,13 +310,31 @@ async function phaseB() {
 
     await sql.begin(async (tx) => {
       // 1) Repoint every FK from any loser → winner so cascading deletes
-      //    don't take useful children with them.
+      //    don't take useful children with them. Some child tables have
+      //    UNIQUE(production_item_id, ...) constraints (e.g. media (item,
+      //    index), view_snapshots (item, checkpoint_key)). When the loser
+      //    has a child row that would collide with one of the winner's,
+      //    delete the loser's instead — losers are dupes of the winner so
+      //    their children are redundant.
       for (const loser of losers) {
         for (const [table, col] of CHILD_FKS) {
-          await tx.unsafe(
-            `UPDATE ${table} SET ${col} = $1 WHERE ${col} = $2`,
-            [winner.id, loser.id]
-          );
+          try {
+            await tx.savepoint(async (sp) => {
+              await sp.unsafe(
+                `UPDATE ${table} SET ${col} = $1 WHERE ${col} = $2`,
+                [winner.id, loser.id]
+              );
+            });
+          } catch (err) {
+            if (err?.code === "23505") {
+              await tx.unsafe(
+                `DELETE FROM ${table} WHERE ${col} = $1`,
+                [loser.id]
+              );
+            } else {
+              throw err;
+            }
+          }
         }
       }
       // 2) Delete losers BEFORE updating the winner. Otherwise the winner's
