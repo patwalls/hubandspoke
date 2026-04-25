@@ -215,13 +215,14 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 ### `evergreen-scan` — daily classifier
 - **Trigger:** cron `0 15 * * *` (daily 15:00 UTC)
 - **Files:** `src/jobs/tasks/scheduled.ts:112`, `src/lib/services/evergreen-scan.ts`, manual: `scripts/run-evergreen-scan.ts`
-- **Inputs:** published items with ≥10,000 views, per-platform age gates (Twitter 365d+, Instagram 90d+, etc.); existing `contentEvents` (past kill reasons)
-- **Outputs:** `productionItems.isEvergreen`; new `contentEvents` rows for Idea-queue suggestions
+- **Inputs:** published items with ≥10,000 views, per-post-type age gates (x 365d+, instagram_reel/post 90d+, linkedin/threads 180d+, youtube_community/shorts 180d+); existing `contentEvents` (past kill reasons)
+- **Outputs:** `productionItems.isEvergreen`; new repost `production_items` rows in the Idea queue (each carries `accountId` + `postType` copied from the original)
 - **Downstream:** none directly; downstream is the human triage flow
 - **Rules:**
-  - Phase A: stratified-batch classify per platform (quota)
+  - Phase A: stratified-batch classify per post-type (quota)
   - Phase B: refill Idea queue, respect 30d repost spacing + hard-kill suppression
   - Cap: 10 pending suggestions in queue
+  - Repost rows copy `accountId` + `postType` from the original; per-platform diversity cap is keyed off the joined `account.platform`.
 
 ### `capture-velocity-snapshot` — per-post scheduled velocity snapshots
 
@@ -527,7 +528,7 @@ debugging "why didn't X happen to this post".
 | Notion sync | `original` | every :30 cron, YouTube long-form only | inherited from Notion |
 | Manual API (`POST /api/production-items`) | `original` | UI form, for platforms API can't pull from | `Idea` or `Queue` |
 | Repost (`POST .../repost`) | `repost` | user button | `Idea` |
-| Cross-post (manual `POST .../cross-post`) | `cross_post` | user button | `Idea` |
+| Cross-post (manual `POST .../cross-post`) | `cross_post` | user button (body: `targetAccountId` + `targetPostType`) | `Idea` |
 | Cross-post (manual scanner, `cross-post-scan`) | `cross_post` | operator clicks "Populate queue" on `/[brand]/queue` Cross-post tab | `Idea` |
 | Clip promotion (`POST /api/clip-ideas/[id]/triage`) | `clip` | user accepts a clip-idea | `Assigned` |
 | Threshold-based auto-repurpose (`threshold-monitor-sweep` cron) | `repurposed` | hourly :15, when parent views cross a child format's `viewThreshold` | `Idea` |

@@ -131,7 +131,7 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
 
   // Exclude long-form YouTube pillars — those live in Notion and don't belong
   // in the triage queue.
-  const hsItems = items.filter((item) => !isNotionAuthoritative(item.platform));
+  const hsItems = items.filter((item) => !isNotionAuthoritative(item.postType));
   const ideaItems = hsItems.filter((item) => item.status === "Idea");
 
   const platformOptions = useMemo(

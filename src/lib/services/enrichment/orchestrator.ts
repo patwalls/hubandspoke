@@ -65,7 +65,6 @@ export async function enrichSingleItem(
   const [item] = await db
     .select({
       id: productionItems.id,
-      platform: productionItems.platform,
       postType: productionItems.postType,
       enrichmentCompletedAt: productionItems.enrichmentCompletedAt,
     })
@@ -78,10 +77,7 @@ export async function enrichSingleItem(
     return null;
   }
 
-  const kinds = resolveItemPlatformKinds({
-    postType: item.postType,
-    platform: item.platform as string[] | null,
-  });
+  const kinds = resolveItemPlatformKinds({ postType: item.postType });
 
   let result: EnrichmentResult | null;
   try {
@@ -216,7 +212,6 @@ export async function runEnrichmentSweep(
   const candidates = await db
     .select({
       id: productionItems.id,
-      platform: productionItems.platform,
       postType: productionItems.postType,
       publishedLink: productionItems.publishedLink,
       enrichmentAttempts: productionItems.enrichmentAttempts,
@@ -230,14 +225,11 @@ export async function runEnrichmentSweep(
   summary.scanned = candidates.length;
 
   for (const item of candidates) {
-    const kinds = resolveItemPlatformKinds({
-      postType: item.postType,
-      platform: item.platform as string[] | null,
-    });
+    const kinds = resolveItemPlatformKinds({ postType: item.postType });
 
-    // Platform filter — applied here (after the SQL select) rather than in
-    // SQL because `platform` is a jsonb array and JSON-path predicates are
-    // ugly. Cheap to filter in JS — `limit` already caps the candidate set.
+    // Platform filter — applied here (after the SQL select) on `kinds`,
+    // which is derived from `post_type`. Cheap to filter in JS — `limit`
+    // already caps the candidate set.
     if (options.platform && !kinds.has(options.platform)) {
       summary.skipped++;
       continue;

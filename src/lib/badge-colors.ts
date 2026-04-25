@@ -65,20 +65,3 @@ export function postTypeClass(postType: string | null | undefined): string {
 export function postTypeLabel(postType: string | null | undefined): string {
   return (postType && POST_TYPE_LABELS[postType]) || "—";
 }
-
-/**
- * Back-compat helper for UI that still receives a raw platform string (the
- * legacy channel label, e.g. "YouTube (SS)" / "X (Pat Walls)"). Normalizes
- * via `normalizePlatform` then falls back to the post-type color. Components
- * that have switched to reading `item.postType` should call `postTypeClass`
- * directly.
- *
- * @deprecated Migrate callers to `postTypeClass(item.postType)`.
- */
-import { normalizePlatform } from "@/lib/platform-field-schemas";
-export function platformClass(platform: string | null | undefined): string {
-  if (!platform) return DEFAULT_BADGE;
-  const key = normalizePlatform(platform);
-  if (key && POST_TYPE_COLORS[key]) return POST_TYPE_COLORS[key];
-  return DEFAULT_BADGE;
-}

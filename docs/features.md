@@ -64,8 +64,8 @@ removing, or deprecating anything.
 | Format hierarchy (pillars + derivatives) | Active | `/(dashboard)/[brand]/formats`, `/(dashboard)/[brand]/formats/[formatId]`, `GET\|POST /api/formats`, `GET\|PATCH\|DELETE /api/formats/[id]` | `formats` (parentFormatId self-ref) | ON DELETE parent SET NULL → orphans become roots |
 | Format publishing channels | Active | Format detail UI | `formatChannels` (formatId, accountId, postType) | Replaces `formats.channels` JSONB |
 | Format top-performers report | Active | `GET /api/formats/top-performers` | `formats`, `productionItems` | |
-| **Old `formats.channels` JSONB** | **Legacy** | Write-only mirror — no live UI reader as of 2026-04-23 | `formats.channels` | `setFormatChannels()` still updates it; safe to drop column once no external consumer remains |
-| **`legacyChannelString()` helper** | **Legacy** | `src/lib/format-channels.ts` | — | Hardcoded (brand, platform, handle, postType) → chip-string map; dies with the JSONB |
+| **Old `formats.channels` JSONB** | **Planned-removal** | Column still on the table; no writers, no readers as of 2026-04-25 | `formats.channels` | `legacyChannelString()` and the mirror writes were deleted 2026-04-25; column drop pending the same migration that removes `production_items.platform`. |
+| **Legacy `production_items.platform` JSONB** | **Planned-removal** | Column still on the table; remaining readers: `clip-ideas/generate`, `drafts/generate`, `matg` report SQL filter, `sync-errors` page, `my-work` page, format-detail item filter, queue/format search filters | `production_items.platform` | `accountId` + `postType` superseded this; the visible-UI consumers and repost/cross-post inserts were migrated 2026-04-25. Column drop pending migration of the remaining read sites listed at left. |
 | **Asana editor/producer fields on formats** | **Deprecated** | (referenced only in legacy trigger-repurpose flow) | `formats.editorAsanaGid`, `producerAsanaGid`, `contentOwnerAsana*` | Replaced by `editorUserId` / `producerUserId` and `editorNotionUserId` / `producerNotionUserId` |
 | **Producer field (formats + content)** | **Hidden** | UI removed from formats index, format detail, content detail (2026-04-23). Column still written by `resolveAssignees()` on new items. | `formats.producer`/`producerUserId`, `productionItems.producerUserId` | Visual removal only; data preserved. Re-introduce the field or drop the columns in a later pass. |
 
@@ -189,7 +189,7 @@ In rough priority order — each is its own PR:
 1. **`brandSettings` table + `/api/brand-settings` route** (Planned-removal). Data already on `brands`. Drop with a drizzle migration.
 2. **`/api/trigger-repurpose` + Asana members surface area** (Deprecated). No live callers; remove with format-picker UI swap to user dropdown.
 3. **`productionItems.crossPostFitGood` + `crossPostFitReasoning`** (Deprecated). All new reads go through `crossPostFitVerdicts`. Drop columns.
-4. **`formats.channels` JSONB + `legacyChannelString()`** (Legacy). Migrate remaining readers (formats list page, search) to `formatChannels` table, then drop.
+4. **`formats.channels` JSONB + `production_items.platform` JSONB** (Planned-removal). `legacyChannelString()`, `SS_CHANNELS`/`MATG_CHANNELS`, `ChannelChip`, and `platformClass()` were deleted 2026-04-25; visible-UI readers were migrated to `AccountBadge`. Remaining work: migrate `clip-ideas/generate`, `drafts/generate`, the `matg` report SQL filter, `sync-errors` page, `my-work` page, format-detail item filter, and queue/format search filters off `production_items.platform`. Then drop both columns in one migration.
 5. **Format Asana columns** (`editorAsanaGid`, `producerAsanaGid`, `contentOwnerAsana*`) (Deprecated). Drop after #2 lands.
 6. **Pre-2026-04 `scripts/add-*.mjs` / `create-*-table.mjs`** — historical, but we could prune any that are clearly obsolete.
 

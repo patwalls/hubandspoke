@@ -114,36 +114,9 @@ export type PlatformKind =
   | "tiktok";
 
 /**
- * Map an item's `platform[]` strings to the set of SC-supported platform
- * kinds. Order matters for YouTube Community vs. YouTube — check community
- * first so the regular-YouTube test doesn't swallow it.
- */
-export function platformKindsFor(platforms: string[] | null): Set<PlatformKind> {
-  const out = new Set<PlatformKind>();
-  for (const p of platforms || []) {
-    if (p === "YouTube Community") out.add("youtube_community");
-    else if (p.includes("YouTube")) out.add("youtube");
-    else if (p.includes("Instagram")) out.add("instagram");
-    else if (
-      p === "X" ||
-      p === "X (Starter Story)" ||
-      p === "X (Pat Walls)" ||
-      p === "Twitter" ||
-      p === "Twitter (Pat Walls)"
-    )
-      out.add("twitter");
-    else if (p === "Threads") out.add("threads");
-    else if (p === "LinkedIn") out.add("linkedin");
-    else if (p === "TikTok") out.add("tiktok");
-  }
-  return out;
-}
-
-/**
- * Resolve the SC platform kind from a canonical `post_type`. Preferred over
- * `platformKindsFor` — a post type is 1:1 with an SC endpoint, so callers
- * that have the post type should use this and avoid the fuzzy string match.
- * Returns null for post types with no SC coverage (newsletter).
+ * Resolve the SC platform kind from a canonical `post_type`. A post type is
+ * 1:1 with an SC endpoint. Returns null for post types with no SC coverage
+ * (newsletter).
  */
 export function platformKindFromPostType(
   postType: string | null | undefined
@@ -173,22 +146,16 @@ export function platformKindFromPostType(
 
 /**
  * Single source of truth for "what SC endpoints does this item belong to?".
- * Prefers `post_type` (canonical 1:1 with an endpoint) and falls back to the
- * legacy `platform[]` string matcher for rows written before post_type rolled
- * out. Every sweep filter AND executor should use this — keeping the filter
- * and executor in sync is what prevents silent-skip bugs.
+ * Reads canonical `post_type` (1:1 with an endpoint). Every sweep filter AND
+ * executor should use this — keeping the filter and executor in sync is what
+ * prevents silent-skip bugs.
  */
 export function resolveItemPlatformKinds(input: {
   postType: string | null | undefined;
-  platform: string[] | null;
 }): Set<PlatformKind> {
   const out = new Set<PlatformKind>();
   const fromPostType = platformKindFromPostType(input.postType);
-  if (fromPostType) {
-    out.add(fromPostType);
-    return out;
-  }
-  for (const k of platformKindsFor(input.platform)) out.add(k);
+  if (fromPostType) out.add(fromPostType);
   return out;
 }
 
@@ -240,7 +207,6 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       id: productionItems.id,
       publishedLink: productionItems.publishedLink,
       youtubeUrl: productionItems.youtubeUrl,
-      platform: productionItems.platform,
       postType: productionItems.postType,
     })
     .from(productionItems)
@@ -252,22 +218,21 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
   }
 
   const url = item.publishedLink || item.youtubeUrl || "";
-  const platforms = (item.platform as string[] | null) ?? [];
   const kinds = resolveItemPlatformKinds({
     postType: item.postType,
-    platform: item.platform as string[] | null,
   });
 
-  // Apply the likes-multiplier estimator on platforms where SC doesn't return
-  // view counts (LinkedIn, YouTube Community, Instagram Photo, Threads
-  // fallback). Returns the final view count + estimated flag to persist.
+  // Apply the likes-multiplier estimator on post types where SC doesn't
+  // return view counts (linkedin, youtube_community, instagram_post,
+  // threads fallback). Returns the final view count + estimated flag to
+  // persist.
   const deriveViews = (
     realViews: number | null,
     likes: number | null
   ): { views: number | null; estimated: boolean } => {
     if (realViews != null) return { views: realViews, estimated: false };
     if (likes == null) return { views: null, estimated: false };
-    const est = estimateViewsFromLikes(platforms, likes);
+    const est = estimateViewsFromLikes(item.postType, likes);
     return est.estimated
       ? { views: est.views, estimated: true }
       : { views: null, estimated: false };
@@ -588,7 +553,6 @@ export async function getItemsDueForSync(): Promise<DueSyncSummary> {
       id: productionItems.id,
       publishedDate: productionItems.publishedDate,
       lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
-      platform: productionItems.platform,
       postType: productionItems.postType,
     })
     .from(productionItems)
@@ -613,10 +577,7 @@ export async function getItemsDueForSync(): Promise<DueSyncSummary> {
       lastPerformanceSyncAt: r.lastPerformanceSyncAt,
     });
     if (!check.needsSync) continue;
-    const kinds = resolveItemPlatformKinds({
-      postType: r.postType,
-      platform: r.platform as string[] | null,
-    });
+    const kinds = resolveItemPlatformKinds({ postType: r.postType });
     if (kinds.size === 0) continue;
 
     items.push({

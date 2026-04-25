@@ -437,15 +437,26 @@ export async function syncFromNotion(): Promise<{
       // Resolve account_id + post_type from the first (primary) channel.
       // Notion only owns long-form YouTube, so this hits the two seeded YT
       // accounts (starterstory / starterstorybuild). The resolveNotionChannel
-      // helper centralizes the mapping and returns null on miss (logged).
+      // helper centralizes the mapping and returns null on miss — when that
+      // happens we skip the page entirely rather than silently inserting a
+      // half-record without an account_id.
       const primaryChannel = platform?.[0] ?? null;
       const accountResolution = primaryChannel
         ? await resolveNotionChannel(primaryChannel, publishedLink)
         : null;
       if (primaryChannel && !accountResolution) {
         console.warn(
-          `[notion-sync] no account match for Notion channel "${primaryChannel}" on page ${notionId}`
+          `[notion-sync] skipping page ${notionId}: no account match for Notion channel "${primaryChannel}"`
         );
+        continue;
+      }
+      if (!accountResolution) {
+        // Notion-authoritative platforms always resolve to an account; if not,
+        // the page is missing a Channel and shouldn't sync.
+        console.warn(
+          `[notion-sync] skipping page ${notionId}: no Channel set on Notion-authoritative page`
+        );
+        continue;
       }
 
       const producer = extractPerson(properties, "Producer");
@@ -570,16 +581,17 @@ export async function syncFromNotion(): Promise<{
     // Upsert users directory from the producers/editors we saw.
     await flushUserUpserts(peopleBucket);
 
-    // Delete orphaned records — but ONLY authoritative ones. H&S-owned rows
-    // (Shorts, IG, LinkedIn, Newsletter, etc.) with a stale notionId must not
-    // be nuked just because their Notion page is gone or was never scanned.
+    // Delete orphaned records — but ONLY authoritative ones (long-form
+    // YouTube; the only post type Notion owns). H&S-owned rows (Shorts, IG,
+    // LinkedIn, Newsletter, etc.) with a stale notionId must not be nuked
+    // just because their Notion page is gone or was never scanned.
     if (completedFetch && notionIds.length > 0) {
       const deleted = await db
         .delete(productionItems)
         .where(
           and(
             notInArray(productionItems.notionId, notionIds),
-            sql`${productionItems.platform} && ARRAY['YouTube', 'YouTube (SS)', 'YouTube (SS Build)']::text[]`
+            eq(productionItems.postType, "youtube_long")
           )
         )
         .returning();

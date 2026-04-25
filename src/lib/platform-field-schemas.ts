@@ -234,26 +234,22 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
   },
 };
 
-// Map any historical platform string to a canonical post-type key. Returns
-// null if we haven't wired that platform yet — callers should surface a clear
-// "unsupported platform" error rather than silently falling back.
+// Map a historical platform string to a canonical post-type key. Used by
+// the Notion-import boundary (notion-sync.ts) to ingest values from the
+// legacy "Channel" multi-select. Returns null for unrecognized values.
+//
+// Parenthesized account-suffix variants ("X (Pat Walls)", "YouTube (SS)") are
+// resolved to specific accounts upstream by `resolveNotionChannel`; this
+// function only collapses bare-platform names.
 export function normalizePlatform(raw: string): PostType | null {
   const s = raw.trim().toLowerCase();
   if (!s) return null;
 
-  // X / Twitter family. "X", "Twitter", "X (Starter Story)", "X (Pat Walls)".
-  if (s === "x" || s === "twitter" || s.startsWith("x (") || s.startsWith("twitter (")) {
-    return "x";
-  }
+  if (s === "x" || s === "twitter") return "x";
 
-  // YouTube family. Community posts are text/image cards on the channel's
-  // Community tab — structurally a social post, not a video — so they route
-  // to their own key instead of collapsing into youtube_long.
   if (s === "youtube shorts") return "youtube_shorts";
   if (s === "youtube community") return "youtube_community";
-  if (s === "youtube" || s.startsWith("youtube (")) {
-    return "youtube_long";
-  }
+  if (s === "youtube") return "youtube_long";
 
   if (s === "instagram reel") return "instagram_reel";
   if (s === "instagram post") return "instagram_post";

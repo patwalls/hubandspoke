@@ -59,7 +59,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
   const userPrompt = [
     `Title: ${item.title || "(Untitled)"}`,
-    `Channel: ${(item.platform || []).join(", ") || "(none)"}`,
+    `Post type: ${item.postType || "(none)"}`,
     `Format: ${item.format || "(none)"}`,
     pillarTitle ? `Pillar content: "${pillarTitle}"${pillarFormat ? ` (${pillarFormat})` : ""}` : null,
     formatInstructions

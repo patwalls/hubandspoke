@@ -55,6 +55,24 @@ pattern. Backfills (data, not schema) still go in `scripts/backfill-*.mjs`.
 If the schema change adds/removes/renames a feature's backing table or major
 column, also update `docs/features.md`.
 
+## Channel display strings
+
+The legacy display format `"PLATFORM (NAME)"` (e.g. `"X (Pat Walls)"`,
+`"YouTube (SS)"`) is **banned** outside the Notion import boundary. Account
+identity lives on `accounts` (one row per platform+handle), and the post
+shape lives on `production_items.post_type`. UI renders both via
+`AccountBadge` (`src/components/ui/account-badge.tsx`).
+
+The only legitimate reader/producer of the legacy format is
+`src/lib/services/notion-sync.ts` — Notion's "Channel" multi-select still
+emits these strings and we can't change that. There, `resolveNotionChannel`
+parses them and resolves to an `accountId` immediately; an unresolvable
+channel skips the page rather than persisting a half-record.
+
+Don't introduce new template literals like `${platform} (${name})` in app
+code, don't add legacy-string constants, and don't render raw
+`item.platform[0]` — use the joined `item.account` + `item.postType`.
+
 ## Soft-delete columns
 
 Two tables support soft delete today: `accounts.deleted_at` and

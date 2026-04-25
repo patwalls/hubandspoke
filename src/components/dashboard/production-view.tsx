@@ -14,8 +14,8 @@ interface ProductionViewProps {
   brand: string;
 }
 
-// Long-form YouTube pillars (YouTube, YouTube (SS), YouTube (SS Build)) are
-// excluded — those live in Notion. Idea-stage triage moved to /[brand]/queue.
+// Long-form YouTube pillars are excluded — those live in Notion (filtered
+// via isNotionAuthoritative below). Idea-stage triage moved to /[brand]/queue.
 const PIPELINE_STATUSES = [
   "Ready To Publish",
   "Final Review",
@@ -63,7 +63,7 @@ export function ProductionView({ brand }: ProductionViewProps) {
     fetchPipeline();
   }, [fetchPipeline]);
 
-  const hsItems = items.filter((item) => !isNotionAuthoritative(item.platform));
+  const hsItems = items.filter((item) => !isNotionAuthoritative(item.postType));
   const pipelineCandidates = hsItems.filter(
     (item) =>
       item.status &&

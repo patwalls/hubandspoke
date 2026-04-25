@@ -154,9 +154,9 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.warn("Auto-fetch failed for YouTube URL, using manual values:", err);
       }
-    } else if (platform && shouldEstimate(platform) && finalLikes && !finalViews) {
-      // Estimate views from likes for platforms without real view data
-      const estimation = estimateViewsFromLikes(platform, finalLikes);
+    } else if (shouldEstimate(postType) && finalLikes && !finalViews) {
+      // Estimate views from likes for post types without real view data
+      const estimation = estimateViewsFromLikes(postType, finalLikes);
       if (estimation.estimated) {
         finalViews = estimation.views;
         finalViewsEstimated = true;
@@ -609,9 +609,10 @@ export async function PUT(request: NextRequest) {
 
     if (incomingLikes !== undefined) {
       updateData.likes = incomingLikes;
-      // Re-estimate views from new likes value if: no explicit views provided, platform uses estimation
-      if (incomingViews === undefined && platform && shouldEstimate(platform) && incomingLikes && incomingLikes > 0) {
-        const estimation = estimateViewsFromLikes(platform, incomingLikes);
+      // Re-estimate views from new likes value if: no explicit views
+      // provided, post type uses estimation
+      if (incomingViews === undefined && shouldEstimate(postType) && incomingLikes && incomingLikes > 0) {
+        const estimation = estimateViewsFromLikes(postType, incomingLikes);
         if (estimation.estimated) {
           updateData.views = estimation.views;
           updateData.viewsEstimated = true;
@@ -733,7 +734,7 @@ export async function PUT(request: NextRequest) {
     // Community, IG, LinkedIn, etc. are H&S-owned — a stale notionId on those
     // rows (from pre-migration syncs) stays as a historical pointer but we no
     // longer round-trip edits to it.
-    if (updated.notionId && isNotionAuthoritative(updated.platform)) {
+    if (updated.notionId && isNotionAuthoritative(updated.postType)) {
       if (status !== undefined && status) {
         try {
           await pushStatusToNotion(updated.notionId, status);
