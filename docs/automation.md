@@ -28,6 +28,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   (per-post) capture-velocity-snapshot → scheduled at publish+{15m,30m,1h,2h,4h,8h,24h,48h} per item; writes one view_snapshots row each
   (manual)     cross-post-scan    → LLM recommender, fired by the "Populate queue" button on /[brand]/queue → POST /api/cross-post-scan
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
+  13:00      daily-scorecard-email → Postmark (per opted-in user). 9am EDT / 8am EST in winter.
 
 USER / API ENTRY POINTS
   POST /api/accounts/[id]/refresh?mode=async              → account-refresh
@@ -208,7 +209,26 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   `productionItems.publishedAt` (YouTube `publishedTime`, IG `taken_at`, X
   `legacy.created_at`, TikTok `create_time`) so the content view can sort
   same-day posts by true publish order. Falls back to null when the
-  response lacks a timestamp.
+  response lacks a timestamp **on first INSERT only** — see the per-column
+  policy below; subsequent syncs do not overwrite a stamped publishedAt.
+- **Per-column write policy** (`upsertItems` in
+  `src/lib/services/account-content-sync.ts`): the upsert keeps two
+  payload shapes —
+  - `insertPayload` (used only on INSERT): writes every column derived
+    from the SC response — title, thumbnail, publishedAt, publishedDate,
+    contentBody, identity columns, plus engagement counters.
+  - `updatePayload` (used only on UPDATE): writes ONLY the engagement
+    refresh — `views`, `likes`, `comments`, `lastPerformanceSyncAt`,
+    `updatedAt`. Every other column is insert-only.
+
+  This exists because SC occasionally returns stale or missing values on
+  later sweeps (a null `publishedTime` it had populated last time; a
+  caption from a different post showing up under the same item id). The
+  pre-2026-04-25 writer trusted SC for everything on UPDATE, which
+  caused observed `publishedAt` thrash (firing bogus "first 15 minutes"
+  velocity snapshots) and `title` clobbering. **Adding a new field to
+  the upsert means deciding which payload it belongs in — when in
+  doubt, insert-only.**
 - **Errors:** any thrown error stamps `lastContentSyncError` and re-throws
   so graphile-worker retries with backoff.
 
@@ -306,7 +326,7 @@ captureVelocitySnapshotTask({ productionItemId, checkpointKey })
 | `publishedAt` is in the far past (4h+) | All 5 checkpoint windows already closed; 0 jobs enqueued; `skippedPast = 5` |
 | Item re-synced 30 min after publish | 15m window closed → skipped; 30m/1h/2h/4h scheduled. If 30m already captured (prior run), `skippedCaptured` increments instead |
 | Item discovered by sync at age 18m | 15m's target was 3 min ago but its window [9, 22] is still open → fire immediately at `now + 5s`; on execution, age ≈ 18, passes the window check, snapshot written |
-| Item's `publishedAt` corrected by a later SC sync | `scheduleVelocitySnapshots` called again via `account-content-sync` UPDATE branch. jobKey `replace` updates `runAt` on still-pending jobs to the corrected time. Already-fired jobs are not re-run |
+| Item's `publishedAt` differs on a later SC sync | Sync no longer corrects the stamp on UPDATE (per insert-only policy added 2026-04-25), so no re-scheduling happens. The original schedule from INSERT stands; if it was wrong, the stale-publishedAt guard further down handles the divergence at fire time |
 | Item deleted between schedule and fire | Task's `deletedAt` guard skips; no SC call |
 | Item un-published between schedule and fire | Task's `status !== 'Published'` guard skips; no SC call |
 | Job retries past its window (rare) | Task's age-within-window guard rejects; no SC call; no misleading row |
@@ -326,7 +346,7 @@ captureVelocitySnapshotTask({ productionItemId, checkpointKey })
 | File | Branch | `publishedAt` source |
 |---|---|---|
 | `src/lib/services/account-content-sync.ts` | INSERT (new post discovered) | SC-reported timestamp |
-| `src/lib/services/account-content-sync.ts` | UPDATE (existing post re-synced) | SC-reported timestamp; corrects earlier wrong stamps |
+| `src/lib/services/account-content-sync.ts` | UPDATE (existing post re-synced) | _no-op since 2026-04-25_ — UPDATE branch does not re-schedule; publishedAt is now insert-only |
 | `src/app/api/production-items/route.ts` | POST (add-from-link) | body `publishedAt` (from SC preview) or `new Date()` |
 | `src/app/api/production-items/route.ts` | PUT (status → Published OR link added on Published) | existing `publishedAt`, or stamped `new Date()` on fresh transition |
 
@@ -395,6 +415,30 @@ ORDER BY pi.published_at DESC;
 - **Outputs:** enqueues one `account-refresh` job per account, `jobKey: account-refresh-{id}`
 - **Downstream:** `account-refresh`
 - **Rules:** explicitly skips `newsletter` and `other` (no SC coverage)
+
+### `daily-scorecard-email` — daily publish-count scorecard
+- **Trigger:** cron `0 13 * * *` (13:00 UTC daily). 9am EDT during DST,
+  8am EST in winter — see DST note in `src/jobs/crontab.ts`.
+- **Files:** `src/jobs/tasks/scheduled.ts` (`dailyScorecardEmailTask`),
+  `src/lib/services/scorecard.ts` (data),
+  `src/lib/email-templates/daily-scorecard.ts` (rendering),
+  `src/lib/email.ts` (`sendDailyScorecardEmail`)
+- **Inputs:** rolling 7-day publish counts (`publishedDate` in [today−7, today)
+  vs [today−14, today−7)). Recipients = users with
+  `daily_scorecard_email_enabled = true`.
+- **Outputs:** one Postmark `outbound` send per recipient. No DB writes.
+- **Downstream:** none.
+- **Preview / dogfood:** admin-only `GET /api/admin/scorecard-email/preview`
+  renders the HTML in-browser; append `?send=me` to send the rendered
+  email to the logged-in admin's address (real Postmark hit).
+- **Recipient gate:** the column is the source of truth — `role='admin'`
+  is not re-checked at send time. If a non-admin gets the flag set, they
+  get the email. Toggle from `/settings/users` (admin-only UI) or via
+  direct SQL.
+- **Failure mode:** each send is wrapped; one Postmark failure increments
+  the `failed` counter and logs but does not starve the rest of the batch.
+  The whole task is retried by graphile-worker on uncaught exceptions
+  (e.g. DB unavailable), but a per-recipient failure does not retry.
 
 ---
 
@@ -530,7 +574,8 @@ debugging "why didn't X happen to this post".
 | Repost (`POST .../repost`) | `repost` | user button | `Idea` |
 | Cross-post (manual `POST .../cross-post`) | `cross_post` | user button (body: `targetAccountId` + `targetPostType`) | `Idea` |
 | Cross-post (manual scanner, `cross-post-scan`) | `cross_post` | operator clicks "Populate queue" on `/[brand]/queue` Cross-post tab | `Idea` |
-| Clip promotion (`POST /api/clip-ideas/[id]/triage`) | `clip` | user accepts a clip-idea | `Assigned` |
+| Clip generation (`POST /api/production-items/[id]/clip-ideas/generate`) | `clip` | admin clicks "Generate 10 ideas" on a pillar's Clip Ideas tab | `Idea` |
+| Clip promotion (`POST /api/clip-ideas/[id]/triage` or `.../create-in-descript[-precise]`) | `clip` | user accepts an existing clip-idea | flips pre-created row from `Idea` → `Assigned` (no new insert) |
 | Threshold-based auto-repurpose (`threshold-monitor-sweep` cron) | `repurposed` | hourly :15, when parent views cross a child format's `viewThreshold` | `Idea` |
 
 **After publication (status = `Published`):**

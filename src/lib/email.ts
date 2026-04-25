@@ -1,4 +1,8 @@
 import { ServerClient } from "postmark";
+import {
+  renderDailyScorecardEmail,
+} from "@/lib/email-templates/daily-scorecard";
+import type { ScorecardData } from "@/lib/services/scorecard";
 
 const token = process.env.POSTMARK_TOKEN;
 const from = process.env.EMAIL_FROM || "Hub & Spoke <pat@starterstory.com>";
@@ -218,6 +222,21 @@ export async function sendInviteEmail(opts: {
       <p style="color:#999;font-size:12px;">This invite expires ${expiresDate}. If you weren't expecting this, you can ignore this email.</p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,
+    MessageStream: "outbound",
+  });
+}
+
+export async function sendDailyScorecardEmail(opts: {
+  to: string;
+  data: ScorecardData;
+}) {
+  const { subject, text, html } = renderDailyScorecardEmail(opts.data);
+  return getClient().sendEmail({
+    From: from,
+    To: opts.to,
+    Subject: subject,
+    TextBody: text,
+    HtmlBody: html,
     MessageStream: "outbound",
   });
 }

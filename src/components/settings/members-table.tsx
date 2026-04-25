@@ -36,6 +36,7 @@ export type Member = {
   avatarUrl: string | null;
   invitedBy: string | null;
   createdAt: string;
+  dailyScorecardEmailEnabled: boolean;
 };
 
 interface Props {
@@ -80,6 +81,25 @@ export function MembersTable({
     }
   }
 
+  async function setScorecardEnabled(member: Member, enabled: boolean) {
+    try {
+      const res = await fetch(`/api/users/${member.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dailyScorecardEmailEnabled: enabled }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to update scorecard preference");
+      }
+      onChanged();
+    } catch (err) {
+      onError(
+        err instanceof Error ? err.message : "Failed to update scorecard preference"
+      );
+    }
+  }
+
   async function removeMember(member: Member) {
     setBusy(true);
     try {
@@ -114,6 +134,12 @@ export function MembersTable({
             <TableHead>Email</TableHead>
             <TableHead>Role</TableHead>
             <TableHead>Joined</TableHead>
+            <TableHead
+              className="text-center"
+              title="Receives the daily publish-count scorecard email at 9am ET."
+            >
+              Daily scorecard
+            </TableHead>
             <TableHead className="w-[60px]" />
           </TableRow>
         </TableHeader>
@@ -140,6 +166,17 @@ export function MembersTable({
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {formatDate(m.createdAt)}
+                </TableCell>
+                <TableCell className="text-center">
+                  <input
+                    type="checkbox"
+                    aria-label={`Send daily scorecard to ${m.email}`}
+                    checked={m.dailyScorecardEmailEnabled}
+                    onChange={(e) =>
+                      setScorecardEnabled(m, e.target.checked)
+                    }
+                    className="h-4 w-4 cursor-pointer accent-primary"
+                  />
                 </TableCell>
                 <TableCell className="text-right">
                   <DropdownMenu>
@@ -183,7 +220,7 @@ export function MembersTable({
           {members.length === 0 && (
             <TableRow>
               <TableCell
-                colSpan={5}
+                colSpan={6}
                 className="text-center text-muted-foreground text-xs py-6"
               >
                 No users yet.

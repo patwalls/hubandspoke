@@ -729,7 +729,13 @@ async function upsertItems(
         (looseKey ? byLooseUrl.get(looseKey) : undefined) ??
         null;
 
-      const baseUpdate = {
+      // Per-column policy. Sync used to write the same payload to both
+      // INSERT and UPDATE, which let SC clobber editorial/identity fields
+      // (title flipping to a stranger's caption, publishedAt thrashing to
+      // null and back). Now: INSERT writes everything; UPDATE writes only
+      // engagement counters and sync timestamps. Adding a field below means
+      // deciding which payload it belongs in — if in doubt, insert-only.
+      const insertPayload = {
         title: item.title,
         thumbnail: item.thumbnail ?? undefined,
         publishedDate: item.publishedDate,
@@ -755,18 +761,23 @@ async function upsertItems(
           : {}),
       };
 
+      const updatePayload = {
+        views: item.views ?? undefined,
+        likes: item.likes ?? undefined,
+        comments: item.comments ?? undefined,
+        lastPerformanceSyncAt: new Date(),
+        updatedAt: new Date(),
+      };
+
       if (existingId) {
         await db
           .update(productionItems)
-          .set(baseUpdate)
+          .set(updatePayload)
           .where(eq(productionItems.id, existingId));
-        // Re-schedule velocity snapshots with the (possibly SC-corrected)
-        // publishedAt. If the item was already tracked, scheduleVelocity
-        // short-circuits already-captured checkpoints and updates run_at
-        // on still-pending ones via graphile-worker's jobKey replace.
-        if (item.publishedAt) {
-          await scheduleVelocitySnapshots(existingId, item.publishedAt);
-        }
+        // No re-scheduling of velocity snapshots on UPDATE: under the
+        // insert-only publishedAt policy, sync no longer corrects the
+        // timestamp, so there's nothing for scheduleVelocitySnapshots to
+        // act on. The original schedule from INSERT stands.
         updated++;
       } else {
         const format = DEFAULT_FORMAT_BY_POST_TYPE[item.postType] ?? null;
@@ -777,7 +788,7 @@ async function upsertItems(
         const [inserted] = await db
           .insert(productionItems)
           .values({
-            ...baseUpdate,
+            ...insertPayload,
             format,
             utmCampaign: await generateUtmCampaign(item.title),
             producerUserId: assignees.producerUserId,

@@ -23,17 +23,40 @@ export async function PATCH(
 
   const { id } = await params;
 
-  let body: { role?: unknown };
+  let body: { role?: unknown; dailyScorecardEmailEnabled?: unknown };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!isRole(body.role)) {
-    return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+  // Build the update set from whichever fields are present. At least one
+  // valid field is required.
+  const update: Partial<typeof users.$inferInsert> = {};
+  let nextRole: "admin" | "creator" | undefined;
+
+  if (body.role !== undefined) {
+    if (!isRole(body.role)) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
+    nextRole = body.role;
+    update.role = nextRole;
   }
-  const nextRole = body.role;
+  if (body.dailyScorecardEmailEnabled !== undefined) {
+    if (typeof body.dailyScorecardEmailEnabled !== "boolean") {
+      return NextResponse.json(
+        { error: "dailyScorecardEmailEnabled must be a boolean" },
+        { status: 400 }
+      );
+    }
+    update.dailyScorecardEmailEnabled = body.dailyScorecardEmailEnabled;
+  }
+  if (Object.keys(update).length === 0) {
+    return NextResponse.json(
+      { error: "No fields to update" },
+      { status: 400 }
+    );
+  }
 
   try {
     const [target] = await db
@@ -46,37 +69,41 @@ export async function PATCH(
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    if (target.role === nextRole) {
-      return NextResponse.json({ ok: true, role: nextRole });
-    }
-
-    if (target.id === session.user.id && nextRole !== "admin") {
-      return NextResponse.json(
-        { error: "You cannot demote yourself" },
-        { status: 409 }
-      );
-    }
-
-    if (target.role === "admin" && nextRole !== "admin") {
-      const others = await countOtherAdmins(target.id);
-      if (others === 0) {
-        return NextResponse.json(
-          { error: "At least one admin is required" },
-          { status: 409 }
-        );
+    if (nextRole !== undefined) {
+      if (target.role === nextRole) {
+        // No-op for the role change; other fields below may still apply.
+        delete update.role;
+      } else {
+        if (target.id === session.user.id && nextRole !== "admin") {
+          return NextResponse.json(
+            { error: "You cannot demote yourself" },
+            { status: 409 }
+          );
+        }
+        if (target.role === "admin" && nextRole !== "admin") {
+          const others = await countOtherAdmins(target.id);
+          if (others === 0) {
+            return NextResponse.json(
+              { error: "At least one admin is required" },
+              { status: 409 }
+            );
+          }
+        }
       }
     }
 
-    await db
-      .update(users)
-      .set({ role: nextRole, updatedAt: new Date() })
-      .where(eq(users.id, id));
+    if (Object.keys(update).length > 0) {
+      await db
+        .update(users)
+        .set({ ...update, updatedAt: new Date() })
+        .where(eq(users.id, id));
+    }
 
-    return NextResponse.json({ ok: true, role: nextRole });
+    return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error("Error updating user role:", error);
+    console.error("Error updating user:", error);
     return NextResponse.json(
-      { error: "Failed to update role" },
+      { error: "Failed to update user" },
       { status: 500 }
     );
   }

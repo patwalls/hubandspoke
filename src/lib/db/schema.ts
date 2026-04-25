@@ -852,6 +852,13 @@ export const users = pgTable(
     role: text("role", { enum: ["admin", "creator"] })
       .notNull()
       .default("creator"),
+    // Opt-in flag for the daily scorecard email. Default false so adding new
+    // users doesn't accidentally email them; flip via a settings UI (or
+    // direct SQL for now). Cron filters on this column directly — it is the
+    // source of truth for "who gets the daily scorecard," not `role='admin'`.
+    dailyScorecardEmailEnabled: boolean("daily_scorecard_email_enabled")
+      .notNull()
+      .default(false),
     invitedBy: uuid("invited_by").references((): AnyPgColumn => users.id, {
       onDelete: "set null",
     }),

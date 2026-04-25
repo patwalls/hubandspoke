@@ -14,8 +14,10 @@ import { selectHookFallbackCandidates } from "@/lib/services/hook-extract/fallba
 import { selectVisionCandidates } from "@/lib/services/hook-extract/vision";
 import { selectDispatcherCandidates } from "@/lib/services/hook-extract/dispatcher";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
+import { getScorecardData } from "@/lib/services/scorecard";
+import { sendDailyScorecardEmail } from "@/lib/email";
 import { db } from "@/lib/db";
-import { accounts } from "@/lib/db/schema";
+import { accounts, users } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import type { EnrichItemPayload } from "./enrich-item";
 import type { ExtractHookPayload } from "./extract-hook";
@@ -197,6 +199,47 @@ export const accountContentSyncSweepTask: Task = async (_payload, helpers) => {
   }
   helpers.logger.info(
     `account-content-sync-sweep fanned out ${enqueued}/${rows.length} accounts (${Date.now() - start}ms)`
+  );
+};
+
+/**
+ * Daily scorecard email. Computes the rolling-7-day publish counts once,
+ * then sends one email per opted-in user. Recipients are gated on
+ * `users.daily_scorecard_email_enabled = true` — a column flipped via the
+ * settings UI. Sends inline (no fan-out) since the recipient list is tiny;
+ * each send is wrapped so a single Postmark failure doesn't starve the rest.
+ */
+export const dailyScorecardEmailTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("daily-scorecard-email start");
+  const recipients = await db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(eq(users.dailyScorecardEmailEnabled, true));
+  if (recipients.length === 0) {
+    helpers.logger.info(
+      `daily-scorecard-email no recipients (${Date.now() - start}ms)`
+    );
+    return;
+  }
+  const data = await getScorecardData();
+  let sent = 0;
+  let failed = 0;
+  for (const r of recipients) {
+    try {
+      await sendDailyScorecardEmail({ to: r.email, data });
+      sent++;
+    } catch (err) {
+      failed++;
+      helpers.logger.error(
+        `daily-scorecard-email send failed for ${r.email}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+  }
+  helpers.logger.info(
+    `daily-scorecard-email sent=${sent} failed=${failed} of ${recipients.length} (${Date.now() - start}ms)`
   );
 };
 

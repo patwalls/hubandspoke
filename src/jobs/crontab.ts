@@ -12,6 +12,11 @@
 //     gate and was burning ~4,800 SC calls/day. Velocity snapshots are now
 //     captured by targeted `capture-velocity-snapshot` jobs scheduled per
 //     post at publish time (T+15m, 30m, 1h, 2h, 4h).
+//
+// DST note: graphile-worker runs cron in UTC. `daily-scorecard-email` at
+// 13:00 UTC = 9am EDT during DST (Mar–Nov), 8am EST in winter. If a strict
+// 9am-Eastern-wall-clock cadence becomes important, switch to 14:00 UTC and
+// accept 10am EDT in summer instead.
 export const CRONTAB = `
 0 * * * * performance-decay
 15 * * * * threshold-monitor-sweep
@@ -22,4 +27,5 @@ export const CRONTAB = `
 0 15 * * * evergreen-scan
 */20 * * * * youtube-download-sweep
 0 17 * * 1 account-refresh-sweep
+0 13 * * * daily-scorecard-email
 `.trim();

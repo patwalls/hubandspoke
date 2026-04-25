@@ -365,6 +365,13 @@
       "when": 1777069797967,
       "tag": "0051_damp_nick_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1777142128446,
+      "tag": "0052_loud_magus",
+      "breakpoints": true
     }
   ]
 }

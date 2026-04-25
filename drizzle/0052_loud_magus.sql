@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "daily_scorecard_email_enabled" boolean DEFAULT false NOT NULL;
