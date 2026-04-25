@@ -2,9 +2,11 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   clipIdeas,
+  contentComments,
   formats,
   productionItems,
   repurposeTriggers,
+  transcripts,
   users,
 } from "@/lib/db/schema";
 import {
@@ -199,6 +201,72 @@ async function loadEditor(
     .where(eq(users.id, editorUserId))
     .limit(1);
   return { name: editor?.name ?? null, email: editor?.email ?? null };
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Drop the clip-idea's hook + rationale + transcript excerpt as the first
+ * comment on the new production_item. Gives the editor everything they need
+ * to make the cut without having to bounce back to the per-pillar Clip Ideas
+ * panel. Fire-and-forget — a comment-insert failure must never break the
+ * promote path. Caller should `void` this.
+ */
+async function postClipPromotionComment(args: {
+  productionItemId: string;
+  actorUserId: string;
+  row: ClipIdeaRow;
+}): Promise<void> {
+  const startSec = Number(args.row.startSec);
+  const endSec = Number(args.row.endSec);
+
+  // Pull transcript segments overlapping the clip range from the pillar's
+  // transcript row. Same shape the preview API uses.
+  const [t] = await db
+    .select({ segments: transcripts.segments })
+    .from(transcripts)
+    .where(eq(transcripts.productionItemId, args.row.sourceProductionItemId))
+    .limit(1);
+  const overlapping = (t?.segments ?? []).filter(
+    (s) => s.endSec > startSec && s.startSec < endSec,
+  );
+  const transcriptText = overlapping
+    .map((s) => s.text.trim())
+    .filter(Boolean)
+    .join(" ");
+
+  const formatTs = (sec: number) => {
+    const total = Math.max(0, Math.floor(sec));
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  };
+  const range = `${formatTs(startSec)}–${formatTs(endSec)} (${Math.max(0, Math.round(endSec - startSec))}s)`;
+
+  const parts: string[] = [
+    `<p><strong>Clip range:</strong> ${escapeHtml(range)}</p>`,
+    `<p><strong>Hook</strong></p>`,
+    `<blockquote>${escapeHtml(args.row.hook)}</blockquote>`,
+    `<p><strong>Why it'll go viral</strong></p>`,
+    `<p>${escapeHtml(args.row.rationale)}</p>`,
+  ];
+  if (transcriptText) {
+    parts.push(`<p><strong>Transcript</strong></p>`);
+    parts.push(`<p>${escapeHtml(transcriptText)}</p>`);
+  }
+  const body = parts.join("\n");
+
+  await db.insert(contentComments).values({
+    contentItemId: args.productionItemId,
+    userId: args.actorUserId,
+    body,
+  });
 }
 
 export async function assignClipIdea(args: {
@@ -403,6 +471,12 @@ export async function createClipIdeaInDescript(args: {
     })
     .where(eq(clipIdeas.id, args.clipIdeaId));
 
+  await postClipPromotionComment({
+    productionItemId,
+    actorUserId: args.actorUserId,
+    row,
+  });
+
   return {
     sourceProductionItemId: row.sourceProductionItemId,
     sourceTitle: row.sourceTitle,
@@ -483,6 +557,12 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
       decidedByUserId: args.actorUserId,
     })
     .where(eq(clipIdeas.id, args.clipIdeaId));
+
+  await postClipPromotionComment({
+    productionItemId,
+    actorUserId: args.actorUserId,
+    row,
+  });
 
   return {
     sourceProductionItemId: row.sourceProductionItemId,
@@ -648,6 +728,12 @@ export async function createClipIdeaInDescriptFullVideo(args: {
       decidedByUserId: args.actorUserId,
     })
     .where(eq(clipIdeas.id, args.clipIdeaId));
+
+  await postClipPromotionComment({
+    productionItemId,
+    actorUserId: args.actorUserId,
+    row,
+  });
 
   return {
     sourceProductionItemId: row.sourceProductionItemId,

@@ -236,12 +236,12 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 ### `evergreen-scan` — daily classifier
 - **Trigger:** cron `0 15 * * *` (daily 15:00 UTC)
 - **Files:** `src/jobs/tasks/scheduled.ts:112`, `src/lib/services/evergreen-scan.ts`, manual: `scripts/run-evergreen-scan.ts`
-- **Inputs:** published items with ≥10,000 views, per-post-type age gates (x 365d+, instagram_reel/post 90d+, linkedin/threads 180d+, youtube_community/shorts 180d+); existing `contentEvents` (past kill reasons)
+- **Inputs:** published items with ≥10,000 views, per-post-type age gates (x 365d+, instagram_reel/post 90d+, linkedin/threads 180d+, youtube_community/shorts 180d+); existing `contentEvents` (past kill reasons); past published reposts (positive accept exemplars)
 - **Outputs:** `productionItems.isEvergreen`; new repost `production_items` rows in the Idea queue (each carries `accountId` + `postType` copied from the original)
 - **Downstream:** none directly; downstream is the human triage flow
 - **Rules:**
-  - Phase A: stratified-batch classify per post-type (quota)
-  - Phase B: refill Idea queue, respect 30d repost spacing + hard-kill suppression
+  - Phase A: stratified-batch classify per post-type (quota). Last 10 kill reasons injected into the classifier prompt as negative exemplars.
+  - Phase B: refill Idea queue, respect 30d repost spacing + hard-kill suppression. Before each insert, a per-candidate Haiku **fit judge** (`judgeRepostFit`) reads recent kill reasons + accepted-and-published repost exemplars and skips candidates that resemble a kill or don't resemble any accept. Catches already-`isEvergreen=true` items the operator no longer wants resurfaced (Phase A's prompt-injection only steers newly-classified items).
   - Cap: 10 pending suggestions in queue
   - Repost rows copy `accountId` + `postType` from the original; per-platform diversity cap is keyed off the joined `account.platform`.
 

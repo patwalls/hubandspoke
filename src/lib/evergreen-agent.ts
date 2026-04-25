@@ -148,3 +148,156 @@ export async function classifyEvergreen(params: {
       "Classifier returned no valid tool call; defaulting to not-evergreen.",
   };
 }
+
+export interface RepostAcceptExemplar {
+  title: string;
+  postType: string | null;
+  format: string | null;
+}
+
+export interface RepostFitVerdict {
+  wouldRepost: boolean;
+  reasoning: string;
+}
+
+const fitTools: Anthropic.Tool[] = [
+  {
+    name: "mark_would_repost",
+    description:
+      "Mark this candidate as a good repost fit. Use when the candidate resembles content the operator has actually published as a repost before, and does NOT resemble the kinds of content they've killed.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reasoning: {
+          type: "string",
+          description:
+            "One or two sentences citing which accept exemplars this is similar to, or why no kill reason applies.",
+        },
+      },
+      required: ["reasoning"],
+    },
+  },
+  {
+    name: "mark_would_skip",
+    description:
+      "Mark this candidate as a bad repost fit. Use when the candidate resembles a recent kill reason (same topic, same framing, same operator objection), or when it doesn't resemble anything the operator has actually published as a repost.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reasoning: {
+          type: "string",
+          description:
+            "One or two sentences citing the matching kill reason or the lack of similar accept exemplars.",
+        },
+      },
+      required: ["reasoning"],
+    },
+  },
+];
+
+const FIT_SYSTEM_PROMPT = `You are a repost-fit judge for a content production dashboard. An evergreen classifier already decided this candidate is "still valid in 12+ months." Your job is narrower: would the human operator actually want it suggested, given how they've behaved on similar items?
+
+You have two signals:
+  - KILL_REASONS: items the operator killed when offered as a repost, with their reason. These are the exact kinds of content they don't want resurfaced.
+  - ACCEPT_EXEMPLARS: items they accepted and actually published as a repost. These are the kinds of content they do want resurfaced.
+
+Decision rule:
+  - If the candidate's topic, framing, or objection-pattern resembles a kill reason → \`mark_would_skip\`.
+  - If it resembles an accept exemplar and does not match a kill → \`mark_would_repost\`.
+  - If neither side has signal yet (cold start with empty lists, or unrelated to anything seen) → \`mark_would_repost\` (don't block on lack of evidence).
+  - When genuinely torn between a partial kill match and a partial accept match → \`mark_would_skip\`. A false skip costs one missed repost; a false accept puts content the operator is sick of seeing back in their queue, which is the failure mode we are fixing.
+
+Match on substance, not surface keywords. "What I made last year" and "my salary" are the same topic. "Mental models on building" and "mental models on hiring" are not — both can be evergreen but the kill reason has to actually apply.
+
+You must call exactly one tool — never respond with plain text.`;
+
+function formatAcceptExemplars(items: RepostAcceptExemplar[]): string {
+  if (items.length === 0) return "(none yet)";
+  return items
+    .slice(0, 20)
+    .map((it) => {
+      const tag = it.postType ? ` [${it.postType}]` : "";
+      const fmt = it.format ? ` (${it.format})` : "";
+      return `  - "${it.title}"${tag}${fmt}`;
+    })
+    .join("\n");
+}
+
+function formatKillReasons(items: PastKillReason[]): string {
+  if (items.length === 0) return "(none yet)";
+  return items
+    .slice(0, 30)
+    .filter((k) => typeof k.reason === "string" && k.reason.trim().length > 0)
+    .map((k) => {
+      const tag = k.postType ? ` [${k.postType}]` : "";
+      return `  - ${k.reason.trim()}${tag}`;
+    })
+    .join("\n");
+}
+
+export async function judgeRepostFit(params: {
+  title: string;
+  postType: string | null;
+  publishedDate: string | null;
+  format?: string | null;
+  contentBody?: string | null;
+  pastKillReasons: PastKillReason[];
+  pastAcceptExemplars: RepostAcceptExemplar[];
+}): Promise<RepostFitVerdict> {
+  const client = new Anthropic();
+
+  const bodyTrimmed = params.contentBody?.trim() ?? "";
+  const bodySection = bodyTrimmed
+    ? `Body:\n"""\n${bodyTrimmed.slice(0, MAX_BODY_CHARS)}${
+        bodyTrimmed.length > MAX_BODY_CHARS ? "…" : ""
+      }\n"""`
+    : `Body: (none captured)`;
+
+  const userMessage = [
+    `CANDIDATE`,
+    `Title: "${params.title}"`,
+    `Format: ${params.format ?? "(none)"}`,
+    `Post type: ${params.postType ?? "(none)"}`,
+    `Originally published: ${params.publishedDate ?? "(unknown)"}`,
+    ``,
+    bodySection,
+    ``,
+    `KILL_REASONS (recent operator rejections):`,
+    formatKillReasons(params.pastKillReasons),
+    ``,
+    `ACCEPT_EXEMPLARS (originals the operator has already republished and published):`,
+    formatAcceptExemplars(params.pastAcceptExemplars),
+    ``,
+    `Decide. Call exactly one tool.`,
+  ].join("\n");
+
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 512,
+    system: FIT_SYSTEM_PROMPT,
+    tools: fitTools,
+    tool_choice: { type: "any" },
+    messages: [{ role: "user", content: userMessage }],
+  });
+
+  for (const block of response.content) {
+    if (block.type !== "tool_use") continue;
+    const input = block.input as { reasoning?: string };
+    if (typeof input.reasoning !== "string" || !input.reasoning.trim()) continue;
+
+    if (block.name === "mark_would_repost") {
+      return { wouldRepost: true, reasoning: input.reasoning.trim() };
+    }
+    if (block.name === "mark_would_skip") {
+      return { wouldRepost: false, reasoning: input.reasoning.trim() };
+    }
+  }
+
+  // Defensive fallback. A malformed model response shouldn't gate a suggestion
+  // — fall back to letting the existing pipeline handle it (i.e. would-repost).
+  // The upstream evergreen classification already provided basic safety.
+  return {
+    wouldRepost: true,
+    reasoning: "Fit judge returned no valid tool call; defaulting to would-repost.",
+  };
+}

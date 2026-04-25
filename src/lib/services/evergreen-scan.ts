@@ -1,9 +1,12 @@
-import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { and, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, contentEvents, productionItems } from "@/lib/db/schema";
 import {
   classifyEvergreen,
+  judgeRepostFit,
   type PastKillReason,
+  type RepostAcceptExemplar,
 } from "@/lib/evergreen-agent";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { isNotionAuthoritativeAccount } from "@/lib/platform";
@@ -18,7 +21,8 @@ const PENDING_QUEUE_TARGET = 10; // keep the Idea queue topped up to ~10 repost 
 const CANDIDATE_POOL_SIZE = 80; // how many evergreen candidates to pull per run before picking suggestions
 const MAX_PER_PLATFORM = Math.ceil(PENDING_QUEUE_TARGET * 0.4); // diversity cap
 const RECLASSIFY_BATCH = 5; // re-examine items that were classified false before their body was captured
-const KILL_REASON_HISTORY = 10; // negative exemplars fed to the classifier prompt
+const KILL_REASON_HISTORY = 30; // negative exemplars; Phase A still slices first 10 inside buildSystemPrompt
+const ACCEPT_EXEMPLAR_HISTORY = 20; // positive exemplars: originals the operator has actually published as reposts
 
 // Per-post-type classification quotas. Each bucket has its own age gate because
 // shelf-life differs dramatically by platform. X keeps the 365-day gate (same
@@ -83,8 +87,12 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
     suggestionsDetails: [],
   };
 
-  // Fetch once: recent kill reasons fed to the classifier as negative exemplars.
-  const pastKillReasons = await fetchPastKillReasons();
+  // Fetch once per run: kill reasons (negative) + accept exemplars (positive).
+  // Both feed the per-candidate Phase B fit judge; Phase A only uses kill reasons.
+  const [pastKillReasons, pastAcceptExemplars] = await Promise.all([
+    fetchPastKillReasons(),
+    fetchPastAcceptExemplars(),
+  ]);
 
   // ─── Phase A: classify (stratified by post-type, per-platform age gate) ──
   for (const quota of CLASSIFY_QUOTAS) {
@@ -271,6 +279,36 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
       continue;
     }
 
+    // Fit check: would this candidate draw a kill given recent operator
+    // behavior? Phase A's kill-reason injection only steers newly-classified
+    // items; this catches already-evergreen items the operator no longer wants
+    // resurfaced (the salary-content failure mode).
+    if (original.title) {
+      try {
+        const fit = await judgeRepostFit({
+          title: original.title,
+          postType: original.postType,
+          publishedDate: original.publishedDate,
+          format: original.format,
+          contentBody: original.contentBody,
+          pastKillReasons,
+          pastAcceptExemplars,
+        });
+        if (!fit.wouldRepost) {
+          console.log(
+            `[evergreen-scan] fit-skip "${original.title}" (${original.postType}): ${fit.reasoning}`
+          );
+          continue;
+        }
+      } catch (err) {
+        console.error(
+          `[evergreen-scan] fit-judge failed for ${original.id}; allowing through:`,
+          err instanceof Error ? err.message : err
+        );
+        // Fall through — don't block a suggestion on a transient API error.
+      }
+    }
+
     const assignees = await resolveAssignees({
       brand: original.brand,
       sourceItemId: original.id,
@@ -386,4 +424,38 @@ async function fetchPastKillReasons(): Promise<PastKillReason[]> {
     reason: r.reason,
     postType: r.postType,
   }));
+}
+
+async function fetchPastAcceptExemplars(): Promise<RepostAcceptExemplar[]> {
+  // Self-join: every repost row has repostedFromItemId pointing at the original.
+  // We want originals whose reposts moved past triage (anything but Idea/Killed)
+  // — that's the operator's positive signal of "yes, content like this is
+  // worth resurfacing."
+  const original = alias(productionItems, "orig");
+  const rows = await db
+    .select({
+      title: original.title,
+      postType: original.postType,
+      format: original.format,
+    })
+    .from(productionItems)
+    .innerJoin(original, eq(original.id, productionItems.repostedFromItemId))
+    .where(
+      and(
+        eq(productionItems.sourceType, "repost"),
+        notInArray(productionItems.status, ["Idea", "Killed"])
+      )
+    )
+    .orderBy(desc(productionItems.createdAt))
+    .limit(ACCEPT_EXEMPLAR_HISTORY);
+
+  return rows
+    .filter((r): r is { title: string; postType: string | null; format: string | null } =>
+      typeof r.title === "string" && r.title.trim().length > 0
+    )
+    .map((r) => ({
+      title: r.title,
+      postType: r.postType,
+      format: r.format,
+    }));
 }

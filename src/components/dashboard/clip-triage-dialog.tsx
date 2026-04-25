@@ -352,7 +352,7 @@ export function ClipTriageDialog({
                       disabled={saving}
                       className={buttonVariants({ variant: "default" })}
                     >
-                      Create in Descript
+                      Create
                       <ChevronDownIcon className="size-3.5 ml-1" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-80">
@@ -443,16 +443,20 @@ function ShortsPreview({
 
   return (
     <div
-      className="mx-auto w-full max-w-[320px] rounded-xl bg-black text-white overflow-hidden flex flex-col shadow-lg"
+      className="relative mx-auto w-full max-w-[320px] rounded-xl bg-black text-white overflow-hidden flex flex-col shadow-lg"
       style={{ aspectRatio: "9 / 16" }}
     >
-      {/* Hook+video group centered vertically. Caption and reaction rail
-          sit absolute at the bottom so they don't push the centered group
-          off-axis. */}
-      <div className="px-3 space-y-2 w-full">
+      {/* Hook pinned to top. Video fills the middle (flex-1 + items-center).
+          Caption and reaction rail sit absolute at the bottom so they overlay
+          the video like a real Reel. Parent is `relative` so the absolute
+          children anchor inside the canvas, not the dialog. */}
+      <div className="px-3 pt-3 z-10">
         <p className="text-[15px] font-extrabold leading-tight line-clamp-3">
           {hook}
         </p>
+      </div>
+
+      <div className="flex-1 flex items-center justify-center min-h-0">
         {preview?.videoUrl ? (
           isAudio ? (
             <audio
@@ -460,7 +464,7 @@ function ShortsPreview({
               src={`${preview.videoUrl}#t=${startSec},${endSec}`}
               controls
               preload="metadata"
-              className="w-full"
+              className="w-full px-3"
             />
           ) : (
             <video
@@ -469,25 +473,25 @@ function ShortsPreview({
               controls
               preload="metadata"
               playsInline
-              className="w-full rounded-md bg-black object-contain max-h-56"
+              className="h-full w-full bg-black object-contain"
             />
           )
         ) : (
-          <div className="flex items-center justify-center h-24 text-[11px] text-white/50">
+          <div className="text-[11px] text-white/50">
             {preview === null ? "Loading preview…" : "No preview available"}
           </div>
         )}
       </div>
 
       {captionText && (
-        <div className="absolute inset-x-0 bottom-14 px-3 text-center pointer-events-none">
-          <p className="text-[13px] font-semibold leading-snug line-clamp-3">
+        <div className="absolute inset-x-0 bottom-14 px-8 text-center pointer-events-none">
+          <p className="text-[13px] font-semibold leading-snug line-clamp-3 drop-shadow-lg">
             {captionText}
           </p>
         </div>
       )}
 
-      <div className="absolute right-1.5 bottom-3 flex flex-col items-center gap-3 text-white/85 pointer-events-none">
+      <div className="absolute right-1.5 bottom-3 flex flex-col items-center gap-3 text-white/85 pointer-events-none drop-shadow-lg">
         <ThumbsUpIcon className="h-5 w-5" strokeWidth={1.8} />
         <ThumbsDownIcon className="h-5 w-5" strokeWidth={1.8} />
         <MessageCircleIcon className="h-5 w-5" strokeWidth={1.8} />

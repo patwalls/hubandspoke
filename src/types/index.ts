@@ -64,6 +64,10 @@ export interface ProductionItem {
   descriptImportedAt?: string | null;
   pillarContentNotionId?: string | null;
   pillarContentItemId?: string | null;
+  /** Title of the pillar production_item (when this row is a clip/repurpose
+   *  with `pillarContentItemId` set). Populated by queries that self-join
+   *  productionItems. The clip queue surfaces this as a column. */
+  pillarContentTitle?: string | null;
   sourceType?: "original" | "repost" | "cross_post" | "clip" | null;
   /** FK to `clip_ideas.id` for sourceType='clip' rows. The triage modal in
    *  the queue fetches the clip-idea on click via this id. */

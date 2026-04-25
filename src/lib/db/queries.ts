@@ -35,6 +35,9 @@ type UserExtras = {
    *  consumers prefer it over the generic format-based predictor for clip
    *  rows. Populated only by queries that JOIN clip_ideas. */
   clipEstimatedViews?: number | null;
+  /** Title of the pillar production_item, resolved via self-join on
+   *  pillarContentItemId. Surfaced in the clip queue's Pillar column. */
+  pillarContentTitle?: string | null;
 };
 
 function mapProductionItem(
@@ -91,6 +94,7 @@ function mapProductionItem(
     clipEstimatedViews: extras.clipEstimatedViews ?? null,
     repostedFromItemId: item.repostedFromItemId,
     pillarContentItemId: item.pillarContentItemId,
+    pillarContentTitle: extras.pillarContentTitle ?? null,
     posterS3Key: item.posterS3Key,
     mediaS3Key: item.mediaS3Key,
     mediaContentType: item.mediaContentType,
@@ -598,6 +602,29 @@ export async function getProductionPipeline(
       )
     );
 
+  // Resolve pillar titles for any clip / repurpose row whose pillar lives
+  // in the same productionItems table. Done as a separate IN query rather
+  // than a self-join because Drizzle's type inference chokes on aliased
+  // self-joins and the cardinality is small (one extra round-trip, ~one
+  // row per distinct pillar — typically <50 in a brand's queue).
+  const pillarIds = Array.from(
+    new Set(
+      rows
+        .map((r) => r.item.pillarContentItemId)
+        .filter((id): id is string => !!id)
+    )
+  );
+  const pillarTitleById = new Map<string, string | null>();
+  if (pillarIds.length > 0) {
+    const pillarRows = await db
+      .select({ id: productionItems.id, title: productionItems.title })
+      .from(productionItems)
+      .where(inArray(productionItems.id, pillarIds));
+    for (const p of pillarRows) {
+      pillarTitleById.set(p.id, p.title ?? null);
+    }
+  }
+
   return rows.map((r) =>
     mapProductionItem(r.item, {
       producerUserName: r.producerUserName,
@@ -617,6 +644,9 @@ export async function getProductionPipeline(
         : null,
       clipEstimatedViews:
         r.clipEstimatedViews != null ? Number(r.clipEstimatedViews) : null,
+      pillarContentTitle: r.item.pillarContentItemId
+        ? pillarTitleById.get(r.item.pillarContentItemId) ?? null
+        : null,
     })
   );
 }

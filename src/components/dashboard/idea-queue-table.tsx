@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { TriageDialog } from "./triage-dialog";
 import { ClipTriageDialog } from "./clip-triage-dialog";
@@ -23,7 +24,7 @@ interface ClipIdeaSummary {
   acceptedProductionItemId?: string | null;
 }
 
-type SortKey = "channel" | "content" | "format" | "views";
+type SortKey = "channel" | "content" | "pillar" | "format" | "views";
 type SortDir = "asc" | "desc";
 
 interface AssignableUser {
@@ -87,6 +88,8 @@ export function IdeaQueueTable({
             : null;
         case "content":
           return item.title?.toLowerCase() ?? null;
+        case "pillar":
+          return item.pillarContentTitle?.toLowerCase() ?? null;
         case "format":
           return item.format?.toLowerCase() ?? null;
         case "views":
@@ -258,6 +261,7 @@ export function IdeaQueueTable({
               <col className="w-[240px]" />
               <col />
               <col className="w-[220px]" />
+              <col className="w-[220px]" />
               <col className="w-[100px]" />
             </colgroup>
             <thead>
@@ -285,6 +289,13 @@ export function IdeaQueueTable({
                 <SortableHeader
                   label="Content"
                   sortKey="content"
+                  activeKey={sortKey}
+                  direction={sortDir}
+                  onSort={toggleSort}
+                />
+                <SortableHeader
+                  label="Pillar"
+                  sortKey="pillar"
                   activeKey={sortKey}
                   direction={sortDir}
                   onSort={toggleSort}
@@ -556,6 +567,19 @@ function IdeaQueueRow({
             {item.title || "(Untitled)"}
           </button>
         </div>
+      </td>
+      <td className="px-3 py-2 text-sm text-muted-foreground max-w-[220px]">
+        {item.pillarContentItemId && item.pillarContentTitle ? (
+          <Link
+            href={`/${brand}/content/${item.pillarContentItemId}`}
+            className="truncate block hover:text-primary hover:underline transition-colors"
+            title={item.pillarContentTitle}
+          >
+            {item.pillarContentTitle}
+          </Link>
+        ) : (
+          <span className="truncate block">—</span>
+        )}
       </td>
       <td className="px-3 py-2 text-sm text-muted-foreground max-w-[220px]">
         <div className="truncate" title={item.format || ""}>
