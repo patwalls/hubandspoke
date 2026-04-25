@@ -28,7 +28,7 @@ removing, or deprecating anything.
 | Duplicate item | Active | `POST /api/production-items/[id]/duplicate` | `productionItems` | |
 | Comments + activity feed | Active | `GET\|POST /api/production-items/[id]/comments`, `POST /api/production-items/[id]/activity` | `contentComments`, `contentEvents` | |
 | Drafts (versioned per-platform copy) | Active | `GET\|POST\|PATCH /api/production-items/[id]/drafts`, `POST .../drafts/generate` | `contentDrafts` | AI gen via Anthropic; UI auto-persists on blur |
-| Clip ideas (LLM-generated short clips) | Active | `POST /api/production-items/[id]/clip-ideas/generate`, `GET .../clip-ideas`, `PATCH /api/clip-ideas/[id]`, `POST /api/clip-ideas/[id]/triage` | `clipIdeas`, `productionItems` (sourceClipIdeaId) | Generated from transcripts on evergreen pillars |
+| Clip ideas (LLM-generated short clips) | Active | `POST /api/production-items/[id]/clip-ideas/generate`, `GET .../clip-ideas`, `GET/PATCH /api/clip-ideas/[id]`, `POST /api/clip-ideas/[id]/triage` | `clipIdeas`, `productionItems` (sourceType=`clip`, sourceClipIdeaId) | Generated from transcripts on evergreen pillars. Each clip_idea now spawns a sibling `production_items` row at generation time (status=`Idea`) so it appears in the central Queue Clip tab. Acceptance flips that row to `Assigned` in place; killing flips it to `Killed`. Backfill: `scripts/backfill-clip-idea-production-items.mjs`. |
 | Clip → Descript (agent flow) | Active | `POST /api/clip-ideas/[id]/create-in-descript`, `POST /api/descript/clip-out` | `repurposeTriggers` (descriptImportPath=`agent`) | Agent decides cut points |
 | Clip → Descript (precise-cut flow) | Active | `POST /api/clip-ideas/[id]/create-in-descript-precise` | `repurposeTriggers` (descriptImportPath=`precise-cut`) | ffmpeg trims [startSec, endSec] before upload |
 | Search (global) | Active | `GET /api/search` | `productionItems`, `formats`, `users`, `accounts` | |
@@ -87,7 +87,7 @@ removing, or deprecating anything.
 | My Work queue | Active | `/(dashboard)/my-work` | `productionItems` (filtered by current user) | |
 | Coverage analytics | Active | `/(dashboard)/coverage` | `productionItems` aggregates | Cross-brand metrics |
 | Production calendar / timeline | Active | `/(dashboard)/[brand]/production` | `productionItems` | Published items + performance |
-| Queue view | Active | `/(dashboard)/[brand]/queue` | `productionItems` (status workflow) | |
+| Queue view | Active | `/(dashboard)/[brand]/queue` (tabs: All / Original / Repost / Cross-post / Clip) | `productionItems` (status workflow), `clip_ideas` (joined for the Clip tab) | Clip tab opens `ClipTriageDialog` (not the standard `TriageDialog`); Est. Views on clip rows uses the LLM's `clip_ideas.estimated_views` instead of the format-based predictor. |
 | Brand home dashboard | Active | `/(dashboard)/[brand]` | `productionItems` aggregates | |
 | Content metrics report | Active | `GET /api/reports/content` | `productionItems` | |
 | Production metrics report | Active | `GET /api/reports/production` | `productionItems`, `users` | |

@@ -65,6 +65,13 @@ export interface ProductionItem {
   pillarContentNotionId?: string | null;
   pillarContentItemId?: string | null;
   sourceType?: "original" | "repost" | "cross_post" | "clip" | null;
+  /** FK to `clip_ideas.id` for sourceType='clip' rows. The triage modal in
+   *  the queue fetches the clip-idea on click via this id. */
+  sourceClipIdeaId?: string | null;
+  /** LLM per-clip view estimate from `clip_ideas.estimated_views`. Set only
+   *  for clip rows; consumers prefer this over the generic format-based
+   *  predictor when surfacing Est. Views in the queue. */
+  clipEstimatedViews?: number | null;
   repostedFromItemId?: string | null;
   mediaS3Bucket?: string | null;
   mediaS3Key?: string | null;

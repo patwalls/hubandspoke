@@ -24,6 +24,29 @@ export async function GET(request: NextRequest) {
         },
         ctx
       );
+      // For clip rows, prefer the LLM's per-clip estimate over the generic
+      // format-based predictor. The LLM reads the actual transcript chunk
+      // and the brand's top-performer hooks, so it has strictly more signal
+      // than the format median. Wrap it into the same ViewPrediction shape
+      // so the UI doesn't need a special-case render path.
+      if (
+        item.sourceType === "clip" &&
+        item.clipEstimatedViews != null &&
+        prediction
+      ) {
+        const est = item.clipEstimatedViews;
+        return {
+          ...item,
+          prediction: {
+            ...prediction,
+            prediction: est,
+            p25: est,
+            p75: est,
+            confidence: "high" as const,
+            cohortBreakdown: [],
+          },
+        };
+      }
       return { ...item, prediction };
     });
     return NextResponse.json({ items: withPredictions });

@@ -15,6 +15,7 @@ const SLUG_TO_SOURCE: Record<string, QueueSource> = {
   original: "original",
   repost: "repost",
   "cross-post": "cross_post",
+  clip: "clip",
 };
 
 const SOURCE_LABEL: Record<QueueSource, string> = {
@@ -22,6 +23,7 @@ const SOURCE_LABEL: Record<QueueSource, string> = {
   original: "Original",
   repost: "Repost",
   cross_post: "Cross-post",
+  clip: "Clip",
 };
 
 export async function generateMetadata({

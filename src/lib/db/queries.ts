@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { productionItems, formats, brands, users, accounts } from "@/lib/db/schema";
+import { productionItems, formats, brands, users, accounts, clipIdeas } from "@/lib/db/schema";
 import { aliasedTable } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
@@ -31,6 +31,10 @@ type UserExtras = {
     brandSlug: string;
     brandLabel: string;
   } | null;
+  /** LLM per-clip view estimate (`clip_ideas.estimated_views`). When set,
+   *  consumers prefer it over the generic format-based predictor for clip
+   *  rows. Populated only by queries that JOIN clip_ideas. */
+  clipEstimatedViews?: number | null;
 };
 
 function mapProductionItem(
@@ -81,7 +85,10 @@ function mapProductionItem(
     sourceType: (item.sourceType ?? "original") as
       | "original"
       | "repost"
-      | "cross_post",
+      | "cross_post"
+      | "clip",
+    sourceClipIdeaId: item.sourceClipIdeaId,
+    clipEstimatedViews: extras.clipEstimatedViews ?? null,
     repostedFromItemId: item.repostedFromItemId,
     pillarContentItemId: item.pillarContentItemId,
     posterS3Key: item.posterS3Key,
@@ -548,12 +555,17 @@ export async function getProductionPipeline(
       accountAvatarUrl: accounts.avatarUrl,
       accountBrandSlug: brands.slug,
       accountBrandLabel: brands.label,
+      // LLM per-clip estimate (sourceType='clip' rows only). The partial
+      // unique index on source_clip_idea_id keeps the join 1:1 without
+      // exploding row counts for non-clip items.
+      clipEstimatedViews: clipIdeas.estimatedViews,
     })
     .from(productionItems)
     .leftJoin(producers, eq(producers.id, productionItems.producerUserId))
     .leftJoin(editors, eq(editors.id, productionItems.editorUserId))
     .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
     .leftJoin(brands, eq(brands.id, accounts.brandId))
+    .leftJoin(clipIdeas, eq(clipIdeas.id, productionItems.sourceClipIdeaId))
     .where(
       and(
         eq(productionItems.brand, brand),
@@ -579,6 +591,8 @@ export async function getProductionPipeline(
             brandLabel: r.accountBrandLabel!,
           }
         : null,
+      clipEstimatedViews:
+        r.clipEstimatedViews != null ? Number(r.clipEstimatedViews) : null,
     })
   );
 }

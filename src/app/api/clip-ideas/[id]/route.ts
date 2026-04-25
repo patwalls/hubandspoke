@@ -2,10 +2,61 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
-import { clipIdeas } from "@/lib/db/schema";
+import { clipIdeas, productionItems, users } from "@/lib/db/schema";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
+}
+
+export async function GET(_request: NextRequest, context: RouteContext) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
+
+  const { id } = await context.params;
+
+  const [row] = await db
+    .select({
+      id: clipIdeas.id,
+      hook: clipIdeas.hook,
+      angle: clipIdeas.angle,
+      rationale: clipIdeas.rationale,
+      startSec: clipIdeas.startSec,
+      endSec: clipIdeas.endSec,
+      estimatedViews: clipIdeas.estimatedViews,
+      status: clipIdeas.status,
+      acceptedProductionItemId: clipIdeas.acceptedProductionItemId,
+      sourceProductionItemId: clipIdeas.sourceProductionItemId,
+      sourceBrand: productionItems.brand,
+      editorName: users.name,
+      editorEmail: users.email,
+    })
+    .from(clipIdeas)
+    .leftJoin(
+      productionItems,
+      eq(productionItems.id, clipIdeas.sourceProductionItemId),
+    )
+    .leftJoin(users, eq(users.id, clipIdeas.acceptedEditorUserId))
+    .where(eq(clipIdeas.id, id))
+    .limit(1);
+
+  if (!row) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    id: row.id,
+    hook: row.hook,
+    angle: row.angle,
+    rationale: row.rationale,
+    startSec: Number(row.startSec),
+    endSec: Number(row.endSec),
+    estimatedViews: row.estimatedViews,
+    status: row.status,
+    acceptedEditorName: row.editorName ?? row.editorEmail ?? null,
+    acceptedProductionItemId: row.acceptedProductionItemId,
+    sourceProductionItemId: row.sourceProductionItemId,
+    sourceBrand: row.sourceBrand,
+  });
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -40,7 +91,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const [row] = await db
-    .select({ status: clipIdeas.status })
+    .select({
+      status: clipIdeas.status,
+      acceptedProductionItemId: clipIdeas.acceptedProductionItemId,
+    })
     .from(clipIdeas)
     .where(eq(clipIdeas.id, id))
     .limit(1);
@@ -55,5 +109,20 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   await db.update(clipIdeas).set(updates).where(eq(clipIdeas.id, id));
+
+  // Mirror the hook edit onto the linked production_item so the queue row's
+  // title and the prod_item.hook stay in sync. The prod_item is the queue-side
+  // representation of an unaccepted clip idea — the title shown is the hook.
+  if (updates.hook && row.acceptedProductionItemId) {
+    await db
+      .update(productionItems)
+      .set({
+        hook: updates.hook,
+        title: updates.hook,
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, row.acceptedProductionItemId));
+  }
+
   return NextResponse.json({ ok: true, ...updates });
 }

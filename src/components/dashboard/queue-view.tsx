@@ -12,7 +12,7 @@ import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 
-export type QueueSource = "all" | "original" | "repost" | "cross_post";
+export type QueueSource = "all" | "original" | "repost" | "cross_post" | "clip";
 
 interface QueueViewProps {
   brand: string;
@@ -24,6 +24,7 @@ const SOURCE_TABS = [
   { value: "original", label: "Original", slug: "original" },
   { value: "repost", label: "Repost", slug: "repost" },
   { value: "cross_post", label: "Cross-post", slug: "cross-post" },
+  { value: "clip", label: "Clip", slug: "clip" },
 ] as const;
 
 export function QueueView({ brand, initialSource }: QueueViewProps) {
@@ -178,7 +179,7 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
   });
 
   const sourceCounts = useMemo(() => {
-    const counts = { all: 0, original: 0, repost: 0, cross_post: 0 };
+    const counts = { all: 0, original: 0, repost: 0, cross_post: 0, clip: 0 };
     for (const item of baseFiltered) {
       counts.all += 1;
       const source = item.sourceType ?? "original";

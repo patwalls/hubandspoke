@@ -3,11 +3,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { TriageDialog } from "./triage-dialog";
+import { ClipTriageDialog } from "./clip-triage-dialog";
 import { BulkKillDialog } from "./bulk-kill-dialog";
 import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { SourceBadge } from "@/components/ui/source-badge";
 import type { ProductionItem } from "@/types";
+
+interface ClipIdeaSummary {
+  id: string;
+  hook: string;
+  angle: string;
+  rationale: string;
+  startSec: number;
+  endSec: number;
+  estimatedViews: number | null;
+  status?: string;
+  acceptedEditorName?: string | null;
+  acceptedProductionItemId?: string | null;
+}
 
 type SortKey = "channel" | "content" | "format" | "views";
 type SortDir = "asc" | "desc";
@@ -465,6 +479,45 @@ function IdeaQueueRow({
   onToggleSelected: (checked: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const isClip = item.sourceType === "clip" && !!item.sourceClipIdeaId;
+  const [clipIdea, setClipIdea] = useState<ClipIdeaSummary | null>(null);
+  const [clipIdeaError, setClipIdeaError] = useState<string | null>(null);
+
+  // Lazy-fetch the clip_ideas row only when the user opens the modal — the
+  // queue can hold hundreds of items so denormalizing the LLM rationale onto
+  // every row would bloat the report payload. Re-fetches on every open so a
+  // hook edit from the per-pillar panel is reflected. We avoid clearing
+  // state synchronously to satisfy react-hooks/set-state-in-effect — stale
+  // state is suppressed in render via an id match instead.
+  useEffect(() => {
+    if (!isClip || !open || !item.sourceClipIdeaId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/clip-ideas/${item.sourceClipIdeaId}`);
+        if (!res.ok) {
+          if (!cancelled) setClipIdeaError(`HTTP ${res.status}`);
+          return;
+        }
+        const json = (await res.json()) as ClipIdeaSummary;
+        if (!cancelled) {
+          setClipIdea(json);
+          setClipIdeaError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setClipIdeaError(err instanceof Error ? err.message : "Fetch failed");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isClip, open, item.sourceClipIdeaId]);
+
+  // Suppress stale data from a previous row's fetch by id-matching.
+  const visibleClipIdea =
+    clipIdea && clipIdea.id === item.sourceClipIdeaId ? clipIdea : null;
 
   return (
     <tr
@@ -541,14 +594,29 @@ function IdeaQueueRow({
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
-        <TriageDialog
-          open={open}
-          onOpenChange={setOpen}
-          item={item}
-          brand={brand}
-          users={users}
-          onDone={onDone}
-        />
+        {isClip ? (
+          <ClipTriageDialog
+            open={open}
+            onOpenChange={setOpen}
+            idea={visibleClipIdea}
+            onDone={onDone}
+            brand={brand}
+          />
+        ) : (
+          <TriageDialog
+            open={open}
+            onOpenChange={setOpen}
+            item={item}
+            brand={brand}
+            users={users}
+            onDone={onDone}
+          />
+        )}
+        {isClip && open && !visibleClipIdea && clipIdeaError && (
+          <span className="sr-only" role="alert">
+            Failed to load clip idea: {clipIdeaError}
+          </span>
+        )}
       </td>
     </tr>
   );

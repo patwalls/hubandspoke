@@ -24,6 +24,17 @@ export async function killClipIdea(args: {
       decidedByUserId: args.decidedByUserId,
     })
     .where(eq(clipIdeas.id, args.clipIdeaId));
+
+  // Mirror onto the queue-side production_item so the killed clip drops out
+  // of /[brand]/queue. Generation creates the prod_item up-front; only legacy
+  // pre-backfill rows would lack one — those are rare and harmless to leave.
+  await db
+    .update(productionItems)
+    .set({
+      status: "Killed",
+      updatedAt: new Date(),
+    })
+    .where(eq(productionItems.sourceClipIdeaId, args.clipIdeaId));
 }
 
 export type AssignClipIdeaResult = {
@@ -69,6 +80,15 @@ export class ClipIdeaSourceMissingMediaError extends Error {
   }
 }
 
+export class ClipIdeaProductionItemMissingError extends Error {
+  constructor(clipIdeaId: string) {
+    super(
+      `No production_item exists for clip_idea ${clipIdeaId}. Run scripts/backfill-clip-idea-production-items.mjs.`,
+    );
+    this.name = "ClipIdeaProductionItemMissingError";
+  }
+}
+
 const PROMOTED_CLIP_FORMAT = "Repackage section with hook";
 
 function formatTimestamp(sec: number): string {
@@ -76,14 +96,6 @@ function formatTimestamp(sec: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
-
-function isUniqueViolation(err: unknown, constraintName: string): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { code?: string; constraint_name?: string; message?: string };
-  if (e.code !== "23505") return false;
-  if (e.constraint_name === constraintName) return true;
-  return typeof e.message === "string" && e.message.includes(constraintName);
 }
 
 interface ClipIdeaRow {
@@ -140,6 +152,24 @@ async function loadAndGuardClipIdea(
   return row as ClipIdeaRow;
 }
 
+/**
+ * Look up the queue-side production_item already created for this clip idea
+ * at generation time. Returns the row's id so the promote paths can UPDATE it
+ * in place (rather than INSERT a new one and trip the partial unique index).
+ * If somehow missing — only possible for pre-backfill historical rows — throw
+ * so the caller can surface a "run the backfill" error rather than silently
+ * creating a duplicate that bypasses the queue pre-creation invariant.
+ */
+async function loadClipProductionItemId(clipIdeaId: string): Promise<string> {
+  const [row] = await db
+    .select({ id: productionItems.id })
+    .from(productionItems)
+    .where(eq(productionItems.sourceClipIdeaId, clipIdeaId))
+    .limit(1);
+  if (!row) throw new ClipIdeaProductionItemMissingError(clipIdeaId);
+  return row.id;
+}
+
 function buildContentBody(row: ClipIdeaRow): string {
   const startSec = Number(row.startSec);
   const endSec = Number(row.endSec);
@@ -174,54 +204,32 @@ export async function assignClipIdea(args: {
   const row = await loadAndGuardClipIdea(args.clipIdeaId);
   const editor = await loadEditor(args.editorUserId);
   const body = buildContentBody(row);
+  const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-  // Create the real production_items row. sourceType='clip' bypasses the
-  // uniq(pillar, format) index, which is scoped to 'original' — many clips
-  // per pillar+format is the whole point. The partial uniq index on
-  // source_clip_idea_id is the replacement guarantee: one production item
-  // per clip idea, enforced at the DB. Default producer = the admin who
-  // assigned; editor = the assignee. Default platform = YouTube Shorts,
-  // editor can swap on the detail page.
-  let created: { id: string } | undefined;
-  try {
-    const rows = await db
-      .insert(productionItems)
-      .values({
-        title: row.hook,
-        status: "Assigned",
-        platform: ["YouTube Shorts"],
-        format: PROMOTED_CLIP_FORMAT,
-        brand: row.sourceBrand ?? "starter-story",
-        contentBody: body,
-        pillarContentItemId: row.sourceProductionItemId,
-        sourceType: "clip",
-        sourceClipIdeaId: args.clipIdeaId,
-        producerUserId: args.decidedByUserId,
-        editorUserId: args.editorUserId,
-        hook: row.hook,
-        hookSource: "clip_idea",
-        hookExtractedAt: new Date(),
-      })
-      .returning({ id: productionItems.id });
-    created = rows[0];
-  } catch (err) {
-    // Translate the DB-level double-promote guard to the same 409 the
-    // app-level status check uses. Happens on concurrent double-clicks or
-    // retries that slip past the status check.
-    if (isUniqueViolation(err, "uniq_production_items_source_clip_idea")) {
-      throw new ClipIdeaAlreadyDecidedError("assigned");
-    }
-    throw err;
-  }
-
-  if (!created) throw new Error("Failed to create production item for clip");
+  // Flip the pre-created production_item from Idea → Assigned and stamp the
+  // chosen editor. Producer flips to the actor who's promoting the idea so
+  // ownership matches who decided. Title/hook/contentBody re-stamped in case
+  // they changed since generation. The partial unique index on
+  // source_clip_idea_id stays honored — we're updating, not inserting.
+  await db
+    .update(productionItems)
+    .set({
+      status: "Assigned",
+      title: row.hook,
+      hook: row.hook,
+      contentBody: body,
+      producerUserId: args.decidedByUserId,
+      editorUserId: args.editorUserId,
+      updatedAt: new Date(),
+    })
+    .where(eq(productionItems.id, productionItemId));
 
   await db
     .update(clipIdeas)
     .set({
       status: "assigned",
       acceptedEditorUserId: args.editorUserId,
-      acceptedProductionItemId: created.id,
+      acceptedProductionItemId: productionItemId,
       decidedAt: new Date(),
       decidedByUserId: args.decidedByUserId,
     })
@@ -234,7 +242,7 @@ export async function assignClipIdea(args: {
     hook: row.hook,
     editorName: editor.name,
     editorEmail: editor.email,
-    newProductionItemId: created.id,
+    newProductionItemId: productionItemId,
   };
 }
 
@@ -295,12 +303,12 @@ function buildDescriptPrompt(args: {
 
 /**
  * Promote a clip idea by cutting a Descript composition at its exact
- * [startSec, endSec] range. Creates a production_items row (editor=actor,
- * producer=actor), invokes Descript's agent with a timestamp-pinned prompt,
- * logs a repurpose_triggers row, and enqueues the poller task that writes
- * descriptCompositionId back onto the new production item when the job
- * stops. The clip idea transitions to "assigned" exactly like the assign
- * path — same terminal state, same uniq-index guarantee.
+ * [startSec, endSec] range. Updates the pre-created production_items row
+ * (editor=actor, producer=actor) to status="Assigned", invokes Descript's
+ * agent with a timestamp-pinned prompt, logs a repurpose_triggers row, and
+ * enqueues the poller task that writes descriptCompositionId back when the
+ * job stops. The clip idea transitions to "assigned" exactly like the assign
+ * path — same terminal state.
  *
  * The agent path requires a pre-existing Descript project on the source
  * (Underlord works by adding a new composition to an existing project).
@@ -326,6 +334,7 @@ export async function createClipIdeaInDescript(args: {
   const body = buildContentBody(row);
   const startSec = Number(row.startSec);
   const endSec = Number(row.endSec);
+  const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
   // repurpose_triggers.target_format_id is NOT NULL. Ensure a bare
   // "Repackage section with hook" format row exists for this brand and
@@ -344,37 +353,20 @@ export async function createClipIdeaInDescript(args: {
     prompt,
   });
 
-  let created: { id: string } | undefined;
-  try {
-    const rows = await db
-      .insert(productionItems)
-      .values({
-        title: row.hook,
-        status: "Assigned",
-        platform: ["YouTube Shorts"],
-        format: PROMOTED_CLIP_FORMAT,
-        brand,
-        contentBody: body,
-        pillarContentItemId: row.sourceProductionItemId,
-        sourceType: "clip",
-        sourceClipIdeaId: args.clipIdeaId,
-        producerUserId: args.actorUserId,
-        editorUserId: args.actorUserId,
-        descriptProjectId: row.descriptProjectId,
-        descriptProjectUrl: agent.projectUrl,
-        hook: row.hook,
-        hookSource: "clip_idea",
-        hookExtractedAt: new Date(),
-      })
-      .returning({ id: productionItems.id });
-    created = rows[0];
-  } catch (err) {
-    if (isUniqueViolation(err, "uniq_production_items_source_clip_idea")) {
-      throw new ClipIdeaAlreadyDecidedError("assigned");
-    }
-    throw err;
-  }
-  if (!created) throw new Error("Failed to create production item for clip");
+  await db
+    .update(productionItems)
+    .set({
+      status: "Assigned",
+      title: row.hook,
+      hook: row.hook,
+      contentBody: body,
+      producerUserId: args.actorUserId,
+      editorUserId: args.actorUserId,
+      descriptProjectId: row.descriptProjectId,
+      descriptProjectUrl: agent.projectUrl,
+      updatedAt: new Date(),
+    })
+    .where(eq(productionItems.id, productionItemId));
 
   const [trigger] = await db
     .insert(repurposeTriggers)
@@ -392,7 +384,7 @@ export async function createClipIdeaInDescript(args: {
   await enqueue("descript-clip-resolve", {
     triggerId: trigger.id,
     jobId: agent.jobId,
-    derivativeItemId: created.id,
+    derivativeItemId: productionItemId,
   });
 
   await db
@@ -400,7 +392,7 @@ export async function createClipIdeaInDescript(args: {
     .set({
       status: "assigned",
       acceptedEditorUserId: args.actorUserId,
-      acceptedProductionItemId: created.id,
+      acceptedProductionItemId: productionItemId,
       decidedAt: new Date(),
       decidedByUserId: args.actorUserId,
     })
@@ -413,7 +405,7 @@ export async function createClipIdeaInDescript(args: {
     hook: row.hook,
     editorName: editor.name,
     editorEmail: editor.email,
-    newProductionItemId: created.id,
+    newProductionItemId: productionItemId,
     descriptProjectUrl: agent.projectUrl,
     descriptJobId: agent.jobId,
   };
@@ -422,11 +414,10 @@ export async function createClipIdeaInDescript(args: {
 export type CreateClipIdeaInDescriptPreciseCutResult = AssignClipIdeaResult;
 
 /**
- * Precise-cut promotion: create the production_item + repurpose_trigger
- * synchronously (so the UI has something to navigate to) and enqueue
- * `clip-idea-precise-cut` which does the slow work — S3 download, ffmpeg
- * trim, Descript upload, job poll. Unlike the agent flow, we don't have
- * descriptProjectId / descriptProjectUrl yet; the worker backfills both
+ * Precise-cut promotion: flip the pre-created production_item to Assigned and
+ * enqueue `clip-idea-precise-cut` which does the slow work — S3 download,
+ * ffmpeg trim, Descript upload, job poll. Unlike the agent flow, we don't
+ * have descriptProjectId / descriptProjectUrl yet; the worker backfills both
  * onto the production_item and the trigger when the import job stops.
  * Different from createClipIdeaInDescript in three ways: (1) requires a
  * source mediaS3Key, not a Descript project; (2) creates a NEW Descript
@@ -444,38 +435,22 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   const brand = row.sourceBrand ?? "starter-story";
   const editor = await loadEditor(args.actorUserId);
   const body = buildContentBody(row);
+  const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
   const formatId = await ensurePromotedClipFormat(brand);
 
-  let created: { id: string } | undefined;
-  try {
-    const rows = await db
-      .insert(productionItems)
-      .values({
-        title: row.hook,
-        status: "Assigned",
-        platform: ["YouTube Shorts"],
-        format: PROMOTED_CLIP_FORMAT,
-        brand,
-        contentBody: body,
-        pillarContentItemId: row.sourceProductionItemId,
-        sourceType: "clip",
-        sourceClipIdeaId: args.clipIdeaId,
-        producerUserId: args.actorUserId,
-        editorUserId: args.actorUserId,
-        hook: row.hook,
-        hookSource: "clip_idea",
-        hookExtractedAt: new Date(),
-      })
-      .returning({ id: productionItems.id });
-    created = rows[0];
-  } catch (err) {
-    if (isUniqueViolation(err, "uniq_production_items_source_clip_idea")) {
-      throw new ClipIdeaAlreadyDecidedError("assigned");
-    }
-    throw err;
-  }
-  if (!created) throw new Error("Failed to create production item for clip");
+  await db
+    .update(productionItems)
+    .set({
+      status: "Assigned",
+      title: row.hook,
+      hook: row.hook,
+      contentBody: body,
+      producerUserId: args.actorUserId,
+      editorUserId: args.actorUserId,
+      updatedAt: new Date(),
+    })
+    .where(eq(productionItems.id, productionItemId));
 
   const [trigger] = await db
     .insert(repurposeTriggers)
@@ -490,7 +465,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   await enqueue("clip-idea-precise-cut", {
     clipIdeaId: args.clipIdeaId,
     triggerId: trigger.id,
-    derivativeItemId: created.id,
+    derivativeItemId: productionItemId,
   });
 
   await db
@@ -498,7 +473,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     .set({
       status: "assigned",
       acceptedEditorUserId: args.actorUserId,
-      acceptedProductionItemId: created.id,
+      acceptedProductionItemId: productionItemId,
       decidedAt: new Date(),
       decidedByUserId: args.actorUserId,
     })
@@ -511,6 +486,6 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     hook: row.hook,
     editorName: editor.name,
     editorEmail: editor.email,
-    newProductionItemId: created.id,
+    newProductionItemId: productionItemId,
   };
 }
