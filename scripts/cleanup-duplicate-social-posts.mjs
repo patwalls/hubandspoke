@@ -169,6 +169,62 @@ async function phaseA() {
   console.log(`  applied=${derived} unique_conflicts_left_for_phase_b=${conflicts}`);
 }
 
+// ─── Phase A2 — normalize Threads numeric-pk → URL code ──────────────────
+// Older Threads sync stored the numeric `pk` (e.g. 3882434372432360069) as
+// platform_content_id; manual "Add from link" stores the URL `code` (e.g.
+// DXhLX3gmPKF). Same post, different ids → Phase B never groups them. Walk
+// every threads row whose id is a pure-numeric pk, derive the code from
+// the URL, and rewrite. Only catches rows whose URL contains an
+// extractable code; the rest stay as-is.
+
+async function phaseA2() {
+  console.log(`\n${dryRun ? "[dry-run]" : "[apply]"} Phase A2 — Threads numeric-pk → code`);
+  const rows = await sql`
+    SELECT id, platform_content_id, published_link
+    FROM production_items
+    WHERE post_type = 'threads'
+      AND platform_content_id ~ '^[0-9]+$'
+      AND published_link IS NOT NULL
+      AND deleted_at IS NULL
+  `;
+  let candidates = 0;
+  let updated = 0;
+  let conflicts = 0;
+  for (const r of rows) {
+    candidates++;
+    const code = extractContentId("threads", r.published_link);
+    if (!code || code === r.platform_content_id) continue;
+    if (dryRun) {
+      console.log(`  ${r.id}: ${r.platform_content_id} → ${code}`);
+      continue;
+    }
+    try {
+      await sql`
+        UPDATE production_items
+        SET platform_content_id = ${code}
+        WHERE id = ${r.id}
+      `;
+      updated++;
+    } catch (err) {
+      // 23505 = sibling row in the same account already owns the URL
+      // code. NULL this row's platform_content_id so Phase B's groupby
+      // (which falls back to extract-from-URL when null) still pairs
+      // the two — they'll both derive to the same code and merge.
+      if (err?.code === "23505") {
+        await sql`
+          UPDATE production_items
+          SET platform_content_id = NULL
+          WHERE id = ${r.id}
+        `;
+        conflicts++;
+      } else {
+        throw err;
+      }
+    }
+  }
+  console.log(`  candidates=${candidates} updated=${updated} unique_conflicts_left_for_phase_b=${conflicts}`);
+}
+
 // ─── Phase B — merge duplicates ──────────────────────────────────────────
 
 // Tables that reference production_items.id. Each entry: child table + FK
@@ -416,6 +472,7 @@ async function phaseC() {
 try {
   console.log(`Cleanup duplicates ${dryRun ? "(dry-run)" : "(apply)"}`);
   await phaseA();
+  await phaseA2();
   await phaseB();
   await phaseC();
   console.log("\nDone.");

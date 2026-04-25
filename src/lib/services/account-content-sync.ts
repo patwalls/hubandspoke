@@ -614,17 +614,19 @@ async function fetchThreadsLatest(
   );
 
   const items: NormalizedItem[] = posts
-    .filter((p) => p.pk)
+    .filter((p) => p.pk && p.code)
     .filter((p) => !isThreadsReply(p))
     .map((p) => {
       const body = p.caption?.text ?? "";
-      const code = p.code;
+      const code = p.code as string;
       const username = p.user?.username ?? handle;
-      const url = code
-        ? `https://www.threads.net/@${username}/post/${code}`
-        : `https://www.threads.net/@${username}`;
+      const url = `https://www.threads.net/@${username}/post/${code}`;
       return {
-        platformContentId: p.pk,
+        // Use the URL-stable `code` (not the numeric `pk`) so rows from
+        // sync line up with rows from manual "Add from link" — both paths
+        // now agree on the same dedup key. Posts without a code are
+        // dropped above; they wouldn't have a usable URL anyway.
+        platformContentId: code,
         publishedLink: url,
         postType: "threads" as const,
         title: body
