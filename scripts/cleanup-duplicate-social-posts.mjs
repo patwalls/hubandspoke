@@ -188,9 +188,14 @@ const CHILD_FKS = [
   ["content_comments", "content_item_id"],
   ["content_events", "content_item_id"],
   ["notifications", "content_item_id"],
-  // Self-refs on production_items
-  ["production_items", "pillar_content_item_id"],
-  ["production_items", "reposted_from_item_id"],
+  // NOTE: self-refs `pillar_content_item_id` and `reposted_from_item_id`
+  // are intentionally NOT in this list. Repointing them en-masse hits
+  // the partial unique index `uniq_production_items_pillar_format`
+  // when two rows in the same (pillar, format) bucket happen to both
+  // be source_type='original'. Schema declares `onDelete: "set null"`
+  // for both, so DELETE of the loser nullifies any references — losing
+  // a pillar / repost link on a few rows but preserving the rest. Acceptable
+  // tradeoff vs. per-row savepoint dance.
 ];
 
 // Curation-quality score: higher = more "real" curated content.
@@ -322,14 +327,17 @@ async function phaseB() {
         await tx`DELETE FROM production_items WHERE id = ${loser.id}`;
       }
       // 3) Apply the merged field set to the winner now that the unique
-      //    key is free.
+      //    key is free. We deliberately don't include pillar_content_item_id
+      //    here — keeping the winner's existing pillar (if any) sidesteps
+      //    the partial unique index `uniq_production_items_pillar_format`
+      //    which would otherwise fire whenever the loser's pillar+format
+      //    bucket is already occupied by another original row.
       await tx`
         UPDATE production_items SET
           platform_content_id = ${fields.platform_content_id},
           published_link = ${fields.published_link},
           notion_id = ${fields.notion_id},
           format = ${fields.format},
-          pillar_content_item_id = ${fields.pillar_content_item_id},
           title = ${fields.title},
           editor_user_id = ${fields.editor_user_id},
           producer_user_id = ${fields.producer_user_id},
