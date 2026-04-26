@@ -327,11 +327,10 @@ captureVelocitySnapshotTask({ productionItemId, checkpointKey })
 | `publishedAt` is in the far past (4h+) | All 5 checkpoint windows already closed; 0 jobs enqueued; `skippedPast = 5` |
 | Item re-synced 30 min after publish | 15m window closed → skipped; 30m/1h/2h/4h scheduled. If 30m already captured (prior run), `skippedCaptured` increments instead |
 | Item discovered by sync at age 18m | 15m's target was 3 min ago but its window [9, 22] is still open → fire immediately at `now + 5s`; on execution, age ≈ 18, passes the window check, snapshot written |
-| Item's `publishedAt` differs on a later SC sync | Sync no longer corrects the stamp on UPDATE (per insert-only policy added 2026-04-25), so no re-scheduling happens. The original schedule from INSERT stands; if it was wrong, the stale-publishedAt guard further down handles the divergence at fire time |
+| Item's `publishedAt` differs on a later SC sync | Sync no longer corrects the stamp on UPDATE (per insert-only policy added 2026-04-25), so no re-scheduling happens. The original schedule from INSERT stands. If `publishedAt` was wrong at INSERT time, the per-checkpoint in-window check at fire time skips out-of-window jobs |
 | Item deleted between schedule and fire | Task's `deletedAt` guard skips; no SC call |
 | Item un-published between schedule and fire | Task's `status !== 'Published'` guard skips; no SC call |
 | Job retries past its window (rare) | Task's age-within-window guard rejects; no SC call; no misleading row |
-| `published_at` was rewritten between schedule and fire (e.g. account-content-sync briefly null'd it then a later sweep stamped a fresh value) | Task's stale-publishedAt guard rejects: if the item has been known to our app (`created_at`) for materially longer than the checkpoint's target age (+ 1h grace), it cannot plausibly be at this checkpoint right now. No SC call, no row written. The scheduler applies the same gate up-front to skip enqueueing in the first place. |
 | Two jobs race to write the same (item, cp) | DB unique index rejects the second; task catches `duplicate key` and logs; no crash |
 | Platform returns no view signal (LinkedIn with no likes yet) | Task logs "no-snapshot"; no row written; 1 SC credit spent |
 | Invalid `checkpointKey` in payload | Task throws up-front; graphile-worker marks the job failed; no DB work done |

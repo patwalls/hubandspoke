@@ -55,7 +55,6 @@ export const captureVelocitySnapshotTask: Task = async (
     .select({
       id: productionItems.id,
       publishedAt: productionItems.publishedAt,
-      createdAt: productionItems.createdAt,
       status: productionItems.status,
       deletedAt: productionItems.deletedAt,
     })
@@ -104,30 +103,6 @@ export const captureVelocitySnapshotTask: Task = async (
   }
 
   const cp = VELOCITY_CHECKPOINTS.find((c) => c.key === checkpointKey);
-
-  // Stale-publishedAt gate. The previous in-window check trusts that
-  // `publishedAt` reflects the real moment the post went live. But that
-  // value can be retroactively rewritten by `account-content-sync` (e.g.
-  // SC briefly returned no `publishedTime`, our writer null-clobbered the
-  // column, and a later sweep wrote a "fresh" approximation). When that
-  // happens, the in-window check still passes — `now - publishedAt` lines
-  // up with the checkpoint — but the captured view count reflects all the
-  // post's accumulated views, not the first 15 minutes.
-  //
-  // Defense: if our app has known about this item for materially longer
-  // than the checkpoint's target age, we cannot plausibly be at this
-  // checkpoint right now. Refuse to write.
-  if (cp) {
-    const knownForMs = Date.now() - new Date(item.createdAt).getTime();
-    const checkpointAgeMs = cp.offsetMinutes * 60_000;
-    const STALE_PUBLISHED_AT_GRACE_MS = 60 * 60_000; // 1 hour
-    if (knownForMs > checkpointAgeMs + STALE_PUBLISHED_AT_GRACE_MS) {
-      helpers.logger.warn(
-        `capture-velocity-snapshot stale-publishedAt item=${productionItemId} cp=${checkpointKey} known_for_min=${Math.round(knownForMs / 60_000)} max_allowed_min=${Math.round((checkpointAgeMs + STALE_PUBLISHED_AT_GRACE_MS) / 60_000)} — refusing (no SC call)`
-      );
-      return;
-    }
-  }
 
   // Age gate. If the job fires outside its checkpoint window (retry
   // backoff, worker downtime, clock skew), skip the SC call instead of
@@ -202,7 +177,7 @@ export const captureVelocitySnapshotTask: Task = async (
  *     correct the `run_at` on still-pending jobs.
  *
  * Safe to call multiple times per item (POST/PUT on the web dyno, plus
- * INSERT and UPDATE branches of account-content-sync).
+ * INSERT branch of account-content-sync).
  */
 export async function scheduleVelocitySnapshots(
   productionItemId: string,
@@ -219,20 +194,15 @@ export async function scheduleVelocitySnapshots(
     return { scheduled: 0, skippedPast: 0, skippedCaptured: 0 };
   }
 
-  // Single SELECT pulling both already-captured checkpoint keys (for the
-  // dedup short-circuit) and the item's `created_at` (for the stale-
-  // publishedAt gate below). Saves a roundtrip vs. two queries.
+  // Confirm the item exists before we enqueue against its id.
   const itemRow = await db
-    .select({
-      createdAt: productionItems.createdAt,
-    })
+    .select({ id: productionItems.id })
     .from(productionItems)
     .where(eq(productionItems.id, productionItemId))
     .limit(1);
   if (itemRow.length === 0) {
     return { scheduled: 0, skippedPast: 0, skippedCaptured: 0 };
   }
-  const itemCreatedAt = itemRow[0].createdAt;
 
   const alreadyCaptured = await db
     .select({ checkpointKey: viewSnapshots.checkpointKey })
@@ -251,13 +221,6 @@ export async function scheduleVelocitySnapshots(
   let skippedPast = 0;
   let skippedCaptured = 0;
   const now = Date.now();
-  // Same gate as the task uses, applied here so we don't even queue jobs
-  // we'd reject at fire time. Cuts SC + worker waste when publishedAt is
-  // briefly fresh-stamped on a long-known item.
-  const STALE_PUBLISHED_AT_GRACE_MS = 60 * 60_000;
-  const knownForMs = itemCreatedAt
-    ? now - new Date(itemCreatedAt).getTime()
-    : 0;
   // Minimum lead time on a job's run_at — keeps the fire from racing with
   // the insert that triggered the schedule.
   const MIN_GRACE_MS = 5_000;
@@ -265,15 +228,6 @@ export async function scheduleVelocitySnapshots(
   for (const cp of VELOCITY_CHECKPOINTS) {
     if (capturedKeys.has(cp.key)) {
       skippedCaptured++;
-      continue;
-    }
-    // Stale-publishedAt gate (mirror of the task's check). If we've known
-    // about this item for materially longer than this checkpoint's target
-    // age, the publishedAt we were handed is retroactively-stamped, not
-    // the real publish time. Skip — see the task for full rationale.
-    const checkpointAgeMs = cp.offsetMinutes * 60_000;
-    if (knownForMs > checkpointAgeMs + STALE_PUBLISHED_AT_GRACE_MS) {
-      skippedPast++;
       continue;
     }
     const targetMs = publishedMs + cp.offsetMinutes * 60_000;

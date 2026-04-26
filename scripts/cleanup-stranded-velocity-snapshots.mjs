@@ -14,9 +14,11 @@
  * `DRIFT_THRESHOLD_MIN`, the publishedAt has shifted since write and
  * the row is no longer a faithful snapshot.
  *
- * Safe: only deletes rows that have demonstrably drifted. The newly-
- * shipped `stale-publishedAt` gate in `capture-velocity-snapshot.ts`
- * prevents new occurrences. This script is the one-time backfill.
+ * Safe: only deletes rows that have demonstrably drifted. New occurrences
+ * are prevented at the source by the insert-only `publishedAt` policy in
+ * `account-content-sync.ts` (UPDATE no longer writes `publishedAt`), so
+ * the timestamp can no longer thrash post-INSERT. This script is the
+ * one-time backfill for rows already stranded before that policy.
  *
  * Defaults to dry-run. Pass --apply to commit.
  *
