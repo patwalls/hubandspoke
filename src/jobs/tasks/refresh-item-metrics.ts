@@ -1,5 +1,6 @@
 import type { Task } from "graphile-worker";
 import { refreshItemMetrics } from "@/lib/services/performance-decay";
+import { recordScUsage } from "@/lib/services/sc-usage-log";
 
 export interface RefreshItemMetricsPayload {
   productionItemId: string;
@@ -23,4 +24,14 @@ export const refreshItemMetricsTask: Task = async (rawPayload, helpers) => {
   helpers.logger.info(
     `refresh-item-metrics ok item=${productionItemId} platform=${result.platform} updated=${result.updated} credits=${result.creditsUsed} (${Date.now() - start}ms)`
   );
+  if (result.creditsUsed > 0) {
+    void recordScUsage({
+      caller: "refresh-item-metrics",
+      productionItemId,
+      platform: result.platform,
+      credits: result.creditsUsed,
+      ok: result.updated,
+      durationMs: Date.now() - start,
+    });
+  }
 };

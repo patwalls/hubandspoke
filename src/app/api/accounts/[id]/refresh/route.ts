@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { enqueue } from "@/jobs/enqueue";
 import { getAccountById } from "@/lib/db/accounts";
 import { refreshAccount } from "@/lib/services/account-refresh";
+import { recordScUsage } from "@/lib/services/sc-usage-log";
 
 /**
  * Refresh an account's SC metadata. Two modes:
@@ -32,7 +33,19 @@ export async function POST(
   }
 
   try {
-    await refreshAccount(id);
+    const start = Date.now();
+    const result = await refreshAccount(id);
+    if (result.credits > 0) {
+      void recordScUsage({
+        caller: "account-refresh",
+        accountId: id,
+        platform: result.platform,
+        credits: result.credits,
+        ok: result.ok,
+        notes: result.note ?? "mode=sync",
+        durationMs: Date.now() - start,
+      });
+    }
     const updated = await getAccountById(id);
     return NextResponse.json({ account: updated });
   } catch (err) {

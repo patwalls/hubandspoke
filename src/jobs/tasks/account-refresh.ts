@@ -1,5 +1,6 @@
 import type { Task } from "graphile-worker";
 import { refreshAccount } from "@/lib/services/account-refresh";
+import { recordScUsage } from "@/lib/services/sc-usage-log";
 
 export interface AccountRefreshPayload {
   accountId: string;
@@ -21,7 +22,21 @@ export interface AccountRefreshPayload {
 export const accountRefreshTask: Task = async (rawPayload, helpers) => {
   const { accountId } = rawPayload as AccountRefreshPayload;
   if (!accountId) throw new Error("account-refresh: missing accountId");
+  const start = Date.now();
   helpers.logger.info(`account-refresh start account=${accountId}`);
-  await refreshAccount(accountId);
-  helpers.logger.info(`account-refresh ok account=${accountId}`);
+  const result = await refreshAccount(accountId);
+  helpers.logger.info(
+    `account-refresh ok account=${accountId} platform=${result.platform} credits=${result.credits} ok=${result.ok}`
+  );
+  if (result.credits > 0) {
+    void recordScUsage({
+      caller: "account-refresh",
+      accountId,
+      platform: result.platform,
+      credits: result.credits,
+      ok: result.ok,
+      notes: result.note ?? null,
+      durationMs: Date.now() - start,
+    });
+  }
 };

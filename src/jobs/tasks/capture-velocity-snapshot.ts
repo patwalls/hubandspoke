@@ -3,6 +3,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, viewSnapshots } from "@/lib/db/schema";
 import { refreshItemMetrics } from "@/lib/services/performance-decay";
+import { recordScUsage } from "@/lib/services/sc-usage-log";
 import { enqueue } from "@/jobs/enqueue";
 import {
   VELOCITY_CHECKPOINTS,
@@ -120,6 +121,18 @@ export const captureVelocitySnapshotTask: Task = async (
   }
 
   const refreshed = await refreshItemMetrics(productionItemId);
+
+  if (refreshed.creditsUsed > 0) {
+    void recordScUsage({
+      caller: "capture-velocity-snapshot",
+      productionItemId,
+      platform: refreshed.platform,
+      credits: refreshed.creditsUsed,
+      ok: refreshed.updated,
+      notes: `cp=${checkpointKey}`,
+      durationMs: Date.now() - start,
+    });
+  }
 
   if (!refreshed.updated || refreshed.views == null) {
     helpers.logger.info(

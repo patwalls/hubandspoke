@@ -139,6 +139,8 @@ export async function POST(request: NextRequest) {
       views != null || likes != null || comments != null;
 
     if (isYouTube && !clientSuppliedMetrics) {
+      const ytStart = Date.now();
+      let ytOk = false;
       try {
         const { fetchSingleVideo } = await import(
           "@/lib/services/sc-fetchers"
@@ -151,8 +153,21 @@ export async function POST(request: NextRequest) {
         youtubeId = video.id;
         youtubeUrl = video.url;
         autoFetched = true;
+        ytOk = true;
       } catch (err) {
         console.warn("Auto-fetch failed for YouTube URL, using manual values:", err);
+      } finally {
+        const { recordScUsage } = await import(
+          "@/lib/services/sc-usage-log"
+        );
+        void recordScUsage({
+          caller: "create-item-yt-fetch",
+          platform: "youtube",
+          credits: 1,
+          ok: ytOk,
+          notes: publishedLink.slice(0, 500),
+          durationMs: Date.now() - ytStart,
+        });
       }
     } else if (shouldEstimate(postType) && finalLikes && !finalViews) {
       // Estimate views from likes for post types without real view data

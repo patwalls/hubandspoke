@@ -231,7 +231,20 @@ async function fetchThreadsUser(handle: string): Promise<AccountRefreshResult | 
  * account endpoint (newsletter, "other") stamp a descriptive error and
  * return so the weekly sweep doesn't retry them every run.
  */
-export async function refreshAccount(accountId: string): Promise<void> {
+export interface RefreshAccountResult {
+  /** Platform on the account (or "skip" for non-SC platforms). */
+  platform: string;
+  /** SC credits consumed by this run. 0 when the platform has no SC endpoint. */
+  credits: number;
+  /** True if SC returned data and we wrote it back. */
+  ok: boolean;
+  /** Human-readable reason when `ok=false` (skip reason or error message). */
+  note?: string;
+}
+
+export async function refreshAccount(
+  accountId: string
+): Promise<RefreshAccountResult> {
   const account = await getAccountById(accountId);
   if (!account) throw new Error(`account not found: ${accountId}`);
 
@@ -281,7 +294,7 @@ export async function refreshAccount(accountId: string): Promise<void> {
         updatedAt: new Date(),
       })
       .where(eq(accounts.id, accountId));
-    return;
+    return { platform: account.platform, credits: 1, ok: false, note: msg };
   }
 
   if (skipMessage || !result) {
@@ -293,7 +306,12 @@ export async function refreshAccount(accountId: string): Promise<void> {
         updatedAt: new Date(),
       })
       .where(eq(accounts.id, accountId));
-    return;
+    return {
+      platform: account.platform,
+      credits: skipMessage ? 0 : 1,
+      ok: false,
+      note: skipMessage ?? "Scrape Creators returned no data",
+    };
   }
 
   // Partial-update: only overwrite columns SC gave us a value for. Avoids
@@ -318,6 +336,7 @@ export async function refreshAccount(accountId: string): Promise<void> {
   if (result.metadata) patch.metadata = result.metadata;
 
   await db.update(accounts).set(patch).where(eq(accounts.id, accountId));
+  return { platform: account.platform, credits: 1, ok: true };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

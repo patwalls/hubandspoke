@@ -1,5 +1,6 @@
 import type { Task } from "graphile-worker";
 import { syncAccountContent } from "@/lib/services/account-content-sync";
+import { recordScUsage } from "@/lib/services/sc-usage-log";
 
 export interface AccountContentSyncPayload {
   accountId: string;
@@ -26,6 +27,7 @@ export const accountContentSyncTask: Task = async (rawPayload, helpers) => {
   const { accountId, mode, maxPages, sinceIso } =
     rawPayload as AccountContentSyncPayload;
   if (!accountId) throw new Error("account-content-sync: missing accountId");
+  const start = Date.now();
   helpers.logger.info(
     `account-content-sync start account=${accountId} mode=${mode} maxPages=${
       maxPages ?? "default"
@@ -39,6 +41,19 @@ export const accountContentSyncTask: Task = async (rawPayload, helpers) => {
   helpers.logger.info(
     `account-content-sync ok account=${accountId} platform=${result.platform} fetched=${result.fetched} created=${result.created} updated=${result.updated} errors=${result.errors} credits=${result.creditsUsed}`
   );
+  if (result.creditsUsed > 0) {
+    void recordScUsage({
+      caller: "account-content-sync",
+      accountId,
+      platform: result.platform,
+      credits: result.creditsUsed,
+      itemsCreated: result.created,
+      itemsUpdated: result.updated,
+      ok: !result.errorMessage && result.errors === 0,
+      notes: `mode=${mode}`,
+      durationMs: Date.now() - start,
+    });
+  }
   if (result.errorMessage) {
     // Surface as a task failure so graphile-worker retries with backoff.
     throw new Error(result.errorMessage);

@@ -138,9 +138,9 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - `MAX_ATTEMPTS = 5` defined locally (`youtube-download-sweep.ts:14`); same constant duplicated in `enrichment/orchestrator.ts:20`
   - Sweep gate paces retries; dyno-level maxAttempts only retries the same tick
 
-### `account-content-sync-sweep` — per-account content fan-out (every 30 min)
-- **Trigger:** cron `*/30 * * * *` (every 30 minutes)
-- **Cost:** 22 SC credits per sweep at current volume (3 IG + 3 LinkedIn + 2 Threads + 3 TikTok + 3 X + 4 YouTube × 2 endpoints). 48 sweeps/day → ~1,056 SC calls/day. Tunable via `CRONTAB` in `src/jobs/crontab.ts`.
+### `account-content-sync-sweep` — per-account content fan-out (hourly)
+- **Trigger:** cron `5 * * * *` (hourly at :05). Was `*/30` before 2026-04-27 — halved frequency to cut SC spend; the PUT-time auto-fetch on operator-pasted publish links handles the common discovery case.
+- **Cost:** ~22 SC credits per sweep at current volume (3 IG + 3 LinkedIn + 2 Threads + 3 TikTok + 3 X + 4 YouTube × 2 endpoints). 24 sweeps/day → ~528 SC calls/day. Tunable via `CRONTAB` in `src/jobs/crontab.ts`.
 - **Files:** `src/jobs/tasks/scheduled.ts` (`accountContentSyncSweepTask`)
 - **Inputs:** every active `accounts` row on an SC-supported platform
   (`youtube, instagram, tiktok, linkedin, x, threads`)
@@ -712,7 +712,7 @@ Every sweep filter AND the per-item executor must resolve platform kinds through
 
 | System | Used by | Cost notes |
 |---|---|---|
-| Scrape Creators | `performance-decay`, `account-content-sync`, `enrich-item`, `account-refresh`, `instagram-body-fetch.ts`, `tweet-body-fetch.ts` | ~1 credit per call; enrichment with media (`withMedia=true`) is ~10; `account-content-sync` with `mode=backfill` spends up to `maxPages` credits per account |
+| Scrape Creators | `performance-decay`, `account-content-sync`, `enrich-item`, `account-refresh`, `instagram-body-fetch.ts`, `tweet-body-fetch.ts` | ~1 credit per call; enrichment with media (`withMedia=true`) is ~10; `account-content-sync` with `mode=backfill` spends up to `maxPages` credits per account. Per-task spend is logged to `sc_call_log` (since 2026-04-27) and visible at `/admin/sc-usage` |
 | Descript | `descript-clip-resolve`, `clip-idea-precise-cut` | Per-project API calls — used for clip editing only (transcript path moved to OpenAI Whisper 2026-04) |
 | OpenAI (Whisper) | `transcribe-whisper` | `whisper-1` at $0.006/min ⇒ ~$0.14 per 24-min video; kill-switch via `WHISPER_TRANSCRIBE_LIVE=false` |
 | Anthropic (Claude Haiku 4.5) | `extract-hook`; also draft-gen, repurpose-agent, fit-classifier, evergreen-scan, summary | Hook extraction ~$0.0005/item |

@@ -1202,3 +1202,39 @@ export const syncLogs = pgTable("sync_logs", {
     .notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
 });
+
+// Per-task-invocation Scrape Creators credit usage log. One row per call
+// to `recordScUsage` from an instrumented task or route — the granularity
+// is "task fired and spent N credits", not "individual HTTP request".
+// That's enough for cost analysis (rollups by caller/account/platform/day)
+// without the write volume of per-call logging. Drives the /admin/sc-usage
+// dashboard.
+export const scCallLog = pgTable(
+  "sc_call_log",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    caller: text("caller").notNull(),
+    accountId: uuid("account_id").references(() => accounts.id, {
+      onDelete: "set null",
+    }),
+    productionItemId: uuid("production_item_id").references(
+      () => productionItems.id,
+      { onDelete: "set null" }
+    ),
+    platform: text("platform"),
+    credits: integer("credits").notNull(),
+    itemsCreated: integer("items_created"),
+    itemsUpdated: integer("items_updated"),
+    ok: boolean("ok").notNull().default(true),
+    notes: text("notes"),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("idx_sc_call_log_created_at").on(t.createdAt),
+    index("idx_sc_call_log_caller_created_at").on(t.caller, t.createdAt),
+    index("idx_sc_call_log_account_created_at").on(t.accountId, t.createdAt),
+  ]
+);

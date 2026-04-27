@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { getAccountsForBrand } from "@/lib/db/accounts";
 import { inferAccountFromUrl } from "@/lib/infer-post-type";
 import { fetchPostMetadataFromUrl } from "@/lib/services/post-metadata";
+import { recordScUsage } from "@/lib/services/sc-usage-log";
 
 /**
  * POST /api/production-items/preview-link
@@ -40,7 +41,17 @@ export async function POST(request: NextRequest) {
 
     const accounts = await getAccountsForBrand(brand);
     const matchedAccount = inferAccountFromUrl(url, accounts);
+    const start = Date.now();
     const metadata = await fetchPostMetadataFromUrl(url);
+    void recordScUsage({
+      caller: "preview-link",
+      accountId: matchedAccount?.id ?? null,
+      platform: metadata.platform ?? null,
+      credits: 1,
+      ok: !metadata.warning,
+      notes: url.slice(0, 500),
+      durationMs: Date.now() - start,
+    });
 
     return NextResponse.json({
       accountId: matchedAccount?.id ?? null,

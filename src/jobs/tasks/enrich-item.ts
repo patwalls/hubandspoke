@@ -1,5 +1,6 @@
 import type { Task } from "graphile-worker";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
+import { recordScUsage } from "@/lib/services/sc-usage-log";
 
 export interface EnrichItemPayload {
   productionItemId: string;
@@ -33,4 +34,17 @@ export const enrichItemTask: Task = async (rawPayload, helpers) => {
   helpers.logger.info(
     `enrich-item ok item=${productionItemId} credits=${result.creditsSpent} (${Date.now() - start}ms)`
   );
+  if (result.creditsSpent > 0) {
+    const noteParts: string[] = [];
+    if (force) noteParts.push("force=true");
+    if (withMedia) noteParts.push("withMedia=true:10cr");
+    void recordScUsage({
+      caller: "enrich-item",
+      productionItemId,
+      credits: result.creditsSpent,
+      ok: true,
+      notes: noteParts.length ? noteParts.join(" ") : null,
+      durationMs: Date.now() - start,
+    });
+  }
 };

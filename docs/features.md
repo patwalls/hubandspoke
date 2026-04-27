@@ -109,6 +109,7 @@ removing, or deprecating anything.
 | Brand-scoped settings | Active | `/(dashboard)/[brand]/settings` | `brands`, `accounts` | |
 | Sync errors monitor | Active | `/(dashboard)/settings/sync-errors` | `syncLogs` | Notion / YouTube / MATG / performance |
 | Job queue monitor | Active | `/(dashboard)/settings/jobs` | `graphile_worker.jobs` | Live status of enrich, transcribe, cross-post-scan, etc. |
+| SC usage dashboard | Active | `/(dashboard)/admin/sc-usage` | `scCallLog` | Per-task SC credit spend rolled up by caller, account, platform; recent-call list. One row per task invocation, written by `recordScUsage` from each instrumented caller. |
 | **`brand-settings` API + table** | **Planned-removal** | `GET\|POST /api/brand-settings`, `brandSettings` table | `brandSettings` | Data fully migrated to `brands`; drop in next migration |
 
 ---

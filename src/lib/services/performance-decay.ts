@@ -25,6 +25,7 @@
 
 import { db } from "@/lib/db";
 import { productionItems, syncLogs } from "@/lib/db/schema";
+import { recordScUsage } from "@/lib/services/sc-usage-log";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import {
   fetchSingleVideo,
@@ -657,9 +658,21 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
     byPlatform[kind] ??= { attempted: 0, updated: 0, errors: 0 };
     byPlatform[kind].attempted++;
 
+    const itemStart = Date.now();
     try {
       const r = await refreshItemMetrics(item.id);
       creditsUsed += r.creditsUsed;
+      if (r.creditsUsed > 0) {
+        void recordScUsage({
+          caller: "performance-decay",
+          productionItemId: item.id,
+          platform: r.platform,
+          credits: r.creditsUsed,
+          ok: r.updated,
+          notes: r.note ?? null,
+          durationMs: Date.now() - itemStart,
+        });
+      }
       if (r.updated) {
         itemsUpdated++;
         byPlatform[r.platform] ??= { attempted: 0, updated: 0, errors: 0 };
@@ -674,6 +687,15 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
       byPlatform[kind].errors++;
       await stampSyncResult(item.id, msg);
       creditsUsed++;
+      void recordScUsage({
+        caller: "performance-decay",
+        productionItemId: item.id,
+        platform: kind,
+        credits: 1,
+        ok: false,
+        notes: msg.slice(0, 500),
+        durationMs: Date.now() - itemStart,
+      });
     }
   }
 

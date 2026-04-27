@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
       try {
         await enqueue(
           "account-content-sync",
-          { accountId: row.id, mode: "backfill", maxPages: 50 },
+          { accountId: row.id, mode: "backfill", maxPages: 10 },
           {
             jobKey: `account-content-sync-${row.id}-backfill`,
             jobKeyMode: "unsafe_dedupe",
