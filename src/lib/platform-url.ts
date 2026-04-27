@@ -125,6 +125,44 @@ export function canonicalPostUrl(
 }
 
 /**
+ * Detect the platform from a URL's hostname. Used when a user pastes a link
+ * without telling us what kind of post it is (e.g. global search).
+ */
+export function inferPlatformFromUrl(
+  url: string | null | undefined
+): PlatformKey | null {
+  if (!url) return null;
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+  if (host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be")
+    return "youtube";
+  if (host === "instagram.com") return "instagram";
+  if (host === "threads.net" || host === "threads.com") return "threads";
+  if (host === "x.com" || host === "twitter.com") return "x";
+  if (host === "tiktok.com" || host === "vm.tiktok.com") return "tiktok";
+  if (host === "linkedin.com") return "linkedin";
+  return null;
+}
+
+/**
+ * Convenience: extract the platform-native content id from a bare URL by
+ * first inferring the platform from the hostname.
+ */
+export function extractContentIdFromUrl(
+  url: string | null | undefined
+): { platform: PlatformKey; contentId: string } | null {
+  const platform = inferPlatformFromUrl(url);
+  if (!platform) return null;
+  const contentId = extractContentId(platform, url);
+  if (!contentId) return null;
+  return { platform, contentId };
+}
+
+/**
  * Loose URL key for fallback dedup when neither side has a `platform_content_id`
  * we can extract (rare — short links, custom domains). Strips query string,
  * fragment, trailing slash, leading `www.`, and folds `threads.com` →

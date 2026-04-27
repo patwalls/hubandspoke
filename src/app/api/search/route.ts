@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, formatChannels, formats, productionItems } from "@/lib/db/schema";
+import { extractContentIdFromUrl, looseUrlKey } from "@/lib/platform-url";
 
 const CONTENT_LIMIT = 12;
 const FORMAT_LIMIT = 8;
@@ -20,6 +32,26 @@ export async function GET(request: NextRequest) {
   }
 
   const pattern = `%${q}%`;
+
+  // If the user pasted a URL, prefer matching against the platform-native
+  // content id (indexed, exact) and fall back to a loose substring of the URL
+  // for legacy rows whose `platform_content_id` hasn't been backfilled. We
+  // skip the title/format text searches in that case — a URL never matches a
+  // human-readable name, and showing unrelated text hits would just be noise.
+  const urlMatch = extractContentIdFromUrl(q);
+  const urlLooseKey = urlMatch ? looseUrlKey(q) : null;
+
+  const contentMatchExpr = urlMatch
+    ? or(
+        eq(productionItems.platformContentId, urlMatch.contentId),
+        urlLooseKey
+          ? ilike(productionItems.publishedLink, `%${urlLooseKey}%`)
+          : undefined,
+        urlLooseKey
+          ? ilike(productionItems.youtubeUrl, `%${urlLooseKey}%`)
+          : undefined,
+      )!
+    : ilike(productionItems.title, pattern);
 
   const [contentRows, formatRows] = await Promise.all([
     db
@@ -42,7 +74,7 @@ export async function GET(request: NextRequest) {
         and(
           eq(productionItems.brand, brand),
           isNotNull(productionItems.notionId),
-          ilike(productionItems.title, pattern),
+          contentMatchExpr,
           isNull(productionItems.deletedAt),
         ),
       )
@@ -53,15 +85,17 @@ export async function GET(request: NextRequest) {
         desc(productionItems.publishedDate),
       )
       .limit(CONTENT_LIMIT),
-    db
-      .select({
-        id: formats.id,
-        name: formats.name,
-      })
-      .from(formats)
-      .where(and(eq(formats.brand, brand), ilike(formats.name, pattern)))
-      .orderBy(asc(formats.name))
-      .limit(FORMAT_LIMIT),
+    urlMatch
+      ? Promise.resolve([] as Array<{ id: string; name: string }>)
+      : db
+          .select({
+            id: formats.id,
+            name: formats.name,
+          })
+          .from(formats)
+          .where(and(eq(formats.brand, brand), ilike(formats.name, pattern)))
+          .orderBy(asc(formats.name))
+          .limit(FORMAT_LIMIT),
   ]);
 
   // Pull format channels for the matched formats so the UI can render
