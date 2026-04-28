@@ -1272,7 +1272,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
     disabledReason?: string;
   }[] = [
     { value: "details", label: "Details", count: null },
-    { value: "preview", label: "Preview", count: null },
+    {
+      value: "preview",
+      label: "Preview",
+      count: null,
+      disabled: true,
+      disabledReason: "This feature is in development, check back soon.",
+    },
     {
       value: "draft",
       label: "Draft",
