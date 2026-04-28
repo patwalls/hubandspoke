@@ -136,6 +136,12 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
   const [formClicks, setFormClicks] = useState("");
   const [formLeads, setFormLeads] = useState("");
   const [formSalesAmount, setFormSalesAmount] = useState("");
+  // CTA UTM is normally generated server-side at insert time, but the create
+  // dialog exposes it here so operators can copy it into the published link
+  // before saving. Empty string = let the server generate as today.
+  const [formUtmCampaign, setFormUtmCampaign] = useState("");
+  const [generatingUtm, setGeneratingUtm] = useState(false);
+  const [utmCopied, setUtmCopied] = useState(false);
   // Set by "Add from link" fetch; sent through to POST so the new row
   // carries a real thumbnail + author without a second SC call on save.
   // The dialog doesn't expose inputs for these — they're pass-through.
@@ -164,12 +170,46 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
     setFormClicks("");
     setFormLeads("");
     setFormSalesAmount("");
+    setFormUtmCampaign("");
+    setUtmCopied(false);
     setPreviewThumbnail(null);
     setPreviewAuthorHandle(null);
     setPreviewPublishedAt(null);
     setPreviewWarning(null);
     setSaveResult(null);
     setDialogOpen(true);
+  }
+
+  async function generateUtm(titleForUtm: string) {
+    setGeneratingUtm(true);
+    setUtmCopied(false);
+    try {
+      const res = await fetch("/api/production-items/generate-utm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: titleForUtm }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (typeof data.utmCampaign === "string") {
+        setFormUtmCampaign(data.utmCampaign);
+      }
+    } catch {
+      // best-effort; user can retry via the Generate button
+    } finally {
+      setGeneratingUtm(false);
+    }
+  }
+
+  async function handleCopyUtm() {
+    if (!formUtmCampaign) return;
+    try {
+      await navigator.clipboard.writeText(formUtmCampaign);
+      setUtmCopied(true);
+      setTimeout(() => setUtmCopied(false), 1500);
+    } catch {
+      // clipboard may be blocked; ignore
+    }
   }
 
   async function handleFetchFromLink() {
@@ -210,6 +250,12 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
       }
 
       if (data.warning) setPreviewWarning(data.warning);
+
+      // Auto-fill the UTM now so the user can copy it into the published
+      // link before saving — that's the whole point of exposing it here.
+      if (data.title && !formUtmCampaign) {
+        void generateUtm(data.title);
+      }
     } catch (err) {
       setPreviewWarning(err instanceof Error ? err.message : String(err));
     } finally {
@@ -271,6 +317,7 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
             brand,
             thumbnail: previewThumbnail,
             authorHandle: previewAuthorHandle,
+            utmCampaign: formUtmCampaign.trim() || undefined,
           }),
         });
         if (!res.ok) {
@@ -615,6 +662,48 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                 onChange={(e) => setFormDate(e.target.value)}
               />
             </div>
+
+            {!isEditing && (
+              <div className="space-y-2">
+                <Label>CTA UTM</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={formUtmCampaign}
+                    onChange={(e) => {
+                      setFormUtmCampaign(e.target.value);
+                      setUtmCopied(false);
+                    }}
+                    placeholder="e.g. angus-warner-42"
+                    className="font-mono"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => generateUtm(formTitle)}
+                    disabled={generatingUtm}
+                  >
+                    {generatingUtm
+                      ? "Generating…"
+                      : formUtmCampaign
+                        ? "Regenerate"
+                        : "Generate"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopyUtm}
+                    disabled={!formUtmCampaign}
+                  >
+                    {utmCopied ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Paste this into the published link before posting. Leave blank to auto-generate on save.
+                </p>
+              </div>
+            )}
 
             {/* Attribution metrics — only editable on an existing post.
                 Views/likes/comments are never edited by hand; the

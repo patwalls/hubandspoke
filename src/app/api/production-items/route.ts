@@ -109,6 +109,7 @@ export async function POST(request: NextRequest) {
       comments,
       thumbnail: bodyThumbnail,
       authorHandle: bodyAuthorHandle,
+      utmCampaign: bodyUtmCampaign,
     } = body;
 
     if (!title || !platform?.length || !publishedDate || !brand) {
@@ -207,7 +208,13 @@ export async function POST(request: NextRequest) {
         ? new Date(bodyPublishedAt)
         : new Date();
 
-    const utmCampaign = await generateUtmCampaign(title);
+    // Caller-supplied UTM (from the Add-Post dialog so operators can paste it
+    // into the published link before saving) wins when present and non-empty;
+    // otherwise we generate one. The partial unique index on `utm_campaign`
+    // is still the source of truth for collision protection.
+    const suppliedUtm =
+      typeof bodyUtmCampaign === "string" ? bodyUtmCampaign.trim() : "";
+    const utmCampaign = suppliedUtm || (await generateUtmCampaign(title));
     // Single dedup key for content sync — derive it from the URL whenever
     // possible. YouTube already extracts `youtubeId` above; reuse it so the
     // partial unique index `(account_id, platform_content_id)` catches
