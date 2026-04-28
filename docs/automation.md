@@ -47,6 +47,8 @@ USER / API ENTRY POINTS
 AUTO-CHAINS (one task enqueues another)
   enrich-item        ── if updates.mediaS3Key set ─→ transcribe-whisper
   youtube-download   ── on success ────────────────→ transcribe-whisper
+  archive-yt-local.ts (script)         ── on S3 upload ─→ transcribe-whisper
+  backfill-instagram-bodies.mjs (script) ── on S3 upload ─→ transcribe-whisper
   enqueueNotification() ───────────────────────────→ notification-send
 ```
 
@@ -99,6 +101,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Maps Notion "Channel" labels to seeded YouTube accounts; remaps legacy "Twitter" → "X"
   - Skips internal Starter Story / Pat Walls handles
   - Resolves producer/editor via Notion user ID → `users.notionUserId` → format defaults → brand defaults
+  - **Pillar resolution is scoped to `source_type='original'` rows.** A post-loop UPDATE resolves `pillar_content_item_id` from `pillar_content_notion_id`, and a follow-up cleanup NULLs out stale links — both restricted to `original` items. App-code-set pillars on `clip` / `repost` / `cross_post` / `repurposed` rows (which never carry a `pillar_content_notion_id`) are left untouched.
 
 ### `enrichment-sweep` — fan-out parent
 - **Trigger:** cron `20 * * * *` (every hour at :20)

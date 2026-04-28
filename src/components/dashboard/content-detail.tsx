@@ -70,7 +70,6 @@ import type { PostType } from "@/lib/platform-field-schemas";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
 import {
-  ContentDraftPanel,
   type DraftRow,
   type FieldSaveState,
 } from "./content-draft";
@@ -304,6 +303,7 @@ const PROPERTY_TRIGGER_CLASS =
 const DETAIL_TAB_VALUES = [
   "details",
   "preview",
+  "draft",
   "derivatives",
   "clip-ideas",
   "repurpose",
@@ -342,9 +342,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
   >({ kind: "idle" });
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
 
-  // Shared draft state — single source of truth for both ContentDraftPanel
-  // (form view) and ContentPreview (native-mock view). Edits in either
-  // surface flow through `onLocalEdit` / `onCommit`.
   const [draft, setDraft] = useState<DraftRow | null>(null);
   const [liveContent, setLiveContent] = useState<ContentDraftContent | null>(
     null,
@@ -1065,13 +1062,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
     [contentId, draft, liveContent],
   );
 
-  const onDraftReplaced = useCallback((newDraft: DraftRow) => {
-    setDraft(newDraft);
-    setLiveContent(newDraft.content);
-    setFieldSaves({});
-    setFieldErrors({});
-  }, []);
-
   // Every field auto-persists through here. The PUT route accepts partial
   // bodies, so we send only what changed. Server response is merged back into
   // `data.item` so derived flags like `isPublished` stay current without a full
@@ -1283,6 +1273,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
   }[] = [
     { value: "details", label: "Details", count: null },
     { value: "preview", label: "Preview", count: null },
+    {
+      value: "draft",
+      label: "Draft",
+      count: null,
+      disabled: true,
+      disabledReason: "This feature is in development, check back soon.",
+    },
     ...(!isPrePublish &&
     (!hideDerivativeSections ||
       data.reposts.length > 0 ||
@@ -2483,23 +2480,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
         </div>
       )}
       </div>
-
-      {item.format &&
-        item.status !== "Published" &&
-        item.status !== "Killed" && (
-          <ContentDraftPanel
-            itemId={item.id}
-            hasFieldSchema={data.hasFieldSchema}
-            formatName={item.format}
-            draft={draft}
-            liveContent={liveContent}
-            fieldSaves={fieldSaves}
-            fieldErrors={fieldErrors}
-            onLocalEdit={onLocalEdit}
-            onCommit={onCommit}
-            onDraftReplaced={onDraftReplaced}
-          />
-        )}
 
       <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
         </TabsContent>

@@ -654,11 +654,17 @@ export async function syncFromNotion(): Promise<{
         `[notion-sync] ${unresolvedCount} derivative(s) could not be linked to their pillar — another derivative already occupies that (pillar, format) slot.`
       );
     }
+    // Scope: source_type='original' only. This cleanup is for Notion-synced
+    // rows where the Notion-side pillar relation got disconnected — it must
+    // not touch app-code-set pillars on clip / repost / cross_post /
+    // repurposed rows (those never have a pillar_content_notion_id and would
+    // be wiped on every sync otherwise). See the Clip queue Pillar column.
     await db.execute(sql`
       UPDATE production_items
       SET pillar_content_item_id = NULL
       WHERE pillar_content_notion_id IS NULL
         AND pillar_content_item_id IS NOT NULL
+        AND source_type = 'original'
     `);
 
     // Update sync log

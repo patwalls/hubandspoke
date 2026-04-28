@@ -82,8 +82,21 @@ const PLAYER_CLIENT_STRATEGIES = [
   { name: "android_vr_mweb", clients: "android_vr,mweb,web_safari" },
 ];
 
+// Hard wall-clock cap per yt-dlp invocation. Some videos cause yt-dlp to
+// spin forever (deleted videos that 200 with empty body, weird CDN edge
+// cases). The original script had no timeout and one bad URL stalled the
+// entire batch for 30+ min. 5 min is plenty for a 1440p hour-long video
+// over residential bandwidth.
+const YT_DLP_TIMEOUT_MS = 5 * 60 * 1000;
+
 function runYtDlp(url: string, outputPath: string, clients: string): Promise<void> {
   return new Promise((resolvePromise, rejectPromise) => {
+    // `detached: true` puts yt-dlp + its children into a new process group
+    // so we can kill the whole tree with `process.kill(-pid, …)`. Without
+    // this, killing only the launcher leaves grandchildren (ffmpeg
+    // fragments, the actual download worker) holding stderr open — which
+    // means proc.on('close') never fires and our timeout silently
+    // accomplishes nothing.
     const proc = spawn(
       YT_DLP_PATH,
       [
@@ -102,20 +115,45 @@ function runYtDlp(url: string, outputPath: string, clients: string): Promise<voi
         "--restrict-filenames",
         "--concurrent-fragments",
         "4",
+        // Per-socket read/connect timeout. Without this yt-dlp can hang
+        // indefinitely on a stalled CDN response.
+        "--socket-timeout",
+        "30",
         "--extractor-args",
         `youtube:player_client=${clients}`,
         "-o",
         outputPath,
         url,
       ],
-      { stdio: ["ignore", "pipe", "pipe"] },
+      { stdio: ["ignore", "pipe", "pipe"], detached: true },
     );
     let stderr = "";
+    let killedByTimeout = false;
+    const killTree = (signal: NodeJS.Signals) => {
+      try {
+        // Negative PID kills the whole process group on POSIX.
+        if (proc.pid !== undefined) process.kill(-proc.pid, signal);
+      } catch {
+        /* group already gone */
+      }
+    };
+    const killTimer = setTimeout(() => {
+      killedByTimeout = true;
+      killTree("SIGKILL");
+    }, YT_DLP_TIMEOUT_MS);
     proc.stderr.on("data", (b) => {
       stderr += b.toString();
     });
-    proc.on("error", (err) => rejectPromise(new Error(`spawn: ${err.message}`)));
+    proc.on("error", (err) => {
+      clearTimeout(killTimer);
+      rejectPromise(new Error(`spawn: ${err.message}`));
+    });
     proc.on("close", (code) => {
+      clearTimeout(killTimer);
+      if (killedByTimeout) {
+        rejectPromise(new Error(`timeout after ${YT_DLP_TIMEOUT_MS / 1000}s`));
+        return;
+      }
       if (code === 0) resolvePromise();
       else {
         const lastErr = stderr.trim().split("\n").slice(-2).join(" | ").slice(0, 400);
@@ -158,19 +196,65 @@ async function archiveOne(
       },
     }).done();
 
-    await pool.query(
-      `UPDATE production_items
-         SET media_s3_bucket = $2,
-             media_s3_key = $3,
-             media_s3_uploaded_at = NOW(),
-             media_size_bytes = $4,
-             media_content_type = 'video/mp4',
-             youtube_download_source = 'yt-dlp',
-             youtube_download_error = NULL,
-             youtube_download_attempts = youtube_download_attempts + 1
-       WHERE id = $1`,
-      [item.id, BUCKET, key, fileStat.size],
-    );
+    // Retry the success-path UPDATE up to 4× with backoff. We've already
+    // spent the bandwidth on yt-dlp + S3; if the PG conn was reaped during
+    // a long upload we MUST retry rather than orphan the S3 object.
+    // Without this, conn-flaps cost us 15+ min per item AND leak storage.
+    let lastErr: Error | null = null;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        await pool.query(
+          `UPDATE production_items
+             SET media_s3_bucket = $2,
+                 media_s3_key = $3,
+                 media_s3_uploaded_at = NOW(),
+                 media_size_bytes = $4,
+                 media_content_type = 'video/mp4',
+                 youtube_download_source = 'yt-dlp',
+                 youtube_download_error = NULL,
+                 youtube_download_attempts = youtube_download_attempts + 1
+           WHERE id = $1`,
+          [item.id, BUCKET, key, fileStat.size],
+        );
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error(String(err));
+        if (attempt < 4) {
+          await new Promise((r) => setTimeout(r, 500 * attempt));
+        }
+      }
+    }
+    if (lastErr) throw lastErr;
+
+    // Auto-chain: enqueue Whisper transcription on the prod graphile_worker
+    // queue using the same pool that just wrote the UPDATE. Can't import
+    // maybeEnqueueWhisperTranscribe() because it pulls in @/lib/db, which
+    // would bake DATABASE_URL — see the standalone-script header above.
+    if (process.env.WHISPER_TRANSCRIBE_LIVE !== "false") {
+      try {
+        const existing = await pool.query<{ has_text: boolean }>(
+          `SELECT length(full_text) > 0 AS has_text
+             FROM transcripts
+            WHERE production_item_id = $1
+            LIMIT 1`,
+          [item.id],
+        );
+        if (!existing.rows[0]?.has_text) {
+          await pool.query(
+            `SELECT graphile_worker.add_job(
+               'transcribe-whisper',
+               payload => $1::json,
+               job_key => $2
+             )`,
+            [JSON.stringify({ productionItemId: item.id }), `transcribe-whisper:${item.id}`],
+          );
+        }
+      } catch (err) {
+        console.warn(`  [transcribe enqueue] ${item.id}: ${(err as Error).message}`);
+      }
+    }
+
     return { ok: true, bytes: fileStat.size };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -198,6 +282,24 @@ async function main() {
     connectionString: PROD_DB_URL,
     ssl: { rejectUnauthorized: false },
     max: 3,
+    // TCP keepalive: long video downloads (1-3 min) leave the pg conn
+    // idle; without keepalive Heroku Postgres reaps it and the next query
+    // gets ETIMEDOUT. The default `idleTimeoutMillis` (10s) also closes
+    // idle conns aggressively, so bump that too.
+    keepAlive: true,
+    // Begin sending TCP keepalive probes after 30s of idle. macOS default
+    // is 2h, well past Heroku Postgres's idle reap, which is what was
+    // dropping connections during long S3 uploads.
+    keepAliveInitialDelayMillis: 30 * 1000,
+    idleTimeoutMillis: 30 * 60 * 1000,
+  });
+  // Pool-level error handler: pg emits 'error' on the pool when a backend
+  // connection dies mid-idle (network blip, server reap). Without this
+  // listener Node bubbles it up as an unhandled error and kills the
+  // process — losing all in-flight progress mid-batch. Logging is enough;
+  // the next query will transparently grab a new connection.
+  pool.on("error", (err) => {
+    console.warn(`[pool] backend conn error (will reconnect): ${err.message}`);
   });
 
   let items: Array<{ id: string; youtube_id: string | null; youtube_url: string; title: string | null }>;
@@ -209,6 +311,10 @@ async function main() {
     );
     items = r.rows;
   } else {
+    // Skip items that have already failed >= 3 times. These are almost
+    // always videos deleted/privatized on YouTube — retrying just stalls
+    // the batch behind the same dead URLs. Operators can re-run with
+    // `--ids=…` to force a specific item.
     const r = await pool.query(
       `SELECT id, youtube_id, youtube_url, title
          FROM production_items
@@ -217,6 +323,7 @@ async function main() {
           AND media_s3_key IS NULL
           AND published_date >= $1::date
           AND brand = ANY($2::text[])
+          AND COALESCE(youtube_download_attempts, 0) < 3
         ORDER BY published_date DESC NULLS LAST
         LIMIT $3`,
       [SINCE, BRANDS, LIMIT],

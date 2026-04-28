@@ -158,6 +158,33 @@ async function archiveToS3(itemId, remoteUrl, igUrl) {
   return { key, size: arr.byteLength, contentType };
 }
 
+// Auto-chain: enqueue Whisper transcription on the prod graphile_worker queue
+// after we write media_s3_key. Mirrors maybeEnqueueWhisperTranscribe() in
+// src/lib/services/transcribe-after-upload.ts — replicated rather than imported
+// because this script is plain JS using postgres.js, not Drizzle.
+async function maybeEnqueueWhisper(itemId) {
+  if (process.env.WHISPER_TRANSCRIBE_LIVE === "false") return;
+  try {
+    const rows = await sql`
+      SELECT length(full_text) > 0 AS has_text
+        FROM transcripts
+       WHERE production_item_id = ${itemId}
+       LIMIT 1
+    `;
+    if (rows[0]?.has_text) return;
+    const payload = JSON.stringify({ productionItemId: itemId });
+    await sql`
+      SELECT graphile_worker.add_job(
+        'transcribe-whisper',
+        payload => ${payload}::json,
+        job_key => ${`transcribe-whisper:${itemId}`}
+      )
+    `;
+  } catch (err) {
+    console.warn(`  [transcribe enqueue] ${itemId}: ${err.message}`);
+  }
+}
+
 async function main() {
   const mode = DRY_RUN ? "[DRY RUN] " : "";
   const mediaNote = WITH_MEDIA ? " + archive to S3" : "";
@@ -241,6 +268,7 @@ async function main() {
               updated_at = now()
           WHERE id = ${r.id}
         `;
+        await maybeEnqueueWhisper(r.id);
       } else if (caption && WITH_MEDIA && !archived && ephemeral) {
         // Caption OK, S3 archive failed — fall back to ephemeral URL so we
         // still have a breadcrumb.
@@ -275,6 +303,7 @@ async function main() {
               updated_at = now()
           WHERE id = ${r.id}
         `;
+        await maybeEnqueueWhisper(r.id);
       } else if (ephemeral) {
         await sql`
           UPDATE production_items
