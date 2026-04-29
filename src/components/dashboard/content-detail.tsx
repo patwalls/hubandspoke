@@ -761,6 +761,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
   const [formatSearch, setFormatSearch] = useState("");
   const [status, setStatus] = useState("");
   const [pillar, setPillar] = useState<PillarOption | null>(null);
+  const [repostedFromOption, setRepostedFromOption] =
+    useState<PillarOption | null>(null);
   const [editorUserId, setEditorUserId] = useState<string>("");
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [publishedLink, setPublishedLink] = useState("");
@@ -903,19 +905,36 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
       });
   }, [accounts, brand, data?.item.accountId]);
 
-  const applyItem = useCallback((item: ProductionItem, pillarRef: PillarRef | null) => {
-    setTitle(item.title || "");
-    setAccountId(item.accountId ?? null);
-    setPostType((item.postType as PostType | null) ?? null);
-    setFormat(item.format || "");
-    setStatus(item.status || "");
-    setPillar(pillarRef);
-    setEditorUserId(item.editorUserId || "");
-    setPublishedLink(item.publishedLink || "");
-    setPublishedDate(item.publishedDate || "");
-    setUtmCampaign(item.utmCampaign || "");
-    setSourceType(item.sourceType || "original");
-  }, []);
+  const applyItem = useCallback(
+    (
+      item: ProductionItem,
+      pillarRef: PillarRef | null,
+      repostedFromRef: RepostedFromRef | null,
+    ) => {
+      setTitle(item.title || "");
+      setAccountId(item.accountId ?? null);
+      setPostType((item.postType as PostType | null) ?? null);
+      setFormat(item.format || "");
+      setStatus(item.status || "");
+      setPillar(pillarRef);
+      setRepostedFromOption(
+        repostedFromRef
+          ? {
+              id: repostedFromRef.id,
+              title: repostedFromRef.title,
+              format: null,
+              status: null,
+            }
+          : null,
+      );
+      setEditorUserId(item.editorUserId || "");
+      setPublishedLink(item.publishedLink || "");
+      setPublishedDate(item.publishedDate || "");
+      setUtmCampaign(item.utmCampaign || "");
+      setSourceType(item.sourceType || "original");
+    },
+    [],
+  );
 
   const slugAttached = data?.item?.shortLinkSlug ?? null;
   useEffect(() => {
@@ -948,7 +967,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
       }
       const json = (await res.json()) as DetailResponse;
       setData(json);
-      applyItem(json.item, json.pillar ?? null);
+      applyItem(json.item, json.pillar ?? null, json.repostedFrom ?? null);
     } catch (err) {
       console.error("Failed to load content detail:", err);
       setData(null);
@@ -1087,7 +1106,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
         // sourceType flips can materialize reposted_from_item_id and thus the
         // "Reposted from" source card. That card reads from data.repostedFrom
         // which only the GET endpoint computes — refetch to surface it.
-        if ("sourceType" in patch) void load();
+        if ("sourceType" in patch || "repostedFromItemId" in patch) void load();
         if (payload.notionSyncWarning) {
           const message = `Saved. Notion: ${payload.notionSyncWarning}`;
           setSaveState({ kind: "error", message });
@@ -2249,6 +2268,25 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
             </div>
           </PropertyRow>
         </PropertyRowSolo>
+
+        {(sourceType === "repost" || sourceType === "cross_post") && (
+          <PropertyRowSolo>
+            <PropertyRow label="Reposted from">
+              <PillarPicker
+                brand={brand}
+                excludeId={contentId}
+                value={repostedFromOption}
+                onChange={(next) => {
+                  setRepostedFromOption(next);
+                  void persistField({ repostedFromItemId: next?.id ?? null });
+                }}
+                placeholder="No source — click to choose…"
+                includeAll
+                triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
+              />
+            </PropertyRow>
+          </PropertyRowSolo>
+        )}
 
         <PropertyRowGroup single>
           <PropertyRow label="Editor">

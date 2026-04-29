@@ -32,6 +32,11 @@ interface PillarPickerProps {
   value: PillarOption | null;
   onChange: (next: PillarOption | null) => void;
   triggerClassName?: string;
+  placeholder?: string;
+  /** Include items that aren't Notion-synced. Default false (pillars are
+   *  Notion-authoritative); set true for reposted-from where the source
+   *  may be a discovered Threads/IG post. */
+  includeAll?: boolean;
 }
 
 export function PillarPicker({
@@ -40,6 +45,8 @@ export function PillarPicker({
   value,
   onChange,
   triggerClassName,
+  placeholder = "No pillar — click to choose…",
+  includeAll = false,
 }: PillarPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -56,6 +63,7 @@ export function PillarPicker({
         try {
           const params = new URLSearchParams({ brand, excludeId });
           if (query.trim()) params.set("q", query.trim());
+          if (includeAll) params.set("includeAll", "1");
           const res = await fetch(`/api/production-items/search?${params}`);
           if (!res.ok) {
             setResults([]);
@@ -74,7 +82,7 @@ export function PillarPicker({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [open, query, brand, excludeId]);
+  }, [open, query, brand, excludeId, includeAll]);
 
   return (
     <div className="flex items-center gap-2">
@@ -96,7 +104,7 @@ export function PillarPicker({
               )}
             </span>
           ) : (
-            <span className="text-muted-foreground">No pillar — click to choose…</span>
+            <span className="text-muted-foreground">{placeholder}</span>
           )}
           <ChevronsUpDownIcon className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         </PopoverTrigger>

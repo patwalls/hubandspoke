@@ -313,6 +313,7 @@ export async function PUT(request: NextRequest) {
       publishedAt: bodyPublishedAt,
       status,
       pillarContentItemId,
+      repostedFromItemId,
       producerUserId,
       editorUserId,
       views,
@@ -448,6 +449,33 @@ export async function PUT(request: NextRequest) {
             ? pillarContentItemId
             : existing.pillarContentItemId;
         if (nextPillar) updateData.repostedFromItemId = nextPillar;
+      }
+    }
+
+    // Explicit reposted-from override. Runs after the sourceType auto-mirror
+    // so a user's pick from the detail-page picker wins over the default.
+    if (repostedFromItemId !== undefined) {
+      if (repostedFromItemId) {
+        if (repostedFromItemId === id) {
+          return NextResponse.json(
+            { error: "Cannot repost from itself" },
+            { status: 400 },
+          );
+        }
+        const [target] = await db
+          .select({ id: productionItems.id })
+          .from(productionItems)
+          .where(eq(productionItems.id, repostedFromItemId))
+          .limit(1);
+        if (!target) {
+          return NextResponse.json(
+            { error: "Reposted-from target not found" },
+            { status: 400 },
+          );
+        }
+        updateData.repostedFromItemId = repostedFromItemId;
+      } else {
+        updateData.repostedFromItemId = null;
       }
     }
 

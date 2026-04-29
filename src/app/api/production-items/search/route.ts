@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
   const brand = params.get("brand");
   const q = (params.get("q") || "").trim();
   const excludeId = params.get("excludeId");
+  const includeAll = params.get("includeAll") === "1";
 
   if (!brand) {
     return NextResponse.json({ error: "brand is required" }, { status: 400 });
@@ -15,9 +16,9 @@ export async function GET(request: NextRequest) {
 
   const conditions = [
     eq(productionItems.brand, brand),
-    isNotNull(productionItems.notionId),
     isNull(productionItems.deletedAt),
   ];
+  if (!includeAll) conditions.push(isNotNull(productionItems.notionId));
   if (excludeId) conditions.push(ne(productionItems.id, excludeId));
   if (q) conditions.push(ilike(productionItems.title, `%${q}%`));
 
