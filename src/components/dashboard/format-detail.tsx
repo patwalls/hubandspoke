@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { statusClass } from "@/lib/badge-colors";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
@@ -1505,7 +1506,12 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                             {item.title || item.publishedLink || "Untitled"}
                           </Link>
                           {item.status && item.status !== "Published" && (
-                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                            <span
+                              className={cn(
+                                "inline-flex items-center mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                                statusClass(item.status),
+                              )}
+                            >
                               {item.status}
                             </span>
                           )}

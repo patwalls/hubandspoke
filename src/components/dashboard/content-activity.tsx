@@ -5,6 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { CommentEditor, isEditorEmpty } from "@/components/dashboard/comment-editor";
+import { statusClass } from "@/lib/badge-colors";
+import { cn } from "@/lib/utils";
 
 interface ActivityUser {
   id: string;
@@ -544,7 +546,12 @@ function EventBody({
 
 function StatusChip({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center rounded border border-border bg-accent/50 px-1.5 py-0.5 text-xs font-medium text-foreground">
+    <span
+      className={cn(
+        "inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium",
+        statusClass(label),
+      )}
+    >
       {label}
     </span>
   );
