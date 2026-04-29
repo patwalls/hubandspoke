@@ -1748,9 +1748,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
                   >
                     <CopyIcon className="size-3.5" /> Duplicate
                   </DropdownMenuItem>
-                  {(hasDescriptProject ||
-                    item.mediaS3Key ||
-                    isPublished) && <DropdownMenuSeparator />}
+                  <DropdownMenuSeparator />
                   {!hasDescriptProject && item.mediaS3Key && (
                     <DropdownMenuItem
                       disabled={actionPending}
@@ -1779,6 +1777,14 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
                       )}
                     </DropdownMenuItem>
                   )}
+                  <DropdownMenuItem
+                    onClick={() => {
+                      window.location.href =
+                        "/watermarks/starter-story-watermarks.zip";
+                    }}
+                  >
+                    <DownloadIcon className="size-3.5" /> Download watermarks
+                  </DropdownMenuItem>
                   {isPublished && (
                     <DropdownMenuItem
                       disabled={isSyncing}
@@ -2166,12 +2172,30 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
               }}
             >
               <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Status">
-                <SelectValue placeholder="Select status…" />
+                <SelectValue placeholder="Select status…">
+                  {status ? (
+                    <span
+                      className={cn(
+                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
+                        statusClass(status),
+                      )}
+                    >
+                      {status}
+                    </span>
+                  ) : null}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {STATUS_OPTIONS.map((s) => (
                   <SelectItem key={s} value={s}>
-                    {s}
+                    <span
+                      className={cn(
+                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
+                        statusClass(s),
+                      )}
+                    >
+                      {s}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
