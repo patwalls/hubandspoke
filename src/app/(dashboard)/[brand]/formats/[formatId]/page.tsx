@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
+import { getStatusPalette } from "@/lib/db/brand-statuses";
 import { FormatDetail } from "@/components/dashboard/format-detail";
 
 interface FormatDetailPageProps {
@@ -32,5 +33,12 @@ export default async function BrandFormatDetailPage({
     notFound();
   }
 
-  return <FormatDetail brand={brand} formatId={formatId} />;
+  // The status palette is a Map; serialize as a plain array for the prop
+  // boundary, then the client component reconstructs the Map.
+  const palette = await getStatusPalette(brand);
+  const statusPalette = new Map(palette);
+
+  return (
+    <FormatDetail brand={brand} formatId={formatId} statusPalette={statusPalette} />
+  );
 }

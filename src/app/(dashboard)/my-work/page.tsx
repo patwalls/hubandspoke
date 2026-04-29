@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
-import { statusClass } from "@/lib/badge-colors";
+import { statusClassWithPalette } from "@/lib/badge-colors";
+import { getAllStatusPalettes } from "@/lib/db/brand-statuses";
 
 export const dynamic = "force-dynamic";
 
@@ -96,6 +97,10 @@ export default async function MyWorkPage() {
         .limit(10)
     : [];
 
+  // Per-brand color palettes; resolved server-side and threaded into the
+  // Section client so each row's chip uses the brand's configured color.
+  const palettes = await getAllStatusPalettes();
+
   return (
     <div className="space-y-6">
       <div>
@@ -111,6 +116,7 @@ export default async function MyWorkPage() {
         rows={yourTurn}
         emptyText="Nothing in your queue. Nice."
         userId={userId}
+        palettes={palettes}
       />
 
       <Section
@@ -119,6 +125,7 @@ export default async function MyWorkPage() {
         rows={waitingOnOthers}
         emptyText="Nothing here yet."
         userId={userId}
+        palettes={palettes}
       />
 
       <div className="rounded-lg border border-border bg-card">
@@ -188,12 +195,14 @@ function Section({
   rows,
   emptyText,
   userId,
+  palettes,
 }: {
   title: string;
   subtitle: string;
   rows: Row[];
   emptyText: string;
   userId: string;
+  palettes: ReadonlyMap<string, ReadonlyMap<string, string>>;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -268,7 +277,7 @@ function Section({
                         <span
                           className={cn(
                             "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                            statusClass(r.status)
+                            statusClassWithPalette(r.status, palettes.get(r.brand))
                           )}
                         >
                           {r.status}

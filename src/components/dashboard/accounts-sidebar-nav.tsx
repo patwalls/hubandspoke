@@ -17,6 +17,7 @@ export function AccountsSidebarNav({ brand }: Props) {
     { href: `${base}/goals`, label: "Goals" },
     { href: `${base}/boundaries`, label: "Boundaries" },
     { href: `${base}/cross-posting`, label: "Cross posting" },
+    { href: `${base}/statuses`, label: "Statuses" },
   ];
 
   return (

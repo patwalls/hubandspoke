@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { statusClass } from "@/lib/badge-colors";
+import { statusClassWithPalette } from "@/lib/badge-colors";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
@@ -147,6 +147,9 @@ interface DetailResponse {
 interface FormatDetailProps {
   brand: string;
   formatId: string;
+  /** Per-brand status palette — Map<status name, color token>. Used to
+   *  color the status chip on each item in the format's content list. */
+  statusPalette?: ReadonlyMap<string, string>;
 }
 
 function ContentSortHeader<K extends string>({
@@ -211,7 +214,7 @@ function formatDate(d: string | null): string {
 const FORMAT_TAB_VALUES = ["details", "derivatives", "content"] as const;
 type FormatTab = (typeof FORMAT_TAB_VALUES)[number];
 
-export function FormatDetail({ brand, formatId }: FormatDetailProps) {
+export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1509,7 +1512,7 @@ export function FormatDetail({ brand, formatId }: FormatDetailProps) {
                             <span
                               className={cn(
                                 "inline-flex items-center mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                                statusClass(item.status),
+                                statusClassWithPalette(item.status, statusPalette),
                               )}
                             >
                               {item.status}

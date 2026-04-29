@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { CommentEditor, isEditorEmpty } from "@/components/dashboard/comment-editor";
-import { statusClass } from "@/lib/badge-colors";
+import { statusClassWithPalette } from "@/lib/badge-colors";
 import { cn } from "@/lib/utils";
 
 interface ActivityUser {
@@ -47,6 +47,9 @@ interface ContentActivityProps {
   contentId: string;
   // Bump to trigger a refetch (e.g. after the parent saves a status change).
   refreshKey?: number;
+  /** Map<status name, color token> for the brand. Threaded from the parent
+   *  so status_change chips render with the same colors as elsewhere. */
+  statusPalette?: ReadonlyMap<string, string>;
 }
 
 function timeAgo(iso: string): string {
@@ -145,7 +148,7 @@ function CommentBody({ body }: { body: string }) {
   );
 }
 
-export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityProps) {
+export function ContentActivity({ contentId, refreshKey = 0, statusPalette }: ContentActivityProps) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -308,7 +311,7 @@ export function ContentActivity({ contentId, refreshKey = 0 }: ContentActivityPr
                 onRemove={remove}
               />
             ) : (
-              <EventRow key={item.id} event={item} />
+              <EventRow key={item.id} event={item} statusPalette={statusPalette} />
             ),
           )
         )}
@@ -443,7 +446,13 @@ function CommentRow({
   );
 }
 
-function EventRow({ event }: { event: EventItem }) {
+function EventRow({
+  event,
+  statusPalette,
+}: {
+  event: EventItem;
+  statusPalette?: ReadonlyMap<string, string>;
+}) {
   const actorName = userDisplayName(event.user, "Someone");
   const avatarUrl = event.user?.avatarUrl ?? null;
   return (
@@ -461,7 +470,7 @@ function EventRow({ event }: { event: EventItem }) {
         </div>
       )}
       <div className="min-w-0 flex-1 text-sm text-muted-foreground">
-        <EventBody actorName={actorName} event={event} />{" "}
+        <EventBody actorName={actorName} event={event} statusPalette={statusPalette} />{" "}
         <span className="text-xs">· {timeAgo(event.createdAt)}</span>
       </div>
     </div>
@@ -471,9 +480,11 @@ function EventRow({ event }: { event: EventItem }) {
 function EventBody({
   actorName,
   event,
+  statusPalette,
 }: {
   actorName: string;
   event: EventItem;
+  statusPalette?: ReadonlyMap<string, string>;
 }) {
   if (event.payload.type === "status_change") {
     const { from, to } = event.payload;
@@ -484,10 +495,10 @@ function EventBody({
         {from ? (
           <>
             {" "}
-            from <StatusChip label={from} />
+            from <StatusChip label={from} palette={statusPalette} />
           </>
         ) : null}{" "}
-        to {to ? <StatusChip label={to} /> : <em>none</em>}
+        to {to ? <StatusChip label={to} palette={statusPalette} /> : <em>none</em>}
       </span>
     );
   }
@@ -544,12 +555,18 @@ function EventBody({
   );
 }
 
-function StatusChip({ label }: { label: string }) {
+function StatusChip({
+  label,
+  palette,
+}: {
+  label: string;
+  palette?: ReadonlyMap<string, string>;
+}) {
   return (
     <span
       className={cn(
         "inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium",
-        statusClass(label),
+        statusClassWithPalette(label, palette),
       )}
     >
       {label}

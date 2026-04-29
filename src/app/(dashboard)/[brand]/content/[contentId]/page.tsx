@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
 import { getAccounts } from "@/lib/db/accounts";
+import { getBrandStatuses } from "@/lib/db/brand-statuses";
 import { ContentDetail } from "@/components/dashboard/content-detail";
 
 interface ContentDetailPageProps {
@@ -36,7 +37,10 @@ export default async function BrandContentDetailPage({
   // Fetch accounts once on the server and thread through so the picker can
   // render without an extra round-trip. Keep the shape minimal — the picker
   // only needs id/brand/platform/handle/displayName.
-  const accountRows = await getAccounts();
+  const [accountRows, statusRows] = await Promise.all([
+    getAccounts(),
+    getBrandStatuses(brand),
+  ]);
   const accounts = accountRows.map((a) => ({
     id: a.id,
     brandSlug: a.brandSlug,
@@ -49,6 +53,13 @@ export default async function BrandContentDetailPage({
     syncedFromNotion: a.syncedFromNotion,
   }));
 
+  const statuses = statusRows.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+    position: s.position,
+  }));
+
   const shortLinksBaseUrl = process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.com";
 
   return (
@@ -57,6 +68,7 @@ export default async function BrandContentDetailPage({
       contentId={contentId}
       accounts={accounts}
       shortLinksBaseUrl={shortLinksBaseUrl}
+      statuses={statuses}
     />
   );
 }

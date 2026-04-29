@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
 import { getBrands, invalidateBrandCache } from "@/lib/db/brands";
+import { insertDefaultStatusesForBrand } from "@/lib/db/brand-statuses";
 
 export async function GET() {
   const session = await auth();
@@ -45,17 +46,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "slug is invalid" }, { status: 400 });
     }
 
-    const [row] = await db
-      .insert(brands)
-      .values({
-        slug: cleanSlug,
-        label: label.trim(),
-        avatarUrl: avatarUrl ?? null,
-        color: color ?? null,
-        disabled: disabled ?? false,
-      })
-      .onConflictDoNothing({ target: brands.slug })
-      .returning();
+    const row = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(brands)
+        .values({
+          slug: cleanSlug,
+          label: label.trim(),
+          avatarUrl: avatarUrl ?? null,
+          color: color ?? null,
+          disabled: disabled ?? false,
+        })
+        .onConflictDoNothing({ target: brands.slug })
+        .returning();
+      if (!created) return null;
+      // Seed the default status palette so the new brand has a working
+      // production pipeline + status dropdown immediately.
+      await insertDefaultStatusesForBrand(created.id, tx);
+      return created;
+    });
 
     if (!row) {
       return NextResponse.json(

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { getAccounts } from "@/lib/db/accounts";
+import { getBrandStatuses } from "@/lib/db/brand-statuses";
 import { ContentDetail } from "@/components/dashboard/content-detail";
 
 interface AllContentDetailPageProps {
@@ -41,7 +42,10 @@ export default async function AllContentDetailPage({
     notFound();
   }
 
-  const accountRows = await getAccounts();
+  const [accountRows, statusRows] = await Promise.all([
+    getAccounts(),
+    getBrandStatuses(item.brand),
+  ]);
   const accounts = accountRows.map((a) => ({
     id: a.id,
     brandSlug: a.brandSlug,
@@ -53,6 +57,12 @@ export default async function AllContentDetailPage({
     isActive: a.isActive,
     syncedFromNotion: a.syncedFromNotion,
   }));
+  const statuses = statusRows.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+    position: s.position,
+  }));
 
   const shortLinksBaseUrl =
     process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.com";
@@ -63,6 +73,7 @@ export default async function AllContentDetailPage({
       contentId={contentId}
       accounts={accounts}
       shortLinksBaseUrl={shortLinksBaseUrl}
+      statuses={statuses}
     />
   );
 }

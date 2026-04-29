@@ -20,7 +20,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { statusClass } from "@/lib/badge-colors";
+import { statusClassFromToken, statusClass } from "@/lib/badge-colors";
 import { AccountBadge } from "@/components/ui/account-badge";
 import {
   recordVisit,
@@ -42,6 +42,9 @@ type ContentHit = {
   format: string | null;
   postType: string | null;
   status: string | null;
+  // Color token (e.g. "yellow") resolved server-side from the brand's
+  // status palette; null when the hit's status isn't in the palette.
+  statusColor: string | null;
   publishedDate: string | null;
   views: number | null;
   account: SearchAccount | null;
@@ -403,7 +406,9 @@ function ContentRow({ hit, title }: { hit: ContentHit; title: string }) {
             <span
               className={cn(
                 "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none",
-                statusClass(hit.status),
+                hit.statusColor
+                  ? statusClassFromToken(hit.statusColor)
+                  : statusClass(hit.status),
               )}
             >
               {hit.status}

@@ -3,14 +3,32 @@ import { productionItems, formats, brands, users, accounts, clipIdeas } from "@/
 import { aliasedTable } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
+import {
+  getInFlightStatusNames,
+  getAllInFlightStatusNames,
+} from "@/lib/db/brand-statuses";
 
-export const PIPELINE_STATUSES = [
+// Legacy hard-coded fallback used only when a brand has no rows in
+// brand_statuses (e.g. a fresh brand whose seed insert race-lost). The
+// per-brand list takes precedence — see `resolveInFlightStatuses` below.
+const FALLBACK_PIPELINE_STATUSES = [
   "Ready To Publish",
   "Final Review",
   "Review",
   "Assigned",
   "Idea",
 ] as const;
+
+async function resolveInFlightStatuses(brand: string): Promise<string[]> {
+  if (brand === "all") {
+    const names = await getAllInFlightStatusNames();
+    if (names.length > 0) return names;
+    return [...FALLBACK_PIPELINE_STATUSES];
+  }
+  const names = await getInFlightStatusNames(brand);
+  if (names.length > 0) return names;
+  return [...FALLBACK_PIPELINE_STATUSES];
+}
 
 type ProductionItemRow = typeof productionItems.$inferSelect;
 
@@ -567,6 +585,8 @@ export async function getProductionPipeline(
   const producers = aliasedTable(users, "producer_user");
   const editors = aliasedTable(users, "editor_user");
 
+  const inFlightStatuses = await resolveInFlightStatuses(brand);
+
   const rows = await db
     .select({
       item: productionItems,
@@ -597,7 +617,7 @@ export async function getProductionPipeline(
         // `brand="all"` is the cross-brand sentinel; drop the predicate
         // entirely so /all/queue and /all/production aggregate everything.
         ...(brand === "all" ? [] : [eq(productionItems.brand, brand)]),
-        inArray(productionItems.status, PIPELINE_STATUSES as unknown as string[]),
+        inArray(productionItems.status, inFlightStatuses),
         isNull(productionItems.deletedAt)
       )
     );

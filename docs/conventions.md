@@ -55,6 +55,29 @@ pattern. Backfills (data, not schema) still go in `scripts/backfill-*.mjs`.
 If the schema change adds/removes/renames a feature's backing table or major
 column, also update `docs/features.md`.
 
+## Statuses — per-brand, not in code
+
+Production-item statuses live in `brand_statuses` (one row per brand × name),
+edited at `/[brand]/accounts/statuses`. Don't hard-code a status list in a
+new component or query — fetch the brand's palette via:
+
+- Server: `getBrandStatuses(brand)` / `getStatusPalette(brand)` /
+  `getAllStatusPalettes()` from `src/lib/db/brand-statuses.ts`.
+- Client: `/api/brand-statuses?brand=<slug>` (or `&pipelineOnly=1`).
+
+Render chips with `statusClassWithPalette(status, palette)` (server) or
+`statusClassFromToken(token)` (client, when the token is already on hand).
+The legacy `statusClass(status)` lookup against `STATUS_COLORS` is kept as
+a fallback only; new code shouldn't use it directly.
+
+**Protected names.** `"Published"` and `"Killed"` are seeded with
+`isProtected = true` for every brand and locked from rename/delete in the
+UI. They're hard-coded in two places — the publish-date filters in
+`src/lib/db/queries.ts` and the kill-confirmation modal in
+`src/components/dashboard/content-detail.tsx` — so renaming them would
+silently break behavior. New brands get the seed via `POST /api/brands`;
+existing-brand backfill is `scripts/backfill-brand-statuses.mjs`.
+
 ## Brand routing — the "All content" sentinel
 
 The brand sidebar contains one synthetic entry, `"All content"` (slug

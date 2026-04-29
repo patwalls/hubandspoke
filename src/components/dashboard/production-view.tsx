@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
-import { statusClass } from "@/lib/badge-colors";
+import { statusClassFromToken } from "@/lib/badge-colors";
 import { ProductionPipelineTable } from "./production-pipeline-table";
 import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
@@ -14,14 +14,22 @@ interface ProductionViewProps {
   brand: string;
 }
 
-// Long-form YouTube pillars are excluded — those live in Notion (filtered
-// via isNotionAuthoritative below). Idea-stage triage moved to /[brand]/queue.
-const PIPELINE_STATUSES = [
-  "Ready To Publish",
-  "Final Review",
-  "Review",
-  "Assigned",
-] as const;
+type PipelineStatus = {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+};
+
+// Fallback list, used only if the API call fails. Long-form YouTube pillars
+// are excluded — those live in Notion (filtered via isNotionAuthoritative
+// below). Idea-stage triage moved to /[brand]/queue.
+const FALLBACK_PIPELINE_STATUSES: PipelineStatus[] = [
+  { id: "fb-rtp", name: "Ready To Publish", color: "pink", position: 0 },
+  { id: "fb-fr", name: "Final Review", color: "orange", position: 1 },
+  { id: "fb-r", name: "Review", color: "yellow", position: 2 },
+  { id: "fb-a", name: "Assigned", color: "pink", position: 3 },
+];
 
 const SOURCES = [
   { value: "all", label: "All sources" },
@@ -33,6 +41,9 @@ const SOURCES = [
 export function ProductionView({ brand }: ProductionViewProps) {
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pipelineStatuses, setPipelineStatuses] = useState<PipelineStatus[]>(
+    FALLBACK_PIPELINE_STATUSES
+  );
   const [search, setSearch] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedFormat, setSelectedFormat] = useState("all");
@@ -63,11 +74,46 @@ export function ProductionView({ brand }: ProductionViewProps) {
     fetchPipeline();
   }, [fetchPipeline]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch(
+          `/api/brand-statuses?brand=${encodeURIComponent(
+            brand
+          )}&pipelineOnly=1`
+        );
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        const list: PipelineStatus[] = (json.statuses ?? [])
+          .map((s: PipelineStatus) => ({
+            id: s.id,
+            name: s.name,
+            color: s.color,
+            position: s.position,
+          }))
+          .sort(
+            (a: PipelineStatus, b: PipelineStatus) => a.position - b.position
+          );
+        if (list.length > 0) setPipelineStatuses(list);
+      } catch {
+        // Keep the fallback statuses on any failure.
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [brand]);
+
+  const pipelineNameSet = useMemo(
+    () => new Set(pipelineStatuses.map((s) => s.name)),
+    [pipelineStatuses]
+  );
   const hsItems = items.filter((item) => !isNotionAuthoritative(item.postType));
   const pipelineCandidates = hsItems.filter(
-    (item) =>
-      item.status &&
-      (PIPELINE_STATUSES as readonly string[]).includes(item.status)
+    (item) => item.status && pipelineNameSet.has(item.status)
   );
 
   const platformOptions = useMemo(
@@ -116,7 +162,7 @@ export function ProductionView({ brand }: ProductionViewProps) {
   });
 
   const byStatus = new Map<string, ProductionItem[]>();
-  for (const status of PIPELINE_STATUSES) byStatus.set(status, []);
+  for (const s of pipelineStatuses) byStatus.set(s.name, []);
   for (const item of pipelineItems) {
     const bucket = item.status ? byStatus.get(item.status) : null;
     if (bucket) bucket.push(item);
@@ -190,19 +236,19 @@ export function ProductionView({ brand }: ProductionViewProps) {
         </div>
       ) : (
         <div className="space-y-8">
-          {PIPELINE_STATUSES.map((status) => {
-            const statusItems = byStatus.get(status) ?? [];
+          {pipelineStatuses.map((status) => {
+            const statusItems = byStatus.get(status.name) ?? [];
             if (statusItems.length === 0) return null;
             return (
-              <section key={status} className="space-y-3">
+              <section key={status.id} className="space-y-3">
                 <div className="flex items-center gap-2">
                   <span
                     className={cn(
                       "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border",
-                      statusClass(status)
+                      statusClassFromToken(status.color)
                     )}
                   >
-                    {status}
+                    {status.name}
                   </span>
                   <span className="text-xs text-muted-foreground tabular-nums">
                     {statusItems.length}

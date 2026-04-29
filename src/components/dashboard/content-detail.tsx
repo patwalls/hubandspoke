@@ -60,7 +60,7 @@ import { EnrichmentButton, type EnrichmentMedia } from "./enrichment-dialog";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
 import { cn } from "@/lib/utils";
-import { statusClass } from "@/lib/badge-colors";
+import { statusClassFromToken, statusClassWithPalette } from "@/lib/badge-colors";
 import {
   AccountPostTypePicker,
   type PickerAccount,
@@ -198,6 +198,13 @@ interface DetailResponse {
   viewHistory?: ViewHistoryPoint[];
 }
 
+type StatusOption = {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+};
+
 interface ContentDetailProps {
   brand: string;
   contentId: string;
@@ -208,16 +215,19 @@ interface ContentDetailProps {
    *  Threaded from the server so the UI can render the full redirect URL
    *  without needing a NEXT_PUBLIC_ env var. */
   shortLinksBaseUrl: string;
+  /** Per-brand status palette. Loaded server-side and passed in so the
+   *  status dropdown + chip render the brand's configured colors / order. */
+  statuses: StatusOption[];
 }
 
-const STATUS_OPTIONS = [
-  "Idea",
-  "Assigned",
-  "Review",
-  "Final Review",
-  "Ready To Publish",
-  "Published",
-  "Killed",
+const FALLBACK_STATUS_OPTIONS: StatusOption[] = [
+  { id: "fb-idea", name: "Idea", color: "zinc", position: 0 },
+  { id: "fb-assigned", name: "Assigned", color: "pink", position: 1 },
+  { id: "fb-review", name: "Review", color: "yellow", position: 2 },
+  { id: "fb-final", name: "Final Review", color: "orange", position: 3 },
+  { id: "fb-rtp", name: "Ready To Publish", color: "pink", position: 4 },
+  { id: "fb-pub", name: "Published", color: "pink", position: 5 },
+  { id: "fb-killed", name: "Killed", color: "zinc", position: 6 },
 ];
 
 function formatCompact(n: number | null | undefined): string {
@@ -310,7 +320,13 @@ const DETAIL_TAB_VALUES = [
 ] as const;
 type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
-export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }: ContentDetailProps) {
+export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses }: ContentDetailProps) {
+  // Sorted dropdown order; palette map for quick chip-color lookup.
+  const statusOptions = (statuses && statuses.length > 0 ? statuses : FALLBACK_STATUS_OPTIONS)
+    .slice()
+    .sort((a, b) => a.position - b.position);
+  const statusPalette = new Map(statusOptions.map((s) => [s.name, s.color] as const));
+
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -2196,7 +2212,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
                     <span
                       className={cn(
                         "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
-                        statusClass(status),
+                        statusClassWithPalette(status, statusPalette),
                       )}
                     >
                       {status}
@@ -2205,15 +2221,15 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {STATUS_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>
+                {statusOptions.map((s) => (
+                  <SelectItem key={s.id} value={s.name}>
                     <span
                       className={cn(
                         "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
-                        statusClass(s),
+                        statusClassFromToken(s.color),
                       )}
                     >
-                      {s}
+                      {s.name}
                     </span>
                   </SelectItem>
                 ))}
@@ -2549,7 +2565,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
       )}
       </div>
 
-      <ContentActivity contentId={item.id} refreshKey={activityRefreshKey} />
+      <ContentActivity
+        contentId={item.id}
+        refreshKey={activityRefreshKey}
+        statusPalette={statusPalette}
+      />
         </TabsContent>
 
         <TabsContent value="preview" className="pt-4">
@@ -2784,7 +2804,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl }:
                           <span
                             className={cn(
                               "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                              statusClass(d.status)
+                              statusClassWithPalette(d.status, statusPalette)
                             )}
                           >
                             {d.status}

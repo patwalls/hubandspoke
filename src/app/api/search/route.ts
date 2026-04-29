@@ -14,6 +14,7 @@ import {
 import { db } from "@/lib/db";
 import { accounts, formatChannels, formats, productionItems } from "@/lib/db/schema";
 import { extractContentIdFromUrl, looseUrlKey } from "@/lib/platform-url";
+import { getStatusPalette } from "@/lib/db/brand-statuses";
 
 const CONTENT_LIMIT = 12;
 const FORMAT_LIMIT = 8;
@@ -142,6 +143,10 @@ export async function GET(request: NextRequest) {
     channelsByFormatId.set(row.formatId, list);
   }
 
+  // Resolve the brand's status palette so each hit can carry its color
+  // token; the UI doesn't have to know about the brand_statuses table.
+  const palette = await getStatusPalette(brand);
+
   // Flatten the joined `account` fields into a nested object so the UI can
   // pass it directly to <AccountBadge>.
   const content = contentRows.map((r) => ({
@@ -150,6 +155,7 @@ export async function GET(request: NextRequest) {
     format: r.format,
     postType: r.postType,
     status: r.status,
+    statusColor: r.status ? palette.get(r.status) ?? null : null,
     publishedDate: r.publishedDate,
     views: r.views,
     account: r.accountId && r.accountPlatform && r.accountHandle

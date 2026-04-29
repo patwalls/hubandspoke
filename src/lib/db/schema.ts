@@ -1095,6 +1095,47 @@ export const brands = pgTable(
   (table) => [uniqueIndex("idx_brands_slug_lower").on(sql`lower(${table.slug})`)]
 );
 
+// Per-brand status palette. Replaces the old hard-coded STATUS_COLORS map and
+// PIPELINE_STATUSES list — each brand now owns its own statuses, ordering, and
+// chip colors. Two names ("Published", "Killed") are seeded with isProtected
+// true on every brand because the publish-date queries in queries.ts and the
+// kill-confirmation modal in content-detail.tsx hard-code those strings;
+// renaming them would silently break that behavior.
+export const brandStatuses = pgTable(
+  "brand_statuses",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    brandId: uuid("brand_id")
+      .notNull()
+      .references(() => brands.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // Color *token* (e.g. "yellow", "pink", "emerald"). Resolved to Tailwind
+    // bg-/text-/border- classes at render time via STATUS_COLOR_TOKENS in
+    // src/lib/badge-colors.ts.
+    color: text("color").notNull(),
+    position: integer("position").notNull().default(0),
+    // When true, this status renders as a kanban column on /[brand]/production
+    // and is counted as "in-flight" by queries.ts.
+    isPipelineColumn: boolean("is_pipeline_column").notNull().default(false),
+    // Locked from rename/delete in the settings UI. Set on the seeded
+    // "Published" / "Killed" rows.
+    isProtected: boolean("is_protected").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_brand_statuses_brand_name_lower").on(
+      table.brandId,
+      sql`lower(${table.name})`
+    ),
+    index("idx_brand_statuses_brand_position").on(table.brandId, table.position),
+  ]
+);
+
 // Social account / channel identity. One row per (platform, handle) — e.g. the
 // Starter Story YouTube channel is one row regardless of whether an item is a
 // long video, a short, or a community post (post type lives on production_items
