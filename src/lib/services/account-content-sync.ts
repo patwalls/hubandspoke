@@ -29,6 +29,7 @@ import { productionItems, syncLogs, accounts, brands } from "@/lib/db/schema";
 import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { SC_BASE, headers } from "@/lib/services/sc-client";
@@ -106,6 +107,10 @@ export interface SyncResult {
   created: number;
   updated: number;
   errors: number;
+  // Posts that already exist on a *different* account (same X tweet retweeted
+  // onto our other handle, etc.). Skipped to avoid double-counting metrics.
+  // Surfaced via lastContentSyncError so operators notice.
+  skippedDuplicates: number;
   errorMessage?: string;
 }
 
@@ -711,11 +716,18 @@ async function upsertItems(
   accountId: string,
   brandSlug: string,
   items: NormalizedItem[]
-): Promise<{ created: number; updated: number; errors: number }> {
+): Promise<{
+  created: number;
+  updated: number;
+  errors: number;
+  skippedDuplicates: number;
+}> {
   let created = 0;
   let updated = 0;
   let errors = 0;
-  if (items.length === 0) return { created, updated, errors };
+  let skippedDuplicates = 0;
+  if (items.length === 0)
+    return { created, updated, errors, skippedDuplicates };
 
   const { byContentId, byLooseUrl } = await loadExisting(accountId, items);
 
@@ -780,6 +792,28 @@ async function upsertItems(
         // act on. The original schedule from INSERT stands.
         updated++;
       } else {
+        // Cross-account dedup: same platform_content_id already owned by a
+        // *different* account. Skip + log instead of inserting — would
+        // double-count metrics. The DB unique index is the safety net;
+        // this branch surfaces the skip count so operators notice.
+        const crossAccountDup = await findCrossAccountDuplicate({
+          platformContentId: item.platformContentId,
+        });
+        if (crossAccountDup) {
+          console.warn(
+            "[account-content-sync] skipping cross-account duplicate",
+            {
+              incomingAccountId: accountId,
+              existingItemId: crossAccountDup.id,
+              existingAccountHandle: crossAccountDup.accountHandle,
+              platformContentId: item.platformContentId,
+              publishedLink: item.publishedLink,
+            }
+          );
+          skippedDuplicates++;
+          continue;
+        }
+
         const format = DEFAULT_FORMAT_BY_POST_TYPE[item.postType] ?? null;
         const assignees = await resolveAssignees({
           brand: brandSlug,
@@ -813,7 +847,7 @@ async function upsertItems(
     }
   }
 
-  return { created, updated, errors };
+  return { created, updated, errors, skippedDuplicates };
 }
 
 // ─── Dispatch ─────────────────────────────────────────────────────────────
@@ -854,6 +888,7 @@ export async function syncAccountContent(
     created: 0,
     updated: 0,
     errors: 0,
+    skippedDuplicates: 0,
   };
   const startedAt = new Date();
 
@@ -957,12 +992,19 @@ export async function syncAccountContent(
     result.created = upsert.created;
     result.updated = upsert.updated;
     result.errors = upsert.errors;
+    result.skippedDuplicates = upsert.skippedDuplicates;
 
     await db
       .update(accounts)
       .set({
         lastContentSyncAt: new Date(),
-        lastContentSyncError: null,
+        // Surface skipped cross-account duplicates as a soft warning so
+        // operators see a non-null error chip even when the sync "succeeded".
+        // A real upstream error overwrites this in the catch below.
+        lastContentSyncError:
+          upsert.skippedDuplicates > 0
+            ? `${upsert.skippedDuplicates} cross-account duplicate${upsert.skippedDuplicates === 1 ? "" : "s"} skipped — see logs`
+            : null,
         updatedAt: new Date(),
       })
       .where(eq(accounts.id, accountId));

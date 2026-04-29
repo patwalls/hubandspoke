@@ -16,6 +16,7 @@ import {
 } from "@/lib/services/view-predictor";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { extractContentId } from "@/lib/platform-url";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -222,6 +223,28 @@ export async function POST(request: NextRequest) {
     // `threads.com` vs `threads.net`).
     const platformContentId =
       youtubeId ?? extractContentId(postType, publishedLink) ?? null;
+
+    // Cross-account duplicate guard. Surfaces the existing item id so the
+    // client can deep-link the operator to it instead of creating a second
+    // row that would double-count metrics. The DB unique index
+    // `uniq_production_items_platform_content_id_global` is the safety net
+    // for the race where two concurrent POSTs pass this check. Skipped when
+    // platformContentId can't be extracted (LinkedIn, newsletter, ad-hoc
+    // URLs) — see helper docs for why URL-based dedup is intentionally not
+    // enforced.
+    const duplicate = await findCrossAccountDuplicate({ platformContentId });
+    if (duplicate) {
+      return NextResponse.json(
+        {
+          error: "DUPLICATE_URL",
+          message: `This URL is already tracked on @${duplicate.accountHandle ?? "another account"} — open that item instead.`,
+          existingItemId: duplicate.id,
+          existingAccountHandle: duplicate.accountHandle,
+        },
+        { status: 409 }
+      );
+    }
+
     const [created] = await db
       .insert(productionItems)
       .values({
@@ -284,6 +307,22 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ...created, autoFetched }, { status: 201 });
   } catch (error) {
+    // 23505 = unique_violation. Catches the race where two concurrent POSTs
+    // pass the pre-check above and only one commits. Translate to the same
+    // 409 shape so the client gets a consistent error contract.
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code: unknown }).code)
+        : null;
+    if (code === "23505") {
+      return NextResponse.json(
+        {
+          error: "DUPLICATE_URL",
+          message: "This URL is already tracked on another account — open that item instead.",
+        },
+        { status: 409 }
+      );
+    }
     console.error("Error creating production item:", error);
     return NextResponse.json(
       { error: String(error) },
@@ -695,6 +734,33 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    // Cross-account duplicate guard for the publishedLink change. Mirrors
+    // the POST-side check; the DB unique index is the safety net for races.
+    // Only runs when the URL is actually changing AND we managed to extract
+    // a platform-native id from it.
+    if (
+      publishedLink !== undefined &&
+      typeof publishedLink === "string" &&
+      publishedLink.trim() !== "" &&
+      updateData.platformContentId
+    ) {
+      const duplicate = await findCrossAccountDuplicate({
+        platformContentId: updateData.platformContentId as string,
+        excludeId: id,
+      });
+      if (duplicate) {
+        return NextResponse.json(
+          {
+            error: "DUPLICATE_URL",
+            message: `This URL is already tracked on @${duplicate.accountHandle ?? "another account"} — open that item instead.`,
+            existingItemId: duplicate.id,
+            existingAccountHandle: duplicate.accountHandle,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     let updated: typeof productionItems.$inferSelect | undefined;
     try {
       [updated] = await db.transaction(async (tx) => {
@@ -757,15 +823,39 @@ export async function PUT(request: NextRequest) {
         return [row];
       });
     } catch (err) {
-      // 23505 = unique_violation. Currently the only PUT-reachable unique
-      // constraint is utm_campaign (per-row).
+      // 23505 = unique_violation. Multiple PUT-reachable unique constraints —
+      // discriminate on the constraint name so the client gets a useful
+      // message instead of the wrong one.
       const code =
         err && typeof err === "object" && "code" in err
           ? String((err as { code: unknown }).code)
           : null;
+      const constraint =
+        err && typeof err === "object" && "constraint" in err
+          ? String((err as { constraint: unknown }).constraint)
+          : null;
       if (code === "23505") {
+        if (
+          constraint === "uniq_production_items_platform_content_id_global" ||
+          constraint === "uniq_production_items_account_platform_content_id"
+        ) {
+          return NextResponse.json(
+            {
+              error: "DUPLICATE_URL",
+              message:
+                "This URL is already tracked on another item — open that item instead.",
+            },
+            { status: 409 }
+          );
+        }
+        if (constraint === "uniq_production_items_utm_campaign") {
+          return NextResponse.json(
+            { error: "That CTA UTM campaign is already taken" },
+            { status: 409 }
+          );
+        }
         return NextResponse.json(
-          { error: "That CTA UTM campaign is already taken" },
+          { error: "Unique constraint violation", constraint },
           { status: 409 }
         );
       }

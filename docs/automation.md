@@ -172,6 +172,21 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   `uniq_production_items_account_platform_content_id`. Stamps
   `accounts.lastContentSyncAt` on success, `lastContentSyncError` on
   failure. Writes `syncLogs` with `sync_type=account-content-sync:<platform>`.
+- **Cross-account uniqueness:** `uniq_production_items_platform_content_id_global`
+  (added 2026-04-29) makes `platform_content_id` globally unique across
+  all accounts, not just per-account. The same X tweet / IG reel / YT video
+  can only live as one row in the whole table — the natural keys are
+  globally unique by construction (X rest_id, YT videoId, IG shortcode), so
+  two rows sharing one is always a duplicate that double-counts metrics.
+  Sync skips + logs cross-account collisions (`skippedDuplicates` counter
+  surfaced via `lastContentSyncError`); manual writes through
+  `POST /api/production-items` return `409 { error: "DUPLICATE_URL",
+  existingItemId, existingAccountHandle }` so the UI can deep-link the
+  operator to the existing item. The DB index is the safety net for races.
+  URL-based uniqueness is intentionally *not* enforced — placeholder URLs
+  (homepage, "Twitter Post", reused Klaviyo links) appear thousands of
+  times in legitimate rows; `scripts/backfill-find-duplicates.mjs` surfaces
+  URL-level collisions for manual audit instead.
 - **Downstream:** none directly — the newly-synced items enter the normal
   enrichment / hook / transcript lifecycle on the next sweep
 - **Per-platform pagination:**

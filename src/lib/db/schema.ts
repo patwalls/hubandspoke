@@ -310,6 +310,21 @@ export const productionItems = pgTable(
     uniqueIndex("uniq_production_items_account_platform_content_id")
       .on(table.accountId, table.platformContentId)
       .where(sql`${table.platformContentId} IS NOT NULL`),
+    // Global cross-account dedup. Same X tweet / IG reel / YT video can only
+    // live once across the whole table — every platform's native id is
+    // globally unique by construction (X rest_id, YT videoId, IG shortcode),
+    // so two rows sharing one is always a duplicate. Carve out soft-deleted
+    // rows so account-restore doesn't trip the constraint. We deliberately
+    // do NOT mirror this on `published_link` because legitimate placeholder
+    // URLs (homepage, "Twitter Post", Klaviyo campaign URLs reused across
+    // accounts) appear thousands of times — uniqueness on the URL would
+    // block correct usage. The script `scripts/backfill-find-duplicates.mjs`
+    // surfaces URL-level collisions for manual review.
+    uniqueIndex("uniq_production_items_platform_content_id_global")
+      .on(table.platformContentId)
+      .where(
+        sql`${table.platformContentId} IS NOT NULL AND ${table.deletedAt} IS NULL`
+      ),
   ]
 );
 

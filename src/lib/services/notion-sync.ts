@@ -4,6 +4,8 @@ import { productionItems, syncLogs, users } from "@/lib/db/schema";
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
+import { extractContentId } from "@/lib/platform-url";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { findAccount } from "@/lib/db/accounts";
 import type { PostType } from "@/lib/platform-field-schemas";
@@ -344,6 +346,7 @@ export async function syncFromNotion(): Promise<{
   totalCreated: number;
   totalUpdated: number;
   totalDeleted: number;
+  totalSkippedDuplicates: number;
   error?: string;
 }> {
   const notion = getNotionClient();
@@ -351,6 +354,11 @@ export async function syncFromNotion(): Promise<{
   let totalCreated = 0;
   let totalUpdated = 0;
   let totalDeleted = 0;
+  // Pages whose publishedLink / platform_content_id collides with an existing
+  // production_item on a *different* account. Skipped so views aren't double-
+  // counted; logged + counted so operators notice. The DB unique indexes are
+  // the safety net.
+  let totalSkippedDuplicates = 0;
 
   // Create sync log
   const [logEntry] = await db
@@ -468,6 +476,15 @@ export async function syncFromNotion(): Promise<{
       const notionUtmCampaign = extractUtmCampaign(properties);
       const title = extractTitle(properties);
 
+      // Derive platform_content_id from the URL so the row participates in
+      // the global cross-account unique index from the moment Notion
+      // creates it (rather than waiting for account-content-sync to fill
+      // the column on the next pass). YouTube long is the only post_type
+      // Notion flows today; extractContentId returns the videoId.
+      const notionPlatformContentId = extractContentId(
+        accountResolution?.postType ?? null,
+        publishedLink
+      );
       // Fields every sync row writes. Producer/editor are deliberately absent:
       // assignments are app-owned post-insert (see below for INSERT-only seed).
       // utmCampaign is also absent here — UPDATE path sets it only when Notion
@@ -483,6 +500,7 @@ export async function syncFromNotion(): Promise<{
         format: formatName,
         campaign: extractCampaign(properties),
         publishedLink,
+        platformContentId: notionPlatformContentId,
         isExternal: detectExternal(publishedLink, platform),
         // views/likes/comments intentionally NOT written here — Scrape Creators
         // owns those via the performance-decay service. See metric-refresh below.
@@ -514,12 +532,59 @@ export async function syncFromNotion(): Promise<{
           ...commonData,
         };
         if (notionUtmCampaign) updatePayload.utmCampaign = notionUtmCampaign;
+
+        // If Notion is trying to change publishedLink to something whose
+        // platform_content_id already lives on a *different* production_item,
+        // drop the publishedLink + platformContentId from this update only.
+        // Don't fail the whole row update — title/status/etc. should still
+        // flow through. The DB unique index would otherwise reject the
+        // UPDATE.
+        const existingRow = existing[0];
+        if (
+          publishedLink &&
+          publishedLink !== existingRow.publishedLink &&
+          notionPlatformContentId
+        ) {
+          const dup = await findCrossAccountDuplicate({
+            platformContentId: notionPlatformContentId,
+            excludeId: existingRow.id,
+          });
+          if (dup) {
+            console.warn(
+              `[notion-sync] keeping existing publishedLink on notionId=${notionId} — Notion's value collides with itemId=${dup.id} on @${dup.accountHandle ?? "?"}`
+            );
+            updatePayload.publishedLink = existingRow.publishedLink;
+            updatePayload.platformContentId = existingRow.platformContentId;
+            totalSkippedDuplicates++;
+          }
+        }
+
         await db
           .update(productionItems)
           .set(updatePayload)
           .where(eq(productionItems.notionId, notionId));
         totalUpdated++;
       } else {
+        // Cross-account duplicate guard. A Notion page whose video already
+        // exists as a production_item under another account (created by
+        // account-content-sync from the platform side) would double-count
+        // views. Skip + log + count instead. Only meaningful when we managed
+        // to extract the videoId — older Notion pages without a published
+        // YT URL slip past, but they wouldn't trip the global unique index
+        // either since their platform_content_id stays NULL.
+        if (notionPlatformContentId) {
+          const dup = await findCrossAccountDuplicate({
+            platformContentId: notionPlatformContentId,
+          });
+          if (dup) {
+            console.warn(
+              `[notion-sync] skipping cross-account duplicate notionId=${notionId} existingItemId=${dup.id} existingAccountHandle=${dup.accountHandle ?? "?"}`
+            );
+            totalSkippedDuplicates++;
+            continue;
+          }
+        }
+
         // INSERT path: seed the legacy email/name columns for display, and
         // resolve producer/editor FKs inline — prefer an email match against
         // users, fall through to format/brand/global via resolveAssignees.
@@ -694,12 +759,18 @@ export async function syncFromNotion(): Promise<{
       }
     }
 
+    if (totalSkippedDuplicates > 0) {
+      console.warn(
+        `[notion-sync] ${totalSkippedDuplicates} cross-account duplicate(s) skipped during this run`
+      );
+    }
     return {
       success: true,
       totalFetched,
       totalCreated,
       totalUpdated,
       totalDeleted,
+      totalSkippedDuplicates,
     };
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : "Unknown error";
@@ -718,6 +789,7 @@ export async function syncFromNotion(): Promise<{
       totalCreated,
       totalUpdated,
       totalDeleted,
+      totalSkippedDuplicates,
       error: errorMessage,
     };
   }

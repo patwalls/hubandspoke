@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uniq_production_items_platform_content_id_global" ON "production_items" USING btree ("platform_content_id") WHERE "production_items"."platform_content_id" IS NOT NULL AND "production_items"."deleted_at" IS NULL;
