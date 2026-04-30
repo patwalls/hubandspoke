@@ -8,16 +8,23 @@
  * reasoning string noting the repost count, which short-circuits the daily
  * AI classifier (the team re-running it is stronger signal than the model).
  *
- * Two passes:
- *   1. Deterministic: same brand + same normalized title + >=1 platform overlap.
- *   2. LLM: Jaccard-filtered near-matches, confirmed via Claude Haiku tool-use.
- *      Cached to disk (keyed by sorted pair of item IDs) so re-runs are free.
+ * See docs/post-classification.md for the rules this script encodes.
+ *
+ * Three passes:
+ *   1a. Deterministic title: same brand + same normalized title + >=1 platform overlap.
+ *   1b. Deterministic body: same brand + same normalized contentBody (>=20 chars after
+ *       normalization, to avoid empty-string collisions) + >=1 platform overlap. Catches
+ *       identical-body posts whose titles drifted (e.g. "ORIGINAL: foo" vs
+ *       "It's 2026 and foo"). Only ~22% of originals have a contentBody, but for those
+ *       it's a stronger signal than title.
+ *   2.  LLM: Jaccard-filtered near-matches on title, confirmed via Claude Haiku tool-use.
+ *       Cached to disk (keyed by sorted pair of item IDs) so re-runs are free.
  *
  * Defaults to --dry-run. Pass --apply to actually write.
  *
  * Run (dry):   node --env-file=.env.local scripts/backfill-repost-classification.mjs
  * Run (apply): node --env-file=.env.local scripts/backfill-repost-classification.mjs --apply
- * Skip LLM:    ... --pass=1
+ * Skip LLM:    ... --pass=1                  (runs 1a + 1b)
  * One brand:   ... --brand=starter-story
  */
 import postgres from "postgres";
@@ -28,8 +35,8 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 const JACCARD_THRESHOLD = 0.5;
 const LLM_MODEL = "claude-haiku-4-5";
 const LLM_BATCH_SIZE = 5; // concurrent requests (stay under per-key concurrent limit)
-const MAX_LLM_PAIRS = 2000; // safety cap per run
-const LEN_RATIO_MAX = 1.5; // skip pairs whose titles differ in length by >1.5x
+const MAX_LLM_PAIRS = 4000; // safety cap per run; bumped 2026-04-29 — fixed platform bug grew candidate pool to ~3k, want one-shot coverage
+const LEN_RATIO_MAX = 3.0; // skip pairs whose titles differ in length by >3x; bumped 2026-04-29 — was 1.5, missed legit reposts where the title was suffixed with platform tag like "(X)" or trimmed for character limits
 const MAX_RETRIES = 5;
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────
@@ -67,6 +74,27 @@ function normalizeTitle(title) {
     .replace(/[\u{1F300}-\u{1FAFF}\u{1F600}-\u{1F64F}\u{2600}-\u{27BF}]/gu, "")
     .replace(/[\s\u00A0]+/g, " ")
     .replace(/[.,!?;:"'`~\-–—()[\]{}]+$/g, "")
+    .trim();
+}
+
+/**
+ * Aggressive body normalization for cross-account/cross-platform body match.
+ * Strips URLs, @mentions, #hashtags, emoji, and ALL punctuation (not just trailing);
+ * folds curly quotes to straight; collapses whitespace. Two posts that copy-pasted
+ * the same caption normalize to the same string even if one swapped the URL or
+ * stripped the hashtags.
+ */
+function normalizeBody(body) {
+  if (!body) return "";
+  return body
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[@#][\w.-]+/g, " ")
+    .replace(/[\u{1F300}-\u{1FAFF}\u{1F600}-\u{1F64F}\u{2600}-\u{27BF}]/gu, "")
+    .replace(/[‘’‚‛]/g, "'")
+    .replace(/[“”„‟]/g, '"')
+    .replace(/[^a-z0-9\s']/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -141,38 +169,72 @@ const sql = postgres(process.env.DATABASE_URL, {
 //   - Template/draft rows like "Share Full YT Video" (no publish date).
 //   - Bulk Twitter import summaries like "Twitter - September 11, 2025 (Backfilled)"
 //     which are one-per-day import artifacts, not real content.
+// Joins accounts.platform — the lowercase platform code ('x', 'linkedin',
+// 'threads', 'youtube', 'tiktok', 'instagram', etc.) — and uses that as the
+// canonical "same platform" axis. The legacy `production_items.platform`
+// JSONB stores account-aware labels like "X (Pat Walls)" vs "X (Starter
+// Story)" which incorrectly mark cross-account same-platform pairs as
+// different-platform — they silently failed the Pass 1/2 overlap check, the
+// exact case docs/post-classification.md is fixing.
 const items = brandArg
   ? await sql`
-      SELECT id, title, platform, brand, published_date, created_at,
-             source_type, reposted_from_item_id, is_evergreen
-      FROM production_items
-      WHERE source_type = 'original'
-        AND status = 'Published'
-        AND published_date IS NOT NULL
-        AND title IS NOT NULL
-        AND title <> ''
-        AND title NOT ILIKE '%(Backfilled)%'
-        AND brand = ${brandArg}
+      SELECT pi.id, pi.title, pi.content_body, pi.platform AS legacy_platform,
+             pi.brand, pi.published_date, pi.created_at,
+             pi.source_type, pi.reposted_from_item_id, pi.is_evergreen,
+             a.platform AS account_platform
+      FROM production_items pi
+      LEFT JOIN accounts a ON a.id = pi.account_id
+      WHERE pi.source_type = 'original'
+        AND pi.status = 'Published'
+        AND pi.published_date IS NOT NULL
+        AND pi.title IS NOT NULL
+        AND pi.title <> ''
+        AND pi.title NOT ILIKE '%(Backfilled)%'
+        AND pi.deleted_at IS NULL
+        AND pi.brand = ${brandArg}
     `
   : await sql`
-      SELECT id, title, platform, brand, published_date, created_at,
-             source_type, reposted_from_item_id, is_evergreen
-      FROM production_items
-      WHERE source_type = 'original'
-        AND status = 'Published'
-        AND published_date IS NOT NULL
-        AND title IS NOT NULL
-        AND title <> ''
-        AND title NOT ILIKE '%(Backfilled)%'
+      SELECT pi.id, pi.title, pi.content_body, pi.platform AS legacy_platform,
+             pi.brand, pi.published_date, pi.created_at,
+             pi.source_type, pi.reposted_from_item_id, pi.is_evergreen,
+             a.platform AS account_platform
+      FROM production_items pi
+      LEFT JOIN accounts a ON a.id = pi.account_id
+      WHERE pi.source_type = 'original'
+        AND pi.status = 'Published'
+        AND pi.published_date IS NOT NULL
+        AND pi.title IS NOT NULL
+        AND pi.title <> ''
+        AND pi.title NOT ILIKE '%(Backfilled)%'
+        AND pi.deleted_at IS NULL
     `;
 
 console.log(`Loaded ${items.length} originals from DB.`);
 
-// Precompute normalized title + token set per item.
+// Precompute normalized title + token set + normalized body + platform per
+// item. `_platforms` is now a single-element array of the lowercased account
+// platform (e.g. ["x"]); falls back to the legacy JSONB if account_platform
+// is null. Older code paths expecting an array still work unchanged.
+let itemsWithoutPlatform = 0;
 for (const it of items) {
   it._norm = normalizeTitle(it.title);
   it._tokens = tokenize(it.title);
-  it._platforms = Array.isArray(it.platform) ? it.platform : [];
+  it._normBody = normalizeBody(it.content_body);
+  if (it.account_platform) {
+    it._platforms = [String(it.account_platform).toLowerCase()];
+  } else if (Array.isArray(it.legacy_platform) && it.legacy_platform.length > 0) {
+    // Fallback: best effort by lowercasing + stripping the parenthesized
+    // account suffix from the legacy JSONB ("X (Pat Walls)" -> "x").
+    it._platforms = it.legacy_platform.map((p) =>
+      String(p).toLowerCase().replace(/\s*\(.+\)\s*$/, "").trim()
+    );
+  } else {
+    it._platforms = [];
+    itemsWithoutPlatform++;
+  }
+}
+if (itemsWithoutPlatform > 0) {
+  console.log(`  (${itemsWithoutPlatform} items had no platform signal — skipped from clustering)`);
 }
 
 // Queue of updates to apply: Map<itemId, { repostedFromItemId }>.
@@ -219,12 +281,75 @@ if (passArg === "1" || passArg === "both") {
     }
   }
 
-  console.log(`\nPass 1 (deterministic): ${pass1Count} items would be reclassified as reposts.`);
+  console.log(`\nPass 1a (deterministic, title): ${pass1Count} items would be reclassified as reposts.`);
   console.log(`Top ${pass1Samples.length} distinct repost groups by title:`);
   for (const s of pass1Samples.sort((a, b) => b.groupSize - a.groupSize)) {
     console.log(
       `  ↳ ${s.groupSize}× "${(s.title ?? "").slice(0, 60)}" [${s.platforms.join(", ")}] ` +
         `${isoDate(s.earliestDate)} → ${isoDate(s.latestDate)}`
+    );
+  }
+}
+
+// ─── Pass 1b: deterministic body match ──────────────────────────────────
+// Same shape as Pass 1a but bucketed by normalized contentBody. Catches the
+// "same body, drifted title" case (e.g. operator added an "ORIGINAL:" prefix
+// or a "It's 2026 and" intro on the re-run). Only ~22% of originals have a
+// body, but for those it's a stronger signal than title.
+const MIN_BODY_LEN = 20;          // skip empty/tiny bodies that would cluster everything
+let pass1bCount = 0;
+const pass1bSamples = [];
+if (passArg === "1" || passArg === "both") {
+  const bodyGroups = new Map(); // key: `${brand}::${normalizedBody}` -> items[]
+  for (const it of items) {
+    if (!it._normBody || it._normBody.length < MIN_BODY_LEN) continue;
+    if (it._platforms.length === 0) continue;
+    const key = `${it.brand}::${it._normBody}`;
+    let g = bodyGroups.get(key);
+    if (!g) bodyGroups.set(key, (g = []));
+    g.push(it);
+  }
+
+  for (const group of bodyGroups.values()) {
+    if (group.length < 2) continue;
+    group.sort(cmpEarliest);
+    const earliest = group[0];
+    const earliestPlatforms = new Set(earliest._platforms);
+
+    for (let i = 1; i < group.length; i++) {
+      const cand = group[i];
+      // require >=1 platform overlap with earliest (same as Pass 1a)
+      const overlap = cand._platforms.some((p) => earliestPlatforms.has(p));
+      if (!overlap) continue;
+      // skip if Pass 1a already linked this item; both passes agreeing is fine, no-op.
+      if (repostUpdates.has(cand.id)) continue;
+      // skip if the earliest is itself already queued as a child of someone else —
+      // link through to the canonical original so the graph stays flat.
+      let targetOriginalId = earliest.id;
+      const existing = repostUpdates.get(earliest.id);
+      if (existing) targetOriginalId = existing.repostedFromItemId;
+      repostUpdates.set(cand.id, { repostedFromItemId: targetOriginalId, via: "pass1b" });
+      pass1bCount++;
+    }
+    if (pass1bSamples.length < 20) {
+      pass1bSamples.push({
+        title: earliest.title,
+        body: (earliest.content_body ?? "").slice(0, 70),
+        platforms: earliest._platforms,
+        groupSize: group.length,
+        earliestDate: earliest.published_date,
+        latestDate: group[group.length - 1].published_date,
+      });
+    }
+  }
+
+  console.log(`\nPass 1b (deterministic, body): ${pass1bCount} additional items would be reclassified.`);
+  console.log(`Top ${pass1bSamples.length} distinct repost groups by body:`);
+  for (const s of pass1bSamples.sort((a, b) => b.groupSize - a.groupSize)) {
+    console.log(
+      `  ↳ ${s.groupSize}× "${(s.title ?? "").slice(0, 50)}" [${s.platforms.join(", ")}] ` +
+        `${isoDate(s.earliestDate)} → ${isoDate(s.latestDate)}\n` +
+        `       body: "${s.body}…"`
     );
   }
 }
@@ -459,7 +584,7 @@ for (const [p, c] of Object.entries(platformCounts).sort((a, b) => b[1] - a[1]))
   console.log(`  ${p.padEnd(30)} ${c}`);
 }
 console.log(
-  `\nTotals — reposts: ${repostUpdates.size} (pass1=${pass1Count}, pass2=${pass2Count}), ` +
+  `\nTotals — reposts: ${repostUpdates.size} (pass1a=${pass1Count}, pass1b=${pass1bCount}, pass2=${pass2Count}), ` +
     `evergreen flips: ${evergreenUpdates}`
 );
 

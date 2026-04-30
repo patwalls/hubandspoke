@@ -14,12 +14,12 @@ const STYLES: Record<
   repost: {
     label: "Repost",
     className: "bg-amber-100 text-amber-900 border-amber-200",
-    title: "Reposting an existing piece of content",
+    title: "Same content, same platform (any account) — re-run of an earlier post",
   },
   cross_post: {
     label: "Cross-post",
     className: "bg-indigo-100 text-indigo-900 border-indigo-200",
-    title: "Same content syndicated to a different platform",
+    title: "Same content, different platform from the original",
   },
   clip: {
     label: "Clip",
