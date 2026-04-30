@@ -31,6 +31,11 @@ interface ClipIdea {
 interface Props {
   itemId: string;
   brand: string;
+  /** Generation calls Sonnet and costs money, so it stays admin-only — but
+   *  viewing/triaging existing ideas is open to all signed-in users. When
+   *  false, hide the Generate button and adjust the empty-state copy so
+   *  non-admins don't get a "Forbidden" error from clicking it. */
+  isAdmin: boolean;
 }
 
 function fmtTs(sec: number): string {
@@ -59,6 +64,7 @@ function fmtRel(iso: string): string {
 export function ClipIdeasPanel({
   itemId,
   brand,
+  isAdmin,
 }: Props) {
   const [loading, setLoading] = useState(true);
   const [ideas, setIdeas] = useState<ClipIdea[]>([]);
@@ -168,29 +174,31 @@ export function ClipIdeasPanel({
             </span>
           )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleGenerate}
-          disabled={genState.kind === "generating"}
-          className="h-7 text-xs gap-1.5"
-          title={
-            ideas.length > 0
-              ? "Re-run the agent against this transcript — replaces the panel with a fresh batch"
-              : "Run the agent against this transcript and propose 10 clip ideas"
-          }
-        >
-          {genState.kind === "generating" ? (
-            <RefreshCwIcon className="size-3.5 animate-spin" />
-          ) : (
-            <SparklesIcon className="size-3.5" />
-          )}
-          {genState.kind === "generating"
-            ? "Generating…"
-            : ideas.length > 0
-              ? "Regenerate"
-              : "Generate 10 ideas"}
-        </Button>
+        {isAdmin && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleGenerate}
+            disabled={genState.kind === "generating"}
+            className="h-7 text-xs gap-1.5"
+            title={
+              ideas.length > 0
+                ? "Re-run the agent against this transcript — replaces the panel with a fresh batch"
+                : "Run the agent against this transcript and propose 10 clip ideas"
+            }
+          >
+            {genState.kind === "generating" ? (
+              <RefreshCwIcon className="size-3.5 animate-spin" />
+            ) : (
+              <SparklesIcon className="size-3.5" />
+            )}
+            {genState.kind === "generating"
+              ? "Generating…"
+              : ideas.length > 0
+                ? "Regenerate"
+                : "Generate 10 ideas"}
+          </Button>
+        )}
       </div>
 
       {genState.kind === "error" && (
@@ -201,8 +209,9 @@ export function ClipIdeasPanel({
         <p className="text-xs text-muted-foreground">Loading…</p>
       ) : ideas.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          No ideas yet. Click Generate 10 ideas to have the agent read the
-          transcript and propose short-form clip candidates.
+          {isAdmin
+            ? "No ideas yet. Click Generate 10 ideas to have the agent read the transcript and propose short-form clip candidates."
+            : "No clip ideas yet."}
         </p>
       ) : (
         <ol className="space-y-2">

@@ -218,6 +218,10 @@ interface ContentDetailProps {
   /** Per-brand status palette. Loaded server-side and passed in so the
    *  status dropdown + chip render the brand's configured colors / order. */
   statuses: StatusOption[];
+  /** Resolved server-side from the session so client components can hide
+   *  admin-only affordances (e.g. the clip-ideas Generate button) instead
+   *  of letting non-admins click them and get a 403 Forbidden. */
+  isAdmin: boolean;
 }
 
 const FALLBACK_STATUS_OPTIONS: StatusOption[] = [
@@ -320,7 +324,7 @@ const DETAIL_TAB_VALUES = [
 ] as const;
 type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
-export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses }: ContentDetailProps) {
+export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses, isAdmin }: ContentDetailProps) {
   // Sorted dropdown order; palette map for quick chip-color lookup.
   const statusOptions = (statuses && statuses.length > 0 ? statuses : FALLBACK_STATUS_OPTIONS)
     .slice()
@@ -2863,7 +2867,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       )}
 
       <TabsContent value="clip-ideas" className="pt-4">
-        <ClipIdeasPanel itemId={item.id} brand={brand} />
+        <ClipIdeasPanel itemId={item.id} brand={brand} isAdmin={isAdmin} />
       </TabsContent>
 
       {!isPrePublish && !hideDerivativeSections && (

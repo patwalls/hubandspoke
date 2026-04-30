@@ -6,6 +6,7 @@ import { productionItems } from "@/lib/db/schema";
 import { getAccounts } from "@/lib/db/accounts";
 import { getBrandStatuses } from "@/lib/db/brand-statuses";
 import { ContentDetail } from "@/components/dashboard/content-detail";
+import { auth } from "@/lib/auth";
 
 interface AllContentDetailPageProps {
   params: Promise<{ contentId: string }>;
@@ -42,10 +43,12 @@ export default async function AllContentDetailPage({
     notFound();
   }
 
-  const [accountRows, statusRows] = await Promise.all([
+  const [accountRows, statusRows, session] = await Promise.all([
     getAccounts(),
     getBrandStatuses(item.brand),
+    auth(),
   ]);
+  const isAdmin = session?.user?.role === "admin";
   const accounts = accountRows.map((a) => ({
     id: a.id,
     brandSlug: a.brandSlug,
@@ -74,6 +77,7 @@ export default async function AllContentDetailPage({
       accounts={accounts}
       shortLinksBaseUrl={shortLinksBaseUrl}
       statuses={statuses}
+      isAdmin={isAdmin}
     />
   );
 }
