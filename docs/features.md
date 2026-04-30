@@ -111,6 +111,7 @@ removing, or deprecating anything.
 | Sync errors monitor | Active | `/(dashboard)/settings/sync-errors` | `syncLogs` | Notion / YouTube / MATG / performance |
 | Job queue monitor | Active | `/(dashboard)/settings/jobs` | `graphile_worker.jobs` | Live status of enrich, transcribe, cross-post-scan, etc. |
 | SC usage dashboard | Active | `/(dashboard)/admin/sc-usage` | `scCallLog` | Per-task SC credit spend rolled up by caller, account, platform; recent-call list. One row per task invocation, written by `recordScUsage` from each instrumented caller. |
+| Fixes backlog | Active | `/(dashboard)/fixes` (admin-only), floating button on every dashboard page, `POST /api/fixes`, `PATCH /api/fixes/[id]`, `POST /api/fixes/upload-url`, `GET /api/fixes/[id]/photo/[idx]` | `fixes` | Floating amber button bottom-right of every page snapshots URL + DOM + optional S3 photos and creates a `fixes` row. `/fixes` page tabs through `open · in_progress · needs_decision · done · wont_fix`. The `/fixthings` Claude Code slash command (see `FIXES.md` at repo root) burns down the backlog one commit at a time. |
 | **`brand-settings` API + table** | **Planned-removal** | `GET\|POST /api/brand-settings`, `brandSettings` table | `brandSettings` | Data fully migrated to `brands`; drop in next migration |
 
 ---
