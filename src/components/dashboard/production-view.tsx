@@ -21,14 +21,15 @@ type PipelineStatus = {
   position: number;
 };
 
-// Fallback list, used only if the API call fails. Long-form YouTube pillars
-// are excluded — those live in Notion (filtered via isNotionAuthoritative
+// Fallback list, used only if the API call fails. Late-stage first so the
+// view leads with what's almost done. Long-form YouTube pillars are
+// excluded — those live in Notion (filtered via isNotionAuthoritative
 // below). Idea-stage triage moved to /[brand]/queue.
 const FALLBACK_PIPELINE_STATUSES: PipelineStatus[] = [
-  { id: "fb-rtp", name: "Ready To Publish", color: "pink", position: 0 },
-  { id: "fb-fr", name: "Final Review", color: "orange", position: 1 },
+  { id: "fb-rtp", name: "Ready To Publish", color: "pink", position: 4 },
+  { id: "fb-fr", name: "Final Review", color: "orange", position: 3 },
   { id: "fb-r", name: "Review", color: "yellow", position: 2 },
-  { id: "fb-a", name: "Assigned", color: "pink", position: 3 },
+  { id: "fb-a", name: "Assigned", color: "pink", position: 1 },
 ];
 
 const SOURCES = [
@@ -86,6 +87,9 @@ export function ProductionView({ brand }: ProductionViewProps) {
         if (!res.ok) return;
         const json = await res.json();
         if (cancelled) return;
+        // Sort by position descending so late-stage statuses (Ready To
+        // Publish, Final Review) surface at the top — this view answers
+        // "what's almost done?", not "what's earliest in the pipeline?".
         const list: PipelineStatus[] = (json.statuses ?? [])
           .map((s: PipelineStatus) => ({
             id: s.id,
@@ -94,7 +98,7 @@ export function ProductionView({ brand }: ProductionViewProps) {
             position: s.position,
           }))
           .sort(
-            (a: PipelineStatus, b: PipelineStatus) => a.position - b.position
+            (a: PipelineStatus, b: PipelineStatus) => b.position - a.position
           );
         if (list.length > 0) setPipelineStatuses(list);
       } catch {
