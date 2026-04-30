@@ -260,8 +260,8 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Rules:**
   - Phase A: stratified-batch classify per post-type (per-run quotas: x 12, instagram 10, linkedin/threads/youtube 4 each). Last 10 kill reasons injected into the classifier prompt as negative exemplars; classifier draws from a 50-reason history window.
   - Phase B: refill Idea queue, blocking any original that already has a prior repost row in **any** state (Idea, in-production, Published, Killed). This is the dedup that used to be enforced (much more narrowly) by the partial unique index `uniq_production_items_pillar_format`; that index was dropped in 0056 and the check now lives at generation time per the operator rule "if we've already done it before, or it's already in production, don't generate it." Before each insert, a per-candidate Haiku **fit judge** (`judgeRepostFit`) reads recent kill reasons (last 50) + accepted-and-published repost exemplars (last 30) and skips candidates that resemble a kill or don't resemble any accept. Catches already-`isEvergreen=true` items the operator no longer wants resurfaced (Phase A's prompt-injection only steers newly-classified items).
-  - Cap: 20 pending suggestions in queue; per-platform diversity cap is 50% of the queue target (10 max from any one platform).
-  - Candidate pool per run: top 150 evergreen originals by views.
+  - Cap: 20 pending suggestions in queue; per-platform diversity caps are explicit (`PLATFORM_QUEUE_CAPS` in `evergreen-scan.ts`): x 6, instagram 6, linkedin 4, threads 3, youtube 3, default 2. Sum exceeds the queue target so the queue can always fill, but no single platform can dominate.
+  - Candidate pool per run: stratified per-platform — top `POOL_PER_PLATFORM` (40) evergreens per platform by views, merged and re-sorted views-DESC. Pulling globally by views starved non-X channels because X view counts dwarf everything else.
   - Repost rows copy `accountId` + `postType` from the original; per-platform diversity cap is keyed off the joined `account.platform`.
 
 ### `capture-velocity-snapshot` — per-post scheduled velocity snapshots

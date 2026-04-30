@@ -17,11 +17,26 @@ import { generateUtmCampaign } from "@/lib/utm-campaign";
 // see every knob in one place.
 const MIN_VIEWS = 10_000;
 const PENDING_QUEUE_TARGET = 20; // keep the Idea queue topped up to ~20 repost suggestions
-const CANDIDATE_POOL_SIZE = 150; // how many evergreen candidates to pull per run before picking suggestions
-const MAX_PER_PLATFORM = Math.ceil(PENDING_QUEUE_TARGET * 0.5); // diversity cap
+const POOL_PER_PLATFORM = 40; // top-N evergreens per platform pulled into the candidate pool
 const RECLASSIFY_BATCH = 5; // re-examine items that were classified false before their body was captured
 const KILL_REASON_HISTORY = 50; // negative exemplars; Phase A still slices first 10 inside buildSystemPrompt
 const ACCEPT_EXEMPLAR_HISTORY = 30; // positive exemplars: originals the operator has actually published as reposts
+
+// Per-platform queue caps. Sums to >= PENDING_QUEUE_TARGET so the queue can
+// always fill, but no single platform can dominate. Tuned around X having
+// the largest pool of evergreens; IG is the second priority because IG's
+// algorithm redistributes reposts to fresh viewers each time. The previous
+// single MAX_PER_PLATFORM = ceil(target * 0.5) = 10 let X fill half the
+// queue, defeating the diversity goal.
+const PLATFORM_QUEUE_CAPS: Record<string, number> = {
+  x: 6,
+  instagram: 6,
+  linkedin: 4,
+  threads: 3,
+  youtube: 3,
+};
+const DEFAULT_PLATFORM_CAP = 2;
+const POOL_PLATFORMS = ["x", "instagram", "linkedin", "threads", "youtube"] as const;
 
 // Per-post-type classification quotas. Each bucket has its own age gate because
 // shelf-life differs dramatically by platform. X keeps the 365-day gate (same
@@ -187,36 +202,50 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
     perPlatformCount.set(key, (perPlatformCount.get(key) ?? 0) + 1);
   }
 
-  // Pool of evergreen originals ordered by views DESC. Joined to accounts so
-  // we can read platform/syncedFromNotion without a second round-trip.
-  const pool = await db
-    .select({
-      id: productionItems.id,
-      title: productionItems.title,
-      accountId: productionItems.accountId,
-      postType: productionItems.postType,
-      format: productionItems.format,
-      brand: productionItems.brand,
-      thumbnail: productionItems.thumbnail,
-      views: productionItems.views,
-      publishedDate: productionItems.publishedDate,
-      evergreenReasoning: productionItems.evergreenReasoning,
-      contentBody: productionItems.contentBody,
-      contentMediaUrl: productionItems.contentMediaUrl,
-      accountPlatform: accounts.platform,
-      accountSyncedFromNotion: accounts.syncedFromNotion,
-    })
-    .from(productionItems)
-    .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
-    .where(
-      and(
-        eq(productionItems.sourceType, "original"),
-        eq(productionItems.isEvergreen, true),
-        eq(productionItems.status, "Published")
-      )
+  // Pool of evergreen originals, stratified per-platform. We pull top-N per
+  // platform separately rather than top-N globally because X content has
+  // dramatically higher view counts than IG/LinkedIn/Threads/YouTube — a
+  // single global views-DESC query produces an X-dominated pool, and the
+  // per-platform cap below can't pick non-X items that aren't there. Pulling
+  // each platform independently guarantees non-X candidates are present;
+  // iteration still goes views-DESC so the highest-quality candidates are
+  // evaluated first within each platform's allowance.
+  const platformPools = await Promise.all(
+    POOL_PLATFORMS.map((platform) =>
+      db
+        .select({
+          id: productionItems.id,
+          title: productionItems.title,
+          accountId: productionItems.accountId,
+          postType: productionItems.postType,
+          format: productionItems.format,
+          brand: productionItems.brand,
+          thumbnail: productionItems.thumbnail,
+          views: productionItems.views,
+          publishedDate: productionItems.publishedDate,
+          evergreenReasoning: productionItems.evergreenReasoning,
+          contentBody: productionItems.contentBody,
+          contentMediaUrl: productionItems.contentMediaUrl,
+          accountPlatform: accounts.platform,
+          accountSyncedFromNotion: accounts.syncedFromNotion,
+        })
+        .from(productionItems)
+        .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
+        .where(
+          and(
+            eq(productionItems.sourceType, "original"),
+            eq(productionItems.isEvergreen, true),
+            eq(productionItems.status, "Published"),
+            eq(accounts.platform, platform)
+          )
+        )
+        .orderBy(desc(productionItems.views))
+        .limit(POOL_PER_PLATFORM)
     )
-    .orderBy(desc(productionItems.views))
-    .limit(CANDIDATE_POOL_SIZE);
+  );
+  const pool = platformPools
+    .flat()
+    .sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
 
   if (pool.length === 0) return result;
 
@@ -261,7 +290,8 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
     if (blockedOriginals.has(original.id)) continue;
 
     const platformKey = original.accountPlatform ?? "unknown";
-    if ((perPlatformCount.get(platformKey) ?? 0) >= MAX_PER_PLATFORM) continue;
+    const platformCap = PLATFORM_QUEUE_CAPS[platformKey] ?? DEFAULT_PLATFORM_CAP;
+    if ((perPlatformCount.get(platformKey) ?? 0) >= platformCap) continue;
 
     // IG reposts need something to grab — caption or archived media. If the
     // original has neither, skip (the operator can't do anything with it).
