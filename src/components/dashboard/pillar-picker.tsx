@@ -24,6 +24,22 @@ export interface PillarOption {
   title: string | null;
   format: string | null;
   status?: string | null;
+  publishedDate?: string | null;
+  views?: number | null;
+}
+
+function formatCompact(n: number | null | undefined): string | null {
+  if (n == null) return null;
+  if (n >= 1_000_000)
+    return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return n.toLocaleString();
+}
+
+function formatDateShort(d: string | null | undefined): string | null {
+  if (!d) return null;
+  const date = new Date(d + "T00:00:00");
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 interface PillarPickerProps {
@@ -138,7 +154,16 @@ export function PillarPicker({
                       <div className="flex flex-col gap-0.5 min-w-0">
                         <span className="truncate">{r.title || "(Untitled)"}</span>
                         <span className="text-[10px] text-muted-foreground">
-                          {[r.format, r.status].filter(Boolean).join(" · ") || "—"}
+                          {[
+                            r.format,
+                            r.status,
+                            formatDateShort(r.publishedDate),
+                            r.views != null
+                              ? `${formatCompact(r.views)} views`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || "—"}
                         </span>
                       </div>
                     </CommandItem>

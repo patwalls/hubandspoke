@@ -29,6 +29,8 @@ export async function GET(request: NextRequest) {
       format: productionItems.format,
       status: productionItems.status,
       notionId: productionItems.notionId,
+      publishedDate: productionItems.publishedDate,
+      views: productionItems.views,
     })
     .from(productionItems)
     .where(and(...conditions))
