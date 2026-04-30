@@ -1,5 +1,5 @@
 import { alias } from "drizzle-orm/pg-core";
-import { and, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, contentEvents, productionItems } from "@/lib/db/schema";
 import {
@@ -16,13 +16,12 @@ import { generateUtmCampaign } from "@/lib/utm-campaign";
 // Tunables. Keep at module top so the first operator to look at this file can
 // see every knob in one place.
 const MIN_VIEWS = 10_000;
-const MIN_REPOST_SPACING_DAYS = 30; // don't re-suggest the same item within 30d
-const PENDING_QUEUE_TARGET = 10; // keep the Idea queue topped up to ~10 repost suggestions
-const CANDIDATE_POOL_SIZE = 80; // how many evergreen candidates to pull per run before picking suggestions
-const MAX_PER_PLATFORM = Math.ceil(PENDING_QUEUE_TARGET * 0.4); // diversity cap
+const PENDING_QUEUE_TARGET = 20; // keep the Idea queue topped up to ~20 repost suggestions
+const CANDIDATE_POOL_SIZE = 150; // how many evergreen candidates to pull per run before picking suggestions
+const MAX_PER_PLATFORM = Math.ceil(PENDING_QUEUE_TARGET * 0.5); // diversity cap
 const RECLASSIFY_BATCH = 5; // re-examine items that were classified false before their body was captured
-const KILL_REASON_HISTORY = 30; // negative exemplars; Phase A still slices first 10 inside buildSystemPrompt
-const ACCEPT_EXEMPLAR_HISTORY = 20; // positive exemplars: originals the operator has actually published as reposts
+const KILL_REASON_HISTORY = 50; // negative exemplars; Phase A still slices first 10 inside buildSystemPrompt
+const ACCEPT_EXEMPLAR_HISTORY = 30; // positive exemplars: originals the operator has actually published as reposts
 
 // Per-post-type classification quotas. Each bucket has its own age gate because
 // shelf-life differs dramatically by platform. X keeps the 365-day gate (same
@@ -37,11 +36,11 @@ const CLASSIFY_QUOTAS: Array<{
   limit: number;
   minAgeDays: number;
 }> = [
-  { bucket: "x", postTypes: ["x"], limit: 8, minAgeDays: 365 },
-  { bucket: "instagram", postTypes: ["instagram_reel", "instagram_post"], limit: 6, minAgeDays: 90 },
-  { bucket: "linkedin", postTypes: ["linkedin"], limit: 2, minAgeDays: 180 },
-  { bucket: "threads", postTypes: ["threads"], limit: 2, minAgeDays: 180 },
-  { bucket: "youtube", postTypes: ["youtube_community", "youtube_shorts"], limit: 2, minAgeDays: 180 },
+  { bucket: "x", postTypes: ["x"], limit: 12, minAgeDays: 365 },
+  { bucket: "instagram", postTypes: ["instagram_reel", "instagram_post"], limit: 10, minAgeDays: 90 },
+  { bucket: "linkedin", postTypes: ["linkedin"], limit: 4, minAgeDays: 180 },
+  { bucket: "threads", postTypes: ["threads"], limit: 4, minAgeDays: 180 },
+  { bucket: "youtube", postTypes: ["youtube_community", "youtube_shorts"], limit: 4, minAgeDays: 180 },
 ];
 
 function isInstagramPostType(postType: string | null | undefined): boolean {
@@ -221,28 +220,23 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
 
   if (pool.length === 0) return result;
 
-  // Pull repost history for this whole pool in two flavors:
-  //   1. Any repost created within the 30-day spacing window (soft guard)
-  //   2. Any repost ever killed (hard, permanent suppression)
+  // Pull repost history for this whole pool. Any prior repost — regardless of
+  // status or age — blocks a new auto-suggestion. The DB-level
+  // uniq_production_items_pillar_format used to be the back-stop for this; per
+  // operator request the dedup now lives here at generation time: "if we've
+  // already done it before, or it's already in production, don't generate."
+  // Killed rows still count (they permanently suppress; the operator already
+  // decided this isn't worth resurfacing).
   const originalIds = pool.map((p) => p.id);
   const history = await db
     .select({
       repostedFromItemId: productionItems.repostedFromItemId,
-      status: productionItems.status,
-      createdAt: productionItems.createdAt,
     })
     .from(productionItems)
     .where(
       and(
         eq(productionItems.sourceType, "repost"),
-        inArray(productionItems.repostedFromItemId, originalIds),
-        or(
-          eq(productionItems.status, "Killed"),
-          gt(
-            productionItems.createdAt,
-            sql`now() - interval '${sql.raw(String(MIN_REPOST_SPACING_DAYS))} days'`
-          )
-        )
+        inArray(productionItems.repostedFromItemId, originalIds)
       )
     );
   const blockedOriginals = new Set<string>();

@@ -176,14 +176,15 @@ export const productionItems = pgTable(
       (): AnyPgColumn => productionItems.id,
       { onDelete: "set null" }
     ),
-    // How this item entered the system. "original" is user-authored or
-    // Notion-synced; "repost" is a same-content/same-channel re-run of an
-    // earlier item; "cross_post" is (reserved) a one-to-one sibling post on a
-    // different channel; "clip" is promoted from a clip-idea triage (many
-    // clips can share a pillar + format, so the uniq (pillar, format) index
-    // below deliberately scopes itself to sourceType='original'). Distinct
-    // from pillarContentItemId (format-derivative tree) so repost rollups
-    // and repurpose queries don't collide.
+    // How this item entered the system. See docs/post-classification.md for
+    // the canonical rules; the platform-based axis is: same content + same
+    // platform (any account) = "repost", same content + different platform =
+    // "cross_post". "clip" is promoted from a clip-idea triage (many clips
+    // can share a pillar + format, so the uniq (pillar, format) index below
+    // deliberately scopes itself to sourceType='original'). "repurposed" is
+    // auto-created by threshold-monitor-sweep. Distinct from
+    // pillarContentItemId (format-derivative tree) so repost rollups and
+    // repurpose queries don't collide.
     sourceType: text("source_type").notNull().default("original"),
     repostedFromItemId: uuid("reposted_from_item_id").references(
       (): AnyPgColumn => productionItems.id,
@@ -293,11 +294,6 @@ export const productionItems = pgTable(
     index("idx_production_items_reposted_from").on(table.repostedFromItemId),
     index("idx_production_items_producer_user").on(table.producerUserId),
     index("idx_production_items_editor_user").on(table.editorUserId),
-    uniqueIndex("uniq_production_items_pillar_format")
-      .on(table.pillarContentItemId, sql`lower(${table.format})`)
-      .where(
-        sql`${table.pillarContentItemId} IS NOT NULL AND ${table.format} IS NOT NULL AND ${table.sourceType} = 'original'`
-      ),
     uniqueIndex("uniq_production_items_utm_campaign")
       .on(table.utmCampaign)
       .where(sql`${table.utmCampaign} IS NOT NULL`),

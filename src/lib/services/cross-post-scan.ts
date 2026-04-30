@@ -103,6 +103,7 @@ export interface CrossPostScanResult {
     belowVelocity: number;
     recentlyProposed: number;
     llmFallback: number;
+    alreadyExists: number;
   };
   proposalsLogged: number;
   ideasCreated: number;
@@ -168,6 +169,7 @@ export async function runCrossPostScan(
       belowVelocity: 0,
       recentlyProposed: 0,
       llmFallback: 0,
+      alreadyExists: 0,
     },
     proposalsLogged: 0,
     ideasCreated: 0,
@@ -442,6 +444,27 @@ export async function runCrossPostScan(
       slotsByBrand.set(p.candidate.brand, slots);
     }
     if (slots <= 0) continue;
+
+    // Skip if this exact cross-post already exists in any state — Idea,
+    // in-production, Published, or Killed. Killed counts as "the operator
+    // decided this isn't worth doing" and is a permanent block; we don't
+    // resurface what they explicitly killed.
+    const [existing] = await db
+      .select({ id: productionItems.id })
+      .from(productionItems)
+      .where(
+        and(
+          eq(productionItems.sourceType, "cross_post"),
+          eq(productionItems.repostedFromItemId, p.candidate.id),
+          eq(productionItems.accountId, p.targetAccountId),
+          eq(productionItems.postType, p.targetPostType)
+        )
+      )
+      .limit(1);
+    if (existing) {
+      result.candidatesDropped.alreadyExists++;
+      continue;
+    }
 
     // Insert the Idea row.
     const assignees = await resolveAssignees({

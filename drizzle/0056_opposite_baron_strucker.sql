@@ -1,0 +1,1 @@
+DROP INDEX "uniq_production_items_pillar_format";
