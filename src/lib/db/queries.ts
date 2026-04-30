@@ -22,12 +22,20 @@ const FALLBACK_PIPELINE_STATUSES = [
 async function resolveInFlightStatuses(brand: string): Promise<string[]> {
   if (brand === "all") {
     const names = await getAllInFlightStatusNames();
-    if (names.length > 0) return names;
+    if (names.length > 0) return withIdea(names);
     return [...FALLBACK_PIPELINE_STATUSES];
   }
   const names = await getInFlightStatusNames(brand);
-  if (names.length > 0) return names;
+  if (names.length > 0) return withIdea(names);
   return [...FALLBACK_PIPELINE_STATUSES];
+}
+
+// "Idea" is the triage queue stage — not a pipeline column in brand_statuses,
+// but the same /api/reports/production endpoint feeds both the queue and
+// production views. Downstream filters separate them. Without this, the SQL
+// filter drops Idea rows and the queue renders empty.
+function withIdea(names: string[]): string[] {
+  return names.includes("Idea") ? names : [...names, "Idea"];
 }
 
 type ProductionItemRow = typeof productionItems.$inferSelect;
