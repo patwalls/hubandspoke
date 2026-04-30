@@ -21,12 +21,27 @@ export type DefaultStatusSeed = {
   isProtected?: boolean;
 };
 
-// Seeded for every new brand. "Published" and "Killed" are protected because
-// queries.ts and content-detail.tsx hard-code those names; renaming them
-// would silently break publish-date queries and the kill-confirmation modal.
+// Names of statuses that the app hard-codes elsewhere — renaming any of
+// these would silently break a flow. Centralized here so future code stays
+// in sync; the backfill script reads the same list to retro-flag rows.
+//   - Idea: created by repost/cross-post/duplicate/clip-out/threshold-monitor;
+//     filtered by queue-view, cross-post-feed, evergreen-scan, cross-post-scan
+//   - Assigned: target status of triage "accept", clip promotion, queue
+//     outcome flow; my-work role logic keys off it
+//   - Published: publish-date filters in queries.ts
+//   - Killed: kill-confirmation modal in content-detail.tsx
+export const PROTECTED_STATUS_NAMES: ReadonlySet<string> = new Set([
+  "Idea",
+  "Assigned",
+  "Published",
+  "Killed",
+]);
+
+// Seeded for every new brand. See PROTECTED_STATUS_NAMES above for why
+// certain names are locked from rename/delete in the UI.
 export const DEFAULT_BRAND_STATUSES: ReadonlyArray<DefaultStatusSeed> = [
-  { name: "Idea", color: "zinc" },
-  { name: "Assigned", color: "pink", isPipelineColumn: true },
+  { name: "Idea", color: "zinc", isProtected: true },
+  { name: "Assigned", color: "pink", isPipelineColumn: true, isProtected: true },
   { name: "Review", color: "yellow", isPipelineColumn: true },
   { name: "Final Review", color: "orange", isPipelineColumn: true },
   { name: "Ready To Publish", color: "pink", isPipelineColumn: true },
@@ -38,7 +53,7 @@ export const DEFAULT_BRAND_STATUSES: ReadonlyArray<DefaultStatusSeed> = [
 // is the live brand and has rows under names beyond the default set, so it
 // gets the full legacy palette; every other brand gets the default seed.
 export const STARTER_STORY_LEGACY_STATUSES: ReadonlyArray<DefaultStatusSeed> = [
-  { name: "Idea", color: "zinc" },
+  { name: "Idea", color: "zinc", isProtected: true },
   { name: "To Assign", color: "zinc" },
   { name: "Pre-Production", color: "pink" },
   { name: "Scoping Call", color: "zinc" },
@@ -47,7 +62,7 @@ export const STARTER_STORY_LEGACY_STATUSES: ReadonlyArray<DefaultStatusSeed> = [
   { name: "Yes BUT Later", color: "green" },
   { name: "Scheduled Shoot", color: "zinc" },
   { name: "Searching/Planning", color: "sky" },
-  { name: "Assigned", color: "pink", isPipelineColumn: true },
+  { name: "Assigned", color: "pink", isPipelineColumn: true, isProtected: true },
   { name: "Editing (V1)", color: "amber" },
   { name: "Graphics (V2)", color: "zinc" },
   { name: "Review", color: "yellow", isPipelineColumn: true },

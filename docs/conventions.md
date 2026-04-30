@@ -70,13 +70,22 @@ Render chips with `statusClassWithPalette(status, palette)` (server) or
 The legacy `statusClass(status)` lookup against `STATUS_COLORS` is kept as
 a fallback only; new code shouldn't use it directly.
 
-**Protected names.** `"Published"` and `"Killed"` are seeded with
-`isProtected = true` for every brand and locked from rename/delete in the
-UI. They're hard-coded in two places — the publish-date filters in
-`src/lib/db/queries.ts` and the kill-confirmation modal in
-`src/components/dashboard/content-detail.tsx` — so renaming them would
-silently break behavior. New brands get the seed via `POST /api/brands`;
-existing-brand backfill is `scripts/backfill-brand-statuses.mjs`.
+**Protected names.** Four status names are seeded with `isProtected = true`
+on every brand and locked from rename/delete in the UI. The canonical list
+is `PROTECTED_STATUS_NAMES` in `src/lib/db/brand-statuses.ts`:
+
+- `Idea` — auto-created status of every new item from repost / cross-post /
+  duplicate / clip-out / threshold-monitor; filtered by name in queue-view,
+  cross-post-feed, evergreen-scan, cross-post-scan
+- `Assigned` — target of triage "accept", clip promotion, and the queue
+  outcome flow; my-work role logic keys off it
+- `Published` — publish-date filters in `src/lib/db/queries.ts`
+- `Killed` — kill-confirmation modal in `src/components/dashboard/content-detail.tsx`
+
+Renaming any of these would silently break the flow that hard-codes the
+string. New brands get the seed via `POST /api/brands`; existing brands are
+re-flagged by re-running `scripts/backfill-brand-statuses.mjs` (idempotent —
+seed pass + re-flag pass).
 
 ## Brand routing — the "All content" sentinel
 

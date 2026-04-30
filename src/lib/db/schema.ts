@@ -1097,10 +1097,13 @@ export const brands = pgTable(
 
 // Per-brand status palette. Replaces the old hard-coded STATUS_COLORS map and
 // PIPELINE_STATUSES list — each brand now owns its own statuses, ordering, and
-// chip colors. Two names ("Published", "Killed") are seeded with isProtected
-// true on every brand because the publish-date queries in queries.ts and the
-// kill-confirmation modal in content-detail.tsx hard-code those strings;
-// renaming them would silently break that behavior.
+// chip colors. Four names are seeded with isProtected = true on every brand
+// because the app hard-codes them elsewhere: Idea + Assigned are the target
+// status of the auto-creation flows (repost / cross-post / clip-out /
+// triage-accept / threshold-monitor), Published is referenced by the
+// publish-date filters in queries.ts, and Killed is referenced by the
+// kill-confirmation modal in content-detail.tsx. See
+// PROTECTED_STATUS_NAMES in src/lib/db/brand-statuses.ts.
 export const brandStatuses = pgTable(
   "brand_statuses",
   {
