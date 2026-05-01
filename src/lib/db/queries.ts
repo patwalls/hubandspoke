@@ -693,6 +693,10 @@ export interface TopShortFormRow {
 }
 
 export interface TopShortFormRowRich extends TopShortFormRow {
+  /** On-video burn-in narrator line (the bold overlay above the speaker).
+   *  Distinct from `hook` so we can show both signals to the clip-idea agent
+   *  even when one is missing. Currently sparse — backfill is a separate pass. */
+  overlay: string | null;
   contentBody: string | null;
   coverDescription: string | null;
   likes: number | null;
@@ -782,6 +786,7 @@ export async function topShortFormPerformers(params: {
             publishedDate: productionItems.publishedDate,
             pillarContentItemId: productionItems.pillarContentItemId,
             hook: productionItems.hook,
+            overlay: productionItems.overlay,
             contentBody: productionItems.contentBody,
             coverDescription: productionItems.coverDescription,
             likes: productionItems.likes,

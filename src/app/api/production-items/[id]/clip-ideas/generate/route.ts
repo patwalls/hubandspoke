@@ -47,6 +47,9 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       // Manual route: operator already chose the pillar, bypass the
       // post_type gate the cron path enforces.
       skipPostTypeGate: true,
+      // Manual Regenerate is explicit operator intent — overwrite the
+      // existing batch instead of bailing on idempotency.
+      force: true,
     });
   })().catch((err) => {
     console.error(

@@ -1,0 +1,1 @@
+ALTER TABLE "clip_ideas" ADD COLUMN "blueprint_anchor_hook" text;

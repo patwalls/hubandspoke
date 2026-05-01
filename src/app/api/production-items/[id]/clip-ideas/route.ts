@@ -3,6 +3,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clipIdeas, transcripts, users } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
+import { algorithmLabel } from "@/lib/clip-idea-agent";
 
 const TRANSCRIPT_EXCERPT_MAX = 220;
 
@@ -56,6 +57,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       hook: clipIdeas.hook,
       angle: clipIdeas.angle,
       rationale: clipIdeas.rationale,
+      blueprintAnchorHook: clipIdeas.blueprintAnchorHook,
+      promptVersion: clipIdeas.promptVersion,
       confidence: clipIdeas.confidence,
       estimatedViews: clipIdeas.estimatedViews,
       status: clipIdeas.status,
@@ -106,6 +109,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         acceptedEditorName: i.editorName ?? i.editorEmail ?? null,
         acceptedEditorEmail: i.editorEmail ?? null,
         transcriptExcerpt: buildExcerpt(segments, startSec, endSec),
+        algorithmLabel: algorithmLabel(i.promptVersion),
       };
     }),
   });

@@ -15,6 +15,8 @@ interface ClipIdea {
   hook: string;
   angle: string;
   rationale: string;
+  blueprintAnchorHook: string | null;
+  algorithmLabel: string | null;
   confidence: number | null;
   estimatedViews: number | null;
   status: string;
@@ -164,10 +166,18 @@ export function ClipIdeasPanel({
   return (
     <div className="rounded-lg border border-border bg-card p-4 sm:p-5 space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-baseline gap-3">
+        <div className="flex items-baseline gap-3 flex-wrap">
           <h3 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
             Clip Ideas
           </h3>
+          {ideas[0]?.algorithmLabel && (
+            <span
+              className="inline-flex items-center rounded-md border border-border bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
+              title="The clip-idea algorithm version that generated this batch"
+            >
+              {ideas[0].algorithmLabel}
+            </span>
+          )}
           {batchCreatedAt && (
             <span className="text-[11px] text-muted-foreground">
               batch generated {fmtRel(batchCreatedAt)}
@@ -318,6 +328,16 @@ export function ClipIdeasPanel({
                     {idea.rationale}
                   </p>
                 </div>
+                {idea.blueprintAnchorHook && (
+                  <div className="space-y-0.5">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Mirroring viral hook
+                    </h4>
+                    <p className="text-[12px] text-foreground/80 leading-relaxed italic">
+                      &ldquo;{idea.blueprintAnchorHook}&rdquo;
+                    </p>
+                  </div>
+                )}
                 {idea.transcriptExcerpt && (
                   <div className="space-y-0.5">
                     <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

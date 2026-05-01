@@ -66,6 +66,12 @@ export interface ClipIdeaGenerateOptions {
    *  operator has already chosen a pillar; the cron path keeps the gate on
    *  to avoid LLM-bombing every transcribed reel. */
   skipPostTypeGate?: boolean;
+  /** Bypass the "ideas-already-exist" idempotency check. The manual
+   *  Regenerate button passes this so operators can re-run the agent against
+   *  a fresh prompt or new training data; older batches stay in the table
+   *  for history but the panel only shows the most recent. The cron path
+   *  never sets this — auto-fire after transcript should be one-and-done. */
+  force?: boolean;
 }
 
 /**
@@ -111,13 +117,16 @@ export async function generateClipIdeasForItem(
 
   // Idempotency: any existing batch for this pillar means a human already
   // triggered generation OR a prior auto-fire succeeded. Don't double-spend
-  // Sonnet on the same transcript.
-  const [existing] = await db
-    .select({ id: clipIdeas.id })
-    .from(clipIdeas)
-    .where(eq(clipIdeas.sourceProductionItemId, productionItemId))
-    .limit(1);
-  if (existing) return { status: "skip", reason: "ideas-already-exist" };
+  // Sonnet on the same transcript — unless the caller explicitly opts in
+  // via `force` (the manual Regenerate button).
+  if (!options.force) {
+    const [existing] = await db
+      .select({ id: clipIdeas.id })
+      .from(clipIdeas)
+      .where(eq(clipIdeas.sourceProductionItemId, productionItemId))
+      .limit(1);
+    if (existing) return { status: "skip", reason: "ideas-already-exist" };
+  }
 
   const transcript = await getTranscriptForPrompt(productionItemId);
   if (!transcript) return { status: "skip", reason: "no-transcript" };
@@ -173,6 +182,7 @@ export async function generateClipIdeasForItem(
     format: r.format,
     views: r.views,
     hook: r.hook,
+    overlay: r.overlay,
     contentBody: r.contentBody,
     coverDescription: r.coverDescription,
     likes: r.likes,
@@ -217,6 +227,7 @@ export async function generateClipIdeasForItem(
         hook: idea.hook,
         angle: idea.angle,
         rationale: idea.rationale,
+        blueprintAnchorHook: idea.blueprintAnchorHook,
         estimatedViews: idea.estimatedViews,
         generatedBy: GENERATED_BY,
         promptVersion: PROMPT_VERSION,

@@ -444,6 +444,10 @@ export const clipIdeas = pgTable(
     hook: text("hook").notNull(),
     angle: text("angle").notNull(),
     rationale: text("rationale").notNull(),
+    // V6: the verbatim hook from the brand's REFERENCE LIBRARY whose
+    // structural pattern this idea is mirroring. Lets us audit which viral
+    // hook each idea descends from. Nullable so older V5 rows still read.
+    blueprintAnchorHook: text("blueprint_anchor_hook"),
     // Legacy field from the first cut; unused now that the agent returns
     // estimatedViews. Kept nullable so older rows still read.
     confidence: decimal("confidence"),
