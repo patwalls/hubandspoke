@@ -7,6 +7,7 @@ import {
   transcribeFromS3Audio,
   type AudioChunk,
 } from "./whisper-pipeline";
+import type { GenerateClipIdeasPayload } from "./generate-clip-ideas";
 
 export interface TranscribeWhisperPayload {
   productionItemId: string;
@@ -62,6 +63,16 @@ export const transcribeWhisperTask: Task = async (rawPayload, helpers) => {
       payload.audioChunks ?? null,
       helpers.logger,
     );
+    // Fresh transcript landed → fan out clip-idea generation. The service
+    // gates on post_type='youtube_long' + source_type='original' so
+    // transcribed reels/shorts no-op. Idempotent on the clip-idea side, so
+    // worker retries (or re-running this task after the transcript
+    // already-exists short-circuit) are safe.
+    const clipPayload: GenerateClipIdeasPayload = { productionItemId };
+    await helpers.addJob("generate-clip-ideas", clipPayload as never, {
+      jobKey: `generate-clip-ideas-${productionItemId}`,
+      jobKeyMode: "unsafe_dedupe",
+    });
     return;
   }
 

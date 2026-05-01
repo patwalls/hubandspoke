@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { buildRepostValues } from "@/lib/services/repost-values";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 interface RouteContext {
@@ -34,6 +35,15 @@ export async function POST(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Source item not found" }, { status: 404 });
   }
 
+  // Legacy/oddball items pre-date the accounts rollout — they don't have an
+  // accountId/postType and aren't repost-eligible until backfilled.
+  if (!source.accountId || !source.postType) {
+    return NextResponse.json(
+      { error: "Source item is missing accountId or postType — backfill required before reposting." },
+      { status: 422 }
+    );
+  }
+
   const assignees = await resolveAssignees({
     brand: source.brand,
     sourceItemId: source.id,
@@ -42,23 +52,27 @@ export async function POST(_request: Request, context: RouteContext) {
 
   const [created] = await db
     .insert(productionItems)
-    .values({
-      brand: source.brand,
-      title: source.title,
-      thumbnail: source.thumbnail,
-      status: "Idea",
-      accountId: source.accountId,
-      postType: source.postType,
-      platform: source.platform,
-      sourceType: "repost",
-      repostedFromItemId: source.id,
-      format: source.format,
-      pillarContentNotionId: source.pillarContentNotionId,
-      pillarContentItemId: source.pillarContentItemId,
-      utmCampaign: await generateUtmCampaign(source.title),
-      producerUserId: assignees.producerUserId,
-      editorUserId: assignees.editorUserId,
-    })
+    .values(
+      buildRepostValues(
+        {
+          id: source.id,
+          brand: source.brand,
+          title: source.title,
+          thumbnail: source.thumbnail,
+          accountId: source.accountId,
+          postType: source.postType,
+          platform: source.platform,
+          format: source.format,
+          pillarContentItemId: source.pillarContentItemId,
+          pillarContentNotionId: source.pillarContentNotionId,
+        },
+        {
+          utmCampaign: await generateUtmCampaign(source.title),
+          producerUserId: assignees.producerUserId,
+          editorUserId: assignees.editorUserId,
+        }
+      )
+    )
     .returning({ id: productionItems.id });
 
   return NextResponse.json({ id: created.id }, { status: 201 });

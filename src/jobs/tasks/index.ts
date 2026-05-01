@@ -63,6 +63,10 @@ import {
   captureVelocitySnapshotTask,
   type CaptureVelocitySnapshotPayload,
 } from "./capture-velocity-snapshot";
+import {
+  generateClipIdeasTask,
+  type GenerateClipIdeasPayload,
+} from "./generate-clip-ideas";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -80,6 +84,7 @@ export interface TaskPayloads {
   "account-content-sync": AccountContentSyncPayload;
   "refresh-item-metrics": RefreshItemMetricsPayload;
   "capture-velocity-snapshot": CaptureVelocitySnapshotPayload;
+  "generate-clip-ideas": GenerateClipIdeasPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
@@ -118,6 +123,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "account-content-sync": accountContentSyncTask,
   "refresh-item-metrics": refreshItemMetricsTask,
   "capture-velocity-snapshot": captureVelocitySnapshotTask,
+  "generate-clip-ideas": generateClipIdeasTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,

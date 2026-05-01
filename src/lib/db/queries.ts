@@ -271,7 +271,7 @@ export async function getContentReport(
     eq(productionItems.status, "Published"),
     gte(productionItems.publishedDate, startDate),
     lte(productionItems.publishedDate, endDate),
-    isNotNull(productionItems.platform),
+    isNotNull(productionItems.accountId),
     isNull(productionItems.deletedAt),
   ];
   if (brand !== "all") {

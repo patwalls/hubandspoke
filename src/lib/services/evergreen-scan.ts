@@ -9,6 +9,7 @@ import {
   type RepostAcceptExemplar,
 } from "@/lib/evergreen-agent";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { buildRepostValues } from "@/lib/services/repost-values";
 import { isNotionAuthoritativeAccount } from "@/lib/platform";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -218,6 +219,7 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
           title: productionItems.title,
           accountId: productionItems.accountId,
           postType: productionItems.postType,
+          platform: productionItems.platform,
           format: productionItems.format,
           brand: productionItems.brand,
           thumbnail: productionItems.thumbnail,
@@ -226,6 +228,8 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
           evergreenReasoning: productionItems.evergreenReasoning,
           contentBody: productionItems.contentBody,
           contentMediaUrl: productionItems.contentMediaUrl,
+          pillarContentItemId: productionItems.pillarContentItemId,
+          pillarContentNotionId: productionItems.pillarContentNotionId,
           accountPlatform: accounts.platform,
           accountSyncedFromNotion: accounts.syncedFromNotion,
         })
@@ -341,21 +345,28 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
 
     const [inserted] = await db
       .insert(productionItems)
-      .values({
-        brand: original.brand,
-        title: original.title,
-        status: "Idea",
-        accountId: original.accountId,
-        postType: original.postType,
-        format: original.format,
-        thumbnail: original.thumbnail,
-        sourceType: "repost",
-        repostedFromItemId: original.id,
-        evergreenReasoning: original.evergreenReasoning,
-        utmCampaign: await generateUtmCampaign(original.title),
-        producerUserId: assignees.producerUserId,
-        editorUserId: assignees.editorUserId,
-      })
+      .values(
+        buildRepostValues(
+          {
+            id: original.id,
+            brand: original.brand,
+            title: original.title,
+            thumbnail: original.thumbnail,
+            accountId: original.accountId,
+            postType: original.postType,
+            platform: original.platform,
+            format: original.format,
+            pillarContentItemId: original.pillarContentItemId,
+            pillarContentNotionId: original.pillarContentNotionId,
+            evergreenReasoning: original.evergreenReasoning,
+          },
+          {
+            utmCampaign: await generateUtmCampaign(original.title),
+            producerUserId: assignees.producerUserId,
+            editorUserId: assignees.editorUserId,
+          }
+        )
+      )
       .returning({ id: productionItems.id });
 
     blockedOriginals.add(original.id);

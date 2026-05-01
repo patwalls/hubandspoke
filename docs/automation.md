@@ -49,6 +49,7 @@ AUTO-CHAINS (one task enqueues another)
   youtube-download   ── on success ────────────────→ transcribe-whisper
   archive-yt-local.ts (script)         ── on S3 upload ─→ transcribe-whisper
   backfill-instagram-bodies.mjs (script) ── on S3 upload ─→ transcribe-whisper
+  transcribe-whisper ── on transcript save ────────→ generate-clip-ideas (gated post_type=youtube_long)
   enqueueNotification() ───────────────────────────→ notification-send
 ```
 
@@ -255,14 +256,14 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Trigger:** cron `0 15 * * *` (daily 15:00 UTC)
 - **Files:** `src/jobs/tasks/scheduled.ts:112`, `src/lib/services/evergreen-scan.ts`, manual: `scripts/run-evergreen-scan.ts`
 - **Inputs:** published items with ≥10,000 views, per-post-type age gates (x 365d+, instagram_reel/post 90d+, linkedin/threads 180d+, youtube_community/shorts 180d+); existing `contentEvents` (past kill reasons); past published reposts (positive accept exemplars)
-- **Outputs:** `productionItems.isEvergreen`; new repost `production_items` rows in the Idea queue (each carries `accountId` + `postType` copied from the original)
+- **Outputs:** `productionItems.isEvergreen`; new repost `production_items` rows in the Idea queue, built via `buildRepostValues` in `src/lib/services/repost-values.ts` — the canonical helper both this scan and the manual `/api/production-items/[id]/repost` route route through, so the field set stays in lockstep. Its strict `RepostSource` input type fails to compile if a candidate-source SELECT omits a required column (introduced 2026-05-01 after a SELECT/INSERT mismatch silently NULLed `platform` on 19 cron-generated reposts and hid them from the Content view).
 - **Downstream:** none directly; downstream is the human triage flow
 - **Rules:**
   - Phase A: stratified-batch classify per post-type (per-run quotas: x 12, instagram 10, linkedin/threads/youtube 4 each). Last 10 kill reasons injected into the classifier prompt as negative exemplars; classifier draws from a 50-reason history window.
   - Phase B: refill Idea queue, blocking any original that already has a prior repost row in **any** state (Idea, in-production, Published, Killed). This is the dedup that used to be enforced (much more narrowly) by the partial unique index `uniq_production_items_pillar_format`; that index was dropped in 0056 and the check now lives at generation time per the operator rule "if we've already done it before, or it's already in production, don't generate it." Before each insert, a per-candidate Haiku **fit judge** (`judgeRepostFit`) reads recent kill reasons (last 50) + accepted-and-published repost exemplars (last 30) and skips candidates that resemble a kill or don't resemble any accept. Catches already-`isEvergreen=true` items the operator no longer wants resurfaced (Phase A's prompt-injection only steers newly-classified items).
   - Cap: 20 pending suggestions in queue; per-platform diversity caps are explicit (`PLATFORM_QUEUE_CAPS` in `evergreen-scan.ts`): x 6, instagram 6, linkedin 4, threads 3, youtube 3, default 2. Sum exceeds the queue target so the queue can always fill, but no single platform can dominate.
   - Candidate pool per run: stratified per-platform — top `POOL_PER_PLATFORM` (40) evergreens per platform by views, merged and re-sorted views-DESC. Pulling globally by views starved non-X channels because X view counts dwarf everything else.
-  - Repost rows copy `accountId` + `postType` from the original; per-platform diversity cap is keyed off the joined `account.platform`.
+  - Repost rows copy `accountId`, `postType`, `platform`, `format`, `pillarContentItemId`, and `pillarContentNotionId` from the original; per-platform diversity cap is keyed off the joined `account.platform`. Pillar-inheritance was added 2026-05-01 to fix evergreen-scan reposts losing their parent's pillar link — see `scripts/backfill-repost-pillar.mjs` for the historic-row repair.
 
 ### `capture-velocity-snapshot` — per-post scheduled velocity snapshots
 
@@ -537,13 +538,26 @@ ORDER BY pi.published_at DESC;
 - **Outputs (by phase):**
   1. No `audioS3Key` → download archived S3 video, ffmpeg segment-extract mono 16kHz opus audio into 10-min chunks (`<prefix>/audio/<itemId>/<runId>-NNN.ogg`), upload each, re-enqueue with chunk manifest carried on payload
   2. `audioS3Key` set → for each chunk: fetch from S3, call OpenAI `whisper-1` with `verbose_json` + `timestamp_granularities: ["word", "segment"]` + an **item-aware prompt** (title + author names + description snippet) so Whisper biases proper nouns correctly. Offset chunk-local timestamps by `chunk.startSec`, merge, upsert `transcripts` row (source=`whisper`, model, segments, **words**, fullText, durationSec, language, audioS3Bucket, audioS3Key, audioChunks)
-- **Downstream:** none
+- **Downstream:** at the end of phase 2 (when the `transcripts` row is saved), enqueues `generate-clip-ideas` for the same `productionItemId`. The downstream service gates on `post_type='youtube_long' AND source_type='original'` so transcribed reels/shorts no-op cheaply.
 - **Rules:**
   - **Skips at top if a `transcripts` row with non-empty `fullText` exists** for this item (don't burn another API call). Legacy `source='descript'` rows count.
   - **Short-invocation pattern**: phase 1 finishes with a re-enqueue for phase 2 (1s delay), so a SIGTERM during ffmpeg or Whisper doesn't waste the other half.
   - Uses jobKey `transcribe-whisper:<id>` so back-to-back UI refetch clicks dedupe.
   - **Chunking** handles long-form content (podcasts): each chunk is ≤10 min and stays under OpenAI's 25 MB per-request cap. For chunk N>0 the prompt appends the tail of running fullText so context carries across the cut (helps with mid-sentence splits and keeps name-bias sticky).
   - Extracted audio stays in S3 — enables future re-runs (different model, diarization, vision) without re-downloading the full video. ~5 MB per 24-min video.
+
+### `generate-clip-ideas` — Sonnet clip-idea generation
+- **Trigger:** auto-enqueued by `transcribe-whisper` after a fresh transcript saves (since 2026-05-01); also the unit of work the manual `POST /api/production-items/[id]/clip-ideas/generate` route calls inline (after returning 202), and the unit fanned out by `scripts/backfill-clip-ideas.mjs` for historic pillars.
+- **Files:** `src/jobs/tasks/generate-clip-ideas.ts`, `src/lib/services/clip-idea-generate.ts` (shared by route + task), `src/lib/clip-idea-agent.ts` (Sonnet prompt)
+- **Inputs:** `{ productionItemId }`
+- **Outputs:** N rows in `clip_ideas` (default 10 per pillar) and N paired `production_items` rows (`source_type='clip'`, `source_clip_idea_id` back-link, `pillar_content_item_id` → source pillar, `status='Idea'`, `post_type='instagram_reel'`, `format='Repackage section with hook'`). `clip_ideas.accepted_production_item_id` is wired to the new prod_item row (note: confusingly named — set at *generation*, not on triage acceptance).
+- **Downstream:** none directly. The new `Idea`-status rows surface in the brand's `/queue` clip tab; promotion is the operator's call (clip-ideas triage panel).
+- **Rules:**
+  - **Cron path gates** on `source_type='original'` AND `post_type='youtube_long'` so the auto-fire only acts on long-form pillars. Manual route passes `skipPostTypeGate: true` to bypass — operator already chose the pillar.
+  - **Idempotent:** any existing `clip_ideas` row for the pillar short-circuits the task (skip status `ideas-already-exist`). Worker retries after a Sonnet timeout / DB blip are safe.
+  - Uses jobKey `generate-clip-ideas-<id>` so the auto-enqueue dedupes against any in-flight backfill.
+  - Producer/editor on the new prod_item rows: manual route uses the actor; cron/backfill path falls through `resolveAssignees` (source item → format default → brand default → global fallback).
+  - Cost: one Sonnet call per pillar (~$0.10). Worker concurrency keeps backfill bursts cheap; ~30 historic pillars ≈ $3 of Sonnet.
 
 ### `descript-clip-resolve` — poll Descript clip-out
 - **Trigger:** enqueued by `POST /api/descript/clip-out`; enqueued by `promote-clip-idea` service (agent flow + full-video flow)
@@ -598,7 +612,8 @@ which `sourceType` a row gets at creation, see
 | Repost (`POST .../repost`) | `repost` | user button | `Idea` |
 | Cross-post (manual `POST .../cross-post`) | `cross_post` | user button (body: `targetAccountId` + `targetPostType`) | `Idea` |
 | Cross-post (manual scanner, `cross-post-scan`) | `cross_post` | operator clicks "Populate queue" on `/[brand]/queue` Cross-post tab | `Idea` |
-| Clip generation (`POST /api/production-items/[id]/clip-ideas/generate`) | `clip` | admin clicks "Generate 10 ideas" on a pillar's Clip Ideas tab | `Idea` |
+| Clip generation — manual (`POST /api/production-items/[id]/clip-ideas/generate`) | `clip` | admin clicks "Generate 10 ideas" on a pillar's Clip Ideas tab | `Idea` |
+| Clip generation — auto (`generate-clip-ideas` task) | `clip` | enqueued by `transcribe-whisper` when a fresh transcript saves on a `youtube_long` `original` pillar | `Idea` |
 | Clip promotion (`POST /api/clip-ideas/[id]/triage` or `.../create-in-descript[-precise]`) | `clip` | user accepts an existing clip-idea | flips pre-created row from `Idea` → `Assigned` (no new insert) |
 | Threshold-based auto-repurpose (`threshold-monitor-sweep` cron) | `repurposed` | hourly :15, when parent views cross a child format's `viewThreshold` | `Idea` |
 
@@ -608,7 +623,7 @@ which `sourceType` a row gets at creation, see
 3. **Hour :20** — `enrichment-sweep` queues `enrich-item` if `enrichment_completed_at IS NULL`
 4. **`enrich-item`** writes platform-specific fields. **If it produces `mediaS3Key`** → auto-enqueues `transcribe-whisper`
 5. **YouTube only**: every 20 min, `youtube-download-sweep` queues `youtube-download` if no `mediaS3Key` yet. On success → auto-enqueues `transcribe-whisper`
-6. **`transcribe-whisper`** runs 2 phases (ffmpeg audio extract → OpenAI Whisper API), ends with `transcripts` row
+6. **`transcribe-whisper`** runs 2 phases (ffmpeg audio extract → OpenAI Whisper API), ends with `transcripts` row. **YouTube long-form only:** auto-enqueues `generate-clip-ideas` to fan out 10 Sonnet-generated `clip` rows into `/queue`.
 7. **Hour :40** — `hook-extract-sweep` queues `extract-hook` if short-form + has transcript + no hook yet
 8. **Hour :50** — `hook-fallback-sweep` queues `hook-fallback` for everything not covered by the LLM sweep
 9. **Daily 15:00** — `evergreen-scan` may classify isEvergreen and refill Idea queue
