@@ -407,6 +407,13 @@
       "when": 1777526906451,
       "tag": "0057_damp_sleepwalker",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1777663548640,
+      "tag": "0058_oval_stone_men",
+      "breakpoints": true
     }
   ]
 }

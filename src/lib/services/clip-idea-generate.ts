@@ -7,6 +7,7 @@ import {
   generateClipIdeas,
   GENERATED_BY,
   PROMPT_VERSION,
+  type BlueprintRow,
   type PerfRow,
 } from "@/lib/clip-idea-agent";
 import { topShortFormPerformers } from "@/lib/db/queries";
@@ -16,6 +17,11 @@ import { resolveAssignees } from "@/lib/services/assignees";
 const SHORT_FORM_PLATFORMS = ["YouTube Shorts", "Instagram Reel", "TikTok"];
 const PROMOTED_CLIP_FORMAT = "Repackage section with hook";
 const AUTO_GENERATE_POST_TYPES = new Set(["youtube_long"]);
+// V5 prompt: the brand's dominant clip format becomes the BLUEPRINT pool the
+// agent pattern-matches against. Hard-coded to Starter Story's format for
+// now — 163 of 201 SS short-form clips ride this format. TODO once MFM/MATG
+// have enough Repackage-format data: lift to brand_settings.preferredClipFormat.
+const PREFERRED_CLIP_FORMAT_FOR_BLUEPRINT = "Reel: Repackage Section w/ Hook";
 
 function isShortForm(platform: string[] | null): boolean {
   if (!platform) return false;
@@ -156,12 +162,25 @@ export async function generateClipIdeasForItem(
       hook: d.hook,
     }));
 
-  const topPerfRows = await topShortFormPerformers({
+  const { blueprint: blueprintRows, bench: benchRows } = await topShortFormPerformers({
     brand: item.brand,
     excludeDerivativesOfPillarId: productionItemId,
-    limit: 30,
+    preferredFormat: PREFERRED_CLIP_FORMAT_FOR_BLUEPRINT,
   });
-  const topPerformers: PerfRow[] = topPerfRows.map((r) => ({
+  const blueprint: BlueprintRow[] = blueprintRows.map((r) => ({
+    title: r.title,
+    platform: r.platform,
+    format: r.format,
+    views: r.views,
+    hook: r.hook,
+    contentBody: r.contentBody,
+    coverDescription: r.coverDescription,
+    likes: r.likes,
+    comments: r.comments,
+    publishedDate: r.publishedDate,
+    openingTranscript: r.openingTranscript,
+  }));
+  const bench: PerfRow[] = benchRows.map((r) => ({
     title: r.title,
     platform: r.platform,
     format: r.format,
@@ -176,7 +195,8 @@ export async function generateClipIdeasForItem(
     transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
     durationSec: transcript.durationSec,
     derivatives,
-    topPerformers,
+    blueprint,
+    bench,
   });
 
   const batchId = randomUUID();

@@ -107,6 +107,11 @@ export interface ProductionItem {
   hookSource?: string | null;
   hookExtractor?: string | null;
   hookExtractedAt?: string | null;
+  /** Verbatim burn-in text painted onto the cover/video itself (the bold
+   *  overlay sentence above the speaker on a Reel). For "Reel: Repackage
+   *  Section w/ Hook" the editor types this into `title` and we mirror it
+   *  here on save. Null when the clip has no designed overlay. */
+  overlay?: string | null;
   /** One-sentence description of the cover image produced by the vision
    *  sweep. Populated for posts with a posterS3Key. Null until processed. */
   coverDescription?: string | null;

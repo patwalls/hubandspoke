@@ -1,11 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// Sonnet 4.6 for creative judgment. Prompt V4: performance context now feeds
-// the actual verbatim hook of each top-performer (when available) instead of
-// the post title. Title is a weak proxy for the hook on Notion-synced /
-// cross-posted items — the real opening line is the training signal.
+// Sonnet 4.6 for creative judgment. Prompt V5: performance context split into
+// BLUEPRINT (top in-format clips with full anatomy — hook, caption, opening
+// transcript, engagement) and BENCH (broader short-form winners, single-line
+// for view-count calibration). Rationales must cite a specific blueprint row.
 const MODEL = "claude-sonnet-4-6";
-export const PROMPT_VERSION = 4;
+export const PROMPT_VERSION = 5;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You are an expert short-form video editor. Given a long-form transcript plus examples of what has worked for this brand, you identify the 10 moments most likely to perform as standalone short-form clips (Reels, TikTok, YouTube Shorts).
@@ -53,7 +53,7 @@ Frame the rationale around three things, in 2–4 tight sentences:
 
 1. The scroll-stopping move — what specifically about the FIRST FIVE WORDS makes a viewer pause? (Specific number, contrarian claim, vulnerability, curiosity gap, etc. Name the pattern.)
 2. The emotional payoff — what does the viewer feel or learn by the end? This is what they'll screenshot or comment on.
-3. The brand-proof calibration — cite a comparable top-performer from the PERFORMANCE CONTEXT by its hook/title and view count. Anchor your virality claim against something real on this brand, not against generic internet trends.
+3. The brand-proof calibration — cite a SPECIFIC BLUEPRINT row by its hook (verbatim or near-verbatim) and view count. The BLUEPRINT section gives you the full anatomy of clips that have actually gone viral on this brand; pattern-match against it. "Anchored to BLUEPRINT row 'Bro simply rebuilt Skype and now makes \$14K/month' (233K views) — same curiosity-gap + specific-number compression" is a strong calibration. Generic "this fits the brand" is not.
 
 Lead with the strongest of those three. Be concrete. Say "$39 of $40K is profit is a jaw-dropping verbatim stat" — not "this clip has strong retention potential." If you can't articulate a specific reason this will outperform the brand's median, the clip probably won't.
 
@@ -199,20 +199,55 @@ export interface PerfRow {
   hook?: string | null;
 }
 
+export interface BlueprintRow extends PerfRow {
+  // V5 additions — the rich anatomy block. Any field can be null; the
+  // formatter renders only the lines whose source field is non-empty.
+  contentBody?: string | null;        // caption (the text actually posted alongside the video)
+  coverDescription?: string | null;   // vision-extract one-line read of the poster image
+  likes?: number | null;
+  comments?: number | null;
+  publishedDate?: string | null;
+  openingTranscript?: string | null;  // first ~25s of the reel's own transcript
+}
+
 export interface GenerateArgs {
   pillarTitle: string | null;
   pillarFormat: string | null;
   pillarChannels: string[] | null;
   transcriptSegmentsMarkdown: string;
   durationSec: number;
-  derivatives: PerfRow[]; // short-form derivatives of THIS pillar
-  topPerformers: PerfRow[]; // brand-wide top short-form clips
+  derivatives: PerfRow[];     // short-form derivatives of THIS pillar
+  blueprint: BlueprintRow[];  // top in-format performers — full anatomy (V5)
+  bench: PerfRow[];           // broader short-form winners — light single-line
+}
+
+const SHORT_PLATFORMS_LABELS = ["YouTube Shorts", "Instagram Reel", "TikTok"];
+
+function pickShortPlatform(platform: string[] | null | undefined): string {
+  return (
+    platform?.find((p) => SHORT_PLATFORMS_LABELS.includes(p)) ??
+    platform?.[0] ??
+    "?"
+  );
+}
+
+function compactNumber(n: number | null | undefined): string | null {
+  if (n == null) return null;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  return n.toString();
+}
+
+function truncate(s: string | null | undefined, max: number): string | null {
+  if (!s) return null;
+  const trimmed = s.trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max - 1)}…`;
 }
 
 function formatPerfRow(r: PerfRow): string {
-  const platform = r.platform?.find((p) =>
-    ["YouTube Shorts", "Instagram Reel", "TikTok"].includes(p)
-  ) ?? r.platform?.[0] ?? "?";
+  const platform = pickShortPlatform(r.platform);
   const views = r.views != null ? `${r.views.toLocaleString()} views` : "—";
   const fmt = r.format ? ` · ${r.format}` : "";
   const hook = r.hook?.trim();
@@ -222,6 +257,37 @@ function formatPerfRow(r: PerfRow): string {
   // Fall back to title with a marker so the LLM knows this isn't a verified
   // opening line — usually a promotional title, not the hook the viewer heard.
   return `- TITLE: "${r.title ?? "(untitled)"}" — ${platform}${fmt} — ${views}`;
+}
+
+function formatBlueprintRow(r: BlueprintRow): string {
+  const platform = pickShortPlatform(r.platform);
+  const lines: string[] = [];
+  const hook = r.hook?.trim();
+  if (hook) {
+    lines.push(`- HOOK: "${hook}"`);
+  } else {
+    lines.push(`- TITLE: "${r.title ?? "(untitled)"}" (no verified hook on file)`);
+  }
+  const caption = truncate(r.contentBody, 300);
+  if (caption) lines.push(`  CAPTION: "${caption}"`);
+  const opening = truncate(r.openingTranscript, 1200);
+  if (opening) lines.push(`  OPENING (first 25s of reel transcript): "${opening}"`);
+  const cover = truncate(r.coverDescription, 200);
+  if (cover) lines.push(`  COVER: ${cover}`);
+  // Stats line — always show views; add likes/comments/published when present.
+  const statsParts: string[] = [];
+  const v = compactNumber(r.views);
+  if (v) statsParts.push(`${v} views`);
+  const l = compactNumber(r.likes);
+  if (l) statsParts.push(`${l} likes`);
+  const c = compactNumber(r.comments);
+  if (c) statsParts.push(`${c} comments`);
+  if (r.publishedDate) statsParts.push(`published ${r.publishedDate}`);
+  if (statsParts.length > 0) {
+    lines.push(`  STATS: ${platform} · ${statsParts.join(" · ")}`);
+  }
+  if (r.format) lines.push(`  FORMAT: ${r.format}`);
+  return lines.join("\n");
 }
 
 export async function generateClipIdeas(
@@ -237,13 +303,21 @@ export async function generateClipIdeas(
         ].join("\n")
       : `DERIVATIVES OF THIS PILLAR: (none yet — this is the first short-form pass.)`;
 
-  const topPerformersBlock =
-    args.topPerformers.length > 0
+  const blueprintBlock =
+    args.blueprint.length > 0
       ? [
-          `TOP-PERFORMING SHORT-FORM CLIPS BRAND-WIDE — the openings that actually stopped the scroll on this audience, ranked by real view counts. Lines prefixed HOOK: are verbatim opening lines; lines prefixed TITLE: are promotional titles where the hook isn't on file (weaker signal). Use the HOOK lines as your pattern-matching ground truth for what hooks land with this brand's viewers.`,
-          args.topPerformers.map(formatPerfRow).join("\n"),
+          `BLUEPRINT — the top performers in this brand's primary clip format, with the full anatomy of each: hook, caption, the first ~25 seconds of the reel's own transcript, and engagement. These are the clips that actually went viral on this audience. Pattern-match against them — what makes the hook land, how the caption frames the payoff, how the opening builds momentum. Every clip-idea rationale you propose MUST cite a specific BLUEPRINT row by hook + view count for its brand-proof calibration.`,
+          args.blueprint.map(formatBlueprintRow).join("\n"),
         ].join("\n")
-      : `TOP-PERFORMING SHORT-FORM CLIPS BRAND-WIDE: (none available.)`;
+      : `BLUEPRINT: (no in-format top performers on file yet — fall back to BENCH below for calibration.)`;
+
+  const benchBlock =
+    args.bench.length > 0
+      ? [
+          `BENCH — broader short-form winners across formats, lighter detail. Use these for view-count CALIBRATION ONLY (what's a realistic top-end on this brand?), not for hook pattern-matching. Lines prefixed HOOK: are verbatim openings; TITLE: rows are promotional titles where the hook isn't on file (weaker signal).`,
+          args.bench.map(formatPerfRow).join("\n"),
+        ].join("\n")
+      : `BENCH: (none available.)`;
 
   const userMessage = [
     `Pillar title: ${args.pillarTitle ?? "(untitled)"}`,
@@ -256,7 +330,9 @@ export async function generateClipIdeas(
     `======================== PERFORMANCE CONTEXT ========================`,
     derivativesBlock,
     ``,
-    topPerformersBlock,
+    blueprintBlock,
+    ``,
+    benchBlock,
     ``,
     `======================== FULL TRANSCRIPT ========================`,
     `Transcript cues below, pre-segmented with [MM:SS] timestamps:`,
@@ -264,7 +340,7 @@ export async function generateClipIdeas(
     args.transcriptSegmentsMarkdown,
     ``,
     `======================== TASK ========================`,
-    `Propose exactly 10 distinct clip ideas via the propose_clip_ideas tool. Hook is everything — every hook must be a verbatim/near-verbatim quote from the transcript. Sort by estimatedViews descending. Calibrate estimates against the performance context above.`,
+    `Propose exactly 10 distinct clip ideas via the propose_clip_ideas tool. Hook is everything — every hook must be a verbatim/near-verbatim quote from the transcript. Each rationale must cite a specific BLUEPRINT row by its hook and view count (see RATIONALE rules in the system prompt). Sort by estimatedViews descending; calibrate against the BLUEPRINT and BENCH numbers above.`,
   ]
     .filter(Boolean)
     .join("\n");

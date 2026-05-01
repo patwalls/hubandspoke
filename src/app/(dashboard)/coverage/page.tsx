@@ -77,6 +77,7 @@ const HOOK_SOURCE_LABELS: Array<{
   { key: "clip_idea", label: "Clip idea" },
   { key: "llm", label: "LLM" },
   { key: "vision", label: "Vision" },
+  { key: "overlay", label: "Overlay" },
   { key: "content_body", label: "Post body" },
   { key: "title", label: "Title" },
   { key: "manual", label: "Manual" },

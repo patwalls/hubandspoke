@@ -1639,6 +1639,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               hook={item.hook}
               hookSource={item.hookSource}
               hookExtractedAt={item.hookExtractedAt}
+              overlay={item.overlay}
               coverDescription={item.coverDescription}
               visionExtractedAt={item.visionExtractedAt}
               contentBody={item.contentBody}

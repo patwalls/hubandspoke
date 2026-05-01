@@ -44,6 +44,11 @@ interface Props {
   hook?: string | null;
   hookSource?: string | null;
   hookExtractedAt?: string | null;
+  /** Verbatim burn-in text painted onto the cover/video itself (the bold
+   *  overlay sentence above the speaker on a Reel). Distinct field from
+   *  `hook`; for "Reel: Repackage Section w/ Hook" they're the same string,
+   *  for other formats this may be null even when hook is set. */
+  overlay?: string | null;
   coverDescription?: string | null;
   visionExtractedAt?: string | null;
   contentBody?: string | null;
@@ -101,6 +106,8 @@ function hookSourceLabel(source: string | null | undefined): string {
       return "extracted by LLM";
     case "vision":
       return "read from cover image";
+    case "overlay":
+      return "from on-video overlay";
     case "content_body":
       return "from post body";
     case "title":
@@ -151,6 +158,7 @@ export function EnrichmentButton(props: Props) {
     hook,
     hookSource,
     hookExtractedAt,
+    overlay,
     coverDescription,
     visionExtractedAt,
     contentBody,
@@ -341,6 +349,20 @@ export function EnrichmentButton(props: Props) {
               </p>
             )}
           </Section>
+
+          {/* On-video overlay — the verbatim burn-in text painted onto the
+              cover/video itself. Distinct from the hook (which may be sourced
+              from caption/transcript/title) so we can answer "does this clip
+              have a designed overlay?" at a glance. */}
+          {overlay && (
+            <Section
+              title="Overlay"
+              subtitle="on-video burn-in text"
+              actions={<CopyButton text={overlay} />}
+            >
+              <p className="text-[13px] leading-snug">{overlay}</p>
+            </Section>
+          )}
 
           {/* Cover description — Haiku vision summary of what the poster
               looks like. Independent signal from the hook. */}

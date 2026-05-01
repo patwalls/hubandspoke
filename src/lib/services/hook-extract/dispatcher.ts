@@ -30,6 +30,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
+import { isRepackageOverlayItem } from "./repackage";
 
 const MODEL = "claude-haiku-4-5";
 export const DISPATCHER_VERSION = `dispatcher:${MODEL}:v1`;
@@ -51,7 +52,7 @@ const BODY_PREVIEW_CHARS = 500;
 type DispatcherSource = "overlay" | "transcript" | "caption" | "title" | "none";
 
 const SOURCE_TO_COLUMN: Record<Exclude<DispatcherSource, "none">, string> = {
-  overlay: "vision",
+  overlay: "overlay",
   transcript: "llm",
   caption: "content_body",
   title: "title",
@@ -282,6 +283,8 @@ export async function dispatchHookForItem(
       title: productionItems.title,
       contentBody: productionItems.contentBody,
       postType: productionItems.postType,
+      format: productionItems.format,
+      sourceType: productionItems.sourceType,
       posterS3Key: productionItems.posterS3Key,
       hookSource: productionItems.hookSource,
       hookExtractedAt: productionItems.hookExtractedAt,
@@ -305,6 +308,27 @@ export async function dispatchHookForItem(
   }
   if (existing.hookExtractedAt) {
     return { status: "skipped", note: "already-stamped" };
+  }
+
+  // Format-by-convention short-circuit: for "Reel: Repackage Section w/ Hook"
+  // the editor types the on-video burn-in overlay into `title`. Trust it,
+  // skip Haiku, mirror to overlay + hook. Same predicate is reused by the
+  // production-items PATCH handler to keep edits in sync.
+  if (isRepackageOverlayItem(existing)) {
+    const now = new Date();
+    const overlayText = existing.title!.trim();
+    await db
+      .update(productionItems)
+      .set({
+        overlay: overlayText,
+        hook: overlayText.slice(0, MAX_HOOK_CHARS),
+        hookSource: "overlay",
+        hookExtractor: "repackage-overlay:v1",
+        hookExtractedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(productionItems.id, productionItemId));
+    return { status: "ok", source: "overlay", note: "format-convention" };
   }
 
   const hasTitle = !!existing.title?.trim();
@@ -363,6 +387,13 @@ export async function dispatchHookForItem(
   if (result.hook && result.source !== "none") {
     updates.hook = result.hook;
     updates.hookSource = SOURCE_TO_COLUMN[result.source];
+    // When the LLM identifies designed overlay text, persist it to the
+    // dedicated `overlay` column too — same string, but lets downstream
+    // queries answer "does this clip have a burn-in overlay?" without
+    // having to inspect hook_source.
+    if (result.source === "overlay") {
+      updates.overlay = result.hook;
+    }
   }
 
   await db

@@ -268,6 +268,11 @@ export async function extractVisionForItem(
     updates.hookSource = "vision";
     updates.hookExtractor = VISION_EXTRACTOR_VERSION;
     updates.hookExtractedAt = now;
+    // Vision-extracted hook IS overlay text by definition (we asked the LLM
+    // for "VERBATIM on-screen text" only). Mirror to the dedicated column so
+    // analytics/queries can find overlay-bearing clips without parsing
+    // hook_source.
+    updates.overlay = result.hook;
   }
 
   await db

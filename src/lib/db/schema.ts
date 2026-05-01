@@ -237,6 +237,15 @@ export const productionItems = pgTable(
     hookExtractedAt: timestamp("hook_extracted_at", {
       withTimezone: true,
     }),
+    // Verbatim burn-in text painted onto the cover/video itself — the bold
+    // overlay sentence above the speaker on a Reel/Short/TikTok. Distinct from
+    // `hook` (which is the chosen scroll-stopping line, may come from caption
+    // /transcript/title) so we can answer "does this clip have a designed
+    // overlay?" without parsing format names. For "Reel: Repackage Section
+    // w/ Hook" the editor types the overlay into `title`, so we mirror it
+    // here on save and stamp `hookSource='overlay'`. The vision sweep also
+    // writes here when it OCRs overlay text from a poster image.
+    overlay: text("overlay"),
     // One-sentence visual description of the cover image (Haiku vision).
     // Independent signal from the hook — populated even when there's no
     // on-screen overlay text to extract. Useful for search and for feeding

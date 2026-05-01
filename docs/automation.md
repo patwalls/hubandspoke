@@ -495,6 +495,18 @@ ORDER BY pi.published_at DESC;
 - **Downstream:** none
 - **Rules:** never overrides an existing hook — checks `hookExtractedAt IS NULL` at the top
 
+### Format-by-convention overlay short-circuit (Repackage w/ Hook)
+- **Where:** `src/lib/services/hook-extract/dispatcher.ts` (`dispatchHookForItem`), gate via `src/lib/services/hook-extract/repackage.ts` (`isRepackageOverlayItem`)
+- **Triggered by:** the dispatcher itself before it would call Haiku — runs whenever an item is being hook-extracted for the first time
+- **Predicate:** `format ∈ {"Reel: Repackage Section w/ Hook", "Repackage section with hook"}` AND `post_type ∈ {instagram_reel, instagram_post}` AND `source_type ∈ {original, repost}` AND `title` non-empty
+- **Outputs:** `productionItems.overlay = trim(title)`, `hook = trim(title)[:240]`, `hookSource='overlay'`, `hookExtractor='repackage-overlay:v1'`, `hookExtractedAt`
+- **Why:** for this format the editor types the on-video burn-in overlay text into `title`. Trusting the title is more reliable than letting Haiku weigh title vs caption (caption is the longer story body and would otherwise win)
+- **Companion path:** `PUT /api/production-items` mirrors the same write whenever an editor edits `title` on a matching item, so the overlay/hook stay in sync after publish
+
+### Clip-idea promotion stamps `hookSource='clip_idea'`
+- **Where:** `src/lib/services/promote-clip-idea.ts` — `assignClipIdea`, `createClipIdeaInDescript`, `createClipIdeaInDescriptFullVideo`
+- **What:** every promotion path sets `hookSource='clip_idea'`, `hookExtractor='promote-clip-idea:v1'`, `hookExtractedAt=now()` alongside `hook`. Required so the dispatcher's `clip_idea`/`manual` protection actually fires — previously these fields were left null and the dispatcher reprocessed the item, frequently overwriting the clip idea's hook with the IG caption
+
 ### `youtube-download` — yt-dlp → S3 archive
 - **Trigger:** enqueued by `youtube-download-sweep`; manual `POST /api/cron/tick?name=youtube-download-sweep`
 - **Files:** `src/jobs/tasks/youtube-download.ts`
@@ -548,8 +560,8 @@ ORDER BY pi.published_at DESC;
 
 ### `generate-clip-ideas` — Sonnet clip-idea generation
 - **Trigger:** auto-enqueued by `transcribe-whisper` after a fresh transcript saves (since 2026-05-01); also the unit of work the manual `POST /api/production-items/[id]/clip-ideas/generate` route calls inline (after returning 202), and the unit fanned out by `scripts/backfill-clip-ideas.mjs` for historic pillars.
-- **Files:** `src/jobs/tasks/generate-clip-ideas.ts`, `src/lib/services/clip-idea-generate.ts` (shared by route + task), `src/lib/clip-idea-agent.ts` (Sonnet prompt)
-- **Inputs:** `{ productionItemId }`
+- **Files:** `src/jobs/tasks/generate-clip-ideas.ts`, `src/lib/services/clip-idea-generate.ts` (shared by route + task), `src/lib/clip-idea-agent.ts` (Sonnet prompt; V5 since 2026-05-01)
+- **Inputs:** `{ productionItemId }`. Performance context comes from `topShortFormPerformers()` in tiered shape — **BLUEPRINT** (top 10 in `Reel: Repackage Section w/ Hook` format with hook + caption + opening ~25s of the reel's own transcript + engagement) and **BENCH** (top 20 short-form across formats, single-line). Rationales must cite a specific BLUEPRINT row by hook + view count.
 - **Outputs:** N rows in `clip_ideas` (default 10 per pillar) and N paired `production_items` rows (`source_type='clip'`, `source_clip_idea_id` back-link, `pillar_content_item_id` → source pillar, `status='Idea'`, `post_type='instagram_reel'`, `format='Repackage section with hook'`). `clip_ideas.accepted_production_item_id` is wired to the new prod_item row (note: confusingly named — set at *generation*, not on triage acceptance).
 - **Downstream:** none directly. The new `Idea`-status rows surface in the brand's `/queue` clip tab; promotion is the operator's call (clip-ideas triage panel).
 - **Rules:**

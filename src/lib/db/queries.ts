@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { productionItems, formats, brands, users, accounts, clipIdeas } from "@/lib/db/schema";
+import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts } from "@/lib/db/schema";
 import { aliasedTable } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
@@ -692,19 +692,54 @@ export interface TopShortFormRow {
   hook: string | null;
 }
 
+export interface TopShortFormRowRich extends TopShortFormRow {
+  contentBody: string | null;
+  coverDescription: string | null;
+  likes: number | null;
+  comments: number | null;
+  /** First ~1200 chars of the reel's own transcript (when one exists). */
+  openingTranscript: string | null;
+}
+
+export interface TopShortFormPerformers {
+  /** Rich-shaped top performers in the brand's preferred clip format. The
+   *  clip-idea agent treats these as the pattern-match ground truth — full
+   *  hook + caption + opening transcript + engagement. */
+  blueprint: TopShortFormRowRich[];
+  /** Lighter, broader short-form winners (any format) for view-count
+   *  calibration. Excludes any id that's already in `blueprint`. */
+  bench: TopShortFormRow[];
+}
+
 /**
  * Top-performing short-form clips for a brand. Used by the clip-idea agent
  * as ground-truth examples of what works for this audience.
  *
- * Optionally excludes rows that descend from a given pillar so the brand-wide
+ * Returns a tiered shape (since 2026-05-01 / prompt V5):
+ *   - `blueprint`: top N where format = `preferredFormat` (the brand's
+ *     dominant clip format) and the row has a non-null hook. SELECT pulls
+ *     caption, cover description, engagement, and the first ~1200 chars of
+ *     the reel's own transcript via a left join on `transcripts`.
+ *   - `bench`: top N short-form regardless of format, excluding anything
+ *     already in `blueprint` (by id). Same shape as `TopShortFormRow`.
+ *
+ * Optionally excludes direct children of a given pillar so the brand-wide
  * sample doesn't overlap with the pillar's own derivatives block.
  */
 export async function topShortFormPerformers(params: {
   brand: string;
   excludeDerivativesOfPillarId?: string;
-  limit?: number;
-}): Promise<TopShortFormRow[]> {
-  const { brand, excludeDerivativesOfPillarId, limit = 30 } = params;
+  preferredFormat?: string;
+  blueprintLimit?: number;
+  benchLimit?: number;
+}): Promise<TopShortFormPerformers> {
+  const {
+    brand,
+    excludeDerivativesOfPillarId,
+    preferredFormat,
+    blueprintLimit = 10,
+    benchLimit = 20,
+  } = params;
 
   // JSONB containment — "any of these platforms" via OR over containment for
   // each short-form platform string. Mirrors the pattern at queries.ts:116-120.
@@ -716,7 +751,7 @@ export async function topShortFormPerformers(params: {
     sql` OR `
   );
 
-  const conditions = [
+  const baseConditions = [
     eq(productionItems.brand, brand),
     eq(productionItems.status, "Published"),
     isNotNull(productionItems.views),
@@ -726,14 +761,58 @@ export async function topShortFormPerformers(params: {
 
   if (excludeDerivativesOfPillarId) {
     // Exclude direct children of the pillar. Grandchildren etc. stay — for the
-    // 30-row sample the overlap cost is tiny and a recursive exclude is
-    // overkill.
-    conditions.push(
+    // small sample the overlap cost is tiny and a recursive exclude is overkill.
+    baseConditions.push(
       sql`(${productionItems.pillarContentItemId} IS NULL OR ${productionItems.pillarContentItemId} <> ${excludeDerivativesOfPillarId})`
     );
   }
 
-  const rows = await db
+  // Blueprint: format-locked top performers with the rich payload joined.
+  // Only run when a preferredFormat is set — otherwise blueprint is empty
+  // and the agent falls back to bench-only context.
+  const blueprintRows: TopShortFormRowRich[] = preferredFormat
+    ? (
+        await db
+          .select({
+            id: productionItems.id,
+            title: productionItems.title,
+            platform: productionItems.platform,
+            format: productionItems.format,
+            views: productionItems.views,
+            publishedDate: productionItems.publishedDate,
+            pillarContentItemId: productionItems.pillarContentItemId,
+            hook: productionItems.hook,
+            contentBody: productionItems.contentBody,
+            coverDescription: productionItems.coverDescription,
+            likes: productionItems.likes,
+            comments: productionItems.comments,
+            openingTranscript: sql<string | null>`LEFT(${transcripts.fullText}, 1200)`,
+          })
+          .from(productionItems)
+          .leftJoin(
+            transcripts,
+            eq(transcripts.productionItemId, productionItems.id)
+          )
+          .where(
+            and(
+              ...baseConditions,
+              eq(productionItems.format, preferredFormat),
+              isNotNull(productionItems.hook),
+              sql`${productionItems.hook} <> ''`
+            )
+          )
+          .orderBy(sql`${productionItems.views} DESC NULLS LAST`)
+          .limit(blueprintLimit)
+      ).map((r) => ({
+        ...r,
+        platform: r.platform as string[] | null,
+      }))
+    : [];
+
+  // Bench: broader top performers, light shape, excluding ids already in
+  // blueprint to avoid duplication.
+  const benchExcludeIds = blueprintRows.map((r) => r.id);
+  const benchRows = await db
     .select({
       id: productionItems.id,
       title: productionItems.title,
@@ -745,14 +824,24 @@ export async function topShortFormPerformers(params: {
       hook: productionItems.hook,
     })
     .from(productionItems)
-    .where(and(...conditions))
+    .where(
+      and(
+        ...baseConditions,
+        ...(benchExcludeIds.length > 0
+          ? [sql`${productionItems.id} NOT IN (${sql.join(benchExcludeIds.map((id) => sql`${id}`), sql`, `)})`]
+          : [])
+      )
+    )
     .orderBy(sql`${productionItems.views} DESC NULLS LAST`)
-    .limit(limit);
+    .limit(benchLimit);
 
-  return rows.map((r) => ({
-    ...r,
-    platform: r.platform as string[] | null,
-  }));
+  return {
+    blueprint: blueprintRows,
+    bench: benchRows.map((r) => ({
+      ...r,
+      platform: r.platform as string[] | null,
+    })),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -841,6 +930,7 @@ export interface HookSourceBreakdown {
     clip_idea: number;
     llm: number;
     vision: number;
+    overlay: number;
     content_body: number;
     title: number;
     manual: number;
@@ -903,6 +993,7 @@ export async function getHookSourceBreakdown(): Promise<HookSourceBreakdown[]> {
           clip_idea: 0,
           llm: 0,
           vision: 0,
+          overlay: 0,
           content_body: 0,
           title: 0,
           manual: 0,
@@ -921,6 +1012,7 @@ export async function getHookSourceBreakdown(): Promise<HookSourceBreakdown[]> {
       case "clip_idea":
       case "llm":
       case "vision":
+      case "overlay":
       case "content_body":
       case "title":
       case "manual":
