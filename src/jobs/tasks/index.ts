@@ -26,6 +26,7 @@ import { enrichItemTask, type EnrichItemPayload } from "./enrich-item";
 import { extractHookTask, type ExtractHookPayload } from "./extract-hook";
 import { hookFallbackTask, type HookFallbackPayload } from "./hook-fallback";
 import { visionExtractTask, type VisionExtractPayload } from "./vision-extract";
+import { extractPosterTask, type ExtractPosterPayload } from "./extract-poster";
 import { hookDispatchTask, type HookDispatchPayload } from "./hook-dispatch";
 import {
   youtubeDownloadTask,
@@ -47,6 +48,7 @@ import {
   hookExtractSweepTask,
   hookFallbackSweepTask,
   visionExtractSweepTask,
+  extractPosterSweepTask,
   hookDispatchSweepTask,
   evergreenScanTask,
   crossPostScanTask,
@@ -78,6 +80,7 @@ export interface TaskPayloads {
   "extract-hook": ExtractHookPayload;
   "hook-fallback": HookFallbackPayload;
   "vision-extract": VisionExtractPayload;
+  "extract-poster": ExtractPosterPayload;
   "hook-dispatch": HookDispatchPayload;
   "youtube-download": YoutubeDownloadPayload;
   "account-refresh": AccountRefreshPayload;
@@ -92,6 +95,7 @@ export interface TaskPayloads {
   "hook-extract-sweep": Record<string, never>;
   "hook-fallback-sweep": Record<string, never>;
   "vision-extract-sweep": Record<string, never>;
+  "extract-poster-sweep": Record<string, never>;
   "hook-dispatch-sweep": Record<string, never>;
   "evergreen-scan": Record<string, never>;
   "cross-post-scan": Record<string, never>;
@@ -117,6 +121,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "extract-hook": extractHookTask,
   "hook-fallback": hookFallbackTask,
   "vision-extract": visionExtractTask,
+  "extract-poster": extractPosterTask,
   "hook-dispatch": hookDispatchTask,
   "youtube-download": youtubeDownloadTask,
   "account-refresh": accountRefreshTask,
@@ -130,6 +135,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "hook-extract-sweep": hookExtractSweepTask,
   "hook-fallback-sweep": hookFallbackSweepTask,
   "vision-extract-sweep": visionExtractSweepTask,
+  "extract-poster-sweep": extractPosterSweepTask,
   "hook-dispatch-sweep": hookDispatchSweepTask,
   "evergreen-scan": evergreenScanTask,
   "cross-post-scan": crossPostScanTask,

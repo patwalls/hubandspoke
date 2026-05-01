@@ -501,6 +501,25 @@ ORDER BY pi.published_at DESC;
 - **Why this is the only path:** an earlier attempt (2026-05-01, reverted) trusted `title` as a proxy for the on-video overlay for "Reel: Repackage Section w/ Hook" items. Spot checks against the rendered cover proved title is unreliable — often it's the caption's first sentence or a draft framing, not the overlay. The overlay text only exists in the rendered video frame; OCR is the only way to read it
 - **One-shot recovery:** `scripts/revert-repackage-overlay-backfill.mjs` (clears the bad rows) + `scripts/enqueue-vision-for-repackage.mjs` (fans out vision-extract for IG Repackage items with a poster). Going forward the cron picks up new posts hourly
 
+### `extract-poster-sweep` — ffmpeg poster fallback
+- **Trigger:** cron `35 * * * *`
+- **Files:** `src/jobs/tasks/scheduled.ts` (`extractPosterSweepTask`), `src/jobs/tasks/extract-poster.ts` (per-item task + `selectExtractPosterCandidates`), `src/jobs/tasks/poster-extract-pipeline.ts` (worker-only ffmpeg helper)
+- **Inputs:** Published short-form items (`instagram_reel`, `instagram_post`, `tiktok`, `youtube_shorts`) where `mediaS3Key IS NOT NULL AND posterS3Key IS NULL`. Ordered by views DESC, batch 50.
+- **Outputs:** enqueues one `extract-poster` job per candidate, `jobKey: extract-poster-{id}`, `jobKeyMode: unsafe_dedupe`
+- **Why:** IG's Scrape Creators response sometimes omits `display_url`; without a poster, vision OCR can't run and the hook stays null. Frame 0 of the archived .mp4 IS the cover with overlay — same image vision needs.
+- **Sequencing:** runs after `enrichment-sweep` (`:20`, archives the .mp4) and before `vision-extract-sweep` (`:55`, OCRs the poster), so a freshly-enriched reel can land all three steps in a single hour.
+
+### `extract-poster` — frame 0 → S3 JPEG
+- **Trigger:** enqueued by `extract-poster-sweep`; manual `GET /api/cron/tick?name=extract-poster-sweep`
+- **Files:** `src/jobs/tasks/extract-poster.ts`, `src/jobs/tasks/poster-extract-pipeline.ts`
+- **Inputs:** `{ productionItemId, force? }`
+- **Outputs:** `productionItems.posterS3Key`, `mediaS3Bucket` (if not already set)
+- **Rules:**
+  - Streams the archived .mp4 from S3 to a tempfile, runs `ffmpeg -ss 0 -i input -frames:v 1 -q:v 2 frame.jpg`, uploads the JPEG to `{prefix}/{itemId}/{uuid}-frame0-poster.jpg`
+  - Idempotent on `posterS3Key`: skips when one is already present unless `force=true`
+  - 60s ffmpeg timeout, 5 MB cap on extracted frame
+  - Backfill: `scripts/enqueue-poster-extract.mjs --apply`
+
 ### Clip-idea promotion stamps `hookSource='clip_idea'`
 - **Where:** `src/lib/services/promote-clip-idea.ts` — `assignClipIdea`, `createClipIdeaInDescript`, `createClipIdeaInDescriptFullVideo`
 - **What:** every promotion path sets `hookSource='clip_idea'`, `hookExtractor='promote-clip-idea:v1'`, `hookExtractedAt=now()` alongside `hook`. Required so the dispatcher's `clip_idea`/`manual` protection actually fires — previously these fields were left null and the dispatcher reprocessed the item, frequently overwriting the clip idea's hook with the IG caption

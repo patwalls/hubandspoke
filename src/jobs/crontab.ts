@@ -22,6 +22,7 @@ export const CRONTAB = `
 15 * * * * threshold-monitor-sweep
 30 * * * * notion-sync
 20 * * * * enrichment-sweep
+35 * * * * extract-poster-sweep
 40 * * * * hook-dispatch-sweep
 55 * * * * vision-extract-sweep
 5 * * * * account-content-sync-sweep

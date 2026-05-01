@@ -13,6 +13,8 @@ import { selectHookCandidates } from "@/lib/services/hook-extract/orchestrator";
 import { selectHookFallbackCandidates } from "@/lib/services/hook-extract/fallback";
 import { selectVisionCandidates } from "@/lib/services/hook-extract/vision";
 import { selectDispatcherCandidates } from "@/lib/services/hook-extract/dispatcher";
+import { selectExtractPosterCandidates } from "./extract-poster";
+import type { ExtractPosterPayload } from "./extract-poster";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
 import { sendDailyScorecardEmail } from "@/lib/email";
@@ -134,6 +136,31 @@ export const visionExtractSweepTask: Task = async (_payload, helpers) => {
   }
   helpers.logger.info(
     `vision-extract-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
+  );
+};
+
+/**
+ * Cron parent task: ffmpeg poster fallback. For published short-form items
+ * where enrichment archived the .mp4 but didn't get a `display_url`-derived
+ * cover, this fans out per-item `extract-poster` jobs that grab frame 0 of
+ * the video and upload it as a poster. Idempotent on `posterS3Key`.
+ *
+ * Sequenced after `enrichment-sweep` (`:20`) and before `vision-extract-sweep`
+ * (`:55`) so vision finds a poster on the same hour the .mp4 lands.
+ */
+export const extractPosterSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("extract-poster-sweep start");
+  const candidates = await selectExtractPosterCandidates();
+  for (const productionItemId of candidates) {
+    const payload: ExtractPosterPayload = { productionItemId };
+    await helpers.addJob("extract-poster", payload as never, {
+      jobKey: `extract-poster-${productionItemId}`,
+      jobKeyMode: "unsafe_dedupe",
+    });
+  }
+  helpers.logger.info(
+    `extract-poster-sweep fanned out ${candidates.length} items (${Date.now() - start}ms)`
   );
 };
 /**
