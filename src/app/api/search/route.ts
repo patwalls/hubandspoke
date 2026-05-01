@@ -12,7 +12,13 @@ import {
   sql,
 } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { accounts, formatChannels, formats, productionItems } from "@/lib/db/schema";
+import {
+  accounts,
+  formatChannels,
+  formats,
+  productionItems,
+  transcripts,
+} from "@/lib/db/schema";
 import { extractContentIdFromUrl, looseUrlKey } from "@/lib/platform-url";
 import { getStatusPalette } from "@/lib/db/brand-statuses";
 
@@ -42,6 +48,13 @@ export async function GET(request: NextRequest) {
   const urlMatch = extractContentIdFromUrl(q);
   const urlLooseKey = urlMatch ? looseUrlKey(q) : null;
 
+  // For text queries, match across every searchable enrichment field so the
+  // editor can grep for a phrase from a caption / hook / overlay / YT
+  // description / spoken transcript line, not just the title. The transcript
+  // join is LEFT (one-to-zero-or-one) so items without a transcript still
+  // match on the production_items columns. URL-shaped queries skip all of
+  // this and go straight to platform_content_id / link match — pasted URLs
+  // never collide with body text.
   const contentMatchExpr = urlMatch
     ? or(
         eq(productionItems.platformContentId, urlMatch.contentId),
@@ -52,7 +65,14 @@ export async function GET(request: NextRequest) {
           ? ilike(productionItems.youtubeUrl, `%${urlLooseKey}%`)
           : undefined,
       )!
-    : ilike(productionItems.title, pattern);
+    : or(
+        ilike(productionItems.title, pattern),
+        ilike(productionItems.hook, pattern),
+        ilike(productionItems.overlay, pattern),
+        ilike(productionItems.contentBody, pattern),
+        ilike(productionItems.description, pattern),
+        ilike(transcripts.fullText, pattern),
+      )!;
 
   const [contentRows, formatRows] = await Promise.all([
     db
@@ -71,6 +91,13 @@ export async function GET(request: NextRequest) {
       })
       .from(productionItems)
       .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
+      // transcripts.productionItemId is UNIQUE, so this leftJoin is 1:0/1
+      // and won't multiply rows. We only need it so the OR can match
+      // transcripts.fullText — never SELECT from it here.
+      .leftJoin(
+        transcripts,
+        eq(transcripts.productionItemId, productionItems.id),
+      )
       .where(
         and(
           eq(productionItems.brand, brand),
