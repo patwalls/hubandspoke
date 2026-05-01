@@ -121,6 +121,22 @@ export async function enrichYouTubeItem(
     result.fields.descriptionFetched = true;
   }
 
+  // Hook for long-form YouTube = the published video title (per the
+  // dispatcher's rule 3). For Notion-authoritative items, `production_items
+  // .title` is the editor's working title from Notion (e.g. "Author: Format -
+  // Working theme") which is wrong for analytics; the live YT title is what
+  // viewers click on. Stamp `hookSource='title'` so vision sweep can still
+  // upgrade if the thumbnail has substantive overlay text.
+  if (data.title) {
+    const trimmedTitle = data.title.trim();
+    if (trimmedTitle.length > 0) {
+      result.updates.hook = trimmedTitle.slice(0, 240);
+      result.updates.hookSource = "title";
+      result.updates.hookExtractor = "yt-enricher:v1";
+      result.updates.hookExtractedAt = new Date();
+    }
+  }
+
   // The SC listing endpoint (channel-videos) only returns ISO timestamps
   // for the last few weeks; older items come through as "N months/years
   // ago" and get dropped to null. /v1/youtube/video is authoritative, so
