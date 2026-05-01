@@ -30,7 +30,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
-import { isRepackageOverlayItem } from "./repackage";
 
 const MODEL = "claude-haiku-4-5";
 export const DISPATCHER_VERSION = `dispatcher:${MODEL}:v1`;
@@ -283,8 +282,6 @@ export async function dispatchHookForItem(
       title: productionItems.title,
       contentBody: productionItems.contentBody,
       postType: productionItems.postType,
-      format: productionItems.format,
-      sourceType: productionItems.sourceType,
       posterS3Key: productionItems.posterS3Key,
       hookSource: productionItems.hookSource,
       hookExtractedAt: productionItems.hookExtractedAt,
@@ -308,27 +305,6 @@ export async function dispatchHookForItem(
   }
   if (existing.hookExtractedAt) {
     return { status: "skipped", note: "already-stamped" };
-  }
-
-  // Format-by-convention short-circuit: for "Reel: Repackage Section w/ Hook"
-  // the editor types the on-video burn-in overlay into `title`. Trust it,
-  // skip Haiku, mirror to overlay + hook. Same predicate is reused by the
-  // production-items PATCH handler to keep edits in sync.
-  if (isRepackageOverlayItem(existing)) {
-    const now = new Date();
-    const overlayText = existing.title!.trim();
-    await db
-      .update(productionItems)
-      .set({
-        overlay: overlayText,
-        hook: overlayText.slice(0, MAX_HOOK_CHARS),
-        hookSource: "overlay",
-        hookExtractor: "repackage-overlay:v1",
-        hookExtractedAt: now,
-        updatedAt: now,
-      })
-      .where(eq(productionItems.id, productionItemId));
-    return { status: "ok", source: "overlay", note: "format-convention" };
   }
 
   const hasTitle = !!existing.title?.trim();

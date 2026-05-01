@@ -495,13 +495,11 @@ ORDER BY pi.published_at DESC;
 - **Downstream:** none
 - **Rules:** never overrides an existing hook — checks `hookExtractedAt IS NULL` at the top
 
-### Format-by-convention overlay short-circuit (Repackage w/ Hook)
-- **Where:** `src/lib/services/hook-extract/dispatcher.ts` (`dispatchHookForItem`), gate via `src/lib/services/hook-extract/repackage.ts` (`isRepackageOverlayItem`)
-- **Triggered by:** the dispatcher itself before it would call Haiku — runs whenever an item is being hook-extracted for the first time
-- **Predicate:** `format ∈ {"Reel: Repackage Section w/ Hook", "Repackage section with hook"}` AND `post_type ∈ {instagram_reel, instagram_post}` AND `source_type ∈ {original, repost}` AND `title` non-empty
-- **Outputs:** `productionItems.overlay = trim(title)`, `hook = trim(title)[:240]`, `hookSource='overlay'`, `hookExtractor='repackage-overlay:v1'`, `hookExtractedAt`
-- **Why:** for this format the editor types the on-video burn-in overlay text into `title`. Trusting the title is more reliable than letting Haiku weigh title vs caption (caption is the longer story body and would otherwise win)
-- **Companion path:** `PUT /api/production-items` mirrors the same write whenever an editor edits `title` on a matching item, so the overlay/hook stay in sync after publish
+### Overlay text: vision OCR is the only source of truth
+- **Where:** `src/lib/services/hook-extract/vision.ts` (`extractVisionForItem`), via `vision-extract` per-item task and the scheduled `vision-extract-sweep` (cron `55 * * * *` in `src/jobs/crontab.ts`)
+- **What:** Haiku reads the bold burn-in text painted onto the cover image and writes it verbatim to `productionItems.overlay`, plus to `hook` (when the existing hook source is overwritable: null/title/content_body) with `hookSource='vision'`
+- **Why this is the only path:** an earlier attempt (2026-05-01, reverted) trusted `title` as a proxy for the on-video overlay for "Reel: Repackage Section w/ Hook" items. Spot checks against the rendered cover proved title is unreliable — often it's the caption's first sentence or a draft framing, not the overlay. The overlay text only exists in the rendered video frame; OCR is the only way to read it
+- **One-shot recovery:** `scripts/revert-repackage-overlay-backfill.mjs` (clears the bad rows) + `scripts/enqueue-vision-for-repackage.mjs` (fans out vision-extract for IG Repackage items with a poster). Going forward the cron picks up new posts hourly
 
 ### Clip-idea promotion stamps `hookSource='clip_idea'`
 - **Where:** `src/lib/services/promote-clip-idea.ts` — `assignClipIdea`, `createClipIdeaInDescript`, `createClipIdeaInDescriptFullVideo`

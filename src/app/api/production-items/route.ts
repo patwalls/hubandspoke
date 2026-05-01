@@ -17,7 +17,6 @@ import {
 import { enqueueNotification } from "@/lib/services/notifications";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
-import { isRepackageOverlayItem } from "@/lib/services/hook-extract/repackage";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { extractContentId } from "@/lib/platform-url";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -759,43 +758,6 @@ export async function PUT(request: NextRequest) {
           },
           { status: 409 }
         );
-      }
-    }
-
-    // For "Reel: Repackage Section w/ Hook" items the editor types the
-    // on-video burn-in overlay into the title field. Mirror title → overlay
-    // + hook so the analytics/algorithm signal stays accurate after edits.
-    // Same predicate the dispatcher uses (src/lib/services/hook-extract/repackage.ts).
-    if (typeof title === "string") {
-      const trimmedTitle = title.trim();
-      if (trimmedTitle.length > 0) {
-        const [existing] = await db
-          .select({
-            format: productionItems.format,
-            postType: productionItems.postType,
-            sourceType: productionItems.sourceType,
-          })
-          .from(productionItems)
-          .where(eq(productionItems.id, id))
-          .limit(1);
-        if (existing) {
-          const candidate = {
-            title: trimmedTitle,
-            format:
-              format !== undefined ? (format || null) : existing.format,
-            postType:
-              postType !== undefined ? (postType || null) : existing.postType,
-            sourceType:
-              sourceType !== undefined ? sourceType : existing.sourceType,
-          };
-          if (isRepackageOverlayItem(candidate)) {
-            updateData.overlay = trimmedTitle;
-            updateData.hook = trimmedTitle.slice(0, 240);
-            updateData.hookSource = "overlay";
-            updateData.hookExtractor = "repackage-overlay:title-edit";
-            updateData.hookExtractedAt = new Date();
-          }
-        }
       }
     }
 
