@@ -71,6 +71,7 @@ export function TranscriptButton({
     | { kind: "error"; message: string }
   >({ kind: "idle" });
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [copyTsState, setCopyTsState] = useState<"idle" | "copied">("idle");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,6 +163,21 @@ export function TranscriptButton({
     }
   }, [transcript]);
 
+  const handleCopyWithTimestamps = useCallback(async () => {
+    if (!transcript) return;
+    const lines = transcript.segments.map((s) => {
+      const speaker = s.speaker ? `${s.speaker}: ` : "";
+      return `${fmtTs(s.startSec)}  ${speaker}${s.text}`;
+    });
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCopyTsState("copied");
+      setTimeout(() => setCopyTsState("idle"), 1500);
+    } catch {
+      setCopyTsState("idle");
+    }
+  }, [transcript]);
+
   if (!hasMedia && !hasTranscript) return null;
 
   return (
@@ -209,6 +225,24 @@ export function TranscriptButton({
             ) : (
               <>
                 <CopyIcon className="size-3.5" /> Copy transcript
+              </>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCopyWithTimestamps}
+            disabled={!transcript}
+            className="h-7 text-xs gap-1.5"
+            title="Copy the transcript with per-segment timestamps"
+          >
+            {copyTsState === "copied" ? (
+              <>
+                <CheckIcon className="size-3.5" /> Copied
+              </>
+            ) : (
+              <>
+                <CopyIcon className="size-3.5" /> Copy transcript with timestamps
               </>
             )}
           </Button>
