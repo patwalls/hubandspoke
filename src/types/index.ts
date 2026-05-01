@@ -76,6 +76,10 @@ export interface ProductionItem {
    *  for clip rows; consumers prefer this over the generic format-based
    *  predictor when surfacing Est. Views in the queue. */
   clipEstimatedViews?: number | null;
+  /** Friendly name + version of the clip-idea algorithm that produced this
+   *  row (e.g. "Splice v6"). Computed from `clip_ideas.prompt_version` via
+   *  `algorithmLabel()`. Set only for sourceType='clip' rows. */
+  clipAlgorithmLabel?: string | null;
   repostedFromItemId?: string | null;
   mediaS3Bucket?: string | null;
   mediaS3Key?: string | null;

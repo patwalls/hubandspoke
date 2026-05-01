@@ -3,6 +3,7 @@ import { productionItems, formats, brands, users, accounts, clipIdeas, transcrip
 import { aliasedTable } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
+import { algorithmLabel } from "@/lib/clip-idea-agent";
 import {
   getInFlightStatusNames,
   getAllInFlightStatusNames,
@@ -61,6 +62,10 @@ type UserExtras = {
    *  consumers prefer it over the generic format-based predictor for clip
    *  rows. Populated only by queries that JOIN clip_ideas. */
   clipEstimatedViews?: number | null;
+  /** Friendly clip-idea algorithm label (e.g. "Splice v6") computed from
+   *  `clip_ideas.prompt_version`. Populated only by queries that JOIN
+   *  clip_ideas; null on non-clip rows. */
+  clipAlgorithmLabel?: string | null;
   /** Title of the pillar production_item, resolved via self-join on
    *  pillarContentItemId. Surfaced in the clip queue's Pillar column. */
   pillarContentTitle?: string | null;
@@ -118,6 +123,7 @@ function mapProductionItem(
       | "clip",
     sourceClipIdeaId: item.sourceClipIdeaId,
     clipEstimatedViews: extras.clipEstimatedViews ?? null,
+    clipAlgorithmLabel: extras.clipAlgorithmLabel ?? null,
     repostedFromItemId: item.repostedFromItemId,
     pillarContentItemId: item.pillarContentItemId,
     pillarContentTitle: extras.pillarContentTitle ?? null,
@@ -613,6 +619,8 @@ export async function getProductionPipeline(
       // unique index on source_clip_idea_id keeps the join 1:1 without
       // exploding row counts for non-clip items.
       clipEstimatedViews: clipIdeas.estimatedViews,
+      // Algorithm version that generated this clip idea (V5, V6 = "Splice v6", etc.).
+      clipPromptVersion: clipIdeas.promptVersion,
     })
     .from(productionItems)
     .leftJoin(producers, eq(producers.id, productionItems.producerUserId))
@@ -672,6 +680,10 @@ export async function getProductionPipeline(
         : null,
       clipEstimatedViews:
         r.clipEstimatedViews != null ? Number(r.clipEstimatedViews) : null,
+      clipAlgorithmLabel:
+        r.clipPromptVersion != null
+          ? algorithmLabel(r.clipPromptVersion)
+          : null,
       pillarContentTitle: r.item.pillarContentItemId
         ? pillarTitleById.get(r.item.pillarContentItemId) ?? null
         : null,

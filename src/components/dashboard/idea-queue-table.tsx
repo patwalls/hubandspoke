@@ -263,6 +263,7 @@ export function IdeaQueueTable({
               <col className="w-[220px]" />
               <col className="w-[220px]" />
               <col className="w-[100px]" />
+              <col className="w-[100px]" />
             </colgroup>
             <thead>
               <tr className="border-b border-border bg-accent/50">
@@ -307,6 +308,13 @@ export function IdeaQueueTable({
                   direction={sortDir}
                   onSort={toggleSort}
                 />
+                <th
+                  scope="col"
+                  className="px-3 py-2.5 text-left text-[11px] font-medium uppercase tracking-wider text-muted-foreground whitespace-nowrap"
+                  title="Clip-idea algorithm version that produced this row"
+                >
+                  Algorithm
+                </th>
                 <SortableHeader
                   label="Est. Views"
                   sortKey="views"
@@ -585,6 +593,18 @@ function IdeaQueueRow({
         <div className="truncate" title={item.format || ""}>
           {item.format || "—"}
         </div>
+      </td>
+      <td className="px-3 py-2 text-xs">
+        {item.clipAlgorithmLabel ? (
+          <span
+            className="inline-flex items-center rounded-md border border-border bg-muted/60 px-1.5 py-0.5 font-mono uppercase tracking-wider text-[10px] text-muted-foreground"
+            title="Clip-idea algorithm version"
+          >
+            {item.clipAlgorithmLabel}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </td>
       <td className="px-3 py-2 text-sm text-right tabular-nums">
         {item.prediction && item.prediction.prediction != null ? (
