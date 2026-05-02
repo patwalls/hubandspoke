@@ -111,6 +111,7 @@ export async function GET(request: NextRequest) {
         format: productionItems.format,
         postType: productionItems.postType,
         status: productionItems.status,
+        sourceType: productionItems.sourceType,
         publishedDate: productionItems.publishedDate,
         views: productionItems.views,
         accountId: accounts.id,
@@ -211,6 +212,7 @@ export async function GET(request: NextRequest) {
     postType: r.postType,
     status: r.status,
     statusColor: r.status ? palette.get(r.status) ?? null : null,
+    sourceType: r.sourceType,
     publishedDate: r.publishedDate,
     views: r.views,
     account: r.accountId && r.accountPlatform && r.accountHandle

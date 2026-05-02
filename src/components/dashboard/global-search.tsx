@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { statusClassFromToken, statusClass } from "@/lib/badge-colors";
 import { AccountBadge } from "@/components/ui/account-badge";
+import { SourceBadge } from "@/components/ui/source-badge";
 import {
   recordVisit,
   useFrequent,
@@ -45,6 +46,7 @@ type ContentHit = {
   // Color token (e.g. "yellow") resolved server-side from the brand's
   // status palette; null when the hit's status isn't in the palette.
   statusColor: string | null;
+  sourceType: string | null;
   publishedDate: string | null;
   views: number | null;
   account: SearchAccount | null;
@@ -414,6 +416,16 @@ function ContentRow({ hit, title }: { hit: ContentHit; title: string }) {
               {hit.status}
             </span>
           ) : null}
+          <SourceBadge
+            sourceType={
+              hit.sourceType as
+                | "original"
+                | "repost"
+                | "cross_post"
+                | "clip"
+                | null
+            }
+          />
           {hit.format ? (
             <span className="shrink-0 truncate text-[11px] text-muted-foreground">
               {hit.format}
