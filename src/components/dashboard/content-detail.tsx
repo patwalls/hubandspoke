@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, Trash2Icon, TrendingUpIcon } from "lucide-react";
+import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { buildDescriptCompositionUrl } from "@/lib/descript";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
@@ -488,6 +488,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     { projectUrl: string } | null
   >(null);
 
+  // Standalone media-upload modal — uploads a video/audio file straight to
+  // S3 (no Descript step). Confirm route auto-enqueues Whisper, so by the
+  // time the editor checks back the transcript is ready and clip ideas
+  // can be generated even on a not-yet-published item.
+  const [mediaUploadOpen, setMediaUploadOpen] = useState(false);
+  const [mediaUploadFile, setMediaUploadFile] = useState<File | null>(null);
+  const [mediaUploadStage, setMediaUploadStage] = useState<
+    "idle" | "uploading" | "confirming" | "done"
+  >("idle");
+  const [mediaUploadProgress, setMediaUploadProgress] = useState(0);
+  const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
+
   // Manual metrics refresh state for the Sync button on the metrics grid.
   // `error` holds a non-fatal note (e.g. "not found in recent feed") so the
   // user sees why metrics didn't move even though the call succeeded.
@@ -770,6 +782,109 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       setDescriptError(err instanceof Error ? err.message : "Descript import failed");
       setDescriptStage("idle");
     }
+  }
+
+  function closeMediaUploadModal() {
+    setMediaUploadOpen(false);
+    setMediaUploadFile(null);
+    setMediaUploadStage("idle");
+    setMediaUploadProgress(0);
+    setMediaUploadError(null);
+  }
+
+  // Mirrors the first three steps of `submitDescriptUpload` (presign → S3
+  // PUT → confirm) without the Descript-import step. The /api/uploads/confirm
+  // route auto-enqueues Whisper, so the transcript lands on its own — clip
+  // ideas can then be generated even on items that aren't published yet.
+  async function submitMediaUpload() {
+    if (!data || !mediaUploadFile) return;
+    setMediaUploadStage("uploading");
+    setMediaUploadError(null);
+    setMediaUploadProgress(0);
+
+    let uploadUrl: string, key: string, bucket: string;
+    try {
+      const res = await fetch("/api/uploads/s3-presign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: contentId,
+          fileName: mediaUploadFile.name,
+          contentType: mediaUploadFile.type || "video/mp4",
+          fileSize: mediaUploadFile.size,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setMediaUploadError(json.error || `HTTP ${res.status}`);
+        setMediaUploadStage("idle");
+        return;
+      }
+      uploadUrl = json.uploadUrl;
+      key = json.key;
+      bucket = json.bucket;
+    } catch (err) {
+      setMediaUploadError(err instanceof Error ? err.message : "Request failed");
+      setMediaUploadStage("idle");
+      return;
+    }
+
+    const contentType = mediaUploadFile.type || "video/mp4";
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener("progress", (e) => {
+          if (e.lengthComputable) {
+            setMediaUploadProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        });
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+        });
+        xhr.addEventListener("error", () =>
+          reject(new Error("Upload failed (network)")),
+        );
+        xhr.addEventListener("abort", () =>
+          reject(new Error("Upload aborted")),
+        );
+        xhr.open("PUT", uploadUrl);
+        xhr.setRequestHeader("Content-Type", contentType);
+        xhr.send(mediaUploadFile);
+      });
+    } catch (err) {
+      setMediaUploadError(err instanceof Error ? err.message : "Upload failed");
+      setMediaUploadStage("idle");
+      return;
+    }
+
+    setMediaUploadStage("confirming");
+    try {
+      const res = await fetch("/api/uploads/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: contentId,
+          key,
+          bucket,
+          contentType,
+          fileSize: mediaUploadFile.size,
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        setMediaUploadError(json.error || `Confirm failed: HTTP ${res.status}`);
+        setMediaUploadStage("idle");
+        return;
+      }
+    } catch (err) {
+      setMediaUploadError(err instanceof Error ? err.message : "Confirm failed");
+      setMediaUploadStage("idle");
+      return;
+    }
+
+    setMediaUploadStage("done");
+    await load();
   }
 
   // Form state
@@ -1629,6 +1744,16 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             >
               <FileTextIcon className="size-3.5" /> Notion
             </a>
+          )}
+          {!item.mediaS3Key && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setMediaUploadOpen(true)}
+              title="Upload the source video so Whisper can transcribe and clip ideas can be generated, even before this post is published"
+            >
+              <UploadIcon className="size-3.5" /> Upload media
+            </Button>
           )}
           {isPublished && (
             <EnrichmentButton
@@ -3204,6 +3329,111 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                       : "Create project"}
                   </Button>
                   )}
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={mediaUploadOpen}
+        onOpenChange={(o) => { if (!o) closeMediaUploadModal(); }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Upload media</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Upload the source video for this post directly to S3. Whisper
+              starts transcribing immediately — once that finishes you can
+              generate clip ideas, even before the post is published.
+            </p>
+            {mediaUploadStage === "done" ? (
+              <>
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm space-y-1">
+                  <p className="font-medium text-foreground">Upload complete.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Whisper is transcribing. Check the Transcript tab in a
+                    few minutes; clip-idea generation unlocks once the
+                    transcript lands.
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <Button variant="outline" onClick={closeMediaUploadModal}>
+                    Close
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="media-upload-file">Video file</Label>
+                  <Input
+                    id="media-upload-file"
+                    type="file"
+                    accept="video/*,audio/*"
+                    onChange={(e) =>
+                      setMediaUploadFile(e.target.files?.[0] || null)
+                    }
+                    disabled={
+                      mediaUploadStage === "uploading" ||
+                      mediaUploadStage === "confirming"
+                    }
+                  />
+                  {mediaUploadFile && (
+                    <p className="text-xs text-muted-foreground">
+                      {mediaUploadFile.name} · {(mediaUploadFile.size / (1024 * 1024)).toFixed(1)} MB
+                    </p>
+                  )}
+                </div>
+                {mediaUploadStage === "uploading" && (
+                  <div className="space-y-1.5">
+                    <div className="w-full bg-border rounded-full h-1.5">
+                      <div
+                        className="h-1.5 rounded-full bg-primary transition-all"
+                        style={{ width: `${mediaUploadProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Uploading to S3… {mediaUploadProgress}%
+                    </p>
+                  </div>
+                )}
+                {mediaUploadStage === "confirming" && (
+                  <p className="text-xs text-muted-foreground">
+                    Saving and kicking off Whisper…
+                  </p>
+                )}
+                {mediaUploadError && (
+                  <p className="text-xs text-destructive">{mediaUploadError}</p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={closeMediaUploadModal}
+                    disabled={
+                      mediaUploadStage === "uploading" ||
+                      mediaUploadStage === "confirming"
+                    }
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={submitMediaUpload}
+                    disabled={
+                      !mediaUploadFile ||
+                      mediaUploadStage === "uploading" ||
+                      mediaUploadStage === "confirming"
+                    }
+                  >
+                    {mediaUploadStage === "uploading"
+                      ? "Uploading…"
+                      : mediaUploadStage === "confirming"
+                      ? "Saving…"
+                      : "Upload"}
+                  </Button>
                 </div>
               </>
             )}
