@@ -3043,23 +3043,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </div>
         </div>
 
-        {!hasDescriptProject && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 flex items-center justify-between gap-3 flex-wrap">
-            <span>
-              This post doesn&apos;t have a Descript project. Clip-style
-              formats will fall back to manual Notion tasks until you add one.
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={openDescriptModal}
-              className="shrink-0"
-            >
-              Add to Descript
-            </Button>
-          </div>
-        )}
-
         {repurposeTargets.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No repurposed-type formats for this brand yet.{" "}
