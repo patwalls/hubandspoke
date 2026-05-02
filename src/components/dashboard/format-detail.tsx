@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -258,6 +259,15 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     | { kind: "error"; message: string }
   >({ kind: "idle" });
   const [deleting, setDeleting] = useState(false);
+
+  // Update-format-on-row dialog state. Lets the editor reassign a content
+  // row's format from this listing — used to fix mis-categorized posts in
+  // bulk without leaving the format detail page.
+  const [updateFormatItemId, setUpdateFormatItemId] = useState<string | null>(
+    null,
+  );
+  const [updateFormatSearch, setUpdateFormatSearch] = useState("");
+  const [updateFormatSaving, setUpdateFormatSaving] = useState(false);
 
   // New-derivative dialog state.
   const [addChildOpen, setAddChildOpen] = useState(false);
@@ -786,6 +796,49 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     } catch (err) {
       console.error("Delete failed:", err);
       setDeleting(false);
+    }
+  }
+
+  const filteredFormatsForUpdate = useMemo(() => {
+    const q = updateFormatSearch.trim().toLowerCase();
+    return allFormats
+      .filter((f) => f.id !== formatId)
+      .filter((f) => !q || f.name.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [allFormats, formatId, updateFormatSearch]);
+
+  async function changeItemFormat(
+    itemId: string,
+    nextFormatName: string | null,
+  ) {
+    setUpdateFormatSaving(true);
+    try {
+      const res = await fetch("/api/production-items", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: itemId, format: nextFormatName }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || "Couldn't update format");
+        return;
+      }
+      // The row no longer belongs to this format view — drop it locally so
+      // the user immediately sees their fix without a full refetch.
+      setData((prev) =>
+        prev
+          ? { ...prev, items: prev.items.filter((it) => it.id !== itemId) }
+          : prev,
+      );
+      toast.success(
+        nextFormatName ? `Moved to "${nextFormatName}"` : "Format cleared",
+      );
+      setUpdateFormatItemId(null);
+      setUpdateFormatSearch("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't update format");
+    } finally {
+      setUpdateFormatSaving(false);
     }
   }
 
@@ -1601,6 +1654,11 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                               Open original
                             </DropdownMenuItem>
                           )}
+                          <DropdownMenuItem
+                            onClick={() => setUpdateFormatItemId(item.id)}
+                          >
+                            Update format…
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </td>
@@ -2071,6 +2129,65 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!updateFormatItemId}
+        onOpenChange={(o) => {
+          if (!o) {
+            setUpdateFormatItemId(null);
+            setUpdateFormatSearch("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-4 pt-4 pb-2">
+            <DialogTitle>Update format</DialogTitle>
+          </DialogHeader>
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder="Search formats…"
+              value={updateFormatSearch}
+              onValueChange={setUpdateFormatSearch}
+              autoFocus
+            />
+            <CommandList className="max-h-[420px]">
+              <CommandGroup>
+                <CommandItem
+                  value="__clear__"
+                  disabled={updateFormatSaving}
+                  onSelect={() =>
+                    updateFormatItemId &&
+                    changeItemFormat(updateFormatItemId, null)
+                  }
+                >
+                  <span className="text-muted-foreground italic">
+                    Clear format (no format)
+                  </span>
+                </CommandItem>
+              </CommandGroup>
+              {filteredFormatsForUpdate.length > 0 ? (
+                <CommandGroup heading="All formats">
+                  {filteredFormatsForUpdate.map((f) => (
+                    <CommandItem
+                      key={f.id}
+                      value={f.name}
+                      disabled={updateFormatSaving}
+                      onSelect={() =>
+                        updateFormatItemId &&
+                        changeItemFormat(updateFormatItemId, f.name)
+                      }
+                    >
+                      {f.name}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ) : (
+                <CommandEmpty>No matching format.</CommandEmpty>
+              )}
+            </CommandList>
+          </Command>
         </DialogContent>
       </Dialog>
     </div>
