@@ -386,7 +386,16 @@ export function CrossPostTriageDialog({
                     </span>{" "}
                     {s.ratio.toFixed(2)}× ({formatCompact(s.views)} vs{" "}
                     {formatCompact(s.bar)} P
-                    {Math.round(s.percentile * 100)}, cohort {s.cohortSize})
+                    {Math.round(s.percentile * 100)} of {s.cohortLabel}, cohort{" "}
+                    {s.cohortSize})
+                    {s.cohortKind === "postType" && (
+                      <span
+                        className="ml-1 text-muted-foreground/70"
+                        title="No cohort for this format yet — comparing against the broader post-type cohort"
+                      >
+                        ↩
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

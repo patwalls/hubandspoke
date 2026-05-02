@@ -102,6 +102,99 @@ export interface FetchFormatCheckpointBarsOptions {
   minCohort?: number;
 }
 
+/** Map<post_type, bar>. Used as the fallback cohort when a candidate's
+ *  format has no rows of its own — comparing against every other post of
+ *  the same post type (e.g. "all instagram_reels") is still better than
+ *  surfacing with no comparison at all. */
+export type PostTypeBars = Record<string, FormatBar>;
+
+export async function fetchPostTypeViewBars(
+  opts: FetchFormatViewBarsOptions = {}
+): Promise<PostTypeBars> {
+  const percentile = opts.percentile ?? FORMAT_BARS_DEFAULT_PERCENTILE;
+  const windowDays = opts.windowDays ?? FORMAT_BARS_DEFAULT_WINDOW_DAYS;
+  const minCohort = opts.minCohort ?? 0;
+
+  const rows = await db.execute<{
+    post_type: string;
+    p: string;
+    cohort_size: string;
+  }>(sql`
+    SELECT
+      post_type,
+      percentile_cont(${percentile}) WITHIN GROUP (ORDER BY views) AS p,
+      count(*) AS cohort_size
+    FROM production_items
+    WHERE post_type IS NOT NULL
+      AND status = 'Published'
+      AND deleted_at IS NULL
+      AND views IS NOT NULL
+      AND published_at >= (now() - interval '${sql.raw(String(windowDays))} days')
+    GROUP BY post_type
+    HAVING count(*) >= ${minCohort}
+  `);
+
+  const bars: PostTypeBars = {};
+  for (const row of rows) {
+    bars[row.post_type] = {
+      p: Number(row.p),
+      percentile,
+      cohortSize: Number(row.cohort_size),
+    };
+  }
+  return bars;
+}
+
+/** Map<post_type, Map<checkpoint_key, bar>>. Velocity flavor of the post-
+ *  type fallback cohort — used when a format has no per-checkpoint cohort
+ *  but the post type does. */
+export type PostTypeCheckpointBars = Record<
+  string,
+  Record<string, CheckpointBar>
+>;
+
+export async function fetchPostTypeCheckpointBars(
+  opts: FetchFormatCheckpointBarsOptions = {}
+): Promise<PostTypeCheckpointBars> {
+  const percentile = opts.percentile ?? FORMAT_BARS_DEFAULT_PERCENTILE;
+  const windowDays = opts.windowDays ?? FORMAT_BARS_DEFAULT_WINDOW_DAYS;
+  const minCohort = opts.minCohort ?? 5;
+
+  const rows = await db.execute<{
+    post_type: string;
+    checkpoint_key: string;
+    p: string;
+    cohort_size: string;
+  }>(sql`
+    SELECT
+      pi.post_type,
+      vs.checkpoint_key,
+      percentile_cont(${percentile}) WITHIN GROUP (ORDER BY vs.views) AS p,
+      count(*) AS cohort_size
+    FROM production_items pi
+    JOIN view_snapshots vs ON vs.production_item_id = pi.id
+    WHERE pi.post_type IS NOT NULL
+      AND pi.status = 'Published'
+      AND pi.deleted_at IS NULL
+      AND vs.checkpoint_key IS NOT NULL
+      AND vs.views IS NOT NULL
+      AND pi.published_at >= (now() - interval '${sql.raw(String(windowDays))} days')
+    GROUP BY pi.post_type, vs.checkpoint_key
+    HAVING count(*) >= ${minCohort}
+  `);
+
+  const bars: PostTypeCheckpointBars = {};
+  for (const row of rows) {
+    if (!bars[row.post_type]) bars[row.post_type] = {};
+    bars[row.post_type][row.checkpoint_key] = {
+      p: Number(row.p),
+      percentile,
+      cohortSize: Number(row.cohort_size),
+    };
+  }
+  return bars;
+}
+
 export async function fetchFormatCheckpointBars(
   opts: FetchFormatCheckpointBarsOptions = {}
 ): Promise<FormatCheckpointBars> {

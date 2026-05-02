@@ -117,7 +117,7 @@ export function CrossPostQueueTable({
             <col className="w-[200px]" />
             <col className="w-[200px]" />
             <col className="w-[90px]" />
-            <col className="w-[100px]" />
+            <col className="w-[120px]" />
             <col className="w-[60px]" />
           </colgroup>
           <thead>
@@ -276,14 +276,11 @@ function CrossPostQueueRow({
 }) {
   const [open, setOpen] = useState(false);
 
-  // Badge text: "{ratio}× {checkpoint}" so the operator knows whether this
-  // post surfaced because of an early-velocity rocket or a lifetime hit.
-  // "NEW" when the candidate auto-admitted in a cohort-less format.
+  // Badge: stacked ratio + signal so the operator knows which checkpoint
+  // triggered (early-velocity rocket vs late-bloomer lifetime hit). "NEW"
+  // when the candidate auto-admitted in a cohort-less format.
   const top = item.topSignal;
   const isNewFormat = top == null;
-  const ratioLabel = isNewFormat
-    ? "NEW"
-    : `${top.ratio.toFixed(1)}× ${top.kind}`;
   const ratioBadgeClass = isNewFormat
     ? "bg-violet-100 text-violet-900 border-violet-200"
     : top.ratio >= 3
@@ -349,12 +346,25 @@ function CrossPostQueueRow({
       <td className="px-3 py-2 text-right">
         <span
           className={cn(
-            "inline-flex items-center rounded px-1.5 py-0.5 text-[11px] tabular-nums border",
+            "inline-flex flex-col items-end leading-tight rounded-md border px-2 py-1 whitespace-nowrap",
             ratioBadgeClass
           )}
           title={buildHotnessTooltip(item)}
         >
-          {ratioLabel}
+          {isNewFormat ? (
+            <span className="font-semibold tracking-wider text-[11px]">
+              NEW
+            </span>
+          ) : (
+            <>
+              <span className="font-semibold tabular-nums text-[12px]">
+                {top.ratio.toFixed(1)}×
+              </span>
+              <span className="font-mono uppercase tracking-wider text-[9px] opacity-70">
+                {top.kind}
+              </span>
+            </>
+          )}
         </span>
       </td>
       <td className="px-3 py-2 text-xs text-right text-muted-foreground tabular-nums whitespace-nowrap">
@@ -376,28 +386,23 @@ function CrossPostQueueRow({
 function buildHotnessTooltip(item: CrossPostCandidate): string {
   if (item.topSignal == null) {
     return [
-      `Format "${item.format}" has no cohort yet —`,
-      `auto-surfacing for human review until we have data.`,
-      "",
-      "Once 5+ posts in this format have published, the queue",
-      "will start computing real velocity / lifetime ratios.",
+      `No cohort to compare against — neither "${item.format}" nor`,
+      `the broader ${item.postType} cohort has any prior posts.`,
+      "Auto-surfacing for human review until data shows up.",
     ].join("\n");
   }
-  const lines = [
-    `Why this is hot:`,
-    `  ${item.whyHot}`,
-    "",
-    `All signals computed:`,
-  ];
+  const lines = [`Why this is hot:`, `  ${item.whyHot}`, "", `All signals:`];
   for (const s of item.hotnessSignals) {
     const pctLabel = `P${Math.round(s.percentile * 100)}`;
+    const cohortHint = s.cohortKind === "postType" ? " ↩ fallback" : "";
     lines.push(
-      `  · ${s.label}: ${s.ratio.toFixed(2)}× (${formatCompact(s.views)} vs ${formatCompact(s.bar)} ${pctLabel}, cohort ${s.cohortSize})`
+      `  · ${s.label}: ${s.ratio.toFixed(2)}× (${formatCompact(s.views)} vs ${formatCompact(s.bar)} ${pctLabel} of ${s.cohortLabel}, cohort ${s.cohortSize})${cohortHint}`
     );
   }
   lines.push("");
   lines.push("Velocity uses the 15m/30m/1h/2h/4h/8h/24h/48h snapshots");
   lines.push("captured after publish; lifetime uses cumulative views.");
-  lines.push("Strongest ratio wins and shows on the badge.");
+  lines.push("If a format has no cohort, we fall back to comparing against");
+  lines.push("every post of the same post type (marked ↩ fallback).");
   return lines.join("\n");
 }

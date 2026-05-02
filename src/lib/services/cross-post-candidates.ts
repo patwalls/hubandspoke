@@ -12,9 +12,15 @@ import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import {
   fetchFormatViewBars,
   fetchFormatCheckpointBars,
+  fetchPostTypeViewBars,
+  fetchPostTypeCheckpointBars,
   type FormatBars,
   type FormatCheckpointBars,
+  type PostTypeBars,
+  type PostTypeCheckpointBars,
 } from "@/lib/services/format-view-bars";
+import { POST_TYPE_SHORT_LABEL } from "@/lib/platforms";
+import type { PostType } from "@/lib/platform-field-schemas";
 
 // Cross-post queue v3.2 — candidate finder.
 //
@@ -49,13 +55,20 @@ export interface HotnessSignal {
   label: string;
   /** Candidate's views at this signal point (cumulative for lifetime, snapshot for checkpoints). */
   views: number;
-  /** Format-cohort percentile bar at this signal point. */
+  /** Cohort's percentile bar at this signal point. */
   bar: number;
   /** views / bar. >=1 means at-or-above the bar. */
   ratio: number;
   /** Which percentile the bar represents (0.6 here, but exposed for the UI). */
   percentile: number;
   cohortSize: number;
+  /** Whether this signal compared against the strict format cohort or fell
+   *  back to the broader post-type cohort. The UI labels the tooltip
+   *  accordingly so the operator knows what the bar represents. */
+  cohortKind: "format" | "postType";
+  /** Display label for the cohort itself, e.g. "Reel: Repackage Section
+   *  w/ Hook" (format cohort) or "all Instagram Reels" (postType cohort). */
+  cohortLabel: string;
 }
 
 export interface CrossPostCandidate {
@@ -160,16 +173,34 @@ export async function selectCrossPostCandidates(opts: {
     autoAdmittedNewFormat: 0,
   };
 
-  // Bars: lifetime + per-checkpoint. P60 with no cohort floor — brand-new
-  // formats with 1–2 prior posts still get a bar (noisy, but the operator
-  // can dismiss); 0-cohort formats auto-admit downstream.
-  const [lifetimeBars, checkpointBars] = await Promise.all([
+  // Bars: lifetime + per-checkpoint, both at the format level (preferred)
+  // and at the post-type level (fallback for cohort-less formats). P60
+  // with no lifetime cohort floor — brand-new formats with 1–2 prior posts
+  // still get a bar; truly cohort-less formats fall through to the post-
+  // type cohort (e.g. "all instagram_reels"); only when neither cohort
+  // exists does the candidate auto-admit as NEW.
+  const [
+    lifetimeFormatBars,
+    checkpointFormatBars,
+    lifetimePostTypeBars,
+    checkpointPostTypeBars,
+  ] = await Promise.all([
     fetchFormatViewBars({
       percentile: PERCENTILE,
       windowDays: COHORT_WINDOW_DAYS,
       minCohort: 0,
     }),
     fetchFormatCheckpointBars({
+      percentile: PERCENTILE,
+      windowDays: COHORT_WINDOW_DAYS,
+      minCohort: 5,
+    }),
+    fetchPostTypeViewBars({
+      percentile: PERCENTILE,
+      windowDays: COHORT_WINDOW_DAYS,
+      minCohort: 0,
+    }),
+    fetchPostTypeCheckpointBars({
       percentile: PERCENTILE,
       windowDays: COHORT_WINDOW_DAYS,
       minCohort: 5,
@@ -354,9 +385,16 @@ export async function selectCrossPostCandidates(opts: {
     }
 
     const signals = computeHotnessSignals({
-      candidate: { id: c.id, format: c.format, views: c.views },
-      lifetimeBars,
-      checkpointBars,
+      candidate: {
+        id: c.id,
+        format: c.format,
+        postType: c.postType,
+        views: c.views,
+      },
+      lifetimeFormatBars,
+      checkpointFormatBars,
+      lifetimePostTypeBars,
+      checkpointPostTypeBars,
       snapshots: snapshotsByItem.get(c.id) ?? null,
     });
 
@@ -456,47 +494,136 @@ export async function selectCrossPostCandidates(opts: {
 }
 
 interface ComputeHotnessOpts {
-  candidate: { id: string; format: string; views: number };
-  lifetimeBars: FormatBars;
-  checkpointBars: FormatCheckpointBars;
+  candidate: {
+    id: string;
+    format: string;
+    postType: string;
+    views: number;
+  };
+  lifetimeFormatBars: FormatBars;
+  checkpointFormatBars: FormatCheckpointBars;
+  lifetimePostTypeBars: PostTypeBars;
+  checkpointPostTypeBars: PostTypeCheckpointBars;
   snapshots: Map<string, number> | null;
 }
 
+/** Resolve a single bar with fallback: prefer the format cohort, fall back
+ *  to the post-type cohort. Returns null when neither cohort exists. */
+function pickBar(
+  format: string,
+  postType: string,
+  formatBars: FormatBars,
+  postTypeBars: PostTypeBars
+): {
+  bar: { p: number; percentile: number; cohortSize: number };
+  cohortKind: "format" | "postType";
+  cohortLabel: string;
+} | null {
+  const fb = formatBars[format];
+  if (fb && fb.p > 0) {
+    return {
+      bar: fb,
+      cohortKind: "format",
+      cohortLabel: format,
+    };
+  }
+  const pb = postTypeBars[postType];
+  if (pb && pb.p > 0) {
+    return {
+      bar: pb,
+      cohortKind: "postType",
+      cohortLabel: postTypeCohortLabel(postType),
+    };
+  }
+  return null;
+}
+
+function pickCheckpointBar(
+  format: string,
+  postType: string,
+  checkpointKey: string,
+  formatBars: FormatCheckpointBars,
+  postTypeBars: PostTypeCheckpointBars
+): {
+  bar: { p: number; percentile: number; cohortSize: number };
+  cohortKind: "format" | "postType";
+  cohortLabel: string;
+} | null {
+  const fb = formatBars[format]?.[checkpointKey];
+  if (fb && fb.p > 0) {
+    return { bar: fb, cohortKind: "format", cohortLabel: format };
+  }
+  const pb = postTypeBars[postType]?.[checkpointKey];
+  if (pb && pb.p > 0) {
+    return {
+      bar: pb,
+      cohortKind: "postType",
+      cohortLabel: postTypeCohortLabel(postType),
+    };
+  }
+  return null;
+}
+
+function postTypeCohortLabel(postType: string): string {
+  const short = POST_TYPE_SHORT_LABEL[postType as PostType];
+  return short ? `all ${short}s` : `all ${postType} posts`;
+}
+
 function computeHotnessSignals(opts: ComputeHotnessOpts): HotnessSignal[] {
-  const { candidate, lifetimeBars, checkpointBars, snapshots } = opts;
+  const {
+    candidate,
+    lifetimeFormatBars,
+    checkpointFormatBars,
+    lifetimePostTypeBars,
+    checkpointPostTypeBars,
+    snapshots,
+  } = opts;
   const out: HotnessSignal[] = [];
 
-  // Lifetime signal — uses cumulative `views` against the format's
-  // lifetime P60. Falls in for every candidate that has a cohort.
-  const lifetimeBar = lifetimeBars[candidate.format];
-  if (lifetimeBar && lifetimeBar.p > 0) {
+  // Lifetime — cumulative views vs lifetime cohort P60 (format → postType).
+  const lifetimePick = pickBar(
+    candidate.format,
+    candidate.postType,
+    lifetimeFormatBars,
+    lifetimePostTypeBars
+  );
+  if (lifetimePick) {
     out.push({
       kind: "lifetime",
       label: "Lifetime",
       views: candidate.views,
-      bar: lifetimeBar.p,
-      ratio: candidate.views / lifetimeBar.p,
-      percentile: lifetimeBar.percentile,
-      cohortSize: lifetimeBar.cohortSize,
+      bar: lifetimePick.bar.p,
+      ratio: candidate.views / lifetimePick.bar.p,
+      percentile: lifetimePick.bar.percentile,
+      cohortSize: lifetimePick.bar.cohortSize,
+      cohortKind: lifetimePick.cohortKind,
+      cohortLabel: lifetimePick.cohortLabel,
     });
   }
 
-  // Velocity signals — only checkpoints where the candidate has a snapshot
-  // AND the format has a baseline. Posts published before the snapshot
-  // pipeline existed will simply have no velocity entries.
-  const formatCheckpointBars = checkpointBars[candidate.format];
-  if (snapshots && formatCheckpointBars) {
+  // Velocity — only checkpoints where the candidate has a snapshot AND
+  // some cohort (format or postType) has a baseline. Posts published
+  // before the snapshot pipeline existed simply have no velocity entries.
+  if (snapshots) {
     for (const [key, viewsAtCheckpoint] of snapshots) {
-      const bar = formatCheckpointBars[key];
-      if (!bar || bar.p <= 0) continue;
+      const pick = pickCheckpointBar(
+        candidate.format,
+        candidate.postType,
+        key,
+        checkpointFormatBars,
+        checkpointPostTypeBars
+      );
+      if (!pick) continue;
       out.push({
         kind: key,
         label: CHECKPOINT_LABEL[key] ?? key,
         views: viewsAtCheckpoint,
-        bar: bar.p,
-        ratio: viewsAtCheckpoint / bar.p,
-        percentile: bar.percentile,
-        cohortSize: bar.cohortSize,
+        bar: pick.bar.p,
+        ratio: viewsAtCheckpoint / pick.bar.p,
+        percentile: pick.bar.percentile,
+        cohortSize: pick.bar.cohortSize,
+        cohortKind: pick.cohortKind,
+        cohortLabel: pick.cohortLabel,
       });
     }
   }
@@ -506,13 +633,13 @@ function computeHotnessSignals(opts: ComputeHotnessOpts): HotnessSignal[] {
 }
 
 function buildWhyHot(
-  format: string,
+  _format: string,
   top: HotnessSignal,
   all: HotnessSignal[]
 ): string {
   const pctLabel = `P${Math.round(top.percentile * 100)}`;
   const ratioLabel = top.ratio.toFixed(1);
-  const head = `${ratioLabel}× ${format} ${pctLabel} at ${top.label.toLowerCase()} (${formatNum(top.views)} vs ${formatNum(top.bar)} bar, cohort ${top.cohortSize}).`;
+  const head = `${ratioLabel}× ${pctLabel} of ${top.cohortLabel} at ${top.label.toLowerCase()} (${formatNum(top.views)} vs ${formatNum(top.bar)} bar, cohort ${top.cohortSize}).`;
   if (all.length <= 1) return head;
   const others = all
     .slice(1)
