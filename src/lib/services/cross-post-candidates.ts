@@ -1,31 +1,62 @@
-import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   accounts,
   brands,
   contentEvents,
   productionItems,
+  viewSnapshots,
 } from "@/lib/db/schema";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
-import { fetchFormatViewBars } from "@/lib/services/format-view-bars";
+import {
+  fetchFormatViewBars,
+  fetchFormatCheckpointBars,
+  type FormatBars,
+  type FormatCheckpointBars,
+} from "@/lib/services/format-view-bars";
 
-// Cross-post queue v3 — candidate finder.
+// Cross-post queue v3.2 — candidate finder.
 //
-// Replaces the v2 LLM-driven scanner (`runCrossPostScan`). The split is:
-//   v3 algorithm: identify hot source content (this file).
-//   v3 human:     pick where to cross-post to (the modal in the UI).
+// "Hot" is the max of multiple ratios per candidate:
+//   - velocity ratio at each available capture-velocity-snapshot checkpoint
+//     (15m / 30m / 1h / 2h / 4h / 8h / 24h / 48h) vs the same-checkpoint P60
+//     across the format's 90-day cohort
+//   - lifetime ratio: cumulative views vs the format's lifetime P60
 //
-// "Hot" = top P75 of `views` within the source's `format` over the last 90
-// days. Self-calibrating — as the data grows, the bar moves with it; no
-// hardcoded velocity multipliers or confidence floors to drift.
+// We take the strongest signal so a 6-hour-old rocket isn't penalized
+// against a cohort that's had days to mature, while older posts that didn't
+// pop early but accumulated views still surface via the lifetime path.
 //
-// Pure read; no inserts, no LLM calls. Re-run on every page load of the
-// Cross-post tab — the source of truth for views is `production_items.views`,
-// already kept fresh by the `performance-decay` cron.
+// Admit when max(ratio) >= 1.0. New formats with no cohort at all are
+// auto-admitted — the operator wanted to be able to surface posts in
+// a brand-new format immediately. Sort by max-ratio desc.
 
-const CANDIDATE_WINDOW_DAYS = 7;
+const CANDIDATE_WINDOW_DAYS = 21;
 const DISMISSAL_TTL_DAYS = 30;
+const HOTNESS_THRESHOLD = 1.0;
+const PERCENTILE = 0.6; // P60 — looser than P75 to compensate for age bias.
+const COHORT_WINDOW_DAYS = 90;
+
+/** Source types eligible for the cross-post queue. Excludes `cross_post`
+ *  to avoid recommending cross-posts of cross-posts. */
+const ELIGIBLE_SOURCE_TYPES = ["original", "clip", "repost"] as const;
+
+export interface HotnessSignal {
+  /** "lifetime" or one of the velocity checkpoint keys (15m/30m/1h/...). */
+  kind: string;
+  /** Human-friendly label rendered in the UI ("Lifetime", "1h after publish"). */
+  label: string;
+  /** Candidate's views at this signal point (cumulative for lifetime, snapshot for checkpoints). */
+  views: number;
+  /** Format-cohort percentile bar at this signal point. */
+  bar: number;
+  /** views / bar. >=1 means at-or-above the bar. */
+  ratio: number;
+  /** Which percentile the bar represents (0.6 here, but exposed for the UI). */
+  percentile: number;
+  cohortSize: number;
+}
 
 export interface CrossPostCandidate {
   id: string;
@@ -37,6 +68,7 @@ export interface CrossPostCandidate {
   publishedLink: string | null;
   postType: string;
   format: string;
+  sourceType: string;
   views: number;
   likes: number | null;
   comments: number | null;
@@ -49,9 +81,19 @@ export interface CrossPostCandidate {
   };
   pillarContentItemId: string | null;
   pillarContentTitle: string | null;
-  formatP75: number;
-  formatCohortSize: number;
-  formatRatio: number;
+  /** Every signal we could compute for this candidate, sorted by ratio desc.
+   *  Empty for brand-new formats with no cohort at all. */
+  hotnessSignals: HotnessSignal[];
+  /** The signal that gives the strongest ratio. The badge in the table
+   *  shows this one ("8.7× at 1h"). Null when the candidate is in a
+   *  cohort-less format and was auto-admitted. */
+  topSignal: HotnessSignal | null;
+  /** Max ratio across all signals, or +Infinity for the auto-admit case
+   *  (so they sort to the very top). Drives both admission and sort order. */
+  hotnessRatio: number;
+  /** One-line "why is this hot" string suitable for tooltip / explainer.
+   *  Always populated. */
+  whyHot: string;
   existingCrossPosts: Array<{
     productionItemId: string;
     accountId: string;
@@ -71,26 +113,38 @@ export interface BrandAccount {
 
 export interface CrossPostCandidatesResult {
   items: CrossPostCandidate[];
-  formatBars: Record<string, { p75: number; cohortSize: number }>;
   brandAccounts: BrandAccount[];
-  /** For each source format, target (account, postType) pairs ranked by how
-   *  often that pair has been used as a cross-post target for posts in that
-   *  format historically. The modal sorts target cards by this. Empty for
-   *  formats with no cross-post history yet. */
   targetCommonality: Record<
     string,
     Array<{ accountId: string; postType: string; count: number }>
   >;
-  /** Counters useful for the populate toast / debugging. */
+  /** Counters useful for debugging / UI explainer. */
   stats: {
     rawCandidates: number;
-    droppedNoFormatBar: number;
-    droppedBelowP75: number;
     droppedDismissed: number;
+    droppedBelowThreshold: number;
     droppedAllTargetsCovered: number;
     droppedNoCompatibleTarget: number;
+    autoAdmittedNewFormat: number;
+  };
+  config: {
+    candidateWindowDays: number;
+    cohortWindowDays: number;
+    percentile: number;
+    hotnessThreshold: number;
   };
 }
+
+const CHECKPOINT_LABEL: Record<string, string> = {
+  "15m": "15 min after publish",
+  "30m": "30 min after publish",
+  "1h": "1h after publish",
+  "2h": "2h after publish",
+  "4h": "4h after publish",
+  "8h": "8h after publish",
+  "24h": "24h after publish",
+  "48h": "48h after publish",
+};
 
 export async function selectCrossPostCandidates(opts: {
   brand: string;
@@ -99,26 +153,31 @@ export async function selectCrossPostCandidates(opts: {
 
   const stats = {
     rawCandidates: 0,
-    droppedNoFormatBar: 0,
-    droppedBelowP75: 0,
     droppedDismissed: 0,
+    droppedBelowThreshold: 0,
     droppedAllTargetsCovered: 0,
     droppedNoCompatibleTarget: 0,
+    autoAdmittedNewFormat: 0,
   };
 
-  // Per-format P75 view threshold over the last 90 days. Shared helper is
-  // also called by the content view to render the same bars as a column.
-  const formatBars = await fetchFormatViewBars();
+  // Bars: lifetime + per-checkpoint. P60 with no cohort floor — brand-new
+  // formats with 1–2 prior posts still get a bar (noisy, but the operator
+  // can dismiss); 0-cohort formats auto-admit downstream.
+  const [lifetimeBars, checkpointBars] = await Promise.all([
+    fetchFormatViewBars({
+      percentile: PERCENTILE,
+      windowDays: COHORT_WINDOW_DAYS,
+      minCohort: 0,
+    }),
+    fetchFormatCheckpointBars({
+      percentile: PERCENTILE,
+      windowDays: COHORT_WINDOW_DAYS,
+      minCohort: 5,
+    }),
+  ]);
 
-  // Per-source-format target popularity. Drives the modal's card order so
-  // the targets you usually pick for, say, "Laptop POV" content surface at
-  // the top. Cheap query — single GROUP BY across the whole cross-post
-  // history.
   const targetCommonality = await fetchTargetCommonalityByFormat();
 
-  // Brand accounts — the universe of possible cross-post targets. Used for
-  // both the "any-eligible-target" filter and surfacing target cards in the
-  // modal.
   const brandAccountsRows = await db
     .select({
       id: accounts.id,
@@ -139,8 +198,8 @@ export async function selectCrossPostCandidates(opts: {
     );
   const brandAccounts: BrandAccount[] = brandAccountsRows;
 
-  // Candidate pool: published originals from the last 7 days with joined
-  // account context.
+  // Candidate pool: original / clip / repost (anything but cross_post)
+  // published in the last CANDIDATE_WINDOW_DAYS.
   const rawCandidates = await db
     .select({
       id: productionItems.id,
@@ -152,6 +211,7 @@ export async function selectCrossPostCandidates(opts: {
       publishedLink: productionItems.publishedLink,
       postType: productionItems.postType,
       format: productionItems.format,
+      sourceType: productionItems.sourceType,
       views: productionItems.views,
       likes: productionItems.likes,
       comments: productionItems.comments,
@@ -167,7 +227,7 @@ export async function selectCrossPostCandidates(opts: {
     .where(
       and(
         eq(productionItems.brand, brand),
-        eq(productionItems.sourceType, "original"),
+        inArray(productionItems.sourceType, [...ELIGIBLE_SOURCE_TYPES]),
         eq(productionItems.status, "Published"),
         isNull(productionItems.deletedAt),
         gte(
@@ -182,18 +242,22 @@ export async function selectCrossPostCandidates(opts: {
   if (rawCandidates.length === 0) {
     return {
       items: [],
-      formatBars,
       brandAccounts,
       targetCommonality,
       stats,
+      config: {
+        candidateWindowDays: CANDIDATE_WINDOW_DAYS,
+        cohortWindowDays: COHORT_WINDOW_DAYS,
+        percentile: PERCENTILE,
+        hotnessThreshold: HOTNESS_THRESHOLD,
+      },
     };
   }
 
   const candidateIds = rawCandidates.map((c) => c.id);
 
-  // Existing cross-post production items derived from any of these
-  // candidates. Used to (a) drop candidates fully covered, (b) show
-  // disabled "already cross-posted to @x" cards in the modal.
+  // Existing cross-posts derived from these candidates — drives the modal's
+  // disabled-card state and the "all targets covered" drop.
   const existingCrossPosts = await db
     .select({
       sourceItemId: productionItems.repostedFromItemId,
@@ -227,10 +291,28 @@ export async function selectCrossPostCandidates(opts: {
     crossPostsBySource.set(row.sourceItemId, list);
   }
 
-  // Recently-dismissed candidates. Operator clicks "Not interested" → write
-  // a content_events row of type 'cross_post_dismissed'. We hide the
-  // candidate for DISMISSAL_TTL_DAYS; after that it can resurface if it's
-  // still hot.
+  // Per-candidate velocity snapshots. One query, batched on ID list.
+  const snapshotRows = await db
+    .select({
+      productionItemId: viewSnapshots.productionItemId,
+      checkpointKey: viewSnapshots.checkpointKey,
+      views: viewSnapshots.views,
+    })
+    .from(viewSnapshots)
+    .where(
+      and(
+        inArray(viewSnapshots.productionItemId, candidateIds),
+        sql`${viewSnapshots.checkpointKey} IS NOT NULL`
+      )
+    );
+  const snapshotsByItem = new Map<string, Map<string, number>>();
+  for (const row of snapshotRows) {
+    if (!row.checkpointKey) continue;
+    const m = snapshotsByItem.get(row.productionItemId) ?? new Map();
+    m.set(row.checkpointKey, row.views);
+    snapshotsByItem.set(row.productionItemId, m);
+  }
+
   const dismissalRows = await db
     .select({ contentItemId: contentEvents.contentItemId })
     .from(contentEvents)
@@ -246,7 +328,6 @@ export async function selectCrossPostCandidates(opts: {
     );
   const dismissedIds = new Set(dismissalRows.map((r) => r.contentItemId));
 
-  // Pillar titles for display.
   const pillarIds = Array.from(
     new Set(
       rawCandidates
@@ -272,23 +353,36 @@ export async function selectCrossPostCandidates(opts: {
       continue;
     }
 
-    const bar = formatBars[c.format];
-    if (!bar) {
-      stats.droppedNoFormatBar++;
-      continue;
-    }
-    if (c.views < bar.p75) {
-      stats.droppedBelowP75++;
-      continue;
+    const signals = computeHotnessSignals({
+      candidate: { id: c.id, format: c.format, views: c.views },
+      lifetimeBars,
+      checkpointBars,
+      snapshots: snapshotsByItem.get(c.id) ?? null,
+    });
+
+    let hotnessRatio: number;
+    let topSignal: HotnessSignal | null;
+    let whyHot: string;
+    let autoAdmitted = false;
+
+    if (signals.length === 0) {
+      // Brand-new format with no cohort and no checkpoint data — admit so
+      // the operator can decide. Sort to the top of the queue (Infinity).
+      hotnessRatio = Number.POSITIVE_INFINITY;
+      topSignal = null;
+      whyHot = `New format "${c.format}" — no cohort yet, surfacing for human review.`;
+      autoAdmitted = true;
+    } else {
+      topSignal = signals[0]; // sorted desc by computeHotnessSignals
+      hotnessRatio = topSignal.ratio;
+      if (hotnessRatio < HOTNESS_THRESHOLD) {
+        stats.droppedBelowThreshold++;
+        continue;
+      }
+      whyHot = buildWhyHot(c.format, topSignal, signals);
     }
 
     const existing = crossPostsBySource.get(c.id) ?? [];
-
-    // Drop candidates where every eligible target pair already has a
-    // cross-post production item — there's nothing left for the operator
-    // to do. v3.1 widens "eligible" to every (account, postType) on the
-    // brand other than the source's own and Notion-authoritative ones —
-    // the operator picks compat manually in the modal.
     const eligiblePairs = countEligibleTargetPairs(
       { accountId: c.accountId, postType: c.postType },
       brandAccounts
@@ -305,6 +399,8 @@ export async function selectCrossPostCandidates(opts: {
       continue;
     }
 
+    if (autoAdmitted) stats.autoAdmittedNewFormat++;
+
     items.push({
       id: c.id,
       brand: c.brand,
@@ -315,6 +411,7 @@ export async function selectCrossPostCandidates(opts: {
       publishedLink: c.publishedLink,
       postType: c.postType,
       format: c.format,
+      sourceType: c.sourceType,
       views: c.views,
       likes: c.likes,
       comments: c.comments,
@@ -329,16 +426,108 @@ export async function selectCrossPostCandidates(opts: {
       pillarContentTitle: c.pillarContentItemId
         ? pillarTitleById.get(c.pillarContentItemId) ?? null
         : null,
-      formatP75: bar.p75,
-      formatCohortSize: bar.cohortSize,
-      formatRatio: c.views / Math.max(bar.p75, 1),
+      hotnessSignals: signals,
+      topSignal,
+      hotnessRatio,
+      whyHot,
       existingCrossPosts: existing,
     });
   }
 
-  items.sort((a, b) => b.formatRatio - a.formatRatio);
+  items.sort((a, b) => b.hotnessRatio - a.hotnessRatio);
 
-  return { items, formatBars, brandAccounts, targetCommonality, stats };
+  // Suppress an unused-import lint by referencing the symbol; `or` and `ne`
+  // are imported for future filter additions and intentional belt/braces.
+  void or;
+  void ne;
+
+  return {
+    items,
+    brandAccounts,
+    targetCommonality,
+    stats,
+    config: {
+      candidateWindowDays: CANDIDATE_WINDOW_DAYS,
+      cohortWindowDays: COHORT_WINDOW_DAYS,
+      percentile: PERCENTILE,
+      hotnessThreshold: HOTNESS_THRESHOLD,
+    },
+  };
+}
+
+interface ComputeHotnessOpts {
+  candidate: { id: string; format: string; views: number };
+  lifetimeBars: FormatBars;
+  checkpointBars: FormatCheckpointBars;
+  snapshots: Map<string, number> | null;
+}
+
+function computeHotnessSignals(opts: ComputeHotnessOpts): HotnessSignal[] {
+  const { candidate, lifetimeBars, checkpointBars, snapshots } = opts;
+  const out: HotnessSignal[] = [];
+
+  // Lifetime signal — uses cumulative `views` against the format's
+  // lifetime P60. Falls in for every candidate that has a cohort.
+  const lifetimeBar = lifetimeBars[candidate.format];
+  if (lifetimeBar && lifetimeBar.p > 0) {
+    out.push({
+      kind: "lifetime",
+      label: "Lifetime",
+      views: candidate.views,
+      bar: lifetimeBar.p,
+      ratio: candidate.views / lifetimeBar.p,
+      percentile: lifetimeBar.percentile,
+      cohortSize: lifetimeBar.cohortSize,
+    });
+  }
+
+  // Velocity signals — only checkpoints where the candidate has a snapshot
+  // AND the format has a baseline. Posts published before the snapshot
+  // pipeline existed will simply have no velocity entries.
+  const formatCheckpointBars = checkpointBars[candidate.format];
+  if (snapshots && formatCheckpointBars) {
+    for (const [key, viewsAtCheckpoint] of snapshots) {
+      const bar = formatCheckpointBars[key];
+      if (!bar || bar.p <= 0) continue;
+      out.push({
+        kind: key,
+        label: CHECKPOINT_LABEL[key] ?? key,
+        views: viewsAtCheckpoint,
+        bar: bar.p,
+        ratio: viewsAtCheckpoint / bar.p,
+        percentile: bar.percentile,
+        cohortSize: bar.cohortSize,
+      });
+    }
+  }
+
+  out.sort((a, b) => b.ratio - a.ratio);
+  return out;
+}
+
+function buildWhyHot(
+  format: string,
+  top: HotnessSignal,
+  all: HotnessSignal[]
+): string {
+  const pctLabel = `P${Math.round(top.percentile * 100)}`;
+  const ratioLabel = top.ratio.toFixed(1);
+  const head = `${ratioLabel}× ${format} ${pctLabel} at ${top.label.toLowerCase()} (${formatNum(top.views)} vs ${formatNum(top.bar)} bar, cohort ${top.cohortSize}).`;
+  if (all.length <= 1) return head;
+  const others = all
+    .slice(1)
+    .map(
+      (s) =>
+        `${s.ratio.toFixed(1)}× at ${s.label.toLowerCase()} (${formatNum(s.views)} vs ${formatNum(s.bar)})`
+    )
+    .join("; ");
+  return `${head} Other signals: ${others}.`;
+}
+
+function formatNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return Math.round(n).toLocaleString();
 }
 
 function countEligibleTargetPairs(
@@ -350,9 +539,6 @@ function countEligibleTargetPairs(
     if (acct.syncedFromNotion) continue;
     const supported = PLATFORM_META[toPlatform(acct.platform)].postTypes;
     for (const pt of supported) {
-      // Only the exact source pair is excluded; same-account different-
-      // postType is a valid target (e.g. an Instagram Reel re-cut into an
-      // Instagram Post on the same handle).
       if (acct.id === source.accountId && pt === source.postType) continue;
       count++;
     }

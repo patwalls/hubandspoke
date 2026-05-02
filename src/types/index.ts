@@ -152,7 +152,11 @@ export interface PrimaryRowMeta {
 }
 
 export interface FormatViewBar {
-  p75: number;
+  /** The percentile value (e.g. P75 lifetime views for this format). */
+  p: number;
+  /** Which percentile (e.g. 0.75). The Content tab labels its column "vs P75"
+   *  because it asks for 0.75; the cross-post queue requests 0.60 internally. */
+  percentile: number;
   cohortSize: number;
 }
 

@@ -79,7 +79,11 @@ export function CrossPostQueueTable({
         case "views":
           return item.views;
         case "ratio":
-          return item.formatRatio;
+          // Sort auto-admitted "new format" rows (Infinity) above everything,
+          // then fall through to numeric ratio order. NaN-safe.
+          return Number.isFinite(item.hotnessRatio)
+            ? item.hotnessRatio
+            : Number.MAX_SAFE_INTEGER;
       }
     };
     return [...items].sort((a, b) => {
@@ -158,7 +162,7 @@ export function CrossPostQueueTable({
                 title="Total views — fresh within ~1h via the performance-decay sync"
               />
               <SortableHeader
-                label="vs P75"
+                label="Hotness"
                 sortKey="ratio"
                 activeKey={sortKey}
                 direction={sortDir}
@@ -166,13 +170,15 @@ export function CrossPostQueueTable({
                 align="right"
                 className="whitespace-nowrap"
                 title={
-                  "How this post stacks up against its format.\n\n" +
-                  "P75 = 75th-percentile views among every Published post in the same format over the last 90 days. " +
-                  "It's the bar that separates the top 25% from the rest.\n\n" +
-                  "The number shown is this post's views ÷ that bar:\n" +
-                  "  · 1.0× = exactly at the bar (top quartile entry)\n" +
-                  "  · 2.0× = double the bar\n\n" +
-                  "Formats with fewer than 10 recent posts are skipped."
+                  "Why this post is in the queue.\n\n" +
+                  "We compute up to two flavors of ratio per post and take the strongest:\n" +
+                  "  · Velocity — views captured at 15m / 30m / 1h / 2h / 4h / 8h / 24h / 48h\n" +
+                  "    after publish, vs P60 of the format's same-checkpoint cohort over\n" +
+                  "    the last 90 days.\n" +
+                  "  · Lifetime — cumulative views vs the format's lifetime P60.\n\n" +
+                  "The badge shows which signal won (e.g. \"5.2× 1h\" or \"1.8× lifetime\").\n" +
+                  "1.0× = at the bar; ≥1.0× admits the post to the queue.\n\n" +
+                  "Posts in formats with no cohort yet auto-surface as NEW."
                 }
               />
               <th
@@ -270,13 +276,21 @@ function CrossPostQueueRow({
 }) {
   const [open, setOpen] = useState(false);
 
-  const ratioLabel = `${item.formatRatio.toFixed(1)}×`;
-  const ratioBadgeClass =
-    item.formatRatio >= 3
-      ? "bg-emerald-100 text-emerald-900 border-emerald-200"
-      : item.formatRatio >= 1.5
-      ? "bg-amber-100 text-amber-900 border-amber-200"
-      : "bg-muted text-muted-foreground border-border";
+  // Badge text: "{ratio}× {checkpoint}" so the operator knows whether this
+  // post surfaced because of an early-velocity rocket or a lifetime hit.
+  // "NEW" when the candidate auto-admitted in a cohort-less format.
+  const top = item.topSignal;
+  const isNewFormat = top == null;
+  const ratioLabel = isNewFormat
+    ? "NEW"
+    : `${top.ratio.toFixed(1)}× ${top.kind}`;
+  const ratioBadgeClass = isNewFormat
+    ? "bg-violet-100 text-violet-900 border-violet-200"
+    : top.ratio >= 3
+    ? "bg-emerald-100 text-emerald-900 border-emerald-200"
+    : top.ratio >= 1.5
+    ? "bg-amber-100 text-amber-900 border-amber-200"
+    : "bg-muted text-muted-foreground border-border";
 
   return (
     <tr className="border-b border-border/50 hover:bg-accent/30 transition-colors">
@@ -338,17 +352,7 @@ function CrossPostQueueRow({
             "inline-flex items-center rounded px-1.5 py-0.5 text-[11px] tabular-nums border",
             ratioBadgeClass
           )}
-          title={[
-            `This post: ${(item.views ?? 0).toLocaleString()} views`,
-            `${item.format} P75: ${item.formatP75.toLocaleString()} views`,
-            `Ratio: ${item.formatRatio.toFixed(2)}× the P75 bar`,
-            "",
-            "P75 = 75th-percentile views across every Published",
-            "post in this format over the last 90 days",
-            `(cohort: ${item.formatCohortSize} posts). It's the line`,
-            "that separates the top 25% from the rest, so 1.0×",
-            "means this post just edges into the top quartile.",
-          ].join("\n")}
+          title={buildHotnessTooltip(item)}
         >
           {ratioLabel}
         </span>
@@ -367,4 +371,33 @@ function CrossPostQueueRow({
       </td>
     </tr>
   );
+}
+
+function buildHotnessTooltip(item: CrossPostCandidate): string {
+  if (item.topSignal == null) {
+    return [
+      `Format "${item.format}" has no cohort yet —`,
+      `auto-surfacing for human review until we have data.`,
+      "",
+      "Once 5+ posts in this format have published, the queue",
+      "will start computing real velocity / lifetime ratios.",
+    ].join("\n");
+  }
+  const lines = [
+    `Why this is hot:`,
+    `  ${item.whyHot}`,
+    "",
+    `All signals computed:`,
+  ];
+  for (const s of item.hotnessSignals) {
+    const pctLabel = `P${Math.round(s.percentile * 100)}`;
+    lines.push(
+      `  · ${s.label}: ${s.ratio.toFixed(2)}× (${formatCompact(s.views)} vs ${formatCompact(s.bar)} ${pctLabel}, cohort ${s.cohortSize})`
+    );
+  }
+  lines.push("");
+  lines.push("Velocity uses the 15m/30m/1h/2h/4h/8h/24h/48h snapshots");
+  lines.push("captured after publish; lifetime uses cumulative views.");
+  lines.push("Strongest ratio wins and shows on the badge.");
+  return lines.join("\n");
 }

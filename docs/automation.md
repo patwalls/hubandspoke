@@ -420,9 +420,13 @@ ORDER BY pi.published_at DESC;
 - **Inputs:** `productionItems.views` (kept fresh by `performance-decay`'s decay-tier sync — <6h stale for items <7d old); `contentEvents` rows of type `cross_post_dismissed` (30-day TTL hide-list).
 - **Outputs:** read-only response. The actual cross-post production items are created on click via `POST /api/production-items/[id]/cross-post` with `assign:true`, which lands them as `Assigned` rows for an editor.
 - **Rules:**
-  - **Candidate window:** published originals from the last 7 days. Idea/Published filter excludes Notion-authoritative post types (long-form YT pillars).
-  - **Cohort:** same `format` over the last 90 days. Cross-brand by design — formats are platform-aligned in practice. Cohort must have ≥10 posts; smaller cohorts are silently skipped (admit nothing rather than admit on noise).
-  - **Threshold:** P75 of `views` within the format cohort. Items at or above the bar are admitted, sorted by `views ÷ P75` so the strongest outliers appear first.
+  - **Candidate window:** published items from the last 21 days. `sourceType` ∈ {`original`, `clip`, `repost`} — `cross_post` is excluded (no recursion). Notion-authoritative post types (long-form YT pillars) excluded.
+  - **Cohort:** same `format` over the last 90 days, cross-brand. Lifetime cohort floor is 0 (a brand-new format with one prior post still gets a noisy P60 — operators dismiss what they don't want); per-checkpoint cohort floor is 5 (velocity baselines need at least a handful of points to be meaningful). Formats with no cohort at all auto-admit and are tagged `NEW` in the badge.
+  - **Hotness signals:** for each candidate we compute up to two flavors of ratio and take the strongest:
+    - **Lifetime** — cumulative `views` ÷ format's lifetime P60.
+    - **Velocity** — for each `view_snapshots.checkpoint_key` available on the candidate (15m / 30m / 1h / 2h / 4h / 8h / 24h / 48h), `views_at_checkpoint` ÷ format's same-checkpoint P60.
+  - **Admission:** max ratio ≥ 1.0× (or auto-admit when no cohort exists). Sort by max ratio desc. The top signal drives the badge label (`8.7× 1h` vs `1.8× lifetime`) and a `whyHot` explainer string is computed server-side and surfaced in the modal + tooltip.
+  - **Why P60 instead of P75:** young posts haven't had time to accumulate the lifetime views that the 90-day cohort has, so the lifetime gate is biased against them. P60 partly compensates without flooding the queue. Velocity comparisons are age-fair (snapshot-vs-snapshot) and not affected.
   - **Already-done dedup:** drop a candidate if every eligible `(target account, target post type)` pair already has a `productionItems` row with `sourceType='cross_post'` and `repostedFromItemId = candidate.id`. Modal still shows partially-done state (per-target disabled cards) when some targets remain.
   - **Dismissal:** "Not interested" → `POST /api/production-items/[id]/cross-post-dismiss` writes a `contentEvents` row with `type='cross_post_dismissed'`. The candidate selector hides it for 30 days; after that it can resurface if it's still hot.
   - **Format compat:** unchanged from v2 — `compatibleTargetsFor()` matrix gates which target post types appear as cards in the modal.

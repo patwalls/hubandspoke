@@ -76,16 +76,21 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
         console.error(`Cross-post queue API returned HTTP ${res.status}`);
         setCrossPostData({
           items: [],
-          formatBars: {},
           brandAccounts: [],
           targetCommonality: {},
           stats: {
             rawCandidates: 0,
-            droppedNoFormatBar: 0,
-            droppedBelowP75: 0,
             droppedDismissed: 0,
+            droppedBelowThreshold: 0,
             droppedAllTargetsCovered: 0,
             droppedNoCompatibleTarget: 0,
+            autoAdmittedNewFormat: 0,
+          },
+          config: {
+            candidateWindowDays: 21,
+            cohortWindowDays: 90,
+            percentile: 0.6,
+            hotnessThreshold: 1.0,
           },
         });
         return;
@@ -213,7 +218,7 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
             {isCrossPostTab
-              ? "High-performing posts from the last 7 days — pick where to cross-post."
+              ? "High-performing posts from the last 21 days — pick where to cross-post."
               : "Triage new ideas — assign an editor or kill."}
           </p>
         </div>
@@ -291,7 +296,7 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
               selectedPlatform !== "all" ||
               selectedFormat !== "all"
                 ? "No hot posts match the current filters."
-                : "Nothing hot in the last 7 days. Check back tomorrow."
+                : "Nothing hot in the last 21 days. Check back tomorrow."
             }
             onMutate={fetchCrossPostQueue}
           />

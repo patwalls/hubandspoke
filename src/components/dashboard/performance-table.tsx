@@ -412,8 +412,8 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
   function vsP75For(item: ProductionItem): number | null {
     if (!item.format || item.views == null) return null;
     const bar = formatBars?.[item.format];
-    if (!bar || bar.p75 <= 0) return null;
-    return item.views / bar.p75;
+    if (!bar || bar.p <= 0) return null;
+    return item.views / bar.p;
   }
 
   const sorted = [...filtered].sort((a, b) => {
@@ -958,7 +958,7 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
                     const tooltip = bar
                       ? [
                           `This post: ${(item.views ?? 0).toLocaleString()} views`,
-                          `${item.format} P75: ${bar.p75.toLocaleString()} views`,
+                          `${item.format} P75: ${bar.p.toLocaleString()} views`,
                           `Ratio: ${ratio.toFixed(2)}× the P75 bar`,
                           "",
                           "P75 = 75th-percentile views across every Published",

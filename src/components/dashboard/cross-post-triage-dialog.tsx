@@ -317,7 +317,6 @@ export function CrossPostTriageDialog({
     }
   }
 
-  const percentile = Math.round(100 * (1 - 0.75));
   const visibleSelectableKeys = visibleTargets
     .filter((t) => !t.existing)
     .map((t) => pairKey(t));
@@ -353,26 +352,46 @@ export function CrossPostTriageDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <section className="rounded-md border border-border bg-emerald-50/40 p-3">
+        <section className="rounded-md border border-border bg-emerald-50/40 p-3 space-y-2">
           <div className="flex items-baseline justify-between flex-wrap gap-x-4 gap-y-1">
             <div className="text-sm text-foreground">
               <span className="font-semibold tabular-nums">
                 {formatCompact(candidate.views)}
               </span>{" "}
-              views{" "}
-              <span className="text-muted-foreground">
-                · top {percentile}% of{" "}
-                <span className="font-medium text-foreground">
-                  {candidate.format}
-                </span>
+              views ·{" "}
+              <span className="font-medium text-foreground">
+                {candidate.format}
               </span>
             </div>
             <div className="text-[11px] text-muted-foreground tabular-nums">
-              {candidate.formatRatio.toFixed(1)}× format P75 (
-              {formatCompact(candidate.formatP75)} ·{" "}
-              {candidate.formatCohortSize} posts)
+              {candidate.topSignal == null
+                ? "New format — no cohort yet"
+                : `${candidate.topSignal.ratio.toFixed(1)}× ${candidate.topSignal.kind}`}
             </div>
           </div>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            <span className="font-semibold text-foreground">Why this is hot:</span>{" "}
+            {candidate.whyHot}
+          </p>
+          {candidate.hotnessSignals.length > 1 && (
+            <details className="text-[11px] text-muted-foreground">
+              <summary className="cursor-pointer hover:text-foreground">
+                Signal breakdown ({candidate.hotnessSignals.length})
+              </summary>
+              <ul className="mt-1 space-y-0.5 pl-3 tabular-nums">
+                {candidate.hotnessSignals.map((s) => (
+                  <li key={s.kind}>
+                    <span className="font-medium text-foreground">
+                      {s.label}:
+                    </span>{" "}
+                    {s.ratio.toFixed(2)}× ({formatCompact(s.views)} vs{" "}
+                    {formatCompact(s.bar)} P
+                    {Math.round(s.percentile * 100)}, cohort {s.cohortSize})
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </section>
 
         <section className="space-y-2">
