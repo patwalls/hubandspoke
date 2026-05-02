@@ -145,12 +145,14 @@ const tools: Anthropic.Tool[] = [
   {
     name: "propose_clip_ideas",
     description:
-      "Submit exactly 10 short-form clip ideas derived from the transcript. Sort highest to lowest estimated views.",
+      "Submit exactly 10 short-form clip ideas derived from the transcript. Sort highest to lowest estimated views. Pass `ideas` as a real JSON array of objects — never a JSON-encoded string.",
     input_schema: {
       type: "object" as const,
       properties: {
         ideas: {
           type: "array",
+          description:
+            "Array of 10 idea objects. Must be a real JSON array, not a string containing JSON.",
           minItems: 10,
           maxItems: 10,
           items: {
@@ -754,7 +756,12 @@ export async function generateClipIdeas(
   async function attempt(extraNote?: string): Promise<Anthropic.Message> {
     return client.messages.create({
       model: MODEL,
-      max_tokens: 4096,
+      // 10 ideas × (hook + angle + 2-4 sentence rationale + 8+ word
+      // anchor quote + blueprint anchor) easily blows past 4096 on chatty
+      // transcripts. Bumping to 8192 leaves comfortable headroom; Sonnet 4.6
+      // supports up to 64K. Symptom of being too low was V7 silently failing
+      // shape validation because the tool_use JSON was truncated mid-array.
+      max_tokens: 8192,
       system: systemPrompt,
       tools,
       tool_choice: { type: "tool", name: "propose_clip_ideas" },
@@ -764,45 +771,125 @@ export async function generateClipIdeas(
     });
   }
 
+  // Track whether the most recent extraction saw a stringified ideas array
+  // that we couldn't parse — so the retry feedback can call it out by name.
+  // Single-element holder so TS doesn't narrow the type through flow analysis
+  // when extractIdeas mutates it across closure boundaries.
+  const failureModeRef: { current: "ok" | "stringified-malformed" | "other" } = {
+    current: "ok",
+  };
+
   function extractIdeas(
     response: Anthropic.Message,
+    label: string,
   ): { ideas: ClipIdea[]; shapeFailures: string[] } | null {
+    failureModeRef.current = "other";
     for (const block of response.content) {
       if (block.type === "tool_use" && block.name === "propose_clip_ideas") {
         const input = block.input as { ideas?: unknown };
+        // Sonnet quirk: with deeply-nested tool schemas the model sometimes
+        // returns the array as a JSON-encoded STRING instead of a real array
+        // (`{"ideas": "[{...}, {...}]"}` rather than `{"ideas": [{...}]}`).
+        // The SDK passes it through as a string. Detect, parse, and on parse
+        // failure flag for the retry to scold the model specifically.
+        let ideasInput: unknown = input.ideas;
+        if (typeof ideasInput === "string") {
+          try {
+            ideasInput = JSON.parse(ideasInput);
+            console.warn(
+              `[clip-idea-agent] ${label} recovered stringified ideas array (Sonnet quirk): isArray=${Array.isArray(ideasInput)}`,
+            );
+          } catch (err) {
+            console.warn(
+              `[clip-idea-agent] ${label} JSON.parse failed on stringified ideas: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            failureModeRef.current = "stringified-malformed";
+          }
+        }
         const shape = validateShape(
-          input.ideas,
+          ideasInput,
           args.durationSec,
           referenceHooks,
         );
-        if (!shape) return null;
+        if (shape) failureModeRef.current = "ok";
+        if (!shape) {
+          // Diagnose: when validateShape returns null we lose detail. Log
+          // enough that a Heroku log scrape pinpoints the cause (truncation,
+          // wrong idea count, blueprint mismatch, anchor verbatim drift).
+          const ideaCount = Array.isArray(input.ideas) ? input.ideas.length : -1;
+          let firstFailure = "unknown";
+          if (Array.isArray(input.ideas)) {
+            for (let idx = 0; idx < input.ideas.length; idx++) {
+              const item = input.ideas[idx] as Record<string, unknown> | null;
+              if (!item || typeof item !== "object") {
+                firstFailure = `idea[${idx}] is not an object`;
+                break;
+              }
+              const reasons: string[] = [];
+              const start = Number(item.startSec);
+              const end = Number(item.endSec);
+              if (!Number.isFinite(start) || start < 0) reasons.push(`startSec=${item.startSec}`);
+              if (!Number.isFinite(end) || end <= start || end > args.durationSec + 5)
+                reasons.push(`endSec=${item.endSec} (duration=${args.durationSec})`);
+              if (typeof item.hook !== "string" || !item.hook.trim()) reasons.push("hook empty/non-string");
+              if (typeof item.angle !== "string" || !item.angle.trim()) reasons.push("angle empty/non-string");
+              if (typeof item.rationale !== "string" || !item.rationale.trim()) reasons.push("rationale empty/non-string");
+              const ev = Math.round(Number(item.estimatedViews));
+              if (!Number.isFinite(ev) || ev < 0) reasons.push(`estimatedViews=${item.estimatedViews}`);
+              if (referenceHooks.length > 0) {
+                const bp = typeof item.blueprintAnchorHook === "string" ? item.blueprintAnchorHook.trim() : "";
+                const refSet = new Set(referenceHooks.map(normalizeForMatch));
+                if (!bp || !refSet.has(normalizeForMatch(bp))) {
+                  reasons.push(`blueprintAnchorHook="${bp.slice(0, 60)}…" not in REFERENCE LIBRARY`);
+                }
+              }
+              if (reasons.length > 0) {
+                firstFailure = `idea[${idx}]: ${reasons.join("; ")}`;
+                break;
+              }
+            }
+          } else {
+            firstFailure = `input.ideas is ${typeof input.ideas} (keys: ${Object.keys(input).join(",")})`;
+          }
+          console.warn(
+            `[clip-idea-agent] ${label} validation failed: stop_reason=${response.stop_reason} idea_count=${ideaCount} input_tokens=${response.usage.input_tokens} output_tokens=${response.usage.output_tokens} first_failure=${firstFailure}`,
+          );
+          return null;
+        }
         return { ideas: shape.ideas, shapeFailures: shape.failures };
       }
     }
+    console.warn(
+      `[clip-idea-agent] ${label} returned no tool_use block: stop_reason=${response.stop_reason}`,
+    );
     return null;
   }
 
   // Pass 1.
   let response = await attempt();
-  let extracted = extractIdeas(response);
+  let extracted = extractIdeas(response, "pass1");
 
-  if (!extracted) {
-    // Hard validation failure (missing/malformed fields, wrong count, etc.).
-    // Re-prompt with the V6-style structural reminder and try once more.
-    const refReminder =
-      referenceHooks.length > 0
-        ? ` Each idea's blueprintAnchorHook must be the EXACT verbatim text of one of these REFERENCE LIBRARY hooks: ${referenceHooks
-            .map((h) => `"${h}"`)
-            .join(", ")}.`
-        : "";
-    response = await attempt(
-      `Your previous response failed validation: each idea needs finite numeric startSec/endSec (seconds, 0 ≤ start < end ≤ ${Math.round(args.durationSec)}), non-empty hook/angle/rationale, a non-negative integer estimatedViews, a blueprintAnchorHook, and a transcriptAnchorQuote (≥ 8 words copied verbatim from the FULL TRANSCRIPT block).${refReminder} Return exactly 10 ideas.`,
-    );
-    extracted = extractIdeas(response);
+  // Hard validation failure handler — Sonnet's stringification quirk is flaky
+  // (~30% rate on some transcripts), so we allow up to 2 retries when we keep
+  // seeing stringified-malformed output before giving up.
+  const refReminder =
+    referenceHooks.length > 0
+      ? ` Each idea's blueprintAnchorHook must be the EXACT verbatim text of one of these REFERENCE LIBRARY hooks: ${referenceHooks
+          .map((h) => `"${h}"`)
+          .join(", ")}.`
+      : "";
+
+  for (let retry = 0; retry < 2 && !extracted; retry++) {
+    const feedback =
+      failureModeRef.current === "stringified-malformed"
+        ? `Your previous response passed the \`ideas\` argument as a JSON-encoded STRING with malformed JSON inside. The tool requires \`ideas\` to be a real JSON ARRAY of 10 objects — pass it directly as an array, not as a string. Each idea object needs: numeric startSec/endSec (0 ≤ start < end ≤ ${Math.round(args.durationSec)}), hook, angle, rationale, integer estimatedViews, blueprintAnchorHook, transcriptAnchorQuote (≥ 8 words verbatim from the transcript).${refReminder}`
+        : `Your previous response failed validation: each idea needs finite numeric startSec/endSec (seconds, 0 ≤ start < end ≤ ${Math.round(args.durationSec)}), non-empty hook/angle/rationale, a non-negative integer estimatedViews, a blueprintAnchorHook, and a transcriptAnchorQuote (≥ 8 words copied verbatim from the FULL TRANSCRIPT block).${refReminder} Return exactly 10 ideas in the \`ideas\` array (as a real array, not a stringified one).`;
+    response = await attempt(feedback);
+    extracted = extractIdeas(response, `shape-retry-${retry + 1}`);
   }
 
   if (!extracted) {
-    throw new Error("Clip-idea agent returned no valid tool call after retry");
+    throw new Error("Clip-idea agent returned no valid tool call after 3 attempts");
   }
 
   // Pass 2: resolve anchors against the word-level transcript. Snap ranges
@@ -824,7 +911,7 @@ export async function generateClipIdeas(
       "Return all 10 ideas again. For each problem idea, EITHER quote a real verbatim transcript line that falls inside startSec/endSec, OR adjust startSec/endSec so they encompass the anchor line. The anchor must be the moment the hook's premise is DELIVERED, not where it's recapped or referenced.",
     ].join("\n");
     response = await attempt(feedback);
-    const retryExtracted = extractIdeas(response);
+    const retryExtracted = extractIdeas(response, "anchor-retry");
     if (retryExtracted) {
       const retryResolved = resolveAnchors(
         retryExtracted.ideas,
