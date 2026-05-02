@@ -61,10 +61,42 @@ export async function getTranscriptForPrompt(
     })
     .join("\n");
 
+  // V7 anchor matching needs word-level timestamps. Whisper rows carry them
+  // natively; legacy `source='descript'` rows (and any future source that
+  // doesn't expose words) only have segment-level timing. Synthesize a words
+  // array by spreading each segment's words evenly across its time range —
+  // less precise than real word timestamps but lets the matcher work.
+  const words: Array<{ word: string; startSec: number; endSec: number }> =
+    row.words && row.words.length > 0
+      ? row.words
+      : synthesizeWordsFromSegments(row.segments);
+
   return {
     fullText: row.fullText,
     segmentsMarkdown,
     durationSec: Number(row.durationSec ?? 0),
-    words: row.words ?? [],
+    words,
   };
+}
+
+function synthesizeWordsFromSegments(
+  segments: Array<{ startSec: number; endSec: number; text: string }>,
+): Array<{ word: string; startSec: number; endSec: number }> {
+  const out: Array<{ word: string; startSec: number; endSec: number }> = [];
+  for (const seg of segments) {
+    const tokens = seg.text.split(/(\s+)/).filter((t) => t.length > 0);
+    if (tokens.length === 0) continue;
+    const wordTokens = tokens.filter((t) => /\S/.test(t));
+    if (wordTokens.length === 0) continue;
+    const span = Math.max(0, seg.endSec - seg.startSec);
+    const perWord = wordTokens.length > 0 ? span / wordTokens.length : 0;
+    let i = 0;
+    for (const token of wordTokens) {
+      const start = seg.startSec + i * perWord;
+      const end = seg.startSec + (i + 1) * perWord;
+      out.push({ word: token, startSec: start, endSec: end });
+      i++;
+    }
+  }
+  return out;
 }

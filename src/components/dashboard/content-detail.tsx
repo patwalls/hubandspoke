@@ -1745,7 +1745,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               <FileTextIcon className="size-3.5" /> Notion
             </a>
           )}
-          {!item.mediaS3Key && (
+          {!isPublished && !item.mediaS3Key && (
             <Button
               variant="outline"
               size="sm"

@@ -943,6 +943,20 @@ export async function generateClipIdeas(
     }
   }
 
+  // If every idea got dropped, throw a clear error rather than handing back
+  // an empty array (which would crash the downstream insert with a Drizzle
+  // "values() must be called with at least one value" error). Surfaces the
+  // failure to the API caller / Heroku logs in a debuggable way.
+  if (validIdeas.length === 0) {
+    const notFound = resolved.diagnostics.filter((d) => !d.found).length;
+    const outOfRange = resolved.diagnostics.filter(
+      (d) => d.found && !d.insideRange && !d.snapApplied,
+    ).length;
+    throw new Error(
+      `Clip-idea agent produced 0 ideas with valid anchors (not_found=${notFound}, unsnappable=${outOfRange}). Likely the transcript lacks word-level timestamps for V7 anchor matching.`,
+    );
+  }
+
   return {
     ideas: validIdeas,
     modelUsage: {
