@@ -36,7 +36,8 @@ USER / API ENTRY POINTS
   POST /api/accounts (new account row)                    → account-content-sync (backfill) + account-refresh
   POST /api/production-items/[id]/transcript/fetch        → transcribe-whisper
   POST /api/uploads/confirm                               → transcribe-whisper
-  POST /api/descript/clip-out                             → descript-clip-resolve
+  POST /api/production-items/[id]/repurpose               → (no job — synchronous insert + redirect)
+  POST /api/descript/clip-out                             → descript-clip-resolve  (format-detail quick-clip only as of 2026-05-02)
   POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve
   POST /api/clip-ideas/[id]/create-in-descript-precise    → clip-idea-precise-cut
   POST /api/clip-ideas/[id]/create-in-descript-full       → descript-clip-resolve (importMode=true on cold path)

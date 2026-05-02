@@ -473,22 +473,14 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     return () => clearTimeout(t);
   }, [fieldSaves]);
 
-  // Per-format repurpose state, keyed by format id
-  type RepurposeKind = "descript_clip" | "manual_task";
-  type RepurposeState = {
-    state: "running" | "previewed" | "clipped" | "created" | "error";
-    kind?: RepurposeKind;
-    label?: string;          // short status pill text on the button
-    message?: string;        // error / info text under the button
-    descriptPrompt?: string; // clip directive (when kind === descript_clip)
-    guidance?: string;       // editor brief (when kind === manual_task)
-    projectUrl?: string;     // Descript project URL
-    firedAt?: "preview" | "real";
-  };
-  const [clipStatus, setClipStatus] = useState<Record<string, RepurposeState>>(
+  // Per-format Create state, keyed by format id. The simplified flow has
+  // exactly one in-flight state ("creating") + a sticky "done" badge for
+  // duplicates we redirected to instead of creating fresh.
+  type CreateState = "idle" | "creating";
+  const [createStatus, setCreateStatus] = useState<Record<string, CreateState>>(
     {}
   );
-  const [repurposingAll, setRepurposingAll] = useState(false);
+  const [creatingAll, setCreatingAll] = useState(false);
 
   // Descript upload modal state
   const [descriptModalOpen, setDescriptModalOpen] = useState(false);
@@ -528,91 +520,79 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     | { kind: "error"; message: string }
   >({ kind: "idle" });
 
-  async function callRepurpose(targetFormatId: string, mode: "preview" | "real") {
-    setClipStatus((prev) => ({
-      ...prev,
-      [targetFormatId]: { state: "running", firedAt: mode },
-    }));
-    const url =
-      mode === "preview"
-        ? "/api/descript/clip-out/preview"
-        : "/api/descript/clip-out";
+  // Spawn a derivative production_item in the target format, assigned to
+  // the calling user. On success → redirect to its detail page. On 409
+  // (a derivative for this pillar+format already exists) → redirect to
+  // the existing one.
+  async function createDerivative(
+    targetFormatId: string,
+    targetFormatName: string,
+    options: { redirectOnSuccess: boolean } = { redirectOnSuccess: true }
+  ): Promise<{ id: string; existed: boolean } | null> {
+    setCreateStatus((prev) => ({ ...prev, [targetFormatId]: "creating" }));
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemId: contentId, targetFormatId }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setClipStatus((prev) => ({
-          ...prev,
-          [targetFormatId]: {
-            state: "error",
-            message: json.error || `HTTP ${res.status}`,
-          },
-        }));
-        return;
-      }
-      if (json.mode === "descript_clip") {
-        setClipStatus((prev) => ({
-          ...prev,
-          [targetFormatId]: {
-            state: mode === "preview" ? "previewed" : "clipped",
-            kind: "descript_clip",
-            label: mode === "preview" ? "preview ready" : "clip queued",
-            descriptPrompt: json.descriptPrompt,
-            projectUrl: json.projectUrl,
-          },
-        }));
-        if (mode === "real") {
-          // Pull the new trigger row in. Refresh again a bit later so the
-          // composition ID resolves from the background poll.
-          load();
-          setTimeout(() => load(), 40_000);
+      const res = await fetch(
+        `/api/production-items/${contentId}/repurpose`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetFormatId }),
         }
-      } else if (json.mode === "manual_task") {
-        setClipStatus((prev) => ({
-          ...prev,
-          [targetFormatId]: {
-            state: mode === "preview" ? "previewed" : "created",
-            kind: "manual_task",
-            label: mode === "preview" ? "preview ready" : "task created",
-            guidance: json.guidance,
-          },
-        }));
-        if (mode === "real") {
-          load();
-          setTimeout(() => load(), 40_000);
+      );
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json?.id) {
+        if (options.redirectOnSuccess) {
+          toast.success(`Created ${targetFormatName}`);
+          router.push(`/${brand}/content/${json.id}`);
         }
-      } else {
-        setClipStatus((prev) => ({
-          ...prev,
-          [targetFormatId]: { state: "error", message: "Unexpected response" },
-        }));
+        return { id: json.id, existed: false };
       }
+      if (res.status === 409 && json?.existingId) {
+        if (options.redirectOnSuccess) {
+          toast.info(`A ${targetFormatName} draft already exists — opening it.`);
+          router.push(`/${brand}/content/${json.existingId}`);
+        }
+        return { id: json.existingId, existed: true };
+      }
+      toast.error(json?.error || `Failed to create ${targetFormatName}`);
+      return null;
     } catch (err) {
-      setClipStatus((prev) => ({
-        ...prev,
-        [targetFormatId]: {
-          state: "error",
-          message: err instanceof Error ? err.message : "Request failed",
-        },
-      }));
+      toast.error(
+        err instanceof Error ? err.message : `Failed to create ${targetFormatName}`
+      );
+      return null;
+    } finally {
+      setCreateStatus((prev) => ({ ...prev, [targetFormatId]: "idle" }));
     }
   }
 
-  async function repurposeAll(targetFormatIds: string[]) {
-    if (repurposingAll || targetFormatIds.length === 0) return;
-    setRepurposingAll(true);
+  async function createAll(targets: { id: string; name: string }[]) {
+    if (creatingAll || targets.length === 0) return;
+    setCreatingAll(true);
+    let created = 0;
+    let existed = 0;
+    let failed = 0;
     try {
-      // Fire sequentially — Claude + Notion + Descript calls are rate-sensitive
-      // and this keeps per-format state transitions readable in the UI.
-      for (const id of targetFormatIds) {
-        await callRepurpose(id, "real");
+      for (const t of targets) {
+        const result = await createDerivative(t.id, t.name, {
+          redirectOnSuccess: false,
+        });
+        if (!result) failed++;
+        else if (result.existed) existed++;
+        else created++;
       }
+      const parts: string[] = [];
+      if (created > 0)
+        parts.push(`${created} new draft${created === 1 ? "" : "s"}`);
+      if (existed > 0) parts.push(`${existed} already existed`);
+      if (failed > 0) parts.push(`${failed} failed`);
+      const summary = parts.join(" · ") || "Nothing happened";
+      if (failed > 0 && created === 0) toast.error(summary);
+      else if (failed > 0) toast.warning(summary);
+      else toast.success(summary);
+      load();
     } finally {
-      setRepurposingAll(false);
+      setCreatingAll(false);
     }
   }
 
@@ -3015,29 +2995,33 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
       {!isPrePublish && !hideDerivativeSections && (
       <TabsContent value="repurpose" className="pt-4">
-      {/* Repurpose to format */}
+      {/* Create derivative */}
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-base font-semibold text-foreground">
-              Repurpose to format
+              Create derivative
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Claude reads each target format&apos;s skill, creates a Notion
-              task for the editor, and fires a Descript clip if the skill
-              calls for one.
+              Spawn a new draft in a derivative format. The new item is
+              assigned to you and pre-linked to this pillar — fill in the
+              details on the new page.
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {repurposeTargets.length > 0 && (
               <button
                 type="button"
-                onClick={() => repurposeAll(repurposeTargets.map((f) => f.id))}
-                disabled={repurposingAll}
-                title="Run Repurpose on every target format, one after another."
+                onClick={() =>
+                  createAll(
+                    repurposeTargets.map((f) => ({ id: f.id, name: f.name }))
+                  )
+                }
+                disabled={creatingAll}
+                title="Create a derivative for every target format, one after another."
                 className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {repurposingAll ? "Repurposing all…" : "Repurpose all"}
+                {creatingAll ? "Creating all…" : "Create all"}
               </button>
             )}
           </div>
@@ -3069,17 +3053,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </TableHeader>
               <TableBody>
                 {repurposeTargets.map((f) => {
-                  const st = clipStatus[f.id];
-                  const busy = st?.state === "running";
-                  const directiveText =
-                    st?.kind === "manual_task"
-                      ? st.guidance
-                      : st?.descriptPrompt;
-                  const showDirective =
-                    (st?.state === "previewed" ||
-                      st?.state === "clipped" ||
-                      st?.state === "created") &&
-                    !!directiveText;
+                  const busy = createStatus[f.id] === "creating";
                   const editorUser = f.editor
                     ? assignableUsers.find(
                         (u) =>
@@ -3093,145 +3067,84 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   const parentName = item.format ?? null;
                   const channels = f.accountChannels ?? [];
                   return (
-                    <React.Fragment key={f.id}>
-                      <TableRow>
-                        <TableCell>
-                          <span className="flex items-center gap-2 min-w-0">
-                            {parentName && (
-                              <>
-                                <Link
-                                  href={`/${brand}/formats/${f.parentFormatId}`}
-                                  className="text-muted-foreground hover:text-foreground hover:underline truncate max-w-[180px]"
-                                >
-                                  {parentName}
-                                </Link>
-                                <span className="text-muted-foreground shrink-0">
-                                  →
-                                </span>
-                              </>
-                            )}
-                            <Link
-                              href={`/${brand}/formats/${f.id}`}
-                              className="font-medium text-foreground hover:underline truncate"
-                              title="Edit this format's skill / prompt"
-                            >
-                              {f.name}
-                            </Link>
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-purple-50 text-purple-700">
-                              Derivative
-                            </span>
-                            {st?.label && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-accent text-muted-foreground border border-border">
-                                {st.label}
+                    <TableRow key={f.id}>
+                      <TableCell>
+                        <span className="flex items-center gap-2 min-w-0">
+                          {parentName && (
+                            <>
+                              <Link
+                                href={`/${brand}/formats/${f.parentFormatId}`}
+                                className="text-muted-foreground hover:text-foreground hover:underline truncate max-w-[180px]"
+                              >
+                                {parentName}
+                              </Link>
+                              <span className="text-muted-foreground shrink-0">
+                                →
                               </span>
-                            )}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1 max-w-[260px]">
-                            {channels.slice(0, 3).map((c) => (
-                              <AccountBadge
-                                key={`${c.accountId}|${c.postType ?? ""}`}
-                                account={c.account}
-                                postType={c.postType}
-                              />
-                            ))}
-                            {channels.length > 3 && (
-                              <span className="text-xs text-muted-foreground">
-                                +{channels.length - 3}
-                              </span>
-                            )}
-                            {channels.length === 0 && (
-                              <span className="text-xs text-muted-foreground">
-                                —
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {editorUser ? (
-                            <UserChip user={editorUser} size="xs" />
-                          ) : (
-                            "—"
+                            </>
                           )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">
-                          {f.viewThreshold != null
-                            ? f.viewThreshold.toLocaleString()
-                            : "—"}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-foreground">
-                          {f.totalViews && f.totalViews > 0
-                            ? f.totalViews.toLocaleString()
-                            : "—"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="inline-flex items-center gap-3">
-                            <button
-                              type="button"
-                              onClick={() => callRepurpose(f.id, "preview")}
-                              disabled={busy || repurposingAll}
-                              title="Ask Claude what it would do — no Notion or Descript writes."
-                              className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {busy && st?.firedAt === "preview"
-                                ? "Dry running…"
-                                : "Dry run"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => callRepurpose(f.id, "real")}
-                              disabled={busy || repurposingAll}
-                              title="Creates a Notion task and, for clip-style skills, fires the Descript job."
-                              className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {busy && st?.firedAt === "real"
-                                ? "Repurposing…"
-                                : "Repurpose →"}
-                            </button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                      {(showDirective ||
-                        st?.state === "clipped" ||
-                        st?.state === "created" ||
-                        st?.state === "error") && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={6}
-                            className="bg-muted/30 py-2"
+                          <Link
+                            href={`/${brand}/formats/${f.id}`}
+                            className="font-medium text-foreground hover:underline truncate"
+                            title="Edit this format's details"
                           >
-                            <div className="space-y-1.5">
-                              {showDirective && (
-                                <div className="text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
-                                  {directiveText}
-                                </div>
-                              )}
-                              {(st?.state === "clipped" ||
-                                st?.state === "created") && (
-                                <div className="flex items-center gap-3 flex-wrap">
-                                  {st.state === "clipped" && st.projectUrl && (
-                                    <a
-                                      href={st.projectUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-[11px] text-primary hover:underline"
-                                    >
-                                      Open in Descript →
-                                    </a>
-                                  )}
-                                </div>
-                              )}
-                              {st?.state === "error" && (
-                                <p className="text-[11px] text-destructive">
-                                  {st.message}
-                                </p>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </React.Fragment>
+                            {f.name}
+                          </Link>
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-purple-50 text-purple-700">
+                            Derivative
+                          </span>
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1 max-w-[260px]">
+                          {channels.slice(0, 3).map((c) => (
+                            <AccountBadge
+                              key={`${c.accountId}|${c.postType ?? ""}`}
+                              account={c.account}
+                              postType={c.postType}
+                            />
+                          ))}
+                          {channels.length > 3 && (
+                            <span className="text-xs text-muted-foreground">
+                              +{channels.length - 3}
+                            </span>
+                          )}
+                          {channels.length === 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              —
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {editorUser ? (
+                          <UserChip user={editorUser} size="xs" />
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {f.viewThreshold != null
+                          ? f.viewThreshold.toLocaleString()
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-foreground">
+                        {f.totalViews && f.totalViews > 0
+                          ? f.totalViews.toLocaleString()
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <button
+                          type="button"
+                          onClick={() => createDerivative(f.id, f.name)}
+                          disabled={busy || creatingAll}
+                          title="Create a new draft in this format, assigned to you."
+                          className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {busy ? "Creating…" : "Create →"}
+                        </button>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
               </TableBody>
@@ -3240,8 +3153,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         )}
 
         <p className="text-[11px] text-muted-foreground">
-          <span className="font-medium">Dry run</span> asks Claude (Haiku) what it would do — no writes.{" "}
-          <span className="font-medium">Repurpose</span> creates the Notion task and, for clip-style skills, fires the Descript job. Click a format name to edit its skill.
+          <span className="font-medium">Create</span> spawns a new draft in
+          that format, assigned to you, linked back to this pillar, and takes
+          you to its detail page. If a draft for this pillar+format already
+          exists, you&apos;ll be redirected there instead. Click a format
+          name to edit its details.
         </p>
       </div>
       </TabsContent>

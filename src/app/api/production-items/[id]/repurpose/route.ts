@@ -1,0 +1,159 @@
+import { NextRequest, NextResponse } from "next/server";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { requireSession } from "@/lib/auth-guards";
+import { db } from "@/lib/db";
+import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
+import { resolveAssignees } from "@/lib/services/assignees";
+import { getChannelsForFormats } from "@/lib/format-channels";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { normalizeFormatForWrite } from "@/lib/services/format-validation";
+
+interface RouteContext {
+  params: Promise<{ id: string }>;
+}
+
+/**
+ * POST /api/production-items/[id]/repurpose
+ *
+ * Body: { targetFormatId: string }
+ *
+ * Spawn a derivative production_item in `targetFormatId`, pre-linked to the
+ * source as a pillar and assigned to the calling user. Replaces the legacy
+ * Claude+Descript dispatcher: no LLM, no Descript clip job — the editor
+ * does the work by hand on the new item's detail page.
+ *
+ * Dedup: if a derivative already exists for `(source.id, target.name)`, the
+ * route returns 409 with `existingId` so the client can redirect to the
+ * existing draft instead of creating a duplicate. The `repurpose_triggers`
+ * row is also written so `threshold-monitor-sweep`'s cron-side dedup
+ * doesn't double-create later.
+ */
+export async function POST(request: NextRequest, context: RouteContext) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
+  const actorUserId = guard.session.user.id as string;
+
+  const { id } = await context.params;
+
+  let body: { targetFormatId?: unknown };
+  try {
+    body = (await request.json()) as { targetFormatId?: unknown };
+  } catch {
+    return NextResponse.json(
+      { error: "Request body must be JSON" },
+      { status: 400 }
+    );
+  }
+  const targetFormatId =
+    typeof body.targetFormatId === "string" && body.targetFormatId.trim()
+      ? body.targetFormatId.trim()
+      : "";
+  if (!targetFormatId) {
+    return NextResponse.json(
+      { error: "targetFormatId is required" },
+      { status: 400 }
+    );
+  }
+
+  const [source] = await db
+    .select()
+    .from(productionItems)
+    .where(eq(productionItems.id, id))
+    .limit(1);
+  if (!source) {
+    return NextResponse.json(
+      { error: "Source item not found" },
+      { status: 404 }
+    );
+  }
+
+  const [target] = await db
+    .select()
+    .from(formats)
+    .where(eq(formats.id, targetFormatId))
+    .limit(1);
+  if (!target) {
+    return NextResponse.json(
+      { error: "Target format not found" },
+      { status: 404 }
+    );
+  }
+  if (target.brand !== source.brand) {
+    return NextResponse.json(
+      { error: "Target format must belong to the same brand" },
+      { status: 400 }
+    );
+  }
+
+  // Dedup against an existing derivative for this (source, format) pair.
+  // Case-insensitive on `format` to match the formats table's
+  // (brand, lower(name)) uniqueness convention.
+  const [existing] = await db
+    .select({ id: productionItems.id })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.pillarContentItemId, source.id),
+        sql`lower(${productionItems.format}) = lower(${target.name})`,
+        isNull(productionItems.deletedAt)
+      )
+    )
+    .limit(1);
+  if (existing) {
+    return NextResponse.json(
+      {
+        error: `A "${target.name}" derivative already exists for this pillar`,
+        existingId: existing.id,
+      },
+      { status: 409 }
+    );
+  }
+
+  // Channel: the format's first persisted target. Both fields nullable —
+  // a freshly-created format with no channels yet still produces a row,
+  // the editor sets the channel later on the detail page.
+  const channelMap = await getChannelsForFormats([target.id]);
+  const firstChannel = channelMap.get(target.id)?.[0] ?? null;
+
+  // Producer follows the standard fallback chain; editor is the clicker.
+  const resolved = await resolveAssignees({
+    brand: source.brand,
+    sourceItemId: source.id,
+    format: target.name,
+  });
+
+  // Format validation is belt-and-braces — `target` is a row in the
+  // formats table by construction, so this should always succeed and
+  // returns the canonical-cased name.
+  const formatCheck = await normalizeFormatForWrite(source.brand, target.name);
+  const canonicalFormat = formatCheck.ok ? formatCheck.value : target.name;
+
+  const [created] = await db
+    .insert(productionItems)
+    .values({
+      brand: source.brand,
+      title: source.title,
+      thumbnail: source.thumbnail,
+      status: "Assigned",
+      accountId: firstChannel?.accountId ?? null,
+      postType: firstChannel?.postType ?? null,
+      format: canonicalFormat,
+      pillarContentNotionId: source.notionId,
+      pillarContentItemId: source.id,
+      utmCampaign: await generateUtmCampaign(source.title),
+      producerUserId: resolved.producerUserId,
+      editorUserId: actorUserId,
+    })
+    .returning({ id: productionItems.id });
+
+  // Mirror the existing manual-task trigger shape so threshold-monitor-
+  // sweep's dedup on (productionItemId, targetFormatId) catches manually-
+  // created derivatives too.
+  await db.insert(repurposeTriggers).values({
+    productionItemId: source.id,
+    targetFormatId: target.id,
+    compositionName: target.name,
+  });
+
+  return NextResponse.json({ id: created.id }, { status: 201 });
+}
