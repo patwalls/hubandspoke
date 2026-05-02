@@ -139,6 +139,7 @@ async function evalPillar(pillarId: string): Promise<PillarEvalResult | null> {
     pillarChannels: item.platform,
     transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
     transcriptWords: transcript.words,
+    transcriptSegments: transcript.segments,
     durationSec: transcript.durationSec,
     derivatives,
     blueprint,

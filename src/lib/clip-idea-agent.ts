@@ -79,6 +79,7 @@ For each clip, you must cite a transcriptAnchorQuote: a verbatim line copied fro
 
 Rules:
 - VERBATIM. Copy from the transcript exactly — same words, same order, no paraphrasing. Punctuation differences are fine; word substitutions are not.
+- CONTIGUOUS. The quote is one continuous passage from the transcript — never stitch together phrases from different parts with "..." or ellipses. If you need to point at multiple moments, pick ONE that best captures the payoff.
 - ≥ 8 words. Long enough to be unambiguous; short enough to be a single beat. If the delivery line is shorter, extend the quote into the next sentence to hit 8 words.
 - INSIDE THE CLIP RANGE. The anchor's [MM:SS] cue must fall between your startSec and endSec. If your range doesn't contain the anchor, you've picked the wrong range — fix the timestamps, not the anchor.
 - DELIVERY, NOT RECAP. If the guest says "X" at 10:46 and the host says "great point about X" at 11:04, the anchor is the 10:46 line — and your timestamps must encompass it. The fact that 11:04 is more on-the-nose is the trap; the value to the viewer is the original delivery.
@@ -316,7 +317,33 @@ interface AnchorMatch {
 // apostrophes only). This is intentionally strict: the prompt asks for
 // VERBATIM, and a fuzzy match could let "I felt scared" through when the
 // actual line is "I was scared," sliding the timestamps off the intended beat.
+//
+// Recovery: when the LLM violates the contiguous-quote rule and concatenates
+// phrases with "..." (a known mode despite explicit prompt rules), split on
+// the ellipsis and try matching each sub-quote — pick the first one that's
+// ≥ 8 words and lands a contiguous match. Better to anchor on one real
+// passage than reject the entire idea.
 export function findAnchorInWords(
+  quote: string,
+  words: TranscriptWord[],
+): AnchorMatch | null {
+  const direct = findContiguousMatch(quote, words);
+  if (direct) return direct;
+  // Fallback: split on "..." (also "…") and try each fragment in turn.
+  const fragments = quote
+    .split(/\s*(?:\.\.\.|…)\s*/)
+    .map((f) => f.trim())
+    .filter((f) => f.length > 0);
+  if (fragments.length < 2) return null;
+  for (const frag of fragments) {
+    if (tokenize(frag).length < 8) continue;
+    const m = findContiguousMatch(frag, words);
+    if (m) return m;
+  }
+  return null;
+}
+
+function findContiguousMatch(
   quote: string,
   words: TranscriptWord[],
 ): AnchorMatch | null {
@@ -351,46 +378,81 @@ export function findAnchorInWords(
   return null;
 }
 
-// Snap [startSec, endSec] so it contains the anchor while preserving the LLM's
-// intended duration. The anchor lands ~70% through the clip — the payoff zone
-// in short-form pacing — leaving room for setup before it. When that snap
-// would push the clip past the video duration, cap to durationSec; when the
-// resulting clip falls outside the 25–95s envelope, signal an error.
-function snapRangeToAnchor(args: {
-  startSec: number;
-  endSec: number;
+// Pick a clip [start, end] window aligned to segment boundaries. Returns the
+// (startSec, endSec) pair drawn from segment cue boundaries that contains
+// the anchor, fits in [25, 95]s, and best matches the LLM's intended pacing
+// (anchor at ~70% through the clip — typical setup→payoff arc).
+//
+// All output timestamps come from real segment boundaries, so:
+//   - The audio at startSec is the start of a sentence, not mid-cue.
+//   - `buildExcerpt` slicing segments by [start, end] now shows exactly
+//     what plays, with no leading/trailing partial segments.
+function alignRangeToCues(args: {
+  intendedStartSec: number;
+  intendedEndSec: number;
   anchorStartSec: number;
   anchorEndSec: number;
   durationSec: number;
+  segments: TranscriptSegment[];
 }): { startSec: number; endSec: number } | { error: string } {
-  const intendedDuration = args.endSec - args.startSec;
   const minDuration = 25;
   const maxDuration = 95;
-  const targetDuration = Math.max(
+  const intendedDuration = Math.max(
     minDuration,
-    Math.min(maxDuration, intendedDuration),
+    Math.min(maxDuration, args.intendedEndSec - args.intendedStartSec),
   );
-  // Place the anchor at 70% of the way through the clip — typical
-  // setup→payoff arc in this format.
-  const anchorMidpoint = (args.anchorStartSec + args.anchorEndSec) / 2;
-  let newStart = anchorMidpoint - targetDuration * 0.7;
-  let newEnd = anchorMidpoint + targetDuration * 0.3;
-  if (newStart < 0) {
-    newEnd += -newStart;
-    newStart = 0;
+
+  // Candidate boundaries for the start: any segment start at or before the
+  // anchor (so the anchor stays inside). Treat 0 as a candidate too (some
+  // pillars have content from the very first segment that should be
+  // includable). Likewise candidate ends are segment ends at or after the
+  // anchor end.
+  const candidateStarts = new Set<number>();
+  const candidateEnds = new Set<number>();
+  for (const s of args.segments) {
+    if (s.startSec <= args.anchorStartSec) candidateStarts.add(s.startSec);
+    if (s.endSec >= args.anchorEndSec) candidateEnds.add(s.endSec);
   }
-  if (newEnd > args.durationSec) {
-    newStart -= newEnd - args.durationSec;
-    newEnd = args.durationSec;
-  }
-  if (newStart < 0) newStart = 0;
-  const finalDuration = newEnd - newStart;
-  if (finalDuration < minDuration || finalDuration > maxDuration) {
+  if (candidateStarts.size === 0 || candidateEnds.size === 0) {
     return {
-      error: `cannot snap to a ${minDuration}-${maxDuration}s clip around anchor at ${args.anchorStartSec.toFixed(1)}s (got ${finalDuration.toFixed(1)}s)`,
+      error: `no segments straddle anchor at ${args.anchorStartSec.toFixed(1)}s (have ${args.segments.length} segments)`,
     };
   }
-  return { startSec: newStart, endSec: newEnd };
+
+  const anchorMid = (args.anchorStartSec + args.anchorEndSec) / 2;
+
+  let best: {
+    startSec: number;
+    endSec: number;
+    score: number;
+  } | null = null;
+  for (const start of candidateStarts) {
+    if (start < 0) continue;
+    for (const end of candidateEnds) {
+      const duration = end - start;
+      if (duration < minDuration || duration > maxDuration) continue;
+      if (end > args.durationSec + 0.5) continue;
+      // Score components:
+      //   - durationDelta: how far from the LLM's intended duration
+      //   - placementDelta: how far the anchor lands from the 70% mark
+      //   - durationGravity: tiny pull toward 60s (sweet spot per prompt)
+      const durationDelta = Math.abs(duration - intendedDuration);
+      const anchorPosition = (anchorMid - start) / duration; // 0..1
+      const placementDelta = Math.abs(anchorPosition - 0.7) * duration;
+      const durationGravity = Math.abs(duration - 60) * 0.1;
+      const score = durationDelta + placementDelta + durationGravity;
+      if (best === null || score < best.score) {
+        best = { startSec: start, endSec: end, score };
+      }
+    }
+  }
+
+  if (best === null) {
+    return {
+      error: `no cue-aligned ${minDuration}-${maxDuration}s window contains anchor at ${args.anchorStartSec.toFixed(1)}s`,
+    };
+  }
+  return { startSec: best.startSec, endSec: best.endSec };
 }
 
 export interface AnchorResolution {
@@ -409,14 +471,16 @@ export interface AnchorResolution {
   }>;
 }
 
-// Match every idea's transcriptAnchorQuote against the words array. Snap the
-// [startSec, endSec] when the anchor falls outside the picked range. Returns
-// the resolved ideas plus a list of human-readable failures suitable for the
-// retry prompt; when failures is non-empty, all 10 ideas could not be
-// validated and the caller should re-prompt.
+// Match every idea's transcriptAnchorQuote against the words array. Always
+// align the [startSec, endSec] to segment cue boundaries — both when the
+// LLM's pick already contains the anchor (so we eliminate mid-cue starts the
+// LLM may have produced despite the prompt instruction) and when it doesn't
+// (existing behavior). Returns the resolved ideas plus human-readable
+// failures suitable for the retry prompt.
 export function resolveAnchors(
   ideas: ClipIdea[],
   words: TranscriptWord[],
+  segments: TranscriptSegment[],
   durationSec: number,
 ): AnchorResolution {
   const failures: string[] = [];
@@ -443,63 +507,73 @@ export function resolveAnchors(
       out.push(idea);
       continue;
     }
-    const insideRange =
+
+    const llmInsideRange =
       match.startSec >= idea.startSec && match.endSec <= idea.endSec;
-    if (insideRange) {
-      diagnostics.push({
-        ideaIndex: i,
-        hook: idea.hook,
-        quote: idea.transcriptAnchorQuote,
-        found: true,
-        insideRange: true,
-        snapApplied: false,
-        finalStartSec: idea.startSec,
-        finalEndSec: idea.endSec,
-        anchorStartSec: match.startSec,
-      });
-      out.push({ ...idea, transcriptAnchorStartSec: match.startSec });
-      continue;
-    }
-    const snap = snapRangeToAnchor({
-      startSec: idea.startSec,
-      endSec: idea.endSec,
+    const aligned = alignRangeToCues({
+      intendedStartSec: idea.startSec,
+      intendedEndSec: idea.endSec,
       anchorStartSec: match.startSec,
       anchorEndSec: match.endSec,
       durationSec,
+      segments,
     });
-    if ("error" in snap) {
-      failures.push(
-        `Idea #${i + 1} ("${idea.hook}") — anchor at ${match.startSec.toFixed(1)}s is outside startSec=${idea.startSec.toFixed(0)}/endSec=${idea.endSec.toFixed(0)} and ${snap.error}. Re-pick startSec/endSec to encompass the line: "${idea.transcriptAnchorQuote}".`
-      );
-      diagnostics.push({
-        ideaIndex: i,
-        hook: idea.hook,
-        quote: idea.transcriptAnchorQuote,
-        found: true,
-        insideRange: false,
-        snapApplied: false,
-        finalStartSec: idea.startSec,
-        finalEndSec: idea.endSec,
-        anchorStartSec: match.startSec,
-      });
-      out.push(idea);
+
+    if ("error" in aligned) {
+      // No cue-aligned window can contain this anchor under the duration
+      // envelope. Fall back to the LLM's original range only when the
+      // anchor was already inside it; otherwise reject so the agent can
+      // retry with feedback.
+      if (llmInsideRange) {
+        diagnostics.push({
+          ideaIndex: i,
+          hook: idea.hook,
+          quote: idea.transcriptAnchorQuote,
+          found: true,
+          insideRange: true,
+          snapApplied: false,
+          finalStartSec: idea.startSec,
+          finalEndSec: idea.endSec,
+          anchorStartSec: match.startSec,
+        });
+        out.push({ ...idea, transcriptAnchorStartSec: match.startSec });
+      } else {
+        failures.push(
+          `Idea #${i + 1} ("${idea.hook}") — ${aligned.error}. Re-pick startSec/endSec around the line: "${idea.transcriptAnchorQuote}".`
+        );
+        diagnostics.push({
+          ideaIndex: i,
+          hook: idea.hook,
+          quote: idea.transcriptAnchorQuote,
+          found: true,
+          insideRange: false,
+          snapApplied: false,
+          finalStartSec: idea.startSec,
+          finalEndSec: idea.endSec,
+          anchorStartSec: match.startSec,
+        });
+        out.push(idea);
+      }
       continue;
     }
+
+    const snapApplied =
+      aligned.startSec !== idea.startSec || aligned.endSec !== idea.endSec;
     diagnostics.push({
       ideaIndex: i,
       hook: idea.hook,
       quote: idea.transcriptAnchorQuote,
       found: true,
-      insideRange: false,
-      snapApplied: true,
-      finalStartSec: snap.startSec,
-      finalEndSec: snap.endSec,
+      insideRange: llmInsideRange,
+      snapApplied,
+      finalStartSec: aligned.startSec,
+      finalEndSec: aligned.endSec,
       anchorStartSec: match.startSec,
     });
     out.push({
       ...idea,
-      startSec: snap.startSec,
-      endSec: snap.endSec,
+      startSec: aligned.startSec,
+      endSec: aligned.endSec,
       transcriptAnchorStartSec: match.startSec,
     });
   }
@@ -530,6 +604,12 @@ export interface BlueprintRow extends PerfRow {
   openingTranscript?: string | null;  // first ~25s of the reel's own transcript
 }
 
+export interface TranscriptSegment {
+  startSec: number;
+  endSec: number;
+  text: string;
+}
+
 export interface GenerateArgs {
   pillarTitle: string | null;
   pillarFormat: string | null;
@@ -538,6 +618,10 @@ export interface GenerateArgs {
   // Word-level transcript timestamps from Whisper. Required by V7 to locate
   // each idea's transcriptAnchorQuote and snap the clip range around it.
   transcriptWords: TranscriptWord[];
+  // Segment-level transcript timestamps from Whisper. Used to snap clip
+  // start/end to natural cue boundaries so audio doesn't start mid-sentence
+  // and the UI excerpt matches what plays.
+  transcriptSegments: TranscriptSegment[];
   durationSec: number;
   derivatives: PerfRow[];     // short-form derivatives of THIS pillar
   blueprint: BlueprintRow[];  // top in-format performers — full anatomy (V5)
@@ -899,6 +983,7 @@ export async function generateClipIdeas(
   let resolved = resolveAnchors(
     extracted.ideas,
     args.transcriptWords,
+    args.transcriptSegments,
     args.durationSec,
   );
   const allAnchorFailures = [...extracted.shapeFailures, ...resolved.failures];
@@ -916,6 +1001,7 @@ export async function generateClipIdeas(
       const retryResolved = resolveAnchors(
         retryExtracted.ideas,
         args.transcriptWords,
+        args.transcriptSegments,
         args.durationSec,
       );
       const retryFailures = [

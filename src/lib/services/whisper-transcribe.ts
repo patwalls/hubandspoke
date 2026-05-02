@@ -15,6 +15,16 @@ export interface TranscriptPromptPayload {
   durationSec: number;
   // Word-level timestamps from Whisper. Required by V7 anchor matching.
   words: Array<{ word: string; startSec: number; endSec: number }>;
+  // Segment-level timestamps from Whisper. Required by V7 cue-boundary
+  // snapping so a snapped clip range starts and ends on natural sentence
+  // cuts (otherwise the audio at startSec lands mid-sentence and the UI
+  // excerpt shows leading text the viewer never hears).
+  segments: Array<{
+    startSec: number;
+    endSec: number;
+    text: string;
+    speaker?: string;
+  }>;
 }
 
 function formatTimestamp(sec: number): string {
@@ -60,5 +70,6 @@ export async function getTranscriptForPrompt(
     segmentsMarkdown,
     durationSec: Number(row.durationSec ?? 0),
     words: row.words ?? [],
+    segments: row.segments,
   };
 }

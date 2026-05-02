@@ -204,6 +204,7 @@ export async function generateClipIdeasForItem(
     pillarChannels: item.platform,
     transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
     transcriptWords: transcript.words,
+    transcriptSegments: transcript.segments,
     durationSec: transcript.durationSec,
     derivatives,
     blueprint,
