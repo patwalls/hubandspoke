@@ -25,10 +25,35 @@ import { getStatusPalette } from "@/lib/db/brand-statuses";
 const CONTENT_LIMIT = 12;
 const FORMAT_LIMIT = 8;
 
+// Treat a copy-pasted quoted phrase ("Do it simpler.") as the unquoted text.
+// Only strip when both ends of the same pair match — preserves inner quotes
+// like `said "yes" and left` and unmatched quotes like `say "hi`.
+const QUOTE_PAIRS: Array<[string, string]> = [
+  ['"', '"'],
+  ["'", "'"],
+  ["“", "”"], // “ ”
+  ["‘", "’"], // ‘ ’
+];
+
+function stripSurroundingQuotes(s: string): string {
+  if (s.length < 2) return s;
+  for (const [open, close] of QUOTE_PAIRS) {
+    if (s.startsWith(open) && s.endsWith(close)) return s.slice(1, -1);
+  }
+  return s;
+}
+
+// Drizzle's ilike() passes the pattern through verbatim, so % and _ in user
+// input would behave as wildcards. Escape them (and the escape char itself).
+function escapeIlike(s: string): string {
+  return s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const brand = params.get("brand");
-  const q = (params.get("q") || "").trim();
+  let q = (params.get("q") || "").trim();
+  q = stripSurroundingQuotes(q).trim();
 
   if (!brand) {
     return NextResponse.json({ error: "brand is required" }, { status: 400 });
@@ -38,7 +63,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ content: [], formats: [] });
   }
 
-  const pattern = `%${q}%`;
+  const pattern = `%${escapeIlike(q)}%`;
 
   // If the user pasted a URL, prefer matching against the platform-native
   // content id (indexed, exact) and fall back to a loose substring of the URL
