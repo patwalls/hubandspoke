@@ -203,6 +203,7 @@ export async function generateClipIdeasForItem(
     pillarFormat: item.format,
     pillarChannels: item.platform,
     transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
+    transcriptWords: transcript.words,
     durationSec: transcript.durationSec,
     derivatives,
     blueprint,
@@ -228,6 +229,11 @@ export async function generateClipIdeasForItem(
         angle: idea.angle,
         rationale: idea.rationale,
         blueprintAnchorHook: idea.blueprintAnchorHook,
+        transcriptAnchorQuote: idea.transcriptAnchorQuote || null,
+        transcriptAnchorStartSec:
+          idea.transcriptAnchorStartSec != null
+            ? idea.transcriptAnchorStartSec.toFixed(3)
+            : null,
         estimatedViews: idea.estimatedViews,
         generatedBy: GENERATED_BY,
         promptVersion: PROMPT_VERSION,

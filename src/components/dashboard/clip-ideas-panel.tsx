@@ -16,6 +16,8 @@ interface ClipIdea {
   angle: string;
   rationale: string;
   blueprintAnchorHook: string | null;
+  transcriptAnchorQuote: string | null;
+  transcriptAnchorStartSec: number | null;
   algorithmLabel: string | null;
   confidence: number | null;
   estimatedViews: number | null;
@@ -335,6 +337,21 @@ export function ClipIdeasPanel({
                     </h4>
                     <p className="text-[12px] text-foreground/80 leading-relaxed italic">
                       &ldquo;{idea.blueprintAnchorHook}&rdquo;
+                    </p>
+                  </div>
+                )}
+                {idea.transcriptAnchorQuote && (
+                  <div className="space-y-0.5">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Anchor line
+                      {idea.transcriptAnchorStartSec != null && (
+                        <span className="ml-1.5 font-mono normal-case tracking-normal text-muted-foreground/70">
+                          @ {fmtTs(idea.transcriptAnchorStartSec)}
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-[12px] text-foreground/80 leading-relaxed italic">
+                      &ldquo;{idea.transcriptAnchorQuote}&rdquo;
                     </p>
                   </div>
                 )}

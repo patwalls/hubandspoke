@@ -1,11 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// Sonnet 4.6. Prompt V6: drop the verbatim-from-transcript rule (wrong for
-// narrated repackage formats), lead the system prompt with a REFERENCE LIBRARY
-// of actual sanitized blueprint hooks, and require each idea to declare which
-// blueprint row it's structurally mimicking.
+// Sonnet 4.6. Prompt V7: require each idea to cite a verbatim transcriptAnchor-
+// Quote — the line that DELIVERS the hook's payoff — and validate in code that
+// the citation actually falls inside startSec/endSec, snapping the range when
+// the model picks timestamps adjacent to (rather than over) the delivery line.
+// Fixes the V6 failure mode where the agent landed on a host's recap of the
+// guest's point instead of the guest making it.
 const MODEL = "claude-sonnet-4-6";
-export const PROMPT_VERSION = 6;
+export const PROMPT_VERSION = 7;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 // Friendly name for the clip-idea algorithm. Versioned alongside PROMPT_VERSION.
@@ -68,6 +70,20 @@ OTHER CLIP CONSTRAINTS
 - VARIETY. The 10 ideas must cover distinctly different moments. No repeated story beats.
 
 =====================================================
+ANCHOR QUOTE — ground the clip in a real transcript line
+=====================================================
+
+The single biggest failure mode of this format is picking timestamps that land on someone DISCUSSING a topic instead of someone DELIVERING it. The host recapping the guest's point ("That's great advice, Evan") is not the same as the guest making the point. Both will surface the same keywords; only one is the moment a viewer needs to see.
+
+For each clip, you must cite a transcriptAnchorQuote: a verbatim line copied from the transcript above that IS the climactic moment your clip is built around — the line that, by itself, justifies the hook.
+
+Rules:
+- VERBATIM. Copy from the transcript exactly — same words, same order, no paraphrasing. Punctuation differences are fine; word substitutions are not.
+- ≥ 8 words. Long enough to be unambiguous; short enough to be a single beat. If the delivery line is shorter, extend the quote into the next sentence to hit 8 words.
+- INSIDE THE CLIP RANGE. The anchor's [MM:SS] cue must fall between your startSec and endSec. If your range doesn't contain the anchor, you've picked the wrong range — fix the timestamps, not the anchor.
+- DELIVERY, NOT RECAP. If the guest says "X" at 10:46 and the host says "great point about X" at 11:04, the anchor is the 10:46 line — and your timestamps must encompass it. The fact that 11:04 is more on-the-nose is the trap; the value to the viewer is the original delivery.
+
+=====================================================
 ESTIMATED VIEWS
 =====================================================
 
@@ -80,12 +96,13 @@ OUTPUT
 Call propose_clip_ideas exactly once with 10 distinct ideas, sorted by estimatedViews descending.
 
 Each idea:
-- startSec / endSec: SECONDS (not MM:SS). Cue-aligned.
+- startSec / endSec: SECONDS (not MM:SS). Cue-aligned. Must encompass the transcriptAnchorQuote.
 - hook: the narrator overlay line in brand voice. Mirrors a REFERENCE LIBRARY pattern.
 - angle: one sentence on the payoff.
 - rationale: 2–4 sentences. Scroll-stopping move + emotional payoff + structural mirror to your blueprintAnchorHook.
 - estimatedViews: integer.
 - blueprintAnchorHook: the EXACT verbatim hook from the REFERENCE LIBRARY whose structure your hook is mirroring. Copy-paste the line.
+- transcriptAnchorQuote: ≥ 8 words copied verbatim from the FULL TRANSCRIPT block. The delivery line your clip is built around. Must fall inside startSec/endSec.
 
 Never respond with plain text. Always call the tool.`;
 
@@ -97,6 +114,16 @@ export interface ClipIdea {
   rationale: string;
   estimatedViews: number;
   blueprintAnchorHook: string | null;
+  // V7: verbatim transcript line that anchors the clip's payoff. The
+  // service layer matches this against the word-level transcript and stores
+  // the resulting timestamp in `transcriptAnchorStartSec`. Null only on
+  // legacy V5/V6 rows when reconstructed from the DB.
+  transcriptAnchorQuote: string;
+  // Matched start time for the anchor in the source transcript. Set by
+  // resolveAnchor() after generation, before insert. Null if matching
+  // failed for some reason (kept for forensics; an idea that lacks a match
+  // never makes it past validation).
+  transcriptAnchorStartSec: number | null;
 }
 
 export interface GenerationResult {
@@ -107,6 +134,11 @@ export interface GenerationResult {
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
   };
+  // Per-idea anchor-resolution telemetry. Useful for the eval harness; the
+  // service layer ignores this when persisting to the DB. Length matches the
+  // number of ideas the agent originally proposed (before dropping any whose
+  // anchors couldn't be resolved).
+  diagnostics: AnchorResolution["diagnostics"];
 }
 
 const tools: Anthropic.Tool[] = [
@@ -135,6 +167,11 @@ const tools: Anthropic.Tool[] = [
                 description:
                   "Verbatim hook from the REFERENCE LIBRARY whose structural pattern this idea is mirroring. Copy the line as shown.",
               },
+              transcriptAnchorQuote: {
+                type: "string",
+                description:
+                  "Verbatim quote (≥ 8 words) copied from the FULL TRANSCRIPT block above that IS the payoff moment of this clip. Must fall inside startSec/endSec. Pick the delivery line, not a recap.",
+              },
             },
             required: [
               "startSec",
@@ -144,6 +181,7 @@ const tools: Anthropic.Tool[] = [
               "rationale",
               "estimatedViews",
               "blueprintAnchorHook",
+              "transcriptAnchorQuote",
             ],
           },
         },
@@ -157,15 +195,34 @@ function normalizeForMatch(s: string): string {
   return s.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function validateIdeas(
+// Strip everything except letters, digits, and single spaces. Used by the
+// anchor matcher so quotes survive the LLM's punctuation/contraction/elision
+// quirks ("you're"/"you are", em-dashes, smart quotes, trailing periods).
+function normalizeForFuzzyMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[‘’“”]/g, "'")
+    .replace(/[^a-z0-9' ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenize(s: string): string[] {
+  const n = normalizeForFuzzyMatch(s);
+  return n.length === 0 ? [] : n.split(" ");
+}
+
+function validateShape(
   ideas: unknown,
   durationSec: number,
   referenceHooks: string[]
-): ClipIdea[] | null {
+): { ideas: ClipIdea[]; failures: string[] } | null {
   if (!Array.isArray(ideas)) return null;
   const refSet = new Set(referenceHooks.map(normalizeForMatch));
   const out: ClipIdea[] = [];
-  for (const raw of ideas) {
+  const failures: string[] = [];
+  for (let i = 0; i < ideas.length; i++) {
+    const raw = ideas[i];
     if (typeof raw !== "object" || raw === null) return null;
     const r = raw as Record<string, unknown>;
     const start = Number(r.startSec);
@@ -175,9 +232,13 @@ function validateIdeas(
     const rationale =
       typeof r.rationale === "string" ? r.rationale.trim() : "";
     const estimatedViews = Math.round(Number(r.estimatedViews));
-    const anchorRaw =
+    const blueprintAnchorRaw =
       typeof r.blueprintAnchorHook === "string"
         ? r.blueprintAnchorHook.trim()
+        : "";
+    const transcriptAnchorRaw =
+      typeof r.transcriptAnchorQuote === "string"
+        ? r.transcriptAnchorQuote.trim()
         : "";
     if (
       !Number.isFinite(start) ||
@@ -193,17 +254,29 @@ function validateIdeas(
     ) {
       return null;
     }
-    // Soft validation: when we have a reference library, the anchor must
-    // match one of its hooks (whitespace/case-insensitive). Without a library
-    // (no preferredFormat data for this brand yet), accept any non-empty value.
-    let anchor: string | null = null;
+    // Blueprint anchor: must match the reference library when one is
+    // available; loose otherwise. Same rule as V6.
+    let blueprintAnchor: string | null = null;
     if (refSet.size > 0) {
-      if (!anchorRaw || !refSet.has(normalizeForMatch(anchorRaw))) {
+      if (!blueprintAnchorRaw || !refSet.has(normalizeForMatch(blueprintAnchorRaw))) {
         return null;
       }
-      anchor = anchorRaw;
+      blueprintAnchor = blueprintAnchorRaw;
     } else {
-      anchor = anchorRaw || null;
+      blueprintAnchor = blueprintAnchorRaw || null;
+    }
+    // Transcript anchor: must be present and ≥ 8 words. The actual
+    // verbatim/in-range check happens in resolveAnchors() after the matcher
+    // sees the words array — we accumulate failures rather than returning
+    // null so the retry prompt can tell the LLM exactly which ideas missed.
+    if (!transcriptAnchorRaw) {
+      failures.push(
+        `Idea #${i + 1} ("${hook}") is missing transcriptAnchorQuote.`
+      );
+    } else if (tokenize(transcriptAnchorRaw).length < 8) {
+      failures.push(
+        `Idea #${i + 1} ("${hook}") has a transcriptAnchorQuote shorter than 8 words: "${transcriptAnchorRaw}". Extend it into the next sentence.`
+      );
     }
     out.push({
       startSec: start,
@@ -212,10 +285,223 @@ function validateIdeas(
       angle,
       rationale,
       estimatedViews,
-      blueprintAnchorHook: anchor,
+      blueprintAnchorHook: blueprintAnchor,
+      transcriptAnchorQuote: transcriptAnchorRaw,
+      transcriptAnchorStartSec: null,
     });
   }
-  return out.length === 10 ? out : null;
+  if (out.length !== 10) return null;
+  return { ideas: out, failures };
+}
+
+export interface TranscriptWord {
+  word: string;
+  startSec: number;
+  endSec: number;
+}
+
+interface AnchorMatch {
+  startSec: number;
+  endSec: number;
+  matchedText: string;
+}
+
+// Locate `quote` inside the word-level transcript via a tokenized contiguous
+// substring search. Returns null when no run of words in `words` matches the
+// tokenized quote — indicates the LLM hallucinated or paraphrased.
+//
+// The match is exact on the normalized token stream (lowercased, alpha-num +
+// apostrophes only). This is intentionally strict: the prompt asks for
+// VERBATIM, and a fuzzy match could let "I felt scared" through when the
+// actual line is "I was scared," sliding the timestamps off the intended beat.
+export function findAnchorInWords(
+  quote: string,
+  words: TranscriptWord[],
+): AnchorMatch | null {
+  const needle = tokenize(quote);
+  if (needle.length === 0 || words.length === 0) return null;
+  // Tokenize the words-array entries the same way; words can carry leading
+  // spaces / punctuation from Whisper, so each word may flatten to 0..N
+  // tokens. Track the source-word index so we can recover startSec/endSec.
+  type IndexedToken = { token: string; wordIdx: number };
+  const haystack: IndexedToken[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const tokens = tokenize(words[i].word);
+    for (const t of tokens) haystack.push({ token: t, wordIdx: i });
+  }
+  if (haystack.length < needle.length) return null;
+  outer: for (let i = 0; i <= haystack.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j].token !== needle[j]) continue outer;
+    }
+    const startWord = words[haystack[i].wordIdx];
+    const endWord = words[haystack[i + needle.length - 1].wordIdx];
+    return {
+      startSec: startWord.startSec,
+      endSec: endWord.endSec,
+      matchedText: words
+        .slice(haystack[i].wordIdx, haystack[i + needle.length - 1].wordIdx + 1)
+        .map((w) => w.word)
+        .join("")
+        .trim(),
+    };
+  }
+  return null;
+}
+
+// Snap [startSec, endSec] so it contains the anchor while preserving the LLM's
+// intended duration. The anchor lands ~70% through the clip — the payoff zone
+// in short-form pacing — leaving room for setup before it. When that snap
+// would push the clip past the video duration, cap to durationSec; when the
+// resulting clip falls outside the 25–95s envelope, signal an error.
+function snapRangeToAnchor(args: {
+  startSec: number;
+  endSec: number;
+  anchorStartSec: number;
+  anchorEndSec: number;
+  durationSec: number;
+}): { startSec: number; endSec: number } | { error: string } {
+  const intendedDuration = args.endSec - args.startSec;
+  const minDuration = 25;
+  const maxDuration = 95;
+  const targetDuration = Math.max(
+    minDuration,
+    Math.min(maxDuration, intendedDuration),
+  );
+  // Place the anchor at 70% of the way through the clip — typical
+  // setup→payoff arc in this format.
+  const anchorMidpoint = (args.anchorStartSec + args.anchorEndSec) / 2;
+  let newStart = anchorMidpoint - targetDuration * 0.7;
+  let newEnd = anchorMidpoint + targetDuration * 0.3;
+  if (newStart < 0) {
+    newEnd += -newStart;
+    newStart = 0;
+  }
+  if (newEnd > args.durationSec) {
+    newStart -= newEnd - args.durationSec;
+    newEnd = args.durationSec;
+  }
+  if (newStart < 0) newStart = 0;
+  const finalDuration = newEnd - newStart;
+  if (finalDuration < minDuration || finalDuration > maxDuration) {
+    return {
+      error: `cannot snap to a ${minDuration}-${maxDuration}s clip around anchor at ${args.anchorStartSec.toFixed(1)}s (got ${finalDuration.toFixed(1)}s)`,
+    };
+  }
+  return { startSec: newStart, endSec: newEnd };
+}
+
+export interface AnchorResolution {
+  ideas: ClipIdea[];
+  failures: string[];
+  diagnostics: Array<{
+    ideaIndex: number; // 0-based
+    hook: string;
+    quote: string;
+    found: boolean;
+    insideRange: boolean;
+    snapApplied: boolean;
+    finalStartSec: number;
+    finalEndSec: number;
+    anchorStartSec: number | null;
+  }>;
+}
+
+// Match every idea's transcriptAnchorQuote against the words array. Snap the
+// [startSec, endSec] when the anchor falls outside the picked range. Returns
+// the resolved ideas plus a list of human-readable failures suitable for the
+// retry prompt; when failures is non-empty, all 10 ideas could not be
+// validated and the caller should re-prompt.
+export function resolveAnchors(
+  ideas: ClipIdea[],
+  words: TranscriptWord[],
+  durationSec: number,
+): AnchorResolution {
+  const failures: string[] = [];
+  const diagnostics: AnchorResolution["diagnostics"] = [];
+  const out: ClipIdea[] = [];
+  for (let i = 0; i < ideas.length; i++) {
+    const idea = ideas[i];
+    const match = findAnchorInWords(idea.transcriptAnchorQuote, words);
+    if (!match) {
+      failures.push(
+        `Idea #${i + 1} ("${idea.hook}") — transcriptAnchorQuote not found verbatim in transcript: "${idea.transcriptAnchorQuote}". Quote a real line from the FULL TRANSCRIPT, word-for-word.`
+      );
+      diagnostics.push({
+        ideaIndex: i,
+        hook: idea.hook,
+        quote: idea.transcriptAnchorQuote,
+        found: false,
+        insideRange: false,
+        snapApplied: false,
+        finalStartSec: idea.startSec,
+        finalEndSec: idea.endSec,
+        anchorStartSec: null,
+      });
+      out.push(idea);
+      continue;
+    }
+    const insideRange =
+      match.startSec >= idea.startSec && match.endSec <= idea.endSec;
+    if (insideRange) {
+      diagnostics.push({
+        ideaIndex: i,
+        hook: idea.hook,
+        quote: idea.transcriptAnchorQuote,
+        found: true,
+        insideRange: true,
+        snapApplied: false,
+        finalStartSec: idea.startSec,
+        finalEndSec: idea.endSec,
+        anchorStartSec: match.startSec,
+      });
+      out.push({ ...idea, transcriptAnchorStartSec: match.startSec });
+      continue;
+    }
+    const snap = snapRangeToAnchor({
+      startSec: idea.startSec,
+      endSec: idea.endSec,
+      anchorStartSec: match.startSec,
+      anchorEndSec: match.endSec,
+      durationSec,
+    });
+    if ("error" in snap) {
+      failures.push(
+        `Idea #${i + 1} ("${idea.hook}") — anchor at ${match.startSec.toFixed(1)}s is outside startSec=${idea.startSec.toFixed(0)}/endSec=${idea.endSec.toFixed(0)} and ${snap.error}. Re-pick startSec/endSec to encompass the line: "${idea.transcriptAnchorQuote}".`
+      );
+      diagnostics.push({
+        ideaIndex: i,
+        hook: idea.hook,
+        quote: idea.transcriptAnchorQuote,
+        found: true,
+        insideRange: false,
+        snapApplied: false,
+        finalStartSec: idea.startSec,
+        finalEndSec: idea.endSec,
+        anchorStartSec: match.startSec,
+      });
+      out.push(idea);
+      continue;
+    }
+    diagnostics.push({
+      ideaIndex: i,
+      hook: idea.hook,
+      quote: idea.transcriptAnchorQuote,
+      found: true,
+      insideRange: false,
+      snapApplied: true,
+      finalStartSec: snap.startSec,
+      finalEndSec: snap.endSec,
+      anchorStartSec: match.startSec,
+    });
+    out.push({
+      ...idea,
+      startSec: snap.startSec,
+      endSec: snap.endSec,
+      transcriptAnchorStartSec: match.startSec,
+    });
+  }
+  return { ideas: out, failures, diagnostics };
 }
 
 export interface PerfRow {
@@ -247,6 +533,9 @@ export interface GenerateArgs {
   pillarFormat: string | null;
   pillarChannels: string[] | null;
   transcriptSegmentsMarkdown: string;
+  // Word-level transcript timestamps from Whisper. Required by V7 to locate
+  // each idea's transcriptAnchorQuote and snap the clip range around it.
+  transcriptWords: TranscriptWord[];
   durationSec: number;
   derivatives: PerfRow[];     // short-form derivatives of THIS pillar
   blueprint: BlueprintRow[];  // top in-format performers — full anatomy (V5)
@@ -475,17 +764,31 @@ export async function generateClipIdeas(
     });
   }
 
-  let response = await attempt();
-  let ideas: ClipIdea[] | null = null;
-  for (const block of response.content) {
-    if (block.type === "tool_use" && block.name === "propose_clip_ideas") {
-      const input = block.input as { ideas?: unknown };
-      ideas = validateIdeas(input.ideas, args.durationSec, referenceHooks);
-      break;
+  function extractIdeas(
+    response: Anthropic.Message,
+  ): { ideas: ClipIdea[]; shapeFailures: string[] } | null {
+    for (const block of response.content) {
+      if (block.type === "tool_use" && block.name === "propose_clip_ideas") {
+        const input = block.input as { ideas?: unknown };
+        const shape = validateShape(
+          input.ideas,
+          args.durationSec,
+          referenceHooks,
+        );
+        if (!shape) return null;
+        return { ideas: shape.ideas, shapeFailures: shape.failures };
+      }
     }
+    return null;
   }
 
-  if (!ideas) {
+  // Pass 1.
+  let response = await attempt();
+  let extracted = extractIdeas(response);
+
+  if (!extracted) {
+    // Hard validation failure (missing/malformed fields, wrong count, etc.).
+    // Re-prompt with the V6-style structural reminder and try once more.
     const refReminder =
       referenceHooks.length > 0
         ? ` Each idea's blueprintAnchorHook must be the EXACT verbatim text of one of these REFERENCE LIBRARY hooks: ${referenceHooks
@@ -493,28 +796,74 @@ export async function generateClipIdeas(
             .join(", ")}.`
         : "";
     response = await attempt(
-      `Your previous response failed validation: each idea needs finite numeric startSec/endSec (seconds, 0 ≤ start < end ≤ ${Math.round(args.durationSec)}), non-empty hook/angle/rationale, a non-negative integer estimatedViews, and a blueprintAnchorHook string.${refReminder} Return exactly 10 ideas.`
+      `Your previous response failed validation: each idea needs finite numeric startSec/endSec (seconds, 0 ≤ start < end ≤ ${Math.round(args.durationSec)}), non-empty hook/angle/rationale, a non-negative integer estimatedViews, a blueprintAnchorHook, and a transcriptAnchorQuote (≥ 8 words copied verbatim from the FULL TRANSCRIPT block).${refReminder} Return exactly 10 ideas.`,
     );
-    for (const block of response.content) {
-      if (block.type === "tool_use" && block.name === "propose_clip_ideas") {
-        const input = block.input as { ideas?: unknown };
-        ideas = validateIdeas(input.ideas, args.durationSec, referenceHooks);
-        break;
+    extracted = extractIdeas(response);
+  }
+
+  if (!extracted) {
+    throw new Error("Clip-idea agent returned no valid tool call after retry");
+  }
+
+  // Pass 2: resolve anchors against the word-level transcript. Snap ranges
+  // when needed; collect failures for ideas whose anchors are missing or
+  // unfixable. If we have any anchor failures (or any shape-level
+  // anchor-too-short complaints), re-prompt once with idea-specific feedback.
+  let resolved = resolveAnchors(
+    extracted.ideas,
+    args.transcriptWords,
+    args.durationSec,
+  );
+  const allAnchorFailures = [...extracted.shapeFailures, ...resolved.failures];
+
+  if (allAnchorFailures.length > 0) {
+    const feedback = [
+      "Your previous response had anchor problems on these ideas:",
+      ...allAnchorFailures.map((f) => `- ${f}`),
+      "",
+      "Return all 10 ideas again. For each problem idea, EITHER quote a real verbatim transcript line that falls inside startSec/endSec, OR adjust startSec/endSec so they encompass the anchor line. The anchor must be the moment the hook's premise is DELIVERED, not where it's recapped or referenced.",
+    ].join("\n");
+    response = await attempt(feedback);
+    const retryExtracted = extractIdeas(response);
+    if (retryExtracted) {
+      const retryResolved = resolveAnchors(
+        retryExtracted.ideas,
+        args.transcriptWords,
+        args.durationSec,
+      );
+      const retryFailures = [
+        ...retryExtracted.shapeFailures,
+        ...retryResolved.failures,
+      ];
+      // Accept the retry only if it strictly beats the first pass — otherwise
+      // we'd be replacing one bad batch with another.
+      if (retryFailures.length < allAnchorFailures.length) {
+        extracted = retryExtracted;
+        resolved = retryResolved;
       }
     }
   }
 
-  if (!ideas) {
-    throw new Error("Clip-idea agent returned no valid tool call after retry");
+  // Drop any ideas that still failed (unresolved anchor or unsnappable
+  // out-of-range anchor) — better to ship 8 valid clips than one with a
+  // hallucinated anchor. The service layer doesn't currently require exactly
+  // 10; the eval harness reads `diagnostics` to see what was dropped.
+  const validIdeas: ClipIdea[] = [];
+  for (let i = 0; i < resolved.ideas.length; i++) {
+    const diag = resolved.diagnostics[i];
+    if (diag.found && (diag.insideRange || diag.snapApplied)) {
+      validIdeas.push(resolved.ideas[i]);
+    }
   }
 
   return {
-    ideas,
+    ideas: validIdeas,
     modelUsage: {
       input_tokens: response.usage.input_tokens,
       output_tokens: response.usage.output_tokens,
       cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
       cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
     },
+    diagnostics: resolved.diagnostics,
   };
 }

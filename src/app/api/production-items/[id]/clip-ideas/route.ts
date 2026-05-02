@@ -58,6 +58,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       angle: clipIdeas.angle,
       rationale: clipIdeas.rationale,
       blueprintAnchorHook: clipIdeas.blueprintAnchorHook,
+      transcriptAnchorQuote: clipIdeas.transcriptAnchorQuote,
+      transcriptAnchorStartSec: clipIdeas.transcriptAnchorStartSec,
       promptVersion: clipIdeas.promptVersion,
       confidence: clipIdeas.confidence,
       estimatedViews: clipIdeas.estimatedViews,
@@ -106,6 +108,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         endSec,
         confidence: i.confidence != null ? Number(i.confidence) : null,
         estimatedViews: i.estimatedViews ?? null,
+        transcriptAnchorStartSec:
+          i.transcriptAnchorStartSec != null
+            ? Number(i.transcriptAnchorStartSec)
+            : null,
         acceptedEditorName: i.editorName ?? i.editorEmail ?? null,
         acceptedEditorEmail: i.editorEmail ?? null,
         transcriptExcerpt: buildExcerpt(segments, startSec, endSec),

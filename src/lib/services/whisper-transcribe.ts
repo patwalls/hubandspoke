@@ -13,6 +13,11 @@ export interface TranscriptPromptPayload {
   fullText: string;
   segmentsMarkdown: string;
   durationSec: number;
+  // Word-level timestamps from Whisper. Empty array on legacy
+  // source='descript' rows (no per-word timing) — V7 anchor matching will
+  // skip those gracefully (every quote will fail to match, the agent will
+  // get a retry prompt, and the operator can re-run after re-transcribing).
+  words: Array<{ word: string; startSec: number; endSec: number }>;
 }
 
 function formatTimestamp(sec: number): string {
@@ -38,6 +43,7 @@ export async function getTranscriptForPrompt(
     .select({
       fullText: transcripts.fullText,
       segments: transcripts.segments,
+      words: transcripts.words,
       durationSec: transcripts.durationSec,
     })
     .from(transcripts)
@@ -59,5 +65,6 @@ export async function getTranscriptForPrompt(
     fullText: row.fullText,
     segmentsMarkdown,
     durationSec: Number(row.durationSec ?? 0),
+    words: row.words ?? [],
   };
 }

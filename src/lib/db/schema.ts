@@ -448,6 +448,13 @@ export const clipIdeas = pgTable(
     // structural pattern this idea is mirroring. Lets us audit which viral
     // hook each idea descends from. Nullable so older V5 rows still read.
     blueprintAnchorHook: text("blueprint_anchor_hook"),
+    // V7: a verbatim line copied from the source transcript that delivers
+    // the clip's payoff. The agent must cite this; we then locate it in the
+    // word-level transcript and snap startSec/endSec around it. Lets us
+    // audit which moment a clip is actually built around. Nullable so older
+    // V5/V6 rows still read.
+    transcriptAnchorQuote: text("transcript_anchor_quote"),
+    transcriptAnchorStartSec: decimal("transcript_anchor_start_sec"),
     // Legacy field from the first cut; unused now that the agent returns
     // estimatedViews. Kept nullable so older rows still read.
     confidence: decimal("confidence"),
