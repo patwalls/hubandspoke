@@ -20,6 +20,7 @@ import {
 } from "@/lib/services/view-predictor";
 import { resolveSchemaForPlatforms } from "@/lib/platform-field-schemas";
 import { getPresignedGetUrl } from "@/lib/s3";
+import { getChannelsForFormats } from "@/lib/format-channels";
 
 const POSTER_URL_TTL_SECONDS = 60 * 60;
 
@@ -366,16 +367,21 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
     // Scope Repurpose targets to direct children of this item's source format.
     // The item stores its format as a text name, so resolve it via brandFormats.
+    // Mirrors the columns the /{brand}/formats listing renders so the Repurpose
+    // tab can use the same Table primitives: name, parent, channels, editor,
+    // viewThreshold, totalViews (rolled up the same way as the formats page).
     const sourceFormat = item.format
       ? brandFormats.find((f) => f.name === item.format)
       : undefined;
-    const repurposeTargets = sourceFormat
+    const repurposeTargetRows = sourceFormat
       ? await db
           .select({
             id: formats.id,
             name: formats.name,
             parentFormatId: formats.parentFormatId,
             instructions: formats.instructions,
+            viewThreshold: formats.viewThreshold,
+            editor: formats.editor,
           })
           .from(formats)
           .where(
@@ -386,6 +392,50 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           )
           .orderBy(formats.name)
       : [];
+
+    // Total views per format name in this brand. Same query shape the formats
+    // listing uses (`/api/formats:41-58`) — repurpose targets are direct
+    // children of one source format so a flat lookup is sufficient (no rollup
+    // through grandchildren needed for the Repurpose tab today).
+    const repurposeViewsRows =
+      repurposeTargetRows.length > 0
+        ? await db
+            .select({
+              format: productionItems.format,
+              total: sql<string>`COALESCE(SUM(${productionItems.views}), 0)`,
+            })
+            .from(productionItems)
+            .where(
+              and(
+                eq(productionItems.brand, item.brand),
+                isNotNull(productionItems.format),
+                inArray(
+                  productionItems.format,
+                  repurposeTargetRows.map((r) => r.name)
+                )
+              )
+            )
+            .groupBy(productionItems.format)
+        : [];
+    const totalViewsByFormatName = new Map<string, number>();
+    for (const r of repurposeViewsRows) {
+      if (r.format) totalViewsByFormatName.set(r.format, Number(r.total) || 0);
+    }
+
+    const repurposeChannelsByFormat = await getChannelsForFormats(
+      repurposeTargetRows.map((r) => r.id)
+    );
+
+    const repurposeTargets = repurposeTargetRows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      parentFormatId: r.parentFormatId,
+      instructions: r.instructions,
+      viewThreshold: r.viewThreshold,
+      editor: r.editor,
+      accountChannels: repurposeChannelsByFormat.get(r.id) ?? [],
+      totalViews: totalViewsByFormatName.get(r.name) ?? 0,
+    }));
 
     // Top performers in this format: up to 3 published items with highest views.
     // Used to show creators benchmarks for the format they're creating in.

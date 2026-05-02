@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -66,6 +66,15 @@ import {
   type PickerAccount,
 } from "@/components/ui/account-post-type-picker";
 import { AccountBadge } from "@/components/ui/account-badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import type { FormatChannelWithAccount } from "@/lib/format-channels";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
@@ -85,6 +94,14 @@ interface BrandFormat {
   name: string;
   parentFormatId: string | null;
   instructions: string | null;
+  // Extra fields surfaced by the Repurpose tab so it can mirror the
+  // /{brand}/formats listing layout. Only populated on `repurposeTargets` —
+  // the bare `formatNames` list shape stays smaller; readers tolerate
+  // undefined.
+  viewThreshold?: number | null;
+  editor?: string | null;
+  accountChannels?: FormatChannelWithAccount[];
+  totalViews?: number;
 }
 
 type DerivativeRow = ProductionItem & { depth: number };
@@ -3055,95 +3072,187 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             with content type <span className="font-mono">Repurposed</span> to see it here.
           </p>
         ) : (
-          <div className="divide-y divide-border border border-border rounded-lg overflow-hidden">
-            {repurposeTargets.map((f) => {
-              const st = clipStatus[f.id];
-              const busy = st?.state === "running";
-              const directiveText =
-                st?.kind === "manual_task" ? st.guidance : st?.descriptPrompt;
-              const showDirective =
-                (st?.state === "previewed" ||
-                  st?.state === "clipped" ||
-                  st?.state === "created") &&
-                !!directiveText;
-              const hasDetails =
-                showDirective ||
-                st?.state === "clipped" ||
-                st?.state === "created" ||
-                st?.state === "error";
-              return (
-                <div key={f.id} className="px-3 py-2 bg-card">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                      <Link
-                        href={`/${brand}/formats/${f.id}`}
-                        className="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors"
-                        title="Edit this format's skill / prompt"
-                      >
-                        {f.name}
-                      </Link>
-                      {st?.label && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-accent text-muted-foreground border border-border">
-                          {st.label}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => callRepurpose(f.id, "preview")}
-                        disabled={busy || repurposingAll}
-                        title="Ask Claude what it would do — no Notion or Descript writes."
-                        className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {busy && st?.firedAt === "preview"
-                          ? "Dry running…"
-                          : "Dry run"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => callRepurpose(f.id, "real")}
-                        disabled={busy || repurposingAll}
-                        title="Creates a Notion task and, for clip-style skills, fires the Descript job."
-                        className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {busy && st?.firedAt === "real"
-                          ? "Repurposing…"
-                          : "Repurpose →"}
-                      </button>
-                    </div>
-                  </div>
-                  {hasDetails && (
-                    <div className="mt-2 space-y-1.5">
-                      {showDirective && (
-                        <div className="text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
-                          {directiveText}
-                        </div>
-                      )}
-                      {(st?.state === "clipped" || st?.state === "created") && (
-                        <div className="flex items-center gap-3 flex-wrap">
-                          {st.state === "clipped" && st.projectUrl && (
-                            <a
-                              href={st.projectUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[11px] text-primary hover:underline"
+          <div className="rounded-md border border-border bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Channels</TableHead>
+                  <TableHead>Editor</TableHead>
+                  <TableHead className="text-right">Threshold</TableHead>
+                  <TableHead className="text-right">Total Views</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {repurposeTargets.map((f) => {
+                  const st = clipStatus[f.id];
+                  const busy = st?.state === "running";
+                  const directiveText =
+                    st?.kind === "manual_task"
+                      ? st.guidance
+                      : st?.descriptPrompt;
+                  const showDirective =
+                    (st?.state === "previewed" ||
+                      st?.state === "clipped" ||
+                      st?.state === "created") &&
+                    !!directiveText;
+                  const editorUser = f.editor
+                    ? assignableUsers.find(
+                        (u) =>
+                          u.name === f.editor ||
+                          u.email === f.editor
+                      ) ?? null
+                    : null;
+                  // Every repurposeTarget is a direct child of `item.format`
+                  // by construction (the API's `parentFormatId` filter), so
+                  // the parent display name is just the item's source format.
+                  const parentName = item.format ?? null;
+                  const channels = f.accountChannels ?? [];
+                  return (
+                    <React.Fragment key={f.id}>
+                      <TableRow>
+                        <TableCell>
+                          <span className="flex items-center gap-2 min-w-0">
+                            {parentName && (
+                              <>
+                                <Link
+                                  href={`/${brand}/formats/${f.parentFormatId}`}
+                                  className="text-muted-foreground hover:text-foreground hover:underline truncate max-w-[180px]"
+                                >
+                                  {parentName}
+                                </Link>
+                                <span className="text-muted-foreground shrink-0">
+                                  →
+                                </span>
+                              </>
+                            )}
+                            <Link
+                              href={`/${brand}/formats/${f.id}`}
+                              className="font-medium text-foreground hover:underline truncate"
+                              title="Edit this format's skill / prompt"
                             >
-                              Open in Descript →
-                            </a>
+                              {f.name}
+                            </Link>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-purple-50 text-purple-700">
+                              Derivative
+                            </span>
+                            {st?.label && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-accent text-muted-foreground border border-border">
+                                {st.label}
+                              </span>
+                            )}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1 max-w-[260px]">
+                            {channels.slice(0, 3).map((c) => (
+                              <AccountBadge
+                                key={`${c.accountId}|${c.postType ?? ""}`}
+                                account={c.account}
+                                postType={c.postType}
+                              />
+                            ))}
+                            {channels.length > 3 && (
+                              <span className="text-xs text-muted-foreground">
+                                +{channels.length - 3}
+                              </span>
+                            )}
+                            {channels.length === 0 && (
+                              <span className="text-xs text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {editorUser ? (
+                            <UserChip user={editorUser} size="xs" />
+                          ) : (
+                            "—"
                           )}
-                        </div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {f.viewThreshold != null
+                            ? f.viewThreshold.toLocaleString()
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-foreground">
+                          {f.totalViews && f.totalViews > 0
+                            ? f.totalViews.toLocaleString()
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="inline-flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => callRepurpose(f.id, "preview")}
+                              disabled={busy || repurposingAll}
+                              title="Ask Claude what it would do — no Notion or Descript writes."
+                              className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {busy && st?.firedAt === "preview"
+                                ? "Dry running…"
+                                : "Dry run"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => callRepurpose(f.id, "real")}
+                              disabled={busy || repurposingAll}
+                              title="Creates a Notion task and, for clip-style skills, fires the Descript job."
+                              className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {busy && st?.firedAt === "real"
+                                ? "Repurposing…"
+                                : "Repurpose →"}
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {(showDirective ||
+                        st?.state === "clipped" ||
+                        st?.state === "created" ||
+                        st?.state === "error") && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={6}
+                            className="bg-muted/30 py-2"
+                          >
+                            <div className="space-y-1.5">
+                              {showDirective && (
+                                <div className="text-[11px] text-muted-foreground bg-muted/40 border border-border rounded-md p-2 whitespace-pre-wrap font-mono">
+                                  {directiveText}
+                                </div>
+                              )}
+                              {(st?.state === "clipped" ||
+                                st?.state === "created") && (
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  {st.state === "clipped" && st.projectUrl && (
+                                    <a
+                                      href={st.projectUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[11px] text-primary hover:underline"
+                                    >
+                                      Open in Descript →
+                                    </a>
+                                  )}
+                                </div>
+                              )}
+                              {st?.state === "error" && (
+                                <p className="text-[11px] text-destructive">
+                                  {st.message}
+                                </p>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
                       )}
-                      {st?.state === "error" && (
-                        <p className="text-[11px] text-destructive">
-                          {st.message}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    </React.Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
         )}
 
