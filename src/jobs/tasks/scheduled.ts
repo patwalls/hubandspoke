@@ -7,7 +7,6 @@ import type { Task } from "graphile-worker";
 import { syncFromNotion } from "@/lib/services/notion-sync";
 import { syncPerformanceData } from "@/lib/services/performance-decay";
 import { runEvergreenScan } from "@/lib/services/evergreen-scan";
-import { runCrossPostScan } from "@/lib/services/cross-post-scan";
 import { selectEnrichmentCandidates } from "@/lib/services/enrichment/orchestrator";
 import { selectHookCandidates } from "@/lib/services/hook-extract/orchestrator";
 import { selectHookFallbackCandidates } from "@/lib/services/hook-extract/fallback";
@@ -188,9 +187,6 @@ export const hookDispatchSweepTask: Task = async (_payload, helpers) => {
 };
 export const evergreenScanTask: Task = timed("evergreen-scan", () =>
   runEvergreenScan()
-);
-export const crossPostScanTask: Task = timed("cross-post-scan", () =>
-  runCrossPostScan()
 );
 
 /**

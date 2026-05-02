@@ -25,7 +25,7 @@ export type DefaultStatusSeed = {
 // these would silently break a flow. Centralized here so future code stays
 // in sync; the backfill script reads the same list to retro-flag rows.
 //   - Idea: created by repost/cross-post/duplicate/clip-out/threshold-monitor;
-//     filtered by queue-view, cross-post-feed, evergreen-scan, cross-post-scan
+//     filtered by queue-view, cross-post-feed, evergreen-scan
 //   - Assigned: target status of triage "accept", clip promotion, queue
 //     outcome flow; my-work role logic keys off it
 //   - Published: publish-date filters in queries.ts

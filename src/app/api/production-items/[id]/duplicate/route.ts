@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -36,6 +37,11 @@ export async function POST(_request: Request, context: RouteContext) {
 
   const title = source.title ? `${source.title} (copy)` : "(copy)";
 
+  // Don't carry a stale `format` from the source — if it doesn't exist in
+  // the brand's formats table, set null instead of propagating the drift.
+  const formatCheck = await normalizeFormatForWrite(source.brand, source.format);
+  const inheritedFormat = formatCheck.ok ? formatCheck.value : null;
+
   const [created] = await db
     .insert(productionItems)
     .values({
@@ -45,7 +51,7 @@ export async function POST(_request: Request, context: RouteContext) {
       status: "Idea",
       platform: source.platform,
       sourceType: "original",
-      format: source.format,
+      format: inheritedFormat,
       pillarContentNotionId: source.pillarContentNotionId,
       pillarContentItemId: source.pillarContentItemId,
       utmCampaign: await generateUtmCampaign(title),

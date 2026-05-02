@@ -222,6 +222,7 @@ import {
   type WeekStartsOn,
 } from "@/lib/utils/dates";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
+import { fetchFormatViewBars } from "@/lib/services/format-view-bars";
 
 interface ReportParams {
   brand: string;
@@ -565,6 +566,11 @@ export async function getContentReport(
   );
   await attachPresignedCoverUrls(mappedItems);
 
+  // Per-format P75 view bars over the last 90 days — used to render the
+  // "vs P75" column on the Content table. Cross-brand cohort by design;
+  // shares its definition with the cross-post candidate finder.
+  const formatBars = await fetchFormatViewBars();
+
   return {
     periods,
     byPlatform: {
@@ -590,6 +596,7 @@ export async function getContentReport(
     // New metadata consumed by the UI to render `[icon] @handle · Type`
     // row labels in place of raw platform strings.
     primaryRowMeta,
+    formatBars,
   };
 }
 

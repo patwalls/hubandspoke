@@ -63,23 +63,6 @@ export function platformSupportsBackfill(platform: string): boolean {
   return BACKFILL_SUPPORTED.has(platform);
 }
 
-/**
- * Best-effort default format per post type. Drives assignee resolution (via
- * `formats.producer_notion_user_id`) and UI grouping. Null means "let the
- * user pick" — the row is still valid and assignees fall back to the brand
- * defaults. `youtube_long` intentionally stays null since format names vary
- * per brand (MATG uses "Business Interview"; others differ).
- */
-const DEFAULT_FORMAT_BY_POST_TYPE: Partial<Record<PostType, string>> = {
-  youtube_shorts: "YouTube Short",
-  instagram_reel: "Instagram Reel",
-  instagram_post: "Instagram Post",
-  x: "Tweet",
-  tiktok: "TikTok",
-  linkedin: "LinkedIn Post",
-  threads: "Threads",
-};
-
 const PLATFORM_LABEL: Record<PostType, string> = {
   youtube_long: "YouTube",
   youtube_shorts: "YouTube Shorts",
@@ -814,16 +797,21 @@ async function upsertItems(
           continue;
         }
 
-        const format = DEFAULT_FORMAT_BY_POST_TYPE[item.postType] ?? null;
+        // No auto-format — synced posts arrive with format=null so operators
+        // can tag intentionally in the UI. The hardcoded post-type → format
+        // defaults that lived here historically were producing surprising
+        // tags (e.g. every tweet getting `format='Tweet'`) and have been
+        // removed; the LLM-driven `scripts/backfill-missing-formats.mjs`
+        // is the only remaining writer that infers format and is opt-in.
         const assignees = await resolveAssignees({
           brand: brandSlug,
-          format,
+          format: null,
         });
         const [inserted] = await db
           .insert(productionItems)
           .values({
             ...insertPayload,
-            format,
+            format: null,
             utmCampaign: await generateUtmCampaign(item.title),
             producerUserId: assignees.producerUserId,
             editorUserId: assignees.editorUserId,

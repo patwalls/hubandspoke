@@ -16,6 +16,7 @@ import {
 } from "@/lib/services/view-predictor";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { extractContentId } from "@/lib/platform-url";
@@ -120,6 +121,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const formatCheck = await normalizeFormatForWrite(brand, format);
+    if (!formatCheck.ok) {
+      return NextResponse.json({ error: formatCheck.error }, { status: 400 });
+    }
+    const validatedFormat = formatCheck.value;
+
     let finalViews = views ?? null;
     let finalLikes = likes ?? null;
     let finalComments = comments ?? null;
@@ -186,7 +193,7 @@ export async function POST(request: NextRequest) {
       typeof body.editorUserId === "string" ? body.editorUserId : null;
     const resolved = await resolveAssignees({
       brand,
-      format: format || null,
+      format: validatedFormat,
     });
     const producerUserId = bodyProducerUserId ?? resolved.producerUserId;
     const editorUserId = bodyEditorUserId ?? resolved.editorUserId;
@@ -252,7 +259,7 @@ export async function POST(request: NextRequest) {
         platform,
         accountId: accountId || null,
         postType: postType || null,
-        format: format || null,
+        format: validatedFormat,
         publishedLink: publishedLink || null,
         platformContentId,
         publishedDate,
@@ -382,6 +389,30 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    // Validate format references a real row in the brand's formats list
+    // before doing anything else. Resolves the row's brand once for the
+    // lookup; the cost is one extra SELECT only when the caller is
+    // touching format.
+    let validatedFormat: string | null | undefined = undefined;
+    if (format !== undefined) {
+      const [row] = await db
+        .select({ brand: productionItems.brand })
+        .from(productionItems)
+        .where(eq(productionItems.id, id))
+        .limit(1);
+      if (!row) {
+        return NextResponse.json(
+          { error: "Item not found" },
+          { status: 404 }
+        );
+      }
+      const check = await normalizeFormatForWrite(row.brand, format);
+      if (!check.ok) {
+        return NextResponse.json({ error: check.error }, { status: 400 });
+      }
+      validatedFormat = check.value;
+    }
+
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
 
     if (title !== undefined) updateData.title = title;
@@ -391,7 +422,7 @@ export async function PUT(request: NextRequest) {
     // until the finalize migration drops it.
     if (accountId !== undefined) updateData.accountId = accountId || null;
     if (postType !== undefined) updateData.postType = postType || null;
-    if (format !== undefined) updateData.format = format || null;
+    if (format !== undefined) updateData.format = validatedFormat ?? null;
     if (publishedLink !== undefined) {
       updateData.publishedLink = publishedLink || null;
       // Re-derive platform_content_id whenever the URL changes so the
@@ -578,7 +609,7 @@ export async function PUT(request: NextRequest) {
             ? (platform as string[] | null)
             : ((current.platform as string[] | null) ?? null);
         const nextFormat =
-          format !== undefined ? (format || null) : current.format;
+          format !== undefined ? validatedFormat ?? null : current.format;
         const nextPillar =
           pillarContentItemId !== undefined
             ? pillarContentItemId || null

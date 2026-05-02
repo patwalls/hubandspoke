@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { accounts, productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { isNotionAuthoritativeAccount } from "@/lib/platform";
 
@@ -14,12 +15,24 @@ interface RouteContext {
 /**
  * POST /api/production-items/[id]/cross-post
  *
- * Body: { targetAccountId: string, targetPostType?: string | null }
+ * Body:
+ *   { targetAccountId: string,
+ *     targetPostType?: string | null,
+ *     assign?: boolean,
+ *     editorUserId?: string | null }
  *
  * Creates a new `cross_post` production item from the source item for the
  * given target account. Inherits title, thumbnail, format, pillar, and brand
- * from the source. Status starts as "Idea". Returns the new item id so the
- * client can redirect to the detail page.
+ * from the source. Returns the new item id so the client can redirect to
+ * the detail page.
+ *
+ * Status semantics:
+ *   - default (no `assign`, no `editorUserId`) → status = "Idea". Used by
+ *     the per-item Cross-post submenu on `/content/[id]`.
+ *   - `assign: true` and/or `editorUserId` provided → status = "Assigned".
+ *     `editorUserId` overrides `resolveAssignees`'s pick. Used by the v3
+ *     cross-post queue modal so "Cross-post to @handle" creates an
+ *     already-assigned item in a single round-trip.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireSession();
@@ -46,6 +59,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
     typeof targetPostTypeRaw === "string" && targetPostTypeRaw.trim().length > 0
       ? targetPostTypeRaw.trim()
       : null;
+  const editorUserIdRaw = (body as { editorUserId?: unknown }).editorUserId;
+  const editorUserIdOverride =
+    typeof editorUserIdRaw === "string" && editorUserIdRaw.trim().length > 0
+      ? editorUserIdRaw.trim()
+      : null;
+  const assign = (body as { assign?: unknown }).assign === true;
 
   if (!targetAccountId) {
     return NextResponse.json(
@@ -110,11 +129,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
+  // Don't propagate a stale `format` from the source — if the source row
+  // points at a format name that no longer exists in the brand's formats
+  // table (legacy auto-default like "Tweet"), drop to null instead of
+  // carrying the drift forward.
+  const formatCheck = await normalizeFormatForWrite(source.brand, source.format);
+  const inheritedFormat = formatCheck.ok ? formatCheck.value : null;
+
   const assignees = await resolveAssignees({
     brand: source.brand,
     sourceItemId: source.id,
-    format: source.format,
+    format: inheritedFormat,
   });
+
+  const editorUserId = editorUserIdOverride ?? assignees.editorUserId;
+  const status = assign || editorUserIdOverride ? "Assigned" : "Idea";
 
   const [created] = await db
     .insert(productionItems)
@@ -122,17 +151,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
       brand: source.brand,
       title: source.title,
       thumbnail: source.thumbnail,
-      status: "Idea",
+      status,
       accountId: targetAccountId,
       postType: targetPostType,
       sourceType: "cross_post",
       repostedFromItemId: source.id,
-      format: source.format,
+      format: inheritedFormat,
       pillarContentNotionId: source.pillarContentNotionId,
       pillarContentItemId: source.pillarContentItemId,
       utmCampaign: await generateUtmCampaign(source.title),
       producerUserId: assignees.producerUserId,
-      editorUserId: assignees.editorUserId,
+      editorUserId,
     })
     .returning({ id: productionItems.id });
 

@@ -76,7 +76,7 @@ is `PROTECTED_STATUS_NAMES` in `src/lib/db/brand-statuses.ts`:
 
 - `Idea` — auto-created status of every new item from repost / cross-post /
   duplicate / clip-out / threshold-monitor; filtered by name in queue-view,
-  cross-post-feed, evergreen-scan, cross-post-scan
+  cross-post-feed, evergreen-scan
 - `Assigned` — target of triage "accept", clip promotion, and the queue
   outcome flow; my-work role logic keys off it
 - `Published` — publish-date filters in `src/lib/db/queries.ts`

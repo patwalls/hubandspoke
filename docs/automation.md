@@ -26,7 +26,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   */30  account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
   (per-post) capture-velocity-snapshot → scheduled at publish+{15m,30m,1h,2h,4h,8h,24h,48h} per item; writes one view_snapshots row each
-  (manual)     cross-post-scan    → LLM recommender, fired by the "Populate queue" button on /[brand]/queue → POST /api/cross-post-scan
+  (live)     cross-post candidate queue → GET /api/cross-post-queue, no scheduled job — runs on every page load of /[brand]/queue Cross-post tab
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
   13:00      daily-scorecard-email → Postmark (per opted-in user). 9am EDT / 8am EST in winter.
 
@@ -414,20 +414,21 @@ HAVING count(vs.id) = 0
 ORDER BY pi.published_at DESC;
 ```
 
-### `cross-post-scan` — velocity-gated cross-post recommendations
-- **Trigger:** **manual only.** Operator clicks "Populate queue" on the Cross-post tab of `/[brand]/queue`, which POSTs to `/api/cross-post-scan` with `{ maxIdeas: 10, maxCandidates: 20 }`. Not on cron — the graphile-worker task is still registered for ad-hoc enqueues but nothing fires it automatically.
-- **Files:** `src/app/api/cross-post-scan/route.ts` (entry), `src/jobs/tasks/scheduled.ts` (task wrapper), `src/lib/services/cross-post-scan.ts`, `src/lib/services/cross-post-recommend.ts`, `src/lib/cross-post-compat.ts`
-- **Inputs:** published originals <72h old with a ~1h `view_snapshots` row; `cross_post_decisions` (48h dedup); recent `contentEvents` of type `killed`/`accepted` on cross-posts (feedback loop)
-- **Outputs:** `cross_post_decisions` (one row per LLM proposal); `productionItems` (new `Idea` rows with `cross_post_confidence` for proposals admitted to the queue)
-- **Downstream:** operator accepts/kills via the cross-post feed → `contentEvents` + mirrored `cross_post_decisions.outcome`
+### Cross-post candidate queue (v3) — live percentile-within-format view
+- **Trigger:** none. `selectCrossPostCandidates({ brand })` runs synchronously on every `GET /api/cross-post-queue?brand=…` (the Cross-post tab fetches it on page load). No graphile-worker task, no cron.
+- **Files:** `src/lib/services/cross-post-candidates.ts` (algorithm), `src/app/api/cross-post-queue/route.ts` (entry), `src/components/dashboard/cross-post-queue-table.tsx` + `cross-post-triage-dialog.tsx` (UI), `src/lib/cross-post-compat.ts` (still the source of truth for which target post types are eligible).
+- **Inputs:** `productionItems.views` (kept fresh by `performance-decay`'s decay-tier sync — <6h stale for items <7d old); `contentEvents` rows of type `cross_post_dismissed` (30-day TTL hide-list).
+- **Outputs:** read-only response. The actual cross-post production items are created on click via `POST /api/production-items/[id]/cross-post` with `assign:true`, which lands them as `Assigned` rows for an editor.
 - **Rules:**
-  - **Velocity gate:** `views_at_1h >= 2.0× median for this account+post_type over last 30 days`; cohort <5 items skips the rule
-  - **Format compat:** hardcoded matrix in `src/lib/cross-post-compat.ts` filters candidate targets (tweet→LI/Threads/YT-community, reel→TikTok/YT-Shorts, etc.); LLM never sees incompatible pairs
-  - **LLM proposes 0-N targets per candidate** with a 0-100 confidence and written reasoning. Past kill + accept reasons are injected into the system prompt.
-  - **Queue discipline:** only admit Ideas with confidence ≥70; cap un-actioned cross-post Ideas at 12 per brand
-  - **48h dedup:** skip candidates already proposed within the window
-  - **Per-target dedup at insert time:** before each Idea insert, skip if **any** `productionItems` row already exists with the same `(repostedFromItemId, accountId, postType)` — Idea, in-production, Published, or Killed. Killed counts as a permanent block; the operator already decided that pair isn't worth doing. This is the dedup that used to be enforced (much more narrowly, and only for `source_type='original'` rows) by the partial unique index `uniq_production_items_pillar_format`; that index was dropped in 0056 and the check now lives at generation time per the operator rule "if we've already done it before, or it's already in production, don't generate it." Counted as `candidatesDropped.alreadyExists` in the result.
-  - **Notion authority:** target post types owned by Notion are skipped (can't auto-create there)
+  - **Candidate window:** published originals from the last 7 days. Idea/Published filter excludes Notion-authoritative post types (long-form YT pillars).
+  - **Cohort:** same `format` over the last 90 days. Cross-brand by design — formats are platform-aligned in practice. Cohort must have ≥10 posts; smaller cohorts are silently skipped (admit nothing rather than admit on noise).
+  - **Threshold:** P75 of `views` within the format cohort. Items at or above the bar are admitted, sorted by `views ÷ P75` so the strongest outliers appear first.
+  - **Already-done dedup:** drop a candidate if every eligible `(target account, target post type)` pair already has a `productionItems` row with `sourceType='cross_post'` and `repostedFromItemId = candidate.id`. Modal still shows partially-done state (per-target disabled cards) when some targets remain.
+  - **Dismissal:** "Not interested" → `POST /api/production-items/[id]/cross-post-dismiss` writes a `contentEvents` row with `type='cross_post_dismissed'`. The candidate selector hides it for 30 days; after that it can resurface if it's still hot.
+  - **Format compat:** unchanged from v2 — `compatibleTargetsFor()` matrix gates which target post types appear as cards in the modal.
+
+### v2 cross-post scanner (`cross-post-scan`) — REMOVED 2026-05-02
+v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confidence) was retired in favor of the v3 candidate queue above. `runCrossPostScan`, `cross-post-recommend.ts`, the manual `/api/cross-post-scan` route, the graphile-worker task, and `scripts/run-cross-post-scan.mjs` are all deleted. `cross_post_decisions`, `crossPostFitVerdicts`, `crossPostRules`, and `productionItems.crossPostConfidence` remain for historical reads (retrospective at `/[brand]/accounts/cross-posting`); see Planned-removal in `docs/features.md`.
 
 ### `account-refresh-sweep` — weekly metadata refresh
 - **Trigger:** cron `0 17 * * 1` (Mondays 17:00 UTC)
@@ -641,8 +642,7 @@ which `sourceType` a row gets at creation, see
 | Notion sync | `original` | every :30 cron, YouTube long-form only | inherited from Notion |
 | Manual API (`POST /api/production-items`) | `original` | UI form, for platforms API can't pull from | `Idea` or `Queue` |
 | Repost (`POST .../repost`) | `repost` | user button | `Idea` |
-| Cross-post (manual `POST .../cross-post`) | `cross_post` | user button (body: `targetAccountId` + `targetPostType`) | `Idea` |
-| Cross-post (manual scanner, `cross-post-scan`) | `cross_post` | operator clicks "Populate queue" on `/[brand]/queue` Cross-post tab | `Idea` |
+| Cross-post (manual `POST .../cross-post`) | `cross_post` | user button (body: `targetAccountId` + `targetPostType`; v3 modal also passes `assign:true`) | `Idea` (default) or `Assigned` when v3 modal sets `assign:true` |
 | Clip generation — manual (`POST /api/production-items/[id]/clip-ideas/generate`) | `clip` | admin clicks "Generate 10 ideas" on a pillar's Clip Ideas tab | `Idea` |
 | Clip generation — auto (`generate-clip-ideas` task) | `clip` | enqueued by `transcribe-whisper` when a fresh transcript saves on a `youtube_long` `original` pillar | `Idea` |
 | Clip promotion (`POST /api/clip-ideas/[id]/triage` or `.../create-in-descript[-precise]`) | `clip` | user accepts an existing clip-idea | flips pre-created row from `Idea` → `Assigned` (no new insert) |
@@ -658,7 +658,7 @@ which `sourceType` a row gets at creation, see
 7. **Hour :40** — `hook-extract-sweep` queues `extract-hook` if short-form + has transcript + no hook yet
 8. **Hour :50** — `hook-fallback-sweep` queues `hook-fallback` for everything not covered by the LLM sweep
 9. **Daily 15:00** — `evergreen-scan` may classify isEvergreen and refill Idea queue
-10. **Daily 16:00** — `cross-post-scan` may create cross-post `Idea` rows on other platforms
+10. **Continuously** — once `views` crosses the format's P75 within 7 days of publish, the post appears in the v3 cross-post candidate queue (`/[brand]/queue` Cross-post tab) until an operator cross-posts every eligible target or dismisses it.
 
 **Status transitions** (no centralized state machine — validation lives in the UI, the PATCH route, and the Notion push-back; this is on the cleanup list):
 ```
@@ -821,4 +821,4 @@ has a row in `docs/features.md`'s cleanup backlog.
 - **`selectEnrichmentCandidates()` and the legacy `selectEnrichmentItems()`** in `enrichment/orchestrator.ts` are nearly identical. Legacy path is the in-process loop used by `runEnrichmentSweep()` (called from `/api/cron/enrichment-sweep` with no `itemId`). Consolidate the query builder when we delete the legacy `runEnrichmentSweep` path.
 - **No central status-transition state machine.** Validation logic lives in the UI, the PATCH route, and the Notion push-back independently. Adding a new status today requires touching all three.
 - **`/api/cron/*` routes** still exist. `tick` is debug; the others (`notion-sync`, `performance-sync`, `enrichment-sweep`) still run their underlying sync inline and are useful for manual re-runs. The old `/api/cron/youtube-sync` + `/api/sync/youtube` routes were removed alongside `matg-sync` — use `/api/cron/tick?name=account-content-sync-sweep` for a manual full-fleet sync.
-- **`assignees.ts` resolution chain** is duplicated implicitly: `source item → format → brand defaults → global` repeats in `notion-sync.ts`, `cross-post-scan.ts`, and the manual creation routes. Extract a single `resolveAssignees()` (already partially exists) and use it everywhere.
+- **`assignees.ts` resolution chain** is duplicated implicitly: `source item → format → brand defaults → global` repeats in `notion-sync.ts` and the manual creation routes. Extract a single `resolveAssignees()` (already partially exists) and use it everywhere.

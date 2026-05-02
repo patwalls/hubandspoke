@@ -22,7 +22,6 @@ const SCHEDULED_TASK_NAMES: ReadonlyArray<keyof TaskPayloads> = [
   "hook-dispatch-sweep",
   "account-content-sync-sweep",
   "evergreen-scan",
-  "cross-post-scan",
   "youtube-download-sweep",
 ];
 

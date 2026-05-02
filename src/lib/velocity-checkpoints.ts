@@ -6,12 +6,12 @@
 // tolerance) and, if so, calls Scrape Creators once to capture a
 // view-count row in `view_snapshots` tagged with `key`.
 //
-// The cross-post scanner reads these rows by `key` to compute velocity
-// ratios against same-account-and-post-type baselines.
+// The dashboard's per-item velocity charts and TriageDialog read these
+// rows by `key` to compare a post's takeoff curve against same-account-
+// and-post-type baselines.
 //
 // Kept uniform across the codebase:
 //   - src/jobs/tasks/capture-velocity-snapshot.ts (scheduler + task)
-//   - src/lib/services/cross-post-scan.ts (reader + velocity gate)
 //   - scripts/backfill-velocity-snapshot-schedule.mjs (mjs boundary —
 //     keys are hardcoded but must match)
 

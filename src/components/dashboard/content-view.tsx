@@ -177,6 +177,7 @@ export function ContentView({ brand }: ContentViewProps) {
           brand={brand}
           formats={data.formats}
           accounts={accounts}
+          formatBars={data.formatBars}
           onPostCreated={fetchReport}
         />
       ) : (

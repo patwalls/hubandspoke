@@ -51,7 +51,6 @@ import {
   extractPosterSweepTask,
   hookDispatchSweepTask,
   evergreenScanTask,
-  crossPostScanTask,
   accountRefreshSweepTask,
   accountContentSyncSweepTask,
   dailyScorecardEmailTask,
@@ -98,7 +97,6 @@ export interface TaskPayloads {
   "extract-poster-sweep": Record<string, never>;
   "hook-dispatch-sweep": Record<string, never>;
   "evergreen-scan": Record<string, never>;
-  "cross-post-scan": Record<string, never>;
   "youtube-download-sweep": Record<string, never>;
   "account-refresh-sweep": Record<string, never>;
   "account-content-sync-sweep": Record<string, never>;
@@ -138,7 +136,6 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "extract-poster-sweep": extractPosterSweepTask,
   "hook-dispatch-sweep": hookDispatchSweepTask,
   "evergreen-scan": evergreenScanTask,
-  "cross-post-scan": crossPostScanTask,
   "youtube-download-sweep": youtubeDownloadSweepTask,
   "account-refresh-sweep": accountRefreshSweepTask,
   "account-content-sync-sweep": accountContentSyncSweepTask,

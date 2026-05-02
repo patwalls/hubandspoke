@@ -124,8 +124,7 @@ rows; manual operator changes via the detail-page picker also enforce them.
 | `repost` | `POST /api/production-items/[id]/repost` | user button on item detail |
 | `repost` | `src/lib/services/evergreen-scan.ts` (Phase B) | daily 15:00 cron, refills Idea queue |
 | `repost` | `scripts/backfill-repost-classification.mjs` | one-shot cleanup; --apply commits |
-| `cross_post` | `POST /api/production-items/[id]/cross-post` | user button on item detail |
-| `cross_post` | `src/lib/services/cross-post-scan.ts` | "Populate queue" button on `/[brand]/queue` |
+| `cross_post` | `POST /api/production-items/[id]/cross-post` | user button on item detail; v3 cross-post queue modal calls the same route with `assign:true` (creates `Assigned` rows). The candidate finder (`src/lib/services/cross-post-candidates.ts`) is read-only — it never writes. |
 | `clip` | `POST /api/production-items/[id]/clip-ideas/generate` | sibling row at clip-idea generation |
 | `clip` | `POST /api/clip-ideas/[id]/triage` (and create-in-descript variants) | flips existing sibling, no new insert |
 | `repurposed` | `src/jobs/tasks/threshold-monitor-sweep.ts` | hourly :15, parent crosses `viewThreshold` |

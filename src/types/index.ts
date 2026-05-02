@@ -151,6 +151,11 @@ export interface PrimaryRowMeta {
   avatarUrl: string | null;
 }
 
+export interface FormatViewBar {
+  p75: number;
+  cohortSize: number;
+}
+
 export interface ContentReportData {
   periods: Period[];
   byPlatform: {
@@ -177,6 +182,10 @@ export interface ContentReportData {
    *  inside `byPlatform.*`. When present the UI renders an
    *  AccountBadge instead of the raw text. */
   primaryRowMeta?: Record<string, PrimaryRowMeta>;
+  /** Per-format P75 view bar (cross-brand, last 90 days). Used by the
+   *  Content table's "vs P75" column. Formats with cohort < 10 are
+   *  silently absent — no bar means "—" in the UI. */
+  formatBars?: Record<string, FormatViewBar>;
 }
 
 export interface SyncLog {

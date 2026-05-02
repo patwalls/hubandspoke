@@ -8,6 +8,7 @@ import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup
 import { extractContentId } from "@/lib/platform-url";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { findAccount } from "@/lib/db/accounts";
+import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import type { PostType } from "@/lib/platform-field-schemas";
 
 /**
@@ -440,7 +441,22 @@ export async function syncFromNotion(): Promise<{
       const platform = rawPlatform
         ? rawPlatform.map((c) => remapChannelName(c, publishedLink))
         : rawPlatform;
-      const formatName = await extractFormat(properties, notion);
+      const rawFormatName = await extractFormat(properties, notion);
+      // Validate the Notion-supplied format against the local `formats`
+      // table. Notion sync is starter-story-only today (see brand="starter-story"
+      // on the insert below). Anything else (a freelancer creating a one-off
+      // "Format" page in Notion that doesn't have a matching row here) is
+      // dropped with a warning instead of silently writing drift onto the row.
+      const formatCheck = await normalizeFormatForWrite(
+        "starter-story",
+        rawFormatName
+      );
+      if (rawFormatName && !formatCheck.ok) {
+        console.warn(
+          `[notion-sync] page ${notionId}: dropping unknown format "${rawFormatName}" (no match in formats for brand=starter-story). ${formatCheck.error}`
+        );
+      }
+      const formatName = formatCheck.ok ? formatCheck.value : null;
 
       // Resolve account_id + post_type from the first (primary) channel.
       // Notion only owns long-form YouTube, so this hits the two seeded YT

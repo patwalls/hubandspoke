@@ -6,6 +6,7 @@ import { productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { buildRepostValues } from "@/lib/services/repost-values";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -44,10 +45,15 @@ export async function POST(_request: Request, context: RouteContext) {
     );
   }
 
+  // Don't carry a stale `format` from the source — if it doesn't exist in
+  // the brand's formats table, set null instead of propagating the drift.
+  const formatCheck = await normalizeFormatForWrite(source.brand, source.format);
+  const inheritedFormat = formatCheck.ok ? formatCheck.value : null;
+
   const assignees = await resolveAssignees({
     brand: source.brand,
     sourceItemId: source.id,
-    format: source.format,
+    format: inheritedFormat,
   });
 
   const [created] = await db
@@ -62,7 +68,7 @@ export async function POST(_request: Request, context: RouteContext) {
           accountId: source.accountId,
           postType: source.postType,
           platform: source.platform,
-          format: source.format,
+          format: inheritedFormat,
           pillarContentItemId: source.pillarContentItemId,
           pillarContentNotionId: source.pillarContentNotionId,
         },

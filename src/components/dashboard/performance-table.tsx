@@ -45,6 +45,7 @@ import {
   type PickerAccount,
 } from "@/components/ui/account-post-type-picker";
 import type { PostType } from "@/lib/platform-field-schemas";
+import type { FormatViewBar } from "@/types";
 
 interface PerformanceTableProps {
   items: ProductionItem[];
@@ -54,6 +55,9 @@ interface PerformanceTableProps {
    *  dialog falls back to the legacy string picker (older callers that
    *  haven't been updated yet still render). */
   accounts?: PickerAccount[];
+  /** Per-format P75 view bar over the last 90 days, keyed by format name.
+   *  Drives the "vs P75" column. Formats with cohort < 10 are absent. */
+  formatBars?: Record<string, FormatViewBar>;
   onPostCreated?: () => void;
 }
 
@@ -65,7 +69,8 @@ type SortKey =
   | "comments"
   | "clicks"
   | "leads"
-  | "salesAmount";
+  | "salesAmount"
+  | "vsP75";
 
 function publishedSortMs(item: ProductionItem): number | null {
   if (item.publishedAt) {
@@ -100,7 +105,7 @@ function getFreshness(item: ProductionItem): {
   return { color: "text-muted-foreground", label: `${Math.floor(days)}d ago`, dotClass: "bg-gray-400" };
 }
 
-export function PerformanceTable({ items, brand, formats, accounts, onPostCreated }: PerformanceTableProps) {
+export function PerformanceTable({ items, brand, formats, accounts, formatBars, onPostCreated }: PerformanceTableProps) {
   const router = useRouter();
   const hasThumbnails = items.some((item) => coverImageUrl(item));
   const hasPerformanceSync = items.some((item) => item.lastPerformanceSyncAt);
@@ -404,6 +409,13 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
       })
     : items;
 
+  function vsP75For(item: ProductionItem): number | null {
+    if (!item.format || item.views == null) return null;
+    const bar = formatBars?.[item.format];
+    if (!bar || bar.p75 <= 0) return null;
+    return item.views / bar.p75;
+  }
+
   const sorted = [...filtered].sort((a, b) => {
     // Sorting by "Published" uses publishedAt when we have it (precise
     // platform timestamp or in-app publish moment) and falls back to
@@ -416,6 +428,14 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
       if (aT == null) return 1;
       if (bT == null) return -1;
       return sortDir === "asc" ? aT - bT : bT - aT;
+    }
+    if (sortKey === "vsP75") {
+      const aR = vsP75For(a);
+      const bR = vsP75For(b);
+      if (aR == null && bR == null) return 0;
+      if (aR == null) return 1;
+      if (bR == null) return -1;
+      return sortDir === "asc" ? aR - bR : bR - aR;
     }
     const aVal = a[sortKey];
     const bVal = b[sortKey];
@@ -430,12 +450,21 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
       : (bVal as number) - (aVal as number);
   });
 
-  function SortHeader({ label, sortKeyName }: { label: string; sortKeyName: SortKey }) {
+  function SortHeader({
+    label,
+    sortKeyName,
+    title,
+  }: {
+    label: string;
+    sortKeyName: SortKey;
+    title?: string;
+  }) {
     const isActive = sortKey === sortKeyName;
     return (
       <th
         className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground cursor-pointer hover:text-foreground select-none whitespace-nowrap transition-colors"
         onClick={() => handleSort(sortKeyName)}
+        title={title}
       >
         <span className="inline-flex items-center gap-1">
           {label}
@@ -810,6 +839,20 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                 </th>
               )}
               <SortHeader label="Views" sortKeyName="views" />
+              <SortHeader
+                label="vs P75"
+                sortKeyName="vsP75"
+                title={
+                  "How this post stacks up against its format.\n\n" +
+                  "P75 = 75th-percentile views among every Published post in the same format over the last 90 days. " +
+                  "It's the bar that separates the top 25% from the rest.\n\n" +
+                  "The number shown is this post's views ÷ that bar:\n" +
+                  "  · 1.0× = exactly at the bar (top quartile entry)\n" +
+                  "  · 2.0× = double the bar\n" +
+                  "  · below 1.0× = below the top quartile\n\n" +
+                  "Formats with fewer than 10 recent posts are skipped (cohort too small to trust)."
+                }
+              />
               <SortHeader label="Likes" sortKeyName="likes" />
               <SortHeader label="Comments" sortKeyName="comments" />
               <SortHeader label="Clicks" sortKeyName="clicks" />
@@ -894,6 +937,49 @@ export function PerformanceTable({ items, brand, formats, accounts, onPostCreate
                       {item.viewsEstimated ? "~" : ""}{item.views.toLocaleString()}
                     </span>
                   ) : "-"}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {(() => {
+                    const ratio = vsP75For(item);
+                    if (ratio == null) {
+                      return (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      );
+                    }
+                    const bar = formatBars?.[item.format!];
+                    const badgeClass =
+                      ratio >= 3
+                        ? "bg-emerald-100 text-emerald-900 border-emerald-200"
+                        : ratio >= 1.5
+                        ? "bg-amber-100 text-amber-900 border-amber-200"
+                        : ratio >= 1
+                        ? "bg-amber-50 text-amber-800 border-amber-100"
+                        : "bg-muted text-muted-foreground border-border";
+                    const tooltip = bar
+                      ? [
+                          `This post: ${(item.views ?? 0).toLocaleString()} views`,
+                          `${item.format} P75: ${bar.p75.toLocaleString()} views`,
+                          `Ratio: ${ratio.toFixed(2)}× the P75 bar`,
+                          "",
+                          "P75 = 75th-percentile views across every Published",
+                          `post in this format over the last 90 days`,
+                          `(cohort: ${bar.cohortSize} posts). It's the line`,
+                          "that separates the top 25% from the rest, so 1.0×",
+                          "means this post just edges into the top quartile.",
+                        ].join("\n")
+                      : undefined;
+                    return (
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded px-1.5 py-0.5 text-[11px] tabular-nums border",
+                          badgeClass
+                        )}
+                        title={tooltip}
+                      >
+                        {ratio.toFixed(1)}×
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
                   {item.likes?.toLocaleString() || "-"}
