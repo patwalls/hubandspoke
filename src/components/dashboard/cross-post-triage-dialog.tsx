@@ -17,6 +17,7 @@ import {
   POST_TYPE_SHORT_LABEL,
   toPlatform,
 } from "@/lib/platforms";
+import { isNotionAuthoritative } from "@/lib/platform";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { cn } from "@/lib/utils";
 import type {
@@ -100,17 +101,21 @@ export function CrossPostTriageDialog({
     );
     const pairs: TargetPair[] = [];
     for (const acct of brandAccounts) {
-      if (acct.syncedFromNotion) continue;
       const supported = PLATFORM_META[toPlatform(acct.platform)].postTypes;
       for (const pt of supported) {
-        // Only the exact source pair is excluded; same-account different-
-        // postType is a valid target (e.g. an IG Reel re-cut as an IG Post).
+        // Skip the exact source pair — can't cross-post to itself.
         if (
           acct.id === candidate.account.id &&
           pt === candidate.postType
         ) {
           continue;
         }
+        // Skip post types Notion owns (long-form YouTube). The cross-post
+        // route would refuse to create one anyway. Note this is a per-
+        // post-type filter, not per-account: a Notion-synced YouTube
+        // channel still shows its `youtube_shorts` and `youtube_community`
+        // options because those aren't Notion-owned.
+        if (isNotionAuthoritative(pt)) continue;
         pairs.push({
           account: acct,
           postType: pt,

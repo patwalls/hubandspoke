@@ -6,7 +6,7 @@ import { accounts, productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
-import { isNotionAuthoritativeAccount } from "@/lib/platform";
+import { isNotionAuthoritative } from "@/lib/platform";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -83,11 +83,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Target account not found" }, { status: 404 });
   }
 
-  if (isNotionAuthoritativeAccount(target)) {
+  // Per-post-type Notion check, not per-account: a Notion-synced YouTube
+  // channel still accepts youtube_shorts / youtube_community cross-posts —
+  // only youtube_long is owned by Notion and must be created there.
+  if (targetPostType && isNotionAuthoritative(targetPostType)) {
     return NextResponse.json(
       {
         error:
-          "Target account is Notion-authoritative; create that post in Notion instead.",
+          "Target post type is Notion-authoritative; create that post in Notion instead.",
       },
       { status: 400 }
     );

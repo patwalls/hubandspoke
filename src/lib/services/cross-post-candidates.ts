@@ -635,20 +635,48 @@ function computeHotnessSignals(opts: ComputeHotnessOpts): HotnessSignal[] {
 function buildWhyHot(
   _format: string,
   top: HotnessSignal,
-  all: HotnessSignal[]
+  _all: HotnessSignal[]
 ): string {
-  const pctLabel = `P${Math.round(top.percentile * 100)}`;
-  const ratioLabel = top.ratio.toFixed(1);
-  const head = `${ratioLabel}× ${pctLabel} of ${top.cohortLabel} at ${top.label.toLowerCase()} (${formatNum(top.views)} vs ${formatNum(top.bar)} bar, cohort ${top.cohortSize}).`;
-  if (all.length <= 1) return head;
-  const others = all
-    .slice(1)
-    .map(
-      (s) =>
-        `${s.ratio.toFixed(1)}× at ${s.label.toLowerCase()} (${formatNum(s.views)} vs ${formatNum(s.bar)})`
-    )
-    .join("; ");
-  return `${head} Other signals: ${others}.`;
+  // One short sentence for the operator to glance at — the granular ratios
+  // for every signal already live in the modal's <details> breakdown, so
+  // "why this is hot" only needs the headline. Drops the percentile /
+  // cohort jargon in favor of "typical" framing.
+  const flavor =
+    top.ratio >= 10
+      ? "Off the charts"
+      : top.ratio >= 5
+      ? "Crushing it"
+      : top.ratio >= 2
+      ? "Well above average"
+      : "Above average";
+  const timing = humanTiming(top.kind);
+  const ratio = top.ratio.toFixed(1);
+  return `${flavor} — ${ratio}× the typical pace for ${top.cohortLabel}${timing}. ${formatNum(top.views)} views vs typical ${formatNum(top.bar)}.`;
+}
+
+function humanTiming(kind: string): string {
+  switch (kind) {
+    case "lifetime":
+      return "";
+    case "15m":
+      return " 15 minutes in";
+    case "30m":
+      return " 30 minutes in";
+    case "1h":
+      return " 1 hour in";
+    case "2h":
+      return " 2 hours in";
+    case "4h":
+      return " 4 hours in";
+    case "8h":
+      return " 8 hours in";
+    case "24h":
+      return " a day in";
+    case "48h":
+      return " two days in";
+    default:
+      return ` at ${kind}`;
+  }
 }
 
 function formatNum(n: number): string {
@@ -663,10 +691,13 @@ function countEligibleTargetPairs(
 ): number {
   let count = 0;
   for (const acct of brandAccounts) {
-    if (acct.syncedFromNotion) continue;
     const supported = PLATFORM_META[toPlatform(acct.platform)].postTypes;
     for (const pt of supported) {
       if (acct.id === source.accountId && pt === source.postType) continue;
+      // Skip Notion-owned post types (long-form YouTube); per-post-type,
+      // not per-account, so other post types on a Notion-synced channel
+      // still count as eligible.
+      if (isNotionAuthoritative(pt)) continue;
       count++;
     }
   }
