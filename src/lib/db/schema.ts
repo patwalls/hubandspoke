@@ -333,12 +333,11 @@ export const productionItems = pgTable(
   ]
 );
 
-// One row per production item. Populated by the `transcribe-whisper` task:
-// ffmpeg extracts audio from the S3 media → OpenAI Whisper API returns
-// segment + word timestamps → we persist both. `segments` stays the shape
-// the UI and `getTranscriptForPrompt()` already expect (Descript rows
-// written before the Whisper migration still render through this field).
-// `words` is new and only populated for source='whisper' rows.
+// One row per production item. Populated by the `transcribe-whisper` task
+// for long-form/audio sources, and by `scrape_creators_*` enrichers for
+// short-form social posts (which ship platform-provided captions). The
+// `transcribe-whisper` path: ffmpeg extracts audio from the S3 media →
+// OpenAI Whisper API returns segment + word timestamps → we persist both.
 // `audioS3Key` points at the extracted audio we keep in S3 so we can
 // re-run Whisper (or layer on diarization/vision) without re-downloading
 // the full video; `audioChunks` is the ordered list when we had to split
@@ -351,25 +350,28 @@ export const transcripts = pgTable("transcripts", {
     .unique(),
   source: text("source").notNull().default("whisper"),
   language: text("language").default("en"),
-  // Raw WEBVTT kept for legacy `source='descript'` rows only; Whisper
-  // doesn't produce VTT, so this is nullable going forward.
+  // Raw WEBVTT from `scrape_creators_*` enrichers (TikTok, YouTube
+  // auto-captions, etc.). Whisper rows leave this null — segments + words
+  // are the canonical shape.
   rawVtt: text("raw_vtt"),
   fullText: text("full_text").notNull(),
   segments: jsonb("segments")
     .$type<Array<{ startSec: number; endSec: number; text: string; speaker?: string }>>()
     .notNull(),
   // Word-level timestamps, populated by Whisper's `timestamp_granularities:
-  // ["word"]`. Null on legacy Descript rows.
+  // ["word"]`. Null on `scrape_creators_*` rows that only carry segment-level
+  // captions; clip-idea generation gates on `source_type='original' AND
+  // post_type='youtube_long'` so those rows never feed V7 anchor matching.
   words: jsonb("words").$type<
     Array<{ word: string; startSec: number; endSec: number }>
   >(),
   wordCount: integer("word_count"),
   durationSec: decimal("duration_sec"),
-  // Model identifier, e.g. "whisper-1". Null on legacy rows.
+  // Model identifier, e.g. "whisper-1". Null on `scrape_creators_*` rows.
   model: text("model"),
   // Pointer to the extracted audio in S3 — kept so future re-runs don't
-  // need to re-download the full video. Null on legacy (Descript-era)
-  // rows. For Whisper rows this is always chunks[0].key.
+  // need to re-download the full video. Set on Whisper rows
+  // (= chunks[0].key); null on `scrape_creators_*` rows.
   audioS3Bucket: text("audio_s3_bucket"),
   audioS3Key: text("audio_s3_key"),
   // Ordered list of audio chunks in S3 — one entry per Whisper call that
@@ -377,7 +379,7 @@ export const transcripts = pgTable("transcripts", {
   // entries for long-form content we had to split to stay under OpenAI's
   // 25 MB per-request limit. `startSec` is the offset in the original
   // video so we can shift chunk-local Whisper timestamps back to global
-  // time. Null on legacy Descript-era rows.
+  // time. Null on `scrape_creators_*` rows.
   audioChunks: jsonb("audio_chunks").$type<
     Array<{ key: string; startSec: number }>
   >(),

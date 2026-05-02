@@ -172,7 +172,7 @@ Every task in `src/jobs/tasks/` is retried on exception by graphile-worker.
 Design accordingly:
 
 - Check for the side-effect being already done at the top of the task and
-  return early (e.g. `descript-transcribe` skips if a transcript row exists;
+  return early (e.g. `transcribe-whisper` skips if a transcript row exists;
   `enrich-item` skips if `enrichment_completed_at` is set).
 - Use `unsafe_dedupe` jobKeys for sweep parents so overlapping ticks don't
   double-fan-out (see `enrichmentSweepTask`).
@@ -186,7 +186,7 @@ task that takes longer than ~20s:
 
 - Use the **short-invocation / self-re-enqueue** pattern: each invocation
   does one HTTP poll (or one chunk of work) and re-enqueues a successor with
-  a 5s `runAt` delay. See `descriptTranscribeTask` and
+  a 5s `runAt` delay. See `transcribeWhisperTask` (phase 1 → phase 2) and
   `descriptClipResolveTask` for reference.
 - Carry a `deadlineAt` (epoch ms) in the payload so the chain doesn't loop
   forever; throw on expiry so graphile-worker stops retrying.
