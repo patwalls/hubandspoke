@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, ilike, isNotNull, isNull, ne, desc } from "drizzle-orm";
+import { and, eq, ilike, isNotNull, isNull, ne, or, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
+import { extractContentIdFromUrl } from "@/lib/platform-url";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NUMERIC_ID_RE = /^\d{6,}$/;
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
@@ -20,7 +24,33 @@ export async function GET(request: NextRequest) {
   ];
   if (!includeAll) conditions.push(isNotNull(productionItems.notionId));
   if (excludeId) conditions.push(ne(productionItems.id, excludeId));
-  if (q) conditions.push(ilike(productionItems.title, `%${q}%`));
+
+  // Recognize ID-shaped pastes so the picker resolves them directly instead
+  // of treating them as title text. Order: UUID (our row id) > URL (any
+  // platform's published link) > bare numeric (X/TikTok/LinkedIn content id).
+  // Falls through to title ILIKE for free-text queries.
+  if (q) {
+    const urlMatch = extractContentIdFromUrl(q);
+    if (UUID_RE.test(q)) {
+      conditions.push(eq(productionItems.id, q));
+    } else if (urlMatch) {
+      conditions.push(
+        or(
+          eq(productionItems.platformContentId, urlMatch.contentId),
+          ilike(productionItems.publishedLink, `%${urlMatch.contentId}%`),
+        )!,
+      );
+    } else if (NUMERIC_ID_RE.test(q)) {
+      conditions.push(
+        or(
+          eq(productionItems.platformContentId, q),
+          ilike(productionItems.publishedLink, `%${q}%`),
+        )!,
+      );
+    } else {
+      conditions.push(ilike(productionItems.title, `%${q}%`));
+    }
+  }
 
   const rows = await db
     .select({
