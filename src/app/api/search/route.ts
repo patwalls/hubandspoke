@@ -6,7 +6,6 @@ import {
   eq,
   ilike,
   inArray,
-  isNotNull,
   isNull,
   or,
   sql,
@@ -97,6 +96,11 @@ export async function GET(request: NextRequest) {
         ilike(productionItems.contentBody, pattern),
         ilike(productionItems.description, pattern),
         ilike(transcripts.fullText, pattern),
+        // Bare numeric content IDs (e.g. an X status id pasted without the
+        // surrounding URL) and URL fragments still need to find their item.
+        // The URL branch above only fires for full, parseable URLs.
+        ilike(productionItems.platformContentId, pattern),
+        ilike(productionItems.publishedLink, pattern),
       )!;
 
   const [contentRows, formatRows] = await Promise.all([
@@ -126,7 +130,6 @@ export async function GET(request: NextRequest) {
       .where(
         and(
           eq(productionItems.brand, brand),
-          isNotNull(productionItems.notionId),
           contentMatchExpr,
           isNull(productionItems.deletedAt),
         ),
