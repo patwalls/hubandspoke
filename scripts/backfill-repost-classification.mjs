@@ -28,12 +28,12 @@
  * One brand:   ... --brand=starter-story
  */
 import postgres from "postgres";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 // ─── Tunables ────────────────────────────────────────────────────────────
 const JACCARD_THRESHOLD = 0.5;
-const LLM_MODEL = "claude-haiku-4-5";
+const LLM_MODEL = "gpt-4.1-mini";
 const LLM_BATCH_SIZE = 5; // concurrent requests (stay under per-key concurrent limit)
 const MAX_LLM_PAIRS = 4000; // safety cap per run; bumped 2026-04-29 — fixed platform bug grew candidate pool to ~3k, want one-shot coverage
 const LEN_RATIO_MAX = 3.0; // skip pairs whose titles differ in length by >3x; bumped 2026-04-29 — was 1.5, missed legit reposts where the title was suffixed with platform tag like "(X)" or trimmed for character limits
@@ -415,7 +415,7 @@ if (passArg === "2" || passArg === "both") {
     console.log(`\nPass 2: ${totalCandidates} candidate pairs above Jaccard ${JACCARD_THRESHOLD}.`);
   }
 
-  const client = new Anthropic();
+  const client = new OpenAI();
 
   async function askLLM(a, b) {
     const key = pairKey(a.id, b.id);
@@ -438,48 +438,69 @@ if (passArg === "2" || passArg === "both") {
       `Are these the same piece of content republished on the same platform, or two different posts? Call exactly one tool.`,
     ].join("\n");
 
-    const response = await withRetry(() => client.messages.create({
+    const response = await withRetry(() => client.chat.completions.create({
       model: LLM_MODEL,
       max_tokens: 256,
-      system:
-        "You decide whether two social-media post titles from the same brand and same platform are the same piece of content re-run (a repost), or two distinct posts. A repost is the same core idea/story presented with only minor rewording. If the angle, claim, or subject actually differs — even subtly — they are NOT the same post. When uncertain, call `not_same_post`: false positives pollute the repost graph, false negatives only miss a link.",
       tools: [
         {
-          name: "same_post",
-          description:
-            "The two titles describe the same piece of content (same story, same claim, same core idea), republished on the same platform with at most minor rewording.",
-          input_schema: {
-            type: "object",
-            properties: {
-              reasoning: { type: "string", description: "One sentence on why these are the same post." },
+          type: "function",
+          function: {
+            name: "same_post",
+            description:
+              "The two titles describe the same piece of content (same story, same claim, same core idea), republished on the same platform with at most minor rewording.",
+            parameters: {
+              type: "object",
+              properties: {
+                reasoning: { type: "string", description: "One sentence on why these are the same post." },
+              },
+              required: ["reasoning"],
+              additionalProperties: false,
             },
-            required: ["reasoning"],
+            strict: true,
           },
         },
         {
-          name: "not_same_post",
-          description:
-            "The two titles describe different posts (different angle, claim, subject, or structure), even if they share vocabulary.",
-          input_schema: {
-            type: "object",
-            properties: {
-              reasoning: { type: "string", description: "One sentence on why these are different posts." },
+          type: "function",
+          function: {
+            name: "not_same_post",
+            description:
+              "The two titles describe different posts (different angle, claim, subject, or structure), even if they share vocabulary.",
+            parameters: {
+              type: "object",
+              properties: {
+                reasoning: { type: "string", description: "One sentence on why these are different posts." },
+              },
+              required: ["reasoning"],
+              additionalProperties: false,
             },
-            required: ["reasoning"],
+            strict: true,
           },
         },
       ],
-      tool_choice: { type: "any" },
-      messages: [{ role: "user", content: userMessage }],
+      tool_choice: "required",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You decide whether two social-media post titles from the same brand and same platform are the same piece of content re-run (a repost), or two distinct posts. A repost is the same core idea/story presented with only minor rewording. If the angle, claim, or subject actually differs — even subtly — they are NOT the same post. When uncertain, call `not_same_post`: false positives pollute the repost graph, false negatives only miss a link.",
+        },
+        { role: "user", content: userMessage },
+      ],
     }));
 
     let verdict = { same: false, reasoning: "malformed response; treated as not-same" };
-    for (const block of response.content) {
-      if (block.type !== "tool_use") continue;
-      const input = block.input ?? {};
+    const message = response.choices[0]?.message;
+    for (const call of message?.tool_calls ?? []) {
+      if (call.type !== "function") continue;
+      let input = {};
+      try {
+        input = JSON.parse(call.function.arguments);
+      } catch {
+        // leave as empty; verdict stays at default
+      }
       const reasoning = typeof input.reasoning === "string" ? input.reasoning.trim() : "";
-      if (block.name === "same_post") verdict = { same: true, reasoning };
-      else if (block.name === "not_same_post") verdict = { same: false, reasoning };
+      if (call.function.name === "same_post") verdict = { same: true, reasoning };
+      else if (call.function.name === "not_same_post") verdict = { same: false, reasoning };
       break;
     }
     cache[key] = verdict;

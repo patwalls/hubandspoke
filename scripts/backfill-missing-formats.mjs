@@ -11,9 +11,9 @@
  *   1. Literal title match — if a known format name is a substring of the
  *      title (case-insensitive), assign. Longest names tried first to avoid
  *      partial collisions.
- *   2. LLM (claude-haiku-4-5) — Claude picks from the brand's format list or
- *      returns `unknown`. Disk-cached by item id so re-runs are free. We
- *      only write when confidence is high or medium (80%-accuracy target).
+ *   2. LLM (gpt-4.1-mini) — picks from the brand's format list or returns
+ *      `unknown`. Disk-cached by item id so re-runs are free. We only write
+ *      when confidence is high or medium (80%-accuracy target).
  *
  * Defaults to --dry-run. Pass --apply to actually write.
  *
@@ -24,11 +24,11 @@
  * Sample run:  ... --limit=50
  */
 import postgres from "postgres";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 // ─── Tunables ────────────────────────────────────────────────────────────
-const LLM_MODEL = "claude-haiku-4-5";
+const LLM_MODEL = "gpt-4.1-mini";
 const LLM_BATCH_SIZE = 5; // concurrent requests
 const MAX_RETRIES = 5;
 
@@ -175,32 +175,26 @@ if (passArg === "2" || passArg === "both") {
   console.log(`\nPhase 2 (LLM): ${unassigned.length} items to classify…`);
 
   if (unassigned.length > 0) {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      console.error("ANTHROPIC_API_KEY not set — required for pass 2.");
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("OPENAI_API_KEY not set — required for pass 2.");
       await sql.end();
       process.exit(1);
     }
-    const client = new Anthropic();
+    const client = new OpenAI();
 
-    // Prompt-cacheable system block. The format list is stable across the
-    // whole run, so every call after the first reads it from cache.
-    const systemBlocks = [
-      {
-        type: "text",
-        text:
-          "You classify a single social-media content item by picking the best-fitting format name from an allowed list.\n\n" +
-          "Allowed formats (pick one exactly as written, or return 'unknown'):\n" +
-          formatNames.map((n) => `  - ${n}`).join("\n") +
-          "\n\nRules:\n" +
-          "  - Return the EXACT format name from the list (capitalization + punctuation) or 'unknown'.\n" +
-          "  - Prefer 'unknown' over a weak guess — correct NULLs beat wrong guesses for this backfill.\n" +
-          "  - The pillar hint (when present) is the source video/post this item derives from; " +
-          "its format often constrains the derivative's format.\n" +
-          "  - High confidence = name strongly matches the title/platform/pillar context. " +
-          "Medium = plausible match. Low = a guess.",
-        cache_control: { type: "ephemeral" },
-      },
-    ];
+    // Stable across the whole run; OpenAI auto-caches system prompts >1024 tokens
+    // (the formats list comfortably exceeds that for any real brand).
+    const systemPrompt =
+      "You classify a single social-media content item by picking the best-fitting format name from an allowed list.\n\n" +
+      "Allowed formats (pick one exactly as written, or return 'unknown'):\n" +
+      formatNames.map((n) => `  - ${n}`).join("\n") +
+      "\n\nRules:\n" +
+      "  - Return the EXACT format name from the list (capitalization + punctuation) or 'unknown'.\n" +
+      "  - Prefer 'unknown' over a weak guess — correct NULLs beat wrong guesses for this backfill.\n" +
+      "  - The pillar hint (when present) is the source video/post this item derives from; " +
+      "its format often constrains the derivative's format.\n" +
+      "  - High confidence = name strongly matches the title/platform/pillar context. " +
+      "Medium = plausible match. Low = a guess.";
 
     async function askLLM(item) {
       const cached = cache[item.id];
@@ -221,40 +215,53 @@ if (passArg === "2" || passArg === "both") {
       ].join("\n");
 
       const response = await withRetry(() =>
-        client.messages.create({
+        client.chat.completions.create({
           model: LLM_MODEL,
           max_tokens: 256,
-          system: systemBlocks,
           tools: [
             {
-              name: "pick_format",
-              description: "Classify the item with the best-matching format.",
-              input_schema: {
-                type: "object",
-                properties: {
-                  format: {
-                    type: "string",
-                    description:
-                      "Exact format name from the allowed list, or 'unknown' if none fit.",
+              type: "function",
+              function: {
+                name: "pick_format",
+                description: "Classify the item with the best-matching format.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    format: {
+                      type: "string",
+                      description:
+                        "Exact format name from the allowed list, or 'unknown' if none fit.",
+                    },
+                    confidence: {
+                      type: "string",
+                      enum: ["high", "medium", "low"],
+                    },
                   },
-                  confidence: {
-                    type: "string",
-                    enum: ["high", "medium", "low"],
-                  },
+                  required: ["format", "confidence"],
+                  additionalProperties: false,
                 },
-                required: ["format", "confidence"],
+                strict: true,
               },
             },
           ],
-          tool_choice: { type: "tool", name: "pick_format" },
-          messages: [{ role: "user", content: userText }],
+          tool_choice: { type: "function", function: { name: "pick_format" } },
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userText },
+          ],
         }),
       );
 
       let verdict = { format: "unknown", confidence: "low" };
-      for (const block of response.content) {
-        if (block.type !== "tool_use") continue;
-        const input = block.input ?? {};
+      const message = response.choices[0]?.message;
+      for (const call of message?.tool_calls ?? []) {
+        if (call.type !== "function") continue;
+        let input = {};
+        try {
+          input = JSON.parse(call.function.arguments);
+        } catch {
+          // leave as default
+        }
         verdict = {
           format: typeof input.format === "string" ? input.format.trim() : "unknown",
           confidence:

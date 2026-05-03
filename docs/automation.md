@@ -20,7 +20,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   *:15  threshold-monitor-sweep   → in-place scan. Auto-creates repurposed Idea items when views cross format thresholds.
   *:20  enrichment-sweep          → fan-out → enrich-item (per item) → maybe transcribe-whisper
   *:30  notion-sync               → Notion API ⇄ productionItems (YouTube long-form authoritative)
-  *:40  hook-extract-sweep        → fan-out → extract-hook (per item, Haiku)
+  *:40  hook-extract-sweep        → fan-out → extract-hook (per item, gpt-4.1-mini)
   *:50  hook-fallback-sweep       → fan-out → hook-fallback (per item, no LLM)
   */20  youtube-download-sweep    → fan-out → youtube-download → transcribe-whisper
   */30  account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
@@ -261,7 +261,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Downstream:** none directly; downstream is the human triage flow
 - **Rules:**
   - Phase A: stratified-batch classify per post-type (per-run quotas: x 12, instagram 10, linkedin/threads/youtube 4 each). Last 10 kill reasons injected into the classifier prompt as negative exemplars; classifier draws from a 50-reason history window.
-  - Phase B: refill Idea queue, blocking any original that already has a prior repost row in **any** state (Idea, in-production, Published, Killed). This is the dedup that used to be enforced (much more narrowly) by the partial unique index `uniq_production_items_pillar_format`; that index was dropped in 0056 and the check now lives at generation time per the operator rule "if we've already done it before, or it's already in production, don't generate it." Before each insert, a per-candidate Haiku **fit judge** (`judgeRepostFit`) reads recent kill reasons (last 50) + accepted-and-published repost exemplars (last 30) and skips candidates that resemble a kill or don't resemble any accept. Catches already-`isEvergreen=true` items the operator no longer wants resurfaced (Phase A's prompt-injection only steers newly-classified items).
+  - Phase B: refill Idea queue, blocking any original that already has a prior repost row in **any** state (Idea, in-production, Published, Killed). This is the dedup that used to be enforced (much more narrowly) by the partial unique index `uniq_production_items_pillar_format`; that index was dropped in 0056 and the check now lives at generation time per the operator rule "if we've already done it before, or it's already in production, don't generate it." Before each insert, a per-candidate gpt-4.1-mini **fit judge** (`judgeRepostFit`) reads recent kill reasons (last 50) + accepted-and-published repost exemplars (last 30) and skips candidates that resemble a kill or don't resemble any accept. Catches already-`isEvergreen=true` items the operator no longer wants resurfaced (Phase A's prompt-injection only steers newly-classified items).
   - Cap: 20 pending suggestions in queue; per-platform diversity caps are explicit (`PLATFORM_QUEUE_CAPS` in `evergreen-scan.ts`): x 6, instagram 6, linkedin 4, threads 3, youtube 3, default 2. Sum exceeds the queue target so the queue can always fill, but no single platform can dominate.
   - Candidate pool per run: stratified per-platform — top `POOL_PER_PLATFORM` (40) evergreens per platform by views, merged and re-sorted views-DESC. Pulling globally by views starved non-X channels because X view counts dwarf everything else.
   - Repost rows copy `accountId`, `postType`, `platform`, `format`, `pillarContentItemId`, and `pillarContentNotionId` from the original; per-platform diversity cap is keyed off the joined `account.platform`. Pillar-inheritance was added 2026-05-01 to fix evergreen-scan reposts losing their parent's pillar link — see `scripts/backfill-repost-pillar.mjs` for the historic-row repair.
@@ -482,16 +482,16 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - Returns `null` if no enricher matches the platform — sweep treats that as a no-op
   - `withMedia=true` (Instagram only) also archives the raw video to S3 (10 SC credits vs ~2)
 
-### `extract-hook` — Haiku hook extraction
+### `extract-hook` — gpt-4.1-mini hook extraction
 - **Trigger:** enqueued by `hook-extract-sweep`
 - **Files:** `src/jobs/tasks/extract-hook.ts`, `src/lib/services/hook-extract/orchestrator.ts`
 - **Inputs:** `{ productionItemId }`
-- **Outputs:** `productionItems.hook` (verbatim opening line), `hookExtractedAt`, `hookSource='haiku'`
+- **Outputs:** `productionItems.hook` (verbatim opening line), `hookExtractedAt`, `hookSource='llm'`
 - **Downstream:** none
 - **Rules:**
-  - Feeds only the opening 20s of the transcript to Haiku
+  - Feeds only the opening 20s of the transcript to the model
   - **Substring-match validation** rejects hallucinated rewordings (normalize whitespace + case)
-  - ~$0.0005 per item
+  - Migrated 2026-05-02 from `claude-haiku-4-5` to OpenAI `gpt-4.1-mini`. Largely deprecated in favor of the unified `dispatch-hook` path
 
 ### `hook-fallback` — fill hooks without LLM
 - **Trigger:** enqueued by `hook-fallback-sweep`
@@ -503,7 +503,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 
 ### Overlay text: vision OCR is the only source of truth
 - **Where:** `src/lib/services/hook-extract/vision.ts` (`extractVisionForItem`), via `vision-extract` per-item task and the scheduled `vision-extract-sweep` (cron `55 * * * *` in `src/jobs/crontab.ts`)
-- **What:** Haiku reads the bold burn-in text painted onto the cover image and writes it verbatim to `productionItems.overlay`, plus to `hook` (when the existing hook source is overwritable: null/title/content_body) with `hookSource='vision'`
+- **What:** gpt-4.1-mini (vision) reads the bold burn-in text painted onto the cover image and writes it verbatim to `productionItems.overlay`, plus to `hook` (when the existing hook source is overwritable: null/title/content_body) with `hookSource='vision'`. Migrated 2026-05-02 from `claude-haiku-4-5`.
 - **Why this is the only path:** an earlier attempt (2026-05-01, reverted) trusted `title` as a proxy for the on-video overlay for "Reel: Repackage Section w/ Hook" items. Spot checks against the rendered cover proved title is unreliable — often it's the caption's first sentence or a draft framing, not the overlay. The overlay text only exists in the rendered video frame; OCR is the only way to read it
 - **One-shot recovery:** `scripts/revert-repackage-overlay-backfill.mjs` (clears the bad rows) + `scripts/enqueue-vision-for-repackage.mjs` (fans out vision-extract for IG Repackage items with a poster). Going forward the cron picks up new posts hourly
 
@@ -754,7 +754,7 @@ Every task that has a "did this already happen?" check at the top:
 Sweep parents enqueue children with `jobKey: <name>-{id}` and `jobKeyMode: "unsafe_dedupe"` so a tick that overlaps an in-flight job won't double-fan-out. Affected: `enrichment-sweep`, `hook-extract-sweep`, `hook-fallback-sweep`, `youtube-download-sweep`, `account-refresh-sweep`.
 
 ### Hook hierarchy (don't override)
-`hookExtractedAt IS NULL` is the gate for both Haiku and fallback paths. Manual hooks (set in the UI), clip-idea-derived hooks, and the LLM hook all stamp it; the fallback never overrides a populated value.
+`hookExtractedAt IS NULL` is the gate for both LLM and fallback paths. Manual hooks (set in the UI), clip-idea-derived hooks, and the LLM hook all stamp it; the fallback never overrides a populated value.
 
 ### Notion authority
 Only YouTube long-form items on `accounts.syncedFromNotion = true` accounts are Notion-authoritative. Hub & Spoke can edit other items freely without conflict. Status / pillar / utm_campaign are pushed back to Notion only for authoritative items.
@@ -787,7 +787,9 @@ Every sweep filter AND the per-item executor must resolve platform kinds through
 | Scrape Creators | `performance-decay`, `account-content-sync`, `enrich-item`, `account-refresh`, `instagram-body-fetch.ts`, `tweet-body-fetch.ts` | ~1 credit per call; enrichment with media (`withMedia=true`) is ~10; `account-content-sync` with `mode=backfill` spends up to `maxPages` credits per account. Per-task spend is logged to `sc_call_log` (since 2026-04-27) and visible at `/admin/sc-usage` |
 | Descript | `descript-clip-resolve`, `clip-idea-precise-cut` | Per-project API calls — used for clip editing only (transcript path moved to OpenAI Whisper 2026-04) |
 | OpenAI (Whisper) | `transcribe-whisper` | `whisper-1` at $0.006/min ⇒ ~$0.14 per 24-min video; kill-switch via `WHISPER_TRANSCRIBE_LIVE=false` |
-| Anthropic (Claude Haiku 4.5) | `extract-hook`; also draft-gen, repurpose-agent, fit-classifier, evergreen-scan, summary | Hook extraction ~$0.0005/item |
+| OpenAI (gpt-4.1-mini) | `extract-hook`, `dispatch-hook`, `vision-extract`, `repurpose-agent`, `evergreen-scan` (`classifyEvergreen` + `judgeRepostFit`), `cross-post-fit-classifier`, summary route, format/repost backfill scripts | Hook extraction ~$0.0005/item; classifier calls similar. Migrated 2026-05-02 from Anthropic Haiku |
+| Anthropic (Claude Sonnet 4.6) | `generate-clip-ideas` | The Splice clip-idea algorithm; ~$0.10 per pillar |
+| Anthropic (Claude Opus 4.7) | draft-gen | Per-platform draft copywriting; ~$0.03 per draft |
 | Notion | `notion-sync` (bi-directional) | Rate-limited; bulk push via service |
 | Postmark | `notification-send`, password reset, invite emails | |
 | AWS S3 | `youtube-download` (write), `transcribe-whisper` (read video + write extracted audio), `clip-idea-precise-cut` (read), uploads route (write) | Long-term archive |

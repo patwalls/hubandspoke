@@ -17,11 +17,12 @@
  */
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
+import { openai } from "@/lib/openai";
+import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
-const MODEL = "claude-haiku-4-5";
+const MODEL = "gpt-4.1-mini";
 export const EXTRACTOR_VERSION = `${MODEL}:v1`;
 
 /** Short-form post types that have a "stop-scroll" hook to extract.
@@ -108,36 +109,46 @@ function formatSegments(
     .join("\n");
 }
 
-const tools: Anthropic.Tool[] = [
+const tools: ChatCompletionTool[] = [
   {
-    name: "return_hook",
-    description:
-      "Return the verbatim 1–2 sentence opening that functions as the hook — the words the viewer hears in the first few seconds.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        hook: {
-          type: "string",
-          description:
-            "VERBATIM text copied from the transcript cues. Do not paraphrase, do not fix grammar, do not add punctuation that isn't there. 1–2 sentences, typically 8–30 words.",
+    type: "function",
+    function: {
+      name: "return_hook",
+      description:
+        "Return the verbatim 1–2 sentence opening that functions as the hook — the words the viewer hears in the first few seconds.",
+      parameters: {
+        type: "object",
+        properties: {
+          hook: {
+            type: "string",
+            description:
+              "VERBATIM text copied from the transcript cues. Do not paraphrase, do not fix grammar, do not add punctuation that isn't there. 1–2 sentences, typically 8–30 words.",
+          },
         },
+        required: ["hook"],
+        additionalProperties: false,
       },
-      required: ["hook"],
+      strict: true,
     },
   },
   {
-    name: "no_clear_hook",
-    description:
-      "Use when the opening is pure filler (greetings, platform intros, silence, music-only) with no hook worth extracting.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        reason: {
-          type: "string",
-          description: "One sentence on why no hook is extractable.",
+    type: "function",
+    function: {
+      name: "no_clear_hook",
+      description:
+        "Use when the opening is pure filler (greetings, platform intros, silence, music-only) with no hook worth extracting.",
+      parameters: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            description: "One sentence on why no hook is extractable.",
+          },
         },
+        required: ["reason"],
+        additionalProperties: false,
       },
-      required: ["reason"],
+      strict: true,
     },
   },
 ];
@@ -159,17 +170,14 @@ export interface ExtractHookResult {
   outputTokens: number;
 }
 
-async function callHaiku(
-  cues: string
-): Promise<ExtractHookResult> {
-  const client = new Anthropic();
-  const response = await client.messages.create({
+async function callHookLLM(cues: string): Promise<ExtractHookResult> {
+  const response = await openai().chat.completions.create({
     model: MODEL,
     max_tokens: 256,
-    system: SYSTEM_PROMPT,
     tools,
-    tool_choice: { type: "any" },
+    tool_choice: "required",
     messages: [
+      { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
         content: `Transcript cues (opening window):\n\n${cues}\n\nCall exactly one tool.`,
@@ -177,13 +185,19 @@ async function callHaiku(
     ],
   });
 
-  const inputTokens = response.usage.input_tokens;
-  const outputTokens = response.usage.output_tokens;
+  const inputTokens = response.usage?.prompt_tokens ?? 0;
+  const outputTokens = response.usage?.completion_tokens ?? 0;
 
-  for (const block of response.content) {
-    if (block.type !== "tool_use") continue;
-    const input = block.input as { hook?: string; reason?: string };
-    if (block.name === "return_hook") {
+  const message = response.choices[0]?.message;
+  for (const call of message?.tool_calls ?? []) {
+    if (call.type !== "function") continue;
+    let input: { hook?: string; reason?: string };
+    try {
+      input = JSON.parse(call.function.arguments);
+    } catch {
+      continue;
+    }
+    if (call.function.name === "return_hook") {
       const hook = typeof input.hook === "string" ? input.hook.trim() : "";
       if (hook.length === 0) {
         return {
@@ -195,7 +209,7 @@ async function callHaiku(
       }
       return { hook, skippedReason: null, inputTokens, outputTokens };
     }
-    if (block.name === "no_clear_hook") {
+    if (call.function.name === "no_clear_hook") {
       return {
         hook: null,
         skippedReason:
@@ -274,7 +288,7 @@ export async function extractHookForItem(
     return { status: "skipped", note: "no-cues-in-window" };
   }
 
-  const result = await callHaiku(cues);
+  const result = await callHookLLM(cues);
 
   if (!result.hook) {
     await db

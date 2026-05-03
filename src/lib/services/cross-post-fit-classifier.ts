@@ -1,6 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { openai } from "@/lib/openai";
+import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "gpt-4.1-mini";
 
 // Captions/tweets over ~1.5k chars are rare; clipping keeps tokens bounded
 // without losing judgement signal. Matches evergreen-agent.ts.
@@ -19,37 +20,47 @@ export interface PastCrossPostKill {
   targetPlatform?: string | null;
 }
 
-const tools: Anthropic.Tool[] = [
+const tools: ChatCompletionTool[] = [
   {
-    name: "mark_good_fit",
-    description:
-      "Mark this post as a good candidate to cross-post to the specified target platform. Use when the content is self-contained, durable, and fits the target platform's medium and audience.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        reasoning: {
-          type: "string",
-          description:
-            "One or two sentences explaining why this specific post fits this specific target platform.",
+    type: "function",
+    function: {
+      name: "mark_good_fit",
+      description:
+        "Mark this post as a good candidate to cross-post to the specified target platform. Use when the content is self-contained, durable, and fits the target platform's medium and audience.",
+      parameters: {
+        type: "object",
+        properties: {
+          reasoning: {
+            type: "string",
+            description:
+              "One or two sentences explaining why this specific post fits this specific target platform.",
+          },
         },
+        required: ["reasoning"],
+        additionalProperties: false,
       },
-      required: ["reasoning"],
+      strict: true,
     },
   },
   {
-    name: "mark_bad_fit",
-    description:
-      "Mark this post as a poor cross-post candidate for the specified target platform. Use when the content is tied to a moment, leans on the source platform's framing, is a thin reaction, or — most importantly — its medium (video, long thread, etc.) does not translate to the target platform.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        reasoning: {
-          type: "string",
-          description:
-            "One or two sentences explaining why this post should not be cross-posted to this target platform. Cite the specific quality (time-sensitive, platform-native, thin reaction, medium mismatch).",
+    type: "function",
+    function: {
+      name: "mark_bad_fit",
+      description:
+        "Mark this post as a poor cross-post candidate for the specified target platform. Use when the content is tied to a moment, leans on the source platform's framing, is a thin reaction, or — most importantly — its medium (video, long thread, etc.) does not translate to the target platform.",
+      parameters: {
+        type: "object",
+        properties: {
+          reasoning: {
+            type: "string",
+            description:
+              "One or two sentences explaining why this post should not be cross-posted to this target platform. Cite the specific quality (time-sensitive, platform-native, thin reaction, medium mismatch).",
+          },
         },
+        required: ["reasoning"],
+        additionalProperties: false,
       },
-      required: ["reasoning"],
+      strict: true,
     },
   },
 ];
@@ -121,8 +132,6 @@ export async function classifyCrossPostFit(params: {
     };
   }
 
-  const client = new Anthropic();
-
   const bodySection = `Body:\n"""\n${body.slice(0, MAX_BODY_CHARS)}${
     body.length > MAX_BODY_CHARS ? "…" : ""
   }\n"""`;
@@ -142,28 +151,36 @@ export async function classifyCrossPostFit(params: {
   ].join("\n");
 
   try {
-    const response = await client.messages.create({
+    const response = await openai().chat.completions.create({
       model: MODEL,
       max_tokens: 512,
-      system: buildSystemPrompt(params.pastKillReasons),
       tools,
-      tool_choice: { type: "any" },
-      messages: [{ role: "user", content: userMessage }],
+      tool_choice: "required",
+      messages: [
+        { role: "system", content: buildSystemPrompt(params.pastKillReasons) },
+        { role: "user", content: userMessage },
+      ],
     });
 
-    for (const block of response.content) {
-      if (block.type !== "tool_use") continue;
-      const input = block.input as { reasoning?: string };
+    const message = response.choices[0]?.message;
+    for (const call of message?.tool_calls ?? []) {
+      if (call.type !== "function") continue;
+      let input: { reasoning?: string };
+      try {
+        input = JSON.parse(call.function.arguments);
+      } catch {
+        continue;
+      }
       if (typeof input.reasoning !== "string" || !input.reasoning.trim()) continue;
 
-      if (block.name === "mark_good_fit") {
+      if (call.function.name === "mark_good_fit") {
         return {
           isGoodFit: true,
           reasoning: input.reasoning.trim(),
           isFallback: false,
         };
       }
-      if (block.name === "mark_bad_fit") {
+      if (call.function.name === "mark_bad_fit") {
         return {
           isGoodFit: false,
           reasoning: input.reasoning.trim(),

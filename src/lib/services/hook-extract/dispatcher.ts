@@ -26,12 +26,16 @@
  */
 
 import { and, eq, isNull, not, or, sql } from "drizzle-orm";
-import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
+import { openai } from "@/lib/openai";
+import type {
+  ChatCompletionContentPart,
+  ChatCompletionTool,
+} from "openai/resources/chat/completions";
 
-const MODEL = "claude-haiku-4-5";
+const MODEL = "gpt-4.1-mini";
 export const DISPATCHER_VERSION = `dispatcher:${MODEL}:v1`;
 
 export const DISPATCHER_BATCH_LIMIT = 50;
@@ -101,36 +105,42 @@ function formatTranscriptSegments(
     .join("\n");
 }
 
-const tools: Anthropic.Tool[] = [
+const tools: ChatCompletionTool[] = [
   {
-    name: "return_hook",
-    description:
-      "Return the best hook for this post. Pick exactly one source and quote verbatim.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        hook: {
-          type: ["string", "null"],
-          description:
-            "The hook text, VERBATIM from whichever source you picked. No paraphrasing, no fixing typos, no adding punctuation. 1–2 sentences, typically 6–30 words. Null if source='none'.",
+    type: "function",
+    function: {
+      name: "return_hook",
+      description:
+        "Return the best hook for this post. Pick exactly one source and quote verbatim.",
+      parameters: {
+        type: "object",
+        properties: {
+          hook: {
+            type: ["string", "null"],
+            description:
+              "The hook text, VERBATIM from whichever source you picked. No paraphrasing, no fixing typos, no adding punctuation. 1–2 sentences, typically 6–30 words. Null if source='none'.",
+          },
+          source: {
+            type: "string",
+            enum: ["overlay", "transcript", "caption", "title", "none"],
+            description:
+              "Which signal the hook came from. 'overlay' = designed text burned into the cover image (Reels/Shorts/TikTok bar text). 'transcript' = first scroll-stopping sentence in the spoken transcript. 'caption' = first sentence of post body/caption (tweets, IG posts). 'title' = post title (YouTube long, newsletter). 'none' = no good hook available.",
+          },
+          cover_description: {
+            type: ["string", "null"],
+            description:
+              "One-sentence description of the cover image — who/what is shown, composition, any graphic treatment. Null if no image was provided.",
+          },
+          reasoning: {
+            type: "string",
+            description:
+              "One short sentence explaining why this source was picked.",
+          },
         },
-        source: {
-          type: "string",
-          enum: ["overlay", "transcript", "caption", "title", "none"],
-          description:
-            "Which signal the hook came from. 'overlay' = designed text burned into the cover image (Reels/Shorts/TikTok bar text). 'transcript' = first scroll-stopping sentence in the spoken transcript. 'caption' = first sentence of post body/caption (tweets, IG posts). 'title' = post title (YouTube long, newsletter). 'none' = no good hook available.",
-        },
-        cover_description: {
-          type: ["string", "null"],
-          description:
-            "One-sentence description of the cover image — who/what is shown, composition, any graphic treatment. Null if no image was provided.",
-        },
-        reasoning: {
-          type: "string",
-          description: "One short sentence explaining why this source was picked.",
-        },
+        required: ["hook", "source", "cover_description", "reasoning"],
+        additionalProperties: false,
       },
-      required: ["hook", "source", "reasoning"],
+      strict: true,
     },
   },
 ];
@@ -197,38 +207,45 @@ function buildUserMessage(signals: ItemSignals): string {
 }
 
 async function callLLM(signals: ItemSignals): Promise<DispatchResult> {
-  const client = new Anthropic();
   const userText = buildUserMessage(signals);
 
-  const content: Array<Anthropic.ContentBlockParam> = [];
+  const content: ChatCompletionContentPart[] = [];
   if (signals.posterImageUrl) {
     content.push({
-      type: "image",
-      source: { type: "url", url: signals.posterImageUrl },
+      type: "image_url",
+      image_url: { url: signals.posterImageUrl },
     });
   }
   content.push({ type: "text", text: userText });
 
-  const response = await client.messages.create({
+  const response = await openai().chat.completions.create({
     model: MODEL,
     max_tokens: 512,
-    system: SYSTEM_PROMPT,
     tools,
-    tool_choice: { type: "tool", name: "return_hook" },
-    messages: [{ role: "user", content }],
+    tool_choice: { type: "function", function: { name: "return_hook" } },
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content },
+    ],
   });
 
-  const inputTokens = response.usage.input_tokens;
-  const outputTokens = response.usage.output_tokens;
+  const inputTokens = response.usage?.prompt_tokens ?? 0;
+  const outputTokens = response.usage?.completion_tokens ?? 0;
 
-  for (const block of response.content) {
-    if (block.type !== "tool_use" || block.name !== "return_hook") continue;
-    const input = block.input as {
+  const message = response.choices[0]?.message;
+  for (const call of message?.tool_calls ?? []) {
+    if (call.type !== "function" || call.function.name !== "return_hook") continue;
+    let input: {
       hook?: string | null;
       source?: string;
       cover_description?: string | null;
       reasoning?: string;
     };
+    try {
+      input = JSON.parse(call.function.arguments);
+    } catch {
+      continue;
+    }
     const source = (input.source ?? "none") as DispatcherSource;
     const rawHook = typeof input.hook === "string" ? input.hook.trim() : null;
     const hook =

@@ -1,6 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { openai } from "@/lib/openai";
+import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
-const MODEL = "claude-haiku-4-5";
+const MODEL = "gpt-4.1-mini";
 
 /**
  * The capabilities this app can execute when the user clicks Repurpose on a
@@ -24,47 +25,57 @@ export type RepurposeAction =
       guidance: string;
     };
 
-const tools: Anthropic.Tool[] = [
+const tools: ChatCompletionTool[] = [
   {
-    name: "create_descript_clip",
-    description:
-      "Create a short clip as a new composition inside the source video's existing Descript project. Use when the format's skill describes any short-form clip, highlight, reel, short, cut, or excerpt of the pillar video.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        descriptPrompt: {
-          type: "string",
-          description:
-            "Natural-language directive that will be sent verbatim to Descript's agent. It must: (1) start with \"Create a new composition named '<name>' containing a clip from the main composition.\", (2) describe WHAT moment to clip — the emotional beat, topic, quote character, or criteria drawn from the format's skill; (3) state a target length range (e.g. \"Target length 30–60 seconds.\"); (4) if the skill has an Avoid section, include a matching \"Avoid …\" clause. Do NOT pick timestamps — Descript has transcript access and will pick the moment itself.",
+    type: "function",
+    function: {
+      name: "create_descript_clip",
+      description:
+        "Create a short clip as a new composition inside the source video's existing Descript project. Use when the format's skill describes any short-form clip, highlight, reel, short, cut, or excerpt of the pillar video.",
+      parameters: {
+        type: "object",
+        properties: {
+          descriptPrompt: {
+            type: "string",
+            description:
+              "Natural-language directive that will be sent verbatim to Descript's agent. It must: (1) start with \"Create a new composition named '<name>' containing a clip from the main composition.\", (2) describe WHAT moment to clip — the emotional beat, topic, quote character, or criteria drawn from the format's skill; (3) state a target length range (e.g. \"Target length 30–60 seconds.\"); (4) if the skill has an Avoid section, include a matching \"Avoid …\" clause. Do NOT pick timestamps — Descript has transcript access and will pick the moment itself.",
+          },
+          compositionName: {
+            type: "string",
+            description:
+              "Name for the new Descript composition. Use the target format's name verbatim unless the format's skill says otherwise.",
+          },
         },
-        compositionName: {
-          type: "string",
-          description:
-            "Name for the new Descript composition. Use the target format's name verbatim unless the format's skill says otherwise.",
-        },
+        required: ["descriptPrompt", "compositionName"],
+        additionalProperties: false,
       },
-      required: ["descriptPrompt", "compositionName"],
+      strict: true,
     },
   },
   {
-    name: "create_manual_task",
-    description:
-      "Create a Notion task for an editor to do this format by hand. Use when the format's skill describes work done in another tool (Canva design, Figma, image editor, written post, playbook slides, etc.), when the skill is too ambiguous to automate, or when the skill is blank/placeholder. No tool is invoked — the `guidance` you provide is shown to the editor in the Notion task body.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        taskName: {
-          type: "string",
-          description:
-            "Name for the task / derivative. Use the target format's name verbatim unless the skill says otherwise.",
+    type: "function",
+    function: {
+      name: "create_manual_task",
+      description:
+        "Create a Notion task for an editor to do this format by hand. Use when the format's skill describes work done in another tool (Canva design, Figma, image editor, written post, playbook slides, etc.), when the skill is too ambiguous to automate, or when the skill is blank/placeholder. No tool is invoked — the `guidance` you provide is shown to the editor in the Notion task body.",
+      parameters: {
+        type: "object",
+        properties: {
+          taskName: {
+            type: "string",
+            description:
+              "Name for the task / derivative. Use the target format's name verbatim unless the skill says otherwise.",
+          },
+          guidance: {
+            type: "string",
+            description:
+              "Short editor brief (a few sentences to a short paragraph). Distill the skill into concrete, actionable guidance the editor can follow. If the skill is empty or placeholder, say so explicitly and tell the editor to ask Pat for a proper skill or to work from the format name and brand conventions.",
+          },
         },
-        guidance: {
-          type: "string",
-          description:
-            "Short editor brief (a few sentences to a short paragraph). Distill the skill into concrete, actionable guidance the editor can follow. If the skill is empty or placeholder, say so explicitly and tell the editor to ask Pat for a proper skill or to work from the format name and brand conventions.",
-        },
+        required: ["taskName", "guidance"],
+        additionalProperties: false,
       },
-      required: ["taskName", "guidance"],
+      strict: true,
     },
   },
 ];
@@ -95,8 +106,6 @@ export async function dispatchRepurpose(params: {
   targetFormatName: string;
   targetPrompt: string;
 }): Promise<RepurposeAction> {
-  const client = new Anthropic();
-
   const userMessage = [
     `Source pillar: "${params.itemTitle}"`,
     `Target format: ${params.targetFormatName}`,
@@ -108,64 +117,74 @@ export async function dispatchRepurpose(params: {
     `Decide what to do. Call exactly one tool.`,
   ].join("\n");
 
-  const response = await client.messages.create({
+  const response = await openai().chat.completions.create({
     model: MODEL,
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
     tools,
-    tool_choice: { type: "any" },
-    messages: [{ role: "user", content: userMessage }],
+    tool_choice: "required",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userMessage },
+    ],
   });
 
-  for (const block of response.content) {
-    if (block.type !== "tool_use") continue;
+  const message = response.choices[0]?.message;
+  for (const call of message?.tool_calls ?? []) {
+    if (call.type !== "function") continue;
 
-    if (block.name === "create_descript_clip") {
-      const input = block.input as {
-        descriptPrompt?: string;
-        compositionName?: string;
-      };
-      if (
-        typeof input.descriptPrompt === "string" &&
-        input.descriptPrompt.trim().length > 0 &&
-        typeof input.compositionName === "string" &&
-        input.compositionName.trim().length > 0
-      ) {
-        return {
-          kind: "descript_clip",
-          descriptPrompt: input.descriptPrompt.trim(),
-          compositionName: input.compositionName.trim(),
+    if (call.function.name === "create_descript_clip") {
+      try {
+        const input = JSON.parse(call.function.arguments) as {
+          descriptPrompt?: string;
+          compositionName?: string;
         };
+        if (
+          typeof input.descriptPrompt === "string" &&
+          input.descriptPrompt.trim().length > 0 &&
+          typeof input.compositionName === "string" &&
+          input.compositionName.trim().length > 0
+        ) {
+          return {
+            kind: "descript_clip",
+            descriptPrompt: input.descriptPrompt.trim(),
+            compositionName: input.compositionName.trim(),
+          };
+        }
+      } catch {
+        // fall through to fallback
       }
     }
 
-    if (block.name === "create_manual_task") {
-      const input = block.input as {
-        taskName?: string;
-        guidance?: string;
-      };
-      if (
-        typeof input.taskName === "string" &&
-        input.taskName.trim().length > 0 &&
-        typeof input.guidance === "string" &&
-        input.guidance.trim().length > 0
-      ) {
-        return {
-          kind: "manual_task",
-          taskName: input.taskName.trim(),
-          guidance: input.guidance.trim(),
+    if (call.function.name === "create_manual_task") {
+      try {
+        const input = JSON.parse(call.function.arguments) as {
+          taskName?: string;
+          guidance?: string;
         };
+        if (
+          typeof input.taskName === "string" &&
+          input.taskName.trim().length > 0 &&
+          typeof input.guidance === "string" &&
+          input.guidance.trim().length > 0
+        ) {
+          return {
+            kind: "manual_task",
+            taskName: input.taskName.trim(),
+            guidance: input.guidance.trim(),
+          };
+        }
+      } catch {
+        // fall through to fallback
       }
     }
   }
 
-  // Defensive fallback: Claude ignored tool_choice or returned malformed args.
+  // Defensive fallback: model ignored tool_choice or returned malformed args.
   // Never leave the caller without an action — a manual task with the format
-  // name and any text Claude emitted is better than a dead end.
-  const textBlock = response.content.find((b) => b.type === "text");
+  // name and any text the model emitted is better than a dead end.
   const fallbackGuidance =
-    textBlock && textBlock.type === "text" && textBlock.text.trim().length > 0
-      ? textBlock.text.trim()
+    typeof message?.content === "string" && message.content.trim().length > 0
+      ? message.content.trim()
       : "The dispatcher couldn't read the format's skill. Ask Pat to rewrite it, or work from the format name and brand conventions.";
   return {
     kind: "manual_task",

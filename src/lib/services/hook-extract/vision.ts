@@ -15,12 +15,13 @@
  */
 
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
-import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
+import { openai } from "@/lib/openai";
+import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
-const MODEL = "claude-haiku-4-5";
+const MODEL = "gpt-4.1-mini";
 export const VISION_EXTRACTOR_VERSION = `vision:${MODEL}:v1`;
 
 /** Post types whose cover image is meaningful (designed overlay, thumbnail
@@ -37,7 +38,7 @@ const VISION_POST_TYPES = [
 
 export const VISION_SWEEP_BATCH_LIMIT = 50;
 
-/** TTL for the presigned poster URL we hand to Anthropic. 1 hour covers
+/** TTL for the presigned poster URL we hand to the model. 1 hour covers
  *  retries comfortably without giving out long-lived URLs. */
 const POSTER_URL_TTL_SECONDS = 60 * 60;
 
@@ -73,45 +74,55 @@ export async function selectVisionCandidates(
   return rows.map((r) => r.id);
 }
 
-const tools: Anthropic.Tool[] = [
+const tools: ChatCompletionTool[] = [
   {
-    name: "return_cover_analysis",
-    description:
-      "Return the on-screen hook text and a one-sentence description of the cover image.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        hook: {
-          type: ["string", "null"],
-          description:
-            "VERBATIM on-screen text from the cover — the bold overlay, bar text, or caption burn-in designed as the hook. Copy exactly what is painted on the image (keep punctuation/emojis but drop small platform chrome like view counts or handles). If there is no scroll-stopping overlay text, pass null. Never invent words that aren't visibly on the image.",
+    type: "function",
+    function: {
+      name: "return_cover_analysis",
+      description:
+        "Return the on-screen hook text and a one-sentence description of the cover image.",
+      parameters: {
+        type: "object",
+        properties: {
+          hook: {
+            type: ["string", "null"],
+            description:
+              "VERBATIM on-screen text from the cover — the bold overlay, bar text, or caption burn-in designed as the hook. Copy exactly what is painted on the image (keep punctuation/emojis but drop small platform chrome like view counts or handles). If there is no scroll-stopping overlay text, pass null. Never invent words that aren't visibly on the image.",
+          },
+          cover_description: {
+            type: "string",
+            description:
+              "One sentence describing what the cover looks like: who/what is shown, composition (split-screen, close-up, text-only), any graphic treatment. Used for search + training data.",
+          },
         },
-        cover_description: {
-          type: "string",
-          description:
-            "One sentence describing what the cover looks like: who/what is shown, composition (split-screen, close-up, text-only), any graphic treatment. Used for search + training data.",
-        },
+        required: ["hook", "cover_description"],
+        additionalProperties: false,
       },
-      required: ["hook", "cover_description"],
+      strict: true,
     },
   },
   {
-    name: "no_clear_cover",
-    description:
-      "Use only when the image is unreadable / failed to load / is not a real content cover. Still describe whatever you can see.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        cover_description: {
-          type: "string",
-          description: "Brief note on what's visible, even if low-quality.",
+    type: "function",
+    function: {
+      name: "no_clear_cover",
+      description:
+        "Use only when the image is unreadable / failed to load / is not a real content cover. Still describe whatever you can see.",
+      parameters: {
+        type: "object",
+        properties: {
+          cover_description: {
+            type: "string",
+            description: "Brief note on what's visible, even if low-quality.",
+          },
+          reason: {
+            type: "string",
+            description: "One sentence on why no hook is extractable.",
+          },
         },
-        reason: {
-          type: "string",
-          description: "One sentence on why no hook is extractable.",
-        },
+        required: ["cover_description", "reason"],
+        additionalProperties: false,
       },
-      required: ["cover_description", "reason"],
+      strict: true,
     },
   },
 ];
@@ -134,47 +145,46 @@ export interface VisionResult {
   outputTokens: number;
 }
 
-async function callHaikuVision(imageUrl: string): Promise<VisionResult> {
-  const client = new Anthropic();
-  const response = await client.messages.create({
+async function callVisionLLM(imageUrl: string): Promise<VisionResult> {
+  const response = await openai().chat.completions.create({
     model: MODEL,
     max_tokens: 512,
-    system: SYSTEM_PROMPT,
     tools,
-    tool_choice: { type: "any" },
+    tool_choice: "required",
     messages: [
+      { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
         content: [
-          {
-            type: "image",
-            source: { type: "url", url: imageUrl },
-          },
-          {
-            type: "text",
-            text: "Analyze this cover. Call exactly one tool.",
-          },
+          { type: "image_url", image_url: { url: imageUrl } },
+          { type: "text", text: "Analyze this cover. Call exactly one tool." },
         ],
       },
     ],
   });
 
-  const inputTokens = response.usage.input_tokens;
-  const outputTokens = response.usage.output_tokens;
+  const inputTokens = response.usage?.prompt_tokens ?? 0;
+  const outputTokens = response.usage?.completion_tokens ?? 0;
 
-  for (const block of response.content) {
-    if (block.type !== "tool_use") continue;
-    const input = block.input as {
+  const message = response.choices[0]?.message;
+  for (const call of message?.tool_calls ?? []) {
+    if (call.type !== "function") continue;
+    let input: {
       hook?: string | null;
       cover_description?: string;
       reason?: string;
     };
+    try {
+      input = JSON.parse(call.function.arguments);
+    } catch {
+      continue;
+    }
     const description =
       typeof input.cover_description === "string"
         ? input.cover_description.trim().slice(0, MAX_DESCRIPTION_CHARS)
         : null;
 
-    if (block.name === "return_cover_analysis") {
+    if (call.function.name === "return_cover_analysis") {
       const hookRaw =
         typeof input.hook === "string" ? input.hook.trim() : null;
       const hook =
@@ -189,7 +199,7 @@ async function callHaikuVision(imageUrl: string): Promise<VisionResult> {
         outputTokens,
       };
     }
-    if (block.name === "no_clear_cover") {
+    if (call.function.name === "no_clear_cover") {
       return {
         hook: null,
         coverDescription: description,
@@ -249,7 +259,7 @@ export async function extractVisionForItem(
     POSTER_URL_TTL_SECONDS
   );
 
-  const result = await callHaikuVision(imageUrl);
+  const result = await callVisionLLM(imageUrl);
   const now = new Date();
 
   const canUpgradeHook =
