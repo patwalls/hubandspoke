@@ -196,13 +196,24 @@ function runYtDlp(args: {
 }): Promise<void> {
   return new Promise((resolvePromise, rejectPromise) => {
     const ytArgs = [
+      // Prefer m4a audio (always AAC on YouTube). The fallback paths land
+      // on Opus, which Twitter rejects with "Incompatible audio codecs" —
+      // the Merger postprocessor below re-encodes to AAC as a safety net.
       "-f",
-      "bv*[height<=1440]+ba/b[height<=1440]",
+      "bv*[height<=1080]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]",
       // Prefer H.264 over AV1/VP9 — Descript's URL import rejects AV1.
+      // Don't add `acodec:aac` here: it makes yt-dlp prefer the 360p
+      // muxed stream over 1080p H.264 split. Audio is enforced by the
+      // `[ext=m4a]` filter + the Merger postprocessor below.
       "-S",
       "vcodec:h264",
       "--merge-output-format",
       "mp4",
+      // Force AAC audio + faststart on the merged output. This is what
+      // makes the file uploadable to Twitter without a separate transcode
+      // pass.
+      "--postprocessor-args",
+      "Merger:-c:v copy -c:a aac -b:a 192k -movflags +faststart",
       "--ffmpeg-location",
       args.ffmpegPath,
       "--no-playlist",

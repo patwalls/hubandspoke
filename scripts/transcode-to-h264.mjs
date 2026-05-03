@@ -1,17 +1,25 @@
-// Re-encode production_item media from AV1/VP9 → H.264 so Descript's URL
-// import will accept it. Audio is always re-encoded to AAC to guarantee
-// MP4 compatibility.
+// Fix codecs on production_item media so the file is uploadable everywhere
+// we care about (Descript URL import + Twitter/X). Two failure modes:
+//   1. Video is AV1/VP9 → Descript rejects. Full re-encode to H.264.
+//   2. Audio is Opus (YouTube's high-quality stream) → Twitter rejects with
+//      "Incompatible audio codecs". Audio-only re-encode to AAC.
+//
+// Three-way branch per item after probing both streams:
+//   - h264 + aac    → skip
+//   - h264 + other  → audio-only fix (-c:v copy -c:a aac, fast)
+//   - other + any   → full re-encode (-c:v libx264 -c:a aac, slow)
+//
+// Always writes `+faststart` so MP4 streaming clients can begin playback
+// before the full file is fetched.
 //
 // Usage:
 //   node scripts/transcode-to-h264.mjs <itemId>      # single item
 //   node scripts/transcode-to-h264.mjs --batch       # all yt-dlp candidates
 //   node scripts/transcode-to-h264.mjs --batch --dry # probe only, no writes
 //
-// In batch mode, only items without an existing descript_project_id are
-// considered (files already imported to Descript must have been H.264). Each
-// candidate is codec-probed via `ffmpeg -i <presignedUrl>`; items already
-// reporting h264 are skipped. Skipping happens before any download, so probe
-// cost is just a small range-GET over HTTP.
+// Idempotent: re-running probes each candidate and skips ones already in
+// (h264, aac). The S3 round-trip dominates cost; expect ~6–10h on
+// residential bandwidth for the full ~1450-item / ~300 GB sweep.
 
 import { spawn } from "child_process";
 import { stat, unlink } from "fs/promises";
@@ -54,9 +62,10 @@ const pool = new pg.Pool({
       : { rejectUnauthorized: false },
 });
 
-async function probeCodec(path) {
+async function probeCodecs(path) {
   // ffmpeg exits non-zero when given only `-i` (no output), but prints
-  // stream info to stderr first. We parse "Video: <codec>," out of that.
+  // stream info to stderr first. Parse both "Video: <codec>" and
+  // "Audio: <codec>" lines.
   return new Promise((resolve) => {
     const proc = spawn(ffmpegInstaller.path, ["-hide_banner", "-i", path], {
       stdio: ["ignore", "ignore", "pipe"],
@@ -66,30 +75,20 @@ async function probeCodec(path) {
       stderr += b.toString();
     });
     proc.on("close", () => {
-      const m = stderr.match(/Video: ([a-zA-Z0-9_]+)/);
-      resolve(m ? m[1].toLowerCase() : null);
+      const v = stderr.match(/Video: ([a-zA-Z0-9_]+)/);
+      const a = stderr.match(/Audio: ([a-zA-Z0-9_]+)/);
+      resolve({
+        video: v ? v[1].toLowerCase() : null,
+        audio: a ? a[1].toLowerCase() : null,
+      });
     });
-    proc.on("error", () => resolve(null));
+    proc.on("error", () => resolve({ video: null, audio: null }));
   });
 }
 
-async function runFfmpeg(inPath, outPath) {
+function runFfmpegProc(args) {
   return new Promise((resolve, reject) => {
-    const ffArgs = [
-      "-y",
-      "-threads", "2",
-      "-i", inPath,
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "22",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "aac",
-      "-b:a", "128k",
-      "-movflags", "+faststart",
-      "-threads", "2",
-      outPath,
-    ];
-    const proc = spawn(ffmpegInstaller.path, ffArgs, {
+    const proc = spawn(ffmpegInstaller.path, args, {
       stdio: ["ignore", "ignore", "pipe"],
     });
     let lastLine = "";
@@ -104,6 +103,40 @@ async function runFfmpeg(inPath, outPath) {
         reject(new Error(`ffmpeg exited ${code}: ${lastLine.slice(0, 300)}`));
     });
   });
+}
+
+// Full re-encode: video → H.264, audio → AAC. Used when video codec is
+// not H.264 (AV1/VP9). Slow: re-encodes every frame.
+async function runFullTranscode(inPath, outPath) {
+  return runFfmpegProc([
+    "-y",
+    "-threads", "2",
+    "-i", inPath,
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "22",
+    "-pix_fmt", "yuv420p",
+    "-c:a", "aac",
+    "-b:a", "192k",
+    "-movflags", "+faststart",
+    "-threads", "2",
+    outPath,
+  ]);
+}
+
+// Audio-only fix: keep video stream byte-for-byte, re-encode audio to
+// AAC LC + faststart. Used when video is already H.264 but audio is
+// Opus (the YouTube-default-for-Twitter-incompatible case).
+async function runAudioFix(inPath, outPath) {
+  return runFfmpegProc([
+    "-y",
+    "-i", inPath,
+    "-c:v", "copy",
+    "-c:a", "aac",
+    "-b:a", "192k",
+    "-movflags", "+faststart",
+    outPath,
+  ]);
 }
 
 async function transcodeItem({ id, title, key }) {
@@ -126,20 +159,32 @@ async function transcodeItem({ id, title, key }) {
     await pipeline(getRes.Body, createWriteStream(inPath));
     console.log(`  downloaded`);
 
-    const codec = await probeCodec(inPath);
-    console.log(`  codec: ${codec ?? "unknown"}`);
-    if (codec === "h264") {
-      console.log("  skip (already H.264)");
+    const { video, audio } = await probeCodecs(inPath);
+    const codecLabel = `${video ?? "?"}/${audio ?? "?"}`;
+    console.log(`  codec: ${codecLabel}`);
+
+    const videoOk = video === "h264";
+    const audioOk = audio === "aac";
+    if (videoOk && audioOk) {
+      console.log("  skip (h264 + aac)");
       await unlink(inPath).catch(() => {});
-      return { outcome: "skipped", codec };
-    }
-    if (DRY) {
-      console.log(`  dry-run — would transcode from ${codec}`);
-      await unlink(inPath).catch(() => {});
-      return { outcome: "would-transcode", codec };
+      return { outcome: "skipped", codec: codecLabel };
     }
 
-    await runFfmpeg(inPath, outPath);
+    const mode = videoOk ? "audio-only" : "full";
+    if (DRY) {
+      console.log(`  dry-run — would ${mode} re-encode from ${codecLabel}`);
+      await unlink(inPath).catch(() => {});
+      return { outcome: "would-transcode", codec: codecLabel };
+    }
+
+    if (mode === "audio-only") {
+      console.log(`  audio-only fix (${audio} → aac)`);
+      await runAudioFix(inPath, outPath);
+    } else {
+      console.log(`  full re-encode (${codecLabel} → h264/aac)`);
+      await runFullTranscode(inPath, outPath);
+    }
     const outStat = await stat(outPath);
     console.log(`  encoded ${outStat.size} bytes`);
 
@@ -163,7 +208,7 @@ async function transcodeItem({ id, title, key }) {
       [id, outStat.size],
     );
     console.log(`  done in ${Math.round((Date.now() - t0) / 1000)}s`);
-    return { outcome: "transcoded", codec };
+    return { outcome: "transcoded", codec: codecLabel };
   } finally {
     await unlink(inPath).catch(() => {});
     await unlink(outPath).catch(() => {});
@@ -178,17 +223,16 @@ async function loadCandidates() {
     );
     return rows;
   }
-  // Anything uploaded after the first batch run (2026-04-23 03:00 UTC) has
-  // already been transcoded by this script — the UPDATE sets
-  // media_s3_uploaded_at = NOW(), so completed items naturally fall out of
-  // the candidate set without a per-item probe.
+  // Probe-then-skip is the resume mechanism: re-running the script
+  // probes each candidate and skips ones already in (h264, aac), so we
+  // don't need a media_s3_uploaded_at cutoff. Descript items are
+  // included — Descript-imported source files can still have Opus audio
+  // and need fixing for Twitter.
   const { rows } = await pool.query(
     `SELECT id, title, media_s3_key AS key
        FROM production_items
       WHERE media_s3_key IS NOT NULL
-        AND descript_project_id IS NULL
         AND youtube_download_source = 'yt-dlp'
-        AND media_s3_uploaded_at < '2026-04-23 03:00:00+00'
       ORDER BY media_size_bytes ASC NULLS LAST`,
   );
   return rows;

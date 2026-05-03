@@ -1742,7 +1742,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               <FileTextIcon className="size-3.5" /> Notion
             </a>
           )}
-          {!isPublished && !item.mediaS3Key && (
+          {isYouTube && !isPublished && !item.mediaS3Key && (
             <Button
               variant="outline"
               size="sm"

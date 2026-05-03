@@ -16,8 +16,15 @@
 //   --brands=a,b       comma-separated brand list (required)
 //   --since=YYYY-MM-DD only items with published_date >= this (required)
 //   --limit=N          cap candidates (default: 500)
-//   --max-height=N     yt-dlp resolution cap (default: 1440)
+//   --max-height=N     yt-dlp resolution cap (default: 1080 — Twitter caps at 1920×1200)
 //   --ids=uuid1,uuid2  specific IDs to re-try (overrides filter query)
+//
+// Output is always Twitter-compatible MP4: H.264 video + AAC LC audio +
+// faststart. YouTube's high-quality audio is Opus-in-WebM, which Twitter
+// rejects ("Incompatible audio codecs"). We force AAC two ways: (1) the
+// format selector prefers m4a audio (always AAC on YouTube), (2) the
+// Merger postprocessor re-encodes audio to AAC as a safety net for the
+// fallback paths.
 
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
@@ -41,8 +48,13 @@ function arg(name: string): string | undefined {
 const BRANDS = (arg("brands") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const SINCE = arg("since");
 const LIMIT = Number(arg("limit") ?? "500");
-const MAX_HEIGHT = Number(arg("max-height") ?? "1440");
+const MAX_HEIGHT = Number(arg("max-height") ?? "1080");
 const ID_LIST = (arg("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+// `--cookies-from-browser=chrome` (or firefox/safari/...) defeats YouTube's
+// "Sign in to confirm you're not a bot" gate on aged accounts and trending
+// videos. Default to chrome since that's where Pat is signed in. Pass
+// `--cookies-from-browser=none` to disable.
+const COOKIES_FROM_BROWSER = (arg("cookies-from-browser") ?? "chrome").trim();
 
 if (ID_LIST.length === 0 && (!BRANDS.length || !SINCE)) {
   console.error("Usage: --brands=a,b --since=YYYY-MM-DD [--limit=N] [--max-height=N] | --ids=uuid1,uuid2");
@@ -97,36 +109,54 @@ function runYtDlp(url: string, outputPath: string, clients: string): Promise<voi
     // fragments, the actual download worker) holding stderr open — which
     // means proc.on('close') never fires and our timeout silently
     // accomplishes nothing.
-    const proc = spawn(
-      YT_DLP_PATH,
-      [
-        "-f",
-        `bv*[height<=${MAX_HEIGHT}]+ba/b[height<=${MAX_HEIGHT}]`,
-        // Prefer H.264 over AV1/VP9 — Descript's URL import rejects AV1.
-        "-S",
-        "vcodec:h264",
-        "--merge-output-format",
-        "mp4",
-        "--ffmpeg-location",
-        ffmpegInstaller.path,
-        "--no-playlist",
-        "--no-warnings",
-        "--no-progress",
-        "--restrict-filenames",
-        "--concurrent-fragments",
-        "4",
-        // Per-socket read/connect timeout. Without this yt-dlp can hang
-        // indefinitely on a stalled CDN response.
-        "--socket-timeout",
-        "30",
-        "--extractor-args",
-        `youtube:player_client=${clients}`,
-        "-o",
-        outputPath,
-        url,
-      ],
-      { stdio: ["ignore", "pipe", "pipe"], detached: true },
-    );
+    const ytDlpArgs = [
+      // Format selector prefers m4a audio — on YouTube m4a is always AAC,
+      // so this avoids the Opus-in-MP4 case Twitter rejects. Falls back to
+      // best-audio-merge or single-file if m4a isn't available.
+      "-f",
+      `bv*[height<=${MAX_HEIGHT}]+ba[ext=m4a]/bv*[height<=${MAX_HEIGHT}]+ba/b[height<=${MAX_HEIGHT}]`,
+      // Prefer H.264 over AV1/VP9 — Descript's URL import rejects AV1.
+      // Don't include `acodec:aac` here — it makes yt-dlp prefer YouTube's
+      // 360p muxed H.264+AAC stream over the 1080p H.264 split video,
+      // because muxed satisfies both sort keys. Audio AAC is enforced by
+      // the `[ext=m4a]` filter in the format selector + the Merger
+      // postprocessor below.
+      "-S",
+      "vcodec:h264",
+      "--merge-output-format",
+      "mp4",
+      // Belt-and-suspenders for Twitter compat: when the merger runs, copy
+      // video and re-encode audio to AAC LC + faststart. If format selector
+      // already picked m4a, ffmpeg's `-c:a aac` re-encodes losslessly-ish
+      // (the file is already AAC; cost is small CPU). If it picked Opus,
+      // this is what saves the upload.
+      "--postprocessor-args",
+      "Merger:-c:v copy -c:a aac -b:a 192k -movflags +faststart",
+      "--ffmpeg-location",
+      ffmpegInstaller.path,
+      "--no-playlist",
+      "--no-warnings",
+      "--no-progress",
+      "--restrict-filenames",
+      "--concurrent-fragments",
+      "4",
+      // Per-socket read/connect timeout. Without this yt-dlp can hang
+      // indefinitely on a stalled CDN response.
+      "--socket-timeout",
+      "30",
+      "--extractor-args",
+      `youtube:player_client=${clients}`,
+      "-o",
+      outputPath,
+    ];
+    if (COOKIES_FROM_BROWSER && COOKIES_FROM_BROWSER !== "none") {
+      ytDlpArgs.push("--cookies-from-browser", COOKIES_FROM_BROWSER);
+    }
+    ytDlpArgs.push(url);
+    const proc = spawn(YT_DLP_PATH, ytDlpArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
     let stderr = "";
     let killedByTimeout = false;
     const killTree = (signal: NodeJS.Signals) => {
