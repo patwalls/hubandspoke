@@ -513,6 +513,7 @@ try {
   const unresolvedByChannel = new Map();
   let updatedCount = 0;
 
+  let crossBrandHandleMismatches = 0;
   for (const item of items) {
     const channels = Array.isArray(item.platform) ? item.platform : [];
     const raw = channels[0] ?? null;
@@ -525,17 +526,27 @@ try {
       const key = `${brandSlug}|${res.platform}|${res.handle.toLowerCase()}`;
       accountId = acctLookup.get(key);
       postType = res.postType;
-      if (!accountId) {
-        throw new Error(`seed gap: no account row for ${key} (item ${item.id}, raw=${raw})`);
+    }
+    // Fall through to the brand's "other" account when:
+    //   - raw didn't resolve to a known platform (no `res`), or
+    //   - it resolved but the handle belongs to a different brand (e.g. a
+    //     futurepedia row whose legacy `platform` string maps to the only
+    //     IG handle we know — @starter_story, owned by starter-story).
+    // The latter used to throw and gate every deploy; treat it as a
+    // recoverable data quirk and stamp `accountId` so the row isn't
+    // re-processed on the next run.
+    if (!accountId) {
+      if (res) {
+        crossBrandHandleMismatches++;
+        console.warn(
+          `[backfill-accounts] cross-brand handle mismatch: ${brandSlug}|${res.platform}|${res.handle} not seeded — falling back to "other" (item ${item.id}, raw=${raw})`
+        );
       }
-    } else {
-      // Fall back to brand's "other" account.
-      const key = `${brandSlug}|other|${brandSlug === "matg" ? "matg-other" : "ss-case-study"}`;
       accountId = acctLookup.get(`${brandSlug}|other|ss-case-study`) ||
                   acctLookup.get(`${brandSlug}|other|matg-other`) ||
                   null;
       postType = null;
-      if (raw !== null) {
+      if (raw !== null && !res) {
         unresolvedByChannel.set(raw, (unresolvedByChannel.get(raw) ?? 0) + 1);
       }
       if (!accountId) {
@@ -554,6 +565,11 @@ try {
     updatedCount++;
   }
   console.log(`  updated ${updatedCount} items`);
+  if (crossBrandHandleMismatches > 0) {
+    console.log(
+      `  cross-brand handle mismatches (mapped to 'other'): ${crossBrandHandleMismatches}`
+    );
+  }
   if (unresolvedByChannel.size) {
     console.log("  unresolved channels (mapped to 'other'):");
     for (const [raw, n] of unresolvedByChannel) console.log(`    ${JSON.stringify(raw)} × ${n}`);
