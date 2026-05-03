@@ -38,6 +38,20 @@ import {
 } from "./sc-fetchers";
 import { estimateViewsFromLikes } from "./view-estimator";
 
+// Opportunistic publish-date backfill for refreshItemMetrics. Returns SET
+// fragments that COALESCE-write publishedDate / publishedAt: existing values
+// always win, so this never overwrites an editorial date — and a null input
+// is a no-op (returns {}). Used by every platform branch below so a row
+// created via duplicate / cross-post / repost (which insert with NULL dates)
+// gets its publish date filled the first time SC has it.
+function publishFill(publishedAt: string | null | undefined) {
+  if (!publishedAt) return {};
+  return {
+    publishedDate: sql`COALESCE(${productionItems.publishedDate}, ${publishedAt.slice(0, 10)}::date)`,
+    publishedAt: sql`COALESCE(${productionItems.publishedAt}, ${new Date(publishedAt)}::timestamptz)`,
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Decay schedule configuration                                       */
 /* ------------------------------------------------------------------ */
@@ -252,6 +266,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         likes,
         comments,
         viewsEstimated: false,
+        ...publishFill(detail.publishedAt),
         lastPerformanceSyncAt: new Date(),
         lastPerformanceSyncError: null,
         updatedAt: new Date(),
@@ -286,6 +301,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
           views: derived.views,
           viewsEstimated: derived.estimated,
         }),
+        ...publishFill(post.publishedAt),
         lastPerformanceSyncAt: new Date(),
         lastPerformanceSyncError: null,
         updatedAt: new Date(),
@@ -322,12 +338,18 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     const views = tweet.views?.count ? parseInt(tweet.views.count, 10) : null;
     const likes = tweet.legacy.favorite_count ?? null;
     const comments = tweet.legacy.reply_count ?? null;
+    // SCTweet exposes legacy.created_at directly (RFC 2822) — convert here
+    // rather than threading a publishedAt field through the SCTweet shape.
+    const tweetPublishedAt = tweet.legacy.created_at
+      ? new Date(tweet.legacy.created_at).toISOString()
+      : null;
     await db
       .update(productionItems)
       .set({
         ...(views != null && { views, viewsEstimated: false }),
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
+        ...publishFill(tweetPublishedAt),
         lastPerformanceSyncAt: new Date(),
         lastPerformanceSyncError: null,
         updatedAt: new Date(),
@@ -365,6 +387,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
         ...(thumbnail && { thumbnail }),
+        ...publishFill(post.publishedAt),
         lastPerformanceSyncAt: new Date(),
         lastPerformanceSyncError: null,
         updatedAt: new Date(),
@@ -409,6 +432,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         }),
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
+        ...publishFill(post.publishedAt),
         lastPerformanceSyncAt: new Date(),
         lastPerformanceSyncError: null,
         updatedAt: new Date(),
@@ -453,6 +477,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         }),
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
+        ...publishFill(post.publishedAt),
         lastPerformanceSyncAt: new Date(),
         lastPerformanceSyncError: null,
         updatedAt: new Date(),
@@ -497,6 +522,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         }),
         ...(likes != null && { likes }),
         ...(comments != null && { comments }),
+        ...publishFill(post.publishedAt),
         lastPerformanceSyncAt: new Date(),
         lastPerformanceSyncError: null,
         updatedAt: new Date(),

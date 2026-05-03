@@ -17,6 +17,24 @@
 
 import { SC_BASE, headers } from "@/lib/services/sc-client";
 
+// ─── Date helpers ─────────────────────────────────────────────────────────
+// Most SC endpoints carry the publish timestamp as either a unix-seconds
+// integer or a parseable date string. Normalize both to ISO-8601 here so
+// every fetcher returns the same shape downstream.
+
+function unixToIso(seconds: number | null | undefined): string | null {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+  return new Date(seconds * 1000).toISOString();
+}
+
+function toIsoOrNull(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────
 
 export interface SCVideoDetail {
@@ -27,6 +45,7 @@ export interface SCVideoDetail {
   likeCountInt: number;
   commentCountInt: number;
   thumbnail?: string;
+  publishedAt: string | null;
 }
 
 export interface SCTweet {
@@ -54,12 +73,14 @@ export interface SCInstagramPostMetrics {
   likes: number | null;
   comments: number | null;
   thumbnail: string | null;
+  publishedAt: string | null;
 }
 
 export interface SCPostMetrics {
   views: number | null;
   likes: number | null;
   comments: number | null;
+  publishedAt: string | null;
 }
 
 // ─── Fetchers ─────────────────────────────────────────────────────────────
@@ -68,7 +89,13 @@ export async function fetchSingleVideo(videoUrl: string): Promise<SCVideoDetail>
   const url = `${SC_BASE}/v1/youtube/video?url=${encodeURIComponent(videoUrl)}`;
   const res = await fetch(url, { headers: headers() });
   if (!res.ok) throw new Error(`Video detail error (${res.status}): ${await res.text()}`);
-  return res.json();
+  const data = await res.json();
+  // SC returns publishedTime / publishDate depending on shape — accept either.
+  const publishRaw =
+    typeof data.publishedTime === "string" ? data.publishedTime
+    : typeof data.publishDate === "string" ? data.publishDate
+    : null;
+  return { ...data, publishedAt: toIsoOrNull(publishRaw) };
 }
 
 /**
@@ -108,6 +135,7 @@ export async function fetchThreadsPostByUrl(
     views: post.view_counts ?? null,
     likes: post.like_count ?? null,
     comments: post.text_post_app_info?.direct_reply_count ?? null,
+    publishedAt: unixToIso(post.taken_at),
   };
 }
 
@@ -125,10 +153,17 @@ export async function fetchLinkedInPostByUrl(
   if (!res.ok) throw new Error(`LinkedIn post error (${res.status}): ${await res.text()}`);
   const data = await res.json();
   if (data?.success === false) return null;
+  // SC's posted_at.timestamp is a millisecond epoch; some shapes expose
+  // postedAtTimestamp directly. Tolerate both.
+  const ms =
+    typeof data?.posted_at?.timestamp === "number" ? data.posted_at.timestamp
+    : typeof data?.postedAtTimestamp === "number" ? data.postedAtTimestamp
+    : null;
   return {
     views: null,
     likes: data?.likeCount ?? null,
     comments: data?.commentCount ?? null,
+    publishedAt: ms ? new Date(ms).toISOString() : null,
   };
 }
 
@@ -151,6 +186,7 @@ export async function fetchTikTokVideoByUrl(
     views: stats.play_count ?? null,
     likes: stats.digg_count ?? null,
     comments: stats.comment_count ?? null,
+    publishedAt: unixToIso(data?.aweme_detail?.create_time),
   };
 }
 
@@ -168,10 +204,14 @@ export async function fetchYouTubeCommunityPostByUrl(
   if (!res.ok) throw new Error(`YT community post error (${res.status}): ${await res.text()}`);
   const data = await res.json();
   if (data?.success === false) return null;
+  // SC's community-post endpoint typically only returns a relative-time
+  // string ("2 weeks ago"), not a precise timestamp. Skip — better to leave
+  // publishedDate NULL than guess from a fuzzy field.
   return {
     views: null,
     likes: data?.likeCount ?? null,
     comments: null,
+    publishedAt: null,
   };
 }
 
@@ -203,5 +243,6 @@ export async function fetchInstagramPostByUrl(
     likes: media.edge_media_preview_like?.count ?? null,
     comments: media.edge_media_to_parent_comment?.count ?? null,
     thumbnail,
+    publishedAt: unixToIso(media.taken_at_timestamp),
   };
 }
