@@ -44,11 +44,17 @@ import { estimateViewsFromLikes } from "./view-estimator";
 // is a no-op (returns {}). Used by every platform branch below so a row
 // created via duplicate / cross-post / repost (which insert with NULL dates)
 // gets its publish date filled the first time SC has it.
+//
+// Both params are passed as ISO/date strings, NOT Date objects. Drizzle's
+// raw `sql` template doesn't run Date values through the column-type
+// serializer the way `.set({ col: new Date() })` does — it falls back to
+// JS toString ("Sun May 03 2026 00:17:51 GMT+0000"), which Postgres
+// rejects. Strings + the explicit cast bind cleanly.
 function publishFill(publishedAt: string | null | undefined) {
   if (!publishedAt) return {};
   return {
     publishedDate: sql`COALESCE(${productionItems.publishedDate}, ${publishedAt.slice(0, 10)}::date)`,
-    publishedAt: sql`COALESCE(${productionItems.publishedAt}, ${new Date(publishedAt)}::timestamptz)`,
+    publishedAt: sql`COALESCE(${productionItems.publishedAt}, ${publishedAt}::timestamptz)`,
   };
 }
 
