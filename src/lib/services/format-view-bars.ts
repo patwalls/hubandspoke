@@ -1,11 +1,12 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 
-// Per-format view bars over a rolling window. Two flavors:
+// Per-(format, post_type) view bars over a rolling window. Two flavors:
 //
 //   1. Lifetime bars — `fetchFormatViewBars` — percentile of cumulative
-//      `production_items.views` for posts in a format. Drives the Content
-//      tab's "vs P75" badge and the cross-post queue's lifetime gate.
+//      `production_items.views` for posts in a (format, post_type). Drives
+//      the Content tab's "vs P75" badge and the cross-post queue's
+//      lifetime gate.
 //
 //   2. Velocity bars — `fetchFormatCheckpointBars` — percentile of
 //      `view_snapshots.views` at each capture-velocity-snapshot
@@ -13,8 +14,12 @@ import { db } from "@/lib/db";
 //      cross-post queue's age-fair gate so a 6-hour-old rocket isn't
 //      penalized against a cohort that's had days to mature.
 //
-// Cross-brand cohort by design — a format like "Reel: Repackage Section
-// w/ Hook" has the same bar across every brand that posts in it.
+// Scoped by (format, post_type) so a format that lives on multiple post
+// types (e.g. "Laptop POV" appearing on X tweets *and* YT community
+// posts, where view counts differ by an order of magnitude) doesn't pool
+// apples and oranges into a single distribution. Cross-brand within that
+// scope by design — same (format, post_type) on different brands shares
+// one bar.
 
 export const FORMAT_BARS_DEFAULT_WINDOW_DAYS = 90;
 export const FORMAT_BARS_DEFAULT_PERCENTILE = 0.75;
@@ -28,7 +33,9 @@ export interface FormatBar {
   cohortSize: number;
 }
 
-export type FormatBars = Record<string, FormatBar>;
+/** Outer key: format name. Inner key: post_type. A format that appears on
+ *  multiple post types has one bar per post type. */
+export type FormatBars = Record<string, Record<string, FormatBar>>;
 
 export interface FetchFormatViewBarsOptions {
   /** Default 0.75 (P75). The cross-post queue uses 0.60 to compensate for
@@ -52,26 +59,30 @@ export async function fetchFormatViewBars(
 
   const rows = await db.execute<{
     format: string;
+    post_type: string;
     p: string;
     cohort_size: string;
   }>(sql`
     SELECT
       format,
+      post_type,
       percentile_cont(${percentile}) WITHIN GROUP (ORDER BY views) AS p,
       count(*) AS cohort_size
     FROM production_items
     WHERE format IS NOT NULL
+      AND post_type IS NOT NULL
       AND status = 'Published'
       AND deleted_at IS NULL
       AND views IS NOT NULL
       AND published_at >= (now() - interval '${sql.raw(String(windowDays))} days')
-    GROUP BY format
+    GROUP BY format, post_type
     HAVING count(*) >= ${minCohort}
   `);
 
   const bars: FormatBars = {};
   for (const row of rows) {
-    bars[row.format] = {
+    if (!bars[row.format]) bars[row.format] = {};
+    bars[row.format][row.post_type] = {
       p: Number(row.p),
       percentile,
       cohortSize: Number(row.cohort_size),
@@ -86,11 +97,12 @@ export interface CheckpointBar {
   cohortSize: number;
 }
 
-/** Map<format, Map<checkpoint_key, bar>>. Checkpoint keys come from
- *  VELOCITY_CHECKPOINTS in src/lib/velocity-checkpoints.ts. */
+/** Map<format, Map<post_type, Map<checkpoint_key, bar>>>. Checkpoint keys
+ *  come from VELOCITY_CHECKPOINTS in src/lib/velocity-checkpoints.ts.
+ *  Scoped by (format, post_type) for the same reason as FormatBars. */
 export type FormatCheckpointBars = Record<
   string,
-  Record<string, CheckpointBar>
+  Record<string, Record<string, CheckpointBar>>
 >;
 
 export interface FetchFormatCheckpointBarsOptions {
@@ -204,31 +216,35 @@ export async function fetchFormatCheckpointBars(
 
   const rows = await db.execute<{
     format: string;
+    post_type: string;
     checkpoint_key: string;
     p: string;
     cohort_size: string;
   }>(sql`
     SELECT
       pi.format AS format,
+      pi.post_type,
       vs.checkpoint_key,
       percentile_cont(${percentile}) WITHIN GROUP (ORDER BY vs.views) AS p,
       count(*) AS cohort_size
     FROM production_items pi
     JOIN view_snapshots vs ON vs.production_item_id = pi.id
     WHERE pi.format IS NOT NULL
+      AND pi.post_type IS NOT NULL
       AND pi.status = 'Published'
       AND pi.deleted_at IS NULL
       AND vs.checkpoint_key IS NOT NULL
       AND vs.views IS NOT NULL
       AND pi.published_at >= (now() - interval '${sql.raw(String(windowDays))} days')
-    GROUP BY pi.format, vs.checkpoint_key
+    GROUP BY pi.format, pi.post_type, vs.checkpoint_key
     HAVING count(*) >= ${minCohort}
   `);
 
   const bars: FormatCheckpointBars = {};
   for (const row of rows) {
     if (!bars[row.format]) bars[row.format] = {};
-    bars[row.format][row.checkpoint_key] = {
+    if (!bars[row.format][row.post_type]) bars[row.format][row.post_type] = {};
+    bars[row.format][row.post_type][row.checkpoint_key] = {
       p: Number(row.p),
       percentile,
       cohortSize: Number(row.cohort_size),

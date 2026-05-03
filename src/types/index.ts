@@ -186,10 +186,12 @@ export interface ContentReportData {
    *  inside `byPlatform.*`. When present the UI renders an
    *  AccountBadge instead of the raw text. */
   primaryRowMeta?: Record<string, PrimaryRowMeta>;
-  /** Per-format P75 view bar (cross-brand, last 90 days). Used by the
-   *  Content table's "vs P75" column. Formats with cohort < 10 are
+  /** Per-(format, post_type) P75 view bar (cross-brand, last 90 days).
+   *  Used by the Content table's "vs P75" column. Cohort is scoped by
+   *  post_type so a tweet isn't compared against a YT short. Formats
+   *  with cohort < 10 within the (format, post_type) bucket are
    *  silently absent — no bar means "—" in the UI. */
-  formatBars?: Record<string, FormatViewBar>;
+  formatBars?: Record<string, Record<string, FormatViewBar>>;
 }
 
 export interface SyncLog {

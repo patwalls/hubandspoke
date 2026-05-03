@@ -507,8 +507,11 @@ interface ComputeHotnessOpts {
   snapshots: Map<string, number> | null;
 }
 
-/** Resolve a single bar with fallback: prefer the format cohort, fall back
- *  to the post-type cohort. Returns null when neither cohort exists. */
+/** Resolve a single bar with fallback: prefer the (format, postType)
+ *  cohort, fall back to the post-type-only cohort. Returns null when
+ *  neither cohort exists. The format cohort is scoped by post_type so a
+ *  format that lives on multiple platforms (e.g. tweets and YT community
+ *  posts) doesn't pool wildly different view distributions. */
 function pickBar(
   format: string,
   postType: string,
@@ -519,12 +522,12 @@ function pickBar(
   cohortKind: "format" | "postType";
   cohortLabel: string;
 } | null {
-  const fb = formatBars[format];
+  const fb = formatBars[format]?.[postType];
   if (fb && fb.p > 0) {
     return {
       bar: fb,
       cohortKind: "format",
-      cohortLabel: format,
+      cohortLabel: formatCohortLabel(format, postType),
     };
   }
   const pb = postTypeBars[postType];
@@ -549,9 +552,13 @@ function pickCheckpointBar(
   cohortKind: "format" | "postType";
   cohortLabel: string;
 } | null {
-  const fb = formatBars[format]?.[checkpointKey];
+  const fb = formatBars[format]?.[postType]?.[checkpointKey];
   if (fb && fb.p > 0) {
-    return { bar: fb, cohortKind: "format", cohortLabel: format };
+    return {
+      bar: fb,
+      cohortKind: "format",
+      cohortLabel: formatCohortLabel(format, postType),
+    };
   }
   const pb = postTypeBars[postType]?.[checkpointKey];
   if (pb && pb.p > 0) {
@@ -562,6 +569,11 @@ function pickCheckpointBar(
     };
   }
   return null;
+}
+
+function formatCohortLabel(format: string, postType: string): string {
+  const short = POST_TYPE_SHORT_LABEL[postType as PostType];
+  return short ? `${format} (${short})` : `${format} (${postType})`;
 }
 
 function postTypeCohortLabel(postType: string): string {

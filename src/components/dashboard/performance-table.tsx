@@ -57,7 +57,9 @@ interface PerformanceTableProps {
   accounts?: PickerAccount[];
   /** Per-format P75 view bar over the last 90 days, keyed by format name.
    *  Drives the "vs P75" column. Formats with cohort < 10 are absent. */
-  formatBars?: Record<string, FormatViewBar>;
+  /** Outer key: format name. Inner key: post_type. Scoped per
+   *  (format, post_type) so a tweet isn't compared against a YT short. */
+  formatBars?: Record<string, Record<string, FormatViewBar>>;
   onPostCreated?: () => void;
 }
 
@@ -410,8 +412,8 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
     : items;
 
   function vsP75For(item: ProductionItem): number | null {
-    if (!item.format || item.views == null) return null;
-    const bar = formatBars?.[item.format];
+    if (!item.format || !item.postType || item.views == null) return null;
+    const bar = formatBars?.[item.format]?.[item.postType];
     if (!bar || bar.p <= 0) return null;
     return item.views / bar.p;
   }
@@ -946,7 +948,7 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
                         <span className="text-muted-foreground text-xs">—</span>
                       );
                     }
-                    const bar = formatBars?.[item.format!];
+                    const bar = formatBars?.[item.format!]?.[item.postType!];
                     const badgeClass =
                       ratio >= 3
                         ? "bg-emerald-100 text-emerald-900 border-emerald-200"
@@ -958,14 +960,15 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
                     const tooltip = bar
                       ? [
                           `This post: ${(item.views ?? 0).toLocaleString()} views`,
-                          `${item.format} P75: ${bar.p.toLocaleString()} views`,
+                          `${item.format} (${item.postType}) P75: ${bar.p.toLocaleString()} views`,
                           `Ratio: ${ratio.toFixed(2)}× the P75 bar`,
                           "",
                           "P75 = 75th-percentile views across every Published",
-                          `post in this format over the last 90 days`,
-                          `(cohort: ${bar.cohortSize} posts). It's the line`,
-                          "that separates the top 25% from the rest, so 1.0×",
-                          "means this post just edges into the top quartile.",
+                          `post in this format on the same post type over`,
+                          `the last 90 days (cohort: ${bar.cohortSize} posts).`,
+                          "It's the line that separates the top 25% from the",
+                          "rest, so 1.0× means this post just edges into the",
+                          "top quartile.",
                         ].join("\n")
                       : undefined;
                     return (
