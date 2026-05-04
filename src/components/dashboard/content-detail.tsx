@@ -148,6 +148,7 @@ interface RepostedFromRef {
   id: string;
   title: string | null;
   publishedDate: string | null;
+  publishedLink: string | null;
   views: number | null;
   evergreenReasoning: string | null;
 }
@@ -1599,6 +1600,17 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                       )}
                     </span>
                   </div>
+                  {data.repostedFrom.publishedLink && (
+                    <a
+                      href={data.repostedFrom.publishedLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:underline"
+                      title="Open the published source post in a new tab"
+                    >
+                      <ExternalLinkIcon className="size-3.5" /> View published post
+                    </a>
+                  )}
                   {data.repostedFrom.evergreenReasoning && (
                     <p className="text-xs text-muted-foreground leading-relaxed">
                       <span className="font-medium text-foreground">
