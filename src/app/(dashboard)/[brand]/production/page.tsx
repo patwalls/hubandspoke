@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { fetchBrandBySlug } from "@/lib/db/brands";
 import { ProductionView } from "@/components/dashboard/production-view";
+import { auth } from "@/lib/auth";
 
 interface BrandProductionPageProps {
   params: Promise<{ brand: string }>;
@@ -22,7 +23,10 @@ export default async function BrandProductionPage({
   params,
 }: BrandProductionPageProps) {
   const { brand } = await params;
-  const brandConfig = await fetchBrandBySlug(brand);
+  const [brandConfig, session] = await Promise.all([
+    fetchBrandBySlug(brand),
+    auth(),
+  ]);
 
   if (!brandConfig) {
     notFound();
@@ -36,7 +40,10 @@ export default async function BrandProductionPage({
         </div>
       }
     >
-      <ProductionView brand={brand} />
+      <ProductionView
+        brand={brand}
+        currentUserId={session?.user?.id ?? null}
+      />
     </Suspense>
   );
 }

@@ -7,11 +7,46 @@ import { isNotionAuthoritative } from "@/lib/platform";
 import { statusClassFromToken } from "@/lib/badge-colors";
 import { ProductionPipelineTable } from "./production-pipeline-table";
 import { SelectPill } from "./filter-pills";
+import { personDisplay } from "./user-chip";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 
 interface ProductionViewProps {
   brand: string;
+  /** UUID of the currently logged-in user. Drives the "Just me" editor
+   *  filter pin. Null if the page somehow renders without a session. */
+  currentUserId: string | null;
+}
+
+interface AssignableUser {
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+/** Tiny avatar for the editor filter dropdown — matches the size of the
+ *  PlatformIcon used in the other filter pills (12-18px range). */
+function EditorAvatar({ user }: { user: AssignableUser }) {
+  const { initials, colorClass } = personDisplay(user);
+  if (user.avatarUrl) {
+    return (
+      /* eslint-disable-next-line @next/next/no-img-element */
+      <img
+        src={user.avatarUrl}
+        alt=""
+        className="w-4 h-4 rounded-full object-cover shrink-0 bg-accent"
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  return (
+    <span
+      className={`w-4 h-4 rounded-full flex items-center justify-center font-semibold shrink-0 text-[8px] ${colorClass}`}
+    >
+      {initials}
+    </span>
+  );
 }
 
 type PipelineStatus = {
@@ -39,16 +74,18 @@ const SOURCES = [
   { value: "cross_post", label: "Cross-post" },
 ];
 
-export function ProductionView({ brand }: ProductionViewProps) {
+export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [pipelineStatuses, setPipelineStatuses] = useState<PipelineStatus[]>(
     FALLBACK_PIPELINE_STATUSES
   );
+  const [users, setUsers] = useState<AssignableUser[]>([]);
   const [search, setSearch] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedFormat, setSelectedFormat] = useState("all");
   const [selectedSource, setSelectedSource] = useState("all");
+  const [selectedEditor, setSelectedEditor] = useState("all");
 
   const fetchPipeline = useCallback(async () => {
     setLoading(true);
@@ -74,6 +111,26 @@ export function ProductionView({ brand }: ProductionViewProps) {
   useEffect(() => {
     fetchPipeline();
   }, [fetchPipeline]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/users/assignable");
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        setUsers(json.users ?? []);
+      } catch {
+        // Editor filter falls back to the implicit list derived from
+        // pipeline rows themselves (see editorOptions below).
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +195,49 @@ export function ProductionView({ brand }: ProductionViewProps) {
     ];
   }, [pipelineCandidates]);
 
+  // Editor pill: "All editors", then "Just me" (current user, pinned),
+  // then everyone else who actually has at least one row in the pipeline,
+  // sorted by name. Filtering the dropdown to active editors keeps it from
+  // ballooning past the team — when the user wants someone who doesn't
+  // currently appear in the queue, they can search by name.
+  const editorOptions = useMemo(() => {
+    const usersById = new Map(users.map((u) => [u.id, u]));
+    const activeEditorIds = new Set<string>();
+    for (const item of pipelineCandidates) {
+      if (item.editorUserId) activeEditorIds.add(item.editorUserId);
+    }
+
+    const opts: { value: string; label: string; icon?: React.ReactNode }[] = [
+      { value: "all", label: "All editors" },
+    ];
+
+    const me = currentUserId ? usersById.get(currentUserId) ?? null : null;
+    if (me) {
+      opts.push({
+        value: me.id,
+        label: "Just me",
+        icon: <EditorAvatar user={me} />,
+      });
+    }
+
+    const rest = users
+      .filter((u) => u.id !== currentUserId && activeEditorIds.has(u.id))
+      .sort((a, b) => {
+        const an = (a.name ?? a.email).toLowerCase();
+        const bn = (b.name ?? b.email).toLowerCase();
+        return an.localeCompare(bn);
+      });
+    for (const u of rest) {
+      opts.push({
+        value: u.id,
+        label: u.name ?? u.email,
+        icon: <EditorAvatar user={u} />,
+      });
+    }
+
+    return opts;
+  }, [users, currentUserId, pipelineCandidates]);
+
   const query = search.trim().toLowerCase();
   const matchesQuery = (item: ProductionItem): boolean => {
     if (!query) return true;
@@ -161,6 +261,9 @@ export function ProductionView({ brand }: ProductionViewProps) {
     if (selectedSource !== "all") {
       const source = item.sourceType ?? "original";
       if (source !== selectedSource) return false;
+    }
+    if (selectedEditor !== "all") {
+      if (item.editorUserId !== selectedEditor) return false;
     }
     return matchesQuery(item);
   });
@@ -210,6 +313,12 @@ export function ProductionView({ brand }: ProductionViewProps) {
           value={selectedSource}
           options={SOURCES}
           onChange={setSelectedSource}
+        />
+        <SelectPill
+          label="Editor"
+          value={selectedEditor}
+          options={editorOptions}
+          onChange={setSelectedEditor}
         />
       </div>
 
@@ -269,7 +378,8 @@ export function ProductionView({ brand }: ProductionViewProps) {
                 {query ||
                 selectedPlatform !== "all" ||
                 selectedFormat !== "all" ||
-                selectedSource !== "all"
+                selectedSource !== "all" ||
+                selectedEditor !== "all"
                   ? "No items match the current filters."
                   : "No items in the pipeline."}
               </p>
