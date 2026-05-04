@@ -297,6 +297,12 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
 
       <div className="flex flex-wrap items-center gap-2">
         <SelectPill
+          label="Editor"
+          value={selectedEditor}
+          options={editorOptions}
+          onChange={setSelectedEditor}
+        />
+        <SelectPill
           label="Channel"
           value={selectedPlatform}
           options={platformOptions}
@@ -313,12 +319,6 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
           value={selectedSource}
           options={SOURCES}
           onChange={setSelectedSource}
-        />
-        <SelectPill
-          label="Editor"
-          value={selectedEditor}
-          options={editorOptions}
-          onChange={setSelectedEditor}
         />
       </div>
 
