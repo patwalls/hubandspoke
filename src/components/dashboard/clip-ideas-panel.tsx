@@ -32,6 +32,13 @@ interface ClipIdea {
   createdAt: string;
 }
 
+interface PromotionFormat {
+  id: string;
+  name: string;
+  brand: string;
+  pack: { id: string; name: string } | null;
+}
+
 interface Props {
   itemId: string;
   brand: string;
@@ -73,6 +80,9 @@ export function ClipIdeasPanel({
   const [loading, setLoading] = useState(true);
   const [ideas, setIdeas] = useState<ClipIdea[]>([]);
   const [batchCreatedAt, setBatchCreatedAt] = useState<string | null>(null);
+  const [promotionFormat, setPromotionFormat] = useState<PromotionFormat | null>(
+    null,
+  );
   const [genState, setGenState] = useState<
     | { kind: "idle" }
     | { kind: "generating" }
@@ -88,9 +98,11 @@ export function ClipIdeasPanel({
         const json = (await res.json()) as {
           batch: { id: string; createdAt: string } | null;
           ideas: ClipIdea[];
+          promotionFormat: PromotionFormat | null;
         };
         setIdeas(json.ideas);
         setBatchCreatedAt(json.batch?.createdAt ?? null);
+        setPromotionFormat(json.promotionFormat ?? null);
       }
     } finally {
       setLoading(false);
@@ -379,6 +391,7 @@ export function ClipIdeasPanel({
         idea={triageIdea}
         onDone={load}
         brand={brand}
+        promotionFormat={promotionFormat}
       />
     </div>
   );

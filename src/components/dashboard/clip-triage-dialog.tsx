@@ -51,12 +51,28 @@ interface Preview {
   segments: PreviewSegment[];
 }
 
+interface PromotionFormat {
+  id: string;
+  name: string;
+  brand: string;
+  pack: { id: string; name: string } | null;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   idea: ClipIdeaSummary | null;
   onDone: () => void;
   brand: string;
+  /** Resolved canonical promotion format + its attached Descript pack.
+   *  When `pack` is null (or the format itself is null/undefined), all
+   *  four "Create in Descript" dropdown items are disabled and the
+   *  header links the user back to the format edit page to attach a
+   *  pack. Optional because not every place that mounts this dialog has
+   *  the data fetched yet (idea-queue-table mounts it in a row context
+   *  without the per-source clip-ideas fetch); those callers see the
+   *  same "attach a pack" gating until they're upgraded. */
+  promotionFormat?: PromotionFormat | null;
 }
 
 function fmtTs(sec: number): string {
@@ -72,7 +88,12 @@ export function ClipTriageDialog({
   idea,
   onDone,
   brand,
+  promotionFormat,
 }: Props) {
+  const packAttached = !!promotionFormat?.pack;
+  const formatHref = promotionFormat
+    ? `/${promotionFormat.brand}/formats/${promotionFormat.id}`
+    : `/${brand}/formats`;
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -368,8 +389,38 @@ export function ClipTriageDialog({
                       <ChevronDownIcon className="size-3.5 ml-1" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-80">
+                      <div className="px-2 py-2 border-b border-border">
+                        {packAttached ? (
+                          <p className="text-[11px] text-muted-foreground leading-snug">
+                            Pack:{" "}
+                            <span className="font-medium text-foreground">
+                              {promotionFormat!.pack!.name}
+                            </span>{" "}
+                            —{" "}
+                            <a
+                              href={formatHref}
+                              className="text-primary hover:underline"
+                            >
+                              edit at format →
+                            </a>
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-amber-700 leading-snug">
+                            <span className="font-medium">
+                              No Descript pack attached.
+                            </span>{" "}
+                            <a
+                              href={formatHref}
+                              className="text-primary hover:underline"
+                            >
+                              Attach one at the format →
+                            </a>
+                          </p>
+                        )}
+                      </div>
                       <DropdownMenuItem
                         onClick={() => void runCreateInDescript("full")}
+                        disabled={!packAttached}
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
@@ -383,6 +434,7 @@ export function ClipTriageDialog({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => void runCreateInDescript("precise")}
+                        disabled={!packAttached}
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
@@ -396,6 +448,7 @@ export function ClipTriageDialog({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => void runCreateInDescript("agent")}
+                        disabled={!packAttached}
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
@@ -403,13 +456,14 @@ export function ClipTriageDialog({
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
                           Fast. New composition in the source project.
-                          Underlord cuts by transcript, applies the
-                          ReelsLayout pack (9:16 + hook track + captions), and
-                          ignores filler words.
+                          Underlord cuts by transcript, applies the format&apos;s
+                          pack (9:16 + hook track + captions), and ignores
+                          filler words.
                         </span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => void runCreateInDescript("precise-ai")}
+                        disabled={!packAttached}
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
@@ -418,7 +472,7 @@ export function ClipTriageDialog({
                         <span className="text-[11px] text-muted-foreground leading-snug">
                           ffmpeg-trims to the exact range, uploads a new
                           Descript project, then Underlord applies the
-                          ReelsLayout pack and ignores fillers. Two Descript
+                          format&apos;s pack and ignores fillers. Two Descript
                           jobs.
                         </span>
                       </DropdownMenuItem>

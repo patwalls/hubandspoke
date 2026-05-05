@@ -574,6 +574,24 @@ export const contentDrafts = pgTable(
   ],
 );
 
+// Reusable Underlord prompt templates. A pack bundles a Descript layout-pack
+// reference (URL inside the prompt body) with the Underlord instructions for
+// applying it to a composition (set hook track, ignore fillers, etc.). One
+// pack can attach to many formats — same pack reused across an SS YouTube
+// short and an SS Reel, or shared across a brand's clip-style formats.
+// Detached when null on a format (FK below). Global, not brand-scoped.
+export const descriptPacks = pgTable("descript_packs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull(),
+  prompt: text("prompt").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export const formats = pgTable(
   "formats",
   {
@@ -591,6 +609,14 @@ export const formats = pgTable(
     editor: text("editor"),
     producer: text("producer"),
     instructions: text("instructions"),
+    // Optional Descript Underlord pack. Null = no Descript clip creation
+    // allowed on this format (UI gates all four "Create in Descript" actions
+    // when unset). ON DELETE SET NULL detaches gracefully if a pack is
+    // deleted; clip creation re-gates afterwards.
+    descriptPackId: uuid("descript_pack_id").references(
+      () => descriptPacks.id,
+      { onDelete: "set null" }
+    ),
     // NULL parent = root (pillar). ON DELETE SET NULL promotes direct children
     // to roots so we don't silently wipe entire subtrees.
     parentFormatId: uuid("parent_format_id").references(

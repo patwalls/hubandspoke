@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clipIdeas, transcripts, users } from "@/lib/db/schema";
+import {
+  clipIdeas,
+  descriptPacks,
+  formats,
+  productionItems,
+  transcripts,
+  users,
+} from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
+
+const PROMOTED_CLIP_FORMAT = "Repackage section with hook";
 
 const TRANSCRIPT_EXCERPT_MAX = 220;
 
@@ -94,11 +103,48 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .limit(1);
   const segments = transcript?.segments ?? [];
 
+  // Look up the canonical "Repackage section with hook" format for the
+  // source's brand and its attached Descript pack. The clip-triage dialog
+  // uses this to gate the four "Create in Descript" buttons (and to show
+  // a header pointing the user at the format edit page when no pack is
+  // attached).
+  const [source] = await db
+    .select({ brand: productionItems.brand })
+    .from(productionItems)
+    .where(eq(productionItems.id, id))
+    .limit(1);
+  const brand = source?.brand ?? "starter-story";
+  const [formatRow] = await db
+    .select({
+      id: formats.id,
+      name: formats.name,
+      brand: formats.brand,
+      packId: descriptPacks.id,
+      packName: descriptPacks.name,
+    })
+    .from(formats)
+    .leftJoin(descriptPacks, eq(formats.descriptPackId, descriptPacks.id))
+    .where(
+      and(eq(formats.name, PROMOTED_CLIP_FORMAT), eq(formats.brand, brand)),
+    )
+    .limit(1);
+  const promotionFormat = formatRow
+    ? {
+        id: formatRow.id,
+        name: formatRow.name,
+        brand: formatRow.brand,
+        pack: formatRow.packId
+          ? { id: formatRow.packId, name: formatRow.packName ?? "" }
+          : null,
+      }
+    : null;
+
   return NextResponse.json({
     batch: {
       id: latest.batchId,
       createdAt: latest.createdAt,
     },
+    promotionFormat,
     ideas: rows.map((i) => {
       const startSec = Number(i.startSec);
       const endSec = Number(i.endSec);

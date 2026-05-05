@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import {
   clipIdeas,
   contentComments,
+  descriptPacks,
   formats,
   productionItems,
   repurposeTriggers,
@@ -12,8 +13,8 @@ import {
 import {
   createDescriptProjectFromUrl,
   duplicateDescriptComposition,
-  getDescriptLayoutPackName,
   invokeDescriptAgent,
+  substituteFormatPrompt,
 } from "@/lib/descript";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { enqueue } from "@/jobs/enqueue";
@@ -94,6 +95,19 @@ export class ClipIdeaProductionItemMissingError extends Error {
       `No production_item exists for clip_idea ${clipIdeaId}. Run scripts/backfill-clip-idea-production-items.mjs.`,
     );
     this.name = "ClipIdeaProductionItemMissingError";
+  }
+}
+
+export class FormatMissingDescriptPackError extends Error {
+  constructor(
+    public readonly formatId: string,
+    public readonly formatName: string,
+    public readonly brand: string,
+  ) {
+    super(
+      `Format "${formatName}" has no Descript pack attached. Set one at /${brand}/formats/${formatId}.`,
+    );
+    this.name = "FormatMissingDescriptPackError";
   }
 }
 
@@ -323,6 +337,51 @@ export async function assignClipIdea(args: {
   };
 }
 
+interface PromotedClipFormat {
+  id: string;
+  name: string;
+  brand: string;
+  /** Loaded from the attached descript_packs row. Always present — the
+   *  caller is `loadPromotedClipFormat` which throws
+   *  `FormatMissingDescriptPackError` before returning when null. */
+  packPrompt: string;
+}
+
+/**
+ * Find or create the canonical "Repackage section with hook" format for a
+ * brand, then load its attached Descript pack. Throws
+ * `FormatMissingDescriptPackError` when no pack is attached so the
+ * three create-in-descript service functions all gate uniformly on the
+ * pack being present (Pat's "don't let me generate anything in Descript
+ * unless I have a prompt set" rule).
+ */
+async function loadPromotedClipFormat(brand: string): Promise<PromotedClipFormat> {
+  const formatId = await ensurePromotedClipFormat(brand);
+  const [row] = await db
+    .select({
+      id: formats.id,
+      name: formats.name,
+      brand: formats.brand,
+      packPrompt: descriptPacks.prompt,
+    })
+    .from(formats)
+    .leftJoin(descriptPacks, eq(formats.descriptPackId, descriptPacks.id))
+    .where(eq(formats.id, formatId))
+    .limit(1);
+  if (!row) {
+    throw new Error(`Format ${formatId} disappeared between insert and read`);
+  }
+  if (!row.packPrompt) {
+    throw new FormatMissingDescriptPackError(row.id, row.name, row.brand);
+  }
+  return {
+    id: row.id,
+    name: row.name,
+    brand: row.brand,
+    packPrompt: row.packPrompt,
+  };
+}
+
 async function ensurePromotedClipFormat(brand: string): Promise<string> {
   const [existing] = await db
     .select({ id: formats.id })
@@ -357,6 +416,7 @@ async function ensurePromotedClipFormat(brand: string): Promise<string> {
 }
 
 function buildDescriptPrompt(args: {
+  packPrompt: string;
   hook: string;
   startSec: number;
   endSec: number;
@@ -365,33 +425,22 @@ function buildDescriptPrompt(args: {
   const start = formatTimestamp(args.startSec);
   const end = formatTimestamp(args.endSec);
   const safeHook = args.hook.replace(/"/g, '\\"');
-  const layoutPackName = getDescriptLayoutPackName();
-  const safePack = layoutPackName?.replace(/"/g, '\\"') ?? null;
-  const step3 = safePack
-    ? `3. Apply the layout pack named "${safePack}" to the new composition. This pack handles vertical 9:16 framing, the hook-text track, and the captions slot — use it instead of manually setting aspect ratio or adding caption tracks.`
-    : "3. Set the new composition to a vertical 9:16 aspect ratio (1080×1920) sized for TikTok / Reels / Shorts. If the source is 16:9, center-crop or reframe so the speaker stays on screen.";
-  // Only meaningful when the layout pack is applied — without the pack
-  // there's no hook-text track to set. Inserted as step 4 in that case;
-  // otherwise step 4 is the filler-words instruction (renumbered).
-  const hookStep = safePack
-    ? `4. Set the hook text track at the top of the new composition to: "${safeHook}". Replace whatever placeholder or default text the layout pack provides — do not append; replace.`
-    : null;
-  const fillerStep = `${hookStep ? "5" : "4"}. Inside the new composition, mark filler words ("um", "uh", "like" when used as filler, "you know", "I mean", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words; they must stay in the transcript, just ignored.`;
-  const finalStepNum = hookStep ? 6 : 5;
-  const step5 = safePack
-    ? `${finalStepNum}. Do not add anything beyond what the layout pack already includes — no extra transitions, effects, music, or title cards. Do not re-order anything. Do not rewrite the transcript.`
-    : `${finalStepNum}. Do not add transitions, effects, music, captions, or title cards. Do not re-order anything. Do not rewrite the transcript.`;
+  const inner = substituteFormatPrompt(args.packPrompt, {
+    hook: args.hook,
+    startSec: args.startSec,
+    endSec: args.endSec,
+  });
   return [
     "You are producing a short-form vertical clip. Follow these instructions exactly and do not deviate.",
     "",
     `1. In the main composition, locate the transcript segment between ${start} and ${end} (duration ≈ ${duration}s). The time range is non-negotiable.`,
     `2. Create a NEW composition named "${safeHook}" containing only that segment. Do not include footage outside this range. The start must land on the first spoken word inside the range; the end must land on the last spoken word inside the range.`,
-    step3,
-    ...(hookStep ? [hookStep] : []),
-    fillerStep,
-    step5,
     "",
-    "If any instruction conflicts with another, prioritize #1 (exact time range) and #2 (no footage outside the range). In the agent response, report what you did for each numbered item, including the new compositionId in the form compositionId=\"<uuid>\".",
+    "3. Apply the following format-specific instructions to the new composition:",
+    "",
+    inner,
+    "",
+    'If any instruction conflicts with another, prioritize #1 (exact time range) and #2 (no footage outside the range). In the agent response, report what you did, including the new compositionId in the form compositionId="<uuid>".',
   ].join("\n");
 }
 
@@ -434,14 +483,16 @@ export async function createClipIdeaInDescript(args: {
   const endSec = Number(row.endSec);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-  // repurpose_triggers.target_format_id is NOT NULL. Ensure a bare
-  // "Repackage section with hook" format row exists for this brand and
-  // reuse it across every clip-idea promotion — same name we stamp on
-  // productionItems.format. Matches the existing assign flow's string
-  // value, now backed by an actual row the FK can reference.
-  const formatId = await ensurePromotedClipFormat(brand);
+  // Resolve the canonical "Repackage section with hook" format for this
+  // brand and load its attached Descript pack — pack must be present or we
+  // throw before any Descript side effect (FormatMissingDescriptPackError
+  // bubbles up to the route as a 400). Same gate fires from precise-cut
+  // and full-video paths so the four "Create in Descript" buttons all
+  // refuse uniformly when the format isn't configured.
+  const format = await loadPromotedClipFormat(brand);
 
   const prompt = buildDescriptPrompt({
+    packPrompt: format.packPrompt,
     hook: row.hook,
     startSec,
     endSec,
@@ -473,7 +524,7 @@ export async function createClipIdeaInDescript(args: {
     .insert(repurposeTriggers)
     .values({
       productionItemId: row.sourceProductionItemId,
-      targetFormatId: formatId,
+      targetFormatId: format.id,
       descriptJobId: agent.jobId,
       descriptProjectUrl: agent.projectUrl,
       descriptPrompt: prompt,
@@ -549,7 +600,11 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-  const formatId = await ensurePromotedClipFormat(brand);
+  // Throws FormatMissingDescriptPackError if the format has no pack
+  // attached, before any side effects. Worker re-loads the pack later
+  // (precise-cut layout-apply phase) — keeping the gate here too prevents
+  // accidentally enqueuing a job that would no-op.
+  const format = await loadPromotedClipFormat(brand);
 
   await db
     .update(productionItems)
@@ -568,7 +623,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     .insert(repurposeTriggers)
     .values({
       productionItemId: row.sourceProductionItemId,
-      targetFormatId: formatId,
+      targetFormatId: format.id,
       compositionName: row.hook,
       descriptImportPath: "precise-cut",
     })
@@ -646,7 +701,11 @@ export async function createClipIdeaInDescriptFullVideo(args: {
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
   const brand = row.sourceBrand ?? "starter-story";
-  const formatId = await ensurePromotedClipFormat(brand);
+  // Gate uniformly with the agent + precise-cut paths even though the
+  // warm path doesn't actually use the pack today — Pat's directive is
+  // "don't let me generate anything in Descript unless I have a prompt
+  // set at the format level."
+  const format = await loadPromotedClipFormat(brand);
 
   // Re-fetch the pillar — `loadAndGuardClipIdea` only returns mediaS3Key /
   // descriptProjectId, but the warm path also needs descriptCompositionId
@@ -738,7 +797,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
     .insert(repurposeTriggers)
     .values({
       productionItemId: row.sourceProductionItemId,
-      targetFormatId: formatId,
+      targetFormatId: format.id,
       descriptJobId: jobId,
       descriptProjectUrl: projectUrl,
       descriptPrompt,

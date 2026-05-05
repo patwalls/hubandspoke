@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import {
   accounts,
   brands,
+  descriptPacks,
   formats,
   productionItems,
 } from "@/lib/db/schema";
@@ -130,10 +131,28 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       })
     );
 
+    // Resolve the attached Descript pack inline so the format detail page
+    // can render its name + offer an edit modal without a second fetch.
+    let descriptPack: { id: string; name: string; prompt: string } | null =
+      null;
+    if (format.descriptPackId) {
+      const [pack] = await db
+        .select({
+          id: descriptPacks.id,
+          name: descriptPacks.name,
+          prompt: descriptPacks.prompt,
+        })
+        .from(descriptPacks)
+        .where(eq(descriptPacks.id, format.descriptPackId))
+        .limit(1);
+      if (pack) descriptPack = pack;
+    }
+
     return NextResponse.json({
       format: {
         ...format,
         accountChannels: channelsByFormat.get(format.id) ?? [],
+        descriptPack,
       },
       children: children.map((c) => ({
         ...c,

@@ -8,6 +8,8 @@ import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { db } from "@/lib/db";
 import {
   clipIdeas,
+  descriptPacks,
+  formats,
   productionItems,
   repurposeTriggers,
 } from "@/lib/db/schema";
@@ -15,7 +17,6 @@ import {
   buildLayoutPackPrompt,
   createDescriptProjectFromUrl,
   fetchDescriptJob,
-  getDescriptLayoutPackName,
   invokeDescriptAgent,
 } from "@/lib/descript";
 import { getPresignedGetUrl, putObjectFromFile } from "@/lib/s3";
@@ -227,53 +228,59 @@ async function pollUploadOnce(
       `precise-cut ok clip=${payload.clipIdeaId} composition=${compositionId ?? "none"}`,
     );
 
-    // Layout-pack phase: ask Underlord to apply the configured layout pack
-    // to the just-imported composition. Requires both the per-promotion
-    // opt-in flag (set by the "Precise cut + Underlord" button) AND a
-    // configured pack name in env. Skipped silently when either is missing,
-    // or when we somehow lost the compositionId. The project_id was stamped
-    // on the derivative production_item in phase 1.
-    const layoutPackName = getDescriptLayoutPackName();
-    if (!payload.applyLayoutPack || !compositionId || !layoutPackName) {
+    // Layout-pack phase: ask Underlord to apply the format's pack-defined
+    // treatment to the just-imported composition. Requires the
+    // per-promotion opt-in flag (set by the "Precise cut + Underlord"
+    // button), a real composition_id, and a pack attached to the format.
+    // The service-layer gate already throws on missing pack at promotion
+    // time, but we re-check here to handle the edge case where someone
+    // detaches the pack between enqueue and execution; in that case we
+    // log + skip rather than fail loudly (the import already succeeded).
+    if (!payload.applyLayoutPack || !compositionId) {
       return;
     }
 
-    const [derivative] = await db
+    const [row] = await db
       .select({
         descriptProjectId: productionItems.descriptProjectId,
         hook: productionItems.hook,
+        compositionName: repurposeTriggers.compositionName,
+        packPrompt: descriptPacks.prompt,
+        packName: descriptPacks.name,
       })
-      .from(productionItems)
-      .where(eq(productionItems.id, payload.derivativeItemId))
+      .from(repurposeTriggers)
+      .leftJoin(formats, eq(repurposeTriggers.targetFormatId, formats.id))
+      .leftJoin(descriptPacks, eq(formats.descriptPackId, descriptPacks.id))
+      .leftJoin(
+        productionItems,
+        eq(productionItems.id, payload.derivativeItemId),
+      )
+      .where(eq(repurposeTriggers.id, payload.triggerId))
       .limit(1);
-    if (!derivative?.descriptProjectId) {
+    if (!row?.descriptProjectId) {
       helpers.logger.info(
         `precise-cut layout-skip clip=${payload.clipIdeaId} reason=no_project_id`,
       );
       return;
     }
-
-    // Hook is set on production_items.hook by the service before enqueue.
-    // Falling back to the trigger's composition_name (same value) protects
-    // against a backfilled in-flight payload that never went through the
-    // service.
-    let hookText = derivative.hook ?? "";
-    if (!hookText) {
-      const [trig] = await db
-        .select({ name: repurposeTriggers.compositionName })
-        .from(repurposeTriggers)
-        .where(eq(repurposeTriggers.id, payload.triggerId))
-        .limit(1);
-      hookText = trig?.name ?? "";
+    if (!row.packPrompt) {
+      helpers.logger.info(
+        `precise-cut layout-skip clip=${payload.clipIdeaId} reason=no_pack`,
+      );
+      return;
     }
 
+    // Hook is set on production_items.hook by the service before enqueue;
+    // composition_name on the trigger is the same value. Either is fine.
+    const hookText = row.hook ?? row.compositionName ?? "";
+
     const prompt = buildLayoutPackPrompt({
+      packPrompt: row.packPrompt,
       compositionId,
-      layoutPackName,
       hookText,
     });
     const agent = await invokeDescriptAgent({
-      projectId: derivative.descriptProjectId,
+      projectId: row.descriptProjectId,
       prompt,
     });
     await db
@@ -281,7 +288,7 @@ async function pollUploadOnce(
       .set({ descriptPrompt: prompt })
       .where(eq(repurposeTriggers.id, payload.triggerId));
     helpers.logger.info(
-      `precise-cut layout-start clip=${payload.clipIdeaId} pack="${layoutPackName}" job=${agent.jobId}`,
+      `precise-cut layout-start clip=${payload.clipIdeaId} pack="${row.packName ?? "unknown"}" job=${agent.jobId}`,
     );
 
     await helpers.addJob(

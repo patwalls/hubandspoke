@@ -7,47 +7,89 @@ export const DEFAULT_CLIP_PROMPT = [
   "Aim for 30–60 seconds.",
 ].join(" ");
 
-const DEFAULT_LAYOUT_PACK_NAME = "ReelsLayout";
-
 /**
- * Name of the Descript layout pack the Underlord agent should apply to new
- * clip compositions (handles 9:16 framing, hook-text track, captions slot).
- *
- * Defaults to "ReelsLayout" — created manually in the team's Descript
- * workspace and verified against the API on 2026-05-05. Override via
- * `DESCRIPT_LAYOUT_PACK_NAME` env var; explicit empty string disables the
- * feature so the prompt falls back to the manual "9:16 aspect ratio"
- * instruction.
+ * Format `seconds` as HH:MM:SS for embedding in Underlord prompts. Mirrors
+ * the format the agent path uses for its time-range step ("between 00:02:29
+ * and 00:03:08"); used here so format-author placeholder substitution
+ * matches.
  */
-export function getDescriptLayoutPackName(): string | null {
-  const v = process.env.DESCRIPT_LAYOUT_PACK_NAME;
-  if (v === undefined) return DEFAULT_LAYOUT_PACK_NAME;
-  const trimmed = v.trim();
-  return trimmed.length > 0 ? trimmed : null;
+function formatTimestamp(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
 }
 
 /**
- * Build a layout-pack-only Underlord prompt for re-applying a layout pack to
- * a composition that already exists (no new composition created). Used by
- * the precise-cut path: after ffmpeg trims locally and the trimmed bytes
- * import into Descript, this prompt asks Underlord to apply the layout pack
- * and ignore filler words on the just-imported composition.
+ * Substitute `{{...}}` placeholders inside a format-author-defined Underlord
+ * prompt template. Unknown placeholders pass through (so a typo is visible
+ * in the rendered prompt, not silently swallowed). All values are escaped
+ * for the surrounding prompt context — quotes inside the hook get
+ * backslash-escaped so the resulting prompt remains parseable.
+ *
+ * Supported placeholders:
+ *   {{hook}}              — clip-idea hook text
+ *   {{startTimestamp}}    — start time formatted HH:MM:SS
+ *   {{endTimestamp}}      — end time formatted HH:MM:SS
+ *   {{startSec}}          — start time as raw seconds
+ *   {{endSec}}            — end time as raw seconds
+ *   {{durationSec}}       — duration in seconds (rounded)
+ *   {{compositionId}}     — composition UUID (precise-cut path; empty for
+ *                           the agent path where the composition doesn't
+ *                           exist yet)
+ */
+export function substituteFormatPrompt(
+  template: string,
+  vars: {
+    hook: string;
+    startSec?: number;
+    endSec?: number;
+    compositionId?: string;
+  },
+): string {
+  const safeHook = vars.hook.replace(/"/g, '\\"');
+  const start = vars.startSec ?? null;
+  const end = vars.endSec ?? null;
+  const duration =
+    start !== null && end !== null ? Math.max(0, Math.round(end - start)) : null;
+  const replacements: Record<string, string> = {
+    hook: safeHook,
+    startTimestamp: start !== null ? formatTimestamp(start) : "",
+    endTimestamp: end !== null ? formatTimestamp(end) : "",
+    startSec: start !== null ? String(start) : "",
+    endSec: end !== null ? String(end) : "",
+    durationSec: duration !== null ? String(duration) : "",
+    compositionId: vars.compositionId ?? "",
+  };
+  return template.replace(/\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}/g, (match, key: string) => {
+    return Object.prototype.hasOwnProperty.call(replacements, key)
+      ? replacements[key]
+      : match;
+  });
+}
+
+/**
+ * Build a layout-apply Underlord prompt for the precise-cut path: the
+ * composition already exists (we just ffmpeg-trimmed bytes and Descript
+ * imported them), and we want Underlord to apply the format's pack-defined
+ * treatment in place. The pack prompt is author-defined per-format and
+ * substituted via {@link substituteFormatPrompt} before being wrapped with
+ * the path-specific scaffolding.
  */
 export function buildLayoutPackPrompt(args: {
+  packPrompt: string;
   compositionId: string;
-  layoutPackName: string;
   hookText: string;
 }): string {
-  const safeName = args.layoutPackName.replace(/"/g, '\\"');
-  const safeHook = args.hookText.replace(/"/g, '\\"');
+  const inner = substituteFormatPrompt(args.packPrompt, {
+    hook: args.hookText,
+    compositionId: args.compositionId,
+  });
   return [
-    `Apply the layout pack named "${safeName}" to the composition with compositionId="${args.compositionId}". This pack handles vertical 9:16 framing, the hook-text track, and the captions slot.`,
+    `Apply the following format-specific instructions to the composition with compositionId="${args.compositionId}":`,
     "",
-    `After applying the pack, set the hook text track at the top of the composition to: "${safeHook}". Replace whatever placeholder or default text the layout pack provides — do not append; replace.`,
-    "",
-    `Inside the composition, mark filler words ("um", "uh", "like" when used as filler, "you know", "I mean", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words.`,
-    "",
-    `Do not add transitions, effects, music, or title cards beyond what the layout pack already includes. Do not re-order anything. Do not rewrite the transcript. Do not change the time range.`,
+    inner,
     "",
     `Reply with the compositionId in the form compositionId="${args.compositionId}".`,
   ].join("\n");
