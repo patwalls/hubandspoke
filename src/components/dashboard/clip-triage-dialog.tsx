@@ -120,11 +120,17 @@ export function ClipTriageDialog({
         return;
       }
       setHookBaseline(next);
-      onDone();
+      // Intentionally NOT calling onDone() here. onDone refetches the parent
+      // clip-ideas list, and when blur fires from clicking the Create
+      // dropdown trigger the parent's re-render races with the dropdown open
+      // and collapses the whole dialog. The new hook is already persisted
+      // server-side; the parent picks it up on its next natural refetch
+      // (after the create-in-descript flow finishes, or when the user
+      // closes the dialog).
     } finally {
       setHookSaving(false);
     }
-  }, [idea, hookDraft, hookBaseline, onDone]);
+  }, [idea, hookDraft, hookBaseline]);
 
   // Fetch transcript excerpt + signed video URL whenever the dialog opens on
   // a new idea. Short-circuit while closed — the fetch is cheap but useless
