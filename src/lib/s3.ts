@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { createReadStream } from "fs";
+import { stat } from "fs/promises";
 import {
   S3Client,
   PutObjectCommand,
@@ -53,6 +55,30 @@ export async function putObject(
       Key: key,
       Body: body,
       ContentType: contentType,
+    })
+  );
+}
+
+/**
+ * Stream a file on disk into S3. Used by the precise-cut worker to upload
+ * the ffmpeg-trimmed clip without loading the whole thing into memory —
+ * graphile_worker dynos run at Heroku Basic 512 MB and a 30 MB Buffer +
+ * the same data flowing through the SDK's internal copy chain has been
+ * enough to trigger R14 (memory quota exceeded) under load.
+ */
+export async function putObjectFromFile(
+  key: string,
+  filePath: string,
+  contentType: string
+): Promise<void> {
+  const fileSize = (await stat(filePath)).size;
+  await s3Client().send(
+    new PutObjectCommand({
+      Bucket: bucketName(),
+      Key: key,
+      Body: createReadStream(filePath),
+      ContentType: contentType,
+      ContentLength: fileSize,
     })
   );
 }

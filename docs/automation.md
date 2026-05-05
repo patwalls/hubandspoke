@@ -625,12 +625,12 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Files:** `src/jobs/tasks/clip-idea-precise-cut.ts`
 - **Inputs:** `{ clipIdeaId, triggerId, derivativeItemId, uploadJobId?, layoutJobId?, applyLayoutPack?, deadlineAt? }`
 - **Outputs:**
-  - Phase 1 (no `uploadJobId`, no `layoutJobId`): download from S3, ffmpeg-trim to [startSec, endSec], upload to Descript, save `descriptJobId` + `descriptProjectUrl` to `repurposeTriggers`; save `descriptProjectId` + URL to `productionItems`
+  - Phase 1 (no `uploadJobId`, no `layoutJobId`): download source from S3, ffmpeg-trim to [startSec, endSec], **re-upload the trimmed mp4 to a temp S3 key (`<prefix>/clip-tmp/<clipIdeaId>/<uuid>.mp4`)**, then call `createDescriptProjectFromUrl` with a presigned GET URL so Descript pulls the bytes itself. Save `descriptJobId` + `descriptProjectUrl` to `repurposeTriggers`; save `descriptProjectId` + URL to `productionItems`. (We previously used Descript's signed-PUT path — `createDescriptProjectWithUpload` + PUT bytes — but Descript's importer started rejecting those uploads with a generic "Import failed" 1–2s after PUT, even for synthetic test patterns; verified 2026-05-05. URL-fetch path is what the cold full-video flow already uses and remains stable.)
   - Phase 2 (`uploadJobId` set): poll import, save composition ID to both tables. When `applyLayoutPack=true` AND `DESCRIPT_LAYOUT_PACK_NAME` is enabled, invoke Underlord against the new project with `buildLayoutPackPrompt()` to apply the pack + mark fillers, save the prompt to `repurposeTriggers.descriptPrompt`, and re-enqueue with `layoutJobId`. Otherwise the task ends here.
   - Phase 3 (`layoutJobId` set): poll the layout-apply Underlord job. Composition ID is unchanged (Underlord mutates in place), so this phase is purely status-watching — exits when the job stops.
 - **Downstream:** none
 - **Rules:**
-  - ffmpeg always re-encodes (libx264 veryfast + AAC). The previous stream-copy fast path was removed 2026-05-05 after Descript's importer started rejecting some stream-copy outputs with a generic "Import failed" 1–2s after upload — `ffmpeg -ss` before `-i` with `-c copy` snaps to the nearest preceding keyframe and can produce mp4s with non-zero start timestamps that ffmpeg accepts (exit 0) but Descript's parser does not. Re-encoding is ~real-time on the Basic worker dyno.
+  - ffmpeg always re-encodes (libx264 veryfast + AAC). The previous stream-copy fast path was removed 2026-05-05; turned out the actual culprit was Descript's signed-PUT path, but always-re-encode is also the cleaner default.
   - 30-min deadline per Descript job (import OR layout-apply); each phase carries its own `deadlineAt`
   - Short-invocation re-enqueue
   - Layout-apply phase is opt-in per-promotion via `applyLayoutPack` (route reads `?ai=1`) AND requires `DESCRIPT_LAYOUT_PACK_NAME` to resolve to a non-empty value. Either gate set false → no Underlord call.

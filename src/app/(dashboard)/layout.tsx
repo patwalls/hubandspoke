@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { Toaster } from "sonner";
 import { eq } from "drizzle-orm";
 import { DashboardNav, SectionTabs } from "@/components/dashboard/nav";
-import { FloatingFixButton } from "@/components/floating-fix-button";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
@@ -70,7 +69,6 @@ export default async function DashboardLayout({
         </div>
         {children}
       </main>
-      {session.user.role === "admin" ? <FloatingFixButton /> : null}
       <Toaster position="bottom-right" richColors closeButton />
     </div>
   );

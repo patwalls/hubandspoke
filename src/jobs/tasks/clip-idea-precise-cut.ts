@@ -1,6 +1,5 @@
 import { spawn } from "child_process";
 import { randomUUID } from "crypto";
-import { stat } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { Task } from "graphile-worker";
@@ -14,17 +13,13 @@ import {
 } from "@/lib/db/schema";
 import {
   buildLayoutPackPrompt,
-  createDescriptProjectWithUpload,
+  createDescriptProjectFromUrl,
   fetchDescriptJob,
   getDescriptLayoutPackName,
   invokeDescriptAgent,
 } from "@/lib/descript";
-import { getPresignedGetUrl } from "@/lib/s3";
-import {
-  downloadToFile,
-  putFileToUrl,
-  safeUnlink,
-} from "./descript-upload-helpers";
+import { getPresignedGetUrl, putObjectFromFile } from "@/lib/s3";
+import { downloadToFile, safeUnlink } from "./descript-upload-helpers";
 
 export interface ClipIdeaPreciseCutPayload {
   clipIdeaId: string;
@@ -139,38 +134,55 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
       logger: helpers.logger,
     });
 
-    const clipStat = await stat(clipPath);
     const uploadContentType = row.mediaContentType || "video/mp4";
 
-    const upload = await createDescriptProjectWithUpload({
+    // Upload the trimmed file to a temp S3 location, then ask Descript to
+    // pull it via presigned URL. Why not use Descript's signed-PUT flow
+    // (POST /jobs/import/project_media → returns upload_url → we PUT bytes)?
+    // Because that path is broken on Descript's side (verified 2026-05-05
+    // with a synthetic 6 MB test pattern that imports fine via URL-fetch
+    // but errors with "Import failed" 1–2s after PUT). The URL-fetch path
+    // is also what the cold full-video flow already uses and it's been
+    // stable.
+    //
+    // Tmp S3 prefix is distinct (`clip-tmp/<id>/<uuid>.mp4`) so an S3
+    // lifecycle rule can sweep it after 24 h without touching durable
+    // pillar uploads. (Lifecycle rule not yet configured — TODO.)
+    const tmpPrefix = (process.env.HUBANDSPOKE_S3_PREFIX || "hubandspoke/uploads")
+      .replace(/\/+$/, "");
+    const tmpS3Key = `${tmpPrefix}/clip-tmp/${clipIdeaId}/${randomUUID()}.mp4`;
+    helpers.logger.info(
+      `precise-cut s3-upload start clip=${clipIdeaId} key=${tmpS3Key}`,
+    );
+    await putObjectFromFile(tmpS3Key, clipPath, uploadContentType);
+    const presignedClipUrl = await getPresignedGetUrl(tmpS3Key, 3600);
+
+    const importRes = await createDescriptProjectFromUrl({
       projectName: row.hook,
-      contentType: uploadContentType,
-      fileSize: clipStat.size,
+      mediaUrl: presignedClipUrl,
     });
     helpers.logger.info(
-      `precise-cut upload_url ready clip=${clipIdeaId} job=${upload.jobId} bytes=${clipStat.size}`,
+      `precise-cut descript-import enqueued clip=${clipIdeaId} job=${importRes.job_id}`,
     );
-
-    await putFileToUrl(clipPath, upload.uploadUrl, uploadContentType, clipStat.size);
 
     await db
       .update(repurposeTriggers)
       .set({
-        descriptJobId: upload.jobId,
-        descriptProjectUrl: upload.projectUrl,
+        descriptJobId: importRes.job_id,
+        descriptProjectUrl: importRes.project_url,
       })
       .where(eq(repurposeTriggers.id, triggerId));
     await db
       .update(productionItems)
       .set({
-        descriptProjectId: upload.projectId,
-        descriptProjectUrl: upload.projectUrl,
+        descriptProjectId: importRes.project_id,
+        descriptProjectUrl: importRes.project_url,
       })
       .where(eq(productionItems.id, derivativeItemId));
 
     await helpers.addJob(
       "clip-idea-precise-cut",
-      { ...payload, uploadJobId: upload.jobId, deadlineAt },
+      { ...payload, uploadJobId: importRes.job_id, deadlineAt },
       { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
     );
   } finally {
