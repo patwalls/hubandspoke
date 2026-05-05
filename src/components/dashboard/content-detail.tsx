@@ -88,6 +88,7 @@ import { KillIdeaDialog } from "./kill-idea-dialog";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
+import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 
 interface BrandFormat {
   id: string;
@@ -2479,30 +2480,43 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
         <PropertyRowGroup single={isPrePublish}>
           <PropertyRow label="Published link">
-            <div className="flex items-center gap-1 min-w-0">
-              <Input
-                value={publishedLink}
-                onChange={(e) => setPublishedLink(e.target.value)}
-                onBlur={() => {
-                  if ((item.publishedLink ?? "") !== publishedLink)
-                    void persistField({ publishedLink: publishedLink || null });
-                }}
-                placeholder="https://…"
-                disabled={isYouTube}
-                aria-label="Published link"
-                className={cn(PROPERTY_INPUT_CLASS, "flex-1 min-w-0")}
-              />
-              {publishedLink && (
-                <a
-                  href={publishedLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 p-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                  aria-label="Open published link"
-                >
-                  <ExternalLinkIcon className="h-3.5 w-3.5" />
-                </a>
-              )}
+            <div className="flex flex-col gap-1 min-w-0">
+              <div className="flex items-center gap-1 min-w-0">
+                <Input
+                  value={publishedLink}
+                  onChange={(e) => setPublishedLink(e.target.value)}
+                  onBlur={() => {
+                    if ((item.publishedLink ?? "") !== publishedLink)
+                      void persistField({ publishedLink: publishedLink || null });
+                  }}
+                  placeholder="https://…"
+                  disabled={isYouTube}
+                  aria-label="Published link"
+                  className={cn(PROPERTY_INPUT_CLASS, "flex-1 min-w-0")}
+                />
+                {publishedLink && (
+                  <a
+                    href={publishedLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 p-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                    aria-label="Open published link"
+                  >
+                    <ExternalLinkIcon className="h-3.5 w-3.5" />
+                  </a>
+                )}
+              </div>
+              {(() => {
+                const mismatch = validatePublishedLinkPlatform(
+                  publishedLink || null,
+                  item.postType,
+                );
+                return mismatch ? (
+                  <span className="text-[11px] text-amber-700">
+                    {mismatch}
+                  </span>
+                ) : null;
+              })()}
             </div>
           </PropertyRow>
 

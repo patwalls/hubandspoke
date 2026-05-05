@@ -19,7 +19,8 @@ import { resolveAssignees } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
 import { isNotionAuthoritative } from "@/lib/platform";
-import { extractContentId } from "@/lib/platform-url";
+import { extractContentId, extractContentIdFromUrl } from "@/lib/platform-url";
+import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { enqueue } from "@/jobs/enqueue";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
@@ -127,6 +128,13 @@ export async function POST(request: NextRequest) {
     }
     const validatedFormat = formatCheck.value;
 
+    // Catch obvious platform mismatches (e.g. saving a threads.com link
+    // onto an X-tagged row). No-op when either side is unresolvable.
+    const linkMismatch = validatePublishedLinkPlatform(publishedLink, postType);
+    if (linkMismatch) {
+      return NextResponse.json({ error: linkMismatch }, { status: 400 });
+    }
+
     let finalViews = views ?? null;
     let finalLikes = likes ?? null;
     let finalComments = comments ?? null;
@@ -228,8 +236,18 @@ export async function POST(request: NextRequest) {
     // partial unique index `(account_id, platform_content_id)` catches
     // re-adds of the same post via a different URL shape (e.g. `?utm_source`,
     // `threads.com` vs `threads.net`).
+    // Always derive platform_content_id when we have a URL — it's the dedup
+    // key the unique indexes (account_id, content_id) and (content_id global)
+    // gate on, so leaving it null silently bypasses both. Fall back to
+    // host-inferred extraction so a row whose post_type isn't set yet
+    // (cross-post / repost drafts) still picks up the code from the URL.
     const platformContentId =
-      youtubeId ?? extractContentId(postType, publishedLink) ?? null;
+      youtubeId ??
+      extractContentId(postType, publishedLink) ??
+      (publishedLink
+        ? extractContentIdFromUrl(publishedLink)?.contentId ?? null
+        : null) ??
+      null;
 
     // Cross-account duplicate guard. Surfaces the existing item id so the
     // client can deep-link the operator to it instead of creating a second
@@ -424,11 +442,8 @@ export async function PUT(request: NextRequest) {
     if (postType !== undefined) updateData.postType = postType || null;
     if (format !== undefined) updateData.format = validatedFormat ?? null;
     if (publishedLink !== undefined) {
-      updateData.publishedLink = publishedLink || null;
-      // Re-derive platform_content_id whenever the URL changes so the
-      // partial unique index `(account_id, platform_content_id)` keeps
-      // catching duplicates even when manual entry differs in trailing
-      // slash, query string, or domain (threads.com vs threads.net).
+      // Resolve the row's effective post-type for both validation and the
+      // platformContentId re-derivation below — single read.
       let pt: string | null = typeof postType === "string" ? postType : null;
       if (postType === undefined) {
         const [existing] = await db
@@ -438,8 +453,30 @@ export async function PUT(request: NextRequest) {
           .limit(1);
         pt = existing?.postType ?? null;
       }
+
+      // Catch obvious platform mismatches (e.g. saving a threads.com link
+      // onto an X-tagged row). Reject before mutating updateData so the
+      // save fails atomically. No-op when either side is unresolvable.
+      const linkMismatch = validatePublishedLinkPlatform(publishedLink, pt);
+      if (linkMismatch) {
+        return NextResponse.json({ error: linkMismatch }, { status: 400 });
+      }
+
+      updateData.publishedLink = publishedLink || null;
+      // Re-derive platform_content_id whenever the URL changes so the
+      // partial unique index `(account_id, platform_content_id)` keeps
+      // catching duplicates even when manual entry differs in trailing
+      // slash, query string, or domain (threads.com vs threads.net).
+      // Fall back to host-inferred extraction so rows whose post_type
+      // isn't set yet (cross-post / repost drafts where the URL is pasted
+      // before tagging) still pick up the dedup key from the URL alone —
+      // otherwise a NULL content_id silently bypasses every dedup check.
       updateData.platformContentId =
-        extractContentId(pt, publishedLink) ?? null;
+        extractContentId(pt, publishedLink) ??
+        (publishedLink
+          ? extractContentIdFromUrl(publishedLink)?.contentId ?? null
+          : null) ??
+        null;
     }
     if (publishedDate !== undefined) updateData.publishedDate = publishedDate;
     if (bodyPublishedAt !== undefined) {
