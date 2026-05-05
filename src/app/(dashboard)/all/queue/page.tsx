@@ -1,10 +1,12 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { QueueView } from "@/components/dashboard/queue-view";
+import { auth } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Queue · All" };
 
-export default function AllQueuePage() {
+export default async function AllQueuePage() {
+  const session = await auth();
   return (
     <Suspense
       fallback={
@@ -13,7 +15,11 @@ export default function AllQueuePage() {
         </div>
       }
     >
-      <QueueView brand="all" initialSource="all" />
+      <QueueView
+        brand="all"
+        initialSource="all"
+        isAdmin={session?.user?.role === "admin"}
+      />
     </Suspense>
   );
 }

@@ -6,6 +6,7 @@ import {
   QueueView,
   type QueueSource,
 } from "@/components/dashboard/queue-view";
+import { auth } from "@/lib/auth";
 
 interface BrandQueueSourcePageProps {
   params: Promise<{ brand: string; source: string }>;
@@ -16,6 +17,7 @@ const SLUG_TO_SOURCE: Record<string, QueueSource> = {
   repost: "repost",
   "cross-post": "cross_post",
   clip: "clip",
+  history: "history",
 };
 
 const SOURCE_LABEL: Record<QueueSource, string> = {
@@ -24,6 +26,7 @@ const SOURCE_LABEL: Record<QueueSource, string> = {
   repost: "Repost",
   cross_post: "Cross-post",
   clip: "Clip",
+  history: "History",
 };
 
 export async function generateMetadata({
@@ -42,7 +45,10 @@ export default async function BrandQueueSourcePage({
   params,
 }: BrandQueueSourcePageProps) {
   const { brand, source } = await params;
-  const brandConfig = await fetchBrandBySlug(brand);
+  const [brandConfig, session] = await Promise.all([
+    fetchBrandBySlug(brand),
+    auth(),
+  ]);
   const internalSource = SLUG_TO_SOURCE[source];
 
   if (!brandConfig || !internalSource) {
@@ -57,7 +63,11 @@ export default async function BrandQueueSourcePage({
         </div>
       }
     >
-      <QueueView brand={brand} initialSource={internalSource} />
+      <QueueView
+        brand={brand}
+        initialSource={internalSource}
+        isAdmin={session?.user?.role === "admin"}
+      />
     </Suspense>
   );
 }

@@ -5,6 +5,7 @@ import {
   QueueView,
   type QueueSource,
 } from "@/components/dashboard/queue-view";
+import { auth } from "@/lib/auth";
 
 interface AllQueueSourcePageProps {
   params: Promise<{ source: string }>;
@@ -15,6 +16,7 @@ const SLUG_TO_SOURCE: Record<string, QueueSource> = {
   repost: "repost",
   "cross-post": "cross_post",
   clip: "clip",
+  history: "history",
 };
 
 const SOURCE_LABEL: Record<QueueSource, string> = {
@@ -23,6 +25,7 @@ const SOURCE_LABEL: Record<QueueSource, string> = {
   repost: "Repost",
   cross_post: "Cross-post",
   clip: "Clip",
+  history: "History",
 };
 
 export async function generateMetadata({
@@ -42,6 +45,7 @@ export default async function AllQueueSourcePage({
   if (!internalSource) {
     notFound();
   }
+  const session = await auth();
 
   return (
     <Suspense
@@ -51,7 +55,11 @@ export default async function AllQueueSourcePage({
         </div>
       }
     >
-      <QueueView brand="all" initialSource={internalSource} />
+      <QueueView
+        brand="all"
+        initialSource={internalSource}
+        isAdmin={session?.user?.role === "admin"}
+      />
     </Suspense>
   );
 }

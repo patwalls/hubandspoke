@@ -2,21 +2,33 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { RefreshCwIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { IdeaQueueTable } from "./idea-queue-table";
 import { CrossPostQueueTable } from "./cross-post-queue-table";
+import { HistoryQueueTable } from "./history-queue-table";
 import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 import type { CrossPostCandidatesResult } from "@/lib/services/cross-post-candidates";
+import type { QueueHistoryEvent } from "@/app/api/queue/history/route";
 
-export type QueueSource = "all" | "original" | "repost" | "cross_post" | "clip";
+export type QueueSource =
+  | "all"
+  | "original"
+  | "repost"
+  | "cross_post"
+  | "clip"
+  | "history";
 
 interface QueueViewProps {
   brand: string;
   initialSource: QueueSource;
+  isAdmin?: boolean;
 }
 
 const SOURCE_TABS = [
@@ -25,15 +37,24 @@ const SOURCE_TABS = [
   { value: "repost", label: "Repost", slug: "repost" },
   { value: "cross_post", label: "Cross-post", slug: "cross-post" },
   { value: "clip", label: "Clip", slug: "clip" },
+  { value: "history", label: "History", slug: "history" },
 ] as const;
 
-export function QueueView({ brand, initialSource }: QueueViewProps) {
+export function QueueView({
+  brand,
+  initialSource,
+  isAdmin = false,
+}: QueueViewProps) {
   const router = useRouter();
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [crossPostData, setCrossPostData] =
     useState<CrossPostCandidatesResult | null>(null);
   const [crossPostLoading, setCrossPostLoading] = useState(true);
+  const [historyEvents, setHistoryEvents] = useState<QueueHistoryEvent[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [refilling, setRefilling] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedFormat, setSelectedFormat] = useState("all");
@@ -113,6 +134,61 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
     fetchCrossPostQueue();
   }, [fetchCrossPostQueue]);
 
+  const fetchHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(
+        `/api/queue/history?brand=${encodeURIComponent(brand)}`,
+      );
+      if (!res.ok) {
+        console.error(`History API returned HTTP ${res.status}`);
+        setHistoryEvents([]);
+        return;
+      }
+      const json = await res.json();
+      setHistoryEvents(json.events ?? []);
+    } catch (err) {
+      console.error("Failed to fetch queue history:", err);
+      setHistoryEvents([]);
+    } finally {
+      setHistoryLoading(false);
+      setHistoryLoaded(true);
+    }
+  }, [brand]);
+
+  // Lazy-load history only when the user actually opens the tab.
+  useEffect(() => {
+    if (selectedSource === "history" && !historyLoaded) {
+      void fetchHistory();
+    }
+  }, [selectedSource, historyLoaded, fetchHistory]);
+
+  const handleRefillReposts = useCallback(async () => {
+    if (refilling) return;
+    setRefilling(true);
+    try {
+      const res = await fetch("/api/queue/refill-reposts", { method: "POST" });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        toast.error(json.error || `Refill failed (HTTP ${res.status})`);
+        return;
+      }
+      toast.success(
+        "Repost scan enqueued — new ideas will appear in a moment.",
+      );
+      // Give the worker a few seconds to chew through Phase A/B then
+      // refetch. Phase B writes one repost row per accepted candidate so we
+      // can see the queue grow.
+      window.setTimeout(() => {
+        void fetchQueue();
+      }, 6000);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Refill failed");
+    } finally {
+      setRefilling(false);
+    }
+  }, [refilling, fetchQueue]);
+
   // Exclude long-form YouTube pillars — those live in Notion and don't belong
   // in the triage queue.
   const hsItems = items.filter((item) => !isNotionAuthoritative(item.postType));
@@ -187,7 +263,14 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
   }, [crossPostData, selectedPlatform, selectedFormat, query]);
 
   const sourceCounts = useMemo(() => {
-    const counts = { all: 0, original: 0, repost: 0, cross_post: 0, clip: 0 };
+    const counts = {
+      all: 0,
+      original: 0,
+      repost: 0,
+      cross_post: 0,
+      clip: 0,
+      history: 0,
+    };
     for (const item of baseFiltered) {
       counts.all += 1;
       const source = item.sourceType ?? "original";
@@ -195,8 +278,9 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
       if (source in counts) counts[source as keyof typeof counts] += 1;
     }
     counts.cross_post = crossPostFiltered.length;
+    counts.history = historyEvents.length;
     return counts;
-  }, [baseFiltered, crossPostFiltered]);
+  }, [baseFiltered, crossPostFiltered, historyEvents]);
 
   const filtered = baseFiltered.filter((item) => {
     if (selectedSource === "all") return true;
@@ -205,6 +289,8 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
   });
 
   const isCrossPostTab = selectedSource === "cross_post";
+  const isHistoryTab = selectedSource === "history";
+  const isRepostTab = selectedSource === "repost";
 
   return (
     <div className="space-y-6">
@@ -213,11 +299,17 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
           <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
             Queue
             <span className="ml-2 text-sm font-normal text-muted-foreground tabular-nums">
-              {isCrossPostTab ? crossPostFiltered.length : filtered.length}
+              {isHistoryTab
+                ? historyEvents.length
+                : isCrossPostTab
+                ? crossPostFiltered.length
+                : filtered.length}
             </span>
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            {isCrossPostTab
+            {isHistoryTab
+              ? "Items that have left the queue in the last 30 days."
+              : isCrossPostTab
               ? "High-performing posts from the last 21 days — pick where to cross-post."
               : "Triage new ideas — assign an editor or kill."}
           </p>
@@ -238,6 +330,10 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
           const href = tab.slug
             ? `/${brand}/queue/${tab.slug}`
             : `/${brand}/queue`;
+          // History is read-only and sits apart from the triage tabs — push
+          // it to the right with a small left margin and a more muted
+          // baseline color so it reads as a side trip, not a queue source.
+          const isHistory = tab.value === "history";
           return (
             <button
               key={tab.value}
@@ -248,41 +344,73 @@ export function QueueView({ brand, initialSource }: QueueViewProps) {
               }}
               className={cn(
                 "inline-flex items-center gap-1.5 px-3 h-9 -mb-px border-b-2 text-sm transition-colors cursor-pointer",
+                isHistory && "ml-auto text-xs",
                 active
                   ? "border-foreground text-foreground font-medium"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
+                  : isHistory
+                  ? "border-transparent text-muted-foreground/70 hover:text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
               )}
             >
               <span>{tab.label}</span>
-              <span
-                className={cn(
-                  "tabular-nums text-xs",
-                  active ? "text-muted-foreground" : "text-muted-foreground/70"
-                )}
-              >
-                {count}
-              </span>
+              {!isHistory && (
+                <span
+                  className={cn(
+                    "tabular-nums text-xs",
+                    active
+                      ? "text-muted-foreground"
+                      : "text-muted-foreground/70",
+                  )}
+                >
+                  {count}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <SelectPill
-          label="Channel"
-          value={selectedPlatform}
-          options={platformOptions}
-          onChange={setSelectedPlatform}
-        />
-        <SelectPill
-          label="Format"
-          value={selectedFormat}
-          options={formatOptions}
-          onChange={setSelectedFormat}
-        />
-      </div>
+      {!isHistoryTab && (
+        <div className="flex flex-wrap items-center gap-2">
+          <SelectPill
+            label="Channel"
+            value={selectedPlatform}
+            options={platformOptions}
+            onChange={setSelectedPlatform}
+          />
+          <SelectPill
+            label="Format"
+            value={selectedFormat}
+            options={formatOptions}
+            onChange={setSelectedFormat}
+          />
+          {isRepostTab && isAdmin && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleRefillReposts}
+              disabled={refilling}
+              className="ml-auto"
+              title="Re-run the evergreen-scan task that populates this queue (admin only)"
+            >
+              <RefreshCwIcon
+                className={cn("size-3.5", refilling && "animate-spin")}
+              />
+              {refilling ? "Refilling…" : "Repopulate"}
+            </Button>
+          )}
+        </div>
+      )}
 
-      {isCrossPostTab ? (
+      {isHistoryTab ? (
+        <HistoryQueueTable
+          events={historyEvents}
+          brand={brand}
+          loading={historyLoading}
+          emptyMessage="Nothing has moved through the queue in the last 30 days."
+        />
+      ) : isCrossPostTab ? (
         crossPostLoading ? (
           <LoadingPanel label="Loading hot posts…" />
         ) : (

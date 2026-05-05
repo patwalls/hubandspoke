@@ -44,6 +44,7 @@ USER / API ENTRY POINTS
   POST /api/production-items (new row w/ link, no inline metrics) → refresh-item-metrics
   PUT  /api/production-items (→ Published w/ link, or link added on Published) → refresh-item-metrics
   POST /api/production-items, /comments, /clip-ideas/triage  → notification-send
+  POST /api/queue/refill-reposts (admin-only)             → evergreen-scan (manual trigger from /queue/repost)
 
 AUTO-CHAINS (one task enqueues another)
   enrich-item        ── if updates.mediaS3Key set ─→ transcribe-whisper
