@@ -187,6 +187,16 @@ async function pollUploadOnce(
   const uploadJobId = payload.uploadJobId!;
   const job = await fetchDescriptJob(uploadJobId);
   if (job.job_state === "stopped") {
+    // Descript reports failures as stopped + result.status="error". Without
+    // this guard the task would silently succeed (no composition_id ever
+    // written) and the UI would hang on "Clip processing…" forever. Throw
+    // so graphile-worker retries (transient Descript blips) and surfaces
+    // the failure in graphile_worker.jobs.last_error after exhaustion.
+    if (job.result?.status === "error") {
+      throw new Error(
+        `Descript import ${uploadJobId} failed: ${job.result.error_message ?? "no error message"}`,
+      );
+    }
     // Import creates exactly one composition (the one we declared in
     // add_compositions). Persist its id so the UI can exit "Clip
     // processing…" and deep-link into the composition.
@@ -277,6 +287,11 @@ async function pollLayoutOnce(
   const layoutJobId = payload.layoutJobId!;
   const job = await fetchDescriptJob(layoutJobId);
   if (job.job_state === "stopped") {
+    if (job.result?.status === "error") {
+      throw new Error(
+        `Descript layout-apply ${layoutJobId} failed: ${job.result.error_message ?? "no error message"}`,
+      );
+    }
     // Layout-apply mutates the composition in place. compositionId is
     // unchanged from the import phase, so nothing to persist — just log.
     helpers.logger.info(

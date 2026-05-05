@@ -45,6 +45,16 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
 
   const job = await fetchDescriptJob(payload.jobId);
   if (job.job_state === "stopped") {
+    // Descript reports failures as stopped + result.status="error". Without
+    // this guard the poller would write a NULL composition_id (or none for
+    // pre-existing rows) and silently exit, leaving the UI stuck on "Clip
+    // processing…". Throw so graphile-worker retries and surfaces the
+    // failure in last_error after exhaustion.
+    if (job.result?.status === "error") {
+      throw new Error(
+        `Descript ${payload.importMode ? "import" : "agent"} job ${payload.jobId} failed: ${job.result.error_message ?? "no error message"}`,
+      );
+    }
     const compositionId = payload.importMode
       ? job.result?.created_compositions?.[0]?.id ?? null
       : extractCompositionIdFromAgentResponse(job.result?.agent_response);
