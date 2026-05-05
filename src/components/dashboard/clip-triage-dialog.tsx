@@ -90,9 +90,39 @@ export function ClipTriageDialog({
   brand,
   promotionFormat,
 }: Props) {
-  const packAttached = !!promotionFormat?.pack;
-  const formatHref = promotionFormat
-    ? `/${promotionFormat.brand}/formats/${promotionFormat.id}`
+  // When the parent doesn't already pass promotionFormat (e.g. the queue
+  // page mounts the dialog without pre-fetching per-row formats), fetch
+  // it ourselves on open. Cached for the dialog lifetime.
+  const [fetchedFormat, setFetchedFormat] = useState<PromotionFormat | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!open || promotionFormat !== undefined) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/promotion-format?brand=${encodeURIComponent(brand)}`,
+        );
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          promotionFormat: PromotionFormat | null;
+        };
+        if (!cancelled) setFetchedFormat(json.promotionFormat);
+      } catch {
+        // Leave fetchedFormat null — gating defaults to "no pack".
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, brand, promotionFormat]);
+
+  const effectiveFormat: PromotionFormat | null =
+    promotionFormat ?? fetchedFormat;
+  const packAttached = !!effectiveFormat?.pack;
+  const formatHref = effectiveFormat
+    ? `/${effectiveFormat.brand}/formats/${effectiveFormat.id}`
     : `/${brand}/formats`;
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -394,7 +424,7 @@ export function ClipTriageDialog({
                           <p className="text-[11px] text-muted-foreground leading-snug">
                             Pack:{" "}
                             <span className="font-medium text-foreground">
-                              {promotionFormat!.pack!.name}
+                              {effectiveFormat!.pack!.name}
                             </span>{" "}
                             —{" "}
                             <a
