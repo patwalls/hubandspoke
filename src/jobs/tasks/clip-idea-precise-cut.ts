@@ -321,55 +321,56 @@ async function ffmpegTrim(args: {
   endSec: number;
   logger: { info: (msg: string) => void; error: (msg: string) => void };
 }): Promise<void> {
-  const tryRun = (useStreamCopy: boolean) =>
-    new Promise<void>((resolve, reject) => {
-      const codecArgs = useStreamCopy
-        ? ["-c", "copy"]
-        : ["-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac"];
-      const ffArgs = [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-ss",
-        String(args.startSec),
-        "-to",
-        String(args.endSec),
-        "-i",
-        args.inputPath,
-        ...codecArgs,
-        "-avoid_negative_ts",
-        "make_zero",
-        "-movflags",
-        "+faststart",
-        args.outputPath,
-      ];
-      const proc = spawn(args.ffmpegPath, ffArgs, { stdio: ["ignore", "ignore", "pipe"] });
-      let stderr = "";
-      proc.stderr.on("data", (b) => {
-        stderr += b.toString();
-      });
-      proc.on("error", reject);
-      proc.on("close", (code) => {
-        if (code === 0) resolve();
-        else
-          reject(
-            new Error(
-              `ffmpeg exited ${code}${stderr ? `: ${stderr.slice(0, 500)}` : ""}`,
-            ),
-          );
-      });
+  // Always re-encode. We previously had a stream-copy fast path with
+  // re-encode fallback, but stream-copy + `-ss` before `-i` snaps the
+  // output to the nearest preceding keyframe and can produce mp4s with
+  // non-zero start timestamps that ffmpeg considers valid (exit 0) but
+  // Descript's importer rejects with a generic "Import failed" 1–2s
+  // after upload (verified across multiple clips from one source pillar
+  // 2026-05-05). Re-encoding is ~real-time on the Basic worker dyno
+  // (~80s for an 80s clip), still well inside the 30-min deadline, and
+  // produces an mp4 with timestamps starting at 0 that any importer can
+  // parse.
+  await new Promise<void>((resolve, reject) => {
+    const ffArgs = [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-ss",
+      String(args.startSec),
+      "-to",
+      String(args.endSec),
+      "-i",
+      args.inputPath,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-c:a",
+      "aac",
+      "-avoid_negative_ts",
+      "make_zero",
+      "-movflags",
+      "+faststart",
+      args.outputPath,
+    ];
+    const proc = spawn(args.ffmpegPath, ffArgs, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    proc.stderr.on("data", (b) => {
+      stderr += b.toString();
     });
-
-  try {
-    await tryRun(true);
-    args.logger.info("ffmpeg stream-copy ok");
-  } catch (err) {
-    args.logger.info(
-      `ffmpeg stream-copy failed, falling back to re-encode: ${(err as Error).message}`,
-    );
-    await tryRun(false);
-    args.logger.info("ffmpeg re-encode ok");
-  }
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else
+        reject(
+          new Error(
+            `ffmpeg exited ${code}${stderr ? `: ${stderr.slice(0, 500)}` : ""}`,
+          ),
+        );
+    });
+  });
+  args.logger.info("ffmpeg re-encode ok");
 }
 

@@ -630,7 +630,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - Phase 3 (`layoutJobId` set): poll the layout-apply Underlord job. Composition ID is unchanged (Underlord mutates in place), so this phase is purely status-watching — exits when the job stops.
 - **Downstream:** none
 - **Rules:**
-  - ffmpeg tries stream-copy first, falls back to H.264 re-encode on failure
+  - ffmpeg always re-encodes (libx264 veryfast + AAC). The previous stream-copy fast path was removed 2026-05-05 after Descript's importer started rejecting some stream-copy outputs with a generic "Import failed" 1–2s after upload — `ffmpeg -ss` before `-i` with `-c copy` snaps to the nearest preceding keyframe and can produce mp4s with non-zero start timestamps that ffmpeg accepts (exit 0) but Descript's parser does not. Re-encoding is ~real-time on the Basic worker dyno.
   - 30-min deadline per Descript job (import OR layout-apply); each phase carries its own `deadlineAt`
   - Short-invocation re-enqueue
   - Layout-apply phase is opt-in per-promotion via `applyLayoutPack` (route reads `?ai=1`) AND requires `DESCRIPT_LAYOUT_PACK_NAME` to resolve to a non-empty value. Either gate set false → no Underlord call.
