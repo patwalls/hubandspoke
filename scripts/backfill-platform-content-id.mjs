@@ -69,10 +69,37 @@ function extractLinkedInId(url) {
   return null;
 }
 
+// Fallback used when accounts.platform is null (orphan rows, legacy data).
+// Mirrors src/lib/platform-url.ts's inferPlatformFromUrl.
+function inferPlatformFromUrl(url) {
+  if (!url) return null;
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+  if (host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be")
+    return "youtube";
+  if (host === "instagram.com") return "instagram";
+  if (host === "threads.net" || host === "threads.com") return "threads";
+  if (host === "x.com" || host === "twitter.com") return "x";
+  if (host === "tiktok.com" || host === "vm.tiktok.com") return "tiktok";
+  if (host === "linkedin.com") return "linkedin";
+  return null;
+}
+
 function deriveContentId(platform, youtubeId, publishedLink) {
   if (youtubeId) return youtubeId;
   if (!publishedLink) return null;
-  switch (platform) {
+  // Fall back to URL-host inference when the linked account's platform
+  // wasn't usable. Catches rows that live without a linked account row
+  // (legacy / drafted-then-orphaned).
+  const effective =
+    platform && platform !== "unknown"
+      ? platform
+      : inferPlatformFromUrl(publishedLink);
+  switch (effective) {
     case "youtube":
       // Fall back to yt video id parse if youtube_id wasn't populated yet.
       {
@@ -96,6 +123,11 @@ function deriveContentId(platform, youtubeId, publishedLink) {
   }
 }
 
+function truncate(s, n) {
+  if (!s) return "";
+  return s.length <= n ? s : s.slice(0, n - 1) + "…";
+}
+
 // ─── Run ─────────────────────────────────────────────────────────────────
 
 try {
@@ -111,23 +143,62 @@ try {
   `;
   console.log(`Scanning ${rows.length} candidate rows…`);
 
+  // Pre-flight: build an index of every existing (content_id) so we know
+  // which derivations would collide with a row that already owns the id.
+  // Surfaced in the dry-run report so the user sees the duplicate count
+  // before applying anything.
+  const existing = await sql`
+    SELECT id, account_id, platform_content_id, published_link
+      FROM production_items
+     WHERE platform_content_id IS NOT NULL
+       AND deleted_at IS NULL
+  `;
+  const ownersByContentId = new Map();
+  for (const e of existing) {
+    if (!ownersByContentId.has(e.platform_content_id)) {
+      ownersByContentId.set(e.platform_content_id, []);
+    }
+    ownersByContentId.get(e.platform_content_id).push(e);
+  }
+
   const updates = [];
+  const conflicts = []; // { row, contentId, owners }
   const missByPlatform = new Map();
   for (const r of rows) {
     const platform = r.platform ?? "unknown";
     const id = deriveContentId(platform, r.youtube_id, r.published_link);
-    if (id) {
-      updates.push({ id: r.id, contentId: id });
-    } else {
+    if (!id) {
       missByPlatform.set(platform, (missByPlatform.get(platform) ?? 0) + 1);
+      continue;
     }
+    const owners = ownersByContentId.get(id);
+    if (owners && owners.length > 0) {
+      conflicts.push({ row: r, contentId: id, owners });
+      continue;
+    }
+    updates.push({ id: r.id, contentId: id });
+    // Reserve so two candidates in the same run don't both win.
+    ownersByContentId.set(id, [{ id: r.id }]);
   }
 
-  console.log(`Derivable: ${updates.length}`);
+  console.log(`Derivable + safe to write: ${updates.length}`);
+  console.log(`Pre-existing duplicates (manual triage): ${conflicts.length}`);
   if (missByPlatform.size > 0) {
     console.log("Couldn't derive id (left as NULL):");
     for (const [p, n] of missByPlatform) {
       console.log(`  ${p}: ${n}`);
+    }
+  }
+
+  if (conflicts.length > 0) {
+    console.log(`\nDuplicates that would collide:`);
+    for (const c of conflicts.slice(0, 50)) {
+      console.log(
+        `  ✗ ${c.row.id} → content_id=${c.contentId} (already on ${c.owners.map((o) => o.id).join(", ")})  ${truncate(c.row.published_link, 70)}`
+      );
+    }
+    if (conflicts.length > 50) {
+      console.log(`  … and ${conflicts.length - 50} more`);
     }
   }
 
@@ -140,7 +211,7 @@ try {
   }
 
   let applied = 0;
-  let conflicts = 0;
+  let runtimeConflicts = 0;
   for (const u of updates) {
     try {
       await sql`
@@ -152,9 +223,11 @@ try {
       applied++;
     } catch (err) {
       // A conflict on (account_id, platform_content_id) means two rows in the
-      // same account share a derived id — surface it but keep going.
+      // same account share a derived id — surface it but keep going. Should
+      // be rare since we pre-detect via ownersByContentId; this catches any
+      // race that slipped past the pre-flight check.
       if (err?.code === "23505") {
-        conflicts++;
+        runtimeConflicts++;
         console.warn(
           `CONFLICT item=${u.id} derived=${u.contentId}: ${err.message}`
         );
@@ -165,9 +238,9 @@ try {
   }
 
   console.log(`\nApplied: ${applied}`);
-  if (conflicts > 0) {
+  if (runtimeConflicts > 0) {
     console.log(
-      `Skipped ${conflicts} rows where another item in the same account already owned the derived id — inspect and reconcile manually.`
+      `Skipped ${runtimeConflicts} rows where another item in the same account already owned the derived id — inspect and reconcile manually.`
     );
   }
 } catch (err) {
