@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
-import { accounts, contentEvents, productionItems } from "@/lib/db/schema";
+import { accounts, contentEvents, productionItems, users } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -197,6 +197,32 @@ export async function POST(request: NextRequest, context: RouteContext) {
         targetPostType,
       },
     });
+
+    // Second event: log the editor assignment so the activity feed reads
+    // "Pat Walls added <editor> as the editor" alongside the create event.
+    // Mirrors the editor_change convention used by PUT /production-items —
+    // payload stores display names (not IDs).
+    if (editorUserId) {
+      const [editor] = await db
+        .select({ name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, editorUserId))
+        .limit(1);
+      if (editor) {
+        const editorName =
+          editor.name?.trim() || editor.email.split("@")[0] || editor.email;
+        await db.insert(contentEvents).values({
+          contentItemId: created.id,
+          userId: guard.session.user.id,
+          eventType: "editor_change",
+          payload: {
+            type: "editor_change",
+            from: null,
+            to: editorName,
+          },
+        });
+      }
+    }
   }
 
   return NextResponse.json({ id: created.id }, { status: 201 });
