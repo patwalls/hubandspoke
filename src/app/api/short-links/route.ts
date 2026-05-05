@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isNotNull, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { productionItems } from "@/lib/db/schema";
 import {
   createShortLink,
   listShortLinks,
@@ -31,8 +34,27 @@ export async function GET(request: NextRequest) {
   try {
     const includeArchived = request.nextUrl.searchParams.get("include_archived") === "true";
     const tag = request.nextUrl.searchParams.get("tag") ?? undefined;
-    const links = await listShortLinks({ includeArchived, tag });
-    return NextResponse.json({ shortLinks: links });
+    const [links, usageRows] = await Promise.all([
+      listShortLinks({ includeArchived, tag }),
+      db
+        .select({
+          slug: productionItems.shortLinkSlug,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(productionItems)
+        .where(isNotNull(productionItems.shortLinkSlug))
+        .groupBy(productionItems.shortLinkSlug),
+    ]);
+
+    const usageBySlug = new Map<string, number>();
+    for (const row of usageRows) {
+      if (row.slug) usageBySlug.set(row.slug, row.count);
+    }
+    const augmented = links.map((l) => ({
+      ...l,
+      inUseCount: usageBySlug.get(l.slug) ?? 0,
+    }));
+    return NextResponse.json({ shortLinks: augmented });
   } catch (err) {
     return handleApiError(err);
   }

@@ -13,6 +13,9 @@ import { Label } from "@/components/ui/label";
 
 // Mirror of ShortLink from lib/services/short-links, but redeclared here so
 // the client component doesn't have to import a server-only module.
+// `inUseCount` is augmented in by /api/short-links by joining against
+// production_items.short_link_slug — tells us which slugs are already wired
+// to a post so the picker can sort/mark them.
 interface ShortLink {
   slug: string;
   destinationUrl: string;
@@ -22,6 +25,7 @@ interface ShortLink {
   archived: boolean;
   createdAt: string;
   updatedAt: string;
+  inUseCount?: number;
 }
 
 interface Props {
@@ -58,11 +62,15 @@ function formatLastClick(iso: string | null): string {
   return date.toLocaleDateString();
 }
 
-// Sort: never-clicked first (null sorts before everything), then least-recent.
-// Archived rows drop to the bottom so they don't distract from the pickable
-// pool — but stay visible in case the user wants to un-archive.
+// Sort: archived to the bottom, then unused (not attached to any post) before
+// in-use, then within each bucket never-clicked first (null sorts before
+// everything), then least-recent. The primary "unused first" rule keeps fresh
+// slugs at the top — the operator's most common need.
 function staleSort(a: ShortLink, b: ShortLink): number {
   if (a.archived !== b.archived) return a.archived ? 1 : -1;
+  const aInUse = (a.inUseCount ?? 0) > 0;
+  const bInUse = (b.inUseCount ?? 0) > 0;
+  if (aInUse !== bInUse) return aInUse ? 1 : -1;
   if (a.lastClickedAt === b.lastClickedAt) return a.slug.localeCompare(b.slug);
   if (a.lastClickedAt == null) return -1;
   if (b.lastClickedAt == null) return 1;
@@ -269,8 +277,9 @@ export function AttachDmKeywordDialog({
           <div className="flex-1 min-h-0 flex flex-col gap-3">
             <p className="text-xs text-muted-foreground">
               Pick a DM-keyword slug (tagged <code className="px-1 py-0.5 rounded bg-muted">{DM_TAG}</code>)
-              from the pool. Sorted by least-recently-used first so stale slugs
-              are easy to recycle. The DM sends{" "}
+              from the pool. Unused slugs first; slugs already attached to
+              another post are struck through and sink to the bottom — picking
+              one moves it to this post. The DM sends{" "}
               <code className="px-1 py-0.5 rounded bg-muted">{baseUrl}/&lt;slug&gt;</code>.
               Sponsor slugs and other non-DM redirects are hidden from this list.
             </p>
@@ -298,31 +307,46 @@ export function AttachDmKeywordDialog({
                       </td>
                     </tr>
                   ) : (
-                    sortedFiltered.map((link) => (
-                      <tr
-                        key={link.slug}
-                        className="border-t border-border hover:bg-accent/40 cursor-pointer"
-                        onClick={() => selectSlug(link)}
-                      >
-                        <td className="px-3 py-2">
-                          <div className="flex items-center gap-2">
-                            <code className="text-xs px-1.5 py-0.5 rounded bg-muted">{link.slug}</code>
-                            {link.archived && (
-                              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700">
-                                archived
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">
-                          {formatLastClick(link.lastClickedAt)}
-                        </td>
-                        <td className="px-3 py-2 font-mono text-xs">{link.clicksCount}</td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground truncate max-w-[260px]">
-                          {link.destinationUrl}
-                        </td>
-                      </tr>
-                    ))
+                    sortedFiltered.map((link) => {
+                      const inUse = (link.inUseCount ?? 0) > 0;
+                      return (
+                        <tr
+                          key={link.slug}
+                          className="border-t border-border hover:bg-accent/40 cursor-pointer"
+                          onClick={() => selectSlug(link)}
+                        >
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-2">
+                              <code
+                                className={
+                                  "text-xs px-1.5 py-0.5 rounded bg-muted" +
+                                  (inUse ? " line-through text-muted-foreground" : "")
+                                }
+                              >
+                                {link.slug}
+                              </code>
+                              {inUse && (
+                                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-amber-800">
+                                  in use{(link.inUseCount ?? 0) > 1 ? ` · ${link.inUseCount}` : ""}
+                                </span>
+                              )}
+                              {link.archived && (
+                                <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700">
+                                  archived
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">
+                            {formatLastClick(link.lastClickedAt)}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-xs">{link.clicksCount}</td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground truncate max-w-[260px]">
+                            {link.destinationUrl}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
