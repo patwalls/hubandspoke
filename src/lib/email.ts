@@ -122,7 +122,7 @@ export async function sendCommentEmail(opts: {
     HtmlBody: `
       <p>${greeting}</p>
       <p><strong>${escapeHtml(author)}</strong> commented on <strong>${escapeHtml(title)}</strong>:</p>
-      <blockquote style="margin:16px 0;padding:10px 14px;border-left:3px solid #d4d4d4;background:#fafafa;color:#333;white-space:pre-wrap;">${escapeHtml(excerpt)}</blockquote>
+      <blockquote style="margin:16px 0;padding:10px 14px;border-left:3px solid #d4d4d4;background:#fafafa;color:#333;white-space:pre-wrap;">${escapeHtmlWithBreaks(excerpt)}</blockquote>
       <p><a href="${opts.itemUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Reply in Hub &amp; Spoke</a></p>
       <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.itemUrl}">${opts.itemUrl}</a></p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
@@ -164,7 +164,7 @@ export async function sendMentionEmail(opts: {
     HtmlBody: `
       <p>${greeting}</p>
       <p><strong>${escapeHtml(author)}</strong> mentioned you on <strong>${escapeHtml(title)}</strong>:</p>
-      <blockquote style="margin:16px 0;padding:10px 14px;border-left:3px solid #16a34a;background:#f6fbf7;color:#333;white-space:pre-wrap;">${escapeHtml(excerpt)}</blockquote>
+      <blockquote style="margin:16px 0;padding:10px 14px;border-left:3px solid #16a34a;background:#f6fbf7;color:#333;white-space:pre-wrap;">${escapeHtmlWithBreaks(excerpt)}</blockquote>
       <p><a href="${opts.itemUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Reply in Hub &amp; Spoke</a></p>
       <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.itemUrl}">${opts.itemUrl}</a></p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
@@ -180,6 +180,14 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// Same as escapeHtml, but also turns newlines into <br /> tags so the email
+// HTML preserves the line breaks the author typed. `white-space:pre-wrap`
+// alone isn't enough — Gmail and many other clients strip that style on
+// inline elements, collapsing the comment onto one line.
+function escapeHtmlWithBreaks(s: string): string {
+  return escapeHtml(s).replace(/\r\n|\r|\n/g, "<br />");
 }
 
 export async function sendInviteEmail(opts: {
