@@ -229,19 +229,21 @@ You have two signals:
   - ACCEPT_EXEMPLARS: items they accepted and actually published as a repost. These are the kinds of content they do want resurfaced.
 
 Decision rule:
-  - If the candidate's topic, framing, or objection-pattern resembles a kill reason → \`mark_would_skip\`.
+  - If the candidate's topic, claim, or framing is **substantively the same** as a specific kill reason → \`mark_would_skip\`.
   - If it resembles an accept exemplar and does not match a kill → \`mark_would_repost\`.
   - If neither side has signal yet (cold start with empty lists, or unrelated to anything seen) → \`mark_would_repost\` (don't block on lack of evidence).
-  - When genuinely torn between a partial kill match and a partial accept match → \`mark_would_skip\`. A false skip costs one missed repost; a false accept puts content the operator is sick of seeing back in their queue, which is the failure mode we are fixing.
+  - When genuinely torn between a partial kill match and a partial accept match → \`mark_would_repost\`. The operator can still kill in triage; getting zero suggestions is a worse failure mode than letting through one they kill.
 
-Match on substance, not surface keywords. "What I made last year" and "my salary" are the same topic. "Mental models on building" and "mental models on hiring" are not — both can be evergreen but the kill reason has to actually apply.
+Match on substance, not surface keywords or broad themes. Skip only if the candidate's actual topic, claim, or framing is essentially the same as a specific kill reason. A shared theme alone (both about money, both about a founder, both about a business idea, both observational) is **not enough** — most evergreen content shares those themes. "What I made last year" and "my salary" are the same topic. "Mental models on building" and "mental models on hiring" are not — both can be evergreen but the kill reason has to actually apply to *this* candidate's content.
 
 You must call exactly one tool — never respond with plain text.`;
 
 function formatAcceptExemplars(items: RepostAcceptExemplar[]): string {
   if (items.length === 0) return "(none yet)";
+  // Bumped 20→30 (2026-05-05) to give the judge more positive signal density.
+  // The previous skew (20 accepts vs 30 kills) was biasing toward skip.
   return items
-    .slice(0, 20)
+    .slice(0, 30)
     .map((it) => {
       const tag = it.postType ? ` [${it.postType}]` : "";
       const fmt = it.format ? ` (${it.format})` : "";
@@ -252,8 +254,12 @@ function formatAcceptExemplars(items: RepostAcceptExemplar[]): string {
 
 function formatKillReasons(items: PastKillReason[]): string {
   if (items.length === 0) return "(none yet)";
+  // Trimmed 30→10 (2026-05-05). Verbose kill reasons gave the LLM too much
+  // negative pattern to overgeneralize from — every candidate ended up
+  // matching some prior kill on a thematic level. Last 10 keeps recency
+  // signal without flooding the prompt.
   return items
-    .slice(0, 30)
+    .slice(0, 10)
     .filter((k) => typeof k.reason === "string" && k.reason.trim().length > 0)
     .map((k) => {
       const tag = k.postType ? ` [${k.postType}]` : "";

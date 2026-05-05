@@ -17,27 +17,42 @@ import { generateUtmCampaign } from "@/lib/utm-campaign";
 // Tunables. Keep at module top so the first operator to look at this file can
 // see every knob in one place.
 const MIN_VIEWS = 10_000;
-const PENDING_QUEUE_TARGET = 20; // keep the Idea queue topped up to ~20 repost suggestions
+const PENDING_QUEUE_TARGET = 50; // bumped 2026-05-05 — operator wants more ideas/day; old 20 was view-yield-limiting
 const POOL_PER_PLATFORM = 40; // top-N evergreens per platform pulled into the candidate pool
 const RECLASSIFY_BATCH = 5; // re-examine items that were classified false before their body was captured
 const KILL_REASON_HISTORY = 50; // negative exemplars; Phase A still slices first 10 inside buildSystemPrompt
 const ACCEPT_EXEMPLAR_HISTORY = 30; // positive exemplars: originals the operator has actually published as reposts
 
 // Per-platform queue caps. Sums to >= PENDING_QUEUE_TARGET so the queue can
-// always fill, but no single platform can dominate. Tuned around X having
-// the largest pool of evergreens; IG is the second priority because IG's
-// algorithm redistributes reposts to fresh viewers each time. The previous
-// single MAX_PER_PLATFORM = ceil(target * 0.5) = 10 let X fill half the
-// queue, defeating the diversity goal.
+// always fill, but no single platform can dominate. Bumped 2026-05-05 alongside
+// PENDING_QUEUE_TARGET — view yield by platform (avg repost views: YT 174K, IG
+// 91K, X 63K) drives the relative weighting; YouTube and IG are the high-yield
+// channels and were under-fed at caps of 3.
 const PLATFORM_QUEUE_CAPS: Record<string, number> = {
-  x: 6,
-  instagram: 6,
-  linkedin: 4,
-  threads: 3,
-  youtube: 3,
+  x: 12,
+  instagram: 15,
+  linkedin: 6,
+  threads: 5,
+  youtube: 10,
+  tiktok: 2,
 };
 const DEFAULT_PLATFORM_CAP = 2;
 const POOL_PLATFORMS = ["x", "instagram", "linkedin", "threads", "youtube"] as const;
+
+// Re-poolable when the last *published* repost on this original is older than
+// the platform's cooldown. Replaced the prior "any prior repost = blocked
+// forever" rule (2026-05-05) — that left only 31 of 325 evergreens eligible
+// because we'd already reposted the easy winners. Cooldown lengths reflect
+// audience-refresh dynamics: IG redistributes fastest (algorithm-driven), X
+// has the longest scroll-back risk.
+const REPOST_COOLDOWN_DAYS_BY_PLATFORM: Record<string, number> = {
+  instagram: 30,
+  youtube: 60,
+  linkedin: 60,
+  threads: 60,
+  x: 120,
+};
+const DEFAULT_REPOST_COOLDOWN_DAYS = 90;
 
 // Per-post-type classification quotas. Each bucket has its own age gate because
 // shelf-life differs dramatically by platform. X keeps the 365-day gate (same
@@ -253,17 +268,21 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
 
   if (pool.length === 0) return result;
 
-  // Pull repost history for this whole pool. Any prior repost — regardless of
-  // status or age — blocks a new auto-suggestion. The DB-level
-  // uniq_production_items_pillar_format used to be the back-stop for this; per
-  // operator request the dedup now lives here at generation time: "if we've
-  // already done it before, or it's already in production, don't generate."
-  // Killed rows still count (they permanently suppress; the operator already
-  // decided this isn't worth resurfacing).
+  // Per-original repost history split into three pools:
+  //   1. lastPublishedRepostByOriginal — newest published repost date,
+  //      consulted against REPOST_COOLDOWN_DAYS_BY_PLATFORM. Re-poolable when
+  //      cooldown has elapsed.
+  //   2. pendingIdeaOriginals — already in the queue (status=Idea); skip to
+  //      avoid double-stacking.
+  //   3. permanentBlockOriginals — Killed reposts. The operator already
+  //      decided this one isn't worth resurfacing; permanent suppression.
+  // Replaced the prior "any prior repost blocks forever" rule on 2026-05-05.
   const originalIds = pool.map((p) => p.id);
   const history = await db
     .select({
       repostedFromItemId: productionItems.repostedFromItemId,
+      status: productionItems.status,
+      publishedDate: productionItems.publishedDate,
     })
     .from(productionItems)
     .where(
@@ -272,9 +291,24 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
         inArray(productionItems.repostedFromItemId, originalIds)
       )
     );
-  const blockedOriginals = new Set<string>();
+  const lastPublishedRepostByOriginal = new Map<string, Date>();
+  const pendingIdeaOriginals = new Set<string>();
+  const permanentBlockOriginals = new Set<string>();
   for (const r of history) {
-    if (r.repostedFromItemId) blockedOriginals.add(r.repostedFromItemId);
+    if (!r.repostedFromItemId) continue;
+    if (r.status === "Killed") {
+      permanentBlockOriginals.add(r.repostedFromItemId);
+      continue;
+    }
+    if (r.status === "Idea") {
+      pendingIdeaOriginals.add(r.repostedFromItemId);
+      continue;
+    }
+    if (r.status === "Published" && r.publishedDate) {
+      const d = new Date(r.publishedDate);
+      const cur = lastPublishedRepostByOriginal.get(r.repostedFromItemId);
+      if (!cur || d > cur) lastPublishedRepostByOriginal.set(r.repostedFromItemId, d);
+    }
   }
 
   for (const original of pool) {
@@ -291,9 +325,26 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
     // Skip originals missing the new accountId/postType — they need backfilling
     // (see scripts/backfill-accounts.mjs) before they're repost-eligible.
     if (!original.accountId || !original.postType) continue;
-    if (blockedOriginals.has(original.id)) continue;
+    // Permanent suppression: operator killed a prior repost of this original.
+    if (permanentBlockOriginals.has(original.id)) continue;
+    // Already in the queue → don't double-stack on the same original.
+    if (pendingIdeaOriginals.has(original.id)) continue;
 
     const platformKey = original.accountPlatform ?? "unknown";
+
+    // Cooldown gate: re-poolable when the last published repost is older than
+    // the platform's cooldown. Originals that have never been published as a
+    // repost flow straight through.
+    const lastPub = lastPublishedRepostByOriginal.get(original.id);
+    if (lastPub) {
+      const cooldownDays =
+        REPOST_COOLDOWN_DAYS_BY_PLATFORM[platformKey] ??
+        DEFAULT_REPOST_COOLDOWN_DAYS;
+      const daysSince =
+        (Date.now() - lastPub.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSince < cooldownDays) continue;
+    }
+
     const platformCap = PLATFORM_QUEUE_CAPS[platformKey] ?? DEFAULT_PLATFORM_CAP;
     if ((perPlatformCount.get(platformKey) ?? 0) >= platformCap) continue;
 
@@ -307,11 +358,13 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
       continue;
     }
 
-    // Fit check: would this candidate draw a kill given recent operator
-    // behavior? Phase A's kill-reason injection only steers newly-classified
-    // items; this catches already-evergreen items the operator no longer wants
-    // resurfaced (the salary-content failure mode).
-    if (original.title) {
+    // Fit check is X-only. Operator kill rate over the last 90 days was 0% on
+    // YouTube/IG/LinkedIn/Threads/TikTok and 17% on X — running the LLM judge
+    // on platforms where everything gets accepted is the failure mode that
+    // produced "0 ideas" runs (2026-05-05). For non-X platforms the operator
+    // can still kill in triage; we trade a near-zero false-accept rate for a
+    // populated queue.
+    if (platformKey === "x" && original.title) {
       try {
         const fit = await judgeRepostFit({
           title: original.title,
@@ -369,7 +422,9 @@ export async function runEvergreenScan(): Promise<EvergreenScanResult> {
       )
       .returning({ id: productionItems.id });
 
-    blockedOriginals.add(original.id);
+    // The new row is status='Idea' — track it so we don't re-pick the same
+    // original later in this same run.
+    pendingIdeaOriginals.add(original.id);
     perPlatformCount.set(platformKey, (perPlatformCount.get(platformKey) ?? 0) + 1);
     result.suggestionsCreated++;
     result.suggestionsDetails.push({
