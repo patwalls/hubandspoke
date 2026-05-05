@@ -36,14 +36,18 @@ export function getDescriptLayoutPackName(): string | null {
 export function buildLayoutPackPrompt(args: {
   compositionId: string;
   layoutPackName: string;
+  hookText: string;
 }): string {
   const safeName = args.layoutPackName.replace(/"/g, '\\"');
+  const safeHook = args.hookText.replace(/"/g, '\\"');
   return [
     `Apply the layout pack named "${safeName}" to the composition with compositionId="${args.compositionId}". This pack handles vertical 9:16 framing, the hook-text track, and the captions slot.`,
     "",
+    `After applying the pack, set the hook text track at the top of the composition to: "${safeHook}". Replace whatever placeholder or default text the layout pack provides — do not append; replace.`,
+    "",
     `Inside the composition, mark filler words ("um", "uh", "like" when used as filler, "you know", "I mean", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words.`,
     "",
-    `Do not add transitions, effects, music, or title cards. Do not re-order anything. Do not rewrite the transcript. Do not change the time range.`,
+    `Do not add transitions, effects, music, or title cards beyond what the layout pack already includes. Do not re-order anything. Do not rewrite the transcript. Do not change the time range.`,
     "",
     `Reply with the compositionId in the form compositionId="${args.compositionId}".`,
   ].join("\n");

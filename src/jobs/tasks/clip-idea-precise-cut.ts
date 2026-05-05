@@ -239,7 +239,10 @@ async function pollUploadOnce(
     }
 
     const [derivative] = await db
-      .select({ descriptProjectId: productionItems.descriptProjectId })
+      .select({
+        descriptProjectId: productionItems.descriptProjectId,
+        hook: productionItems.hook,
+      })
       .from(productionItems)
       .where(eq(productionItems.id, payload.derivativeItemId))
       .limit(1);
@@ -250,9 +253,24 @@ async function pollUploadOnce(
       return;
     }
 
+    // Hook is set on production_items.hook by the service before enqueue.
+    // Falling back to the trigger's composition_name (same value) protects
+    // against a backfilled in-flight payload that never went through the
+    // service.
+    let hookText = derivative.hook ?? "";
+    if (!hookText) {
+      const [trig] = await db
+        .select({ name: repurposeTriggers.compositionName })
+        .from(repurposeTriggers)
+        .where(eq(repurposeTriggers.id, payload.triggerId))
+        .limit(1);
+      hookText = trig?.name ?? "";
+    }
+
     const prompt = buildLayoutPackPrompt({
       compositionId,
       layoutPackName,
+      hookText,
     });
     const agent = await invokeDescriptAgent({
       projectId: derivative.descriptProjectId,

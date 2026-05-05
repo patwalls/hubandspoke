@@ -370,16 +370,25 @@ function buildDescriptPrompt(args: {
   const step3 = safePack
     ? `3. Apply the layout pack named "${safePack}" to the new composition. This pack handles vertical 9:16 framing, the hook-text track, and the captions slot — use it instead of manually setting aspect ratio or adding caption tracks.`
     : "3. Set the new composition to a vertical 9:16 aspect ratio (1080×1920) sized for TikTok / Reels / Shorts. If the source is 16:9, center-crop or reframe so the speaker stays on screen.";
+  // Only meaningful when the layout pack is applied — without the pack
+  // there's no hook-text track to set. Inserted as step 4 in that case;
+  // otherwise step 4 is the filler-words instruction (renumbered).
+  const hookStep = safePack
+    ? `4. Set the hook text track at the top of the new composition to: "${safeHook}". Replace whatever placeholder or default text the layout pack provides — do not append; replace.`
+    : null;
+  const fillerStep = `${hookStep ? "5" : "4"}. Inside the new composition, mark filler words ("um", "uh", "like" when used as filler, "you know", "I mean", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words; they must stay in the transcript, just ignored.`;
+  const finalStepNum = hookStep ? 6 : 5;
   const step5 = safePack
-    ? "5. Do not add anything beyond what the layout pack already includes — no extra transitions, effects, music, or title cards. Do not re-order anything. Do not rewrite the transcript."
-    : "5. Do not add transitions, effects, music, captions, or title cards. Do not re-order anything. Do not rewrite the transcript.";
+    ? `${finalStepNum}. Do not add anything beyond what the layout pack already includes — no extra transitions, effects, music, or title cards. Do not re-order anything. Do not rewrite the transcript.`
+    : `${finalStepNum}. Do not add transitions, effects, music, captions, or title cards. Do not re-order anything. Do not rewrite the transcript.`;
   return [
     "You are producing a short-form vertical clip. Follow these instructions exactly and do not deviate.",
     "",
     `1. In the main composition, locate the transcript segment between ${start} and ${end} (duration ≈ ${duration}s). The time range is non-negotiable.`,
     `2. Create a NEW composition named "${safeHook}" containing only that segment. Do not include footage outside this range. The start must land on the first spoken word inside the range; the end must land on the last spoken word inside the range.`,
     step3,
-    "4. Inside the new composition, mark filler words (\"um\", \"uh\", \"like\" when used as filler, \"you know\", \"I mean\", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words; they must stay in the transcript, just ignored.",
+    ...(hookStep ? [hookStep] : []),
+    fillerStep,
     step5,
     "",
     "If any instruction conflicts with another, prioritize #1 (exact time range) and #2 (no footage outside the range). In the agent response, report what you did for each numbered item, including the new compositionId in the form compositionId=\"<uuid>\".",
