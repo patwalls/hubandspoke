@@ -996,7 +996,14 @@ export type ContentEventPayload =
   | { type: "killed"; from: string | null; reason: string | null }
   | { type: "accepted"; from: string | null; reason: string | null }
   | { type: "editor_change"; from: string | null; to: string | null }
-  | { type: "cross_post_dismissed"; reason: string | null };
+  | { type: "cross_post_dismissed"; reason: string | null }
+  | {
+      type: "cross_post_created";
+      sourceItemId: string;
+      sourceTitle: string | null;
+      targetAccountHandle: string | null;
+      targetPostType: string | null;
+    };
 
 export const contentEvents = pgTable(
   "content_events",

@@ -2706,6 +2706,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
       <ContentActivity
         contentId={item.id}
+        brand={brand}
         refreshKey={activityRefreshKey}
         statusPalette={statusPalette}
       />

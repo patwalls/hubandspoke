@@ -10,8 +10,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AccountAvatar } from "@/components/ui/account-avatar";
 import { AccountBadge } from "@/components/ui/account-badge";
+import { UserChip } from "./user-chip";
 import {
   PLATFORM_META,
   POST_TYPE_SHORT_LABEL,
@@ -83,14 +91,47 @@ export function CrossPostTriageDialog({
   const [submitting, setSubmitting] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [assigneeUserId, setAssigneeUserId] = useState<string>("");
+  const [assignableUsers, setAssignableUsers] = useState<
+    Array<{ id: string; name: string | null; email: string; avatarUrl: string | null }>
+  >([]);
 
   // Reset selection + collapse list when the candidate changes (or modal reopens).
   useEffect(() => {
     if (open) {
       setSelected(new Set());
       setShowAll(false);
+      setAssigneeUserId("");
     }
   }, [open, candidate.id]);
+
+  // Fetch assignable users on first open. List rarely changes during a
+  // triage session, so we keep the result mounted across candidate flips.
+  useEffect(() => {
+    if (!open || assignableUsers.length > 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/users/assignable");
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          users: Array<{
+            id: string;
+            name: string | null;
+            email: string;
+            avatarUrl: string | null;
+          }>;
+        };
+        if (!cancelled) setAssignableUsers(json.users ?? []);
+      } catch {
+        // Non-fatal — picker just won't have options; user sees an empty
+        // dropdown and the disabled CTA blocks submit.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, assignableUsers.length]);
 
   const targets: TargetPair[] = useMemo(() => {
     const existingByPair = new Map(
@@ -231,6 +272,7 @@ export function CrossPostTriageDialog({
                   targetAccountId: accountId,
                   targetPostType: postType,
                   assign: true,
+                  editorUserId: assigneeUserId,
                 }),
               }
             );
@@ -506,10 +548,46 @@ export function CrossPostTriageDialog({
           )}
         </section>
 
+        <section className="space-y-2">
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+            Assign to
+          </div>
+          <Select
+            value={assigneeUserId || ""}
+            onValueChange={(v) => setAssigneeUserId(v ?? "")}
+            disabled={busy}
+          >
+            <SelectTrigger
+              aria-label="Assignee"
+              className="h-10 [&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1"
+            >
+              {assigneeUserId ? (
+                (() => {
+                  const u = assignableUsers.find((x) => x.id === assigneeUserId);
+                  return u ? (
+                    <UserChip user={u} />
+                  ) : (
+                    <SelectValue placeholder="Select an editor" />
+                  );
+                })()
+              ) : (
+                <span className="text-muted-foreground">Select an editor…</span>
+              )}
+            </SelectTrigger>
+            <SelectContent>
+              {assignableUsers.map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  <UserChip user={u} />
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </section>
+
         <button
           type="button"
           onClick={() => void handleSubmit()}
-          disabled={busy || selected.size === 0}
+          disabled={busy || selected.size === 0 || !assigneeUserId}
           className={cn(
             "h-10 w-full rounded-md text-sm font-medium transition-colors",
             "bg-emerald-600 text-white hover:bg-emerald-700",
@@ -518,13 +596,17 @@ export function CrossPostTriageDialog({
           title={
             selected.size === 0
               ? "Pick at least one target"
-              : "Create assigned cross-post drafts and remove this from the queue"
+              : !assigneeUserId
+              ? "Pick an editor first"
+              : "Create cross-post drafts in Ready To Publish and remove this from the queue"
           }
         >
           {submitting
             ? "Cross-posting…"
             : selected.size === 0
             ? "Cross-post selected"
+            : !assigneeUserId
+            ? "Pick an editor to continue"
             : `Cross-post ${selected.size} selected`}
         </button>
 

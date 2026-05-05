@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,14 @@ interface CommentItem {
 type EventPayload =
   | { type: "status_change"; from: string | null; to: string | null }
   | { type: "killed"; from: string | null; reason: string | null }
-  | { type: "editor_change"; from: string | null; to: string | null };
+  | { type: "editor_change"; from: string | null; to: string | null }
+  | {
+      type: "cross_post_created";
+      sourceItemId: string;
+      sourceTitle: string | null;
+      targetAccountHandle: string | null;
+      targetPostType: string | null;
+    };
 
 interface EventItem {
   kind: "event";
@@ -45,6 +53,10 @@ type ActivityItem = CommentItem | EventItem;
 
 interface ContentActivityProps {
   contentId: string;
+  /** Brand slug — used to render the source-item back-link on
+   *  `cross_post_created` events. Routes are brand-scoped under
+   *  `/<brand>/content/<id>`. */
+  brand: string;
   // Bump to trigger a refetch (e.g. after the parent saves a status change).
   refreshKey?: number;
   /** Map<status name, color token> for the brand. Threaded from the parent
@@ -148,7 +160,7 @@ function CommentBody({ body }: { body: string }) {
   );
 }
 
-export function ContentActivity({ contentId, refreshKey = 0, statusPalette }: ContentActivityProps) {
+export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalette }: ContentActivityProps) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -311,7 +323,7 @@ export function ContentActivity({ contentId, refreshKey = 0, statusPalette }: Co
                 onRemove={remove}
               />
             ) : (
-              <EventRow key={item.id} event={item} statusPalette={statusPalette} />
+              <EventRow key={item.id} event={item} brand={brand} statusPalette={statusPalette} />
             ),
           )
         )}
@@ -448,9 +460,11 @@ function CommentRow({
 
 function EventRow({
   event,
+  brand,
   statusPalette,
 }: {
   event: EventItem;
+  brand: string;
   statusPalette?: ReadonlyMap<string, string>;
 }) {
   const actorName = userDisplayName(event.user, "Someone");
@@ -470,7 +484,7 @@ function EventRow({
         </div>
       )}
       <div className="min-w-0 flex-1 text-sm text-muted-foreground">
-        <EventBody actorName={actorName} event={event} statusPalette={statusPalette} />{" "}
+        <EventBody actorName={actorName} event={event} brand={brand} statusPalette={statusPalette} />{" "}
         <span className="text-xs">· {timeAgo(event.createdAt)}</span>
       </div>
     </div>
@@ -480,10 +494,12 @@ function EventRow({
 function EventBody({
   actorName,
   event,
+  brand,
   statusPalette,
 }: {
   actorName: string;
   event: EventItem;
+  brand: string;
   statusPalette?: ReadonlyMap<string, string>;
 }) {
   if (event.payload.type === "status_change") {
@@ -528,6 +544,38 @@ function EventBody({
         ) : (
           <em>none</em>
         )}
+      </span>
+    );
+  }
+  if (event.payload.type === "cross_post_created") {
+    const { sourceItemId, sourceTitle, targetAccountHandle, targetPostType } =
+      event.payload;
+    return (
+      <span>
+        <span className="font-medium text-foreground">{actorName}</span> created
+        this from the cross-post queue
+        {targetAccountHandle ? (
+          <>
+            {" "}for{" "}
+            <span className="font-medium text-foreground">
+              @{targetAccountHandle}
+            </span>
+            {targetPostType ? (
+              <span className="text-muted-foreground"> · {targetPostType}</span>
+            ) : null}
+          </>
+        ) : null}
+        {sourceTitle ? (
+          <>
+            . Source:{" "}
+            <Link
+              href={`/${brand}/content/${sourceItemId}`}
+              className="text-primary hover:underline"
+            >
+              {sourceTitle}
+            </Link>
+          </>
+        ) : null}
       </span>
     );
   }

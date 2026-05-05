@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
-import { accounts, productionItems } from "@/lib/db/schema";
+import { accounts, contentEvents, productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -29,10 +29,16 @@ interface RouteContext {
  * Status semantics:
  *   - default (no `assign`, no `editorUserId`) → status = "Idea". Used by
  *     the per-item Cross-post submenu on `/content/[id]`.
- *   - `assign: true` and/or `editorUserId` provided → status = "Assigned".
- *     `editorUserId` overrides `resolveAssignees`'s pick. Used by the v3
- *     cross-post queue modal so "Cross-post to @handle" creates an
- *     already-assigned item in a single round-trip.
+ *   - `assign: true` and/or `editorUserId` provided → status = "Ready To
+ *     Publish". `editorUserId` overrides `resolveAssignees`'s pick. Used
+ *     by the cross-post queue modal so "Cross-post to @handle" lands the
+ *     item ready for publish in a single round-trip — cross-posts have no
+ *     editorial work to do, so skipping the Assigned/Review/etc. middle
+ *     statuses is intentional.
+ *
+ * On status='Ready To Publish' inserts, also writes a `cross_post_created`
+ * activity event so the new row's content-detail page shows where it came
+ * from + a link back to the source.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireSession();
@@ -146,7 +152,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   });
 
   const editorUserId = editorUserIdOverride ?? assignees.editorUserId;
-  const status = assign || editorUserIdOverride ? "Assigned" : "Idea";
+  // Cross-posts skip the editorial pipeline (Assigned → Review → Ready)
+  // because there's no work to do — same content, different channel. Land
+  // queue-driven creates straight in "Ready To Publish". Every brand has
+  // this status seeded in brand_statuses, so the literal is safe.
+  const isQueueDriven = assign || !!editorUserIdOverride;
+  const status = isQueueDriven ? "Ready To Publish" : "Idea";
 
   const [created] = await db
     .insert(productionItems)
@@ -167,6 +178,26 @@ export async function POST(request: NextRequest, context: RouteContext) {
       editorUserId,
     })
     .returning({ id: productionItems.id });
+
+  // Activity trail on the new row so the editor lands on the detail page
+  // and immediately sees where this came from. Only stamped on queue-
+  // driven creates — drive-by cross-posts from the per-item submenu don't
+  // have a meaningful "came from" beyond the source pointer already on
+  // the row.
+  if (isQueueDriven) {
+    await db.insert(contentEvents).values({
+      contentItemId: created.id,
+      userId: guard.session.user.id,
+      eventType: "cross_post_created",
+      payload: {
+        type: "cross_post_created",
+        sourceItemId: source.id,
+        sourceTitle: source.title,
+        targetAccountHandle: target.handle,
+        targetPostType,
+      },
+    });
+  }
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }
