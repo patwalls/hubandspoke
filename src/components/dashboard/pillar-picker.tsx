@@ -5,6 +5,8 @@ import Link from "next/link";
 import { XIcon, LinkIcon, ChevronsUpDownIcon, ExternalLinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { AccountBadge } from "@/components/ui/account-badge";
+import { SourceBadge } from "@/components/ui/source-badge";
 import {
   Popover,
   PopoverContent,
@@ -26,6 +28,23 @@ export interface PillarOption {
   status?: string | null;
   publishedDate?: string | null;
   views?: number | null;
+  // Added 2026-05-05 so the picker can show post-style + channel — operators
+  // pasting a similar title across accounts couldn't tell which row was which.
+  sourceType?: string | null;
+  postType?: string | null;
+  account?: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName?: string | null;
+    avatarUrl?: string | null;
+  } | null;
+}
+
+const SOURCE_BADGE_TYPES = ["original", "repost", "cross_post", "clip"] as const;
+type RenderableSourceType = (typeof SOURCE_BADGE_TYPES)[number];
+function isRenderableSourceType(s: unknown): s is RenderableSourceType {
+  return typeof s === "string" && (SOURCE_BADGE_TYPES as readonly string[]).includes(s);
 }
 
 function formatCompact(n: number | null | undefined): string | null {
@@ -151,8 +170,23 @@ export function PillarPicker({
                         setOpen(false);
                       }}
                     >
-                      <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="flex flex-col gap-1 min-w-0 w-full">
                         <span className="truncate">{r.title || "(Untitled)"}</span>
+                        {(isRenderableSourceType(r.sourceType) || r.account) && (
+                          <span className="flex items-center gap-1.5 flex-wrap">
+                            {isRenderableSourceType(r.sourceType) && (
+                              <SourceBadge sourceType={r.sourceType} />
+                            )}
+                            {r.account && (
+                              <AccountBadge
+                                account={r.account}
+                                postType={r.postType}
+                                variant="compact"
+                                size={10}
+                              />
+                            )}
+                          </span>
+                        )}
                         <span className="text-[10px] text-muted-foreground">
                           {[
                             r.format,
