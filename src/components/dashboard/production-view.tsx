@@ -5,7 +5,11 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { statusClassFromToken } from "@/lib/badge-colors";
-import { ProductionPipelineTable } from "./production-pipeline-table";
+import {
+  ProductionPipelineTable,
+  type SortDir,
+  type SortKey,
+} from "./production-pipeline-table";
 import { SelectPill } from "./filter-pills";
 import { personDisplay } from "./user-chip";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
@@ -74,6 +78,36 @@ const SOURCES = [
   { value: "cross_post", label: "Cross-post" },
 ];
 
+// Encoded as `<key>:<dir>` so the SelectPill (string-typed) can drive the
+// lifted sort state for every status table at once. "default" = preserve
+// API order; the other options surface the most useful sorts up front.
+// Clicking a column header inside any table updates the same lifted
+// state, so the pill stays in sync.
+const SORT_OPTIONS = [
+  { value: "default", label: "Default" },
+  { value: "created:desc", label: "Created (newest)" },
+  { value: "created:asc", label: "Created (oldest)" },
+  { value: "views:desc", label: "Est. views (high → low)" },
+  { value: "views:asc", label: "Est. views (low → high)" },
+  { value: "editor:asc", label: "Editor (A → Z)" },
+];
+
+function decodeSort(value: string): {
+  key: SortKey | null;
+  dir: SortDir;
+} {
+  if (value === "default") return { key: null, dir: "asc" };
+  const [keyPart, dirPart] = value.split(":");
+  const key = keyPart as SortKey;
+  const dir: SortDir = dirPart === "asc" ? "asc" : "desc";
+  return { key, dir };
+}
+
+function encodeSort(key: SortKey | null, dir: SortDir): string {
+  if (!key) return "default";
+  return `${key}:${dir}`;
+}
+
 export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +120,21 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   const [selectedFormat, setSelectedFormat] = useState("all");
   const [selectedSource, setSelectedSource] = useState("all");
   const [selectedEditor, setSelectedEditor] = useState("all");
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const toggleSort = useCallback((key: SortKey) => {
+    setSortKey((prev) => {
+      if (prev === key) {
+        // Same key clicked again → flip direction.
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        return prev;
+      }
+      // New key → desc by default for numeric/date columns, asc for text.
+      setSortDir(key === "views" || key === "created" ? "desc" : "asc");
+      return key;
+    });
+  }, []);
 
   const fetchPipeline = useCallback(async () => {
     setLoading(true);
@@ -320,6 +369,16 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
           options={SOURCES}
           onChange={setSelectedSource}
         />
+        <SelectPill
+          label="Sort"
+          value={encodeSort(sortKey, sortDir)}
+          options={SORT_OPTIONS}
+          onChange={(value) => {
+            const { key, dir } = decodeSort(value);
+            setSortKey(key);
+            setSortDir(dir);
+          }}
+        />
       </div>
 
       {loading ? (
@@ -367,7 +426,13 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
                     {statusItems.length}
                   </span>
                 </div>
-                <ProductionPipelineTable items={statusItems} brand={brand} />
+                <ProductionPipelineTable
+                  items={statusItems}
+                  brand={brand}
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                />
               </section>
             );
           })}

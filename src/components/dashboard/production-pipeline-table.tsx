@@ -1,19 +1,51 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { SourceBadge } from "@/components/ui/source-badge";
 import type { ProductionItem } from "@/types";
 
+export type SortKey =
+  | "editor"
+  | "channel"
+  | "content"
+  | "format"
+  | "views"
+  | "created";
+export type SortDir = "asc" | "desc";
+
 interface ProductionPipelineTableProps {
   items: ProductionItem[];
   brand: string;
+  /** Global sort lifted from ProductionView so a single "Sort" pill +
+   *  any column header click drives every status table at once. Null
+   *  key means "preserve API-returned order". */
+  sortKey: SortKey | null;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
 }
 
-type SortKey = "editor" | "channel" | "content" | "format" | "views";
-type SortDir = "asc" | "desc";
+function formatRelativeTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "—";
+  const diff = Date.now() - t;
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
 
 function formatCompact(n: number | null | undefined): string {
   if (n == null) return "—";
@@ -161,19 +193,10 @@ function SortableHeader({
 export function ProductionPipelineTable({
   items,
   brand,
+  sortKey,
+  sortDir,
+  onSort,
 }: ProductionPipelineTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
-
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(key === "views" ? "desc" : "asc");
-    }
-  };
-
   const sortedItems = useMemo(() => {
     if (!sortKey) return items;
     const dir = sortDir === "asc" ? 1 : -1;
@@ -195,6 +218,8 @@ export function ProductionPipelineTable({
           return item.format?.toLowerCase() ?? null;
         case "views":
           return item.prediction?.prediction ?? null;
+        case "created":
+          return item.createdAt ? new Date(item.createdAt).getTime() : null;
       }
     };
     return [...items].sort((a, b) => {
@@ -228,6 +253,7 @@ export function ProductionPipelineTable({
             <col />
             <col className="w-[220px]" />
             <col className="w-[100px]" />
+            <col className="w-[90px]" />
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-accent/50">
@@ -236,7 +262,7 @@ export function ProductionPipelineTable({
                 sortKey="editor"
                 activeKey={sortKey}
                 direction={sortDir}
-                onSort={toggleSort}
+                onSort={onSort}
                 className="whitespace-nowrap"
               />
               <SortableHeader
@@ -244,31 +270,41 @@ export function ProductionPipelineTable({
                 sortKey="channel"
                 activeKey={sortKey}
                 direction={sortDir}
-                onSort={toggleSort}
+                onSort={onSort}
               />
               <SortableHeader
                 label="Content"
                 sortKey="content"
                 activeKey={sortKey}
                 direction={sortDir}
-                onSort={toggleSort}
+                onSort={onSort}
               />
               <SortableHeader
                 label="Format"
                 sortKey="format"
                 activeKey={sortKey}
                 direction={sortDir}
-                onSort={toggleSort}
+                onSort={onSort}
               />
               <SortableHeader
                 label="Est. Views"
                 sortKey="views"
                 activeKey={sortKey}
                 direction={sortDir}
-                onSort={toggleSort}
+                onSort={onSort}
                 align="right"
                 className="whitespace-nowrap"
                 title="Predicted views — based on past performance of similar content"
+              />
+              <SortableHeader
+                label="Created"
+                sortKey="created"
+                activeKey={sortKey}
+                direction={sortDir}
+                onSort={onSort}
+                align="right"
+                className="whitespace-nowrap"
+                title="When the production_item row was created"
               />
             </tr>
           </thead>
@@ -371,6 +407,16 @@ export function ProductionPipelineTable({
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
+                  </td>
+                  <td
+                    className="px-3 py-2 text-sm text-right tabular-nums text-muted-foreground"
+                    title={
+                      item.createdAt
+                        ? new Date(item.createdAt).toLocaleString()
+                        : undefined
+                    }
+                  >
+                    {formatRelativeTime(item.createdAt)}
                   </td>
                 </tr>
               );
