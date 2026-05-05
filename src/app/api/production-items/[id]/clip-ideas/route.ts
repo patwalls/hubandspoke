@@ -11,8 +11,7 @@ import {
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
-
-const PROMOTED_CLIP_FORMAT = "Repackage section with hook";
+import { PROMOTED_CLIP_FORMAT } from "@/lib/services/promote-clip-idea";
 
 const TRANSCRIPT_EXCERPT_MAX = 220;
 
@@ -103,7 +102,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .limit(1);
   const segments = transcript?.segments ?? [];
 
-  // Look up the canonical "Repackage section with hook" format for the
+  // Look up the canonical promotion format (PROMOTED_CLIP_FORMAT) for the
   // source's brand and its attached Descript pack. The clip-triage dialog
   // uses this to gate the four "Create in Descript" buttons (and to show
   // a header pointing the user at the format edit page when no pack is

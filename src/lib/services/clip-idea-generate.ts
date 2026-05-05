@@ -12,16 +12,19 @@ import {
 } from "@/lib/clip-idea-agent";
 import { topShortFormPerformers } from "@/lib/db/queries";
 import { findAccountForBrandPlatform } from "@/lib/db/accounts";
+import { PROMOTED_CLIP_FORMAT } from "@/lib/services/promote-clip-idea";
 import { resolveAssignees } from "@/lib/services/assignees";
 
 const SHORT_FORM_PLATFORMS = ["YouTube Shorts", "Instagram Reel", "TikTok"];
-const PROMOTED_CLIP_FORMAT = "Repackage section with hook";
 const AUTO_GENERATE_POST_TYPES = new Set(["youtube_long"]);
 // V5 prompt: the brand's dominant clip format becomes the BLUEPRINT pool the
 // agent pattern-matches against. Hard-coded to Starter Story's format for
 // now — 163 of 201 SS short-form clips ride this format. TODO once MFM/MATG
 // have enough Repackage-format data: lift to brand_settings.preferredClipFormat.
-const PREFERRED_CLIP_FORMAT_FOR_BLUEPRINT = "Reel: Repackage Section w/ Hook";
+// Same string as PROMOTED_CLIP_FORMAT now that the canonical name is
+// "Reel: Repackage Section w/ Hook" — kept as a separate symbol because the
+// blueprint role is conceptually distinct from the stamp-on-creation role.
+const PREFERRED_CLIP_FORMAT_FOR_BLUEPRINT = PROMOTED_CLIP_FORMAT;
 
 function isShortForm(platform: string[] | null): boolean {
   if (!platform) return false;

@@ -111,7 +111,16 @@ export class FormatMissingDescriptPackError extends Error {
   }
 }
 
-const PROMOTED_CLIP_FORMAT = "Repackage section with hook";
+/**
+ * Canonical short-form format every clip-idea gets promoted into. Exported
+ * so the clip-idea generator and the clip-ideas API route stamp the same
+ * string — three copies of this constant in 2026-05-05 caused 4,400+
+ * production_items to point at the wrong format ("Repackage section with
+ * hook" — a brand-default Pillar with no Descript pack attached). The
+ * 0063 backfill normalized them; this single source of truth prevents the
+ * drift from recurring.
+ */
+export const PROMOTED_CLIP_FORMAT = "Reel: Repackage Section w/ Hook";
 
 function formatTimestamp(sec: number): string {
   const total = Math.max(0, Math.floor(sec));
@@ -392,17 +401,10 @@ async function ensurePromotedClipFormat(brand: string): Promise<string> {
     .limit(1);
   if (existing) return existing.id;
 
-  // formats.name is globally unique (not scoped by brand). If the row exists
-  // under a different brand, adopt it by updating brand — a single format
-  // row per name is the schema's invariant, and the assign flow stamps the
-  // same name regardless of brand anyway.
-  const [byName] = await db
-    .select({ id: formats.id })
-    .from(formats)
-    .where(eq(formats.name, PROMOTED_CLIP_FORMAT))
-    .limit(1);
-  if (byName) return byName.id;
-
+  // No cross-brand fallback. The schema enforces uniqueness per
+  // `(brand, lower(name))`, not globally — a 2026-05-05 fix removed the
+  // legacy `byName` lookup that returned the starter-story row for
+  // non-starter brands and silently mis-attributed clip promotions.
   const [created] = await db
     .insert(formats)
     .values({ name: PROMOTED_CLIP_FORMAT, brand })
