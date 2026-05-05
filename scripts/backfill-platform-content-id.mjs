@@ -207,41 +207,43 @@ try {
       "\nDry run — pass --apply to write. Sample derived ids:",
       updates.slice(0, 5)
     );
-    process.exit(0);
-  }
-
-  let applied = 0;
-  let runtimeConflicts = 0;
-  for (const u of updates) {
-    try {
-      await sql`
-        UPDATE production_items
-        SET platform_content_id = ${u.contentId}
-        WHERE id = ${u.id}
-          AND platform_content_id IS NULL
-      `;
-      applied++;
-    } catch (err) {
-      // A conflict on (account_id, platform_content_id) means two rows in the
-      // same account share a derived id — surface it but keep going. Should
-      // be rare since we pre-detect via ownersByContentId; this catches any
-      // race that slipped past the pre-flight check.
-      if (err?.code === "23505") {
-        runtimeConflicts++;
-        console.warn(
-          `CONFLICT item=${u.id} derived=${u.contentId}: ${err.message}`
-        );
-      } else {
-        throw err;
+    // Falls through to the finally so sql.end() runs and stdout drains.
+    // Avoid process.exit(0) here — under `heroku run` the dyno's stdout
+    // is a pipe and exit can race with the drain, swallowing the summary.
+  } else {
+    let applied = 0;
+    let runtimeConflicts = 0;
+    for (const u of updates) {
+      try {
+        await sql`
+          UPDATE production_items
+          SET platform_content_id = ${u.contentId}
+          WHERE id = ${u.id}
+            AND platform_content_id IS NULL
+        `;
+        applied++;
+      } catch (err) {
+        // A conflict on (account_id, platform_content_id) means two rows in
+        // the same account share a derived id — surface it but keep going.
+        // Should be rare since we pre-detect via ownersByContentId; this
+        // catches any race that slipped past the pre-flight check.
+        if (err?.code === "23505") {
+          runtimeConflicts++;
+          console.warn(
+            `CONFLICT item=${u.id} derived=${u.contentId}: ${err.message}`
+          );
+        } else {
+          throw err;
+        }
       }
     }
-  }
 
-  console.log(`\nApplied: ${applied}`);
-  if (runtimeConflicts > 0) {
-    console.log(
-      `Skipped ${runtimeConflicts} rows where another item in the same account already owned the derived id — inspect and reconcile manually.`
-    );
+    console.log(`\nApplied: ${applied}`);
+    if (runtimeConflicts > 0) {
+      console.log(
+        `Skipped ${runtimeConflicts} rows where another item in the same account already owned the derived id — inspect and reconcile manually.`
+      );
+    }
   }
 } catch (err) {
   console.error("backfill failed:", err);
