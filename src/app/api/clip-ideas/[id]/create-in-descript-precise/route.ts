@@ -11,17 +11,19 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-export async function POST(_request: NextRequest, context: RouteContext) {
+export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireSession();
   if (guard.response) return guard.response;
 
   const { id } = await context.params;
   const actorUserId = guard.session.user.id as string;
+  const applyLayoutPack = request.nextUrl.searchParams.get("ai") === "1";
 
   try {
     const result = await createClipIdeaInDescriptPreciseCut({
       clipIdeaId: id,
       actorUserId,
+      applyLayoutPack,
     });
     return NextResponse.json({
       ok: true,

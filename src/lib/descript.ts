@@ -7,6 +7,48 @@ export const DEFAULT_CLIP_PROMPT = [
   "Aim for 30–60 seconds.",
 ].join(" ");
 
+const DEFAULT_LAYOUT_PACK_NAME = "ReelsLayout";
+
+/**
+ * Name of the Descript layout pack the Underlord agent should apply to new
+ * clip compositions (handles 9:16 framing, hook-text track, captions slot).
+ *
+ * Defaults to "ReelsLayout" — created manually in the team's Descript
+ * workspace and verified against the API on 2026-05-05. Override via
+ * `DESCRIPT_LAYOUT_PACK_NAME` env var; explicit empty string disables the
+ * feature so the prompt falls back to the manual "9:16 aspect ratio"
+ * instruction.
+ */
+export function getDescriptLayoutPackName(): string | null {
+  const v = process.env.DESCRIPT_LAYOUT_PACK_NAME;
+  if (v === undefined) return DEFAULT_LAYOUT_PACK_NAME;
+  const trimmed = v.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Build a layout-pack-only Underlord prompt for re-applying a layout pack to
+ * a composition that already exists (no new composition created). Used by
+ * the precise-cut path: after ffmpeg trims locally and the trimmed bytes
+ * import into Descript, this prompt asks Underlord to apply the layout pack
+ * and ignore filler words on the just-imported composition.
+ */
+export function buildLayoutPackPrompt(args: {
+  compositionId: string;
+  layoutPackName: string;
+}): string {
+  const safeName = args.layoutPackName.replace(/"/g, '\\"');
+  return [
+    `Apply the layout pack named "${safeName}" to the composition with compositionId="${args.compositionId}". This pack handles vertical 9:16 framing, the hook-text track, and the captions slot.`,
+    "",
+    `Inside the composition, mark filler words ("um", "uh", "like" when used as filler, "you know", "I mean", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words.`,
+    "",
+    `Do not add transitions, effects, music, or title cards. Do not re-order anything. Do not rewrite the transcript. Do not change the time range.`,
+    "",
+    `Reply with the compositionId in the form compositionId="${args.compositionId}".`,
+  ].join("\n");
+}
+
 function authHeader(): string {
   const token = process.env.DESCRIPT_API_TOKEN;
   if (!token) throw new Error("DESCRIPT_API_TOKEN not set");

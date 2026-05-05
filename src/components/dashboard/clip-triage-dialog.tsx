@@ -178,7 +178,7 @@ export function ClipTriageDialog({
   );
 
   const runCreateInDescript = useCallback(
-    async (path: "agent" | "precise" | "full") => {
+    async (path: "agent" | "precise" | "precise-ai" | "full") => {
       if (!idea) return;
       setSaving(true);
       setError(null);
@@ -188,7 +188,9 @@ export function ClipTriageDialog({
             ? `/api/clip-ideas/${idea.id}/create-in-descript`
             : path === "precise"
               ? `/api/clip-ideas/${idea.id}/create-in-descript-precise`
-              : `/api/clip-ideas/${idea.id}/create-in-descript-full`;
+              : path === "precise-ai"
+                ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?ai=1`
+                : `/api/clip-ideas/${idea.id}/create-in-descript-full`;
         const res = await fetch(url, { method: "POST" });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -199,20 +201,24 @@ export function ClipTriageDialog({
         const brandSlug: string = json?.sourceBrand ?? brand;
         const toastTitle =
           path === "agent"
-            ? "Cutting clip in Descript (agent)…"
+            ? "Cutting clip in Descript (Underlord)…"
             : path === "precise"
               ? "Trimming clip locally and uploading to Descript…"
-              : json?.mode === "cold"
-                ? "Uploading the full pillar to Descript…"
-                : "Duplicating the pillar composition in Descript…";
+              : path === "precise-ai"
+                ? "Trimming locally, then applying ReelsLayout via Underlord…"
+                : json?.mode === "cold"
+                  ? "Uploading the full pillar to Descript…"
+                  : "Duplicating the pillar composition in Descript…";
         const toastDesc =
           path === "agent"
             ? "The new composition will appear on this item shortly."
             : path === "precise"
               ? "The new Descript project will appear on this item when the upload finishes."
-              : json?.mode === "cold"
-                ? "First clip from this pillar — uploading once. Future clips will be instant."
-                : "The new composition will appear on this item shortly.";
+              : path === "precise-ai"
+                ? "Two-step: ffmpeg trim → Descript import → Underlord layout pack. The new composition will appear shortly."
+                : json?.mode === "cold"
+                  ? "First clip from this pillar — uploading once. Future clips will be instant."
+                  : "The new composition will appear on this item shortly.";
         toast.success(toastTitle, {
           duration: 6000,
           description: toastDesc,
@@ -361,25 +367,12 @@ export function ClipTriageDialog({
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
-                          Full video in Descript
+                          Full video — no AI
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
                           Reuses the pillar&apos;s Descript project (uploads
                           once) and duplicates the composition. Editor trims
-                          manually — no LLM cut.
-                        </span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => void runCreateInDescript("agent")}
-                        className="flex flex-col items-start gap-0.5 py-2"
-                      >
-                        <span className="font-medium">
-                          With AI (Underlord agent)
-                        </span>
-                        <span className="text-[11px] text-muted-foreground leading-snug">
-                          Fast. New composition in the source project. Vertical
-                          9:16 + strike-through filler words requested via
-                          prompt.
+                          manually — no Underlord call.
                         </span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
@@ -387,12 +380,40 @@ export function ClipTriageDialog({
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
-                          Precise cut (exact timestamps)
+                          Precise cut — no AI
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
-                          Trims the source video to the exact range with
-                          ffmpeg, then uploads a new Descript project. Slower
-                          but frame-accurate.
+                          ffmpeg-trims the source to the exact range and
+                          uploads a new Descript project. Frame-accurate, no
+                          Underlord call.
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => void runCreateInDescript("agent")}
+                        className="flex flex-col items-start gap-0.5 py-2"
+                      >
+                        <span className="font-medium">
+                          Full video + Underlord
+                        </span>
+                        <span className="text-[11px] text-muted-foreground leading-snug">
+                          Fast. New composition in the source project.
+                          Underlord cuts by transcript, applies the
+                          ReelsLayout pack (9:16 + hook track + captions), and
+                          ignores filler words.
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => void runCreateInDescript("precise-ai")}
+                        className="flex flex-col items-start gap-0.5 py-2"
+                      >
+                        <span className="font-medium">
+                          Precise cut + Underlord
+                        </span>
+                        <span className="text-[11px] text-muted-foreground leading-snug">
+                          ffmpeg-trims to the exact range, uploads a new
+                          Descript project, then Underlord applies the
+                          ReelsLayout pack and ignores fillers. Two Descript
+                          jobs.
                         </span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>

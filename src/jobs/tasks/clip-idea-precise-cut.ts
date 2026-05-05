@@ -13,8 +13,11 @@ import {
   repurposeTriggers,
 } from "@/lib/db/schema";
 import {
+  buildLayoutPackPrompt,
   createDescriptProjectWithUpload,
   fetchDescriptJob,
+  getDescriptLayoutPackName,
+  invokeDescriptAgent,
 } from "@/lib/descript";
 import { getPresignedGetUrl } from "@/lib/s3";
 import {
@@ -29,6 +32,18 @@ export interface ClipIdeaPreciseCutPayload {
   derivativeItemId: string;
   /** Set once the upload has been handed to Descript; subsequent runs only poll. */
   uploadJobId?: string;
+  /** Set after the import finishes when the user opted into the AI layout
+   *  pack and the Underlord agent has been invoked to apply the configured
+   *  pack to the just-imported composition. Subsequent runs poll this job
+   *  until it stops (status updates only — composition_id was already
+   *  persisted from the import phase). */
+  layoutJobId?: string;
+  /** When true, after the import finishes invoke the Underlord agent to
+   *  apply `DESCRIPT_LAYOUT_PACK_NAME` to the composition (ignores fillers
+   *  too). Set per-promotion by the route based on the user's button choice
+   *  ("Precise cut + Underlord" vs "Precise cut — no AI"). Undefined/false
+   *  on existing in-flight payloads keeps them on the no-AI path. */
+  applyLayoutPack?: boolean;
   /** Epoch ms. Set on the first poll; carried forward across re-enqueues. */
   deadlineAt?: number;
 }
@@ -37,15 +52,21 @@ const POLL_INTERVAL_MS = 5000;
 const DEADLINE_MS = 30 * 60 * 1000;
 
 /**
- * Precise-cut flow, split across two phases so each task invocation stays
- * short enough to survive a deploy:
+ * Precise-cut flow, split across phases so each task invocation stays short
+ * enough to survive a deploy:
  *
- *   1. First run (no uploadJobId in payload): download from S3, ffmpeg-trim,
- *      create a Descript project + signed upload URL, PUT the bytes, then
- *      enqueue a continuation carrying the Descript upload jobId.
- *   2. Continuation runs: one poll per invocation. If the import job is
- *      stopped, persist descriptCompositionId on the trigger + derivative.
- *      Otherwise self-re-enqueue with a 5s delay.
+ *   1. First run (no uploadJobId, no layoutJobId): download from S3,
+ *      ffmpeg-trim, create a Descript project + signed upload URL, PUT the
+ *      bytes, then enqueue a continuation carrying the Descript upload jobId.
+ *   2. Upload-poll phase (uploadJobId set): one poll per invocation. When
+ *      the import job stops, persist descriptCompositionId on the trigger +
+ *      derivative. If `DESCRIPT_LAYOUT_PACK_NAME` is enabled, kick off an
+ *      Underlord agent call to apply the layout pack to the just-imported
+ *      composition and re-enqueue with `layoutJobId`. Otherwise we're done.
+ *   3. Layout-poll phase (layoutJobId set): one poll per invocation. The
+ *      Underlord call mutates the composition in place — composition_id
+ *      doesn't change, so this phase is purely status-watching for retries
+ *      and observability. Logs and exits when the agent job stops.
  *
  * Idempotency: the derivative production_item is uniq-constrained on
  * source_clip_idea_id, so a retry after a partial failure re-finds the same
@@ -58,6 +79,10 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
   const { clipIdeaId, triggerId, derivativeItemId } = payload;
   const deadlineAt = payload.deadlineAt ?? Date.now() + DEADLINE_MS;
 
+  if (payload.layoutJobId) {
+    await pollLayoutOnce(helpers, payload, deadlineAt);
+    return;
+  }
   if (payload.uploadJobId) {
     await pollUploadOnce(helpers, payload, deadlineAt);
     return;
@@ -179,12 +204,90 @@ async function pollUploadOnce(
     helpers.logger.info(
       `precise-cut ok clip=${payload.clipIdeaId} composition=${compositionId ?? "none"}`,
     );
+
+    // Layout-pack phase: ask Underlord to apply the configured layout pack
+    // to the just-imported composition. Requires both the per-promotion
+    // opt-in flag (set by the "Precise cut + Underlord" button) AND a
+    // configured pack name in env. Skipped silently when either is missing,
+    // or when we somehow lost the compositionId. The project_id was stamped
+    // on the derivative production_item in phase 1.
+    const layoutPackName = getDescriptLayoutPackName();
+    if (!payload.applyLayoutPack || !compositionId || !layoutPackName) {
+      return;
+    }
+
+    const [derivative] = await db
+      .select({ descriptProjectId: productionItems.descriptProjectId })
+      .from(productionItems)
+      .where(eq(productionItems.id, payload.derivativeItemId))
+      .limit(1);
+    if (!derivative?.descriptProjectId) {
+      helpers.logger.info(
+        `precise-cut layout-skip clip=${payload.clipIdeaId} reason=no_project_id`,
+      );
+      return;
+    }
+
+    const prompt = buildLayoutPackPrompt({
+      compositionId,
+      layoutPackName,
+    });
+    const agent = await invokeDescriptAgent({
+      projectId: derivative.descriptProjectId,
+      prompt,
+    });
+    await db
+      .update(repurposeTriggers)
+      .set({ descriptPrompt: prompt })
+      .where(eq(repurposeTriggers.id, payload.triggerId));
+    helpers.logger.info(
+      `precise-cut layout-start clip=${payload.clipIdeaId} pack="${layoutPackName}" job=${agent.jobId}`,
+    );
+
+    await helpers.addJob(
+      "clip-idea-precise-cut",
+      {
+        ...payload,
+        layoutJobId: agent.jobId,
+        deadlineAt: Date.now() + DEADLINE_MS,
+      },
+      { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+    );
     return;
   }
 
   if (Date.now() >= deadlineAt) {
     throw new Error(
       `Descript import ${uploadJobId} did not stop before deadline`,
+    );
+  }
+
+  await helpers.addJob(
+    "clip-idea-precise-cut",
+    { ...payload, deadlineAt },
+    { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+  );
+}
+
+async function pollLayoutOnce(
+  helpers: Parameters<Task>[1],
+  payload: ClipIdeaPreciseCutPayload,
+  deadlineAt: number,
+): Promise<void> {
+  const layoutJobId = payload.layoutJobId!;
+  const job = await fetchDescriptJob(layoutJobId);
+  if (job.job_state === "stopped") {
+    // Layout-apply mutates the composition in place. compositionId is
+    // unchanged from the import phase, so nothing to persist — just log.
+    helpers.logger.info(
+      `precise-cut layout-ok clip=${payload.clipIdeaId} job=${layoutJobId}`,
+    );
+    return;
+  }
+
+  if (Date.now() >= deadlineAt) {
+    throw new Error(
+      `Descript layout-apply ${layoutJobId} did not stop before deadline`,
     );
   }
 

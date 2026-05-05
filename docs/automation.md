@@ -530,6 +530,20 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Where:** `src/lib/services/promote-clip-idea.ts` — `assignClipIdea`, `createClipIdeaInDescript`, `createClipIdeaInDescriptFullVideo`
 - **What:** every promotion path sets `hookSource='clip_idea'`, `hookExtractor='promote-clip-idea:v1'`, `hookExtractedAt=now()` alongside `hook`. Required so the dispatcher's `clip_idea`/`manual` protection actually fires — previously these fields were left null and the dispatcher reprocessed the item, frequently overwriting the clip idea's hook with the IG caption
 
+### Underlord agent prompt — layout pack injection
+- **Where:** `src/lib/services/promote-clip-idea.ts` (`buildDescriptPrompt`) for the agent path; `src/jobs/tasks/clip-idea-precise-cut.ts` + `src/lib/descript.ts` (`buildLayoutPackPrompt`) for the precise-cut + Underlord path.
+- **What:** when `DESCRIPT_LAYOUT_PACK_NAME` resolves to a non-empty value (default `"ReelsLayout"`; helper `getDescriptLayoutPackName()`), step 3 of the agent prompt switches from the manual "9:16 aspect ratio" instruction to "Apply the layout pack named X". The pack handles vertical framing, hook-text track, and captions slot in one step — verified end-to-end via `scripts/test-descript-layout-pack.mjs` against project `30588650-79c4-463f-ba72-664f27a357b5` on 2026-05-05 (compositionId `4a27a5eb-…`, ai_credits_used=49). Set `DESCRIPT_LAYOUT_PACK_NAME=""` to disable and fall back to manual reframing.
+- **Four promotion options surfaced in the clip-triage dropdown** (`src/components/dashboard/clip-triage-dialog.tsx`):
+
+  | Button | Service entrypoint | Underlord called? |
+  |---|---|---|
+  | Full video — no AI | `createClipIdeaInDescriptFullVideo` | no — pillar composition duplicated, manual trim |
+  | Precise cut — no AI | `createClipIdeaInDescriptPreciseCut({ applyLayoutPack: false })` | no — ffmpeg trim + import only |
+  | Full video + Underlord | `createClipIdeaInDescript` (agent path) | yes — agent cuts by transcript + applies pack in one call |
+  | Precise cut + Underlord | `createClipIdeaInDescriptPreciseCut({ applyLayoutPack: true })` | yes — ffmpeg trim + import, then Underlord applies the pack to the imported composition |
+
+- **Per-promotion opt-in:** the precise-cut layout-apply phase requires both a configured `DESCRIPT_LAYOUT_PACK_NAME` AND a per-promotion `applyLayoutPack: true` flag. The flag is plumbed via `?ai=1` on `POST /api/clip-ideas/[id]/create-in-descript-precise` and through the task payload (`ClipIdeaPreciseCutPayload.applyLayoutPack`). The agent-path fall-through (when a clip-idea source has `mediaS3Key` but no Descript project yet) inherits `applyLayoutPack: true` since the user clicked the AI button.
+
 ### `youtube-download` — yt-dlp → S3 archive
 - **Trigger:** enqueued by `youtube-download-sweep`; manual `POST /api/cron/tick?name=youtube-download-sweep`
 - **Files:** `src/jobs/tasks/youtube-download.ts`
@@ -606,18 +620,20 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - Polls every 5s, 10-min deadline; short-invocation re-enqueue
   - `importMode=true` switches the result parse from `agent_response` (regex) to `created_compositions[0].id` (used by the cold full-video upload path)
 
-### `clip-idea-precise-cut` — ffmpeg trim + Descript import
-- **Trigger:** enqueued by `promote-clip-idea` service (precise-cut path; user clicks "Cut precisely" in clip-ideas panel)
+### `clip-idea-precise-cut` — ffmpeg trim + Descript import + (optional) Underlord layout-pack apply
+- **Trigger:** enqueued by `promote-clip-idea` service from two button paths in the clip-triage dialog: "Precise cut — no AI" (`applyLayoutPack=false`) and "Precise cut + Underlord" (`applyLayoutPack=true`). Same task, same payload shape, different terminal behavior.
 - **Files:** `src/jobs/tasks/clip-idea-precise-cut.ts`
-- **Inputs:** `{ clipIdeaId, triggerId, derivativeItemId, uploadJobId?, deadlineAt? }`
+- **Inputs:** `{ clipIdeaId, triggerId, derivativeItemId, uploadJobId?, layoutJobId?, applyLayoutPack?, deadlineAt? }`
 - **Outputs:**
-  - Phase 1 (no `uploadJobId`): download from S3, ffmpeg-trim to [startSec, endSec], upload to Descript, save `descriptJobId` + `descriptProjectUrl` to `repurposeTriggers`; save `descriptProjectId` + URL to `productionItems`
-  - Phase 2+ (`uploadJobId` set): poll import, save composition ID to both tables
+  - Phase 1 (no `uploadJobId`, no `layoutJobId`): download from S3, ffmpeg-trim to [startSec, endSec], upload to Descript, save `descriptJobId` + `descriptProjectUrl` to `repurposeTriggers`; save `descriptProjectId` + URL to `productionItems`
+  - Phase 2 (`uploadJobId` set): poll import, save composition ID to both tables. When `applyLayoutPack=true` AND `DESCRIPT_LAYOUT_PACK_NAME` is enabled, invoke Underlord against the new project with `buildLayoutPackPrompt()` to apply the pack + mark fillers, save the prompt to `repurposeTriggers.descriptPrompt`, and re-enqueue with `layoutJobId`. Otherwise the task ends here.
+  - Phase 3 (`layoutJobId` set): poll the layout-apply Underlord job. Composition ID is unchanged (Underlord mutates in place), so this phase is purely status-watching — exits when the job stops.
 - **Downstream:** none
 - **Rules:**
   - ffmpeg tries stream-copy first, falls back to H.264 re-encode on failure
-  - 30-min deadline per import job
+  - 30-min deadline per Descript job (import OR layout-apply); each phase carries its own `deadlineAt`
   - Short-invocation re-enqueue
+  - Layout-apply phase is opt-in per-promotion via `applyLayoutPack` (route reads `?ai=1`) AND requires `DESCRIPT_LAYOUT_PACK_NAME` to resolve to a non-empty value. Either gate set false → no Underlord call.
 
 ### `notification-send` — email send
 - **Trigger:** enqueued by `enqueueNotification()` after a `notifications` row is inserted (comments, mentions, assignments)

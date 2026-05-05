@@ -12,6 +12,7 @@ import {
 import {
   createDescriptProjectFromUrl,
   duplicateDescriptComposition,
+  getDescriptLayoutPackName,
   invokeDescriptAgent,
 } from "@/lib/descript";
 import { getPresignedGetUrl } from "@/lib/s3";
@@ -364,16 +365,24 @@ function buildDescriptPrompt(args: {
   const start = formatTimestamp(args.startSec);
   const end = formatTimestamp(args.endSec);
   const safeHook = args.hook.replace(/"/g, '\\"');
+  const layoutPackName = getDescriptLayoutPackName();
+  const safePack = layoutPackName?.replace(/"/g, '\\"') ?? null;
+  const step3 = safePack
+    ? `3. Apply the layout pack named "${safePack}" to the new composition. This pack handles vertical 9:16 framing, the hook-text track, and the captions slot — use it instead of manually setting aspect ratio or adding caption tracks.`
+    : "3. Set the new composition to a vertical 9:16 aspect ratio (1080×1920) sized for TikTok / Reels / Shorts. If the source is 16:9, center-crop or reframe so the speaker stays on screen.";
+  const step5 = safePack
+    ? "5. Do not add anything beyond what the layout pack already includes — no extra transitions, effects, music, or title cards. Do not re-order anything. Do not rewrite the transcript."
+    : "5. Do not add transitions, effects, music, captions, or title cards. Do not re-order anything. Do not rewrite the transcript.";
   return [
     "You are producing a short-form vertical clip. Follow these instructions exactly and do not deviate.",
     "",
     `1. In the main composition, locate the transcript segment between ${start} and ${end} (duration ≈ ${duration}s). The time range is non-negotiable.`,
     `2. Create a NEW composition named "${safeHook}" containing only that segment. Do not include footage outside this range. The start must land on the first spoken word inside the range; the end must land on the last spoken word inside the range.`,
-    "3. Set the new composition to a vertical 9:16 aspect ratio (1080×1920) sized for TikTok / Reels / Shorts. If the source is 16:9, center-crop or reframe so the speaker stays on screen.",
+    step3,
     "4. Inside the new composition, mark filler words (\"um\", \"uh\", \"like\" when used as filler, \"you know\", \"I mean\", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words; they must stay in the transcript, just ignored.",
-    "5. Do not add transitions, effects, music, captions, or title cards. Do not re-order anything. Do not rewrite the transcript.",
+    step5,
     "",
-    "If any instruction conflicts with another, prioritize #1 (exact time range) and #2 (no footage outside the range). In the agent response, report what you did for each numbered item.",
+    "If any instruction conflicts with another, prioritize #1 (exact time range) and #2 (no footage outside the range). In the agent response, report what you did for each numbered item, including the new compositionId in the form compositionId=\"<uuid>\".",
   ].join("\n");
 }
 
@@ -401,7 +410,11 @@ export async function createClipIdeaInDescript(args: {
   const row = await loadAndGuardClipIdea(args.clipIdeaId);
   if (!row.descriptProjectId) {
     if (row.mediaS3Key) {
-      return createClipIdeaInDescriptPreciseCut(args);
+      // Fall through to precise-cut, but inherit the AI intent: the user
+      // clicked the agent button (which always applies the layout pack), so
+      // when we can't run the agent path we still want the pack applied to
+      // the imported composition.
+      return createClipIdeaInDescriptPreciseCut({ ...args, applyLayoutPack: true });
     }
     throw new ClipIdeaSourceMissingDescriptProjectError();
   }
@@ -512,6 +525,11 @@ export type CreateClipIdeaInDescriptPreciseCutResult = AssignClipIdeaResult;
 export async function createClipIdeaInDescriptPreciseCut(args: {
   clipIdeaId: string;
   actorUserId: string;
+  /** When true, the worker invokes Underlord post-import to apply the
+   *  configured layout pack to the imported composition. Set by the
+   *  "Precise cut + Underlord" button (or by the agent-path fall-through
+   *  when a Descript project doesn't exist yet). */
+  applyLayoutPack: boolean;
 }): Promise<CreateClipIdeaInDescriptPreciseCutResult> {
   const row = await loadAndGuardClipIdea(args.clipIdeaId);
   if (!row.mediaS3Key) {
@@ -551,6 +569,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     clipIdeaId: args.clipIdeaId,
     triggerId: trigger.id,
     derivativeItemId: productionItemId,
+    applyLayoutPack: args.applyLayoutPack,
   });
 
   await db
