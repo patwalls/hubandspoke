@@ -91,7 +91,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     const sanitized = sanitizeCommentHtml(raw);
     const plain = htmlToPlainText(sanitized);
-    if (!plain) {
+    // Image-only / file-only comments are valid — `plain` is empty but
+    // the comment carries an `<img>` or anchor that the renderer shows.
+    const hasAttachment = /<(img|a)\b/i.test(sanitized);
+    if (!plain && !hasAttachment) {
       return NextResponse.json({ error: "body is required" }, { status: 400 });
     }
 

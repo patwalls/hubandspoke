@@ -1,13 +1,22 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent, ReactRenderer, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Mention from "@tiptap/extension-mention";
+import Image from "@tiptap/extension-image";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
-import { Bold, Italic, Link as LinkIcon, List, ListOrdered, Strikethrough } from "lucide-react";
+import {
+  Bold,
+  Italic,
+  Link as LinkIcon,
+  List,
+  ListOrdered,
+  Paperclip,
+  Strikethrough,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MentionList, type MentionListRef, type MentionUser } from "./mention-list";
 
@@ -59,6 +68,56 @@ function filterUsers(users: MentionUser[], query: string): MentionUser[] {
     .slice(0, 8);
 }
 
+interface UploadResult {
+  uploadUrl: string;
+  fileUrl: string;
+  key: string;
+}
+
+async function presignCommentAttachment(file: File): Promise<UploadResult> {
+  const res = await fetch("/api/uploads/comment-attachment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fileName: file.name,
+      contentType: file.type,
+      fileSize: file.size,
+    }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Presign failed (${res.status})`);
+  }
+  return (await res.json()) as UploadResult;
+}
+
+async function uploadCommentAttachment(file: File): Promise<{
+  fileUrl: string;
+  isImage: boolean;
+  name: string;
+}> {
+  const { uploadUrl, fileUrl } = await presignCommentAttachment(file);
+  const put = await fetch(uploadUrl, {
+    method: "PUT",
+    body: file,
+    headers: { "Content-Type": file.type },
+  });
+  if (!put.ok) throw new Error(`Upload failed (${put.status})`);
+  return {
+    fileUrl,
+    isImage: file.type.startsWith("image/"),
+    name: file.name,
+  };
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function CommentEditor({
   value,
   onChange,
@@ -67,6 +126,31 @@ export function CommentEditor({
   autoFocus = false,
   disabled = false,
 }: CommentEditorProps) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const insertUploadedFile = useCallback(
+    (editor: Editor, result: { fileUrl: string; isImage: boolean; name: string }) => {
+      if (result.isImage) {
+        editor
+          .chain()
+          .focus()
+          .setImage({ src: result.fileUrl, alt: result.name })
+          .run();
+      } else {
+        editor
+          .chain()
+          .focus()
+          .insertContent(
+            `<a href="${result.fileUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(result.name)}</a>`,
+          )
+          .run();
+      }
+    },
+    [],
+  );
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -80,6 +164,11 @@ export function CommentEditor({
           target: "_blank",
           rel: "noopener noreferrer",
           class: "text-blue-600 underline hover:text-blue-700 break-all",
+        },
+      }),
+      Image.configure({
+        HTMLAttributes: {
+          class: "tiptap-image rounded border border-border max-w-full h-auto my-2",
         },
       }),
       Placeholder.configure({ placeholder }),
@@ -163,11 +252,68 @@ export function CommentEditor({
         }
         return false;
       },
+      // Drag-and-drop a file onto the editor → upload + insert. Returning
+      // true prevents ProseMirror from also trying to handle the drop as
+      // text/HTML (which it would garble the binary into).
+      handleDrop: (_view, event, _slice, moved) => {
+        if (moved) return false;
+        const dt = event.dataTransfer;
+        if (!dt || dt.files.length === 0) return false;
+        const files = Array.from(dt.files);
+        event.preventDefault();
+        void handleFiles(files);
+        return true;
+      },
+      // Paste an image (e.g. screenshot from clipboard) → upload + insert.
+      // Pure-text paste falls through to the default handler so plain text
+      // and rich-text paste keep working.
+      handlePaste: (_view, event) => {
+        const items = event.clipboardData?.items;
+        if (!items) return false;
+        const fileItems = Array.from(items).filter(
+          (it) => it.kind === "file",
+        );
+        if (fileItems.length === 0) return false;
+        const files = fileItems
+          .map((it) => it.getAsFile())
+          .filter((f): f is File => f !== null);
+        if (files.length === 0) return false;
+        event.preventDefault();
+        void handleFiles(files);
+        return true;
+      },
     },
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
     },
   });
+
+  const handleFiles = useCallback(
+    async (files: File[]) => {
+      if (!editor) return;
+      setUploadError(null);
+      setUploading(true);
+      try {
+        for (const file of files) {
+          const result = await uploadCommentAttachment(file);
+          insertUploadedFile(editor, result);
+        }
+      } catch (e) {
+        setUploadError(e instanceof Error ? e.message : "Upload failed");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [editor, insertUploadedFile],
+  );
+
+  const onPickFile = () => fileInputRef.current?.click();
+  const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length > 0) void handleFiles(files);
+    // Reset so picking the same file twice in a row still fires onChange.
+    e.target.value = "";
+  };
 
   // Keep editor in sync when the parent resets `value` (e.g. after posting).
   useEffect(() => {
@@ -183,15 +329,45 @@ export function CommentEditor({
 
   return (
     <div className="rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-0">
-      <Toolbar editor={editor} />
+      <Toolbar
+        editor={editor}
+        onPickFile={onPickFile}
+        uploading={uploading}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,application/pdf"
+        multiple
+        className="hidden"
+        onChange={onFileInputChange}
+      />
       <div className="px-3 py-2">
         <EditorContent editor={editor} />
       </div>
+      {uploadError && (
+        <div className="border-t border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">
+          {uploadError}
+        </div>
+      )}
+      {uploading && !uploadError && (
+        <div className="border-t border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+          Uploading…
+        </div>
+      )}
     </div>
   );
 }
 
-function Toolbar({ editor }: { editor: Editor | null }) {
+function Toolbar({
+  editor,
+  onPickFile,
+  uploading,
+}: {
+  editor: Editor | null;
+  onPickFile: () => void;
+  uploading: boolean;
+}) {
   if (!editor) return null;
 
   const promptForLink = () => {
@@ -259,6 +435,14 @@ function Toolbar({ editor }: { editor: Editor | null }) {
       >
         <LinkIcon className="size-3.5" />
       </ToolbarButton>
+      <ToolbarButton
+        label={uploading ? "Uploading…" : "Attach image or PDF"}
+        active={false}
+        onClick={onPickFile}
+        disabled={uploading}
+      >
+        <Paperclip className="size-3.5" />
+      </ToolbarButton>
     </div>
   );
 }
@@ -267,11 +451,13 @@ function ToolbarButton({
   label,
   active,
   onClick,
+  disabled,
   children,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -279,10 +465,11 @@ function ToolbarButton({
       type="button"
       aria-label={label}
       title={label}
+      disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 min-w-7 items-center justify-center rounded px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground",
+        "inline-flex h-7 min-w-7 items-center justify-center rounded px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
         active && "bg-accent text-foreground",
       )}
     >

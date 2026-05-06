@@ -31,7 +31,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     const sanitized = sanitizeCommentHtml(raw);
     const plain = htmlToPlainText(sanitized);
-    if (!plain) {
+    // Image-only / file-only edits are valid — see POST route.
+    const hasAttachment = /<(img|a)\b/i.test(sanitized);
+    if (!plain && !hasAttachment) {
       return NextResponse.json({ error: "body is required" }, { status: 400 });
     }
 
