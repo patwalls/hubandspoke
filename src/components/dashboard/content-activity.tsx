@@ -19,7 +19,7 @@ import {
   Wrench as WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { CommentEditor, isEditorEmpty } from "@/components/dashboard/comment-editor";
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { cn } from "@/lib/utils";
@@ -277,25 +277,22 @@ function CommentImage({ src, alt }: { src: string; alt: string }) {
         <a
           href={downloadUrl}
           download={alt || true}
-          className="inline-flex items-center justify-center rounded bg-black/70 hover:bg-black/85 text-white size-7 backdrop-blur-sm"
+          className={buttonVariants({ variant: "outline", size: "icon-xs" })}
           title="Download"
           aria-label="Download image"
         >
-          <DownloadIcon className="size-3.5" />
+          <DownloadIcon />
         </a>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="icon-xs"
           onClick={onCopy}
-          className="inline-flex items-center justify-center rounded bg-black/70 hover:bg-black/85 text-white size-7 backdrop-blur-sm"
           title={copied ? "Copied" : "Copy image"}
           aria-label="Copy image to clipboard"
         >
-          {copied ? (
-            <CheckIcon className="size-3.5" />
-          ) : (
-            <CopyIcon className="size-3.5" />
-          )}
-        </button>
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </Button>
       </span>
       {error && (
         <span className="absolute bottom-2 right-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white">
@@ -346,11 +343,11 @@ function CommentFileLink({
       <a
         href={downloadUrl}
         download
-        className="inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent size-5"
+        className={buttonVariants({ variant: "ghost", size: "icon-xs" })}
         title="Download"
         aria-label="Download file"
       >
-        <DownloadIcon className="size-3" />
+        <DownloadIcon />
       </a>
     </span>
   );
