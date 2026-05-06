@@ -64,6 +64,11 @@ type EventPayload =
       targetAccountHandle: string | null;
       targetPostType: string | null;
     }
+  | {
+      type: "repost_created";
+      sourceItemId: string;
+      sourceTitle: string | null;
+    }
   | ToolActionPayload;
 
 // Registry for `tool_action` events. Key on the `tool` string the worker
@@ -774,6 +779,26 @@ function EventBody({
             ) : null}
           </>
         ) : null}
+        {sourceTitle ? (
+          <>
+            . Source:{" "}
+            <Link
+              href={`/${brand}/content/${sourceItemId}`}
+              className="text-primary hover:underline"
+            >
+              {sourceTitle}
+            </Link>
+          </>
+        ) : null}
+      </span>
+    );
+  }
+  if (event.payload.type === "repost_created") {
+    const { sourceItemId, sourceTitle } = event.payload;
+    return (
+      <span>
+        <span className="font-medium text-foreground">{actorName}</span> created
+        this from the repost queue
         {sourceTitle ? (
           <>
             . Source:{" "}

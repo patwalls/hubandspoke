@@ -120,6 +120,152 @@ export interface FetchFormatCheckpointBarsOptions {
  *  surfacing with no comparison at all. */
 export type PostTypeBars = Record<string, FormatBar>;
 
+/** Outer key: account UUID. Inner: format. Innermost: post_type.
+ *  The repost v2 algorithm compares a candidate against its own
+ *  (account, format, post_type) cohort first. Empty inner objects when
+ *  the account doesn't have enough items in that format to form a
+ *  cohort. */
+export type AccountFormatBars = Record<
+  string,
+  Record<string, Record<string, FormatBar>>
+>;
+
+export interface FetchAccountFormatViewBarsOptions
+  extends FetchFormatViewBarsOptions {
+  /** Limit the query to these account ids. Required — without it the
+   *  cross-account scan would return tens of thousands of (account,
+   *  format, post_type) tuples. */
+  accountIds: string[];
+}
+
+/**
+ * Per-account percentile of `views` grouped by (account_id, format,
+ * post_type). Uses an all-time window by default — repost v2 wants to
+ * say "this post outperformed every other post of the same format on
+ * this exact channel," and the longer the history, the more meaningful
+ * "P75" is for cohorts that only see a few posts per format per quarter.
+ *
+ * `windowDays = null` means no time filter (all-time).
+ */
+export async function fetchAccountFormatViewBars(
+  opts: FetchAccountFormatViewBarsOptions
+): Promise<AccountFormatBars> {
+  const percentile = opts.percentile ?? FORMAT_BARS_DEFAULT_PERCENTILE;
+  const windowDays = opts.windowDays ?? null;
+  const minCohort = opts.minCohort ?? 5;
+
+  if (opts.accountIds.length === 0) return {};
+
+  // Optional time filter — null means all-time.
+  const windowFilter =
+    windowDays != null
+      ? sql`AND published_at >= (now() - interval '${sql.raw(String(windowDays))} days')`
+      : sql``;
+
+  const rows = await db.execute<{
+    account_id: string;
+    format: string;
+    post_type: string;
+    p: string;
+    cohort_size: string;
+  }>(sql`
+    SELECT
+      account_id,
+      format,
+      post_type,
+      percentile_cont(${percentile}) WITHIN GROUP (ORDER BY views) AS p,
+      count(*) AS cohort_size
+    FROM production_items
+    WHERE account_id = ANY(${opts.accountIds})
+      AND format IS NOT NULL
+      AND post_type IS NOT NULL
+      AND status = 'Published'
+      AND deleted_at IS NULL
+      AND views IS NOT NULL
+      ${windowFilter}
+    GROUP BY account_id, format, post_type
+    HAVING count(*) >= ${minCohort}
+  `);
+
+  const bars: AccountFormatBars = {};
+  for (const row of rows) {
+    if (!bars[row.account_id]) bars[row.account_id] = {};
+    if (!bars[row.account_id][row.format]) bars[row.account_id][row.format] = {};
+    bars[row.account_id][row.format][row.post_type] = {
+      p: Number(row.p),
+      percentile,
+      cohortSize: Number(row.cohort_size),
+    };
+  }
+  return bars;
+}
+
+/** Map<brand_id, Map<format, Map<post_type, bar>>>. Same shape as
+ *  AccountFormatBars but grouped by brand. Repost v2's first fallback
+ *  when an account has fewer than 5 items in a given format. */
+export type BrandFormatBars = Record<
+  string,
+  Record<string, Record<string, FormatBar>>
+>;
+
+export interface FetchBrandFormatViewBarsOptions
+  extends FetchFormatViewBarsOptions {
+  brandIds: string[];
+}
+
+export async function fetchBrandFormatViewBars(
+  opts: FetchBrandFormatViewBarsOptions
+): Promise<BrandFormatBars> {
+  const percentile = opts.percentile ?? FORMAT_BARS_DEFAULT_PERCENTILE;
+  const windowDays = opts.windowDays ?? null;
+  const minCohort = opts.minCohort ?? 5;
+
+  if (opts.brandIds.length === 0) return {};
+
+  const windowFilter =
+    windowDays != null
+      ? sql`AND pi.published_at >= (now() - interval '${sql.raw(String(windowDays))} days')`
+      : sql``;
+
+  const rows = await db.execute<{
+    brand_id: string;
+    format: string;
+    post_type: string;
+    p: string;
+    cohort_size: string;
+  }>(sql`
+    SELECT
+      a.brand_id AS brand_id,
+      pi.format,
+      pi.post_type,
+      percentile_cont(${percentile}) WITHIN GROUP (ORDER BY pi.views) AS p,
+      count(*) AS cohort_size
+    FROM production_items pi
+    JOIN accounts a ON a.id = pi.account_id
+    WHERE a.brand_id = ANY(${opts.brandIds})
+      AND pi.format IS NOT NULL
+      AND pi.post_type IS NOT NULL
+      AND pi.status = 'Published'
+      AND pi.deleted_at IS NULL
+      AND pi.views IS NOT NULL
+      ${windowFilter}
+    GROUP BY a.brand_id, pi.format, pi.post_type
+    HAVING count(*) >= ${minCohort}
+  `);
+
+  const bars: BrandFormatBars = {};
+  for (const row of rows) {
+    if (!bars[row.brand_id]) bars[row.brand_id] = {};
+    if (!bars[row.brand_id][row.format]) bars[row.brand_id][row.format] = {};
+    bars[row.brand_id][row.format][row.post_type] = {
+      p: Number(row.p),
+      percentile,
+      cohortSize: Number(row.cohort_size),
+    };
+  }
+  return bars;
+}
+
 export async function fetchPostTypeViewBars(
   opts: FetchFormatViewBarsOptions = {}
 ): Promise<PostTypeBars> {

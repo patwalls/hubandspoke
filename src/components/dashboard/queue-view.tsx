@@ -2,19 +2,18 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { RefreshCwIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { IdeaQueueTable } from "./idea-queue-table";
 import { CrossPostQueueTable } from "./cross-post-queue-table";
+import { RepostQueueTable } from "./repost-queue-table";
 import { HistoryQueueTable } from "./history-queue-table";
 import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 import type { CrossPostCandidatesResult } from "@/lib/services/cross-post-candidates";
+import type { RepostCandidatesResult } from "@/lib/services/repost-candidates";
 import type { QueueHistoryEvent } from "@/app/api/queue/history/route";
 
 export type QueueSource =
@@ -28,6 +27,8 @@ export type QueueSource =
 interface QueueViewProps {
   brand: string;
   initialSource: QueueSource;
+  /** Retained for back-compat with the page route; v2 doesn't expose any
+   *  admin-only controls, so this is currently a no-op. */
   isAdmin?: boolean;
 }
 
@@ -43,7 +44,7 @@ const SOURCE_TABS = [
 export function QueueView({
   brand,
   initialSource,
-  isAdmin = false,
+  isAdmin: _isAdmin = false,
 }: QueueViewProps) {
   const router = useRouter();
   const [items, setItems] = useState<ProductionItem[]>([]);
@@ -51,10 +52,13 @@ export function QueueView({
   const [crossPostData, setCrossPostData] =
     useState<CrossPostCandidatesResult | null>(null);
   const [crossPostLoading, setCrossPostLoading] = useState(true);
+  const [repostData, setRepostData] = useState<RepostCandidatesResult | null>(
+    null
+  );
+  const [repostLoading, setRepostLoading] = useState(true);
   const [historyEvents, setHistoryEvents] = useState<QueueHistoryEvent[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
-  const [refilling, setRefilling] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedFormat, setSelectedFormat] = useState("all");
@@ -134,6 +138,49 @@ export function QueueView({
     fetchCrossPostQueue();
   }, [fetchCrossPostQueue]);
 
+  const fetchRepostQueue = useCallback(async () => {
+    setRepostLoading(true);
+    try {
+      const res = await fetch(
+        `/api/repost-queue?brand=${encodeURIComponent(brand)}`
+      );
+      if (!res.ok) {
+        console.error(`Repost queue API returned HTTP ${res.status}`);
+        setRepostData({
+          items: [],
+          stats: {
+            rawCandidates: 0,
+            droppedDismissed: 0,
+            droppedPriorKilled: 0,
+            droppedCooldown: 0,
+            droppedPendingInFlight: 0,
+            droppedNoCohort: 0,
+            droppedBelowThreshold: 0,
+          },
+          config: {
+            cohortPercentile: 0.75,
+            hotnessThreshold: 1.5,
+            minCohort: 5,
+            minAgeDaysByPlatform: {},
+            minAgeDaysDefault: 180,
+          },
+        });
+        return;
+      }
+      const json = (await res.json()) as RepostCandidatesResult;
+      setRepostData(json);
+    } catch (err) {
+      console.error("Failed to fetch repost queue:", err);
+      setRepostData(null);
+    } finally {
+      setRepostLoading(false);
+    }
+  }, [brand]);
+
+  useEffect(() => {
+    fetchRepostQueue();
+  }, [fetchRepostQueue]);
+
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
@@ -163,40 +210,19 @@ export function QueueView({
     }
   }, [selectedSource, historyLoaded, fetchHistory]);
 
-  const handleRefillReposts = useCallback(async () => {
-    if (refilling) return;
-    setRefilling(true);
-    try {
-      const res = await fetch("/api/queue/refill-reposts", { method: "POST" });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        toast.error(json.error || `Refill failed (HTTP ${res.status})`);
-        return;
-      }
-      toast.success(
-        "Repost scan enqueued — new ideas will appear in a moment.",
-      );
-      // Give the worker a few seconds to chew through Phase A/B then
-      // refetch. Phase B writes one repost row per accepted candidate so we
-      // can see the queue grow.
-      window.setTimeout(() => {
-        void fetchQueue();
-      }, 6000);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Refill failed");
-    } finally {
-      setRefilling(false);
-    }
-  }, [refilling, fetchQueue]);
-
   // Exclude long-form YouTube pillars — those live in Notion and don't belong
   // in the triage queue.
   const hsItems = items.filter((item) => !isNotionAuthoritative(item.postType));
-  // The All / Original / Repost / Clip tabs only show triage-Idea rows.
-  // Cross-post is a separate queue (live view of hot Published originals)
-  // and is filtered out of the Idea pool here.
+  // The All / Original / Clip tabs show triage-Idea rows.
+  // Cross-post is a separate live query of hot Published originals.
+  // Repost is also a separate live query (v2) of elite evergreen
+  // candidates — never has Idea rows itself, so it's filtered out of
+  // the Idea pool here too.
   const ideaItems = hsItems.filter(
-    (item) => item.status === "Idea" && item.sourceType !== "cross_post"
+    (item) =>
+      item.status === "Idea" &&
+      item.sourceType !== "cross_post" &&
+      item.sourceType !== "repost"
   );
 
   const platformOptions = useMemo(
@@ -262,6 +288,29 @@ export function QueueView({
     });
   }, [crossPostData, selectedPlatform, selectedFormat, query]);
 
+  // Repost v2 candidates — same filter ergonomics as the cross-post tab.
+  const repostFiltered = useMemo(() => {
+    const candidates = repostData?.items ?? [];
+    return candidates.filter((c) => {
+      if (
+        !matchesChannel(
+          { accountId: c.account.id, postType: c.postType, account: c.account },
+          selectedPlatform
+        )
+      )
+        return false;
+      if (selectedFormat !== "all" && c.format !== selectedFormat) return false;
+      if (query) {
+        const haystack = [c.title, c.format, c.account.handle]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+      return true;
+    });
+  }, [repostData, selectedPlatform, selectedFormat, query]);
+
   const sourceCounts = useMemo(() => {
     const counts = {
       all: 0,
@@ -274,13 +323,14 @@ export function QueueView({
     for (const item of baseFiltered) {
       counts.all += 1;
       const source = item.sourceType ?? "original";
-      if (source === "cross_post") continue;
+      if (source === "cross_post" || source === "repost") continue;
       if (source in counts) counts[source as keyof typeof counts] += 1;
     }
     counts.cross_post = crossPostFiltered.length;
+    counts.repost = repostFiltered.length;
     counts.history = historyEvents.length;
     return counts;
-  }, [baseFiltered, crossPostFiltered, historyEvents]);
+  }, [baseFiltered, crossPostFiltered, repostFiltered, historyEvents]);
 
   const filtered = baseFiltered.filter((item) => {
     if (selectedSource === "all") return true;
@@ -302,16 +352,20 @@ export function QueueView({
               {isHistoryTab
                 ? historyEvents.length
                 : isCrossPostTab
-                ? crossPostFiltered.length
-                : filtered.length}
+                  ? crossPostFiltered.length
+                  : isRepostTab
+                    ? repostFiltered.length
+                    : filtered.length}
             </span>
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
             {isHistoryTab
               ? "Items that have left the queue in the last 30 days."
               : isCrossPostTab
-              ? "High-performing posts from the last 21 days — pick where to cross-post."
-              : "Triage new ideas — assign an editor or kill."}
+                ? "High-performing posts from the last 21 days — pick where to cross-post."
+                : isRepostTab
+                  ? "Elite evergreen — past hits that beat their format on this channel by ≥1.5× the top quartile."
+                  : "Triage new ideas — assign an editor or kill."}
           </p>
         </div>
         <Input
@@ -384,22 +438,6 @@ export function QueueView({
             options={formatOptions}
             onChange={setSelectedFormat}
           />
-          {isRepostTab && isAdmin && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleRefillReposts}
-              disabled={refilling}
-              className="ml-auto"
-              title="Re-run the evergreen-scan task that populates this queue (admin only)"
-            >
-              <RefreshCwIcon
-                className={cn("size-3.5", refilling && "animate-spin")}
-              />
-              {refilling ? "Refilling…" : "Repopulate"}
-            </Button>
-          )}
         </div>
       )}
 
@@ -427,6 +465,23 @@ export function QueueView({
                 : "Nothing hot in the last 21 days. Check back tomorrow."
             }
             onMutate={fetchCrossPostQueue}
+          />
+        )
+      ) : isRepostTab ? (
+        repostLoading ? (
+          <LoadingPanel label="Loading evergreen candidates…" />
+        ) : (
+          <RepostQueueTable
+            items={repostFiltered}
+            brand={brand}
+            emptyMessage={
+              query ||
+              selectedPlatform !== "all" ||
+              selectedFormat !== "all"
+                ? "No evergreen candidates match the current filters."
+                : "No elite evergreen right now. The bar is high — give it time as more cohort data lands."
+            }
+            onMutate={fetchRepostQueue}
           />
         )
       ) : loading ? (

@@ -1046,6 +1046,12 @@ export type ContentEventPayload =
       targetAccountHandle: string | null;
       targetPostType: string | null;
     }
+  | { type: "repost_dismissed"; reason: string | null }
+  | {
+      type: "repost_created";
+      sourceItemId: string;
+      sourceTitle: string | null;
+    }
   // Generic tool-integration events. Single envelope so adding a tool is
   // (1) emit with a new `tool` string, (2) register the icon/label in
   // content-activity.tsx's TOOL_REGISTRY. No new variant per tool, no

@@ -254,18 +254,31 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Errors:** any thrown error stamps `lastContentSyncError` and re-throws
   so graphile-worker retries with backoff.
 
-### `evergreen-scan` — daily classifier
+### `evergreen-scan` — daily classifier (Phase A only as of 2026-05-06)
 - **Trigger:** cron `0 15 * * *` (daily 15:00 UTC)
-- **Files:** `src/jobs/tasks/scheduled.ts:112`, `src/lib/services/evergreen-scan.ts`, manual: `scripts/run-evergreen-scan.ts`
-- **Inputs:** published items with ≥10,000 views, per-post-type age gates (x 365d+, instagram_reel/post 90d+, linkedin/threads 180d+, youtube_community/shorts 180d+); existing `contentEvents` (past kill reasons); past published reposts (positive accept exemplars)
-- **Outputs:** `productionItems.isEvergreen`; new repost `production_items` rows in the Idea queue, built via `buildRepostValues` in `src/lib/services/repost-values.ts` — the canonical helper both this scan and the manual `/api/production-items/[id]/repost` route route through, so the field set stays in lockstep. Its strict `RepostSource` input type fails to compile if a candidate-source SELECT omits a required column (introduced 2026-05-01 after a SELECT/INSERT mismatch silently NULLed `platform` on 19 cron-generated reposts and hid them from the Content view).
-- **Downstream:** none directly; downstream is the human triage flow
+- **Files:** `src/jobs/tasks/scheduled.ts:112`, `src/lib/services/evergreen-scan.ts`
+- **Inputs:** published items with ≥10,000 views, per-post-type age gates (x 365d+, instagram_reel/post 90d+, linkedin/threads 180d+, youtube_community/shorts 180d+); existing `contentEvents` (past kill reasons fed to the classifier prompt as negative exemplars).
+- **Outputs:** `productionItems.isEvergreen` + `evergreenReasoning`. The reasoning text is what the repost queue v2 modal surfaces in the yellow callout; `is_evergreen` is no longer a queue-admission gate but stays as a corroborating signal.
+- **Downstream:** repost queue v2 (`/api/repost-queue`) reads `evergreen_reasoning` for flavor text. No queue rows are written by this task anymore.
 - **Rules:**
-  - Phase A: stratified-batch classify per post-type (per-run quotas: x 12, instagram 10, linkedin/threads/youtube 4 each). Last 10 kill reasons injected into the classifier prompt as negative exemplars; classifier draws from a 50-reason history window.
-  - Phase B: refill Idea queue using a **platform cooldown** (replaced the prior "any prior repost blocks forever" rule on 2026-05-05 — that left only 31 of 325 evergreens eligible because we'd already reposted the easy winners). An original is re-poolable when the last *Published* repost is older than the platform's cooldown: instagram 30d, youtube/linkedin/threads 60d, x 120d, default 90d (`REPOST_COOLDOWN_DAYS_BY_PLATFORM` in `evergreen-scan.ts`). `Killed` reposts still permanently suppress (operator already decided this isn't worth resurfacing). `Idea`-state reposts still block to avoid double-stacking. Before each insert, the gpt-4.1-mini **fit judge** (`judgeRepostFit`) runs **only on X** (which has a ~17% kill rate); other platforms have ~0% historical kill rate and were starving the queue when judged. The X judge sees last 10 kill reasons + last 30 accept exemplars; "torn → repost" tiebreaker since getting zero suggestions is a worse failure mode than letting through one the operator kills in triage.
-  - Cap: 50 pending suggestions in queue; per-platform diversity caps are explicit (`PLATFORM_QUEUE_CAPS` in `evergreen-scan.ts`): instagram 15, x 12, youtube 10, linkedin 6, threads 5, tiktok 2, default 2. Bumped 2026-05-05 alongside the cooldown rollout — view yield by platform (avg repost views: YT 174K, IG 91K, X 63K) drives the relative weighting.
-  - Candidate pool per run: stratified per-platform — top `POOL_PER_PLATFORM` (40) evergreens per platform by views, merged and re-sorted views-DESC. Pulling globally by views starved non-X channels because X view counts dwarf everything else.
-  - Repost rows copy `accountId`, `postType`, `platform`, `format`, `pillarContentItemId`, and `pillarContentNotionId` from the original; per-platform diversity cap is keyed off the joined `account.platform`. Pillar-inheritance was added 2026-05-01 to fix evergreen-scan reposts losing their parent's pillar link — see `scripts/backfill-repost-pillar.mjs` for the historic-row repair.
+  - Stratified-batch classify per post-type (per-run quotas: x 12, instagram 10, linkedin/threads/youtube 4 each). Last 10 kill reasons injected into the classifier prompt as negative exemplars; classifier draws from a 50-reason history window.
+  - Phase A' re-runs classification when an item's body becomes available after a previous `not_evergreen` verdict (caption sync arrives late on IG/X). Bounded to 5 items per cron tick.
+  - **Phase B retired 2026-05-06** — the queue-refill loop (LLM fit judge, per-platform diversity caps, cooldown gating) was replaced by the live-query repost candidate queue v2 (`src/lib/services/repost-candidates.ts`) which uses cohort-relative percentile evidence instead of binary classification. The `accept_exemplars` history feed and `judgeRepostFit` LLM call are no longer invoked.
+
+### Repost candidate queue (v2) — live percentile-within-format×account view
+- **Trigger:** none. `selectRepostCandidates({ brand })` runs synchronously on every `GET /api/repost-queue?brand=…` (the Repost tab fetches it on page load). No graphile-worker task, no cron, no Idea-row pre-population.
+- **Files:** `src/lib/services/repost-candidates.ts` (algorithm), `src/app/api/repost-queue/route.ts` (entry), `src/components/dashboard/repost-queue-table.tsx` + `repost-triage-dialog.tsx` (UI), `src/lib/services/format-view-bars.ts` (cohort-bar fetchers — extended with `fetchAccountFormatViewBars` and `fetchBrandFormatViewBars` for the per-account/per-brand cohort tiers).
+- **Inputs:** `productionItems.views` (kept fresh by `performance-decay`); existing reposts on each candidate (status check for kill/cooldown/in-flight); `contentEvents` rows of type `repost_dismissed` (30-day TTL hide-list); optionally `view_snapshots` for bonus velocity signals.
+- **Outputs:** read-only response. Accepting in the modal calls `POST /api/production-items/[id]/repost` with `{ editorUserId, status: "Ready To Publish" }`, which lands a new `sourceType='repost'` row directly in `Ready To Publish` (skipping the Idea/Assigned review cycle) and writes a `repost_created` content_event for the activity feed.
+- **Rules:**
+  - **Eligibility:** `sourceType ∈ {original, clip, cross_post, repurposed}` (no recursion on `repost`), `status='Published'`, age ≥ per-platform floor (x 365d / instagram 90d / others 180d), `accountId` + `format` + `postType` populated, `views > 0`.
+  - **Permanent suppression:** any prior `Killed` repost on the same source → never resurface. (Operator already decided.)
+  - **In-flight block:** any `Idea` / `Assigned` / `Ready To Publish` repost on the same source → skip.
+  - **Cooldown:** any `Published` repost on the same source within the platform's cooldown window → skip. instagram 30d, youtube/linkedin/threads 60d, x 120d, default 60d.
+  - **Cohort ladder (P75 in all three tiers):** (1) `(account, format, postType)` all-time, min cohort 5; (2) `(brand, format, postType)` all-time, min cohort 5; (3) `(format, postType)` cross-brand over 365d, min cohort 5. The strongest tier with a bar wins.
+  - **Admission:** lifetime ratio (`candidate.views / cohort_P75`) ≥ 1.5×. Sort items by max ratio desc. Unlike cross-post v3, candidates with **no cohort at all are NOT auto-admitted** — reposts require evidence; "this beat its peers" needs peers.
+  - **Velocity bonus:** when `view_snapshots` rows exist for a candidate (typically only items younger than ~2 weeks at capture time), each checkpoint contributes a supplementary `hotnessSignal` against the format's same-checkpoint P75 cohort. Lifetime is the admission gate; velocity is informational only.
+  - **Dismissal:** "Not interested" / "Kill this idea" → `POST /api/production-items/[id]/repost-dismiss` writes a `contentEvents` row with `type='repost_dismissed'`. The candidate is hidden for 30 days; after that it can resurface if it still clears the bar.
 
 ### `capture-velocity-snapshot` — per-post scheduled velocity snapshots
 
