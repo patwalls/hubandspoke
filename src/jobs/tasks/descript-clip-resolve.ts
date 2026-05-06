@@ -57,7 +57,14 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
         `Descript ${payload.importMode ? "import" : "agent"} job ${payload.jobId} failed: ${job.result.error_message ?? "no error message"}`,
       );
     }
-    const compositionId = payload.importMode
+    // Auto-detect import vs agent when the caller didn't specify (the
+    // redrive endpoint omits importMode for "full-video" triggers since
+    // that path can be either cold-import or warm-duplicate). Import
+    // jobs always populate `created_compositions`; agent jobs put the
+    // composition id inside `agent_response`.
+    const importMode =
+      payload.importMode ?? Boolean(job.result?.created_compositions?.length);
+    const compositionId = importMode
       ? job.result?.created_compositions?.[0]?.id ?? null
       : extractCompositionIdFromAgentResponse(job.result?.agent_response);
     await db
@@ -96,20 +103,20 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
         status: "success",
         label: "Clip ready in Descript",
         url: compositionUrl,
-        meta: { importPath: payload.importMode ? "import" : "agent" },
+        meta: { importPath: importMode ? "import" : "agent" },
       });
     }
     // Cold full-video import: stamp the pillar with the source compositionId
     // so the next clip on this pillar takes the warm (duplicate) path
     // instead of re-uploading.
-    if (payload.pillarItemId && payload.importMode && compositionId) {
+    if (payload.pillarItemId && importMode && compositionId) {
       await db
         .update(productionItems)
         .set({ descriptCompositionId: compositionId })
         .where(eq(productionItems.id, payload.pillarItemId));
     }
     helpers.logger.info(
-      `descript-clip-resolve ok trigger=${payload.triggerId} composition=${compositionId ?? "none"}${payload.importMode ? " (import)" : ""}`,
+      `descript-clip-resolve ok trigger=${payload.triggerId} composition=${compositionId ?? "none"}${importMode ? " (import)" : ""}`,
     );
     return;
   }

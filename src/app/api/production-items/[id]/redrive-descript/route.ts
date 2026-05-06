@@ -3,6 +3,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, repurposeTriggers } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
+import { enqueue } from "@/jobs/enqueue";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -48,7 +49,11 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   // trigger against the pillar's production_item id, not the derivative).
   const triggerSourceId = item.pillarContentItemId ?? item.id;
   const [trigger] = await db
-    .select({ id: repurposeTriggers.id })
+    .select({
+      id: repurposeTriggers.id,
+      descriptJobId: repurposeTriggers.descriptJobId,
+      descriptImportPath: repurposeTriggers.descriptImportPath,
+    })
     .from(repurposeTriggers)
     .where(eq(repurposeTriggers.productionItemId, triggerSourceId))
     .orderBy(desc(repurposeTriggers.id))
@@ -96,13 +101,43 @@ export async function POST(_request: NextRequest, context: RouteContext) {
 
   const job = updated[0] ?? null;
   if (!job) {
-    return NextResponse.json(
-      {
-        error:
-          "No queue job found for this trigger. The original task may have completed or never been enqueued.",
-      },
-      { status: 400 },
-    );
+    // Stalled state: trigger exists, project was created in Descript,
+    // but no queue job is around to redrive (the original task either
+    // exhausted its attempts and got swept, or crashed without
+    // re-enqueueing the polling phase). If we still have the Descript-
+    // side jobId, enqueue a fresh `descript-clip-resolve` to re-poll
+    // it. The poller will either find the job stopped successfully
+    // and stamp composition_id, or surface the Descript error in
+    // last_error after retrying.
+    if (!trigger.descriptJobId) {
+      return NextResponse.json(
+        {
+          error:
+            "No queue job and no Descript jobId on the trigger — there's nothing left to recover. Re-promote the clip from the source.",
+        },
+        { status: 400 },
+      );
+    }
+    // importMode is path-derived where unambiguous; "full-video" can be
+    // either cold-import or warm-duplicate, so we omit it and let the
+    // task auto-detect from the job result shape.
+    const importMode =
+      trigger.descriptImportPath === "agent"
+        ? false
+        : trigger.descriptImportPath === "precise-cut"
+          ? true
+          : undefined;
+    await enqueue("descript-clip-resolve", {
+      triggerId: trigger.id,
+      jobId: trigger.descriptJobId,
+      derivativeItemId: id,
+      pillarItemId: item.pillarContentItemId ?? undefined,
+      ...(importMode !== undefined ? { importMode } : {}),
+    });
+    return NextResponse.json({
+      ok: true,
+      enqueued: { taskIdentifier: "descript-clip-resolve" },
+    });
   }
 
   return NextResponse.json({
