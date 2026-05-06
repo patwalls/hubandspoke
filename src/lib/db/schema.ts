@@ -120,6 +120,22 @@ export const productionItems = pgTable(
     descriptImportedAt: timestamp("descript_imported_at", {
       withTimezone: true,
     }),
+    // Typefully draft created automatically when a new X/LinkedIn item is
+    // inserted with no publishedLink. The pill in the content-detail header
+    // links to typefullyPrivateUrl. Webhook receiver (/api/webhooks/typefully)
+    // keeps these columns in sync as the user schedules/publishes inside
+    // Typefully. Soft-skipped for accounts without typefullySocialSetId.
+    typefullyDraftId: bigint("typefully_draft_id", { mode: "number" }),
+    typefullyStatus: text("typefully_status"),
+    typefullyShareUrl: text("typefully_share_url"),
+    typefullyPrivateUrl: text("typefully_private_url"),
+    typefullyScheduledDate: timestamp("typefully_scheduled_date", {
+      withTimezone: true,
+    }),
+    typefullyPublishedAt: timestamp("typefully_published_at", {
+      withTimezone: true,
+    }),
+    typefullyError: text("typefully_error"),
     // Permanent media archive: source video uploaded to S3 before being
     // handed to Descript via a presigned GET URL. Lets us re-import to
     // Descript without re-uploading from the browser.
@@ -1252,6 +1268,10 @@ export const accounts = pgTable(
     // Distinct from lastRefreshedAt, which is the profile-metadata sweep.
     lastContentSyncAt: timestamp("last_content_sync_at", { withTimezone: true }),
     lastContentSyncError: text("last_content_sync_error"),
+    // Maps this hubandspoke account to a Typefully social set. Null = skip
+    // Typefully draft auto-creation for this account. Get the id from
+    // GET https://api.typefully.com/v2/social-sets.
+    typefullySocialSetId: bigint("typefully_social_set_id", { mode: "number" }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

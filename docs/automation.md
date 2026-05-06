@@ -674,6 +674,17 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - Skips uninvited contractors (no `passwordHash`)
   - Idempotent on `emailedAt`
 
+### `typefully-create-draft` — auto-create Typefully draft for new X/LinkedIn items
+- **Trigger:** enqueued from `POST /api/production-items` after insert when `postType` is `x` or `linkedin` AND `publishedLink` is null. Also enqueueable on demand via `POST /api/production-items/[id]/typefully-redrive`.
+- **Files:** `src/jobs/tasks/typefully-create-draft.ts`, `src/lib/typefully.ts`
+- **Inputs:** `{ productionItemId }` — task re-fetches the item + the owning account
+- **Outputs:** Typefully draft created via `POST /v2/social-sets/{id}/drafts`; populates `production_items.typefully_draft_id`, `typefully_status`, `typefully_share_url`, `typefully_private_url`
+- **Downstream:** `/api/webhooks/typefully` keeps `typefully_status`, `typefully_scheduled_date`, `typefully_published_at` synced as the user moves the draft inside Typefully
+- **Rules:**
+  - Soft-skips (returns without throwing) when: item missing, draft already exists, postType isn't x/linkedin, publishedLink set, contentBody empty, account has no `typefullySocialSetId`
+  - Hard-fails (throws → graphile retries) on Typefully API errors
+  - Idempotent: re-running on an item with `typefully_draft_id` set is a noop
+
 ---
 
 ## Lifecycle views

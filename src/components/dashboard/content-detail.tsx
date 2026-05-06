@@ -1624,6 +1624,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </Popover>
             )}
           <DescriptStatusPill productionItemId={item.id} />
+          {(item.postType === "x" || item.postType === "linkedin") && (
+            <TypefullyStatusPill productionItemId={item.id} />
+          )}
           {isPrePublish && data.prediction && (
             <Popover>
               <PopoverTrigger
@@ -3782,6 +3785,276 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
                 className="text-primary hover:underline inline-flex items-center gap-1"
               >
                 <ExternalLinkIcon className="size-3" /> Open project in Descript
+              </a>
+            )}
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void fetchStatus()}
+            disabled={redriving}
+          >
+            Refresh
+          </Button>
+          {data.redriveAvailable && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleRedrive}
+              disabled={redriving}
+            >
+              {redriving ? "Re-running…" : "Re-run"}
+            </Button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+interface TypefullyStatusResponse {
+  status:
+    | "published"
+    | "scheduled"
+    | "draft"
+    | "publishing"
+    | "creating"
+    | "stuck"
+    | "error"
+    | "not_started";
+  detail: string;
+  postType: string | null;
+  draftId: number | null;
+  shareUrl: string | null;
+  privateUrl: string | null;
+  scheduledDate: string | null;
+  publishedAt: string | null;
+  error: string | null;
+  queueJob: {
+    id: string;
+    taskIdentifier: string;
+    attempts: number;
+    maxAttempts: number;
+    runAt: string;
+    lockedAt: string | null;
+    lastError: string | null;
+  } | null;
+  redriveAvailable: boolean;
+}
+
+const TYPEFULLY_STATUS_STYLES: Record<
+  TypefullyStatusResponse["status"],
+  { dot: string; label: string; pillClass: string }
+> = {
+  draft: {
+    dot: "bg-sky-500",
+    label: "Typefully draft",
+    pillClass: "border-sky-200 bg-sky-50 text-sky-800",
+  },
+  scheduled: {
+    dot: "bg-amber-500",
+    label: "Typefully scheduled",
+    pillClass: "border-amber-200 bg-amber-50 text-amber-800",
+  },
+  publishing: {
+    dot: "bg-amber-500 animate-pulse",
+    label: "Typefully publishing",
+    pillClass: "border-amber-200 bg-amber-50 text-amber-800",
+  },
+  published: {
+    dot: "bg-emerald-500",
+    label: "Typefully published",
+    pillClass: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  },
+  creating: {
+    dot: "bg-muted-foreground/60 animate-pulse",
+    label: "Typefully creating…",
+    pillClass: "border-border bg-muted/30 text-muted-foreground",
+  },
+  stuck: {
+    dot: "bg-red-500",
+    label: "Typefully stuck",
+    pillClass: "border-red-200 bg-red-50 text-red-800",
+  },
+  error: {
+    dot: "bg-red-500",
+    label: "Typefully error",
+    pillClass: "border-red-200 bg-red-50 text-red-800",
+  },
+  not_started: {
+    dot: "bg-muted-foreground/40",
+    label: "Typefully not started",
+    pillClass: "border-border bg-muted/30 text-muted-foreground",
+  },
+};
+
+/**
+ * Status pill for the Typefully draft auto-created when an X/LinkedIn item
+ * is inserted with no publishedLink. Polls every 10s while the draft is
+ * being created or publishing; otherwise relies on the webhook receiver
+ * to keep the underlying row fresh between page loads. Hidden when no
+ * draft exists and no queue job is in flight (e.g. accounts without
+ * typefullySocialSetId).
+ */
+function TypefullyStatusPill({ productionItemId }: { productionItemId: string }) {
+  const [data, setData] = useState<TypefullyStatusResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [redriving, setRedriving] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/production-items/${productionItemId}/typefully-status`,
+      );
+      if (!res.ok) return;
+      const json = (await res.json()) as TypefullyStatusResponse;
+      setData(json);
+    } finally {
+      setLoading(false);
+    }
+  }, [productionItemId]);
+
+  useEffect(() => {
+    void fetchStatus();
+  }, [fetchStatus]);
+
+  useEffect(() => {
+    if (!data) return;
+    if (data.status !== "creating" && data.status !== "publishing") return;
+    const interval = setInterval(() => void fetchStatus(), 10_000);
+    return () => clearInterval(interval);
+  }, [data, fetchStatus]);
+
+  const handleRedrive = useCallback(async () => {
+    setRedriving(true);
+    try {
+      const res = await fetch(
+        `/api/production-items/${productionItemId}/typefully-redrive`,
+        { method: "POST" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error("Re-run failed", {
+          description: json?.error || `HTTP ${res.status}`,
+        });
+        return;
+      }
+      toast.success("Re-running…", {
+        description:
+          "The worker will pick this up within a few seconds. Status will refresh automatically.",
+      });
+      await fetchStatus();
+    } finally {
+      setRedriving(false);
+    }
+  }, [productionItemId, fetchStatus]);
+
+  if (loading || !data) return null;
+  // Hide when nothing to show — typically an account without a
+  // typefullySocialSetId, where the task no-ops silently.
+  if (data.status === "not_started" && !data.queueJob && !data.draftId)
+    return null;
+
+  const style = TYPEFULLY_STATUS_STYLES[data.status];
+  return (
+    <Popover>
+      <PopoverTrigger
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          style.pillClass,
+        )}
+        title={data.detail}
+      >
+        <span className={cn("size-1.5 rounded-full", style.dot)} aria-hidden />
+        {style.label}
+      </PopoverTrigger>
+      <PopoverContent className="w-[26rem] space-y-3" align="end">
+        <div>
+          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            Typefully status
+          </p>
+          <p className="mt-1 text-sm font-medium text-foreground">
+            {style.label}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground leading-snug">
+            {data.detail}
+          </p>
+        </div>
+        {(data.scheduledDate || data.publishedAt) && (
+          <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-0.5">
+            {data.publishedAt && (
+              <div>
+                Published:{" "}
+                <span className="text-foreground">
+                  {new Date(data.publishedAt).toLocaleString()}
+                </span>
+              </div>
+            )}
+            {data.scheduledDate && !data.publishedAt && (
+              <div>
+                Scheduled:{" "}
+                <span className="text-foreground">
+                  {new Date(data.scheduledDate).toLocaleString()}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+        {data.queueJob && (
+          <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground space-y-0.5 font-mono">
+            <div>
+              task: <span className="text-foreground">{data.queueJob.taskIdentifier}</span>
+            </div>
+            <div>
+              attempts:{" "}
+              <span className="text-foreground">
+                {data.queueJob.attempts} / {data.queueJob.maxAttempts}
+              </span>
+            </div>
+            <div>
+              run_at:{" "}
+              <span className="text-foreground">
+                {new Date(data.queueJob.runAt).toLocaleString()}
+              </span>
+            </div>
+            {data.queueJob.lockedAt && (
+              <div>
+                locked_at:{" "}
+                <span className="text-foreground">
+                  {new Date(data.queueJob.lockedAt).toLocaleString()}
+                </span>
+              </div>
+            )}
+            {data.queueJob.lastError && (
+              <div className="text-red-600 break-words whitespace-pre-wrap">
+                error: {data.queueJob.lastError}
+              </div>
+            )}
+          </div>
+        )}
+        {(data.privateUrl || data.shareUrl) && (
+          <div className="flex flex-col gap-1 text-xs">
+            {data.privateUrl && (
+              <a
+                href={data.privateUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline inline-flex items-center gap-1"
+              >
+                <ExternalLinkIcon className="size-3" /> Open in Typefully
+              </a>
+            )}
+            {data.shareUrl && (
+              <a
+                href={data.shareUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline inline-flex items-center gap-1"
+              >
+                <ExternalLinkIcon className="size-3" /> Public share link
               </a>
             )}
           </div>

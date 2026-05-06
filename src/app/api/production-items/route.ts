@@ -330,6 +330,23 @@ export async function POST(request: NextRequest) {
       console.error("[create] scheduleVelocitySnapshots failed", err);
     }
 
+    // Auto-create a Typefully draft for X/LinkedIn items the user is
+    // authoring (i.e. not yet live on the platform). Soft-skipped inside
+    // the task if the account has no typefullySocialSetId or contentBody
+    // is empty, so a stale enqueue never surfaces as a hard failure.
+    if (
+      (created.postType === "x" || created.postType === "linkedin") &&
+      !created.publishedLink
+    ) {
+      try {
+        await enqueue("typefully-create-draft", {
+          productionItemId: created.id,
+        });
+      } catch (err) {
+        console.error("[create] typefully-create-draft enqueue failed", err);
+      }
+    }
+
     return NextResponse.json({ ...created, autoFetched }, { status: 201 });
   } catch (error) {
     // 23505 = unique_violation. Catches the race where two concurrent POSTs
