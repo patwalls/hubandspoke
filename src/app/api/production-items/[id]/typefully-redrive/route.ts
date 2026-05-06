@@ -26,12 +26,29 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
 
   const [item] = await db
-    .select({ id: productionItems.id })
+    .select({
+      id: productionItems.id,
+      publishedLink: productionItems.publishedLink,
+      typefullyDraftId: productionItems.typefullyDraftId,
+    })
     .from(productionItems)
     .where(eq(productionItems.id, id))
     .limit(1);
   if (!item) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  // Block creating a fresh draft for posts already live on the platform —
+  // there's no value in drafting a post that's already published. Existing
+  // drafts (typefullyDraftId set) can still be re-driven, e.g. to re-pull
+  // metadata after a Typefully-side change.
+  if (item.publishedLink && !item.typefullyDraftId) {
+    return NextResponse.json(
+      {
+        error:
+          "This post is already published — no Typefully draft will be created.",
+      },
+      { status: 400 },
+    );
   }
 
   // graphile-worker 0.16+ stores task identifiers in `_private_tasks`, not on

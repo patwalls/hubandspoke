@@ -3828,6 +3828,7 @@ interface TypefullyStatusResponse {
   detail: string;
   postType: string | null;
   accountConfigured: boolean;
+  alreadyPublished: boolean;
   draftId: number | null;
   shareUrl: string | null;
   privateUrl: string | null;
@@ -3961,8 +3962,15 @@ function TypefullyStatusPill({ productionItemId }: { productionItemId: string })
 
   // Pre-create state for X/LinkedIn items: render a one-click button
   // (no popover) that just kicks off creation. Less friction than a
-  // popover for the common "I want a Typefully draft" path.
-  if (data.status === "not_started" && !data.queueJob && !data.draftId) {
+  // popover for the common "I want a Typefully draft" path. Hidden for
+  // already-published posts — no point drafting a post that's already
+  // live on the platform.
+  if (
+    data.status === "not_started" &&
+    !data.queueJob &&
+    !data.draftId &&
+    !data.alreadyPublished
+  ) {
     const style = TYPEFULLY_STATUS_STYLES.not_started;
     return (
       <button

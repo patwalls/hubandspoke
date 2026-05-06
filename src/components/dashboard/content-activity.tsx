@@ -4,7 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import parse, {
+  domToReact,
+  type DOMNode,
+  type HTMLReactParserOptions,
+} from "html-react-parser";
 import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
   ExternalLinkIcon,
   FilmIcon,
   Send as SendIcon,
@@ -131,14 +139,42 @@ function initialsFor(name: string): string {
 const MARKDOWN_LINK_CLASS =
   "text-blue-600 underline hover:text-blue-700 break-all";
 
+// Replace `<img>` and file-link `<a>` nodes with React components that
+// add download / copy buttons. Everything else falls through to the
+// default HTML→React mapping.
+const COMMENT_HTML_OPTIONS: HTMLReactParserOptions = {
+  replace: (node) => {
+    if (node.type !== "tag") return undefined;
+    if (node.name === "img") {
+      const src = (node.attribs?.src as string | undefined) ?? "";
+      const alt = (node.attribs?.alt as string | undefined) ?? "";
+      if (!src) return undefined;
+      return <CommentImage src={src} alt={alt} />;
+    }
+    if (node.name === "a") {
+      const href = (node.attribs?.href as string | undefined) ?? "";
+      // Only intercept links pointing at our file proxy — external
+      // links keep the default rendering (they're real pages, not
+      // downloadable artifacts).
+      if (href.startsWith("/api/files/")) {
+        return (
+          <CommentFileLink href={href}>
+            {domToReact(node.children as DOMNode[], COMMENT_HTML_OPTIONS)}
+          </CommentFileLink>
+        );
+      }
+    }
+    return undefined;
+  },
+};
+
 function CommentBody({ body }: { body: string }) {
   const isHtml = body.trimStart().startsWith("<");
   if (isHtml) {
     return (
-      <div
-        className="tiptap mt-0.5 text-sm text-foreground break-words space-y-2 leading-relaxed"
-        dangerouslySetInnerHTML={{ __html: body }}
-      />
+      <div className="tiptap mt-0.5 text-sm text-foreground break-words space-y-2 leading-relaxed">
+        {parse(body, COMMENT_HTML_OPTIONS)}
+      </div>
     );
   }
   return (
@@ -187,6 +223,136 @@ function CommentBody({ body }: { body: string }) {
         {body}
       </ReactMarkdown>
     </div>
+  );
+}
+
+// Hover overlay with download + copy actions. Clipboard API requires a
+// user gesture and a same-origin fetch — both true here since /api/files
+// runs on our domain. Falls back gracefully on browsers that don't
+// support ClipboardItem (e.g. Firefox without the flag).
+function CommentImage({ src, alt }: { src: string; alt: string }) {
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onCopy = async () => {
+    setError(null);
+    try {
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      // Some browsers reject formats other than image/png. Convert if
+      // needed — but most of our uploads are png/jpeg, so try direct
+      // first and only re-encode on failure.
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({ [blob.type]: blob }),
+        ]);
+      } catch {
+        const png = await blobToPng(blob);
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": png }),
+        ]);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Copy failed");
+      setTimeout(() => setError(null), 2500);
+    }
+  };
+
+  const downloadUrl = src.includes("?")
+    ? `${src}&download=1`
+    : `${src}?download=1`;
+
+  return (
+    <span className="relative inline-block group/img my-2">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        className="rounded border border-border max-w-full sm:max-w-sm h-auto block"
+      />
+      <span className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover/img:opacity-100 transition-opacity">
+        <a
+          href={downloadUrl}
+          download={alt || true}
+          className="inline-flex items-center justify-center rounded bg-black/70 hover:bg-black/85 text-white size-7 backdrop-blur-sm"
+          title="Download"
+          aria-label="Download image"
+        >
+          <DownloadIcon className="size-3.5" />
+        </a>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="inline-flex items-center justify-center rounded bg-black/70 hover:bg-black/85 text-white size-7 backdrop-blur-sm"
+          title={copied ? "Copied" : "Copy image"}
+          aria-label="Copy image to clipboard"
+        >
+          {copied ? (
+            <CheckIcon className="size-3.5" />
+          ) : (
+            <CopyIcon className="size-3.5" />
+          )}
+        </button>
+      </span>
+      {error && (
+        <span className="absolute bottom-2 right-2 rounded bg-red-600 px-1.5 py-0.5 text-[10px] text-white">
+          {error}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Browsers (notably Safari) only accept image/png for navigator.clipboard.write
+// reliably. Re-encode arbitrary blobs through a canvas so the copy still works
+// for jpeg / webp / etc.
+async function blobToPng(blob: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D not supported");
+  ctx.drawImage(bitmap, 0, 0);
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
+      "image/png",
+    );
+  });
+}
+
+function CommentFileLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  const downloadUrl = href.includes("?") ? `${href}&download=1` : `${href}?download=1`;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={MARKDOWN_LINK_CLASS}
+      >
+        {children}
+      </a>
+      <a
+        href={downloadUrl}
+        download
+        className="inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent size-5"
+        title="Download"
+        aria-label="Download file"
+      >
+        <DownloadIcon className="size-3" />
+      </a>
+    </span>
   );
 }
 

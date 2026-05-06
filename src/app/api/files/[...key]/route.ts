@@ -18,8 +18,12 @@ const ALLOWED_PREFIXES = [
  * issue short-lived presigned GET URLs and 302 the browser to them. Comment
  * bodies store `/api/files/<key>` so the link survives forever even though
  * the underlying signed URL only lives ~15 min.
+ *
+ * `?download` (or `?download=<filename>`) sets Content-Disposition:
+ * attachment on the presigned URL so the browser saves the file instead
+ * of rendering it inline. Used by the comment download button.
  */
-export async function GET(_request: NextRequest, context: RouteContext) {
+export async function GET(request: NextRequest, context: RouteContext) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -36,8 +40,16 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   if (!ALLOWED_PREFIXES.some((p) => slashKey.includes(p))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  const downloadParam = request.nextUrl.searchParams.get("download");
+  // Strip the random uuid prefix that buildKey injected so the saved file
+  // is named like the original. Falls back to the last path segment.
+  const rawName = key.split("/").pop() ?? "file";
+  const downloadFileName =
+    downloadParam !== null
+      ? downloadParam || rawName.replace(/^[0-9a-f-]{36}-/i, "")
+      : undefined;
   try {
-    const url = await getPresignedGetUrl(key, 900);
+    const url = await getPresignedGetUrl(key, 900, { downloadFileName });
     return NextResponse.redirect(url, 302);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
