@@ -63,7 +63,7 @@ async function main() {
     const valuesSql = targets
       .map(
         (_t, i) =>
-          `($${i * 4 + 1}, NULL, 'killed', $${i * 4 + 2}::jsonb, now())`
+          `($${i * 2 + 1}::uuid, NULL, 'killed', $${i * 2 + 2}::jsonb, now())`
       )
       .join(", ");
     const params = targets.flatMap((t) => [
