@@ -248,3 +248,43 @@ export async function sendDailyScorecardEmail(opts: {
     MessageStream: "outbound",
   });
 }
+
+export async function sendScCreditsExhaustedEmail(opts: {
+  to: string;
+  failedCount: number;
+  since: Date | null;
+  sampleError: string;
+}) {
+  const sinceText = opts.since
+    ? `since ${opts.since.toLocaleString()} UTC`
+    : "in the last hour";
+  const subject = "[Hub & Spoke] Scrape Creators credits exhausted";
+  const lines = [
+    "Heads up — Scrape Creators is rejecting our metric-sync calls with HTTP 402:",
+    "",
+    `> ${opts.sampleError}`,
+    "",
+    `${opts.failedCount} sync attempts have failed ${sinceText}. Until you top up, no platform metrics (TikTok / IG / X / YouTube / Threads / LinkedIn) will refresh — items show "—" and the dashboard banner stays red.`,
+    "",
+    "Top up here: https://app.scrapecreators.com/",
+    "",
+    "Once credits are back, the next hourly performance-decay sweep will catch every stuck row automatically — no code or manual backfill needed.",
+    "",
+    "— Hub & Spoke",
+  ];
+  return getClient().sendEmail({
+    From: from,
+    To: opts.to,
+    Subject: subject,
+    TextBody: lines.join("\n"),
+    HtmlBody: `
+      <p>Heads up — Scrape Creators is rejecting our metric-sync calls with HTTP 402:</p>
+      <blockquote style="margin:0 0 12px;padding:8px 12px;border-left:3px solid #dc2626;background:#fef2f2;color:#991b1b;font-family:ui-monospace,Menlo,monospace;font-size:12px;">${opts.sampleError.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</blockquote>
+      <p><strong>${opts.failedCount}</strong> sync attempts have failed ${sinceText}. Until you top up, no platform metrics (TikTok / IG / X / YouTube / Threads / LinkedIn) will refresh — items show "—" and the dashboard banner stays red.</p>
+      <p><a href="https://app.scrapecreators.com/" style="background:#dc2626;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Top up Scrape Creators</a></p>
+      <p style="color:#666;font-size:12px;">Once credits are back, the next hourly performance-decay sweep will catch every stuck row automatically — no code or manual backfill needed.</p>
+      <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
+    `,
+    MessageStream: "outbound",
+  });
+}

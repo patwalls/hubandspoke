@@ -31,4 +31,5 @@ export const CRONTAB = `
 */20 * * * * youtube-download-sweep
 0 17 * * 1 account-refresh-sweep
 0 13 * * * daily-scorecard-email
+*/15 * * * * sc-credits-watch
 `.trim();

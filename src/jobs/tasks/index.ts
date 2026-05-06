@@ -54,6 +54,7 @@ import {
   accountRefreshSweepTask,
   accountContentSyncSweepTask,
   dailyScorecardEmailTask,
+  scCreditsWatchTask,
 } from "./scheduled";
 import { thresholdMonitorSweepTask } from "./threshold-monitor-sweep";
 import {
@@ -102,6 +103,7 @@ export interface TaskPayloads {
   "account-content-sync-sweep": Record<string, never>;
   "threshold-monitor-sweep": Record<string, never>;
   "daily-scorecard-email": Record<string, never>;
+  "sc-credits-watch": Record<string, never>;
 }
 
 const helloTask: Task = async (payload, helpers) => {
@@ -141,4 +143,5 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "account-content-sync-sweep": accountContentSyncSweepTask,
   "threshold-monitor-sweep": thresholdMonitorSweepTask,
   "daily-scorecard-email": dailyScorecardEmailTask,
+  "sc-credits-watch": scCreditsWatchTask,
 };

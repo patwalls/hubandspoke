@@ -29,6 +29,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   (live)     cross-post candidate queue → GET /api/cross-post-queue, no scheduled job — runs on every page load of /[brand]/queue Cross-post tab
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
   13:00      daily-scorecard-email → Postmark (per opted-in user). 9am EDT / 8am EST in winter.
+  */15 min   sc-credits-watch → email opted-in users when SC returns HTTP 402 (deduped 4h)
 
 USER / API ENTRY POINTS
   POST /api/accounts/[id]/refresh?mode=async              → account-refresh
@@ -466,6 +467,28 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   the `failed` counter and logs but does not starve the rest of the batch.
   The whole task is retried by graphile-worker on uncaught exceptions
   (e.g. DB unavailable), but a per-recipient failure does not retry.
+
+### `sc-credits-watch` — Scrape Creators credit-exhaustion alert
+- **Trigger:** cron `*/15 * * * *` (every 15 minutes).
+- **Files:** `src/jobs/tasks/scheduled.ts` (`scCreditsWatchTask`),
+  `src/lib/services/sc-credits-watch.ts` (detection + dedupe),
+  `src/lib/email.ts` (`sendScCreditsExhaustedEmail`)
+- **Inputs:** `sc_call_log` rows in the last hour where `ok=false` and
+  notes match `%out of credits%` or `%(402)%`.
+- **Outputs:**
+  - Email to every `daily_scorecard_email_enabled` user (same admin
+    notification list as the daily scorecard).
+  - One `sync_logs` row with `sync_type='sc-credits-alert'` per send for
+    dedupe — the next 4 hours of ticks read this and skip emailing.
+  - Drives the dashboard banner indirectly: `/api/sc-credits-status`
+    reads the same detection helper and `<ScCreditsBanner>` polls it
+    every 60s on every dashboard page.
+- **Downstream:** none. The banner clears itself the moment SC starts
+  returning 200s again — no manual reset needed.
+- **Why every 15 min and not the 60s the banner polls:** the banner is
+  the user-facing surface (instant visibility); the cron's only job is
+  to send one Postmark on state transition, where 15-min granularity is
+  fine and avoids hammering Postmark on flapping.
 
 ---
 

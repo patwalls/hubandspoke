@@ -14,6 +14,7 @@ import { selectVisionCandidates } from "@/lib/services/hook-extract/vision";
 import { selectDispatcherCandidates } from "@/lib/services/hook-extract/dispatcher";
 import { selectExtractPosterCandidates } from "./extract-poster";
 import type { ExtractPosterPayload } from "./extract-poster";
+import { maybeAlertScCreditsExhausted } from "@/lib/services/sc-credits-watch";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
 import { sendDailyScorecardEmail } from "@/lib/email";
@@ -264,6 +265,32 @@ export const dailyScorecardEmailTask: Task = async (_payload, helpers) => {
   helpers.logger.info(
     `daily-scorecard-email sent=${sent} failed=${failed} of ${recipients.length} (${Date.now() - start}ms)`
   );
+};
+
+/**
+ * Watchdog for Scrape Creators credit exhaustion. Looks at the last hour
+ * of `sc_call_log` rows; if any returned a 402 / "out of credits" error,
+ * sends an alert email to opted-in users and writes a `sync_logs` row
+ * for dedupe so the next 4h of ticks stay quiet. Cheap query (single
+ * COUNT + 1 SELECT). Drives the dashboard banner indirectly via the
+ * shared detection helper.
+ */
+export const scCreditsWatchTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("sc-credits-watch start");
+  try {
+    const result = await maybeAlertScCreditsExhausted();
+    helpers.logger.info(
+      `sc-credits-watch ${result.reason} sent=${result.sent} failedCount=${result.state.failedCount} (${Date.now() - start}ms)`,
+    );
+  } catch (err) {
+    helpers.logger.error(
+      `sc-credits-watch failed (${Date.now() - start}ms): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    throw err;
+  }
 };
 
 /**

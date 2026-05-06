@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Toaster } from "sonner";
 import { eq } from "drizzle-orm";
 import { DashboardNav, SectionTabs } from "@/components/dashboard/nav";
+import { ScCreditsBanner } from "@/components/dashboard/sc-credits-banner";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
@@ -67,6 +68,7 @@ export default async function DashboardLayout({
         <div className="mb-4 sm:mb-6">
           <SectionTabs brands={brands} defaultBrand={defaultBrand} />
         </div>
+        <ScCreditsBanner />
         {children}
       </main>
       <Toaster position="bottom-right" richColors closeButton />
