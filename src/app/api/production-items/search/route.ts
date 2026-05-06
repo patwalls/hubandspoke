@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, ilike, isNotNull, isNull, ne, or, desc } from "drizzle-orm";
+import { and, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, productionItems } from "@/lib/db/schema";
 import { extractContentIdFromUrl } from "@/lib/platform-url";
@@ -22,13 +22,31 @@ export async function GET(request: NextRequest) {
     eq(productionItems.brand, brand),
     isNull(productionItems.deletedAt),
   ];
-  if (!includeAll) conditions.push(isNotNull(productionItems.notionId));
+  // The Pillar picker needs items that can plausibly be a *parent* — i.e.
+  // anything not already a derivative. Until 2026-05-06 this was gated
+  // by `notionId IS NOT NULL`, which dated back to the era when every
+  // pillar was Notion-synced. Account-content-sync, manual uploads, and
+  // YouTube downloads now produce legitimate pillar candidates without
+  // notion_ids; the old gate hid them. Source-type is the canonical
+  // "is this a derivative" field — drop the Notion gate, exclude only
+  // clip/repost/cross_post.
+  if (!includeAll) {
+    conditions.push(
+      or(
+        isNull(productionItems.sourceType),
+        eq(productionItems.sourceType, "original"),
+      )!,
+    );
+  }
   if (excludeId) conditions.push(ne(productionItems.id, excludeId));
 
   // Recognize ID-shaped pastes so the picker resolves them directly instead
   // of treating them as title text. Order: UUID (our row id) > URL (any
   // platform's published link) > bare numeric (X/TikTok/LinkedIn content id).
-  // Falls through to title ILIKE for free-text queries.
+  // Falls through to multi-field ILIKE for free-text queries — title was
+  // the only matched column until 2026-05-06, which made phrases like
+  // "how i work" miss pillars whose title was different but whose hook
+  // / description matched.
   if (q) {
     const urlMatch = extractContentIdFromUrl(q);
     if (UUID_RE.test(q)) {
@@ -48,7 +66,16 @@ export async function GET(request: NextRequest) {
         )!,
       );
     } else {
-      conditions.push(ilike(productionItems.title, `%${q}%`));
+      const pattern = `%${q}%`;
+      conditions.push(
+        or(
+          ilike(productionItems.title, pattern),
+          ilike(productionItems.hook, pattern),
+          ilike(productionItems.overlay, pattern),
+          ilike(productionItems.description, pattern),
+          ilike(productionItems.contentBody, pattern),
+        )!,
+      );
     }
   }
 
@@ -72,7 +99,13 @@ export async function GET(request: NextRequest) {
     .from(productionItems)
     .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
     .where(and(...conditions))
-    .orderBy(desc(productionItems.publishedDate))
+    // Heavy-hitter pillars (the ones operators reach for daily) first;
+    // recency tiebreaks for items at the same view count. NULLS LAST so
+    // unpublished/non-views rows don't pollute the top of the list.
+    .orderBy(
+      sql`${productionItems.views} DESC NULLS LAST`,
+      sql`${productionItems.publishedDate} DESC NULLS LAST`,
+    )
     .limit(25);
 
   // Reshape so the picker gets a nested `account` object (matches the
