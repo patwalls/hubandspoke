@@ -34,32 +34,38 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const updated = (await db.execute(sql`
-    UPDATE graphile_worker._private_jobs
-    SET locked_at = NULL,
-        locked_by = NULL,
-        attempts = 0,
-        run_at = now(),
-        last_error = NULL
-    WHERE task_identifier = 'typefully-create-draft'
-      AND payload->>'productionItemId' = ${id}
-      AND id IN (
-        SELECT id FROM graphile_worker._private_jobs
-        WHERE task_identifier = 'typefully-create-draft'
+  // graphile-worker 0.16+ stores task identifiers in `_private_tasks`, not on
+  // `_private_jobs` directly. Look up the integer task_id once, then filter.
+  const taskRows = (await db.execute(sql`
+    SELECT id FROM graphile_worker._private_tasks WHERE identifier = 'typefully-create-draft'
+  `)) as unknown as Array<{ id: number }>;
+  const taskId = taskRows[0]?.id ?? null;
+
+  const updated = taskId
+    ? ((await db.execute(sql`
+        UPDATE graphile_worker._private_jobs
+        SET locked_at = NULL,
+            locked_by = NULL,
+            attempts = 0,
+            run_at = now(),
+            last_error = NULL
+        WHERE task_id = ${taskId}
           AND payload->>'productionItemId' = ${id}
-        ORDER BY id DESC
-        LIMIT 1
-      )
-    RETURNING id::text, task_identifier
-  `)) as unknown as Array<{ id: string; task_identifier: string }>;
+          AND id IN (
+            SELECT id FROM graphile_worker._private_jobs
+            WHERE task_id = ${taskId}
+              AND payload->>'productionItemId' = ${id}
+            ORDER BY id DESC
+            LIMIT 1
+          )
+        RETURNING id::text
+      `)) as unknown as Array<{ id: string }>)
+    : [];
 
   if (updated[0]) {
     return NextResponse.json({
       ok: true,
-      redriven: {
-        jobId: updated[0].id,
-        taskIdentifier: updated[0].task_identifier,
-      },
+      redriven: { jobId: updated[0].id, taskIdentifier: "typefully-create-draft" },
     });
   }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { productionItems } from "@/lib/db/schema";
+import { accounts, productionItems } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 
 interface QueueJobRow {
@@ -44,6 +44,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .select({
       id: productionItems.id,
       postType: productionItems.postType,
+      accountId: productionItems.accountId,
       typefullyDraftId: productionItems.typefullyDraftId,
       typefullyStatus: productionItems.typefullyStatus,
       typefullyShareUrl: productionItems.typefullyShareUrl,
@@ -59,13 +60,36 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Whether the owning account is mapped to a Typefully social set. Drives
+  // the UI: when false, the pill stays hidden because the task would silently
+  // soft-skip and showing a "Create draft" button would do nothing.
+  let accountConfigured = false;
+  if (item.accountId) {
+    const [account] = await db
+      .select({ socialSetId: accounts.typefullySocialSetId })
+      .from(accounts)
+      .where(eq(accounts.id, item.accountId))
+      .limit(1);
+    accountConfigured = !!account?.socialSetId;
+  }
+
   // Most recent typefully-create-draft job for this production item.
+  // graphile-worker 0.16+ stores task identifiers in `_private_tasks`, not on
+  // `_private_jobs` directly — join through `task_id` to filter.
   const rows = (await db.execute(sql`
-    SELECT id::text, task_identifier, attempts, max_attempts, run_at, locked_at, locked_by, last_error
-    FROM graphile_worker._private_jobs
-    WHERE task_identifier = 'typefully-create-draft'
-      AND payload->>'productionItemId' = ${id}
-    ORDER BY id DESC
+    SELECT j.id::text,
+           t.identifier AS task_identifier,
+           j.attempts,
+           j.max_attempts,
+           j.run_at,
+           j.locked_at,
+           j.locked_by,
+           j.last_error
+    FROM graphile_worker._private_jobs j
+    JOIN graphile_worker._private_tasks t ON t.id = j.task_id
+    WHERE t.identifier = 'typefully-create-draft'
+      AND j.payload->>'productionItemId' = ${id}
+    ORDER BY j.id DESC
     LIMIT 1
   `)) as unknown as QueueJobRow[];
   const queueJob: QueueJobRow | null = rows[0] ?? null;
@@ -126,6 +150,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     status,
     detail,
     postType: item.postType,
+    accountConfigured,
     draftId: item.typefullyDraftId,
     shareUrl: item.typefullyShareUrl,
     privateUrl: item.typefullyPrivateUrl,

@@ -68,13 +68,13 @@ export const typefullyCreateDraftTask: Task = async (rawPayload, helpers) => {
     );
     return;
   }
-  const text = (item.contentBody ?? "").trim();
-  if (!text) {
-    helpers.logger.info(
-      `[typefully] item ${productionItemId} has empty contentBody — skip`,
-    );
-    return;
-  }
+  // Always create a draft, even when contentBody is empty — operators want
+  // the empty Typefully shell so they can write the body inside Typefully.
+  // Typefully requires text length >= 1; fall back to title, then a single
+  // space if both are blank.
+  const body = (item.contentBody ?? "").trim();
+  const titleFallback = (item.title ?? "").trim();
+  const text = body || titleFallback || " ";
   if (!item.accountId) {
     helpers.logger.info(
       `[typefully] item ${productionItemId} has no accountId — skip`,

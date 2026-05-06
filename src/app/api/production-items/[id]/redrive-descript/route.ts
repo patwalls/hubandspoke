@@ -60,24 +60,39 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     );
   }
 
-  const updated = (await db.execute(sql`
-    UPDATE graphile_worker._private_jobs
-    SET locked_at = NULL,
-        locked_by = NULL,
-        attempts = 0,
-        run_at = now(),
-        last_error = NULL
-    WHERE task_identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
-      AND payload->>'triggerId' = ${trigger.id}
-      AND id IN (
-        SELECT id FROM graphile_worker._private_jobs
-        WHERE task_identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
+  // graphile-worker 0.16+ stores task identifiers in `_private_tasks`; look
+  // up the int task ids once, then filter by them.
+  const taskIds = (await db.execute(sql`
+    SELECT id, identifier FROM graphile_worker._private_tasks
+    WHERE identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
+  `)) as unknown as Array<{ id: number; identifier: string }>;
+  const idByName = new Map(taskIds.map((r) => [r.identifier, r.id]));
+  const ids = [...idByName.values()];
+  const updated = (ids.length
+    ? ((await db.execute(sql`
+        UPDATE graphile_worker._private_jobs
+        SET locked_at = NULL,
+            locked_by = NULL,
+            attempts = 0,
+            run_at = now(),
+            last_error = NULL
+        WHERE task_id = ANY(${ids})
           AND payload->>'triggerId' = ${trigger.id}
-        ORDER BY id DESC
-        LIMIT 1
-      )
-    RETURNING id::text, task_identifier
-  `)) as unknown as Array<{ id: string; task_identifier: string }>;
+          AND id IN (
+            SELECT id FROM graphile_worker._private_jobs
+            WHERE task_id = ANY(${ids})
+              AND payload->>'triggerId' = ${trigger.id}
+            ORDER BY id DESC
+            LIMIT 1
+          )
+        RETURNING id::text, task_id
+      `)) as unknown as Array<{ id: string; task_id: number }>)
+    : []
+  ).map((r) => ({
+    id: r.id,
+    task_identifier:
+      [...idByName.entries()].find(([, v]) => v === r.task_id)?.[0] ?? "unknown",
+  }));
 
   const job = updated[0] ?? null;
   if (!job) {

@@ -81,12 +81,23 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   // payload is jsonb so we filter by triggerId inside it.
   let queueJob: QueueJobRow | null = null;
   if (trigger) {
+    // graphile-worker 0.16+ stores task identifiers in `_private_tasks`;
+    // join through `task_id` to filter by name.
     const rows = (await db.execute(sql`
-      SELECT id::text, task_identifier, attempts, max_attempts, run_at, locked_at, locked_by, last_error, payload
-      FROM graphile_worker._private_jobs
-      WHERE task_identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
-        AND payload->>'triggerId' = ${trigger.id}
-      ORDER BY id DESC
+      SELECT j.id::text,
+             t.identifier AS task_identifier,
+             j.attempts,
+             j.max_attempts,
+             j.run_at,
+             j.locked_at,
+             j.locked_by,
+             j.last_error,
+             j.payload
+      FROM graphile_worker._private_jobs j
+      JOIN graphile_worker._private_tasks t ON t.id = j.task_id
+      WHERE t.identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
+        AND j.payload->>'triggerId' = ${trigger.id}
+      ORDER BY j.id DESC
       LIMIT 1
     `)) as unknown as QueueJobRow[];
     queueJob = rows[0] ?? null;

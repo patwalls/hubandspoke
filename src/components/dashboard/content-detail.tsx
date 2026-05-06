@@ -3827,6 +3827,7 @@ interface TypefullyStatusResponse {
     | "not_started";
   detail: string;
   postType: string | null;
+  accountConfigured: boolean;
   draftId: number | null;
   shareUrl: string | null;
   privateUrl: string | null;
@@ -3885,9 +3886,9 @@ const TYPEFULLY_STATUS_STYLES: Record<
     pillClass: "border-red-200 bg-red-50 text-red-800",
   },
   not_started: {
-    dot: "bg-muted-foreground/40",
-    label: "Typefully not started",
-    pillClass: "border-border bg-muted/30 text-muted-foreground",
+    dot: "bg-sky-500",
+    label: "Create Typefully draft",
+    pillClass: "border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100",
   },
 };
 
@@ -3937,12 +3938,12 @@ function TypefullyStatusPill({ productionItemId }: { productionItemId: string })
       );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error("Re-run failed", {
+        toast.error("Create / re-run failed", {
           description: json?.error || `HTTP ${res.status}`,
         });
         return;
       }
-      toast.success("Re-running…", {
+      toast.success("Creating in Typefully…", {
         description:
           "The worker will pick this up within a few seconds. Status will refresh automatically.",
       });
@@ -3953,10 +3954,32 @@ function TypefullyStatusPill({ productionItemId }: { productionItemId: string })
   }, [productionItemId, fetchStatus]);
 
   if (loading || !data) return null;
-  // Hide when nothing to show — typically an account without a
-  // typefullySocialSetId, where the task no-ops silently.
-  if (data.status === "not_started" && !data.queueJob && !data.draftId)
-    return null;
+  // Hide entirely when the owning account isn't mapped to a Typefully social
+  // set — the task would silently no-op, so rendering a "Create draft" CTA
+  // would mislead. Configure the account's typefully_social_set_id to enable.
+  if (!data.accountConfigured) return null;
+
+  // Pre-create state for X/LinkedIn items: render a one-click button
+  // (no popover) that just kicks off creation. Less friction than a
+  // popover for the common "I want a Typefully draft" path.
+  if (data.status === "not_started" && !data.queueJob && !data.draftId) {
+    const style = TYPEFULLY_STATUS_STYLES.not_started;
+    return (
+      <button
+        type="button"
+        onClick={handleRedrive}
+        disabled={redriving}
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          style.pillClass,
+        )}
+        title="Create a Typefully draft for this post"
+      >
+        <span className={cn("size-1.5 rounded-full", style.dot)} aria-hidden />
+        {redriving ? "Creating…" : style.label}
+      </button>
+    );
+  }
 
   const style = TYPEFULLY_STATUS_STYLES[data.status];
   return (
