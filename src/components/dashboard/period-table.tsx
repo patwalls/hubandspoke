@@ -256,19 +256,23 @@ export function PeriodTable({
           // it when the post_type equals the platform's default, which is
           // exactly the case that's ambiguous here ("@starter_story" sitting
           // next to "@starter_story · Post" with no Reel label).
-          <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm">
+          <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm whitespace-nowrap">
             <AccountAvatar
               avatarUrl={rowMeta[row].avatarUrl}
               platform={rowMeta[row].platform}
               handle={rowMeta[row].handle}
               size={20}
             />
-            <span>@{rowMeta[row].handle}</span>
-            {rowMeta[row].postType ? (
-              <span className="text-muted-foreground">
-                · {POST_TYPE_SHORT_LABEL[rowMeta[row].postType as PostType] ?? rowMeta[row].postType}
-              </span>
-            ) : null}
+            <span>
+              @{rowMeta[row].handle}
+              {rowMeta[row].postType ? (
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {POST_TYPE_SHORT_LABEL[rowMeta[row].postType as PostType] ??
+                    rowMeta[row].postType}
+                </span>
+              ) : null}
+            </span>
           </span>
         ) : (
           row

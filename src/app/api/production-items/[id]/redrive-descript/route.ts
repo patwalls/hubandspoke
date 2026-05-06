@@ -32,7 +32,26 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   const guard = await requireSession();
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  try {
+    return await runRedrive(id);
+  } catch (err) {
+    // Without this catch, anything that throws below (e.g. enqueue
+    // hitting a connection issue, a malformed payload, etc.) bubbles
+    // up to Next.js as an opaque 500 with no body — the toast then
+    // shows "HTTP 500" with no actionable detail. Capture the message
+    // and log the full error to the server so heroku logs have the
+    // stack trace.
+    console.error("[redrive-descript] unhandled", err);
+    return NextResponse.json(
+      {
+        error: `Re-run failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      { status: 500 },
+    );
+  }
+}
 
+async function runRedrive(id: string) {
   const [item] = await db
     .select({
       id: productionItems.id,

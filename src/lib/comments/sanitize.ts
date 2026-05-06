@@ -90,9 +90,25 @@ export function sanitizeCommentHtml(html: string): string {
 }
 
 export function htmlToPlainText(html: string): string {
-  const stripped = sanitizeHtml(html, {
+  // Insert newlines at block-element boundaries before sanitize-html
+  // strips tags. Without this, `<p>foo</p><p>bar</p>` collapses to
+  // `foobar` — the comment-notification email then renders one giant
+  // blob instead of the multi-paragraph comment the user actually
+  // typed. The email template uses `white-space: pre-wrap` and
+  // converts `\n` → `<br>`, so preserving newlines here is what
+  // makes line breaks survive end-to-end.
+  const withBreaks = html
+    .replace(/<\/(p|div|h[1-6]|li|blockquote|tr)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n");
+  const stripped = sanitizeHtml(withBreaks, {
     allowedTags: [],
     allowedAttributes: {},
   });
-  return stripped.replace(/\s+/g, " ").trim();
+  // Collapse runs of horizontal whitespace, drop leading/trailing
+  // whitespace per line, cap consecutive blank lines at one.
+  return stripped
+    .replace(/[ \t]+/g, " ")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
