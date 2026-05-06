@@ -162,6 +162,11 @@ export async function fetchAccountFormatViewBars(
       ? sql`AND published_at >= (now() - interval '${sql.raw(String(windowDays))} days')`
       : sql``;
 
+  const accountIdList = sql.join(
+    opts.accountIds.map((id) => sql`${id}`),
+    sql`, `
+  );
+
   const rows = await db.execute<{
     account_id: string;
     format: string;
@@ -176,7 +181,7 @@ export async function fetchAccountFormatViewBars(
       percentile_cont(${percentile}) WITHIN GROUP (ORDER BY views) AS p,
       count(*) AS cohort_size
     FROM production_items
-    WHERE account_id = ANY(${opts.accountIds})
+    WHERE account_id IN (${accountIdList})
       AND format IS NOT NULL
       AND post_type IS NOT NULL
       AND status = 'Published'
@@ -227,6 +232,11 @@ export async function fetchBrandFormatViewBars(
       ? sql`AND pi.published_at >= (now() - interval '${sql.raw(String(windowDays))} days')`
       : sql``;
 
+  const brandIdList = sql.join(
+    opts.brandIds.map((id) => sql`${id}`),
+    sql`, `
+  );
+
   const rows = await db.execute<{
     brand_id: string;
     format: string;
@@ -242,7 +252,7 @@ export async function fetchBrandFormatViewBars(
       count(*) AS cohort_size
     FROM production_items pi
     JOIN accounts a ON a.id = pi.account_id
-    WHERE a.brand_id = ANY(${opts.brandIds})
+    WHERE a.brand_id IN (${brandIdList})
       AND pi.format IS NOT NULL
       AND pi.post_type IS NOT NULL
       AND pi.status = 'Published'
