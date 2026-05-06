@@ -3,9 +3,11 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, repurposeTriggers } from "@/lib/db/schema";
 import {
+  buildDescriptCompositionUrl,
   fetchDescriptJob,
   extractCompositionIdFromAgentResponse,
 } from "@/lib/descript";
+import { recordToolAction } from "@/lib/services/content-events";
 
 export interface DescriptClipResolvePayload {
   triggerId: string;
@@ -67,6 +69,35 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
         .update(productionItems)
         .set({ descriptCompositionId: compositionId })
         .where(eq(productionItems.id, payload.derivativeItemId));
+
+      // Surface the completion in the activity feed. Read editor +
+      // project_id off the just-updated derivative; both are set during
+      // promotion (editorUserId by resolveAssignees, descriptProjectId
+      // by the agent/full-video path before this poller fires).
+      const [derivative] = await db
+        .select({
+          editorUserId: productionItems.editorUserId,
+          descriptProjectId: productionItems.descriptProjectId,
+        })
+        .from(productionItems)
+        .where(eq(productionItems.id, payload.derivativeItemId))
+        .limit(1);
+      const compositionUrl = derivative?.descriptProjectId
+        ? buildDescriptCompositionUrl(
+            derivative.descriptProjectId,
+            compositionId,
+          )
+        : null;
+      await recordToolAction({
+        contentItemId: payload.derivativeItemId,
+        userId: derivative?.editorUserId ?? null,
+        tool: "descript",
+        action: "clip_created",
+        status: "success",
+        label: "Clip ready in Descript",
+        url: compositionUrl,
+        meta: { importPath: payload.importMode ? "import" : "agent" },
+      });
     }
     // Cold full-video import: stamp the pillar with the source compositionId
     // so the next clip on this pillar takes the warm (duplicate) path

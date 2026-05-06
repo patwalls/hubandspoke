@@ -6,6 +6,7 @@ import {
   createTypefullyDraft,
   type TypefullyPlatform,
 } from "@/lib/typefully";
+import { recordToolAction } from "@/lib/services/content-events";
 
 export interface TypefullyCreateDraftPayload {
   productionItemId: string;
@@ -37,6 +38,7 @@ export const typefullyCreateDraftTask: Task = async (rawPayload, helpers) => {
       publishedLink: productionItems.publishedLink,
       typefullyDraftId: productionItems.typefullyDraftId,
       accountId: productionItems.accountId,
+      editorUserId: productionItems.editorUserId,
     })
     .from(productionItems)
     .where(eq(productionItems.id, productionItemId))
@@ -118,6 +120,20 @@ export const typefullyCreateDraftTask: Task = async (rawPayload, helpers) => {
       typefullyError: null,
     })
     .where(eq(productionItems.id, productionItemId));
+
+  // Surface the completion in the activity feed. private_url is the
+  // editable Typefully draft URL; share_url is the public preview.
+  // Prefer private — that's the link an operator wants to click.
+  await recordToolAction({
+    contentItemId: productionItemId,
+    userId: item.editorUserId ?? null,
+    tool: "typefully",
+    action: "draft_created",
+    status: "success",
+    label: "Draft created in Typefully",
+    url: draft.private_url ?? draft.share_url ?? null,
+    meta: { platform: item.postType, draftStatus: draft.status },
+  });
 
   helpers.logger.info(
     `[typefully] item ${productionItemId} draft=${draft.id} status=${draft.status}`,

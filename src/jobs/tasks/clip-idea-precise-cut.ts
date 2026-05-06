@@ -14,12 +14,14 @@ import {
   repurposeTriggers,
 } from "@/lib/db/schema";
 import {
+  buildDescriptCompositionUrl,
   buildLayoutPackPrompt,
   createDescriptProjectFromUrl,
   fetchDescriptJob,
   invokeDescriptAgent,
 } from "@/lib/descript";
 import { getPresignedGetUrl, putObjectFromFile } from "@/lib/s3";
+import { recordToolAction } from "@/lib/services/content-events";
 import { downloadToFile, safeUnlink } from "./descript-upload-helpers";
 
 export interface ClipIdeaPreciseCutPayload {
@@ -223,6 +225,35 @@ async function pollUploadOnce(
         .update(productionItems)
         .set({ descriptCompositionId: compositionId })
         .where(eq(productionItems.id, payload.derivativeItemId));
+
+      // Surface the completion in the activity feed. Read editor +
+      // project_id off the derivative; descriptProjectId was set in
+      // phase 1 (createDescriptProjectFromUrl), editorUserId at
+      // promotion time.
+      const [derivative] = await db
+        .select({
+          editorUserId: productionItems.editorUserId,
+          descriptProjectId: productionItems.descriptProjectId,
+        })
+        .from(productionItems)
+        .where(eq(productionItems.id, payload.derivativeItemId))
+        .limit(1);
+      const compositionUrl = derivative?.descriptProjectId
+        ? buildDescriptCompositionUrl(
+            derivative.descriptProjectId,
+            compositionId,
+          )
+        : null;
+      await recordToolAction({
+        contentItemId: payload.derivativeItemId,
+        userId: derivative?.editorUserId ?? null,
+        tool: "descript",
+        action: "clip_created",
+        status: "success",
+        label: "Clip ready in Descript",
+        url: compositionUrl,
+        meta: { importPath: "precise-cut" },
+      });
     }
     helpers.logger.info(
       `precise-cut ok clip=${payload.clipIdeaId} composition=${compositionId ?? "none"}`,

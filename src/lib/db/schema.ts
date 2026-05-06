@@ -1045,6 +1045,20 @@ export type ContentEventPayload =
       sourceTitle: string | null;
       targetAccountHandle: string | null;
       targetPostType: string | null;
+    }
+  // Generic tool-integration events. Single envelope so adding a tool is
+  // (1) emit with a new `tool` string, (2) register the icon/label in
+  // content-activity.tsx's TOOL_REGISTRY. No new variant per tool, no
+  // new renderer branch, no migration. `label` is pre-rendered by the
+  // emitter so the renderer stays trivial.
+  | {
+      type: "tool_action";
+      tool: string; // "descript" | "typefully" | …
+      action: string; // "clip_created" | "draft_created" | …
+      status: "success" | "error" | "info";
+      label: string;
+      url: string | null;
+      meta?: Record<string, string | number | null>;
     };
 
 export const contentEvents = pgTable(

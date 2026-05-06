@@ -4,6 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  ExternalLinkIcon,
+  FilmIcon,
+  Send as SendIcon,
+  Wrench as WrenchIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CommentEditor, isEditorEmpty } from "@/components/dashboard/comment-editor";
 import { statusClassWithPalette } from "@/lib/badge-colors";
@@ -28,6 +35,16 @@ interface CommentItem {
   isMine: boolean;
 }
 
+type ToolActionPayload = {
+  type: "tool_action";
+  tool: string;
+  action: string;
+  status: "success" | "error" | "info";
+  label: string;
+  url: string | null;
+  meta?: Record<string, string | number | null>;
+};
+
 type EventPayload =
   | { type: "status_change"; from: string | null; to: string | null }
   | { type: "killed"; from: string | null; reason: string | null }
@@ -38,7 +55,20 @@ type EventPayload =
       sourceTitle: string | null;
       targetAccountHandle: string | null;
       targetPostType: string | null;
-    };
+    }
+  | ToolActionPayload;
+
+// Registry for `tool_action` events. Key on the `tool` string the worker
+// emits. Adding a new tool integration = one row here. An unknown tool
+// falls back to the generic Wrench icon — safe under deploy ordering.
+const TOOL_REGISTRY: Record<
+  string,
+  { label: string; Icon: LucideIcon; accent: string }
+> = {
+  descript: { label: "Descript", Icon: FilmIcon, accent: "text-purple-600" },
+  typefully: { label: "Typefully", Icon: SendIcon, accent: "text-blue-600" },
+};
+const TOOL_FALLBACK = { label: "Tool", Icon: WrenchIcon, accent: "text-muted-foreground" };
 
 interface EventItem {
   kind: "event";
@@ -469,9 +499,25 @@ function EventRow({
 }) {
   const actorName = userDisplayName(event.user, "Someone");
   const avatarUrl = event.user?.avatarUrl ?? null;
+  // Tool actions get a tool-branded icon avatar instead of the actor's
+  // photo — the actor is still named in the body, but the visual anchor
+  // is the integration that fired (Descript / Typefully / …).
+  const isToolAction = event.payload.type === "tool_action";
+  const tool = isToolAction
+    ? TOOL_REGISTRY[(event.payload as ToolActionPayload).tool] ?? TOOL_FALLBACK
+    : null;
   return (
     <div className="flex gap-3 items-center">
-      {avatarUrl ? (
+      {tool ? (
+        <div
+          className={cn(
+            "size-8 rounded-full bg-accent inline-flex items-center justify-center shrink-0",
+            tool.accent,
+          )}
+        >
+          <tool.Icon className="size-4" />
+        </div>
+      ) : avatarUrl ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
           src={avatarUrl}
@@ -595,10 +641,51 @@ function EventBody({
       </div>
     );
   }
+  if (event.payload.type === "tool_action") {
+    return <ToolActionBody actor={actorName} payload={event.payload} />;
+  }
   return (
     <span>
       <span className="font-medium text-foreground">{actorName}</span> logged{" "}
       {event.eventType}
+    </span>
+  );
+}
+
+function ToolActionBody({
+  actor,
+  payload,
+}: {
+  actor: string;
+  payload: ToolActionPayload;
+}) {
+  const tool = TOOL_REGISTRY[payload.tool] ?? TOOL_FALLBACK;
+  const dotClass =
+    payload.status === "success"
+      ? "bg-emerald-500"
+      : payload.status === "error"
+        ? "bg-red-500"
+        : "bg-muted-foreground/40";
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-1.5">
+      <span
+        className={cn("size-1.5 rounded-full inline-block", dotClass)}
+        aria-hidden
+      />
+      <span className="font-medium text-foreground">{actor}</span>
+      <span>·</span>
+      <span>{payload.label}</span>
+      {payload.url ? (
+        <a
+          href={payload.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-primary hover:underline"
+        >
+          Open in {tool.label}
+          <ExternalLinkIcon className="size-3" />
+        </a>
+      ) : null}
     </span>
   );
 }

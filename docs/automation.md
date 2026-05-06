@@ -642,7 +642,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Trigger:** enqueued by `POST /api/descript/clip-out`; enqueued by `promote-clip-idea` service (agent flow + full-video flow)
 - **Files:** `src/jobs/tasks/descript-clip-resolve.ts`
 - **Inputs:** `{ triggerId, jobId, derivativeItemId?, pillarItemId?, importMode?, deadlineAt? }`
-- **Outputs:** `repurposeTriggers.descriptCompositionId`; if `derivativeItemId`, also `productionItems.descriptCompositionId` on the derivative; if `pillarItemId` + `importMode`, also stamps composition on the pillar so future full-video clips skip the upload.
+- **Outputs:** `repurposeTriggers.descriptCompositionId`; if `derivativeItemId`, also `productionItems.descriptCompositionId` on the derivative; if `pillarItemId` + `importMode`, also stamps composition on the pillar so future full-video clips skip the upload. Inserts a `tool_action` row into `content_events` (tool=`descript`, action=`clip_created`) so the activity feed surfaces the completion with an "Open in Descript" link.
 - **Downstream:** none
 - **Rules:**
   - Polls every 5s, 10-min deadline; short-invocation re-enqueue
@@ -654,7 +654,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Inputs:** `{ clipIdeaId, triggerId, derivativeItemId, uploadJobId?, layoutJobId?, applyLayoutPack?, deadlineAt? }`
 - **Outputs:**
   - Phase 1 (no `uploadJobId`, no `layoutJobId`): download source from S3, ffmpeg-trim to [startSec, endSec], **re-upload the trimmed mp4 to a temp S3 key (`<prefix>/clip-tmp/<clipIdeaId>/<uuid>.mp4`)**, then call `createDescriptProjectFromUrl` with a presigned GET URL so Descript pulls the bytes itself. Save `descriptJobId` + `descriptProjectUrl` to `repurposeTriggers`; save `descriptProjectId` + URL to `productionItems`. (We previously used Descript's signed-PUT path — `createDescriptProjectWithUpload` + PUT bytes — but Descript's importer started rejecting those uploads with a generic "Import failed" 1–2s after PUT, even for synthetic test patterns; verified 2026-05-05. URL-fetch path is what the cold full-video flow already uses and remains stable.)
-  - Phase 2 (`uploadJobId` set): poll import, save composition ID to both tables. When `applyLayoutPack=true` AND `DESCRIPT_LAYOUT_PACK_NAME` is enabled, invoke Underlord against the new project with `buildLayoutPackPrompt()` to apply the pack + mark fillers, save the prompt to `repurposeTriggers.descriptPrompt`, and re-enqueue with `layoutJobId`. Otherwise the task ends here.
+  - Phase 2 (`uploadJobId` set): poll import, save composition ID to both tables, and insert a `tool_action` row into `content_events` (tool=`descript`, action=`clip_created`, meta.importPath=`precise-cut`) so the activity feed shows the completion. When `applyLayoutPack=true` AND `DESCRIPT_LAYOUT_PACK_NAME` is enabled, invoke Underlord against the new project with `buildLayoutPackPrompt()` to apply the pack + mark fillers, save the prompt to `repurposeTriggers.descriptPrompt`, and re-enqueue with `layoutJobId`. Otherwise the task ends here.
   - Phase 3 (`layoutJobId` set): poll the layout-apply Underlord job. Composition ID is unchanged (Underlord mutates in place), so this phase is purely status-watching — exits when the job stops.
 - **Downstream:** none
 - **Rules:**
@@ -678,7 +678,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Trigger:** enqueued from `POST /api/production-items` after insert when `postType` is `x` or `linkedin` AND `publishedLink` is null. Also enqueueable on demand via `POST /api/production-items/[id]/typefully-redrive`.
 - **Files:** `src/jobs/tasks/typefully-create-draft.ts`, `src/lib/typefully.ts`
 - **Inputs:** `{ productionItemId }` — task re-fetches the item + the owning account
-- **Outputs:** Typefully draft created via `POST /v2/social-sets/{id}/drafts`; populates `production_items.typefully_draft_id`, `typefully_status`, `typefully_share_url`, `typefully_private_url`
+- **Outputs:** Typefully draft created via `POST /v2/social-sets/{id}/drafts`; populates `production_items.typefully_draft_id`, `typefully_status`, `typefully_share_url`, `typefully_private_url`. Also inserts a `tool_action` row into `content_events` (tool=`typefully`, action=`draft_created`) so the activity feed surfaces the new draft with an "Open in Typefully" link.
 - **Downstream:** `/api/webhooks/typefully` keeps `typefully_status`, `typefully_scheduled_date`, `typefully_published_at` synced as the user moves the draft inside Typefully
 - **Rules:**
   - Soft-skips (returns without throwing) when: item missing, draft already exists, postType isn't x/linkedin, publishedLink set, contentBody empty, account has no `typefullySocialSetId`
