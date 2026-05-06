@@ -15,7 +15,14 @@ async function main() {
 
   const runner = await run({
     pgPool,
-    concurrency: 4,
+    // Dropped from 4 → 2 (2026-05-06): clip-idea-precise-cut's ffmpeg
+    // re-encode uses ~200–300 MB and the Basic worker dyno only has
+    // 512 MB total. Running 4 in parallel was hitting Heroku R14
+    // (memory quota exceeded), SIGKILLing the worker mid-task and
+    // leaking the job lock for graphile-worker's default 4h timeout —
+    // every precise-cut promotion was getting stuck. Bump back to 4
+    // when the worker upgrades past Basic.
+    concurrency: 2,
     pollInterval: 2000,
     // Heroku sends SIGKILL 30s after SIGTERM; 20s of grace lets jobs finish
     // while leaving 10s of headroom for cleanup.
@@ -46,7 +53,7 @@ async function main() {
   process.on("SIGINT", () => void shutdown("SIGINT"));
 
   console.log(
-    `[worker] started concurrency=4 tasks=${Object.keys(taskList).join(",")}`
+    `[worker] started concurrency=2 tasks=${Object.keys(taskList).join(",")}`
   );
 
   await runner.promise;
