@@ -1,10 +1,17 @@
 #!/usr/bin/env node
 // One-shot cleanup script for the repost v1 → v2 cutover.
 //
-// Bulk-stamps every existing `sourceType='repost' status='Idea'` row to
-// status='Killed' with reason 'superseded by repost v2 algorithm'. This
-// clears the v1-populated queue so the live v2 query (cohort-driven,
-// P75×1.5×) takes over with a clean slate.
+// Soft-deletes every existing `sourceType='repost' status='Idea'` row
+// (stamps deleted_at). v2's selectRepostCandidates filters by
+// deleted_at IS NULL when looking up prior reposts, so soft-deleting
+// makes these rows vanish from v2's view entirely.
+//
+// CRITICAL: do NOT stamp status='Killed' — v2 treats any killed repost
+// on a source as a *permanent operator rejection* and blocks the source
+// from ever resurfacing. The v1 picks were system-generated, not
+// operator-rejected, so the killed-status path is wrong for cleanup.
+// (Learned this by accidentally suppressing 24 of v2's top candidates
+// with the original version of this script.)
 //
 // Idempotent: re-running is a no-op because the WHERE clause filters
 // to Idea status only. Run via:
@@ -27,57 +34,34 @@ const pool = new Pool({
   ssl: process.env.DATABASE_SSL === "off" ? false : { rejectUnauthorized: false },
 });
 
-const REASON = "superseded by repost v2 algorithm (live percentile-driven queue)";
-
 async function main() {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    // Lock-and-find candidates so the activity-event insert can reference
-    // the killed rows by id.
-    const { rows: targets } = await client.query(
-      `SELECT id, title, account_id, post_type
+    const { rows: countRow } = await client.query(
+      `SELECT count(*)::int AS n
        FROM production_items
-       WHERE source_type = 'repost' AND status = 'Idea'
-       FOR UPDATE`
+       WHERE source_type = 'repost' AND status = 'Idea' AND deleted_at IS NULL`
     );
+    const toDelete = countRow[0]?.n ?? 0;
 
-    if (targets.length === 0) {
+    if (toDelete === 0) {
       console.log("No v1 repost Idea rows to clean up — already done.");
       await client.query("ROLLBACK");
       return;
     }
 
-    console.log(`Found ${targets.length} v1 repost Idea rows. Killing them...`);
+    console.log(`Found ${toDelete} v1 repost Idea rows. Soft-deleting...`);
 
-    // Stamp status=Killed.
     await client.query(
       `UPDATE production_items
-       SET status = 'Killed', updated_at = now()
-       WHERE source_type = 'repost' AND status = 'Idea'`
-    );
-
-    // Activity event per row so the kill is auditable + the kill reason
-    // feeds the evergreen classifier's negative-exemplar history.
-    const valuesSql = targets
-      .map(
-        (_t, i) =>
-          `($${i * 2 + 1}::uuid, NULL, 'killed', $${i * 2 + 2}::jsonb, now())`
-      )
-      .join(", ");
-    const params = targets.flatMap((t) => [
-      t.id,
-      JSON.stringify({ type: "killed", from: "Idea", reason: REASON }),
-    ]);
-    await client.query(
-      `INSERT INTO content_events (content_item_id, user_id, event_type, payload, created_at)
-       VALUES ${valuesSql}`,
-      params
+       SET deleted_at = now(), updated_at = now()
+       WHERE source_type = 'repost' AND status = 'Idea' AND deleted_at IS NULL`
     );
 
     await client.query("COMMIT");
-    console.log(`✅ Killed ${targets.length} legacy repost rows.`);
+    console.log(`✅ Soft-deleted ${toDelete} legacy repost rows.`);
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("Failed:", err);
