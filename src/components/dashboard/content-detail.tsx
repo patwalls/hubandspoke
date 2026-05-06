@@ -1623,6 +1623,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 </PopoverContent>
               </Popover>
             )}
+          <DescriptStatusPill productionItemId={item.id} />
           {isPrePublish && data.prediction && (
             <Popover>
               <PopoverTrigger
@@ -3562,5 +3563,251 @@ function PredictedVsActualCard({
           : "Snapshot at publish"}
       </p>
     </div>
+  );
+}
+
+interface DescriptStatusResponse {
+  status:
+    | "connected"
+    | "processing"
+    | "stuck"
+    | "failed"
+    | "stalled"
+    | "not_started";
+  detail: string;
+  compositionId: string | null;
+  compositionUrl: string | null;
+  projectId: string | null;
+  projectUrl: string | null;
+  trigger: {
+    id: string;
+    descriptJobId: string | null;
+    descriptImportPath: string | null;
+  } | null;
+  queueJob: {
+    id: string;
+    taskIdentifier: string;
+    attempts: number;
+    maxAttempts: number;
+    runAt: string;
+    lockedAt: string | null;
+    lastError: string | null;
+  } | null;
+  redriveAvailable: boolean;
+}
+
+const DESCRIPT_STATUS_STYLES: Record<
+  DescriptStatusResponse["status"],
+  { dot: string; label: string; pillClass: string }
+> = {
+  connected: {
+    dot: "bg-emerald-500",
+    label: "Descript ready",
+    pillClass: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  },
+  processing: {
+    dot: "bg-amber-500 animate-pulse",
+    label: "Descript processing",
+    pillClass: "border-amber-200 bg-amber-50 text-amber-800",
+  },
+  stuck: {
+    dot: "bg-red-500",
+    label: "Descript stuck",
+    pillClass: "border-red-200 bg-red-50 text-red-800",
+  },
+  failed: {
+    dot: "bg-red-500",
+    label: "Descript failed",
+    pillClass: "border-red-200 bg-red-50 text-red-800",
+  },
+  stalled: {
+    dot: "bg-orange-500",
+    label: "Descript stalled",
+    pillClass: "border-orange-200 bg-orange-50 text-orange-800",
+  },
+  not_started: {
+    dot: "bg-muted-foreground/40",
+    label: "Descript not started",
+    pillClass: "border-border bg-muted/30 text-muted-foreground",
+  },
+};
+
+/**
+ * Status pill that mirrors the Descript-side state of the production_item:
+ * connected (composition exists), processing (queue job running), stuck
+ * (lock leaked from a dead worker), failed (max attempts exhausted),
+ * stalled (project exists but no composition + no queue job), or
+ * not-started. Click to open a popover with details + a "Re-run" button
+ * that releases the queue lock and resets attempts. Polls every 10s
+ * while the job is processing so the editor sees state transitions
+ * without refreshing the page.
+ */
+function DescriptStatusPill({ productionItemId }: { productionItemId: string }) {
+  const [data, setData] = useState<DescriptStatusResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [redriving, setRedriving] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/production-items/${productionItemId}/descript-status`,
+      );
+      if (!res.ok) return;
+      const json = (await res.json()) as DescriptStatusResponse;
+      setData(json);
+    } finally {
+      setLoading(false);
+    }
+  }, [productionItemId]);
+
+  useEffect(() => {
+    void fetchStatus();
+  }, [fetchStatus]);
+
+  // Poll while processing — state transitions (composition_id getting
+  // written, lock leaking) deserve the editor seeing the change without
+  // refreshing the page. Stop polling once the state is terminal.
+  useEffect(() => {
+    if (!data) return;
+    if (data.status !== "processing") return;
+    const interval = setInterval(() => void fetchStatus(), 10_000);
+    return () => clearInterval(interval);
+  }, [data, fetchStatus]);
+
+  const handleRedrive = useCallback(async () => {
+    setRedriving(true);
+    try {
+      const res = await fetch(
+        `/api/production-items/${productionItemId}/redrive-descript`,
+        { method: "POST" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error("Re-run failed", {
+          description: json?.error || `HTTP ${res.status}`,
+        });
+        return;
+      }
+      toast.success("Re-running…", {
+        description:
+          "The worker will pick this up within a few seconds. Status will refresh automatically.",
+      });
+      await fetchStatus();
+    } finally {
+      setRedriving(false);
+    }
+  }, [productionItemId, fetchStatus]);
+
+  if (loading || !data) return null;
+  // Hide entirely for items with no Descript context (e.g. an Original
+  // post that never had a clip path). Editors don't need a "not started"
+  // pill on every row that doesn't apply.
+  if (data.status === "not_started" && !data.trigger && !data.projectId)
+    return null;
+
+  const style = DESCRIPT_STATUS_STYLES[data.status];
+  return (
+    <Popover>
+      <PopoverTrigger
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          style.pillClass,
+        )}
+        title={data.detail}
+      >
+        <span className={cn("size-1.5 rounded-full", style.dot)} aria-hidden />
+        {style.label}
+      </PopoverTrigger>
+      <PopoverContent className="w-[26rem] space-y-3" align="end">
+        <div>
+          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            Descript status
+          </p>
+          <p className="mt-1 text-sm font-medium text-foreground">
+            {style.label}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground leading-snug">
+            {data.detail}
+          </p>
+        </div>
+        {data.queueJob && (
+          <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground space-y-0.5 font-mono">
+            <div>
+              task: <span className="text-foreground">{data.queueJob.taskIdentifier}</span>
+            </div>
+            <div>
+              attempts:{" "}
+              <span className="text-foreground">
+                {data.queueJob.attempts} / {data.queueJob.maxAttempts}
+              </span>
+            </div>
+            <div>
+              run_at:{" "}
+              <span className="text-foreground">
+                {new Date(data.queueJob.runAt).toLocaleString()}
+              </span>
+            </div>
+            {data.queueJob.lockedAt && (
+              <div>
+                locked_at:{" "}
+                <span className="text-foreground">
+                  {new Date(data.queueJob.lockedAt).toLocaleString()}
+                </span>
+              </div>
+            )}
+            {data.queueJob.lastError && (
+              <div className="text-red-600 break-words whitespace-pre-wrap">
+                error: {data.queueJob.lastError}
+              </div>
+            )}
+          </div>
+        )}
+        {(data.compositionUrl || data.projectUrl) && (
+          <div className="flex flex-col gap-1 text-xs">
+            {data.compositionUrl && (
+              <a
+                href={data.compositionUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline inline-flex items-center gap-1"
+              >
+                <ExternalLinkIcon className="size-3" /> Open composition in Descript
+              </a>
+            )}
+            {data.projectUrl && !data.compositionUrl && (
+              <a
+                href={data.projectUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline inline-flex items-center gap-1"
+              >
+                <ExternalLinkIcon className="size-3" /> Open project in Descript
+              </a>
+            )}
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void fetchStatus()}
+            disabled={redriving}
+          >
+            Refresh
+          </Button>
+          {data.redriveAvailable && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleRedrive}
+              disabled={redriving}
+            >
+              {redriving ? "Re-running…" : "Re-run"}
+            </Button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
