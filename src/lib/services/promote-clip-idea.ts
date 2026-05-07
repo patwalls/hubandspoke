@@ -661,55 +661,34 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     throw new ClipIdeaSourceMissingMediaError();
   }
   const brand = row.sourceBrand ?? "starter-story";
-  const formatName = getPromotedClipFormat(brand);
   const editor = await loadEditor(args.actorUserId);
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-  let created: { id: string } | undefined;
-  try {
-    const rows = await db
-      .insert(productionItems)
-      .values({
-        title: row.hook,
-        status: "Assigned",
-        platform: ["YouTube Shorts"],
-        format: formatName,
-        brand,
-        contentBody: body,
-        pillarContentItemId: row.sourceProductionItemId,
-        sourceType: "clip",
-        sourceClipIdeaId: args.clipIdeaId,
-        producerUserId: args.actorUserId,
-        editorUserId: args.actorUserId,
-        hook: row.hook,
-        hookSource: "clip_idea",
-        hookExtractedAt: new Date(),
-      })
-      .returning({ id: productionItems.id });
-    created = rows[0];
-  } catch (err) {
-    if (isUniqueViolation(err, "uniq_production_items_source_clip_idea")) {
-      throw new ClipIdeaAlreadyDecidedError("assigned");
-    }
-    throw err;
-  }
-  if (!created) throw new Error("Failed to create production item for clip");
+  // Throws FormatMissingDescriptPackError if the format has no pack
+  // attached, before any side effects. Worker re-loads the pack later
+  // (precise-cut layout-apply phase) — keeping the gate here too prevents
+  // accidentally enqueuing a job that would no-op.
+  const format = await loadPromotedClipFormat(brand);
 
-  // For repurpose_triggers, we need the format_id. Query it or create if missing.
-  const [format] = await db
-    .select({ id: formats.id })
-    .from(formats)
-    .where(and(eq(formats.name, formatName), eq(formats.brand, brand)))
-    .limit(1);
-
-  const formatId = format?.id ?? (await ensurePromotedClipFormat(brand, formatName));
+  await db
+    .update(productionItems)
+    .set({
+      status: "Assigned",
+      title: row.hook,
+      hook: row.hook,
+      contentBody: body,
+      producerUserId: args.actorUserId,
+      editorUserId: args.actorUserId,
+      updatedAt: new Date(),
+    })
+    .where(eq(productionItems.id, productionItemId));
 
   const [trigger] = await db
     .insert(repurposeTriggers)
     .values({
       productionItemId: row.sourceProductionItemId,
-      targetFormatId: formatId,
+      targetFormatId: format.id,
       compositionName: row.hook,
       descriptImportPath: "precise-cut",
     })
