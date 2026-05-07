@@ -223,9 +223,16 @@ export async function fetchBrandFormatViewBars(
 
   if (opts.brandIds.length === 0) return {};
 
+  // Drop table aliases here. `inArray(accountsTable.brandId, …)` emits
+  // a fully-qualified `"accounts"."brand_id"` reference; if the FROM
+  // clause aliases `accounts` as `a`, Postgres can't resolve the bare
+  // `accounts` qualifier and errors with "missing FROM-clause entry
+  // for table 'accounts'". Selecting via the unaliased table names
+  // keeps inArray's emitted SQL valid. (Same reason fetchAccountFormat-
+  // ViewBars below doesn't alias `production_items`.)
   const windowFilter =
     windowDays != null
-      ? sql`AND pi.published_at >= (now() - interval '${sql.raw(String(windowDays))} days')`
+      ? sql`AND production_items.published_at >= (now() - interval '${sql.raw(String(windowDays))} days')`
       : sql``;
 
   const rows = await db.execute<{
@@ -236,21 +243,21 @@ export async function fetchBrandFormatViewBars(
     cohort_size: string;
   }>(sql`
     SELECT
-      a.brand_id AS brand_id,
-      pi.format,
-      pi.post_type,
-      percentile_cont(${percentile}) WITHIN GROUP (ORDER BY pi.views) AS p,
+      accounts.brand_id AS brand_id,
+      production_items.format,
+      production_items.post_type,
+      percentile_cont(${percentile}) WITHIN GROUP (ORDER BY production_items.views) AS p,
       count(*) AS cohort_size
-    FROM production_items pi
-    JOIN accounts a ON a.id = pi.account_id
+    FROM production_items
+    JOIN accounts ON accounts.id = production_items.account_id
     WHERE ${inArray(accountsTable.brandId, opts.brandIds)}
-      AND pi.format IS NOT NULL
-      AND pi.post_type IS NOT NULL
-      AND pi.status = 'Published'
-      AND pi.deleted_at IS NULL
-      AND pi.views IS NOT NULL
+      AND production_items.format IS NOT NULL
+      AND production_items.post_type IS NOT NULL
+      AND production_items.status = 'Published'
+      AND production_items.deleted_at IS NULL
+      AND production_items.views IS NOT NULL
       ${windowFilter}
-    GROUP BY a.brand_id, pi.format, pi.post_type
+    GROUP BY accounts.brand_id, production_items.format, production_items.post_type
     HAVING count(*) >= ${minCohort}
   `);
 
