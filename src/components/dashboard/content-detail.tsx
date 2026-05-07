@@ -1404,11 +1404,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const isYouTube = !!item.youtubeId;
   const isPublished = !!item.publishedLink;
   const isPrePublish = item.status !== "Published";
-  // X pre-publish gets a "drafting surface" layout: simulator card on the
-  // left, form metadata on the right, no Instructions panel, no separate
-  // Preview tab. Other platforms keep today's form-left/Instructions-right
-  // layout until inline-draft is built for them too.
-  const isPrePublishX = isPrePublish && item.postType === "x";
+  // Pre-publish "drafting surface" layout: simulator card on the left,
+  // form metadata on the right, no Instructions panel, no separate
+  // Preview tab. Wired post types are listed here; everything else
+  // keeps today's form-left/Instructions-right layout.
+  const INLINE_DRAFTING_POST_TYPES: ReadonlySet<string> = new Set([
+    "x",
+    "instagram_post",
+    "instagram_reel",
+    "instagram_story",
+  ]);
+  const isPrePublishInline =
+    isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
   const hideDerivativeSections =
     derivatives.length === 0 && repurposeTargets.length === 0;
 
@@ -1435,11 +1442,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     disabledReason?: string;
   }[] = [
     { value: "details", label: "Details", count: null },
-    // Preview tab: hidden for pre-publish X (the simulator is inline in
-    // Details) and for published items (post is live; nothing to simulate).
-    // Still useful for pre-publish non-X items until inline-draft is built
-    // for those platforms.
-    ...(isPrePublish && item.postType !== "x"
+    // Preview tab: hidden for pre-publish post types that have inline
+    // drafting (the simulator is rendered inside the Details tab) and for
+    // published items (post is live; nothing to simulate). Still useful
+    // for pre-publish non-inline items (LinkedIn / YouTube / TikTok / etc.)
+    // until inline-draft is built for them too.
+    ...(isPrePublish && !isPrePublishInline
       ? ([{ value: "preview", label: "Preview", count: null }] as const)
       : []),
     {
@@ -1634,9 +1642,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </Popover>
             )}
           <DescriptStatusPill productionItemId={item.id} />
-          {(item.postType === "x" || item.postType === "linkedin") && (
-            <TypefullyStatusPill productionItemId={item.id} />
-          )}
+          {/* TypefullyStatusPill hidden for now — to be revisited once the
+           * drafting surface owns the publish flow. The pill component
+           * itself stays in the file for easy reinstatement. */}
           {isPrePublish && data.prediction && (
             <Popover>
               <PopoverTrigger
@@ -2197,7 +2205,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
        * in the LEFT grid column (rendered first). The form metadata then
        * lands in the RIGHT column. Other platforms keep today's order
        * (form → Instructions). */}
-      {isPrePublishX && (
+      {isPrePublishInline && (
         <ContentPreview
           item={item}
           media={data.media ?? []}
@@ -2657,9 +2665,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         )}
       </div>
 
-      {/* Instructions panel: pre-publish only, and not for X items (where
-       * the simulator already occupies the right-side real estate). */}
-      {isPrePublish && !isPrePublishX && (
+      {/* Instructions panel: pre-publish only, and not for post types
+       * with inline drafting (which already occupy the right-side real
+       * estate via the simulator card). */}
+      {isPrePublish && !isPrePublishInline && (
         <div className="rounded-lg border border-border bg-card p-5 space-y-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
@@ -2767,7 +2776,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
          * for pre-publish non-X items. Pre-publish X renders the
          * simulator inline on the Details tab; published items get no
          * preview at all. */}
-        {isPrePublish && item.postType !== "x" && (
+        {isPrePublish && !isPrePublishInline && (
           <TabsContent value="preview" className="pt-4">
             <ContentPreview
               item={item}

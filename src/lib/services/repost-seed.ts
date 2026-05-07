@@ -21,7 +21,11 @@
  */
 import { eq } from "drizzle-orm";
 import { contentDrafts, productionItemMedia } from "@/lib/db/schema";
-import { PLATFORM_FIELD_SCHEMAS, type PostType } from "@/lib/platform-field-schemas";
+import {
+  PLATFORM_FIELD_MAP,
+  PLATFORM_FIELD_SCHEMAS,
+  type PostType,
+} from "@/lib/platform-field-schemas";
 import type { db as dbClient } from "@/lib/db";
 
 type Tx = Parameters<Parameters<typeof dbClient.transaction>[0]>[0];
@@ -76,10 +80,16 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
   //    sentinel for `generatedBy` — distinct from `ai:...` and `user` so
   //    we can later filter "did the editor actually rewrite this, or ship
   //    it verbatim?" analytics.
+  //
+  //    Target the **caption role** from PLATFORM_FIELD_MAP, not the first
+  //    required field in the schema. For `instagram_reel` the schema lists
+  //    `hook` first (and it's required), but `hook` is editorial on-screen
+  //    text — the source's contentBody is the post caption and belongs in
+  //    the `caption` field. PLATFORM_FIELD_MAP encodes the right mapping.
   const fieldSchema = PLATFORM_FIELD_SCHEMAS[postType];
-  const captionField = fieldSchema.fields.find((f) => f.required) ?? fieldSchema.fields[0];
-  const draftContent: Record<string, string> = captionField
-    ? { [captionField.key]: sourceContentBody ?? "" }
+  const captionFieldKey = PLATFORM_FIELD_MAP[postType]?.caption ?? null;
+  const draftContent: Record<string, string> = captionFieldKey
+    ? { [captionFieldKey]: sourceContentBody ?? "" }
     : {};
 
   await tx.insert(contentDrafts).values({

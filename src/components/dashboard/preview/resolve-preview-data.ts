@@ -2,9 +2,18 @@ import type { ContentDraftContent } from "@/lib/db/schema";
 import type { ProductionItem } from "@/types";
 import type { EnrichmentMedia } from "../enrichment-dialog";
 import {
+  PLATFORM_FIELD_MAP,
   PLATFORM_FIELD_SCHEMAS,
+  type PlatformFieldMap,
   type PlatformKey,
 } from "@/lib/platform-field-schemas";
+
+// Re-exported here for the consumers that have always imported the field
+// map alongside `PreviewSlide` / `PreviewData`. Canonical home is
+// `@/lib/platform-field-schemas` so services (repost-seed) can use it
+// without pulling on UI modules.
+export { PLATFORM_FIELD_MAP };
+export type { PlatformFieldMap };
 
 export type PreviewSlide = {
   url: string | null;
@@ -31,27 +40,6 @@ export type PreviewData = {
   publishedAt: string | null;
 };
 
-// Which draft field feeds which role per platform. Order matters for
-// components that render multiple editable fields (e.g. YouTube title +
-// description) — the platform simulator decides which to show where.
-export type PlatformFieldMap = {
-  caption: string | null;
-  secondary: string | null;
-};
-
-export const PLATFORM_FIELD_MAP: Record<PlatformKey, PlatformFieldMap> = {
-  x: { caption: "tweet", secondary: null },
-  instagram_reel: { caption: "caption", secondary: "hook" },
-  instagram_post: { caption: "caption", secondary: null },
-  instagram_story: { caption: "caption", secondary: null },
-  youtube_long: { caption: "description", secondary: "title" },
-  youtube_shorts: { caption: "description", secondary: "title" },
-  youtube_community: { caption: "body", secondary: null },
-  linkedin: { caption: "body", secondary: null },
-  newsletter: { caption: "body", secondary: "subject" },
-  tiktok: { caption: "caption", secondary: null },
-  threads: { caption: "post", secondary: null },
-};
 
 function pickString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;

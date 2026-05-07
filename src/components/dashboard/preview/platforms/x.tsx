@@ -70,6 +70,7 @@ export function XSimulator({
 
           <DraftMediaDropZone
             itemId={itemId}
+            postType="x"
             editable={editable}
             slides={slides}
             onMediaMutated={onMediaMutated}

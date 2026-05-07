@@ -3,10 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ImagePlusIcon, Loader2Icon, XIcon } from "lucide-react";
 import { toast } from "sonner";
+import { dropZoneOptionsForPostType } from "@/lib/services/draft-media";
 import type { PreviewSlide } from "./resolve-preview-data";
 
 interface DraftMediaDropZoneProps {
   itemId: string;
+  /** The platform this simulator is rendering. Drives the file-picker
+   *  accept string, the "add more" button label, and the per-platform
+   *  cap. When the post type isn't wired (`dropZoneOptionsForPostType`
+   *  returns null), the dropzone renders no add UI but still shows
+   *  per-slide remove buttons via the render-prop. */
+  postType: string | null;
   editable: boolean;
   slides: PreviewSlide[];
   /** Callback fired after a successful upload or delete so the parent
@@ -33,17 +40,18 @@ export interface SlideWithRemoveButton {
   removeButton: React.ReactNode | null;
 }
 
-const X_ACCEPT =
-  "image/jpeg,image/jpg,image/png,image/gif,image/webp,video/mp4,video/quicktime";
-const MAX_FILES_PER_BATCH = 4;
-
 export function DraftMediaDropZone({
   itemId,
+  postType,
   editable,
   slides,
   onMediaMutated,
   children,
 }: DraftMediaDropZoneProps) {
+  const options = dropZoneOptionsForPostType(postType);
+  const accept = options?.accept ?? "";
+  const maxTotal = options?.maxTotal ?? 0;
+  const addButtonLabel = options?.addButtonLabel ?? "Add media";
   const [dragOver, setDragOver] = useState(false);
   const [placeholders, setPlaceholders] = useState<PlaceholderSlide[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -53,10 +61,9 @@ export function DraftMediaDropZone({
 
   const handleFiles = useCallback(
     async (files: File[]) => {
-      if (!editable) return;
-      const accepted = files.filter((f) =>
-        X_ACCEPT.split(",").some((t) => t === f.type),
-      );
+      if (!editable || !options) return;
+      const acceptedTypes = accept.split(",");
+      const accepted = files.filter((f) => acceptedTypes.includes(f.type));
       const rejected = files.length - accepted.length;
       if (rejected > 0) {
         toast.error(
@@ -64,8 +71,10 @@ export function DraftMediaDropZone({
         );
       }
       if (accepted.length === 0) return;
-      if (accepted.length > MAX_FILES_PER_BATCH) {
-        toast.error("Up to 4 files at a time.");
+      if (accepted.length > maxTotal) {
+        toast.error(
+          `Up to ${maxTotal} file${maxTotal === 1 ? "" : "s"} at a time.`,
+        );
         return;
       }
 
@@ -173,7 +182,7 @@ export function DraftMediaDropZone({
         // they auto-clear on the next successful mutation.
       }
     },
-    [editable, itemId, onMediaMutated],
+    [editable, itemId, onMediaMutated, options, accept, maxTotal],
   );
 
   // Wipe error placeholders whenever the canonical slide set changes (a
@@ -270,7 +279,9 @@ export function DraftMediaDropZone({
   }));
 
   const totalCount = slides.length + placeholders.length;
-  const canAddMore = editable && totalCount < 4;
+  const wired = options !== null;
+  const canAddMore = wired && editable && totalCount < maxTotal;
+  const allowMultiple = maxTotal > 1;
 
   return (
     <div
@@ -290,7 +301,7 @@ export function DraftMediaDropZone({
             className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           >
             <ImagePlusIcon className="h-3.5 w-3.5" />
-            Add photo or video
+            {addButtonLabel}
           </button>
           <span className="text-[11px] text-muted-foreground">
             or drop files anywhere on the card
@@ -298,7 +309,7 @@ export function DraftMediaDropZone({
         </div>
       )}
 
-      {dragOver && editable && (
+      {dragOver && editable && wired && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-primary/60 bg-primary/5">
           <span className="rounded-md bg-background/90 px-3 py-1.5 text-sm font-medium text-foreground shadow">
             Drop to add media
@@ -306,14 +317,16 @@ export function DraftMediaDropZone({
         </div>
       )}
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept={X_ACCEPT}
-        multiple
-        className="hidden"
-        onChange={onPickerChange}
-      />
+      {wired && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={accept}
+          multiple={allowMultiple}
+          className="hidden"
+          onChange={onPickerChange}
+        />
+      )}
     </div>
   );
 }

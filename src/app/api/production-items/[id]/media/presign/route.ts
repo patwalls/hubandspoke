@@ -5,7 +5,8 @@ import { db } from "@/lib/db";
 import { productionItems, productionItemMedia } from "@/lib/db/schema";
 import { bucketName, buildKey, getPresignedPutUrl } from "@/lib/s3";
 import {
-  X_ALLOWED_CONTENT_TYPES,
+  ALLOWED_CONTENT_TYPES,
+  MAX_FILES_PER_REQUEST,
   MAX_IMAGE_BYTES,
   MAX_VIDEO_BYTES,
   inferKindFromContentType,
@@ -64,9 +65,9 @@ export async function POST(request: Request, context: RouteContext) {
       { status: 400 },
     );
   }
-  if (body.files.length > 4) {
+  if (body.files.length > MAX_FILES_PER_REQUEST) {
     return NextResponse.json(
-      { error: "Up to 4 files per request" },
+      { error: `Up to ${MAX_FILES_PER_REQUEST} files per request` },
       { status: 400 },
     );
   }
@@ -87,7 +88,7 @@ export async function POST(request: Request, context: RouteContext) {
         { status: 400 },
       );
     }
-    if (!X_ALLOWED_CONTENT_TYPES.has(contentType)) {
+    if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
       return NextResponse.json(
         { error: `Unsupported file type: ${contentType}` },
         { status: 400 },

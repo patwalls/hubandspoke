@@ -114,8 +114,9 @@ export function validateMediaForPostType(
     return { ok: false, reason: "Set a post type before uploading media." };
   }
 
+  const combined = [...existing, ...incoming];
+
   if (postType === "x") {
-    const combined = [...existing, ...incoming];
     if (combined.length > 4) {
       return {
         ok: false,
@@ -132,6 +133,36 @@ export function validateMediaForPostType(
     return { ok: true };
   }
 
+  if (postType === "instagram_post") {
+    // Up to 10 items per carousel; photos and videos can mix freely.
+    if (combined.length > 10) {
+      return {
+        ok: false,
+        reason: "Instagram carousels allow up to 10 items.",
+      };
+    }
+    return { ok: true };
+  }
+
+  if (postType === "instagram_reel") {
+    // Exactly 1 video. Photos rejected outright.
+    if (combined.length > 1) {
+      return { ok: false, reason: "Reels are a single video." };
+    }
+    if (combined.length === 1 && combined[0].kind !== "video") {
+      return { ok: false, reason: "Reels are a single video." };
+    }
+    return { ok: true };
+  }
+
+  if (postType === "instagram_story") {
+    // Exactly 1 photo OR 1 video.
+    if (combined.length > 1) {
+      return { ok: false, reason: "Stories allow one photo or video." };
+    }
+    return { ok: true };
+  }
+
   // Other platforms haven't been wired for manual upload yet. Refuse so the
   // call site explicitly opts in when adding (and adds the right rule).
   return {
@@ -140,8 +171,12 @@ export function validateMediaForPostType(
   };
 }
 
-/** Allowlist for X. Mirrors what the X feed actually accepts on publish. */
-export const X_ALLOWED_CONTENT_TYPES: ReadonlySet<string> = new Set([
+/**
+ * Server-side allowlist of MIME types accepted by ANY supported platform.
+ * Per-platform constraints (which subset is valid for which post type)
+ * live in `validateMediaForPostType` and `dropZoneOptionsForPostType`.
+ */
+export const ALLOWED_CONTENT_TYPES: ReadonlySet<string> = new Set([
   "image/jpeg",
   "image/jpg",
   "image/png",
@@ -151,9 +186,60 @@ export const X_ALLOWED_CONTENT_TYPES: ReadonlySet<string> = new Set([
   "video/quicktime",
 ]);
 
-/** Per-file size caps (bytes). Generous vs Twitter's actual limits. */
+/** Per-file size caps (bytes). Generous vs platform actual limits. */
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+
+/** Max files in a single upload batch — IG carousels go up to 10. */
+export const MAX_FILES_PER_REQUEST = 10;
+
+/**
+ * Per-platform dropzone configuration for the React component. Drives the
+ * file-picker `accept`, the "Add ..." button label, and when the "add
+ * more" button is shown. Returns null for post types that haven't been
+ * wired for manual upload yet — the dropzone then renders no UI but still
+ * displays existing slides.
+ */
+export interface DropZoneOptions {
+  accept: string;
+  /** Combined cap (existing + new). Drives "add more" button visibility. */
+  maxTotal: number;
+  addButtonLabel: string;
+}
+
+export function dropZoneOptionsForPostType(
+  postType: string | null,
+): DropZoneOptions | null {
+  switch (postType) {
+    case "x":
+      return {
+        accept:
+          "image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime",
+        maxTotal: 4,
+        addButtonLabel: "Add photo or video",
+      };
+    case "instagram_post":
+      return {
+        accept: "image/jpeg,image/png,video/mp4,video/quicktime",
+        maxTotal: 10,
+        addButtonLabel: "Add photo or video",
+      };
+    case "instagram_reel":
+      return {
+        accept: "video/mp4,video/quicktime",
+        maxTotal: 1,
+        addButtonLabel: "Add video",
+      };
+    case "instagram_story":
+      return {
+        accept: "image/jpeg,image/png,video/mp4,video/quicktime",
+        maxTotal: 1,
+        addButtonLabel: "Add photo or video",
+      };
+    default:
+      return null;
+  }
+}
 
 export function inferKindFromContentType(contentType: string): "image" | "video" | null {
   if (contentType.startsWith("image/")) return "image";

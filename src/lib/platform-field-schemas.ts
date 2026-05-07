@@ -234,6 +234,30 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
   },
 };
 
+// Per-postType role map for the simulator + repost-seed: which draft field
+// holds the "main caption" and which (if any) holds the "secondary" text
+// (on-screen hook, video title, etc.). Lives next to the schemas because
+// it's schema-level metadata, not UI-level — both the simulator (UI) and
+// the repost-seed service consume it.
+export type PlatformFieldMap = {
+  caption: string | null;
+  secondary: string | null;
+};
+
+export const PLATFORM_FIELD_MAP: Record<PostType, PlatformFieldMap> = {
+  x: { caption: "tweet", secondary: null },
+  instagram_reel: { caption: "caption", secondary: "hook" },
+  instagram_post: { caption: "caption", secondary: null },
+  instagram_story: { caption: "caption", secondary: null },
+  youtube_long: { caption: "description", secondary: "title" },
+  youtube_shorts: { caption: "description", secondary: "title" },
+  youtube_community: { caption: "body", secondary: null },
+  linkedin: { caption: "body", secondary: null },
+  newsletter: { caption: "body", secondary: "subject" },
+  tiktok: { caption: "caption", secondary: null },
+  threads: { caption: "post", secondary: null },
+};
+
 // Map a historical platform string to a canonical post-type key. Used by
 // the Notion-import boundary (notion-sync.ts) to ingest values from the
 // legacy "Channel" multi-select. Returns null for unrecognized values.

@@ -13,8 +13,13 @@ import type { PostType } from "@/lib/platform-field-schemas";
 
 // Platforms whose new repost rows get seeded with mirrored media + a v1
 // content_drafts row at creation time. Other platforms still create the
-// production_items row but skip seeding until they're wired up. Today: just X.
-const SEEDED_POST_TYPES: ReadonlySet<PostType> = new Set<PostType>(["x"]);
+// production_items row but skip seeding until they're wired up.
+const SEEDED_POST_TYPES: ReadonlySet<PostType> = new Set<PostType>([
+  "x",
+  "instagram_post",
+  "instagram_reel",
+  "instagram_story",
+]);
 
 interface RouteContext {
   params: Promise<{ id: string }>;

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   BookmarkIcon,
   HeartIcon,
@@ -8,11 +9,14 @@ import {
   SendIcon,
 } from "lucide-react";
 import { MonogramAvatar } from "../avatar";
-import { SlideCarousel } from "../slide-carousel";
 import { VerifiedBadge } from "../verified-badge";
 import { EditableField } from "../editable-field";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import { formatCompactCount } from "../resolve-preview-data";
+import {
+  DraftMediaDropZone,
+  PlaceholderSlideRender,
+} from "../draft-media-dropzone";
 
 export function InstagramPostSimulator({
   data,
@@ -21,6 +25,8 @@ export function InstagramPostSimulator({
   liveContent,
   onLocalEdit,
   onCommit,
+  itemId,
+  onMediaMutated,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   const handle = data.author.handle ?? "your_handle";
@@ -60,8 +66,22 @@ export function InstagramPostSimulator({
         <MoreHorizontalIcon className="h-5 w-5 text-foreground" />
       </div>
 
-      {/* Media */}
-      <SlideCarousel slides={data.slides} aspect="portrait-45" />
+      {/* Media — wrapped with the dropzone so the user can drag-drop /
+          click to add up to 10 photos/videos and × any existing slide. */}
+      <DraftMediaDropZone
+        itemId={itemId}
+        postType="instagram_post"
+        editable={editable}
+        slides={data.slides}
+        onMediaMutated={onMediaMutated}
+      >
+        {({ slides: enrichedSlides, placeholders }) => (
+          <IgPostCarousel
+            enrichedSlides={enrichedSlides}
+            placeholders={placeholders}
+          />
+        )}
+      </DraftMediaDropZone>
 
       {/* Actions */}
       <div className="flex items-center gap-4 px-3 pt-3">
@@ -102,6 +122,93 @@ export function InstagramPostSimulator({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Inline IG-Post carousel that supports per-slide remove buttons and
+ * placeholder tiles. Snap-scroll behavior matches the shared
+ * `<SlideCarousel>` (we don't reuse it because we need per-slide overlays
+ * the carousel doesn't expose).
+ */
+function IgPostCarousel({
+  enrichedSlides,
+  placeholders,
+}: {
+  enrichedSlides: Array<{
+    slide: { url: string | null; kind: "image" | "video"; posterUrl: string | null };
+    removeButton: React.ReactNode | null;
+  }>;
+  placeholders: Array<{ id: string; kind: "image" | "video"; state: "uploading" | "error" }>;
+}) {
+  const [index, setIndex] = useState(0);
+  const total = enrichedSlides.length + placeholders.length;
+  if (total === 0) {
+    return (
+      <div className="flex aspect-[4/5] items-center justify-center bg-muted text-xs text-muted-foreground">
+        No media — drop photos or videos to add
+      </div>
+    );
+  }
+  return (
+    <div className="relative w-full">
+      <div
+        className="flex aspect-[4/5] w-full snap-x snap-mandatory overflow-x-auto scroll-smooth bg-black [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          const i = Math.round(el.scrollLeft / el.clientWidth);
+          if (i !== index) setIndex(i);
+        }}
+      >
+        {enrichedSlides.map((entry, i) => (
+          <div
+            key={entry.slide.url ?? i}
+            className="group relative h-full w-full shrink-0 snap-center"
+          >
+            {entry.removeButton}
+            {entry.slide.kind === "video" ? (
+              <video
+                src={entry.slide.url ?? undefined}
+                poster={entry.slide.posterUrl ?? undefined}
+                controls
+                playsInline
+                className="h-full w-full object-contain"
+              />
+            ) : entry.slide.url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={entry.slide.url}
+                alt=""
+                className="h-full w-full object-contain"
+              />
+            ) : null}
+          </div>
+        ))}
+        {placeholders.map((p) => (
+          <div key={p.id} className="relative h-full w-full shrink-0 snap-center">
+            <PlaceholderSlideRender placeholder={p} />
+          </div>
+        ))}
+      </div>
+
+      {total > 1 && (
+        <>
+          <div className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums">
+            {index + 1}/{total}
+          </div>
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 flex items-center justify-center gap-1">
+            {Array.from({ length: total }).map((_, i) => (
+              <span
+                key={i}
+                className={`h-1.5 w-1.5 rounded-full transition-colors ${
+                  i === index ? "bg-white" : "bg-white/40"
+                }`}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
