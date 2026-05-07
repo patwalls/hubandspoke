@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { descriptPacks, formats } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
-import { PROMOTED_CLIP_FORMAT } from "@/lib/services/promote-clip-idea";
+import { getPromotedClipFormat } from "@/lib/services/promote-clip-idea";
 
 /**
  * Returns the canonical clip-promotion format (`PROMOTED_CLIP_FORMAT`) for
@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "brand is required" }, { status: 400 });
   }
 
+  const promotionFormatName = getPromotedClipFormat(brand);
   const [row] = await db
     .select({
       id: formats.id,
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
     .from(formats)
     .leftJoin(descriptPacks, eq(formats.descriptPackId, descriptPacks.id))
     .where(
-      and(eq(formats.name, PROMOTED_CLIP_FORMAT), eq(formats.brand, brand)),
+      and(eq(formats.name, promotionFormatName), eq(formats.brand, brand)),
     )
     .limit(1);
 

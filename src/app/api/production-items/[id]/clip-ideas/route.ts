@@ -11,7 +11,7 @@ import {
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
-import { PROMOTED_CLIP_FORMAT } from "@/lib/services/promote-clip-idea";
+import { getPromotedClipFormat } from "@/lib/services/promote-clip-idea";
 
 const TRANSCRIPT_EXCERPT_MAX = 220;
 
@@ -113,6 +113,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .where(eq(productionItems.id, id))
     .limit(1);
   const brand = source?.brand ?? "starter-story";
+  const promotionFormatName = getPromotedClipFormat(brand);
   const [formatRow] = await db
     .select({
       id: formats.id,
@@ -124,7 +125,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .from(formats)
     .leftJoin(descriptPacks, eq(formats.descriptPackId, descriptPacks.id))
     .where(
-      and(eq(formats.name, PROMOTED_CLIP_FORMAT), eq(formats.brand, brand)),
+      and(eq(formats.name, promotionFormatName), eq(formats.brand, brand)),
     )
     .limit(1);
   const promotionFormat = formatRow
