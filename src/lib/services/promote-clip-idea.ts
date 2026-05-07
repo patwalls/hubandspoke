@@ -124,7 +124,7 @@ const PROMOTED_CLIP_FORMAT_BY_BRAND: Record<string, string> = {
   "futurepedia": "Repackage section with hook",
 };
 
-function getPromotedClipFormat(brand: string): string {
+export function getPromotedClipFormat(brand: string): string {
   return PROMOTED_CLIP_FORMAT_BY_BRAND[brand] || "Repackage section with hook";
 }
 
@@ -309,28 +309,6 @@ export async function assignClipIdea(args: {
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-<<<<<<< HEAD
-  // Flip the pre-created production_item from Idea → Assigned and stamp the
-  // chosen editor. Producer flips to the actor who's promoting the idea so
-  // ownership matches who decided. Title/hook/contentBody re-stamped in case
-  // they changed since generation. The partial unique index on
-  // source_clip_idea_id stays honored — we're updating, not inserting.
-  await db
-    .update(productionItems)
-    .set({
-      status: "Assigned",
-      title: row.hook,
-      hook: row.hook,
-      hookSource: "clip_idea",
-      hookExtractor: "promote-clip-idea:v1",
-      hookExtractedAt: new Date(),
-      contentBody: body,
-      producerUserId: args.decidedByUserId,
-      editorUserId: args.editorUserId,
-      updatedAt: new Date(),
-    })
-    .where(eq(productionItems.id, productionItemId));
-=======
   // Create the real production_items row. sourceType='clip' bypasses the
   // uniq(pillar, format) index, which is scoped to 'original' — many clips
   // per pillar+format is the whole point. The partial uniq index on
@@ -372,7 +350,6 @@ export async function assignClipIdea(args: {
   }
 
   if (!created) throw new Error("Failed to create production item for clip");
->>>>>>> 89dd8bc (Make clip format selection brand-aware instead of hardcoded)
 
   await db
     .update(clipIdeas)
@@ -451,12 +428,6 @@ async function ensurePromotedClipFormat(brand: string, formatName: string): Prom
     .limit(1);
   if (existing) return existing.id;
 
-<<<<<<< HEAD
-  // No cross-brand fallback. The schema enforces uniqueness per
-  // `(brand, lower(name))`, not globally — a 2026-05-05 fix removed the
-  // legacy `byName` lookup that returned the starter-story row for
-  // non-starter brands and silently mis-attributed clip promotions.
-=======
   // formats.name is globally unique (not scoped by brand). If the row exists
   // under a different brand, adopt it by updating brand — a single format
   // row per name is the schema's invariant, and the assign flow stamps the
@@ -468,7 +439,6 @@ async function ensurePromotedClipFormat(brand: string, formatName: string): Prom
     .limit(1);
   if (byName) return byName.id;
 
->>>>>>> 89dd8bc (Make clip format selection brand-aware instead of hardcoded)
   const [created] = await db
     .insert(formats)
     .values({ name: formatName, brand })
@@ -550,21 +520,11 @@ export async function createClipIdeaInDescript(args: {
   const endSec = Number(row.endSec);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-<<<<<<< HEAD
-  // Resolve the canonical "Repackage section with hook" format for this
-  // brand and load its attached Descript pack — pack must be present or we
-  // throw before any Descript side effect (FormatMissingDescriptPackError
-  // bubbles up to the route as a 400). Same gate fires from precise-cut
-  // and full-video paths so the four "Create in Descript" buttons all
-  // refuse uniformly when the format isn't configured.
-  const format = await loadPromotedClipFormat(brand);
-=======
   // repurpose_triggers.target_format_id is NOT NULL. Ensure the brand-specific
   // format row exists for this brand and reuse it across every clip-idea
   // promotion — same name we stamp on productionItems.format. Matches the
   // existing assign flow's string value, now backed by an actual row the FK can reference.
   const formatId = await ensurePromotedClipFormat(brand, formatName);
->>>>>>> 89dd8bc (Make clip format selection brand-aware instead of hardcoded)
 
   const prompt = buildDescriptPrompt({
     packPrompt: format.packPrompt,
@@ -577,25 +537,6 @@ export async function createClipIdeaInDescript(args: {
     prompt,
   });
 
-<<<<<<< HEAD
-  await db
-    .update(productionItems)
-    .set({
-      status: "Assigned",
-      title: row.hook,
-      hook: row.hook,
-      hookSource: "clip_idea",
-      hookExtractor: "promote-clip-idea:v1",
-      hookExtractedAt: new Date(),
-      contentBody: body,
-      producerUserId: args.actorUserId,
-      editorUserId: args.actorUserId,
-      descriptProjectId: row.descriptProjectId,
-      descriptProjectUrl: agent.projectUrl,
-      updatedAt: new Date(),
-    })
-    .where(eq(productionItems.id, productionItemId));
-=======
   let created: { id: string } | undefined;
   try {
     const rows = await db
@@ -627,7 +568,6 @@ export async function createClipIdeaInDescript(args: {
     throw err;
   }
   if (!created) throw new Error("Failed to create production item for clip");
->>>>>>> 89dd8bc (Make clip format selection brand-aware instead of hardcoded)
 
   const [trigger] = await db
     .insert(repurposeTriggers)
@@ -710,26 +650,6 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-<<<<<<< HEAD
-  // Throws FormatMissingDescriptPackError if the format has no pack
-  // attached, before any side effects. Worker re-loads the pack later
-  // (precise-cut layout-apply phase) — keeping the gate here too prevents
-  // accidentally enqueuing a job that would no-op.
-  const format = await loadPromotedClipFormat(brand);
-
-  await db
-    .update(productionItems)
-    .set({
-      status: "Assigned",
-      title: row.hook,
-      hook: row.hook,
-      contentBody: body,
-      producerUserId: args.actorUserId,
-      editorUserId: args.actorUserId,
-      updatedAt: new Date(),
-    })
-    .where(eq(productionItems.id, productionItemId));
-=======
   const formatId = await ensurePromotedClipFormat(brand, formatName);
 
   let created: { id: string } | undefined;
@@ -761,7 +681,6 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     throw err;
   }
   if (!created) throw new Error("Failed to create production item for clip");
->>>>>>> 89dd8bc (Make clip format selection brand-aware instead of hardcoded)
 
   const [trigger] = await db
     .insert(repurposeTriggers)
