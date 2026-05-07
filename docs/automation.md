@@ -923,6 +923,30 @@ UI equivalent: `/(dashboard)/settings/jobs` for queue status,
 
 ---
 
+## Error tracking (Sentry)
+
+Both dynos report unhandled errors to Sentry — org `pat-walls`, project
+`hubandspoke` (https://pat-walls.sentry.io/issues/?project=hubandspoke).
+
+- **Web dyno:** Next.js auto-instrumentation via `@sentry/nextjs` (configs in
+  `sentry.{server,edge}.config.ts`, `src/instrumentation.ts`,
+  `src/instrumentation-client.ts`, plus `src/app/global-error.tsx` for the
+  client error boundary).
+- **Worker dyno:** `src/jobs/instrument.ts` initializes `@sentry/node` at the
+  top of `worker.ts`. The worker explicitly captures:
+  - **Permanent task failures** (max attempts exhausted) via the
+    `job:failed` event — tagged with `task` and `source: graphile-worker`.
+    Transient errors that succeed on retry are intentionally **not** captured
+    to keep signal high.
+  - **Fatal worker crashes** (anything that escapes `main()`), with
+    `Sentry.flush()` before exit so the event isn't lost on dyno restart.
+
+DSN is hardcoded in the config files (DSNs are public identifiers by design).
+Source maps are uploaded by `withSentryConfig` in `next.config.ts` for prod
+builds.
+
+---
+
 ## Known seams (future cleanup)
 
 These show up here so changes don't accidentally widen them. Each one

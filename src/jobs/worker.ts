@@ -3,6 +3,8 @@
 // Connects to Postgres, runs the task list, and handles SIGTERM gracefully so
 // in-flight jobs finish before Heroku SIGKILLs us at the 30s mark.
 
+import "./instrument"; // initializes Sentry — must come first
+import * as Sentry from "@sentry/node";
 import { run } from "graphile-worker";
 import { taskList } from "./tasks";
 import { CRONTAB } from "./crontab";
@@ -29,6 +31,20 @@ async function main() {
     gracefulShutdownAbortTimeout: 20_000,
     taskList,
     crontab: CRONTAB,
+  });
+
+  // Permanent task failures (max attempts exhausted) → Sentry. Transient
+  // errors that succeed on retry are intentionally not captured to keep
+  // signal high.
+  runner.events.on("job:failed", ({ job, error }) => {
+    Sentry.captureException(error, {
+      tags: { task: job.task_identifier, source: "graphile-worker" },
+      extra: {
+        job_id: job.id,
+        attempts: job.attempts,
+        max_attempts: job.max_attempts,
+      },
+    });
   });
 
   let shuttingDown = false;
@@ -59,7 +75,9 @@ async function main() {
   await runner.promise;
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error("[worker] fatal:", err);
+  Sentry.captureException(err, { tags: { source: "graphile-worker", fatal: "true" } });
+  await Sentry.flush(2000).catch(() => {});
   process.exit(1);
 });

@@ -45,3 +45,6 @@ next-env.d.ts
 
 # one-shot backfill caches
 .repost-llm-cache.json
+
+# Sentry Config File
+.env.sentry-build-plugin
