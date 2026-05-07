@@ -30,7 +30,21 @@ import * as dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
 
-const PROMOTED_CLIP_FORMAT = "Repackage section with hook";
+/**
+ * Brand-specific short-form formats for clip promotion. Each brand has its own
+ * preferred format with a Descript pack attached. Must match getPromotedClipFormat
+ * in src/lib/services/promote-clip-idea.ts.
+ */
+const PROMOTED_CLIP_FORMAT_BY_BRAND = {
+  "starter-story": "Reel: Repackage Section w/ Hook",
+  "matg": "Podcast Clip With Hook",
+  "my-first-million": "Repackage section with hook",
+  "futurepedia": "Repackage section with hook",
+};
+
+function getPromotedClipFormat(brand) {
+  return PROMOTED_CLIP_FORMAT_BY_BRAND[brand] || "Repackage section with hook";
+}
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -237,6 +251,7 @@ async function main() {
     }
 
     const accountId = await getInstagramAccountId(sql, brand);
+    const promotedFormat = getPromotedClipFormat(brand);
     try {
       const created = await sql`
         INSERT INTO production_items (
@@ -252,7 +267,7 @@ async function main() {
           ${sql.json(["Instagram Reel"])},
           'instagram_reel',
           ${accountId},
-          ${PROMOTED_CLIP_FORMAT},
+          ${promotedFormat},
           ${brand},
           ${body},
           ${row.source_production_item_id},

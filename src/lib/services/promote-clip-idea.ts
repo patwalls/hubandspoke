@@ -19,6 +19,22 @@ import {
 import { getPresignedGetUrl } from "@/lib/s3";
 import { enqueue } from "@/jobs/enqueue";
 
+/**
+ * Check if a caught database error is a unique constraint violation for a
+ * specific constraint name. Used to distinguish double-promote attempts from
+ * other errors and return the appropriate HTTP status code.
+ */
+function isUniqueViolation(err: unknown, constraintName: string): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message || "";
+  // Check for postgres unique constraint error pattern: "duplicate key value"
+  // or "Unique constraint" in the message
+  return (
+    (msg.includes("duplicate key") || msg.includes("UNIQUE constraint")) &&
+    msg.includes(constraintName)
+  );
+}
+
 export async function killClipIdea(args: {
   clipIdeaId: string;
   killReason: string | null;
@@ -384,15 +400,17 @@ interface PromotedClipFormat {
 }
 
 /**
- * Find or create the canonical "Repackage section with hook" format for a
- * brand, then load its attached Descript pack. Throws
- * `FormatMissingDescriptPackError` when no pack is attached so the
+ * Find or create the canonical clip-promotion format for a brand, then load
+ * its attached Descript pack. The format name is brand-specific (e.g., "Podcast
+ * Clip With Hook" for MATG, "Reel: Repackage Section w/ Hook" for Starter Story).
+ * Throws `FormatMissingDescriptPackError` when no pack is attached so the
  * three create-in-descript service functions all gate uniformly on the
  * pack being present (Pat's "don't let me generate anything in Descript
  * unless I have a prompt set" rule).
  */
 async function loadPromotedClipFormat(brand: string): Promise<PromotedClipFormat> {
-  const formatId = await ensurePromotedClipFormat(brand);
+  const formatName = getPromotedClipFormat(brand);
+  const formatId = await ensurePromotedClipFormat(brand, formatName);
   const [row] = await db
     .select({
       id: formats.id,
@@ -513,18 +531,16 @@ export async function createClipIdeaInDescript(args: {
     throw new ClipIdeaSourceMissingDescriptProjectError();
   }
   const brand = row.sourceBrand ?? "starter-story";
-  const formatName = getPromotedClipFormat(brand);
   const editor = await loadEditor(args.actorUserId);
   const body = buildContentBody(row);
   const startSec = Number(row.startSec);
   const endSec = Number(row.endSec);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-  // repurpose_triggers.target_format_id is NOT NULL. Ensure the brand-specific
-  // format row exists for this brand and reuse it across every clip-idea
-  // promotion — same name we stamp on productionItems.format. Matches the
-  // existing assign flow's string value, now backed by an actual row the FK can reference.
-  const formatId = await ensurePromotedClipFormat(brand, formatName);
+  // Load the brand-specific clip-promotion format with its Descript pack.
+  // This ensures the format row exists and has a pack attached (guard against
+  // the "No Descript pack attached" error the user saw).
+  const format = await loadPromotedClipFormat(brand);
 
   const prompt = buildDescriptPrompt({
     packPrompt: format.packPrompt,
@@ -545,7 +561,7 @@ export async function createClipIdeaInDescript(args: {
         title: row.hook,
         status: "Assigned",
         platform: ["YouTube Shorts"],
-        format: formatName,
+        format: format.name,
         brand,
         contentBody: body,
         pillarContentItemId: row.sourceProductionItemId,
@@ -645,12 +661,14 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     throw new ClipIdeaSourceMissingMediaError();
   }
   const brand = row.sourceBrand ?? "starter-story";
-  const formatName = getPromotedClipFormat(brand);
   const editor = await loadEditor(args.actorUserId);
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-  const formatId = await ensurePromotedClipFormat(brand, formatName);
+  // Load the brand-specific clip-promotion format. For precise-cut, we don't
+  // need the pack prompt (that's only for agent path), but we do need the
+  // format_id for the repurpose_triggers FK. Throws if no pack is attached.
+  const format = await loadPromotedClipFormat(brand);
 
   let created: { id: string } | undefined;
   try {
@@ -660,7 +678,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
         title: row.hook,
         status: "Assigned",
         platform: ["YouTube Shorts"],
-        format: formatName,
+        format: format.name,
         brand,
         contentBody: body,
         pillarContentItemId: row.sourceProductionItemId,
