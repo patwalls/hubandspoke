@@ -579,6 +579,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **What:** gpt-4.1-mini (vision) reads the bold burn-in text painted onto the cover image and writes it verbatim to `productionItems.overlay`, plus to `hook` (when the existing hook source is overwritable: null/title/content_body) with `hookSource='vision'`. Migrated 2026-05-02 from `claude-haiku-4-5`.
 - **Why this is the only path:** an earlier attempt (2026-05-01, reverted) trusted `title` as a proxy for the on-video overlay for "Reel: Repackage Section w/ Hook" items. Spot checks against the rendered cover proved title is unreliable — often it's the caption's first sentence or a draft framing, not the overlay. The overlay text only exists in the rendered video frame; OCR is the only way to read it
 - **One-shot recovery:** `scripts/revert-repackage-overlay-backfill.mjs` (clears the bad rows) + `scripts/enqueue-vision-for-repackage.mjs` (fans out vision-extract for IG Repackage items with a poster). Going forward the cron picks up new posts hourly
+- **Permanent OpenAI 400s** (unsupported image format, broken image, etc.) are caught and treated as a skipped extraction so `visionExtractedAt` still gets stamped — otherwise the same bad poster would burn the full retry budget every sweep.
 
 ### `extract-poster-sweep` — ffmpeg poster fallback
 - **Trigger:** cron `35 * * * *`

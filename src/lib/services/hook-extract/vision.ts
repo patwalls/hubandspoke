@@ -19,6 +19,7 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { openai } from "@/lib/openai";
+import { BadRequestError } from "openai";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
 const MODEL = "gpt-4.1-mini";
@@ -146,22 +147,39 @@ export interface VisionResult {
 }
 
 async function callVisionLLM(imageUrl: string): Promise<VisionResult> {
-  const response = await openai().chat.completions.create({
-    model: MODEL,
-    max_tokens: 512,
-    tools,
-    tool_choice: "required",
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: [
-          { type: "image_url", image_url: { url: imageUrl } },
-          { type: "text", text: "Analyze this cover. Call exactly one tool." },
-        ],
-      },
-    ],
-  });
+  let response;
+  try {
+    response = await openai().chat.completions.create({
+      model: MODEL,
+      max_tokens: 512,
+      tools,
+      tool_choice: "required",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: imageUrl } },
+            { type: "text", text: "Analyze this cover. Call exactly one tool." },
+          ],
+        },
+      ],
+    });
+  } catch (err) {
+    // 400s from OpenAI vision are permanent (unsupported format, broken image,
+    // dimensions out of range). Treat as a skipped extraction so the caller
+    // stamps visionExtractedAt and we don't burn retries.
+    if (err instanceof BadRequestError) {
+      return {
+        hook: null,
+        coverDescription: null,
+        skippedReason: `openai-400:${err.message.slice(0, 200)}`,
+        inputTokens: 0,
+        outputTokens: 0,
+      };
+    }
+    throw err;
+  }
 
   const inputTokens = response.usage?.prompt_tokens ?? 0;
   const outputTokens = response.usage?.completion_tokens ?? 0;
