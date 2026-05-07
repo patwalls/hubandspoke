@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { accounts, contentEvents, productionItems, users } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
+import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { isNotionAuthoritative } from "@/lib/platform";
 
@@ -102,7 +103,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  const [source] = await db
+  let [source] = await db
     .select()
     .from(productionItems)
     .where(eq(productionItems.id, id))
@@ -110,6 +111,29 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   if (!source) {
     return NextResponse.json({ error: "Source item not found" }, { status: 404 });
+  }
+
+  // Best-effort: enrich the source first so the new cross-post inherits
+  // populated `contentBody` + media rows, even if the source predates the
+  // auto-enrich sweep. Synchronous wait by design — the user wants this
+  // to block. Failures are logged and we proceed; the cross-post ends up
+  // no worse than today. `enrichSingleItem` is a no-op when already
+  // enriched, so unconditionally calling it is safe.
+  if (!source.enrichmentCompletedAt) {
+    try {
+      await enrichSingleItem(source.id);
+      const [refreshed] = await db
+        .select()
+        .from(productionItems)
+        .where(eq(productionItems.id, id))
+        .limit(1);
+      if (refreshed) source = refreshed;
+    } catch (err) {
+      console.error(
+        `[cross-post] enrichment failed for source ${source.id}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   if (source.accountId === targetAccountId && source.postType === targetPostType) {

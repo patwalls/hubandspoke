@@ -960,15 +960,20 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     if (actionPending) return;
     setActionPending(true);
     try {
+      // Mirror the queue-triage path: land in "Ready To Publish" and emit
+      // the `repost_created` activity event. Editor defaults via
+      // `resolveAssignees` server-side (no picker on this surface).
       const res = await fetch(`/api/production-items/${contentId}/repost`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "Ready To Publish" }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(json?.error || "Failed to create repost");
         return;
       }
-      toast.success("Repost idea created");
+      toast.success("Repost created");
       router.push(`/${brand}/content/${json.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create repost");
@@ -1399,6 +1404,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const isYouTube = !!item.youtubeId;
   const isPublished = !!item.publishedLink;
   const isPrePublish = item.status !== "Published";
+  // X pre-publish gets a "drafting surface" layout: simulator card on the
+  // left, form metadata on the right, no Instructions panel, no separate
+  // Preview tab. Other platforms keep today's form-left/Instructions-right
+  // layout until inline-draft is built for them too.
+  const isPrePublishX = isPrePublish && item.postType === "x";
   const hideDerivativeSections =
     derivatives.length === 0 && repurposeTargets.length === 0;
 
@@ -1425,19 +1435,19 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     disabledReason?: string;
   }[] = [
     { value: "details", label: "Details", count: null },
-    {
-      value: "preview",
-      label: "Preview",
-      count: null,
-      disabled: true,
-      disabledReason: "This feature is in development, check back soon.",
-    },
+    // Preview tab: hidden for pre-publish X (the simulator is inline in
+    // Details) and for published items (post is live; nothing to simulate).
+    // Still useful for pre-publish non-X items until inline-draft is built
+    // for those platforms.
+    ...(isPrePublish && item.postType !== "x"
+      ? ([{ value: "preview", label: "Preview", count: null }] as const)
+      : []),
     {
       value: "draft",
       label: "Draft",
       count: null,
       disabled: true,
-      disabledReason: "This feature is in development, check back soon.",
+      disabledReason: "Draft tab UI is still in development. Edit the tweet inline on the Details tab.",
     },
     ...(!isPrePublish &&
     (!hideDerivativeSections ||
@@ -2183,6 +2193,21 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             : undefined
         }
       >
+      {/* Pre-publish X: the simulator card is the drafting surface and lives
+       * in the LEFT grid column (rendered first). The form metadata then
+       * lands in the RIGHT column. Other platforms keep today's order
+       * (form → Instructions). */}
+      {isPrePublishX && (
+        <ContentPreview
+          item={item}
+          media={data.media ?? []}
+          draftId={draft?.id ?? null}
+          liveContent={liveContent}
+          onLocalEdit={onLocalEdit}
+          onCommit={onCommit}
+          onMediaMutated={() => void load()}
+        />
+      )}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         {isYouTube && (
           <div className="flex items-center justify-end gap-2 px-3 py-1.5 border-b border-border/60">
@@ -2482,64 +2507,70 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </PropertyRow>
         </PropertyRowGroup>
 
-        <PropertyRowGroup single={isPrePublish}>
-          <PropertyRow label="Published link">
-            <div className="flex flex-col gap-1 min-w-0">
-              <div className="flex items-center gap-1 min-w-0">
-                <Input
-                  value={publishedLink}
-                  onChange={(e) => setPublishedLink(e.target.value)}
-                  onBlur={() => {
-                    if ((item.publishedLink ?? "") !== publishedLink)
-                      void persistField({ publishedLink: publishedLink || null });
-                  }}
-                  placeholder="https://…"
-                  disabled={isYouTube}
-                  aria-label="Published link"
-                  className={cn(PROPERTY_INPUT_CLASS, "flex-1 min-w-0")}
-                />
-                {publishedLink && (
-                  <a
-                    href={publishedLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 p-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                    aria-label="Open published link"
-                  >
-                    <ExternalLinkIcon className="h-3.5 w-3.5" />
-                  </a>
-                )}
+        {/* Published link + Published date are stamps that exist only after
+         * the post is live. Hiding them pre-publish keeps the drafting
+         * surface uncluttered (the user explicitly asked for this). They
+         * reappear automatically once status flips to Published. */}
+        {!isPrePublish && (
+          <PropertyRowGroup single={isPrePublish}>
+            <PropertyRow label="Published link">
+              <div className="flex flex-col gap-1 min-w-0">
+                <div className="flex items-center gap-1 min-w-0">
+                  <Input
+                    value={publishedLink}
+                    onChange={(e) => setPublishedLink(e.target.value)}
+                    onBlur={() => {
+                      if ((item.publishedLink ?? "") !== publishedLink)
+                        void persistField({ publishedLink: publishedLink || null });
+                    }}
+                    placeholder="https://…"
+                    disabled={isYouTube}
+                    aria-label="Published link"
+                    className={cn(PROPERTY_INPUT_CLASS, "flex-1 min-w-0")}
+                  />
+                  {publishedLink && (
+                    <a
+                      href={publishedLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 p-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                      aria-label="Open published link"
+                    >
+                      <ExternalLinkIcon className="h-3.5 w-3.5" />
+                    </a>
+                  )}
+                </div>
+                {(() => {
+                  const mismatch = validatePublishedLinkPlatform(
+                    publishedLink || null,
+                    item.postType,
+                  );
+                  return mismatch ? (
+                    <span className="text-[11px] text-amber-700">
+                      {mismatch}
+                    </span>
+                  ) : null;
+                })()}
               </div>
-              {(() => {
-                const mismatch = validatePublishedLinkPlatform(
-                  publishedLink || null,
-                  item.postType,
-                );
-                return mismatch ? (
-                  <span className="text-[11px] text-amber-700">
-                    {mismatch}
-                  </span>
-                ) : null;
-              })()}
-            </div>
-          </PropertyRow>
+            </PropertyRow>
 
-          <PropertyRow label="Published date">
-            <Input
-              type="date"
-              value={publishedDate}
-              onChange={(e) => {
-                const next = e.target.value;
-                setPublishedDate(next);
-                if ((item.publishedDate ?? "") !== next)
-                  void persistField({ publishedDate: next });
-              }}
-              disabled={isYouTube}
-              aria-label="Published date"
-              className={PROPERTY_INPUT_CLASS}
-            />
-          </PropertyRow>
-        </PropertyRowGroup>
+            <PropertyRow label="Published date">
+              <Input
+                type="date"
+                value={publishedDate}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setPublishedDate(next);
+                  if ((item.publishedDate ?? "") !== next)
+                    void persistField({ publishedDate: next });
+                }}
+                disabled={isYouTube}
+                aria-label="Published date"
+                className={PROPERTY_INPUT_CLASS}
+              />
+            </PropertyRow>
+          </PropertyRowGroup>
+        )}
 
         <PropertyRowSolo>
           <PropertyRow label="CTA UTM">
@@ -2626,7 +2657,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         )}
       </div>
 
-      {isPrePublish && (
+      {/* Instructions panel: pre-publish only, and not for X items (where
+       * the simulator already occupies the right-side real estate). */}
+      {isPrePublish && !isPrePublishX && (
         <div className="rounded-lg border border-border bg-card p-5 space-y-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
@@ -2730,16 +2763,23 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       />
         </TabsContent>
 
-        <TabsContent value="preview" className="pt-4">
-          <ContentPreview
-            item={item}
-            media={data.media ?? []}
-            draftId={draft?.id ?? null}
-            liveContent={liveContent}
-            onLocalEdit={onLocalEdit}
-            onCommit={onCommit}
-          />
-        </TabsContent>
+        {/* Match the tab-trigger gate: only render the Preview tab body
+         * for pre-publish non-X items. Pre-publish X renders the
+         * simulator inline on the Details tab; published items get no
+         * preview at all. */}
+        {isPrePublish && item.postType !== "x" && (
+          <TabsContent value="preview" className="pt-4">
+            <ContentPreview
+              item={item}
+              media={data.media ?? []}
+              draftId={draft?.id ?? null}
+              liveContent={liveContent}
+              onLocalEdit={onLocalEdit}
+              onCommit={onCommit}
+              onMediaMutated={() => void load()}
+            />
+          </TabsContent>
+        )}
 
       {!isPrePublish &&
         (!hideDerivativeSections ||

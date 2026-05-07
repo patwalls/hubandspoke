@@ -20,6 +20,14 @@ export interface RepostSource {
   pillarContentItemId: string | null;
   pillarContentNotionId: string | null;
   evergreenReasoning?: string | null;
+  // Single-cover columns mirrored onto the new repost so the X simulator's
+  // fallback chain (`item.posterUrl ?? item.mediaUrl ?? item.thumbnail`) has
+  // something to render on the redirect, before the carousel rows load.
+  // `productionItemMedia` rows are also copied separately by `seedRepostContent`.
+  mediaS3Bucket?: string | null;
+  mediaS3Key?: string | null;
+  mediaContentType?: string | null;
+  posterS3Key?: string | null;
 }
 
 export interface RepostBuildOptions {
@@ -43,6 +51,10 @@ export function buildRepostValues(source: RepostSource, opts: RepostBuildOptions
     pillarContentNotionId: source.pillarContentNotionId,
     pillarContentItemId: source.pillarContentItemId,
     evergreenReasoning: source.evergreenReasoning ?? null,
+    mediaS3Bucket: source.mediaS3Bucket ?? null,
+    mediaS3Key: source.mediaS3Key ?? null,
+    mediaContentType: source.mediaContentType ?? null,
+    posterS3Key: source.posterS3Key ?? null,
     utmCampaign: opts.utmCampaign,
     producerUserId: opts.producerUserId,
     editorUserId: opts.editorUserId,

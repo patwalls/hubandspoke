@@ -14,6 +14,12 @@ export interface SimulatorProps {
   liveContent: ContentDraftContent | null;
   onLocalEdit?: (fieldKey: string, value: string) => void;
   onCommit?: (fieldKey: string) => void;
+  // The production_items.id this simulator is rendering. Powers the media
+  // drop zone (uploads / deletes are scoped per item).
+  itemId: string;
+  // Fires after a successful media upload or delete so the parent can
+  // refetch and re-render with the new rows.
+  onMediaMutated?: () => void;
 }
 
 export function readLive(

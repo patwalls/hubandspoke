@@ -280,6 +280,37 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - **Velocity bonus:** when `view_snapshots` rows exist for a candidate (typically only items younger than ~2 weeks at capture time), each checkpoint contributes a supplementary `hotnessSignal` against the format's same-checkpoint P75 cohort. Lifetime is the admission gate; velocity is informational only.
   - **Dismissal:** "Not interested" / "Kill this idea" → `POST /api/production-items/[id]/repost-dismiss` writes a `contentEvents` row with `type='repost_dismissed'`. The candidate is hidden for 30 days; after that it can resurface if it still clears the bar.
 
+### Repost content seeding (X only, 2026-05-06)
+- **Trigger:** synchronous step inside `POST /api/production-items/[id]/repost`, in the same transaction as the new `production_items` insert. Runs for both repost-creation paths (manual button on `/content/[id]` and the queue v2 triage dialog).
+- **Files:** `src/lib/services/repost-seed.ts` (the helper), `src/app/api/production-items/[id]/repost/route.ts` (call site, gated to `postType === 'x'` via the local `SEEDED_POST_TYPES` set).
+- **Outputs:**
+  1. Mirrored `production_item_media` rows on the new repost — same `s3_key`s as the source (no re-upload, no duplicated bytes). Drives the photo grid in the X simulator card on the redirect target.
+  2. A v1 `content_drafts` row with `is_current=true`, `content = { tweet: <source.contentBody> }`, `field_schema_snapshot = PLATFORM_FIELD_SCHEMAS.x`, `generated_by = 'copy:source'`. The `EditableField` editor binds via `draftId`, so the row has to exist before the first keystroke can PATCH against it.
+- **`generated_by` sentinels:** `copy:source` (this seed), `ai:<model>:v<n>` (drafts generation route), `user` (manual edits via the editor UI). The split lets us later filter "did the editor rewrite this, or ship it verbatim?" analytics without ambiguity.
+- **Why synchronous:** the seed is sub-50ms (≤4 small INSERTs) — invisible next to the redirect. A background job would race the redirect and the user would see exactly the blank simulator card the seed exists to fix.
+
+### On-demand source enrichment for repost / cross-post (2026-05-07)
+
+When the user clicks **Repost** or **Cross-post**, the route now calls `enrichSingleItem(source.id)` synchronously before building the new row — best-effort, with the source re-fetched after to pick up the new `contentBody` / `productionItemMedia` rows / author fields. This closes a gap where a source published just before the auto-enrich sweep ran would produce an empty repost (no body, no photos).
+
+- **Files:** `src/app/api/production-items/[id]/repost/route.ts`, `src/app/api/production-items/[id]/cross-post/route.ts`. No changes to the orchestrator itself — both routes call the existing `enrichSingleItem` from `src/lib/services/enrichment/orchestrator.ts`.
+- **Idempotent:** `enrichSingleItem` short-circuits to `null` when `enrichmentCompletedAt` is already set (no SC credits spent).
+- **Failure-tolerant:** wrapped in try/catch. If upstream is broken or the source has no published link, the error is logged and the create proceeds — the new repost ends up as empty as it would have been before this change. Never blocks the user's action.
+- **Latency:** adds one Scrape Creators round-trip + S3 archive (typically 2–5 s for X tweets). The user explicitly opted into the wait — they prefer correct data over instant redirect.
+
+### Manual media upload to drafts (X only, 2026-05-07)
+
+Browser-driven companion to `archiveCarouselMedia` (enrichment-time URL ingest) and `seedRepostContent` (repost-time row mirror). All three write into the same `production_item_media` table with identical column conventions — that's the **single shared schema** for media on a production item.
+
+- **Files:**
+  - `src/lib/services/draft-media.ts` — primitive: `addMediaRowsToDraft`, `removeMediaRowFromDraft`, `validateMediaForPostType`, `X_ALLOWED_CONTENT_TYPES`, `MAX_IMAGE_BYTES` (15 MB), `MAX_VIDEO_BYTES` (200 MB). No S3 calls — pure DB + validation. Both routes below funnel through it.
+  - `src/app/api/production-items/[id]/media/presign/route.ts` — POST. Validates the batch against the post-type rules + per-file size + content-type allowlist (`image/jpeg|png|gif|webp` + `video/mp4|quicktime`). Issues 15-min presigned PUT URLs via `getPresignedPutUrl`. Refuses on `status === "Published"`.
+  - `src/app/api/production-items/[id]/media/route.ts` — POST (confirm). HEAD-checks each S3 key landed, re-runs the validator (defense-in-depth), inserts rows in one `db.transaction`, and mirrors the new index 0 onto `production_items.media_s3_*` + `poster_s3_key` so cover-thumbnail consumers (queue/list views) see the latest cover. Returns presigned GET URLs for the new rows so the simulator renders without a full refetch.
+  - `src/app/api/production-items/[id]/media/[mediaId]/route.ts` — DELETE. Drops the row, recomputes the legacy single-cover columns from the new index 0 (or nulls them when empty). **Does not delete the S3 object** — the same `s3_key` may be referenced by another item (reposts share keys). Orphan-cleanup is a separate concern.
+- **Per-platform rules:** `validateMediaForPostType("x", existing, incoming)` enforces the X invariant: combined ≤4 photos OR ≤1 video, no mixing. Other post types currently refuse manual upload (explicit allowlist — adding IG/LinkedIn means extending the validator, that's it).
+- **Refuses on published items:** both routes check `item.status === "Published"` and return 400. Server-side gate is the source of truth; client also hides the dropzone via the `editable` prop.
+- **No worker, no background job.** The browser does presign → PUT → confirm in three round-trips; the simulator drops in a placeholder + spinner per file and refetches on success.
+
 ### `capture-velocity-snapshot` — per-post scheduled velocity snapshots
 
 Measures how fast each Published original is growing by taking up to **five** Scrape-Creators view-count snapshots at fixed post ages (15m, 30m, 1h, 2h, 4h). The cross-post scanner reads those snapshots to decide which posts are "taking off."

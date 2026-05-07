@@ -28,6 +28,9 @@ interface EnrichmentFields {
 }
 
 export interface EnrichmentMedia {
+  // Optional during the rollout — older code paths may not thread it
+  // through. Required for delete/edit flows on the drafting surface.
+  id?: string;
   index: number;
   kind: string; // "image" | "video"
   url: string | null;

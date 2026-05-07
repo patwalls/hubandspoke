@@ -1,21 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronDownIcon, EyeIcon } from "lucide-react";
+import { EyeIcon } from "lucide-react";
 import type { ContentDraftContent } from "@/lib/db/schema";
 import type { ProductionItem } from "@/types";
 import {
+  PLATFORM_FIELD_SCHEMAS,
   resolveSchemaForPlatforms,
   type PlatformKey,
+  type PostType,
 } from "@/lib/platform-field-schemas";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import type { EnrichmentMedia } from "../enrichment-dialog";
 import {
   PLATFORM_FIELD_MAP,
   resolvePreviewData,
 } from "./resolve-preview-data";
-import { PreviewEmbed } from "./embed";
 import type { SimulatorProps } from "./simulator-types";
 import { InstagramPostSimulator } from "./platforms/instagram-post";
 import { InstagramReelSimulator } from "./platforms/instagram-reel";
@@ -64,6 +63,10 @@ interface ContentPreviewProps {
   liveContent: ContentDraftContent | null;
   onLocalEdit: (fieldKey: string, value: string) => void;
   onCommit: (fieldKey: string) => void;
+  /** Fires after a successful media upload or delete on the inline
+   *  drafting surface. Parent should refetch so canonical rows replace
+   *  local placeholders. */
+  onMediaMutated?: () => void;
 }
 
 export function ContentPreview({
@@ -73,26 +76,28 @@ export function ContentPreview({
   liveContent,
   onLocalEdit,
   onCommit,
+  onMediaMutated,
 }: ContentPreviewProps) {
-  const resolution = resolveSchemaForPlatforms(item.platform ?? null);
-  if (!resolution.key) return null;
+  // Prefer the canonical `postType` ("x", "instagram_reel", …) — it's the
+  // accounts-rollout key and matches the simulator map directly. Fall back
+  // to the legacy `platform[]` resolver for older rows that haven't been
+  // backfilled. Without this prefer-postType branch, X items with a
+  // platform array of `["X (Starter Story)"]` (the legacy human-readable
+  // string) fall out of `normalizePlatform` and the preview renders null.
+  const platform: PostType | null =
+    item.postType && item.postType in PLATFORM_FIELD_SCHEMAS
+      ? (item.postType as PostType)
+      : resolveSchemaForPlatforms(item.platform ?? null).key;
+  if (!platform) return null;
 
-  const platform = resolution.key;
   const Simulator = SIMULATORS[platform];
   const fieldMap = PLATFORM_FIELD_MAP[platform];
   const data = resolvePreviewData(platform, item, media, liveContent);
   const editable = draftId !== null;
 
-  const [expanded, setExpanded] = useState(true);
-
   return (
     <div className="rounded-lg border border-border bg-card">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30 sm:px-5 sm:py-4"
-      >
+      <div className="flex items-start justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4">
         <div className="min-w-0">
           <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground">
             <EyeIcon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -105,47 +110,23 @@ export function ContentPreview({
               : " Read-only — no draft yet."}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Badge variant="outline" className="text-[11px]">
-            {PLATFORM_LABEL[platform]}
-          </Badge>
-          <ChevronDownIcon
-            className={`h-4 w-4 text-muted-foreground transition-transform ${
-              expanded ? "rotate-180" : ""
-            }`}
-          />
-        </div>
-      </button>
+        <Badge variant="outline" className="text-[11px] shrink-0">
+          {PLATFORM_LABEL[platform]}
+        </Badge>
+      </div>
 
-      {expanded && (
-        <Tabs
-          defaultValue="simulated"
-          className="border-t border-border px-4 py-4 sm:px-5"
-        >
-          <TabsList>
-            <TabsTrigger value="simulated">Simulated</TabsTrigger>
-            <TabsTrigger value="embed">Embed</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="simulated" className="pt-4">
-            <Simulator
-              data={data}
-              fieldMap={fieldMap}
-              editable={editable}
-              liveContent={liveContent}
-              onLocalEdit={onLocalEdit}
-              onCommit={onCommit}
-            />
-          </TabsContent>
-
-          <TabsContent value="embed" className="pt-4">
-            <PreviewEmbed
-              platform={platform}
-              publishedLink={item.publishedLink ?? null}
-            />
-          </TabsContent>
-        </Tabs>
-      )}
+      <div className="border-t border-border px-4 py-4 sm:px-5">
+        <Simulator
+          data={data}
+          fieldMap={fieldMap}
+          editable={editable}
+          liveContent={liveContent}
+          onLocalEdit={onLocalEdit}
+          onCommit={onCommit}
+          itemId={item.id}
+          onMediaMutated={onMediaMutated}
+        />
+      </div>
     </div>
   );
 }

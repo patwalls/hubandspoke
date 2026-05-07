@@ -519,6 +519,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     // upstream slide position so index 0 is the cover.
     const mediaRows = await db
       .select({
+        id: productionItemMedia.id,
         index: productionItemMedia.index,
         kind: productionItemMedia.kind,
         s3Key: productionItemMedia.s3Key,
@@ -596,16 +597,20 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     const accountFor = (accountId: string | null | undefined) =>
       accountId ? accountById.get(accountId) ?? null : null;
 
-    // Joined account summary for the UI's AccountBadge / picker. Null when
-    // the item predates the accounts backfill (shouldn't happen in prod but
-    // kept defensive).
+    // Joined account summary for the UI's AccountBadge / picker AND for the
+    // preview simulator card (handle, displayName, avatar, verified,
+    // followerCount). Null when the item predates the accounts backfill
+    // (shouldn't happen in prod but kept defensive).
     let joinedAccount: {
       id: string;
       platform: string;
       handle: string;
       displayName: string | null;
+      avatarUrl: string | null;
       brandSlug: string;
       brandLabel: string;
+      verified: boolean | null;
+      followerCount: number | null;
     } | null = null;
     if (item.accountId) {
       const [row] = await db
@@ -614,8 +619,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           platform: accounts.platform,
           handle: accounts.handle,
           displayName: accounts.displayName,
+          avatarUrl: accounts.avatarUrl,
           brandSlug: brands.slug,
           brandLabel: brands.label,
+          verified: accounts.verified,
+          followerCount: accounts.followerCount,
         })
         .from(accounts)
         .innerJoin(brands, eq(brands.id, accounts.brandId))
@@ -693,6 +701,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       currentDraft: currentDraft ?? null,
       hasFieldSchema,
       media: mediaRows.map((m) => ({
+        id: m.id,
         index: m.index,
         kind: m.kind,
         url: urlFor(m.s3Key),

@@ -32,6 +32,11 @@ export interface ProductionItem {
     avatarUrl: string | null;
     brandSlug: string;
     brandLabel: string;
+    // Populated by the single-item detail GET (the only surface that
+    // renders the simulator card). Optional so list/search queries that
+    // don't need them aren't forced to expand their selectors.
+    verified?: boolean | null;
+    followerCount?: number | null;
   } | null;
   format: string | null;
   brand: string;

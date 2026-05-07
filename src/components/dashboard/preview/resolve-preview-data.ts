@@ -10,6 +10,10 @@ export type PreviewSlide = {
   url: string | null;
   kind: "image" | "video";
   posterUrl: string | null;
+  // Set when the slide came from a `production_item_media` row, so the
+  // drafting surface can target it for delete. Null for fallback slides
+  // (cover image, draft-stored slide objects).
+  mediaId?: string | null;
 };
 
 export type PreviewData = {
@@ -105,6 +109,7 @@ export function resolvePreviewData(
       url: m.url,
       kind: m.kind === "video" ? "video" : "image",
       posterUrl: m.posterUrl,
+      mediaId: m.id ?? null,
     }));
   }
   if (slides.length === 0) {
@@ -123,14 +128,29 @@ export function resolvePreviewData(
     }
   }
 
+  // Author is account-driven: when the joined `item.account` is present,
+  // the simulator follows the account (so changing accountId in the header
+  // updates the card without needing a republish). Snapshot columns are a
+  // fallback for legacy rows where `item.account` is null.
+  const account = item.account;
+  const author = account
+    ? {
+        handle: account.handle,
+        displayName: account.displayName,
+        followerCount: account.followerCount ?? null,
+        verified: account.verified ?? false,
+        avatarUrl: account.avatarUrl,
+      }
+    : {
+        handle: item.authorHandle ?? null,
+        displayName: item.authorDisplayName ?? null,
+        followerCount: item.authorFollowerCount ?? null,
+        verified: !!item.authorVerified,
+        avatarUrl: null,
+      };
+
   return {
-    author: {
-      handle: item.authorHandle ?? null,
-      displayName: item.authorDisplayName ?? null,
-      followerCount: item.authorFollowerCount ?? null,
-      verified: !!item.authorVerified,
-      avatarUrl: null,
-    },
+    author,
     caption,
     secondaryText: secondary,
     slides,

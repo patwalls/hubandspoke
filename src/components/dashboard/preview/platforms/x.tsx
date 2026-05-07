@@ -13,6 +13,10 @@ import { MonogramAvatar } from "../avatar";
 import { VerifiedBadge } from "../verified-badge";
 import { EditableField } from "../editable-field";
 import { readLive, type SimulatorProps } from "../simulator-types";
+import {
+  DraftMediaDropZone,
+  PlaceholderSlideRender,
+} from "../draft-media-dropzone";
 
 export function XSimulator({
   data,
@@ -21,20 +25,13 @@ export function XSimulator({
   liveContent,
   onLocalEdit,
   onCommit,
+  itemId,
+  onMediaMutated,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   const handle = data.author.handle ?? "you";
   const displayName = data.author.displayName ?? handle;
   const slides = data.slides;
-
-  const gridClass =
-    slides.length >= 4
-      ? "grid-cols-2 grid-rows-2 aspect-video"
-      : slides.length === 3
-        ? "grid-cols-2 grid-rows-2 aspect-video"
-        : slides.length === 2
-          ? "grid-cols-2 aspect-video"
-          : "grid-cols-1 aspect-video";
 
   return (
     <div className="mx-auto w-full max-w-[560px] rounded-xl border border-border bg-background text-foreground">
@@ -71,37 +68,67 @@ export function XSimulator({
             />
           </div>
 
-          {slides.length > 0 && (
-            <div
-              className={`mt-3 grid gap-0.5 overflow-hidden rounded-2xl border border-border ${gridClass}`}
-            >
-              {slides.slice(0, 4).map((slide, i) => (
+          <DraftMediaDropZone
+            itemId={itemId}
+            editable={editable}
+            slides={slides}
+            onMediaMutated={onMediaMutated}
+          >
+            {({ slides: enrichedSlides, placeholders }) => {
+              const total = enrichedSlides.length + placeholders.length;
+              if (total === 0) return null;
+              const gridClass =
+                total >= 4
+                  ? "grid-cols-2 grid-rows-2 aspect-video"
+                  : total === 3
+                    ? "grid-cols-2 grid-rows-2 aspect-video"
+                    : total === 2
+                      ? "grid-cols-2 aspect-video"
+                      : "grid-cols-1 aspect-video";
+              return (
                 <div
-                  key={i}
-                  className={`relative w-full bg-black ${
-                    slides.length === 3 && i === 0 ? "row-span-2" : ""
-                  }`}
+                  className={`mt-3 grid gap-0.5 overflow-hidden rounded-2xl border border-border ${gridClass}`}
                 >
-                  {slide.kind === "video" ? (
-                    <video
-                      src={slide.url ?? undefined}
-                      poster={slide.posterUrl ?? undefined}
-                      controls
-                      playsInline
-                      className="h-full w-full object-cover"
-                    />
-                  ) : slide.url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={slide.url}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : null}
+                  {enrichedSlides.slice(0, 4).map((entry, i) => {
+                    const { slide, removeButton } = entry;
+                    return (
+                      <div
+                        key={slide.mediaId ?? `slide-${i}`}
+                        className={`group relative w-full bg-black ${
+                          total === 3 && i === 0 ? "row-span-2" : ""
+                        }`}
+                      >
+                        {removeButton}
+                        {slide.kind === "video" ? (
+                          <video
+                            src={slide.url ?? undefined}
+                            poster={slide.posterUrl ?? undefined}
+                            controls
+                            playsInline
+                            className="h-full w-full object-cover"
+                          />
+                        ) : slide.url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={slide.url}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                  {placeholders
+                    .slice(0, Math.max(0, 4 - enrichedSlides.length))
+                    .map((p) => (
+                      <div key={p.id} className="relative w-full">
+                        <PlaceholderSlideRender placeholder={p} />
+                      </div>
+                    ))}
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            }}
+          </DraftMediaDropZone>
 
           <div className="mt-3 flex max-w-[420px] items-center justify-between text-xs text-muted-foreground">
             <ActionIcon icon={<MessageCircleIcon className="h-4 w-4" />} />

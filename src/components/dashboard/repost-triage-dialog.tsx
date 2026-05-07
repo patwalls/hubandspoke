@@ -79,6 +79,10 @@ export function RepostTriageDialog({
 
   async function handleRepost() {
     if (!assigneeUserId) return;
+    // Belt-and-suspenders re-entry guard. The button disables on
+    // `submitting`, but a fast double-click can still queue two clicks
+    // before React commits the disabled state.
+    if (submitting) return;
     setSubmitting(true);
     try {
       const res = await fetch(

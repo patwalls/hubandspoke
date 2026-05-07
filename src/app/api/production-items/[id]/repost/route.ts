@@ -5,16 +5,25 @@ import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { buildRepostValues } from "@/lib/services/repost-values";
+import { seedRepostContent } from "@/lib/services/repost-seed";
+import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
+import type { PostType } from "@/lib/platform-field-schemas";
+
+// Platforms whose new repost rows get seeded with mirrored media + a v1
+// content_drafts row at creation time. Other platforms still create the
+// production_items row but skip seeding until they're wired up. Today: just X.
+const SEEDED_POST_TYPES: ReadonlySet<PostType> = new Set<PostType>(["x"]);
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-/** Statuses the repost route accepts. v1 callers (content-detail's
- *  manual "Repost" submenu) keep landing in `Idea`; the repost queue v2
- *  triage dialog passes `Ready To Publish` to skip the review step. */
+/** Statuses the repost route accepts. Both creation paths (content-detail
+ *  Actions → Repost and the queue v2 triage dialog) now pass
+ *  `Ready To Publish` so reposts skip the Idea/Assigned review cycle.
+ *  `Idea` stays accepted for back-compat with any older caller. */
 const ACCEPTED_STATUSES = ["Idea", "Ready To Publish"] as const;
 type AcceptedStatus = (typeof ACCEPTED_STATUSES)[number];
 
@@ -55,7 +64,7 @@ export async function POST(request: Request, context: RouteContext) {
       ? body.editorUserId
       : null;
 
-  const [source] = await db
+  let [source] = await db
     .select()
     .from(productionItems)
     .where(eq(productionItems.id, id))
@@ -63,6 +72,31 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (!source) {
     return NextResponse.json({ error: "Source item not found" }, { status: 404 });
+  }
+
+  // Best-effort: enrich the source first so the new repost inherits a
+  // populated `contentBody` + media rows, even if the source was created
+  // before the auto-enrich sweep had a chance to run. Synchronous wait —
+  // the user explicitly wants to block on this. Failures (no published
+  // link, broken upstream, etc.) are logged and we proceed; the repost
+  // ends up no worse than today. `enrichSingleItem` is a no-op when
+  // `enrichmentCompletedAt` is already set, so this is safe to always
+  // call (cheap idempotent guard).
+  if (!source.enrichmentCompletedAt) {
+    try {
+      await enrichSingleItem(source.id);
+      const [refreshed] = await db
+        .select()
+        .from(productionItems)
+        .where(eq(productionItems.id, id))
+        .limit(1);
+      if (refreshed) source = refreshed;
+    } catch (err) {
+      console.error(
+        `[repost] enrichment failed for source ${source.id}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   // Legacy/oddball items pre-date the accounts rollout — they don't have an
@@ -99,6 +133,10 @@ export async function POST(request: Request, context: RouteContext) {
       pillarContentItemId: source.pillarContentItemId,
       pillarContentNotionId: source.pillarContentNotionId,
       evergreenReasoning: source.evergreenReasoning,
+      mediaS3Bucket: source.mediaS3Bucket,
+      mediaS3Key: source.mediaS3Key,
+      mediaContentType: source.mediaContentType,
+      posterS3Key: source.posterS3Key,
     },
     {
       utmCampaign: await generateUtmCampaign(source.title),
@@ -107,27 +145,43 @@ export async function POST(request: Request, context: RouteContext) {
     }
   );
 
-  const [created] = await db
-    .insert(productionItems)
-    .values({ ...baseValues, status: requestedStatus })
-    .returning({ id: productionItems.id });
+  // One transaction so we never leave a half-seeded repost. The seed step
+  // is sub-50ms (≤4 small INSERTs), invisible next to the redirect.
+  const created = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(productionItems)
+      .values({ ...baseValues, status: requestedStatus })
+      .returning({ id: productionItems.id });
 
-  // Activity-feed event so the source's history shows where the new
-  // repost came from. Only emitted on the queue-driven "Ready To
-  // Publish" path — the manual `Idea`-status repost is the editor
-  // self-creating, no breadcrumb worth surfacing.
-  if (requestedStatus === "Ready To Publish") {
-    await db.insert(contentEvents).values({
-      contentItemId: created.id,
-      userId: actorUserId,
-      eventType: "repost_created",
-      payload: {
-        type: "repost_created",
-        sourceItemId: source.id,
-        sourceTitle: source.title,
-      },
-    });
-  }
+    if (SEEDED_POST_TYPES.has(source.postType as PostType)) {
+      await seedRepostContent(tx, {
+        sourceId: source.id,
+        repostId: row.id,
+        postType: source.postType as PostType,
+        sourceContentBody: source.contentBody,
+        actorUserId,
+      });
+    }
+
+    // Activity-feed event so the source's history shows where the new
+    // repost came from. Both creation paths (manual Actions → Repost and
+    // the queue triage dialog) now emit this so the lineage is visible
+    // regardless of where the operator clicked.
+    if (requestedStatus === "Ready To Publish") {
+      await tx.insert(contentEvents).values({
+        contentItemId: row.id,
+        userId: actorUserId,
+        eventType: "repost_created",
+        payload: {
+          type: "repost_created",
+          sourceItemId: source.id,
+          sourceTitle: source.title,
+        },
+      });
+    }
+
+    return row;
+  });
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }
