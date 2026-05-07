@@ -661,14 +661,10 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     throw new ClipIdeaSourceMissingMediaError();
   }
   const brand = row.sourceBrand ?? "starter-story";
+  const formatName = getPromotedClipFormat(brand);
   const editor = await loadEditor(args.actorUserId);
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
-
-  // Load the brand-specific clip-promotion format. For precise-cut, we don't
-  // need the pack prompt (that's only for agent path), but we do need the
-  // format_id for the repurpose_triggers FK. Throws if no pack is attached.
-  const format = await loadPromotedClipFormat(brand);
 
   let created: { id: string } | undefined;
   try {
@@ -678,7 +674,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
         title: row.hook,
         status: "Assigned",
         platform: ["YouTube Shorts"],
-        format: format.name,
+        format: formatName,
         brand,
         contentBody: body,
         pillarContentItemId: row.sourceProductionItemId,
@@ -700,11 +696,20 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   }
   if (!created) throw new Error("Failed to create production item for clip");
 
+  // For repurpose_triggers, we need the format_id. Query it or create if missing.
+  const [format] = await db
+    .select({ id: formats.id })
+    .from(formats)
+    .where(and(eq(formats.name, formatName), eq(formats.brand, brand)))
+    .limit(1);
+
+  const formatId = format?.id ?? (await ensurePromotedClipFormat(brand, formatName));
+
   const [trigger] = await db
     .insert(repurposeTriggers)
     .values({
       productionItemId: row.sourceProductionItemId,
-      targetFormatId: format.id,
+      targetFormatId: formatId,
       compositionName: row.hook,
       descriptImportPath: "precise-cut",
     })
