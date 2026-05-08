@@ -20,13 +20,22 @@ interface DraftMediaDropZoneProps {
    *  refetches and re-renders the simulator with the canonical rows. */
   onMediaMutated?: () => void;
   /** Render-prop for the slide grid. Receives the live slides plus a
-   *  per-slide "remove" affordance. The simulator stays in charge of
-   *  layout — this dropzone only owns drag/drop, the picker, and the
-   *  hover-X overlay. */
+   *  per-slide "remove" affordance, plus a callback to open the file
+   *  picker (useful when the simulator wants its own "Add media" button
+   *  outside the aspect-ratio'd container that would otherwise clip the
+   *  default one). The simulator stays in charge of layout — this
+   *  dropzone only owns drag/drop, the picker, and the hover-X overlay. */
   children: (props: {
     slides: SlideWithRemoveButton[];
     placeholders: PlaceholderSlide[];
+    openPicker: () => void;
+    canAddMore: boolean;
   }) => React.ReactNode;
+  /** When true, suppress the dropzone's auto-rendered "Add media" button.
+   *  Simulators that render their own Add button via the `openPicker`
+   *  callback (LinkedIn / X / TikTok) opt in here so they don't end up
+   *  with two stacked Add affordances. */
+  hideDefaultAddButton?: boolean;
 }
 
 export interface PlaceholderSlide {
@@ -47,6 +56,7 @@ export function DraftMediaDropZone({
   slides,
   onMediaMutated,
   children,
+  hideDefaultAddButton = false,
 }: DraftMediaDropZoneProps) {
   const options = dropZoneOptionsForPostType(postType);
   const accept = options?.accept ?? "";
@@ -296,9 +306,14 @@ export function DraftMediaDropZone({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      {children({ slides: enrichedSlides, placeholders })}
+      {children({
+        slides: enrichedSlides,
+        placeholders,
+        openPicker: () => fileInputRef.current?.click(),
+        canAddMore,
+      })}
 
-      {canAddMore && (
+      {canAddMore && !hideDefaultAddButton && (
         <div className="mt-2 flex items-center gap-2">
           <button
             type="button"

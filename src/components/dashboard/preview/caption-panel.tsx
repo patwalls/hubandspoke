@@ -34,6 +34,10 @@ interface Props {
   /** ig-embed only: subtitle under the handle. "Original audio" for Reels,
    *  null for Posts. */
   subtitle?: string | null;
+  /** Override the editable field's placeholder. Defaults to "Caption…",
+   *  but each platform should pass its own — LinkedIn isn't a "caption",
+   *  X says "What's happening?", etc. */
+  placeholder?: string;
 }
 
 /**
@@ -61,6 +65,7 @@ export function CaptionPanel({
   variant = "minimal",
   author,
   subtitle,
+  placeholder,
 }: Props) {
   if (variant === "ig-embed" && author) {
     return (
@@ -75,31 +80,33 @@ export function CaptionPanel({
         onRegenerated={onRegenerated}
         author={author}
         subtitle={subtitle ?? null}
+        placeholder={placeholder ?? "Write a caption…"}
       />
     );
   }
+  // Minimal layout: just the editable textarea (with the right per-platform
+  // placeholder) and a top-right Regenerate button when applicable. No
+  // hard-coded "CAPTION" label — LinkedIn doesn't have captions, X calls
+  // it a tweet, etc. The placeholder carries the affordance.
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-          Caption
-        </span>
-        {showRegenerate && (
+      {showRegenerate && (
+        <div className="mb-1.5 flex items-center justify-end">
           <RegenerateCaptionButton
             itemId={itemId}
             hasExisting={value.trim().length > 0}
             hasDraft={editable}
             onRegenerated={onRegenerated}
           />
-        )}
-      </div>
+        </div>
+      )}
       <EditableField
         fieldKey={fieldKey}
         editable={editable}
         onLocalEdit={onLocalEdit}
         onCommit={onCommit}
         value={value}
-        placeholder="Caption…"
+        placeholder={placeholder ?? "Write something…"}
         multiline
         className="whitespace-pre-wrap text-sm leading-snug text-foreground"
       />
@@ -118,6 +125,7 @@ function IgEmbedCaption({
   onRegenerated,
   author,
   subtitle,
+  placeholder,
 }: {
   itemId: string;
   fieldKey: string | null;
@@ -129,6 +137,7 @@ function IgEmbedCaption({
   onRegenerated?: () => void;
   author: PreviewData["author"];
   subtitle: string | null;
+  placeholder: string;
 }) {
   const handle = author.handle ?? "your_handle";
   const displayName = author.displayName ?? handle;
@@ -170,7 +179,7 @@ function IgEmbedCaption({
         onLocalEdit={onLocalEdit}
         onCommit={onCommit}
         value={value}
-        placeholder="Write a caption…"
+        placeholder={placeholder}
         multiline
         className="whitespace-pre-wrap text-sm leading-snug text-foreground"
       />

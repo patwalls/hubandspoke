@@ -44,6 +44,14 @@ test.describe("content detail metadata card", () => {
     await expect(page.getByRole("button", { name: /hide extra fields/i })).toBeVisible();
   });
 
+  test("clicking the heading itself enters edit mode", async ({ page }) => {
+    await page.goto(ITEM_PATH);
+    // The h1 is given role=button so editors can click straight onto the
+    // text without hunting for the pencil.
+    await page.locator("h1").click();
+    await expect(page.getByRole("textbox", { name: /^title$/i })).toBeFocused();
+  });
+
   test("pencil swaps heading for input; Esc reverts", async ({ page }) => {
     await page.goto(ITEM_PATH);
     const heading = page.locator("h1");

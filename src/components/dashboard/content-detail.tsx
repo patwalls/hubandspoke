@@ -1270,21 +1270,22 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     [],
   );
 
-  // Auto-expand "More fields" once per item when a moved field has a
-  // non-default value, so a repost flag / set pillar / unset account isn't
-  // silently hidden behind the toggle. Only fires the first time we see a
-  // given item id — subsequent refetches don't override a user's collapse.
+  // Auto-expand "More fields" once per item when the source-type flag
+  // genuinely needs to be visible — i.e. this item is a repost or
+  // cross-post, where hiding the row would also hide the Reposted-from
+  // picker that sits underneath it. Items with sourceType=clip / original
+  // and a set pillar are the common case; auto-expanding for those would
+  // defeat the toggle's whole point. Fires once per item id so a later
+  // refetch doesn't override a user's manual collapse.
   const showMoreInitedRef = useRef<string | null>(null);
   useEffect(() => {
     const it = data?.item;
     if (!it) return;
     if (showMoreInitedRef.current === it.id) return;
     showMoreInitedRef.current = it.id;
-    const needsMore =
-      (it.sourceType ?? "original") !== "original" ||
-      !!it.pillarContentItemId ||
-      !it.accountId;
-    if (needsMore) setShowMore(true);
+    if (it.sourceType === "repost" || it.sourceType === "cross_post") {
+      setShowMore(true);
+    }
   }, [data?.item]);
 
   const slugAttached = data?.item?.shortLinkSlug ?? null;
@@ -1786,9 +1787,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               src={coverImageUrl(item)}
               className="w-16 h-10 rounded object-cover shrink-0"
             />
-            {/* Title — pencil button fades in on hover and swaps the
-             *  heading for an Input. Enter / blur saves via persistField,
-             *  Esc reverts. YouTube items are non-editable (no pencil). */}
+            {/* Title — clicking the heading enters edit mode (so editors
+             *  can just type), and a hover-revealed pencil signals the
+             *  affordance for users who don't realize the text is clickable.
+             *  Both swap the h1 for an Input that matches the heading's
+             *  size exactly so the layout doesn't jump.
+             *
+             *  The `md:text-2xl` is load-bearing — the base Input class
+             *  ends with `md:text-sm` which would otherwise shrink the
+             *  input on desktop. Tailwind-merge keeps `md:text-2xl` because
+             *  it's the same breakpoint and applies later.
+             *
+             *  YouTube items are non-editable (no click target, no pencil). */}
             <div className="group/title flex items-start gap-2 min-w-0 flex-1">
               {editingTitle ? (
                 <Input
@@ -1813,10 +1823,28 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   }}
                   aria-label="Title"
                   placeholder="Untitled"
-                  className="border-0 bg-transparent shadow-none h-auto px-0 py-0 text-xl sm:text-2xl font-semibold focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="border-0 bg-transparent shadow-none h-auto px-0 py-0 text-xl sm:text-2xl md:text-2xl font-semibold leading-tight focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
+              ) : isYouTube ? (
+                <h1 className="text-xl sm:text-2xl font-semibold leading-tight text-foreground min-w-0 break-words">
+                  {item.title || (
+                    <span className="text-muted-foreground">(Untitled)</span>
+                  )}
+                </h1>
               ) : (
-                <h1 className="text-xl sm:text-2xl font-semibold text-foreground min-w-0 break-words">
+                <h1
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setEditingTitle(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setEditingTitle(true);
+                    }
+                  }}
+                  className="text-xl sm:text-2xl font-semibold leading-tight text-foreground min-w-0 break-words cursor-text rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  title="Click to edit"
+                >
                   {item.title || (
                     <span className="text-muted-foreground">(Untitled)</span>
                   )}

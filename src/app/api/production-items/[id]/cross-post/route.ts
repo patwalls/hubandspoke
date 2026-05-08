@@ -6,8 +6,25 @@ import { accounts, contentEvents, productionItems, users } from "@/lib/db/schema
 import { resolveAssignees } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
+import { seedRepostContent } from "@/lib/services/repost-seed";
+import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { isNotionAuthoritative } from "@/lib/platform";
+import type { PostType } from "@/lib/platform-field-schemas";
+
+// Cross-post targets that get the same media-mirror + draft-seed treatment
+// as reposts. Without this the simulator on the redirect page lands in
+// "Read-only — no draft yet" state, which means no Add-photo button, no
+// inline editing, no AI caption regenerate. Mirror this set with the
+// SEEDED_POST_TYPES in the repost route — they share the same UX promise.
+const CROSS_POST_SEEDED_TARGETS: ReadonlySet<PostType> = new Set<PostType>([
+  "x",
+  "instagram_post",
+  "instagram_reel",
+  "instagram_story",
+  "linkedin",
+  "tiktok",
+]);
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -183,25 +200,47 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const isQueueDriven = assign || !!editorUserIdOverride;
   const status = isQueueDriven ? "Ready To Publish" : "Idea";
 
-  const [created] = await db
-    .insert(productionItems)
-    .values({
-      brand: source.brand,
-      title: source.title,
-      thumbnail: source.thumbnail,
-      status,
-      accountId: targetAccountId,
-      postType: targetPostType,
-      sourceType: "cross_post",
-      repostedFromItemId: source.id,
-      format: inheritedFormat,
-      pillarContentNotionId: source.pillarContentNotionId,
-      pillarContentItemId: source.pillarContentItemId,
-      utmCampaign: await generateUtmCampaign(source.title),
-      producerUserId: assignees.producerUserId,
-      editorUserId,
-    })
-    .returning({ id: productionItems.id });
+  // Wrap the insert + seed in a transaction so a partial failure (e.g.
+  // mid-mirror media insert) doesn't leave a half-created cross-post.
+  const utm = await generateUtmCampaign(source.title);
+  const created = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(productionItems)
+      .values({
+        brand: source.brand,
+        title: source.title,
+        thumbnail: source.thumbnail,
+        status,
+        accountId: targetAccountId,
+        postType: targetPostType,
+        sourceType: "cross_post",
+        repostedFromItemId: source.id,
+        format: inheritedFormat,
+        pillarContentNotionId: source.pillarContentNotionId,
+        pillarContentItemId: source.pillarContentItemId,
+        utmCampaign: utm,
+        producerUserId: assignees.producerUserId,
+        editorUserId,
+      })
+      .returning({ id: productionItems.id });
+
+    // Seed mirrored media + a v1 contentDrafts row so the simulator on the
+    // redirect page lands editable — same UX promise as the repost route.
+    // Without this the new cross-post shows "Read-only — no draft yet."
+    // and the Add-photo / Generate-caption / inline-edit affordances are
+    // all hidden because they gate on `editable = draftId !== null`.
+    if (CROSS_POST_SEEDED_TARGETS.has(targetPostType as PostType)) {
+      await seedRepostContent(tx, {
+        sourceId: source.id,
+        repostId: row.id,
+        postType: targetPostType as PostType,
+        sourceContentBody: source.contentBody,
+        actorUserId: guard.session.user.id,
+      });
+    }
+
+    return row;
+  });
 
   // Activity trail on the new row so the editor lands on the detail page
   // and immediately sees where this came from. Only stamped on queue-
@@ -246,6 +285,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
           },
         });
       }
+    }
+  }
+
+  // After the seed tx commits, fire the AI caption generator for IG
+  // targets — same auto-fire seam as the repost route. Fire-and-forget;
+  // failure here doesn't block the redirect to the new item.
+  if (
+    typeof targetPostType === "string" &&
+    targetPostType.startsWith("instagram_")
+  ) {
+    try {
+      await enqueue("generate-instagram-caption", {
+        productionItemId: created.id,
+      });
+    } catch (err) {
+      console.error("generate-ig-caption enqueue (cross-post) failed:", err);
     }
   }
 
