@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { authorInitials } from "./resolve-preview-data";
 
@@ -52,7 +55,13 @@ export function MonogramAvatar({
       : size === "lg"
         ? "h-12 w-12 text-base"
         : "h-9 w-9 text-xs";
-  if (avatarUrl) {
+  // IG / SC CDN avatar URLs are signed and expire (24h-ish). When the
+  // image fails to load we silently flip to the monogram fallback so the
+  // simulator never renders a broken-image icon. State keys off the URL
+  // so a parent passing a fresh `avatarUrl` retries instead of staying
+  // stuck on a previous failure.
+  const [failed, setFailed] = useState(false);
+  if (avatarUrl && !failed) {
     return (
       <div
         className={cn(
@@ -63,10 +72,12 @@ export function MonogramAvatar({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          key={avatarUrl}
           src={avatarUrl}
           alt=""
           className="h-full w-full object-cover"
           referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
         />
       </div>
     );

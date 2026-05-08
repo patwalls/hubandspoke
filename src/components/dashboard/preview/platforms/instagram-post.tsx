@@ -58,7 +58,6 @@ export function InstagramPostSimulator({
         variant="ig-embed"
         author={data.author}
         subtitle={null}
-        publishedAt={data.publishedAt}
       />
     </div>
   );

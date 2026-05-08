@@ -1,15 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  BookmarkIcon,
-  HeartIcon,
-  MessageCircleIcon,
-  MoreHorizontalIcon,
-  MusicIcon,
-  SendIcon,
-  SparklesIcon,
-} from "lucide-react";
+import { SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { EditableField } from "./editable-field";
@@ -42,9 +34,6 @@ interface Props {
   /** ig-embed only: subtitle under the handle. "Original audio" for Reels,
    *  null for Posts. */
   subtitle?: string | null;
-  /** ig-embed only: published-at timestamp shown under the caption.
-   *  Formatted by the parent (or null if not yet published). */
-  publishedAt?: string | null;
 }
 
 /**
@@ -72,7 +61,6 @@ export function CaptionPanel({
   variant = "minimal",
   author,
   subtitle,
-  publishedAt,
 }: Props) {
   if (variant === "ig-embed" && author) {
     return (
@@ -87,7 +75,6 @@ export function CaptionPanel({
         onRegenerated={onRegenerated}
         author={author}
         subtitle={subtitle ?? null}
-        publishedAt={publishedAt ?? null}
       />
     );
   }
@@ -131,7 +118,6 @@ function IgEmbedCaption({
   onRegenerated,
   author,
   subtitle,
-  publishedAt,
 }: {
   itemId: string;
   fieldKey: string | null;
@@ -143,15 +129,15 @@ function IgEmbedCaption({
   onRegenerated?: () => void;
   author: PreviewData["author"];
   subtitle: string | null;
-  publishedAt: string | null;
 }) {
   const handle = author.handle ?? "your_handle";
   const displayName = author.displayName ?? handle;
-  const relativeTime = formatRelativeShort(publishedAt);
   return (
-    <div className="flex min-w-0 flex-1 flex-col rounded-lg border border-border bg-background">
-      {/* Account header */}
-      <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
+    <div className="flex min-w-0 flex-1 flex-col gap-3">
+      {/* Account header — borderless, just avatar + handle + subtitle.
+       *  No card chrome, no faux engagement rail; the editor wants to see
+       *  who's posting + edit the caption, that's it. */}
+      <div className="flex items-center gap-2.5">
         <MonogramAvatar
           displayName={displayName}
           handle={handle}
@@ -164,10 +150,7 @@ function IgEmbedCaption({
             {author.verified && <VerifiedBadge />}
           </div>
           {subtitle && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <MusicIcon className="h-3 w-3" />
-              {subtitle}
-            </div>
+            <div className="text-xs text-muted-foreground">{subtitle}</div>
           )}
         </div>
         {showRegenerate && (
@@ -178,82 +161,21 @@ function IgEmbedCaption({
             onRegenerated={onRegenerated}
           />
         )}
-        <MoreHorizontalIcon
-          className="h-5 w-5 shrink-0 text-muted-foreground"
-          aria-hidden
-        />
       </div>
 
-      {/* Caption block. IG renders the handle inline with the caption's
-       *  first line, but inlining a textarea with a span breaks the cursor
-       *  and makes long captions awkward to edit — so we float the handle
-       *  on its own line above the editable textarea. Same column gutter
-       *  (small avatar to the left) so it still reads like an IG comment
-       *  block. */}
-      <div className="flex items-start gap-2.5 px-4 py-3">
-        <MonogramAvatar
-          displayName={displayName}
-          handle={handle}
-          avatarUrl={author.avatarUrl ?? null}
-          size="sm"
-        />
-        <div className="min-w-0 flex-1 text-sm leading-snug">
-          <div className="mb-1 flex items-center gap-1">
-            <span className="text-sm font-semibold">{handle}</span>
-            {author.verified && <VerifiedBadge />}
-          </div>
-          <EditableField
-            fieldKey={fieldKey}
-            editable={editable}
-            onLocalEdit={onLocalEdit}
-            onCommit={onCommit}
-            value={value}
-            placeholder="Write a caption…"
-            multiline
-            className="whitespace-pre-wrap text-sm leading-snug text-foreground"
-          />
-          {relativeTime && (
-            <div className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground">
-              {relativeTime}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Faux engagement rail — decorative; we don't have real comment /
-       *  like data on the simulator. Mirrors instagram.com layout so the
-       *  editor sees the post in roughly its final shape. */}
-      <div className="mt-auto flex items-center gap-4 border-t border-border px-4 py-3 text-muted-foreground">
-        <HeartIcon className="h-5 w-5" strokeWidth={1.75} />
-        <MessageCircleIcon className="h-5 w-5" strokeWidth={1.75} />
-        <SendIcon className="h-5 w-5" strokeWidth={1.75} />
-        <BookmarkIcon className="ml-auto h-5 w-5" strokeWidth={1.75} />
-      </div>
+      {/* Caption — editable textarea, no extra label or background. */}
+      <EditableField
+        fieldKey={fieldKey}
+        editable={editable}
+        onLocalEdit={onLocalEdit}
+        onCommit={onCommit}
+        value={value}
+        placeholder="Write a caption…"
+        multiline
+        className="whitespace-pre-wrap text-sm leading-snug text-foreground"
+      />
     </div>
   );
-}
-
-/** "1d", "3h", "just now" — short relative time for the timestamp under
- *  the caption. Returns null when no publishedAt is set so we don't lie
- *  about timing on pre-publish drafts. */
-function formatRelativeShort(iso: string | null): string | null {
-  if (!iso) return null;
-  const ms = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(ms) || ms < 0) return null;
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return "just now";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d`;
-  const wk = Math.floor(day / 7);
-  if (wk < 5) return `${wk}w`;
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
 }
 
 function RegenerateCaptionButton({

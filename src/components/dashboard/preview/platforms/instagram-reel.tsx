@@ -125,7 +125,6 @@ export function InstagramReelSimulator({
         variant="ig-embed"
         author={data.author}
         subtitle="Original audio"
-        publishedAt={data.publishedAt}
       />
     </div>
   );
