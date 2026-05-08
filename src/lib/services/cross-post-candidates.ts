@@ -112,6 +112,11 @@ export interface CrossPostCandidate {
     accountId: string;
     postType: string | null;
     status: string | null;
+    /** When this sibling cross-post was published. Drives the
+     *  "Already posted · Xd ago" hint in the triage dialog. Null when the
+     *  sibling is still pre-publish (Idea / Assigned / etc.) — the dialog
+     *  falls back to the status string in that case. */
+    publishedAt: string | null;
   }>;
 }
 
@@ -287,39 +292,120 @@ export async function selectCrossPostCandidates(opts: {
 
   const candidateIds = rawCandidates.map((c) => c.id);
 
-  // Existing cross-posts derived from these candidates — drives the modal's
-  // disabled-card state and the "all targets covered" drop.
-  const existingCrossPosts = await db
-    .select({
-      sourceItemId: productionItems.repostedFromItemId,
-      productionItemId: productionItems.id,
-      accountId: productionItems.accountId,
-      postType: productionItems.postType,
-      status: productionItems.status,
-    })
-    .from(productionItems)
-    .where(
-      and(
-        eq(productionItems.sourceType, "cross_post"),
-        inArray(productionItems.repostedFromItemId, candidateIds),
-        isNull(productionItems.deletedAt)
-      )
-    );
+  // Existing cross-posts in each candidate's LINEAGE — drives the dialog's
+  // "Already posted · Xd ago" hint + sort-to-bottom + disabled state.
+  //
+  // The candidate may itself be a `repost` (same content, same platform,
+  // different time) whose parent — the lineage root — has already been
+  // cross-posted to other accounts. We want those siblings to surface too,
+  // not just the direct children of the candidate. Two CTEs:
+  //
+  //   1. `lineage`: walk UP from each candidate via `reposted_from_item_id`
+  //      until the parent is null. The terminal node is the lineage root
+  //      (the `original` / `clip` the candidate descends from). Tag every
+  //      walked row with the candidate id it came from.
+  //   2. `descendants`: walk DOWN from each lineage root through every
+  //      `reposted_from_item_id` edge, regardless of `source_type`. This
+  //      catches siblings on the other side of the tree (cross_posts of
+  //      the original we walked up through, cross_posts of OTHER reposts
+  //      of the same original, etc.). Carry the `candidate_id` through.
+  //
+  // Then filter the descendants to `source_type='cross_post'` (only those
+  // are sibling-cross-posts the editor cares about) and exclude the
+  // candidate itself. Depth bound at 8 — actual lineages are 1-2 deep, but
+  // we want a clear ceiling in case of a cycle bug elsewhere.
+  const existingCrossPostRows =
+    candidateIds.length === 0
+      ? []
+      : ((await db.execute(sql`
+        WITH RECURSIVE lineage(candidate_id, node_id, parent_id, depth) AS (
+          SELECT pi.id, pi.id, pi.reposted_from_item_id, 0
+          FROM production_items pi
+          WHERE pi.id IN ${sql.raw(`(${candidateIds.map((id) => `'${id}'`).join(",")})`)}
+            AND pi.deleted_at IS NULL
+          UNION ALL
+          SELECT l.candidate_id, pi.id, pi.reposted_from_item_id, l.depth + 1
+          FROM lineage l
+          JOIN production_items pi ON pi.id = l.parent_id
+          WHERE l.depth < 8
+            AND pi.deleted_at IS NULL
+        ),
+        roots(candidate_id, root_id) AS (
+          SELECT candidate_id, node_id
+          FROM lineage
+          WHERE parent_id IS NULL
+        ),
+        descendants(candidate_id, root_id, node_id, depth) AS (
+          SELECT candidate_id, root_id, root_id, 0
+          FROM roots
+          UNION ALL
+          SELECT d.candidate_id, d.root_id, pi.id, d.depth + 1
+          FROM descendants d
+          JOIN production_items pi ON pi.reposted_from_item_id = d.node_id
+          WHERE d.depth < 8
+            AND pi.deleted_at IS NULL
+        )
+        SELECT DISTINCT
+          d.candidate_id::text AS candidate_id,
+          pi.id::text AS production_item_id,
+          pi.account_id::text AS account_id,
+          pi.post_type AS post_type,
+          pi.status AS status,
+          pi.published_at AS published_at
+        FROM descendants d
+        JOIN production_items pi ON pi.id = d.node_id
+        WHERE pi.source_type = 'cross_post'
+          AND pi.account_id IS NOT NULL
+          AND pi.post_type IS NOT NULL
+          AND pi.deleted_at IS NULL
+          AND pi.id != d.candidate_id;
+      `)) as unknown as Array<{
+          candidate_id: string;
+          production_item_id: string;
+          account_id: string;
+          post_type: string | null;
+          status: string | null;
+          published_at: Date | string | null;
+        }>);
 
+  // Group by candidate, then dedupe by (accountId, postType) keeping the
+  // most-recent published-at. The dialog renders one row per
+  // (account, postType) pair so duplicates would render redundantly.
   const crossPostsBySource = new Map<
     string,
     CrossPostCandidate["existingCrossPosts"]
   >();
-  for (const row of existingCrossPosts) {
-    if (!row.sourceItemId || !row.accountId) continue;
-    const list = crossPostsBySource.get(row.sourceItemId) ?? [];
-    list.push({
-      productionItemId: row.productionItemId,
-      accountId: row.accountId,
-      postType: row.postType,
+  const dedupKey = (accountId: string, postType: string | null) =>
+    `${accountId}:${postType ?? ""}`;
+  for (const row of existingCrossPostRows) {
+    if (!row.candidate_id || !row.account_id) continue;
+    const list = crossPostsBySource.get(row.candidate_id) ?? [];
+    const publishedAtIso =
+      row.published_at instanceof Date
+        ? row.published_at.toISOString()
+        : typeof row.published_at === "string"
+          ? row.published_at
+          : null;
+    const existingIdx = list.findIndex(
+      (r) => dedupKey(r.accountId, r.postType) === dedupKey(row.account_id, row.post_type),
+    );
+    const next = {
+      productionItemId: row.production_item_id,
+      accountId: row.account_id,
+      postType: row.post_type,
       status: row.status,
-    });
-    crossPostsBySource.set(row.sourceItemId, list);
+      publishedAt: publishedAtIso,
+    };
+    if (existingIdx === -1) {
+      list.push(next);
+    } else {
+      // Keep the most-recent: prefer non-null publishedAt; tie-break newer.
+      const prev = list[existingIdx];
+      const prevTs = prev.publishedAt ? Date.parse(prev.publishedAt) : -Infinity;
+      const nextTs = publishedAtIso ? Date.parse(publishedAtIso) : -Infinity;
+      if (nextTs > prevTs) list[existingIdx] = next;
+    }
+    crossPostsBySource.set(row.candidate_id, list);
   }
 
   // Per-candidate velocity snapshots. One query, batched on ID list.

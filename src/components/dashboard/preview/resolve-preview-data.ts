@@ -115,15 +115,19 @@ export function resolvePreviewData(
     }));
   }
   if (slides.length === 0) {
-    const cover = item.posterUrl ?? item.mediaUrl ?? item.thumbnail ?? null;
-    if (cover) {
+    const isVideo = item.mediaContentType?.startsWith("video/") ?? false;
+    // For video items prefer the playable mediaUrl and use the poster as
+    // the thumbnail. Earlier logic only flipped to "video" when posterUrl
+    // was absent, which silently downgraded any item with both archived
+    // (the common Reel case) into a static still.
+    const url = isVideo
+      ? item.mediaUrl ?? item.posterUrl ?? item.thumbnail ?? null
+      : item.posterUrl ?? item.mediaUrl ?? item.thumbnail ?? null;
+    if (url) {
       slides = [
         {
-          url: cover,
-          kind:
-            item.mediaContentType?.startsWith("video/") && !item.posterUrl
-              ? "video"
-              : "image",
+          url,
+          kind: isVideo ? "video" : "image",
           posterUrl: item.posterUrl ?? null,
         },
       ];

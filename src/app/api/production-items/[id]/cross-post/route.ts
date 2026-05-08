@@ -235,6 +235,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
         repostId: row.id,
         postType: targetPostType as PostType,
         sourceContentBody: source.contentBody,
+        sourceLegacyMedia: source.mediaS3Key
+          ? {
+              s3Bucket: source.mediaS3Bucket,
+              s3Key: source.mediaS3Key,
+              contentType: source.mediaContentType,
+              posterS3Key: source.posterS3Key,
+            }
+          : null,
         actorUserId: guard.session.user.id,
       });
     }

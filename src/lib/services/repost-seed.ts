@@ -37,11 +37,30 @@ export interface SeedRepostContentInput {
   /** Source's published-snapshot text. May be null if enrichment hasn't run.
    *  Treated as "" so the editor still has a row to PATCH against. */
   sourceContentBody: string | null;
+  /** Legacy single-media columns from the source's `production_items` row.
+   *  Used as a fallback when the source has zero `production_item_media`
+   *  rows — older enrichments wrote the MP4 directly onto the parent row
+   *  instead of into the carousel-style table. When present we synthesize
+   *  one carousel row on the new repost so the simulator can play it
+   *  without a fresh Descript render. Pass null to skip the fallback. */
+  sourceLegacyMedia: {
+    s3Bucket: string | null;
+    s3Key: string | null;
+    contentType: string | null;
+    posterS3Key: string | null;
+  } | null;
   actorUserId: string;
 }
 
 export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
-  const { sourceId, repostId, postType, sourceContentBody, actorUserId } = input;
+  const {
+    sourceId,
+    repostId,
+    postType,
+    sourceContentBody,
+    sourceLegacyMedia,
+    actorUserId,
+  } = input;
 
   // 1. Mirror carousel media. The (production_item_id, index) unique index
   //    means we insert with the same `index` values; collisions can't happen
@@ -74,6 +93,30 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
         sourceUrl: m.sourceUrl,
       }))
     );
+  } else if (
+    sourceLegacyMedia?.s3Bucket &&
+    sourceLegacyMedia.s3Key &&
+    sourceLegacyMedia.contentType
+  ) {
+    // Legacy fallback: pre-carousel enrichment archived the MP4 onto the
+    // parent row's `mediaS3Key` instead of as a `production_item_media`
+    // row. Synthesize one row on the new repost so the simulator's video
+    // path lights up without re-rendering through Descript. Schema
+    // requires s3Bucket / s3Key / contentType non-null — skip the row
+    // if any is missing.
+    await tx.insert(productionItemMedia).values({
+      productionItemId: repostId,
+      index: 0,
+      kind: sourceLegacyMedia.contentType.startsWith("video/")
+        ? "video"
+        : "image",
+      s3Bucket: sourceLegacyMedia.s3Bucket,
+      s3Key: sourceLegacyMedia.s3Key,
+      contentType: sourceLegacyMedia.contentType,
+      sizeBytes: null,
+      posterS3Key: sourceLegacyMedia.posterS3Key,
+      sourceUrl: null,
+    });
   }
 
   // 2. v1 draft pre-filled with the source's text. `copy:source` is a new

@@ -33,6 +33,28 @@ import type {
   CrossPostCandidate,
 } from "@/lib/services/cross-post-candidates";
 
+/** "3d ago", "2h ago", "just now" — short relative-time helper for the
+ *  "Already posted · Xd ago" hint on a cross-post target row. Same shape
+ *  as the helper in `sync-errors-table.tsx`; inlined here because there's
+ *  no shared utils file for "time-ago" yet and a 10-line helper isn't
+ *  worth a new module. */
+function timeAgo(iso: string | null): string {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms) || ms < 0) return "just now";
+  const min = Math.floor(ms / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const wk = Math.floor(day / 7);
+  if (wk < 5) return `${wk}w ago`;
+  const mo = Math.floor(day / 30);
+  return `${mo}mo ago`;
+}
+
 interface CrossPostTriageDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -54,8 +76,14 @@ const VISIBLE_LIMIT = 8;
 interface TargetPair {
   account: BrandAccount;
   postType: PostType;
-  /** Existing cross-post production item for this (account, postType) pair, if any. */
-  existing: { productionItemId: string; status: string | null } | null;
+  /** Existing cross-post production item for this (account, postType) pair, if any.
+   *  May be a sibling deeper in the lineage tree (e.g., the candidate is a
+   *  repost of the original; the row here is a cross-post of the original). */
+  existing: {
+    productionItemId: string;
+    status: string | null;
+    publishedAt: string | null;
+  } | null;
 }
 
 function pairKey(p: { account: { id: string }; postType: string }): string {
@@ -137,7 +165,11 @@ export function CrossPostTriageDialog({
     const existingByPair = new Map(
       candidate.existingCrossPosts.map((x) => [
         `${x.accountId}:${x.postType ?? ""}`,
-        { productionItemId: x.productionItemId, status: x.status },
+        {
+          productionItemId: x.productionItemId,
+          status: x.status,
+          publishedAt: x.publishedAt,
+        },
       ])
     );
     const pairs: TargetPair[] = [];
@@ -516,8 +548,17 @@ export function CrossPostTriageDialog({
                       </span>
                     </span>
                     {isDone && (
-                      <span className="text-[10px] text-muted-foreground whitespace-nowrap uppercase tracking-wider">
-                        {t.existing?.status ?? "done"}
+                      <span
+                        className="text-[10px] text-muted-foreground whitespace-nowrap"
+                        title={
+                          t.existing?.publishedAt
+                            ? `Already cross-posted on ${new Date(t.existing.publishedAt).toLocaleString()}`
+                            : `Already cross-posted (status: ${t.existing?.status ?? "unknown"})`
+                        }
+                      >
+                        {t.existing?.publishedAt
+                          ? `Already posted · ${timeAgo(t.existing.publishedAt)}`
+                          : `Already cross-posted · ${(t.existing?.status ?? "in progress").toLowerCase()}`}
                       </span>
                     )}
                   </label>
