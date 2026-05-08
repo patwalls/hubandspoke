@@ -361,10 +361,31 @@ async function pollLayoutOnce(
       );
     }
     // Layout-apply mutates the composition in place. compositionId is
-    // unchanged from the import phase, so nothing to persist — just log.
+    // unchanged from the import phase, so nothing to persist — just log
+    // + emit an activity event so the editor can confirm Underlord ran.
     helpers.logger.info(
       `precise-cut layout-ok clip=${payload.clipIdeaId} job=${layoutJobId}`,
     );
+    const [editor] = await db
+      .select({ editorUserId: productionItems.editorUserId })
+      .from(productionItems)
+      .where(eq(productionItems.id, payload.derivativeItemId))
+      .limit(1);
+    await recordToolAction({
+      contentItemId: payload.derivativeItemId,
+      userId: editor?.editorUserId ?? null,
+      tool: "descript",
+      action: "layout_applied",
+      status: "success",
+      label: "Underlord finished applying the layout pack",
+      meta: { layoutJobId },
+    });
+    // Auto-chain into publish-and-archive so the rendered MP4 lands in
+    // S3 and the simulator on the detail page picks it up. Mirrors the
+    // chain we wired in `descript-clip-resolve` for the agent flow.
+    await helpers.addJob("descript-publish-and-archive", {
+      productionItemId: payload.derivativeItemId,
+    });
     return;
   }
 

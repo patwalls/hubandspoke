@@ -67,6 +67,11 @@ export interface ProductionItem {
   descriptProjectUrl?: string | null;
   descriptCompositionId?: string | null;
   descriptImportedAt?: string | null;
+  /** Publish-and-archive state. Drives the "rendering / rendered / failed"
+   *  sub-state on the Descript pill and the inline-simulator empty UX. */
+  descriptPublishJobId?: string | null;
+  descriptPublishedAt?: string | null;
+  descriptPublishError?: string | null;
   pillarContentNotionId?: string | null;
   pillarContentItemId?: string | null;
   /** Title of the pillar production_item (when this row is a clip/repurpose

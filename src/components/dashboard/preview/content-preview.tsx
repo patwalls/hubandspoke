@@ -67,6 +67,10 @@ interface ContentPreviewProps {
    *  drafting surface. Parent should refetch so canonical rows replace
    *  local placeholders. */
   onMediaMutated?: () => void;
+  /** True while there's Descript-side work in flight. Forwarded to the
+   *  per-platform simulator so it can render an "embed-style" placeholder
+   *  in place of the empty drag-to-add state. */
+  processing?: boolean;
 }
 
 export function ContentPreview({
@@ -77,6 +81,7 @@ export function ContentPreview({
   onLocalEdit,
   onCommit,
   onMediaMutated,
+  processing,
 }: ContentPreviewProps) {
   // Prefer the canonical `postType` ("x", "instagram_reel", …) — it's the
   // accounts-rollout key and matches the simulator map directly. Fall back
@@ -125,6 +130,7 @@ export function ContentPreview({
           onCommit={onCommit}
           itemId={item.id}
           onMediaMutated={onMediaMutated}
+          processing={processing}
         />
       </div>
     </div>

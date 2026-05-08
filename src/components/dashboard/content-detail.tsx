@@ -1447,6 +1447,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   ]);
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
+  // True while there's Descript-side work happening that the simulator
+  // should reflect (composition not ready yet, OR Underlord still running,
+  // OR the publish-and-archive worker is rendering / waiting). Drives
+  // the embed-style empty state in the IG Reel simulator. Two signals:
+  //   - Item has a Descript project but no composition yet (Phase 1 mid)
+  //   - Composition exists but no archived MP4 yet (Underlord + publish
+  //     phases are still running, OR a manual sync was just kicked off)
+  // We OR the project_id check for the precise-cut path which sets project
+  // before composition, and the publish_job_id check for the post-comp
+  // window where Underlord might still be applying the layout pack.
+  const descriptProcessing =
+    !!item.descriptProjectId && !item.descriptPublishedAt;
   const hideDerivativeSections =
     derivatives.length === 0 && repurposeTargets.length === 0;
 
@@ -2253,6 +2265,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           onLocalEdit={onLocalEdit}
           onCommit={onCommit}
           onMediaMutated={() => void load()}
+          processing={descriptProcessing}
         />
       )}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -2825,6 +2838,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               onLocalEdit={onLocalEdit}
               onCommit={onCommit}
               onMediaMutated={() => void load()}
+              processing={descriptProcessing}
             />
           </TabsContent>
         )}

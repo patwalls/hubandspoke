@@ -20,6 +20,12 @@ export interface SimulatorProps {
   // Fires after a successful media upload or delete so the parent can
   // refetch and re-render with the new rows.
   onMediaMutated?: () => void;
+  // True when there's Descript-side work in flight (composition rendering,
+  // Underlord layout-pack, MP4 publish-and-archive). Drives the empty-state
+  // UX: instead of "Drag a video to add", the simulator shows an
+  // embed-style placeholder with "Rendering..." copy. Currently only the
+  // IG Reel simulator branches on this.
+  processing?: boolean;
 }
 
 export function readLive(

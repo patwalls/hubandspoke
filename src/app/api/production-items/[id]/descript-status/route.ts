@@ -122,16 +122,33 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     | "failed"
     | "stalled"
     | "not_started";
+  // Prefer active queue state OVER `compositionId is set`. The
+  // precise-cut + Underlord flow stamps `compositionId` at end of Phase 1
+  // (import) and then continues running Phase 2 (Underlord layout-pack)
+  // as a follow-up invocation of `clip-idea-precise-cut`. Without this
+  // precedence flip the pill would say "Descript ready" while Underlord
+  // is still applying the layout pack — misleading. The agent flow
+  // (`descript-clip-resolve`) finishes its task at composition stamp, so
+  // there's no active queue job after — `compositionId` falls through
+  // here and lands on "connected" correctly.
   let status: Status;
   let detail: string;
-  if (compositionId) {
-    status = "connected";
-    detail = "Composition is ready in Descript.";
-  } else if (queueJob) {
+  if (queueJob) {
     const lockedAt = queueJob.locked_at ? new Date(queueJob.locked_at) : null;
     const lockAgeMs = lockedAt ? Date.now() - lockedAt.getTime() : 0;
     const isMaxedOut =
       queueJob.attempts >= queueJob.max_attempts && queueJob.last_error;
+    // Phase identifier for the detail string: "import", "Underlord
+    // layout-pack", or generic. Helps the editor know which step they're
+    // looking at.
+    const phaseLabel =
+      queueJob.task_identifier === "clip-idea-precise-cut"
+        ? compositionId
+          ? "Underlord layout-pack"
+          : "import"
+        : queueJob.task_identifier === "descript-clip-resolve"
+          ? "import"
+          : queueJob.task_identifier;
     if (isMaxedOut) {
       status = "failed";
       detail = `Job exhausted ${queueJob.max_attempts} attempts. Last error: ${queueJob.last_error}`;
@@ -140,11 +157,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       detail = `Job locked ${Math.floor(lockAgeMs / 60_000)} min ago by a worker that's no longer running. Re-run to release the lock.`;
     } else if (lockedAt) {
       status = "processing";
-      detail = `Worker is running phase ${queueJob.task_identifier}. Locked ${Math.max(1, Math.floor(lockAgeMs / 1000))}s ago.`;
+      detail = `Worker is running ${phaseLabel}. Locked ${Math.max(1, Math.floor(lockAgeMs / 1000))}s ago.`;
     } else {
       status = "processing";
-      detail = `Queued, run_at ${new Date(queueJob.run_at).toLocaleString()}.`;
+      detail = `${phaseLabel} queued, run_at ${new Date(queueJob.run_at).toLocaleString()}.`;
     }
+  } else if (compositionId) {
+    status = "connected";
+    detail = "Composition is ready in Descript.";
   } else if (trigger || projectId) {
     status = "stalled";
     detail =
