@@ -78,6 +78,7 @@ import type { PostType } from "@/lib/platform-field-schemas";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
 import { ContentPreview } from "./preview/content-preview";
+import { PublishedEmbed } from "./preview/published-embed";
 import type { ContentDraftContent, FormatFieldSchema } from "@/lib/db/schema";
 
 // Server returns contentDrafts rows with `createdAt`/`updatedAt` as ISO
@@ -1692,6 +1693,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   ]);
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
+  // Two-column Details layout fires for inline-drafting items (left =
+  // editable simulator) AND for published items (left = real embed of the
+  // live post). Other states keep today's form-only layout.
+  const showLeftPane = isPrePublishInline || isPublished;
   // Descript-render state. Drives the IG Reel embed-style placeholder
   // until the rendered MP4 actually lands in S3. Four states derived from
   // the existing `descript_*` columns:
@@ -2511,16 +2516,16 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         <TabsContent value="details" className="pt-5 space-y-6">
       <div
         className={
-          isPrePublish
+          showLeftPane
             ? "grid grid-cols-1 lg:grid-cols-2 gap-6 items-start"
             : undefined
         }
       >
-      {/* Pre-publish X: the simulator card is the drafting surface and lives
-       * in the LEFT grid column (rendered first). The form metadata then
-       * lands in the RIGHT column. Other platforms keep today's order
-       * (form → Instructions). */}
-      {isPrePublishInline && (
+      {/* LEFT column. Two cases: pre-publish inline-drafting items get the
+       * editable simulator (drafting surface). Published items get a real
+       * embed of the live post (Instagram iframe, X/TikTok widget, …). All
+       * other states render no left pane and the form goes full-width. */}
+      {isPrePublishInline ? (
         <ContentPreview
           item={item}
           media={data.media ?? []}
@@ -2532,7 +2537,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           onDraftMutated={() => void load()}
           descriptRenderState={descriptRenderState}
         />
-      )}
+      ) : isPublished ? (
+        <PublishedEmbed item={item} />
+      ) : null}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         {isYouTube && (
           <div className="flex items-center justify-end gap-2 px-3 py-1.5 border-b border-border/60">
