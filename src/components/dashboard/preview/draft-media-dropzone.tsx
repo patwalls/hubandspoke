@@ -272,6 +272,11 @@ export function DraftMediaDropZone({
 
   const enrichedSlides: SlideWithRemoveButton[] = slides.map((slide) => ({
     slide,
+    // Always-visible (not hover-gated) on the assumption that the editor
+    // needs to find this fast — a hover-only X was invisible on broken
+    // poster frames, which is exactly when the user wants to delete. The
+    // bg-black/60 chip is small enough to not fight the media for
+    // attention.
     removeButton:
       editable && slide.mediaId ? (
         <button
@@ -280,8 +285,9 @@ export function DraftMediaDropZone({
             e.stopPropagation();
             void handleRemove(slide.mediaId!);
           }}
-          className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/80"
+          className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white shadow-sm transition-colors hover:bg-black/80"
           aria-label="Remove media"
+          title="Remove media"
         >
           <XIcon className="h-3.5 w-3.5" />
         </button>
