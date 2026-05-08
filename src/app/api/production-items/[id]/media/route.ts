@@ -168,6 +168,7 @@ export async function POST(request: Request, context: RouteContext) {
         s3Bucket: productionItemMedia.s3Bucket,
         s3Key: productionItemMedia.s3Key,
         contentType: productionItemMedia.contentType,
+        kind: productionItemMedia.kind,
         posterS3Key: productionItemMedia.posterS3Key,
       })
       .from(productionItemMedia)
@@ -176,13 +177,19 @@ export async function POST(request: Request, context: RouteContext) {
       .limit(1);
 
     if (lowest) {
+      // Only fall back to s3Key as the poster when slide-0 is an image.
+      // For video slides without an explicit posterS3Key, leave the column
+      // null — feeding a video URL into image-only consumers (the vision
+      // sweep, cover-thumbnail renderers) breaks them.
+      const fallbackPoster =
+        lowest.posterS3Key ?? (lowest.kind === "image" ? lowest.s3Key : null);
       await tx
         .update(productionItems)
         .set({
           mediaS3Bucket: lowest.s3Bucket,
           mediaS3Key: lowest.s3Key,
           mediaContentType: lowest.contentType,
-          posterS3Key: lowest.posterS3Key ?? lowest.s3Key,
+          posterS3Key: fallbackPoster,
           updatedAt: new Date(),
         })
         .where(eq(productionItems.id, id));

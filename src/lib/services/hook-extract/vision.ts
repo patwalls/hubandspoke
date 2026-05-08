@@ -39,6 +39,18 @@ const VISION_POST_TYPES = [
 
 export const VISION_SWEEP_BATCH_LIMIT = 50;
 
+/** Match S3 keys that look like still images. Anything else (mp4, mov, webm,
+ *  no extension) is treated as not vision-eligible — see the guard in
+ *  extractVisionForItem. */
+const IMAGE_KEY_RE = /\.(jpe?g|png|webp|gif|heic|heif|avif)$/i;
+
+function isLikelyImageKey(key: string): boolean {
+  // Strip query string just in case (presigned URLs aren't passed here, but
+  // be safe).
+  const base = key.split("?")[0] ?? key;
+  return IMAGE_KEY_RE.test(base);
+}
+
 /** TTL for the presigned poster URL we hand to the model. 1 hour covers
  *  retries comfortably without giving out long-lived URLs. */
 const POSTER_URL_TTL_SECONDS = 60 * 60;
@@ -270,6 +282,18 @@ export async function extractVisionForItem(
   }
   if (!existing.posterS3Key) {
     return { status: "no-poster" };
+  }
+  // Defensive: legacy rows can have a video key in posterS3Key (the media
+  // route used to fall back to s3Key for video slides). Vision can't read an
+  // mp4 — OpenAI returns a 400 that the SDK auto-captures to Sentry — so
+  // skip and stamp instead of burning the API call.
+  if (!isLikelyImageKey(existing.posterS3Key)) {
+    const now = new Date();
+    await db
+      .update(productionItems)
+      .set({ visionExtractedAt: now, updatedAt: now })
+      .where(eq(productionItems.id, productionItemId));
+    return { status: "skipped", note: "non-image-poster" };
   }
 
   const imageUrl = await getPresignedGetUrl(
