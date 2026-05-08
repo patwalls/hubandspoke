@@ -9,22 +9,24 @@ import {
   PlaceholderSlideRender,
 } from "../draft-media-dropzone";
 import { MediaActions } from "../media-actions";
+import { MultiSlideCarousel } from "../multi-slide-carousel";
 
 /**
- * Minimalist LinkedIn simulator.
+ * LinkedIn simulator.
  *
- * LinkedIn is text-primary. Media is optional (≤9 images OR 1 video, see
- * `validateMediaForPostType`). Layout:
- *   - Always: editable post body on the right side, with an Add-photo-or-
- *     video button below it. The button stays visible whether or not the
- *     post has media yet — the previous version conditionally rendered the
- *     dropzone, leaving editors with no way to attach a photo on a
- *     post-without-media (catch-22).
- *   - When there IS media: a media preview on the left (16:9 for video,
- *     1:1 for image), with the standard hover-overlay for download / copy.
+ * LinkedIn is text-primary. The real LI feed renders body text full width,
+ * with media (when present) directly below — never beside the body. Earlier
+ * iterations of this simulator used a side-by-side layout that collapsed
+ * the body to a ~80px gutter when the preview card was narrow, and the
+ * shape didn't match what actually publishes either way. So we stack:
  *
- * No "CAPTION" label — LinkedIn calls it a post body. The placeholder text
- * carries the affordance.
+ *   header → body (full width) → media (full width, real aspect) → add
+ *
+ * Media: optional, ≤9 images OR 1 video (see `validateMediaForPostType`).
+ * Aspect is whatever the original is — LI happily takes portrait, landscape,
+ * or square. We use `object-contain` and a `max-h` cap so a very tall
+ * portrait doesn't push the page height; the simulator should look like
+ * the post, not crop it.
  *
  * Field schema: `body` (longtext, ≤3000 chars). See
  * `platform-field-schemas.ts` for the agent's per-field directive.
@@ -42,11 +44,6 @@ export function LinkedInSimulator({
   const body = readLive(liveContent, fieldMap.caption, data.caption);
   const slides = data.slides;
   const hasMedia = slides.length > 0;
-  const firstSlide = slides[0];
-  // 16:9 for video (matches the LI feed); 1:1 for image since LI POV photos
-  // tend to be square or portrait.
-  const aspectClass =
-    firstSlide?.kind === "video" ? "aspect-video" : "aspect-square";
 
   return (
     <DraftMediaDropZone
@@ -58,14 +55,48 @@ export function LinkedInSimulator({
       hideDefaultAddButton
     >
       {({ slides: enrichedSlides, placeholders, openPicker, canAddMore }) => {
+        const totalSlides = enrichedSlides.length + placeholders.length;
+        // Single-slide path renders inline so we can let `object-contain`
+        // size the wrapper to the media's real aspect — `aspect-square`
+        // would crop a portrait image. The shared carousel needs a
+        // fixed-aspect wrapper to scroll cleanly, so we only use it when
+        // there are 2+ slides (LinkedIn allows up to 9 images).
         const enriched = enrichedSlides[0];
         const placeholder = placeholders[0];
         return (
-          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">
-            {hasMedia && (
-              <div
-                className={`group relative ${aspectClass} w-full max-w-[400px] shrink-0 overflow-hidden rounded-lg bg-black`}
-              >
+          <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3">
+            <SocialEmbedHeader
+              name={data.author.displayName ?? data.author.handle ?? "You"}
+              subtitle={data.author.bio}
+              avatarUrl={data.author.avatarUrl}
+              verified={data.author.verified}
+              monogramSeed={{
+                displayName: data.author.displayName,
+                handle: data.author.handle,
+              }}
+            />
+
+            <CaptionPanel
+              itemId={itemId}
+              fieldKey={fieldMap.caption}
+              value={body}
+              editable={editable}
+              onLocalEdit={onLocalEdit}
+              onCommit={onCommit}
+              placeholder="What do you want to talk about?"
+            />
+
+            {hasMedia && totalSlides > 1 ? (
+              <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-black">
+                <MultiSlideCarousel
+                  enrichedSlides={enrichedSlides}
+                  placeholders={placeholders}
+                  objectFit="contain"
+                  emptyState="Drop photos to add"
+                />
+              </div>
+            ) : hasMedia ? (
+              <div className="group relative w-full overflow-hidden rounded-lg border border-border bg-black">
                 {enriched?.slide.kind === "video" && enriched.slide.url ? (
                   <>
                     <video
@@ -73,7 +104,7 @@ export function LinkedInSimulator({
                       poster={enriched.slide.posterUrl ?? undefined}
                       controls
                       playsInline
-                      className="absolute inset-0 h-full w-full object-cover"
+                      className="block h-auto max-h-[560px] w-full"
                     />
                     <MediaActions src={enriched.slide.url} kind="video" />
                   </>
@@ -83,52 +114,29 @@ export function LinkedInSimulator({
                     <img
                       src={enriched.slide.url}
                       alt=""
-                      className="absolute inset-0 h-full w-full object-cover"
+                      className="block h-auto max-h-[560px] w-full object-contain"
                     />
                     <MediaActions src={enriched.slide.url} />
                   </>
                 ) : placeholder ? (
-                  <div className="absolute inset-0">
+                  <div className="aspect-square w-full">
                     <PlaceholderSlideRender placeholder={placeholder} />
                   </div>
                 ) : null}
                 {enriched?.removeButton}
               </div>
+            ) : null}
+
+            {canAddMore && (
+              <button
+                type="button"
+                onClick={openPicker}
+                className="inline-flex items-center gap-1.5 self-start rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+              >
+                <ImagePlusIcon className="h-3.5 w-3.5" />
+                {hasMedia ? "Add another" : "Add photo or video"}
+              </button>
             )}
-
-            <div className="flex min-w-0 flex-1 flex-col gap-3">
-              <SocialEmbedHeader
-                name={data.author.displayName ?? data.author.handle ?? "You"}
-                subtitle={data.author.bio}
-                avatarUrl={data.author.avatarUrl}
-                verified={data.author.verified}
-                monogramSeed={{
-                  displayName: data.author.displayName,
-                  handle: data.author.handle,
-                }}
-              />
-
-              <CaptionPanel
-                itemId={itemId}
-                fieldKey={fieldMap.caption}
-                value={body}
-                editable={editable}
-                onLocalEdit={onLocalEdit}
-                onCommit={onCommit}
-                placeholder="What do you want to talk about?"
-              />
-
-              {canAddMore && (
-                <button
-                  type="button"
-                  onClick={openPicker}
-                  className="inline-flex items-center gap-1.5 self-start rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-                >
-                  <ImagePlusIcon className="h-3.5 w-3.5" />
-                  {hasMedia ? "Add another" : "Add photo or video"}
-                </button>
-              )}
-            </div>
           </div>
         );
       }}

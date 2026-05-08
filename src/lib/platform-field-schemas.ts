@@ -45,16 +45,12 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
   },
   instagram_reel: {
     version: SCHEMA_VERSION,
+    // The on-screen `hook` field used to live here, but it's authored
+    // upstream in Descript and baked into the rendered MP4 — the simulator
+    // can't edit it, so the schema shouldn't pretend it can. Hook text
+    // still lives on `production_items.hook` (and on the source clip-idea);
+    // see `promote-clip-idea.ts` and the Descript pipeline for that flow.
     fields: [
-      {
-        key: "hook",
-        label: "On-screen hook",
-        type: "text",
-        maxLength: 120,
-        required: true,
-        prompt:
-          "The text overlay shown in the first second of the Reel. 5–10 words. Must be a verbatim or near-verbatim quote from the transcript — same rule as clip-idea hooks. The viewer will hear these words. Do not paraphrase.",
-      },
       {
         key: "caption",
         label: "Caption",
@@ -62,7 +58,7 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         maxLength: 2200,
         required: true,
         prompt:
-          "The Reel caption. First line should repeat or paraphrase the hook. 1–3 short follow-up lines that add context the overlay can't carry. No hashtag dumps.",
+          "The Reel caption. First line should repeat or paraphrase the on-screen hook (which lives on `production_items.hook`). 1–3 short follow-up lines that add context the overlay can't carry. No hashtag dumps.",
       },
     ],
   },
@@ -123,13 +119,9 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         prompt:
           "First 2 lines appear above the fold — make them hook + payoff. Follow with a timestamped outline derived from the transcript, then links + CTA. No generic SEO boilerplate.",
       },
-      {
-        key: "tags",
-        label: "Tags",
-        type: "tags",
-        prompt:
-          "5–10 search tags pulled from specific terms in the transcript (founder names, companies, niches, tools). Skip generic tags like 'business' or 'entrepreneur'.",
-      },
+      // YouTube tags used to live here. Removed because the simulator never
+      // surfaced them — the schema should match what the editor can actually
+      // see and edit. Re-add when there's a tags input in `youtube.tsx`.
     ],
   },
   youtube_shorts: {
@@ -246,7 +238,7 @@ export type PlatformFieldMap = {
 
 export const PLATFORM_FIELD_MAP: Record<PostType, PlatformFieldMap> = {
   x: { caption: "tweet", secondary: null },
-  instagram_reel: { caption: "caption", secondary: "hook" },
+  instagram_reel: { caption: "caption", secondary: null },
   instagram_post: { caption: "caption", secondary: null },
   instagram_story: { caption: "caption", secondary: null },
   youtube_long: { caption: "description", secondary: "title" },

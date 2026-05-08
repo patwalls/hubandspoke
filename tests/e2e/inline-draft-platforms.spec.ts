@@ -49,4 +49,26 @@ test("LinkedIn pre-publish item renders the inline drafting surface", async ({
   // Legacy LI action rail is gone.
   await expect(page.getByRole("button", { name: /^like$/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^repost$/i })).toHaveCount(0);
+
+  // Layout regression guard (2026-05-08): LinkedIn must stack body-above-
+  // media, never side-by-side. Earlier the simulator put media on the left
+  // at max-w-[400px] and the body collapsed to ~80px in the half-width
+  // preview card. The "Add photo or video" button lives below the
+  // CaptionPanel; assert that the textarea sits before the button in the
+  // document order — which is only true in the stacked layout.
+  const bodyTextarea = page.getByPlaceholder(
+    /what do you want to talk about/i,
+  );
+  const addButton = page.getByRole("button", {
+    name: /^add photo or video$/i,
+  });
+  const addHandle = await addButton.elementHandle();
+  expect(addHandle).not.toBeNull();
+  const order = await bodyTextarea.evaluate((el, other) => {
+    return el.compareDocumentPosition(other) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+      ? "before"
+      : "after";
+  }, addHandle as NonNullable<typeof addHandle>);
+  expect(order).toBe("before");
 });

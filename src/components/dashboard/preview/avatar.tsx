@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { displayAvatarUrl } from "@/lib/avatar-proxy";
 import { authorInitials } from "./resolve-preview-data";
 
 // Deterministic pastel color per handle so the same author looks the same
@@ -70,10 +71,13 @@ export function MonogramAvatar({
           className,
         )}
       >
+        {/* Route Meta CDN URLs (fbcdn.net / cdninstagram.com) through our
+         *  `/api/image-proxy` so the browser doesn't refuse the response
+         *  on `CORP: same-origin`. Same fix as `AccountAvatar`. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           key={avatarUrl}
-          src={avatarUrl}
+          src={displayAvatarUrl(avatarUrl)}
           alt=""
           className="h-full w-full object-cover"
           referrerPolicy="no-referrer"

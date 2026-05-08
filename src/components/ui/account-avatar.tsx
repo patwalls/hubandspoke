@@ -2,22 +2,8 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { displayAvatarUrl } from "@/lib/avatar-proxy";
 import { PlatformIcon } from "@/components/ui/platform-icon";
-
-/** Meta's CDN (fbcdn.net, cdninstagram.com) sets CORP: same-origin on
- *  avatar responses, so browsers refuse to render them cross-origin.
- *  Route those through our proxy; leave other hosts alone. */
-function displayAvatarUrl(raw: string): string {
-  try {
-    const host = new URL(raw).hostname;
-    if (host.endsWith(".fbcdn.net") || host.endsWith(".cdninstagram.com")) {
-      return `/api/image-proxy?url=${encodeURIComponent(raw)}`;
-    }
-    return raw;
-  } catch {
-    return raw;
-  }
-}
 
 interface AccountAvatarProps {
   avatarUrl: string | null | undefined;

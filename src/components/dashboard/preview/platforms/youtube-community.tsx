@@ -66,6 +66,13 @@ export function YouTubeCommunitySimulator({
             className="block h-auto max-h-[520px] w-full object-cover"
           />
         </div>
+      ) : firstSlide && firstSlide.kind === "video" ? (
+        // Don't silently drop the video — tell the editor that Community
+        // posts are image-only so they know to swap it before publish.
+        <div className="mt-3 rounded-[12px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-900">
+          Community posts don&rsquo;t support video. Drop an image instead, or
+          publish this clip as a Short.
+        </div>
       ) : null}
 
       <div className="mt-3 flex items-center gap-2 text-[#606060]">
