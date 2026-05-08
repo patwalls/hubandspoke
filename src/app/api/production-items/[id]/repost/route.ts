@@ -20,6 +20,8 @@ const SEEDED_POST_TYPES: ReadonlySet<PostType> = new Set<PostType>([
   "instagram_post",
   "instagram_reel",
   "instagram_story",
+  "linkedin",
+  "tiktok",
 ]);
 
 interface RouteContext {

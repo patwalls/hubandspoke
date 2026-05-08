@@ -163,6 +163,36 @@ export function validateMediaForPostType(
     return { ok: true };
   }
 
+  if (postType === "linkedin") {
+    // LinkedIn allows up to 9 images, OR exactly 1 video. (Documents
+    // upload is its own flow, not wired here.) Mixed image+video isn't
+    // supported by the LI feed UI.
+    if (combined.length > 9) {
+      return { ok: false, reason: "LinkedIn posts allow up to 9 images." };
+    }
+    const hasVideo = combined.some((m) => m.kind === "video");
+    if (hasVideo && combined.length > 1) {
+      return {
+        ok: false,
+        reason:
+          "A LinkedIn post can have 1 video OR up to 9 images, not both.",
+      };
+    }
+    return { ok: true };
+  }
+
+  if (postType === "tiktok") {
+    // Exactly 1 video. Photo-carousels exist on TikTok but the team isn't
+    // shipping them through this surface yet — re-open if/when they do.
+    if (combined.length > 1) {
+      return { ok: false, reason: "TikTok posts are a single video." };
+    }
+    if (combined.length === 1 && combined[0].kind !== "video") {
+      return { ok: false, reason: "TikTok posts are a single video." };
+    }
+    return { ok: true };
+  }
+
   // Other platforms haven't been wired for manual upload yet. Refuse so the
   // call site explicitly opts in when adding (and adds the right rule).
   return {
@@ -235,6 +265,19 @@ export function dropZoneOptionsForPostType(
         accept: "image/jpeg,image/png,video/mp4,video/quicktime",
         maxTotal: 1,
         addButtonLabel: "Add photo or video",
+      };
+    case "linkedin":
+      return {
+        accept:
+          "image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime",
+        maxTotal: 9,
+        addButtonLabel: "Add photo or video",
+      };
+    case "tiktok":
+      return {
+        accept: "video/mp4,video/quicktime",
+        maxTotal: 1,
+        addButtonLabel: "Add video",
       };
     default:
       return null;

@@ -1,18 +1,25 @@
 "use client";
 
-import {
-  BookmarkIcon,
-  HeartIcon,
-  MessageCircleIcon,
-  MusicIcon,
-  SendIcon,
-  UserPlusIcon,
-} from "lucide-react";
-import { MonogramAvatar } from "../avatar";
-import { VerifiedBadge } from "../verified-badge";
-import { EditableField } from "../editable-field";
+import { CaptionPanel } from "../caption-panel";
 import { readLive, type SimulatorProps } from "../simulator-types";
+import {
+  DraftMediaDropZone,
+  PlaceholderSlideRender,
+} from "../draft-media-dropzone";
+import { MediaActions } from "../media-actions";
 
+/**
+ * Minimalist TikTok simulator.
+ *
+ * TikTok is video-primary in a 9:16 frame, so the layout shape mirrors IG
+ * Reel: video on the left, editable caption on the right. We DON'T use
+ * the ig-embed CaptionPanel variant — TikTok isn't Instagram and its
+ * brand isn't ours to mock. The plain `CaptionPanel` minimal layout is
+ * the right call: a CAPTION label + the editable text, nothing else.
+ *
+ * Field schema: `caption` (longtext, ≤2200 chars). See
+ * `platform-field-schemas.ts`.
+ */
 export function TikTokSimulator({
   data,
   fieldMap,
@@ -20,76 +27,71 @@ export function TikTokSimulator({
   liveContent,
   onLocalEdit,
   onCommit,
+  itemId,
+  onMediaMutated,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
-  const handle = data.author.handle ?? "you";
-  const firstSlide = data.slides[0];
 
   return (
-    <div className="mx-auto w-full max-w-[380px] overflow-hidden rounded-xl bg-black text-white">
-      <div className="relative aspect-[9/16] w-full">
-        {firstSlide?.kind === "video" ? (
-          <video
-            src={firstSlide.url ?? undefined}
-            poster={firstSlide.posterUrl ?? undefined}
-            controls
-            playsInline
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-        ) : firstSlide?.url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={firstSlide.url}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-white/60">
-            No video yet
-          </div>
-        )}
-
-        {/* Right-side rail */}
-        <div className="absolute right-2 bottom-28 flex flex-col items-center gap-5">
-          <div className="relative">
-            <MonogramAvatar
-              displayName={data.author.displayName}
-              handle={data.author.handle}
-              size="md"
-              className="border-2 border-white"
-            />
-            <div className="absolute -bottom-2 left-1/2 flex h-4 w-4 -translate-x-1/2 items-center justify-center rounded-full bg-rose-500">
-              <UserPlusIcon className="h-2.5 w-2.5" />
-            </div>
-          </div>
-          <HeartIcon className="h-6 w-6" strokeWidth={1.8} />
-          <MessageCircleIcon className="h-6 w-6" strokeWidth={1.8} />
-          <BookmarkIcon className="h-6 w-6" strokeWidth={1.8} />
-          <SendIcon className="h-6 w-6" strokeWidth={1.8} />
-        </div>
-
-        {/* Bottom caption */}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-4 pt-12">
-          <div className="mb-1 flex items-center gap-1 text-sm font-bold">
-            @{handle}
-            {data.author.verified && <VerifiedBadge tone="tiktok" />}
-          </div>
-          <EditableField
-            fieldKey={fieldMap.caption}
-            editable={editable}
-            onLocalEdit={onLocalEdit}
-            onCommit={onCommit}
-            value={caption}
-            placeholder="Caption…"
-            multiline
-            className="text-xs leading-snug text-white"
-          />
-          <div className="mt-2 flex items-center gap-1.5 text-[11px]">
-            <MusicIcon className="h-3 w-3" />
-            <span className="truncate">original sound — {handle}</span>
-          </div>
-        </div>
+    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">
+      <div className="group relative aspect-[9/16] w-full max-w-[320px] shrink-0 overflow-hidden rounded-lg bg-black">
+        <DraftMediaDropZone
+          itemId={itemId}
+          postType="tiktok"
+          editable={editable}
+          slides={data.slides}
+          onMediaMutated={onMediaMutated}
+        >
+          {({ slides: enrichedSlides, placeholders }) => {
+            const enriched = enrichedSlides[0];
+            const placeholder = placeholders[0];
+            return (
+              <>
+                {enriched?.slide.kind === "video" && enriched.slide.url ? (
+                  <>
+                    <video
+                      src={enriched.slide.url}
+                      poster={enriched.slide.posterUrl ?? undefined}
+                      controls
+                      playsInline
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                    <MediaActions src={enriched.slide.url} kind="video" />
+                  </>
+                ) : enriched?.slide.url ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={enriched.slide.url}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                    <MediaActions src={enriched.slide.url} />
+                  </>
+                ) : placeholder ? (
+                  <div className="absolute inset-0">
+                    <PlaceholderSlideRender placeholder={placeholder} />
+                  </div>
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-xs text-white/60">
+                    Drop a video to add
+                  </div>
+                )}
+                {enriched?.removeButton}
+              </>
+            );
+          }}
+        </DraftMediaDropZone>
       </div>
+
+      <CaptionPanel
+        itemId={itemId}
+        fieldKey={fieldMap.caption}
+        value={caption}
+        editable={editable}
+        onLocalEdit={onLocalEdit}
+        onCommit={onCommit}
+      />
     </div>
   );
 }

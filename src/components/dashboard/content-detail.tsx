@@ -1786,9 +1786,54 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               src={coverImageUrl(item)}
               className="w-16 h-10 rounded object-cover shrink-0"
             />
-            <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-              {item.title || "(Untitled)"}
-            </h1>
+            {/* Title — pencil button fades in on hover and swaps the
+             *  heading for an Input. Enter / blur saves via persistField,
+             *  Esc reverts. YouTube items are non-editable (no pencil). */}
+            <div className="group/title flex items-start gap-2 min-w-0 flex-1">
+              {editingTitle ? (
+                <Input
+                  autoFocus
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onBlur={() => {
+                    setEditingTitle(false);
+                    if ((item.title ?? "") !== title)
+                      void persistField({ title });
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      setTitle(item.title ?? "");
+                      setEditingTitle(false);
+                    }
+                  }}
+                  aria-label="Title"
+                  placeholder="Untitled"
+                  className="border-0 bg-transparent shadow-none h-auto px-0 py-0 text-xl sm:text-2xl font-semibold focus-visible:ring-0 focus-visible:ring-offset-0"
+                />
+              ) : (
+                <h1 className="text-xl sm:text-2xl font-semibold text-foreground min-w-0 break-words">
+                  {item.title || (
+                    <span className="text-muted-foreground">(Untitled)</span>
+                  )}
+                </h1>
+              )}
+              {!isYouTube && !editingTitle && (
+                <button
+                  type="button"
+                  onClick={() => setEditingTitle(true)}
+                  aria-label="Edit title"
+                  title="Edit title"
+                  className="mt-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted/50 hover:text-foreground group-hover/title:opacity-100 focus-visible:opacity-100"
+                >
+                  <PencilIcon className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap mt-2">
             {item.sourceType === "repost" && (
@@ -2435,56 +2480,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           descriptRenderState={descriptRenderState}
         />
       )}
-      {/* Title — promoted out of the metadata card so it reads as the page
-       *  heading, not a row in a properties table. The pencil button shows
-       *  on hover (and while editing) and swaps the heading for an Input;
-       *  Enter / blur saves, Esc reverts. YouTube items remain read-only —
-       *  no pencil is shown when `isYouTube`. */}
-      <div className="group/title flex items-start gap-2">
-        {editingTitle ? (
-          <Input
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onFocus={(e) => e.currentTarget.select()}
-            onBlur={() => {
-              setEditingTitle(false);
-              if ((item.title ?? "") !== title) void persistField({ title });
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                e.currentTarget.blur();
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                setTitle(item.title ?? "");
-                setEditingTitle(false);
-              }
-            }}
-            aria-label="Title"
-            placeholder="Untitled"
-            className="border-0 bg-transparent shadow-none h-auto px-0 py-0 text-2xl font-semibold tracking-tight focus-visible:ring-0 focus-visible:ring-offset-0"
-          />
-        ) : (
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground min-w-0 flex-1 break-words">
-            {title || (
-              <span className="text-muted-foreground">Untitled</span>
-            )}
-          </h1>
-        )}
-        {!isYouTube && !editingTitle && (
-          <button
-            type="button"
-            onClick={() => setEditingTitle(true)}
-            aria-label="Edit title"
-            title="Edit title"
-            className="mt-1.5 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted/50 hover:text-foreground group-hover/title:opacity-100 focus-visible:opacity-100"
-          >
-            <PencilIcon className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
-
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         {isYouTube && (
           <div className="flex items-center justify-end gap-2 px-3 py-1.5 border-b border-border/60">

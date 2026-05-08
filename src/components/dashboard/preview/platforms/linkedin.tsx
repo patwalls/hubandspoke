@@ -1,17 +1,28 @@
 "use client";
 
-import {
-  GlobeIcon,
-  MessageSquareIcon,
-  MoreHorizontalIcon,
-  Repeat2Icon,
-  SendIcon,
-  ThumbsUpIcon,
-} from "lucide-react";
-import { MonogramAvatar } from "../avatar";
-import { EditableField } from "../editable-field";
+import { CaptionPanel } from "../caption-panel";
 import { readLive, type SimulatorProps } from "../simulator-types";
+import {
+  DraftMediaDropZone,
+  PlaceholderSlideRender,
+} from "../draft-media-dropzone";
+import { MediaActions } from "../media-actions";
 
+/**
+ * Minimalist LinkedIn simulator.
+ *
+ * LinkedIn is text-primary — a long-form post body with optional media —
+ * so the simulator mirrors the X layout: optional media on the left
+ * (16:9 for video, 1:1 for image), `CaptionPanel` minimal variant on the
+ * right. The post body is the single editable field.
+ *
+ * No platform chrome (avatar / handle / follower count / action rail) —
+ * editors only iterate on the body copy. The minimal label + textarea
+ * wins over a faux LinkedIn card.
+ *
+ * Field schema: `body` (longtext, ≤3000 chars). See
+ * `platform-field-schemas.ts` for the agent's per-field directive.
+ */
 export function LinkedInSimulator({
   data,
   fieldMap,
@@ -19,90 +30,81 @@ export function LinkedInSimulator({
   liveContent,
   onLocalEdit,
   onCommit,
+  itemId,
+  onMediaMutated,
 }: SimulatorProps) {
   const body = readLive(liveContent, fieldMap.caption, data.caption);
-  const displayName = data.author.displayName ?? data.author.handle ?? "You";
   const slides = data.slides;
+  const hasMedia = slides.length > 0;
+  // First-slide kind drives the aspect ratio: videos get 16:9 (matches the
+  // LinkedIn feed), images get 1:1 because portrait images are common in
+  // LinkedIn POV-style content.
+  const firstSlide = slides[0];
+  const aspectClass =
+    firstSlide?.kind === "video"
+      ? "aspect-video"
+      : "aspect-square";
 
   return (
-    <div className="mx-auto w-full max-w-[560px] rounded-md border border-border bg-background text-foreground">
-      <div className="flex items-start gap-2 px-4 pt-3">
-        <MonogramAvatar
-          displayName={data.author.displayName}
-          handle={data.author.handle}
-          size="md"
-        />
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold leading-tight">{displayName}</div>
-          <div className="truncate text-xs text-muted-foreground">
-            {data.author.followerCount != null
-              ? `${data.author.followerCount.toLocaleString()} followers`
-              : "Creator"}
-          </div>
-          <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-            <span>2h</span>
-            <span>·</span>
-            <GlobeIcon className="h-3 w-3" />
-          </div>
-        </div>
-        <MoreHorizontalIcon className="h-4 w-4 text-muted-foreground" />
-      </div>
-
-      <div className="px-4 pt-2 pb-3">
-        <EditableField
-          fieldKey={fieldMap.caption}
-          editable={editable}
-          onLocalEdit={onLocalEdit}
-          onCommit={onCommit}
-          value={body}
-          placeholder="What do you want to talk about?"
-          multiline
-          className="text-[14px] leading-snug"
-        />
-      </div>
-
-      {slides.length > 0 && (
-        <div className="w-full bg-black">
-          {slides[0].kind === "video" ? (
-            <video
-              src={slides[0].url ?? undefined}
-              poster={slides[0].posterUrl ?? undefined}
-              controls
-              playsInline
-              className="aspect-video w-full object-cover"
-            />
-          ) : slides[0].url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={slides[0].url}
-              alt=""
-              className="aspect-video w-full object-cover"
-            />
-          ) : null}
+    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">
+      {hasMedia && (
+        <div
+          className={`group relative ${aspectClass} w-full max-w-[400px] shrink-0 overflow-hidden rounded-lg bg-black`}
+        >
+          <DraftMediaDropZone
+            itemId={itemId}
+            postType="linkedin"
+            editable={editable}
+            slides={slides}
+            onMediaMutated={onMediaMutated}
+          >
+            {({ slides: enrichedSlides, placeholders }) => {
+              const enriched = enrichedSlides[0];
+              const placeholder = placeholders[0];
+              return (
+                <>
+                  {enriched?.slide.kind === "video" && enriched.slide.url ? (
+                    <>
+                      <video
+                        src={enriched.slide.url}
+                        poster={enriched.slide.posterUrl ?? undefined}
+                        controls
+                        playsInline
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                      <MediaActions src={enriched.slide.url} kind="video" />
+                    </>
+                  ) : enriched?.slide.url ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={enriched.slide.url}
+                        alt=""
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                      <MediaActions src={enriched.slide.url} />
+                    </>
+                  ) : placeholder ? (
+                    <div className="absolute inset-0">
+                      <PlaceholderSlideRender placeholder={placeholder} />
+                    </div>
+                  ) : null}
+                  {enriched?.removeButton}
+                </>
+              );
+            }}
+          </DraftMediaDropZone>
         </div>
       )}
 
-      <div className="flex items-center justify-around border-t border-border px-2 py-1.5 text-xs text-muted-foreground">
-        <LiAction icon={<ThumbsUpIcon className="h-4 w-4" />} label="Like" />
-        <LiAction icon={<MessageSquareIcon className="h-4 w-4" />} label="Comment" />
-        <LiAction icon={<Repeat2Icon className="h-4 w-4" />} label="Repost" />
-        <LiAction icon={<SendIcon className="h-4 w-4" />} label="Send" />
-      </div>
-    </div>
-  );
-}
-
-function LiAction({
-  icon,
-  label,
-}: {
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <div className="flex items-center gap-1.5 px-2 py-1.5">
-      {icon}
-      <span className="text-xs">{label}</span>
+      <CaptionPanel
+        itemId={itemId}
+        fieldKey={fieldMap.caption}
+        value={body}
+        editable={editable}
+        onLocalEdit={onLocalEdit}
+        onCommit={onCommit}
+      />
     </div>
   );
 }
