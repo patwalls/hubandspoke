@@ -23,7 +23,10 @@ interface TypefullyWebhookPayload {
  * Typefully doesn't retry forever.
  *
  * Configure in Typefully settings → Webhooks → URL:
- *   https://hubandspoke.herokuapp.com/api/webhooks/typefully
+ *   https://hubandspoke.starterstory.com/api/webhooks/typefully
+ * (NOT hubandspoke.herokuapp.com — that hostname doesn't exist; the
+ *  Heroku-assigned domain uses the modern hashed pattern. The custom
+ *  prod domain is more durable than the hashed one anyway.)
  * Copy the generated secret into TYPEFULLY_WEBHOOK_SECRET.
  */
 export async function POST(request: NextRequest) {
