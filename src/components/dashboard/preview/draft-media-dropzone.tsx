@@ -285,7 +285,12 @@ export function DraftMediaDropZone({
 
   return (
     <div
-      className="relative"
+      // h-full w-full so the wrapper inherits its parent's dimensions —
+      // matters for simulators that fix the parent height via aspect ratio
+      // (IG Reel 9:16, IG Post 1:1) and rely on absolutely-positioned
+      // children (the video element is `absolute inset-0`). Without these
+      // the wrapper collapses to 0×0 and the video renders invisible.
+      className="relative h-full w-full"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
