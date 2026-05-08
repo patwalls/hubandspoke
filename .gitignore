@@ -56,3 +56,5 @@ next-env.d.ts
 /blob-report/
 # Per-developer auth state — holds a real session cookie. Never commit.
 /tests/e2e/.auth/
+# Playwright MCP scratch dir (snapshots/console/page dumps from browser sessions)
+/.playwright-mcp/
