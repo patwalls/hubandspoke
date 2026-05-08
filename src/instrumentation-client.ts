@@ -20,6 +20,16 @@ if (process.env.NODE_ENV === "production") {
     // Enable sending user PII (Personally Identifiable Information)
     // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
     sendDefaultPii: true,
+
+    // Drop "TypeError: Failed to fetch" — never an app bug. The browser
+    // throws this when a request never completes (offline, CORS preflight
+    // blocked, ad blocker, browser extension wrapping fetch, etc.). Our
+    // background pollers (notification-bell, sc-credits-banner) already
+    // try/catch their own fetches; these only surface as Sentry events
+    // because page-level browser extensions create unhandled rejections
+    // outside our await chain — see HUBANDSPOKE-N / HUBANDSPOKE-P, where
+    // frame_ant.js was sandwiched in the stacktrace.
+    ignoreErrors: ["TypeError: Failed to fetch", "TypeError: Load failed"],
   });
 }
 
