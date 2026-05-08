@@ -7,6 +7,7 @@ import {
   DraftMediaDropZone,
   PlaceholderSlideRender,
 } from "../draft-media-dropzone";
+import { MediaActions } from "../media-actions";
 
 export function InstagramStorySimulator({
   data,
@@ -44,12 +45,15 @@ export function InstagramStorySimulator({
                   className="absolute inset-0 h-full w-full object-cover"
                 />
               ) : enriched?.slide.url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={enriched.slide.url}
-                  alt=""
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={enriched.slide.url}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                  <MediaActions src={enriched.slide.url} />
+                </>
               ) : placeholder ? (
                 <div className="absolute inset-0">
                   <PlaceholderSlideRender placeholder={placeholder} />

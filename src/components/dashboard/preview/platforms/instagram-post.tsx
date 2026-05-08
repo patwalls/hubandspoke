@@ -17,6 +17,7 @@ import {
   DraftMediaDropZone,
   PlaceholderSlideRender,
 } from "../draft-media-dropzone";
+import { MediaActions } from "../media-actions";
 
 export function InstagramPostSimulator({
   data,
@@ -176,12 +177,15 @@ function IgPostCarousel({
                 className="h-full w-full object-contain"
               />
             ) : entry.slide.url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={entry.slide.url}
-                alt=""
-                className="h-full w-full object-contain"
-              />
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={entry.slide.url}
+                  alt=""
+                  className="h-full w-full object-contain"
+                />
+                <MediaActions src={entry.slide.url} />
+              </>
             ) : null}
           </div>
         ))}

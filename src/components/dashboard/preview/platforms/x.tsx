@@ -17,6 +17,7 @@ import {
   DraftMediaDropZone,
   PlaceholderSlideRender,
 } from "../draft-media-dropzone";
+import { MediaActions } from "../media-actions";
 
 export function XSimulator({
   data,
@@ -109,12 +110,15 @@ export function XSimulator({
                             className="h-full w-full object-cover"
                           />
                         ) : slide.url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={slide.url}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
+                          <>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={slide.url}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                            <MediaActions src={slide.url} />
+                          </>
                         ) : null}
                       </div>
                     );
