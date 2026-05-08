@@ -985,6 +985,16 @@ DSN is hardcoded in the config files (DSNs are public identifiers by design).
 Source maps are uploaded by `withSentryConfig` in `next.config.ts` for prod
 builds.
 
+**Local dev is muted:** every `Sentry.init` is gated. Server-side configs
+(`sentry.{server,edge}.config.ts`, `src/jobs/instrument.ts`) only init when
+`process.env.DYNO` is set (i.e. running on Heroku). The client config
+(`src/instrumentation-client.ts`) gates on `process.env.NODE_ENV === "production"`,
+which Next.js inlines at build time. Without these gates, a local crash with
+`NODE_ENV` unset gets reported tagged `environment: production` because that
+is Sentry's fallback default — see HUBANDSPOKE-M for the incident that
+prompted this. Override locally by setting `DYNO=local` if you need to test
+Sentry capture.
+
 ---
 
 ## Known seams (future cleanup)
