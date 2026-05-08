@@ -229,13 +229,14 @@ function RegenerateCaptionButton({
     }
   }
 
-  // Label flips on first-vs-subsequent runs so the affordance is honest:
-  // "Generate" before any draft exists, "Regenerate" after the editor's
-  // got something to replace.
+  // Label flips on first-vs-subsequent runs so the affordance is honest.
+  // "Regenerate caption" (not just "Regenerate") because the button sits
+  // next to the IG-embed video — bare "Regenerate" reads like it might
+  // re-render the MP4.
   const label = busy
     ? "Generating…"
     : hasDraft
-      ? "Regenerate"
+      ? "Regenerate caption"
       : "Generate caption";
   return (
     <button

@@ -19,6 +19,7 @@ export function InstagramPostSimulator({
   itemId,
   onMediaMutated,
   onDraftMutated,
+  descriptProjectUrl,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
 
@@ -39,6 +40,7 @@ export function InstagramPostSimulator({
             <IgPostCarousel
               enrichedSlides={enrichedSlides}
               placeholders={placeholders}
+              descriptProjectUrl={descriptProjectUrl}
             />
           )}
         </DraftMediaDropZone>
@@ -72,12 +74,14 @@ export function InstagramPostSimulator({
 function IgPostCarousel({
   enrichedSlides,
   placeholders,
+  descriptProjectUrl,
 }: {
   enrichedSlides: Array<{
     slide: { url: string | null; kind: "image" | "video"; posterUrl: string | null };
     removeButton: React.ReactNode | null;
   }>;
   placeholders: Array<{ id: string; kind: "image" | "video"; state: "uploading" | "error" }>;
+  descriptProjectUrl?: string | null;
 }) {
   const [index, setIndex] = useState(0);
   const total = enrichedSlides.length + placeholders.length;
@@ -113,7 +117,11 @@ function IgPostCarousel({
                   playsInline
                   className="h-full w-full object-contain"
                 />
-                <MediaActions src={entry.slide.url} kind="video" />
+                <MediaActions
+                  src={entry.slide.url}
+                  kind="video"
+                  editUrl={descriptProjectUrl}
+                />
               </>
             ) : entry.slide.url ? (
               <>

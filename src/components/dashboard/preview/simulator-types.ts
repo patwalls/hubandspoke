@@ -33,6 +33,10 @@ export interface SimulatorProps {
   //   "awaiting"  — composition exists, no publish job yet (stuck / fresh)
   //   "failed"    — last publish attempt errored; user can retry
   descriptRenderState?: "rendering" | "awaiting" | "failed" | null;
+  // Deep link to the source Descript project for this item, when known.
+  // Drives the Edit button in the per-video MediaActions overlay so editors
+  // can jump from the simulator into Descript to tweak the composition.
+  descriptProjectUrl?: string | null;
 }
 
 export function readLive(

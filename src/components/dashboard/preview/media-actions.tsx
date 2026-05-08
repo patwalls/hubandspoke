@@ -5,10 +5,11 @@ import {
   CheckIcon,
   CopyIcon,
   DownloadIcon,
+  PencilIcon,
   RefreshCwIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 /**
  * Hover overlay with download / copy / (optional) resync buttons for an
@@ -33,6 +34,7 @@ export function MediaActions({
   filename,
   kind = "image",
   onResync,
+  editUrl,
 }: {
   src: string;
   filename?: string;
@@ -43,6 +45,10 @@ export function MediaActions({
    *  callback is async and should return when the resync request has been
    *  acknowledged by the server (we toast on entry/exit). */
   onResync?: () => Promise<void>;
+  /** When set, render an "Edit" button (leftmost) that opens the source
+   *  composition for this media in a new tab. Used for Descript-derived
+   *  videos so editors can jump to the project from the simulator. */
+  editUrl?: string | null;
 }) {
   const [copied, setCopied] = useState(false);
   const [resyncing, setResyncing] = useState(false);
@@ -121,6 +127,19 @@ export function MediaActions({
 
   return (
     <div className="absolute left-1.5 top-1.5 z-10 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      {editUrl && (
+        <a
+          href={editUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          title="Edit in Descript"
+          aria-label="Edit in Descript"
+          className={buttonVariants({ variant: "outline", size: "icon-xs" })}
+        >
+          <PencilIcon />
+        </a>
+      )}
       {onResync && (
         <Button
           type="button"

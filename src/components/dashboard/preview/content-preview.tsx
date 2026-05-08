@@ -137,6 +137,7 @@ export function ContentPreview({
           onMediaMutated={onMediaMutated}
           onDraftMutated={onDraftMutated}
           descriptRenderState={descriptRenderState}
+          descriptProjectUrl={item.descriptProjectUrl ?? null}
         />
       </div>
     </div>

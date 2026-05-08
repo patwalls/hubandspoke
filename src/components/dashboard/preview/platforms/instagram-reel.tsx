@@ -26,6 +26,7 @@ export function InstagramReelSimulator({
   onMediaMutated,
   onDraftMutated,
   descriptRenderState,
+  descriptProjectUrl,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   // Show the render-state placeholder whenever Descript work isn't done.
@@ -77,6 +78,7 @@ export function InstagramReelSimulator({
                       <MediaActions
                         src={enriched.slide.url}
                         kind="video"
+                        editUrl={descriptProjectUrl}
                         onResync={async () => {
                           await triggerResync(itemId);
                         }}
