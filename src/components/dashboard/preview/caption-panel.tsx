@@ -47,10 +47,17 @@ export function CaptionPanel({
         <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
           Caption
         </span>
-        {showRegenerate && editable && (
+        {/* Show the Generate / Regenerate button regardless of `editable`.
+         *  An IG clip-promotion lands without a `contentDrafts` row, so
+         *  `editable` is false until the user creates one — but the button
+         *  itself CREATES the draft (the service writes a new contentDrafts
+         *  row on success), so gating it on `editable` was a chicken-and-egg
+         *  that left the editor with no path to seed the AI caption. */}
+        {showRegenerate && (
           <RegenerateCaptionButton
             itemId={itemId}
             hasExisting={value.trim().length > 0}
+            hasDraft={editable}
             onRegenerated={onRegenerated}
           />
         )}
@@ -72,10 +79,12 @@ export function CaptionPanel({
 function RegenerateCaptionButton({
   itemId,
   hasExisting,
+  hasDraft,
   onRegenerated,
 }: {
   itemId: string;
   hasExisting: boolean;
+  hasDraft: boolean;
   onRegenerated?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -89,42 +98,57 @@ function RegenerateCaptionButton({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // force=true when an existing caption is present — without it the
-          // service skips on the "already-filled" guard, which is correct
-          // for auto-fire but wrong for an explicit user click.
-          body: JSON.stringify({ force: hasExisting }),
+          // force=true when there's already a draft caption present —
+          // without it the service skips on the "already-filled" guard,
+          // which is correct for auto-fire but wrong for an explicit
+          // user click. `hasExisting && hasDraft` because an IG
+          // clip-promotion has `item.contentBody` (clip-idea metadata)
+          // but no draft row yet — the seeded text we want to overwrite
+          // sits in `contentBody`, not the draft, so force isn't needed
+          // for the first generate.
+          body: JSON.stringify({ force: hasExisting && hasDraft }),
         },
       );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(json?.error || "Couldn't regenerate caption");
+        toast.error(json?.error || "Couldn't generate caption");
         return;
       }
       if (json?.status === "skipped") {
         toast.message("Skipped", { description: json.reason ?? "Nothing to do." });
         return;
       }
-      toast.success("Caption regenerated");
+      toast.success(hasDraft ? "Caption regenerated" : "Caption generated");
       onRegenerated?.();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't regenerate caption");
+      toast.error(err instanceof Error ? err.message : "Couldn't generate caption");
     } finally {
       setBusy(false);
     }
   }
 
+  // Label flips on first-vs-subsequent runs so the affordance is honest:
+  // "Generate" before any draft exists, "Regenerate" after the editor's
+  // got something to replace.
+  const label = busy
+    ? hasDraft
+      ? "Generating…"
+      : "Generating…"
+    : hasDraft
+      ? "Regenerate"
+      : "Generate caption";
   return (
     <button
       type="button"
       onClick={() => void handleClick()}
       disabled={busy}
-      title="Regenerate caption from the pillar transcript + past captions for this format"
+      title="Generate the caption from the pillar transcript + past captions for this format"
       className={cn(
         "inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50",
       )}
     >
       <SparklesIcon className={cn("h-3 w-3", busy && "animate-pulse")} />
-      {busy ? "Generating…" : "Regenerate"}
+      {label}
     </button>
   );
 }

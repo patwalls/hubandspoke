@@ -28,19 +28,16 @@ export function InstagramReelSimulator({
   descriptRenderState,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
-  const noMedia = data.slides.length === 0;
-  // Edge case: a `production_item_media` row exists but its presigned URL
-  // came back null (the resolve-preview-data presigner timed out, or the
-  // S3 key is missing). Falling back to the rendering placeholder beats
-  // rendering an empty `<video>` tag — that's the "black box" the user
-  // hit when the publish task had finished but the simulator hadn't yet
-  // gotten a refreshed presign.
-  const firstSlide = data.slides[0];
-  const videoNotReady =
-    firstSlide?.kind === "video" && !firstSlide.url;
-  const showStatePlaceholder =
-    (!!descriptRenderState && noMedia) ||
-    (videoNotReady && !!descriptRenderState);
+  // Show the render-state placeholder whenever Descript work isn't done.
+  // Cover-image fallback slides (built from `posterS3Key` when no
+  // `production_item_media` row exists yet) leave `data.slides[0].kind ==
+  // "image"` — without this fix the "Awaiting render" placeholder + its
+  // "Render now" button were hidden behind a static cover, leaving the
+  // editor with no way to kick off the publish from the simulator.
+  const hasArchivedVideo = data.slides.some(
+    (s) => s.kind === "video" && !!s.url,
+  );
+  const showStatePlaceholder = !!descriptRenderState && !hasArchivedVideo;
 
   return (
     <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">

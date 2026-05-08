@@ -75,8 +75,18 @@ export function resolvePreviewData(
       ? pickString(draftContent[fieldMap.secondary])
       : null;
 
+  // For clip-promoted items `item.contentBody` holds the clip-idea metadata
+  // (the "Source: … / Timestamp: … / Angle: … / Why: …" block written by
+  // `buildContentBody` in promote-clip-idea.ts) — useful as editor context,
+  // but it is *not* a caption. Surfacing it in the simulator's caption slot
+  // mislabels the AI's job and confuses editors who expect to see (or
+  // generate) a real caption. Skip the fallback for clips so the slot is
+  // empty until a draft / AI-generated caption lands.
   const caption =
-    captionFromDraft ?? pickString(item.contentBody) ?? "";
+    captionFromDraft ??
+    (item.sourceType === "clip"
+      ? ""
+      : pickString(item.contentBody) ?? "");
 
   // Fall back to item.title for anything title-shaped (YouTube, newsletter
   // subject) when there's no draft yet.

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -520,6 +520,89 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     data?.item?.descriptPublishedAt,
     data?.item?.descriptPublishError,
     data?.media,
+  ]);
+
+  // Auto-trigger Descript publish-and-archive when an editor lands on a
+  // clip whose composition exists but no MP4 has been rendered yet.
+  // Two cases this rescues:
+  //   1. Legacy items created before the descript-clip-resolve auto-chain
+  //      (commit d57bf09) — they're stuck in `awaiting` forever.
+  //   2. Auto-chain enqueued the publish job but it errored silently or
+  //      got dropped before stamping `descriptPublishJobId`.
+  // The publish task is idempotent (race-guards on jobId, no-ops when
+  // already published), so an extra fire is cheap. Tracked in a ref so we
+  // only attempt once per item per page-mount.
+  const autoPublishFiredRef = useRef<string | null>(null);
+  useEffect(() => {
+    const item = data?.item;
+    if (!item) return;
+    const awaitingPublish =
+      item.sourceType === "clip" &&
+      !!item.descriptCompositionId &&
+      !item.descriptPublishJobId &&
+      !item.descriptPublishedAt &&
+      !item.descriptPublishError;
+    if (!awaitingPublish) return;
+    if (autoPublishFiredRef.current === item.id) return;
+    autoPublishFiredRef.current = item.id;
+    void fetch(
+      `/api/production-items/${item.id}/sync-descript-publish`,
+      { method: "POST", headers: { "Content-Type": "application/json" } },
+    ).catch(() => {
+      // Silent — the user can still hit "Render now" on the simulator
+      // placeholder if this fails.
+    });
+  }, [
+    data?.item?.id,
+    data?.item?.sourceType,
+    data?.item?.descriptCompositionId,
+    data?.item?.descriptPublishJobId,
+    data?.item?.descriptPublishedAt,
+    data?.item?.descriptPublishError,
+  ]);
+
+  // Auto-fire AI caption generation when an editor lands on an IG drafting
+  // surface that has no draft yet. The repost route already enqueues this
+  // post-seed, but clip-promotion writes a `production_items` row WITHOUT
+  // a `content_drafts` row — so without this hook those items show no
+  // generated caption until the user clicks Generate. Fires once per item
+  // per page-mount; idempotent on retry because the service skips when a
+  // non-`copy:source` draft already exists.
+  const autoGenCaptionFiredRef = useRef<string | null>(null);
+  useEffect(() => {
+    const item = data?.item;
+    if (!item) return;
+    const isIg =
+      typeof item.postType === "string" && item.postType.startsWith("instagram_");
+    const noDraft = !data?.currentDraft;
+    const hasTranscript = !!data?.transcript;
+    if (!isIg || !noDraft || !hasTranscript) return;
+    if (autoGenCaptionFiredRef.current === item.id) return;
+    autoGenCaptionFiredRef.current = item.id;
+    void fetch(`/api/production-items/${item.id}/generate-caption`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: false }),
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        // On success the service inserted a new `contentDrafts` row.
+        // Refetch so the simulator flips to editable + shows the AI-
+        // generated caption.
+        void load();
+      })
+      .catch(() => {
+        // Silent — Generate button on the panel is the manual fallback.
+      });
+    // `load` is stable enough across renders that omitting it from deps
+    // here doesn't cause stale-closure issues; including it would re-fire
+    // the auto-gen on every refetch, defeating the purpose of the ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    data?.item?.id,
+    data?.item?.postType,
+    data?.currentDraft,
+    data?.transcript,
   ]);
 
   // Auto-clear per-field "Saved" pills 1.5s after each successful save.
