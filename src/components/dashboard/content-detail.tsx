@@ -4,7 +4,7 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronDownIcon, ChevronUpIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import {
@@ -1361,6 +1361,40 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     load();
   }, [load]);
 
+  // Manual entry point for the Draft Algorithm. `force: true` because this
+  // is an explicit operator click — bypass the "already-filled" idempotency
+  // guard so an existing draft gets overwritten. Use cases: rapid prompt
+  // iteration, and backfilling drafts on items created before the algorithm
+  // was wired in.
+  const handleRedraft = useCallback(async () => {
+    if (actionPending) return;
+    setActionPending(true);
+    try {
+      const res = await fetch(`/api/production-items/${contentId}/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Couldn't redraft");
+        return;
+      }
+      if (json?.status === "skipped") {
+        toast.message("Skipped", {
+          description: json.reason ?? "Nothing to draft.",
+        });
+        return;
+      }
+      toast.success("Redrafted");
+      void load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to redraft");
+    } finally {
+      setActionPending(false);
+    }
+  }, [actionPending, contentId, load]);
+
   const handleAddToDescript = useCallback(async () => {
     if (actionPending) return;
     const s3Key = data?.item.mediaS3Key;
@@ -2253,6 +2287,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     onClick={() => void handleRepost()}
                   >
                     <RepeatIcon className="size-3.5" /> Repost
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={actionPending}
+                    onClick={() => void handleRedraft()}
+                  >
+                    <SparklesIcon className="size-3.5" /> Redraft
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={actionPending}
