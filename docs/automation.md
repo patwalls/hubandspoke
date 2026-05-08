@@ -298,6 +298,25 @@ When the user clicks **Repost** or **Cross-post**, the route now calls `enrichSi
 - **Failure-tolerant:** wrapped in try/catch. If upstream is broken or the source has no published link, the error is logged and the create proceeds — the new repost ends up as empty as it would have been before this change. Never blocks the user's action.
 - **Latency:** adds one Scrape Creators round-trip + S3 archive (typically 2–5 s for X tweets). The user explicitly opted into the wait — they prefer correct data over instant redirect.
 
+### Descript publish + archive (2026-05-07)
+
+Closes the loop on the clip-creation flow: when Descript finishes assembling a composition, render it to MP4, archive to our S3 bucket, and surface in the simulator on the clip's detail page. Auto-fires after every clip-creation path; can be re-triggered manually via the Actions dropdown to pull fresh edits.
+
+- **Files:**
+  - `src/jobs/tasks/descript-publish-and-archive.ts` — self-polling task. Phase 1 calls `POST /jobs/publish` and stamps `descript_publish_job_id`. Phase 2 polls `GET /jobs/{id}` every 10s; on `job_state="stopped"` + `result.status="success"`, downloads the MP4 via `archiveRemoteToS3`, deletes prior Descript-published media rows (matched by `source_url LIKE 'https://production-273614-media-export.storage.googleapis.com/%'`, so manual uploads are preserved), inserts a new `production_item_media` row at the next index, mirrors the cover columns, and stamps `descript_published_at`. 15-minute deadline.
+  - `src/jobs/tasks/descript-clip-resolve.ts` — auto-chains: after stamping `descript_composition_id` on the derivative item, enqueues `descript-publish-and-archive`. Idempotent (no-op if already rendered).
+  - `src/lib/descript.ts` — `publishDescriptComposition({projectId, compositionId, resolution, accessLevel})` returns `{jobId}`. `DESCRIPT_EXPORT_URL_PREFIX` constant identifies Descript's GCS export bucket for source-URL matching.
+  - `src/app/api/production-items/[id]/sync-descript-publish/route.ts` — manual re-trigger. Race guard: returns 409 if a render is already in flight, unless `{force: true}` is passed (used by the Retry button on a failed pill).
+  - `src/app/api/production-items/[id]/descript-status/route.ts` — extended to return a `publish: { state, jobId, publishedAt, error }` block. Pill polls every 10s while `state === "rendering"`.
+- **Schema:** three new columns on `production_items`:
+  - `descript_publish_job_id` — current/last publish job id (null = idle).
+  - `descript_published_at` — when the MP4 archive completed.
+  - `descript_publish_error` — last error if failed (truncated to 1000 chars).
+  - Derivable states: `idle` (both null), `rendering` (job id set, not published, no error), `rendered` (published_at set), `failed` (error set).
+- **Race condition:** every polling tick re-reads `descript_publish_job_id` from the row; if it doesn't match the payload's job id (the user clicked Sync mid-poll and a fresh job kicked off), the stale poller bails.
+- **Failure tolerance:** task throws on Descript errors / timeout; graphile-worker retries with backoff. Final error is stamped on `descript_publish_error` and surfaced via the pill with a Retry button.
+- **UI:** Actions dropdown gains a "Download from Descript" item when `hasDescriptProject && descriptCompositionId`. The `DescriptStatusPill` shows a Render section inside its popover with rendering/rendered/failed sub-state and a Retry/Re-sync button. Once `descript_published_at` flips, the next page-data refresh returns the new media row and the simulator re-renders with the actual MP4.
+
 ### Manual media upload to drafts (X + Instagram, 2026-05-07)
 
 Browser-driven companion to `archiveCarouselMedia` (enrichment-time URL ingest) and `seedRepostContent` (repost-time row mirror). All three write into the same `production_item_media` table with identical column conventions — that's the **single shared schema** for media on a production item.

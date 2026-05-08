@@ -1003,6 +1003,37 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     }
   }, [actionPending, brand, contentId, router]);
 
+  // Trigger the Descript publish-and-archive flow: render the current
+  // composition to MP4 and pull it back into our S3. The Descript pill
+  // takes over showing the "rendering" state once the worker picks it up.
+  const handleDownloadFromDescript = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/production-items/${contentId}/sync-descript-publish`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error("Couldn't start render", {
+          description: json?.error || `HTTP ${res.status}`,
+        });
+        return;
+      }
+      toast.success("Rendering MP4 in Descript…", {
+        description:
+          "Takes about 2 minutes. The simulator will update when it lands.",
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Couldn't start render",
+      );
+    }
+  }, [contentId]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1958,6 +1989,14 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     <DropdownMenuItem onClick={openDescriptModal}>
                       <RefreshCwIcon className="size-3.5" /> Replace Descript
                       file
+                    </DropdownMenuItem>
+                  )}
+                  {hasDescriptProject && item.descriptCompositionId && (
+                    <DropdownMenuItem
+                      onClick={() => void handleDownloadFromDescript()}
+                    >
+                      <DownloadIcon className="size-3.5" /> Download from
+                      Descript
                     </DropdownMenuItem>
                   )}
                   {item.mediaS3Key && (
@@ -3646,6 +3685,12 @@ interface DescriptStatusResponse {
     lastError: string | null;
   } | null;
   redriveAvailable: boolean;
+  publish: {
+    state: "idle" | "rendering" | "rendered" | "failed";
+    jobId: string | null;
+    publishedAt: string | null;
+    error: string | null;
+  };
 }
 
 const DESCRIPT_STATUS_STYLES: Record<
@@ -3716,15 +3761,49 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
     void fetchStatus();
   }, [fetchStatus]);
 
-  // Poll while processing — state transitions (composition_id getting
-  // written, lock leaking) deserve the editor seeing the change without
-  // refreshing the page. Stop polling once the state is terminal.
+  // Poll while processing OR while a publish render is in flight — state
+  // transitions (composition_id getting written, lock leaking, MP4 render
+  // finishing) deserve the editor seeing the change without refreshing.
   useEffect(() => {
     if (!data) return;
-    if (data.status !== "processing") return;
+    const shouldPoll =
+      data.status === "processing" || data.publish.state === "rendering";
+    if (!shouldPoll) return;
     const interval = setInterval(() => void fetchStatus(), 10_000);
     return () => clearInterval(interval);
   }, [data, fetchStatus]);
+
+  const handleSyncFromDescript = useCallback(
+    async (force = false) => {
+      try {
+        const res = await fetch(
+          `/api/production-items/${productionItemId}/sync-descript-publish`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ force }),
+          },
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error("Couldn't start render", {
+            description: json?.error || `HTTP ${res.status}`,
+          });
+          return;
+        }
+        toast.success("Rendering MP4 in Descript…", {
+          description:
+            "Takes about 2 minutes. The simulator will update when it lands.",
+        });
+        await fetchStatus();
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Couldn't start render",
+        );
+      }
+    },
+    [productionItemId, fetchStatus],
+  );
 
   const handleRedrive = useCallback(async () => {
     setRedriving(true);
@@ -3812,6 +3891,55 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
                 error: {data.queueJob.lastError}
               </div>
             )}
+          </div>
+        )}
+        {data.publish.state !== "idle" && (
+          <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-foreground">Render</span>
+              {data.publish.state === "rendering" && (
+                <span className="inline-flex items-center gap-1 text-amber-700">
+                  <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Rendering MP4… (~2 min)
+                </span>
+              )}
+              {data.publish.state === "rendered" && (
+                <span className="inline-flex items-center gap-1 text-emerald-700">
+                  <span className="size-1.5 rounded-full bg-emerald-500" />
+                  Rendered ✓
+                  {data.publish.publishedAt &&
+                    ` ${new Date(data.publish.publishedAt).toLocaleString()}`}
+                </span>
+              )}
+              {data.publish.state === "failed" && (
+                <span className="inline-flex items-center gap-1 text-red-700">
+                  <span className="size-1.5 rounded-full bg-red-500" />
+                  Render failed
+                </span>
+              )}
+            </div>
+            {data.publish.state === "failed" && data.publish.error && (
+              <div className="text-red-700 break-words whitespace-pre-wrap">
+                {data.publish.error}
+              </div>
+            )}
+            {(data.publish.state === "failed" ||
+              data.publish.state === "rendered") &&
+              data.compositionId && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() =>
+                    void handleSyncFromDescript(data.publish.state === "failed")
+                  }
+                >
+                  {data.publish.state === "failed"
+                    ? "Retry render"
+                    : "Re-sync from Descript"}
+                </Button>
+              )}
           </div>
         )}
         {(data.compositionUrl || data.projectUrl) && (

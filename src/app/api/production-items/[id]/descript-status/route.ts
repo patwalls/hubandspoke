@@ -49,6 +49,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       descriptProjectId: productionItems.descriptProjectId,
       descriptProjectUrl: productionItems.descriptProjectUrl,
       descriptCompositionId: productionItems.descriptCompositionId,
+      descriptPublishJobId: productionItems.descriptPublishJobId,
+      descriptPublishedAt: productionItems.descriptPublishedAt,
+      descriptPublishError: productionItems.descriptPublishError,
       sourceType: productionItems.sourceType,
       sourceClipIdeaId: productionItems.sourceClipIdeaId,
       pillarContentItemId: productionItems.pillarContentItemId,
@@ -190,7 +193,36 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       status === "failed" ||
       status === "stalled" ||
       status === "processing",
+    /** Publish-and-archive state — separate axis from the composition
+     *  status. The pill polls this independently and shows a secondary
+     *  "Rendering MP4…" / "Rendered ✓" / "Render failed (Retry)" block
+     *  inside the popover. */
+    publish: derivePublishState(item),
   });
+}
+
+function derivePublishState(item: {
+  descriptPublishJobId: string | null;
+  descriptPublishedAt: Date | null;
+  descriptPublishError: string | null;
+}): {
+  state: "idle" | "rendering" | "rendered" | "failed";
+  jobId: string | null;
+  publishedAt: string | null;
+  error: string | null;
+} {
+  let state: "idle" | "rendering" | "rendered" | "failed" = "idle";
+  if (item.descriptPublishError) state = "failed";
+  else if (item.descriptPublishedAt) state = "rendered";
+  else if (item.descriptPublishJobId) state = "rendering";
+  return {
+    state,
+    jobId: item.descriptPublishJobId,
+    publishedAt: item.descriptPublishedAt
+      ? new Date(item.descriptPublishedAt).toISOString()
+      : null,
+    error: item.descriptPublishError,
+  };
 }
 
 interface RouteContext {

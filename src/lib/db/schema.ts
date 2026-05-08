@@ -120,6 +120,18 @@ export const productionItems = pgTable(
     descriptImportedAt: timestamp("descript_imported_at", {
       withTimezone: true,
     }),
+    // Descript publish-and-archive state (sync OUT direction). Set when we
+    // ask Descript to render an MP4 of this composition and download it
+    // back to S3. Three derivable states:
+    //   idle: both null → nothing in flight, never published
+    //   rendering: jobId set, publishedAt null, error null → polling
+    //   rendered: publishedAt set → MP4 archived, productionItemMedia row exists
+    //   failed: error set → most recent attempt failed; user can retry
+    descriptPublishJobId: text("descript_publish_job_id"),
+    descriptPublishedAt: timestamp("descript_published_at", {
+      withTimezone: true,
+    }),
+    descriptPublishError: text("descript_publish_error"),
     // Typefully draft created automatically when a new X/LinkedIn item is
     // inserted with no publishedLink. The pill in the content-detail header
     // links to typefullyPrivateUrl. Webhook receiver (/api/webhooks/typefully)

@@ -156,6 +156,65 @@ interface DescriptJobResponse {
   stopped_at?: string;
 }
 
+/**
+ * Render and "publish" a composition. Despite the name, this is Descript's
+ * export endpoint — the response carries a `share_url` (a public viewer
+ * link) and a 24h-signed `download_url` pointing at the rendered MP4 in
+ * Descript's GCS export bucket. We download from there and archive to our
+ * own S3 in the `descript-publish-and-archive` worker task.
+ *
+ * Asynchronous: returns a job id; callers poll via `fetchDescriptJob`.
+ * Confirmed live: ~2 min per render for a typical short clip at 1080p.
+ */
+interface PublishCompositionArgs {
+  projectId: string;
+  compositionId: string;
+  /** "Video" or "Audio". Defaults to Video. */
+  mediaType?: "Video" | "Audio";
+  /** Resolution string per Descript docs. Defaults to 1080p. */
+  resolution?: "480p" | "720p" | "1080p" | "1440p" | "4K";
+  /** "public" | "unlisted" | "drive" | "private". Defaults to unlisted. */
+  accessLevel?: "public" | "unlisted" | "drive" | "private";
+}
+
+export async function publishDescriptComposition(
+  args: PublishCompositionArgs,
+): Promise<{ jobId: string }> {
+  const res = await fetch(`${BASE_URL}/jobs/publish`, {
+    method: "POST",
+    headers: {
+      Authorization: authHeader(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      project_id: args.projectId,
+      composition_id: args.compositionId,
+      media_type: args.mediaType ?? "Video",
+      resolution: args.resolution ?? "1080p",
+      access_level: args.accessLevel ?? "unlisted",
+    }),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    job_id?: string;
+    message?: string;
+    error?: string;
+  };
+  if (!res.ok || !json.job_id) {
+    const msg = json.message || json.error || `HTTP ${res.status}`;
+    throw new Error(`Descript publish failed: ${msg}`);
+  }
+  return { jobId: json.job_id };
+}
+
+/**
+ * Detect download URLs that originated from Descript's publish endpoint.
+ * Used by the publish-and-archive task to know which `production_item_media`
+ * rows to delete on a re-sync (manually-uploaded media has a different
+ * `source_url` and must be preserved).
+ */
+export const DESCRIPT_EXPORT_URL_PREFIX =
+  "https://production-273614-media-export.storage.googleapis.com/";
+
 export async function fetchDescriptJob(
   jobId: string
 ): Promise<DescriptJobResponse> {

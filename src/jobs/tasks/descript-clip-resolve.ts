@@ -105,6 +105,15 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
         url: compositionUrl,
         meta: { importPath: importMode ? "import" : "agent" },
       });
+
+      // Auto-chain: kick off the publish-and-archive task so the
+      // derivative ends up with a rendered MP4 in our S3 bucket and the
+      // simulator on its detail page can render it. The task is
+      // idempotent (no-op if descript_published_at is already set), so
+      // double-firing is harmless.
+      await helpers.addJob("descript-publish-and-archive", {
+        productionItemId: payload.derivativeItemId,
+      });
     }
     // Cold full-video import: stamp the pillar with the source compositionId
     // so the next clip on this pillar takes the warm (duplicate) path

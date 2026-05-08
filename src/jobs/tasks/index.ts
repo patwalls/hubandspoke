@@ -11,6 +11,10 @@ import {
   type DescriptClipResolvePayload,
 } from "./descript-clip-resolve";
 import {
+  descriptPublishAndArchiveTask,
+  type DescriptPublishAndArchivePayload,
+} from "./descript-publish-and-archive";
+import {
   clipIdeaPreciseCutTask,
   type ClipIdeaPreciseCutPayload,
 } from "./clip-idea-precise-cut";
@@ -77,6 +81,7 @@ import {
 export interface TaskPayloads {
   "hello": { message?: string };
   "descript-clip-resolve": DescriptClipResolvePayload;
+  "descript-publish-and-archive": DescriptPublishAndArchivePayload;
   "clip-idea-precise-cut": ClipIdeaPreciseCutPayload;
   "transcribe-whisper": TranscribeWhisperPayload;
   "notification-send": NotificationSendPayload;
@@ -119,6 +124,7 @@ const helloTask: Task = async (payload, helpers) => {
 export const taskList: Record<keyof TaskPayloads, Task> = {
   "hello": helloTask,
   "descript-clip-resolve": descriptClipResolveTask,
+  "descript-publish-and-archive": descriptPublishAndArchiveTask,
   "clip-idea-precise-cut": clipIdeaPreciseCutTask,
   "transcribe-whisper": transcribeWhisperTask,
   "notification-send": notificationSendTask,
