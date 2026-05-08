@@ -80,31 +80,44 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .orderBy(desc(repurposeTriggers.id))
     .limit(1);
 
-  // Pull the most recent queue job for this trigger. graphile-worker's
-  // payload is jsonb so we filter by triggerId inside it.
+  // Pull the most recent queue job for this trigger or for this item.
+  // Three task families can be in flight, each keyed differently in the
+  // payload:
+  //   - `clip-idea-precise-cut` and `descript-clip-resolve` → keyed by
+  //     `triggerId` (set when the clip-promotion trigger was created)
+  //   - `descript-publish-and-archive` → keyed by `productionItemId`
+  //     (the publish task is owned by the item, not the trigger)
+  //
+  // Without the publish-and-archive branch the pill flips to "Descript
+  // ready" the moment Underlord finishes — but the MP4 archive job is
+  // still in the queue waiting to render. Including it here keeps the
+  // status honest until the MP4 actually lands.
   let queueJob: QueueJobRow | null = null;
-  if (trigger) {
-    // graphile-worker 0.16+ stores task identifiers in `_private_tasks`;
-    // join through `task_id` to filter by name.
-    const rows = (await db.execute(sql`
-      SELECT j.id::text,
-             t.identifier AS task_identifier,
-             j.attempts,
-             j.max_attempts,
-             j.run_at,
-             j.locked_at,
-             j.locked_by,
-             j.last_error,
-             j.payload
-      FROM graphile_worker._private_jobs j
-      JOIN graphile_worker._private_tasks t ON t.id = j.task_id
-      WHERE t.identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
-        AND j.payload->>'triggerId' = ${trigger.id}
-      ORDER BY j.id DESC
-      LIMIT 1
-    `)) as unknown as QueueJobRow[];
-    queueJob = rows[0] ?? null;
-  }
+  const rows = (await db.execute(sql`
+    SELECT j.id::text,
+           t.identifier AS task_identifier,
+           j.attempts,
+           j.max_attempts,
+           j.run_at,
+           j.locked_at,
+           j.locked_by,
+           j.last_error,
+           j.payload
+    FROM graphile_worker._private_jobs j
+    JOIN graphile_worker._private_tasks t ON t.id = j.task_id
+    WHERE
+      (
+        t.identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
+        AND ${trigger ? sql`j.payload->>'triggerId' = ${trigger.id}` : sql`FALSE`}
+      )
+      OR (
+        t.identifier = 'descript-publish-and-archive'
+        AND j.payload->>'productionItemId' = ${id}
+      )
+    ORDER BY j.id DESC
+    LIMIT 1
+  `)) as unknown as QueueJobRow[];
+  queueJob = rows[0] ?? null;
 
   const compositionId = item.descriptCompositionId ?? trigger?.descriptCompositionId ?? null;
   const projectId = item.descriptProjectId ?? null;
@@ -139,8 +152,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     const isMaxedOut =
       queueJob.attempts >= queueJob.max_attempts && queueJob.last_error;
     // Phase identifier for the detail string: "import", "Underlord
-    // layout-pack", or generic. Helps the editor know which step they're
-    // looking at.
+    // layout-pack", "MP4 render", or generic. Helps the editor know
+    // which step they're looking at.
     const phaseLabel =
       queueJob.task_identifier === "clip-idea-precise-cut"
         ? compositionId
@@ -148,7 +161,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           : "import"
         : queueJob.task_identifier === "descript-clip-resolve"
           ? "import"
-          : queueJob.task_identifier;
+          : queueJob.task_identifier === "descript-publish-and-archive"
+            ? "MP4 render"
+            : queueJob.task_identifier;
     if (isMaxedOut) {
       status = "failed";
       detail = `Job exhausted ${queueJob.max_attempts} attempts. Last error: ${queueJob.last_error}`;
