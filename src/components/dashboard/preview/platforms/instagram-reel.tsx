@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import {
+  AlertTriangleIcon,
   BookmarkIcon,
   HeartIcon,
   Loader2Icon,
@@ -8,7 +10,9 @@ import {
   MusicIcon,
   SendIcon,
   MoreVerticalIcon,
+  PlayCircleIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { MonogramAvatar } from "../avatar";
 import { VerifiedBadge } from "../verified-badge";
 import { EditableField } from "../editable-field";
@@ -28,98 +32,38 @@ export function InstagramReelSimulator({
   onCommit,
   itemId,
   onMediaMutated,
-  processing,
+  descriptRenderState,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   const hook = readLive(liveContent, fieldMap.secondary, data.secondaryText ?? "");
   const handle = data.author.handle ?? "you";
   const displayName = data.author.displayName ?? handle;
 
-  // Processing state with no media yet: render the desktop-style "Reel
-  // embed" mock — black 9:16 placeholder on the left, account/caption/
-  // comments column on the right. Drops the dropzone too (per the user:
-  // "don't show anything here in this preview" while processing — show
-  // the embedded layout instead). Once the rendered MP4 lands, we fall
-  // back to the existing portrait simulator below.
+  // Descript-derived clip with no archived MP4 yet: render the desktop
+  // Instagram Reel embed mock — black 9:16 placeholder on the LEFT,
+  // account header + editable hook + editable caption + faux engagement
+  // on the RIGHT. Drops the dropzone (per the user: while processing,
+  // don't show "Drag a video to add" — show the eventual layout).
+  // Once the rendered MP4 lands and a productionItemMedia row exists,
+  // descriptRenderState flips to null and we fall through to the
+  // existing portrait simulator below.
   const noMedia = data.slides.length === 0;
-  if (processing && noMedia) {
+  if (descriptRenderState && descriptRenderState !== null && noMedia) {
     return (
-      <div className="mx-auto flex w-full max-w-[640px] gap-0 overflow-hidden rounded-xl border border-border bg-background text-foreground">
-        {/* LEFT: video placeholder, 9:16 */}
-        <div className="relative aspect-[9/16] w-[180px] shrink-0 bg-black">
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-white/70">
-            <Loader2Icon className="h-5 w-5 animate-spin" />
-            <span className="text-[11px] font-medium leading-tight">
-              Rendering in Descript…
-            </span>
-            <span className="text-[10px] leading-tight text-white/50">
-              Usually about 2 minutes. The video will appear here automatically.
-            </span>
-          </div>
-        </div>
-
-        {/* RIGHT: account + caption + faux engagement */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 px-3 pt-3">
-            <MonogramAvatar
-              displayName={data.author.displayName}
-              handle={data.author.handle}
-              size="sm"
-            />
-            <div className="min-w-0 flex-1 leading-tight">
-              <div className="flex items-center gap-1">
-                <span className="truncate text-[13px] font-semibold">
-                  {displayName}
-                </span>
-                {data.author.verified && <VerifiedBadge />}
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                Original audio
-              </div>
-            </div>
-            <MoreVerticalIcon className="h-4 w-4 text-muted-foreground" />
-          </div>
-
-          <div className="px-3 pt-2 text-xs leading-snug">
-            <span className="mr-1.5 text-[12px] font-semibold">{handle}</span>
-            <EditableField
-              fieldKey={fieldMap.caption}
-              editable={editable}
-              onLocalEdit={onLocalEdit}
-              onCommit={onCommit}
-              value={caption}
-              placeholder="Caption…"
-              multiline
-              className="text-[12px] leading-snug"
-            />
-          </div>
-
-          {fieldMap.secondary && (
-            <div className="mt-2 px-3 text-[11px] text-muted-foreground">
-              <span className="mr-1.5 font-mono uppercase tracking-wider">
-                Hook
-              </span>
-              <EditableField
-                fieldKey={fieldMap.secondary}
-                editable={editable}
-                onLocalEdit={onLocalEdit}
-                onCommit={onCommit}
-                value={hook}
-                placeholder="On-screen hook…"
-                multiline
-                className="text-[11px] leading-snug text-foreground"
-              />
-            </div>
-          )}
-
-          <div className="mt-auto flex items-center gap-3 border-t border-border px-3 py-2 text-muted-foreground">
-            <HeartIcon className="h-4 w-4" strokeWidth={1.75} />
-            <MessageCircleIcon className="h-4 w-4" strokeWidth={1.75} />
-            <SendIcon className="h-4 w-4" strokeWidth={1.75} />
-            <BookmarkIcon className="ml-auto h-4 w-4" strokeWidth={1.75} />
-          </div>
-        </div>
-      </div>
+      <ReelEmbedPlaceholder
+        state={descriptRenderState}
+        itemId={itemId}
+        editable={editable}
+        liveContent={liveContent}
+        onLocalEdit={onLocalEdit}
+        onCommit={onCommit}
+        fieldMap={fieldMap}
+        caption={caption}
+        hook={hook}
+        handle={handle}
+        displayName={displayName}
+        verified={data.author.verified}
+      />
     );
   }
 
@@ -230,5 +174,177 @@ export function InstagramReelSimulator({
         );
       }}
     </DraftMediaDropZone>
+  );
+}
+
+/**
+ * Instagram-desktop-reel-embed placeholder. Fires when the clip is
+ * Descript-derived but no MP4 is archived yet. Layout mirrors what an
+ * editor sees on instagram.com viewing a Reel: video on the LEFT (here
+ * a sub-state-aware placeholder), account header + editable caption +
+ * editable hook + faux engagement column on the RIGHT.
+ */
+function ReelEmbedPlaceholder(props: {
+  state: "rendering" | "awaiting" | "failed";
+  itemId: string;
+  editable: boolean;
+  liveContent: SimulatorProps["liveContent"];
+  onLocalEdit: SimulatorProps["onLocalEdit"];
+  onCommit: SimulatorProps["onCommit"];
+  fieldMap: SimulatorProps["fieldMap"];
+  caption: string;
+  hook: string;
+  handle: string;
+  displayName: string;
+  verified: boolean;
+}) {
+  const {
+    state,
+    itemId,
+    editable,
+    onLocalEdit,
+    onCommit,
+    fieldMap,
+    caption,
+    hook,
+    handle,
+    displayName,
+    verified,
+  } = props;
+  const [retrying, setRetrying] = useState(false);
+
+  async function handleRetry(force: boolean) {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      const res = await fetch(
+        `/api/production-items/${itemId}/sync-descript-publish`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force }),
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Couldn't start render");
+        return;
+      }
+      toast.success("Rendering MP4 in Descript…", {
+        description: "Takes ~2–10 min. The video will appear here automatically.",
+      });
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto flex w-full max-w-[760px] overflow-hidden rounded-lg border border-border bg-background text-foreground">
+      {/* LEFT: 9:16 video placeholder */}
+      <div className="relative aspect-[9/16] w-[360px] shrink-0 bg-black">
+        {state === "rendering" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-white/80">
+            <Loader2Icon className="h-7 w-7 animate-spin text-white/90" />
+            <span className="text-sm font-semibold leading-tight">
+              Rendering MP4 in Descript…
+            </span>
+            <span className="text-xs leading-snug text-white/55">
+              Usually 2–10 minutes. The video will appear here automatically.
+            </span>
+          </div>
+        )}
+        {state === "awaiting" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-white/80">
+            <PlayCircleIcon className="h-9 w-9 text-white/60" strokeWidth={1.5} />
+            <span className="text-sm font-semibold leading-tight">
+              Awaiting render
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleRetry(false)}
+              disabled={retrying}
+              className="rounded-md bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {retrying ? "Starting…" : "Render now"}
+            </button>
+          </div>
+        )}
+        {state === "failed" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-white/80">
+            <AlertTriangleIcon className="h-7 w-7 text-red-400" />
+            <span className="text-sm font-semibold leading-tight text-red-300">
+              Render failed
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleRetry(true)}
+              disabled={retrying}
+              className="rounded-md bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {retrying ? "Retrying…" : "Retry"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* RIGHT: account + editable caption / hook + faux engagement */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center gap-2.5 px-4 pt-4">
+          <MonogramAvatar displayName={displayName} handle={handle} size="md" />
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="flex items-center gap-1">
+              <span className="truncate text-sm font-semibold">{displayName}</span>
+              {verified && <VerifiedBadge />}
+            </div>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <MusicIcon className="h-3 w-3" /> Original audio
+            </div>
+          </div>
+          <MoreVerticalIcon className="h-5 w-5 text-muted-foreground" />
+        </div>
+
+        <div className="px-4 pt-4">
+          <div className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">
+            On-screen hook
+          </div>
+          <EditableField
+            fieldKey={fieldMap.secondary}
+            editable={editable}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+            value={hook}
+            placeholder="On-screen hook…"
+            multiline
+            className="text-sm font-semibold leading-snug"
+          />
+        </div>
+
+        <div className="mt-3 px-4">
+          <div className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">
+            Caption
+          </div>
+          <div className="leading-snug">
+            <span className="mr-1.5 text-sm font-semibold">{handle}</span>
+            <EditableField
+              fieldKey={fieldMap.caption}
+              editable={editable}
+              onLocalEdit={onLocalEdit}
+              onCommit={onCommit}
+              value={caption}
+              placeholder="Caption…"
+              multiline
+              className="text-sm leading-snug"
+            />
+          </div>
+        </div>
+
+        <div className="mt-auto flex items-center gap-4 border-t border-border px-4 py-3 text-muted-foreground">
+          <HeartIcon className="h-5 w-5" strokeWidth={1.75} />
+          <MessageCircleIcon className="h-5 w-5" strokeWidth={1.75} />
+          <SendIcon className="h-5 w-5" strokeWidth={1.75} />
+          <BookmarkIcon className="ml-auto h-5 w-5" strokeWidth={1.75} />
+        </div>
+      </div>
+    </div>
   );
 }

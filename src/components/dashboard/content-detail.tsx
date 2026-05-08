@@ -1194,6 +1194,42 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     setFieldErrors({});
   }, [loadedDraft?.id, loadedDraft]);
 
+  // Auto-trigger publish-and-archive when we land on a clip whose
+  // composition is ready but the MP4 hasn't been rendered yet (the
+  // "awaiting" state). Covers two cases:
+  //   1. Old clips from before publish-and-archive existed.
+  //   2. Fresh clips where the auto-chain didn't fire (e.g. the
+  //      precise-cut "no Underlord" branch which doesn't currently
+  //      enqueue publish — separate fix).
+  // The route's race guard returns 409 on duplicate calls, so a
+  // double-fire (StrictMode dev) is silent. We key on the item id +
+  // state to fire exactly once per landing. We derive the awaiting flag
+  // here directly (rather than reusing the later `descriptRenderState`)
+  // so this useEffect can sit alongside the other early hooks before
+  // the `data` guard.
+  const itemIdForAutoSync = data?.item.id;
+  const isAwaitingRender =
+    !!data?.item.descriptCompositionId &&
+    !data?.item.descriptPublishJobId &&
+    !data?.item.descriptPublishedAt &&
+    !data?.item.descriptPublishError;
+  useEffect(() => {
+    if (!itemIdForAutoSync) return;
+    if (!isAwaitingRender) return;
+    void fetch(
+      `/api/production-items/${itemIdForAutoSync}/sync-descript-publish`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    ).catch(() => {
+      // Best-effort. Toasts here would be noise — the placeholder UI
+      // surfaces the state via its own polling.
+    });
+    // We intentionally only re-fire when the item or state changes.
+  }, [itemIdForAutoSync, isAwaitingRender]);
+
   const onLocalEdit = useCallback(
     (fieldKey: string, value: string | string[]) => {
       setLiveContent((prev) => ({ ...(prev ?? {}), [fieldKey]: value }));
@@ -1447,18 +1483,23 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   ]);
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
-  // True while there's Descript-side work happening that the simulator
-  // should reflect (composition not ready yet, OR Underlord still running,
-  // OR the publish-and-archive worker is rendering / waiting). Drives
-  // the embed-style empty state in the IG Reel simulator. Two signals:
-  //   - Item has a Descript project but no composition yet (Phase 1 mid)
-  //   - Composition exists but no archived MP4 yet (Underlord + publish
-  //     phases are still running, OR a manual sync was just kicked off)
-  // We OR the project_id check for the precise-cut path which sets project
-  // before composition, and the publish_job_id check for the post-comp
-  // window where Underlord might still be applying the layout pack.
-  const descriptProcessing =
-    !!item.descriptProjectId && !item.descriptPublishedAt;
+  // Descript-render state. Drives the IG Reel embed-style placeholder
+  // until the rendered MP4 actually lands in S3. Four states derived from
+  // the existing `descript_*` columns:
+  //   - "rendering": publish-and-archive worker is mid-flight
+  //   - "awaiting":  composition exists, no publish job (stuck or fresh)
+  //   - "failed":    last publish attempt errored — show retry button
+  //   - null:        no Descript context, OR MP4 already archived
+  let descriptRenderState: "rendering" | "awaiting" | "failed" | null = null;
+  if (item.descriptPublishError) {
+    descriptRenderState = "failed";
+  } else if (item.descriptPublishedAt) {
+    descriptRenderState = null;
+  } else if (item.descriptPublishJobId) {
+    descriptRenderState = "rendering";
+  } else if (item.descriptCompositionId) {
+    descriptRenderState = "awaiting";
+  }
   const hideDerivativeSections =
     derivatives.length === 0 && repurposeTargets.length === 0;
 
@@ -2265,7 +2306,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           onLocalEdit={onLocalEdit}
           onCommit={onCommit}
           onMediaMutated={() => void load()}
-          processing={descriptProcessing}
+          descriptRenderState={descriptRenderState}
         />
       )}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -2838,7 +2879,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               onLocalEdit={onLocalEdit}
               onCommit={onCommit}
               onMediaMutated={() => void load()}
-              processing={descriptProcessing}
+              descriptRenderState={descriptRenderState}
             />
           </TabsContent>
         )}

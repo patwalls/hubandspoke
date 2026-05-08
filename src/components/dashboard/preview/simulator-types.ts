@@ -20,12 +20,16 @@ export interface SimulatorProps {
   // Fires after a successful media upload or delete so the parent can
   // refetch and re-render with the new rows.
   onMediaMutated?: () => void;
-  // True when there's Descript-side work in flight (composition rendering,
-  // Underlord layout-pack, MP4 publish-and-archive). Drives the empty-state
-  // UX: instead of "Drag a video to add", the simulator shows an
-  // embed-style placeholder with "Rendering..." copy. Currently only the
-  // IG Reel simulator branches on this.
-  processing?: boolean;
+  // Descript-render state for the placeholder UX. Drives the IG Reel
+  // simulator's embed-style empty state (video left, caption right) and
+  // its sub-state copy. `null` = not Descript-derived OR already rendered;
+  // simulators fall back to their existing empty state. Other states drive
+  // the placeholder until the actual MP4 archive lands.
+  //
+  //   "rendering" — publish-and-archive job is in flight
+  //   "awaiting"  — composition exists, no publish job yet (stuck / fresh)
+  //   "failed"    — last publish attempt errored; user can retry
+  descriptRenderState?: "rendering" | "awaiting" | "failed" | null;
 }
 
 export function readLive(
