@@ -6,7 +6,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
-import { buildDescriptCompositionUrl } from "@/lib/descript";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import {
   ViewsSparkline,
@@ -1905,60 +1904,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               onSynced={load}
             />
           )}
-          {(() => {
-            const isClipSource = item.sourceType === "clip";
-            const clipPending =
-              isClipSource &&
-              !!item.descriptProjectId &&
-              !item.descriptCompositionId;
-            if (clipPending) {
-              return (
-                <button
-                  type="button"
-                  disabled
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                  title="Descript is still cutting the new composition — the link will be ready shortly."
-                >
-                  <RefreshCwIcon className="size-3.5 animate-spin" /> Clip
-                  processing…
-                </button>
-              );
-            }
-            if (
-              isClipSource &&
-              item.descriptProjectId &&
-              item.descriptCompositionId
-            ) {
-              return (
-                <a
-                  href={buildDescriptCompositionUrl(
-                    item.descriptProjectId,
-                    item.descriptCompositionId,
-                  )}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                  title="Open the new Descript composition"
-                >
-                  <FilmIcon className="size-3.5" /> Descript
-                </a>
-              );
-            }
-            if (item.descriptProjectUrl) {
-              return (
-                <a
-                  href={item.descriptProjectUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                  title="Open the Descript project"
-                >
-                  <FilmIcon className="size-3.5" /> Descript
-                </a>
-              );
-            }
-            return null;
-          })()}
+          {/* Descript deep-link is consolidated into DescriptStatusPill —
+           *  its popover surfaces both the composition URL and the
+           *  project URL, so a separate button here is redundant. */}
           <TranscriptButton
             itemId={item.id}
             hasMedia={!!item.mediaS3Key}
@@ -3891,7 +3839,25 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
   if (data.status === "not_started" && !data.trigger && !data.projectId)
     return null;
 
-  const style = DESCRIPT_STATUS_STYLES[data.status];
+  const baseStyle = DESCRIPT_STATUS_STYLES[data.status];
+  // Override the pill while an MP4 render is in flight or has failed.
+  // Without this the pill flips back to "Descript ready" the instant
+  // Underlord finishes — even though the editor is still waiting on the
+  // MP4 to land in S3 — which is misleading.
+  const style =
+    data.publish.state === "rendering"
+      ? {
+          dot: "bg-amber-500 animate-pulse",
+          label: "Rendering MP4…",
+          pillClass: "border-amber-200 bg-amber-50 text-amber-800",
+        }
+      : data.publish.state === "failed"
+        ? {
+            dot: "bg-red-500",
+            label: "Render failed",
+            pillClass: "border-red-200 bg-red-50 text-red-800",
+          }
+        : baseStyle;
   return (
     <Popover>
       <PopoverTrigger
