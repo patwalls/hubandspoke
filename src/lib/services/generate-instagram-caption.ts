@@ -41,8 +41,8 @@ export interface GenerateInstagramCaptionResult {
  *      the strongest tone signal we have, because they're real shipped
  *      copy on the same brand + format.
  *
- * Writes the result as a new `contentDrafts` row (demote-then-insert tx),
- * matching the same pattern as /api/production-items/[id]/drafts/generate.
+ * Writes the result as a new `contentDrafts` row (demote-then-insert tx:
+ * current row flips to `is_current=false`, new row inserts with version+1).
  *
  * Idempotent on retry: when a caption already exists in the current draft
  * and `force` is false, we skip with reason "already_filled". The worker
@@ -191,9 +191,8 @@ export async function generateInstagramCaptionForItem(
     pastCaptions,
   });
 
-  // Demote previous current + insert new current as version+1 in a tx.
-  // Same pattern as /api/production-items/[id]/drafts/generate — keeps
-  // the partial unique index on (production_item_id) WHERE is_current
+  // Demote previous current + insert new current as version+1 in a tx —
+  // keeps the partial unique index on (production_item_id) WHERE is_current
   // happy.
   const inserted = await db.transaction(async (tx) => {
     const [prevCurrent] = await tx

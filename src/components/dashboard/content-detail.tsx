@@ -4,7 +4,7 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import {
@@ -77,12 +77,24 @@ import type { FormatChannelWithAccount } from "@/lib/format-channels";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
-import {
-  type DraftRow,
-  type FieldSaveState,
-} from "./content-draft";
 import { ContentPreview } from "./preview/content-preview";
-import type { ContentDraftContent } from "@/lib/db/schema";
+import type { ContentDraftContent, FormatFieldSchema } from "@/lib/db/schema";
+
+// Server returns contentDrafts rows with `createdAt`/`updatedAt` as ISO
+// strings (JSON), not Date objects — keep a local shape for that.
+export interface DraftRow {
+  id: string;
+  productionItemId: string;
+  version: number;
+  isCurrent: boolean;
+  content: ContentDraftContent;
+  fieldSchemaSnapshot: FormatFieldSchema;
+  generatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FieldSaveState = "idle" | "saving" | "saved" | "error";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
@@ -335,7 +347,6 @@ const PROPERTY_TRIGGER_CLASS =
 const DETAIL_TAB_VALUES = [
   "details",
   "preview",
-  "draft",
   "derivatives",
   "clip-ideas",
   "repurpose",
@@ -1060,6 +1071,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     null,
   );
   const [actionPending, setActionPending] = useState(false);
+  // "More fields" toggle: hides Account, Pillar, Source type, Reposted from
+  // by default so the metadata card surfaces only the fields a clip operator
+  // routinely edits (Editor, Status, Format, CTA UTM, DM keyword).
+  const [showMore, setShowMore] = useState(false);
+  // Title is rendered as a heading above the card; pencil swaps in an Input
+  // with autoFocus so it receives focus immediately on mount.
+  const [editingTitle, setEditingTitle] = useState(false);
 
   const handleCrossPost = useCallback(
     async (target: {
@@ -1251,6 +1269,23 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     },
     [],
   );
+
+  // Auto-expand "More fields" once per item when a moved field has a
+  // non-default value, so a repost flag / set pillar / unset account isn't
+  // silently hidden behind the toggle. Only fires the first time we see a
+  // given item id — subsequent refetches don't override a user's collapse.
+  const showMoreInitedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const it = data?.item;
+    if (!it) return;
+    if (showMoreInitedRef.current === it.id) return;
+    showMoreInitedRef.current = it.id;
+    const needsMore =
+      (it.sourceType ?? "original") !== "original" ||
+      !!it.pillarContentItemId ||
+      !it.accountId;
+    if (needsMore) setShowMore(true);
+  }, [data?.item]);
 
   const slugAttached = data?.item?.shortLinkSlug ?? null;
   useEffect(() => {
@@ -1626,6 +1661,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     "instagram_post",
     "instagram_reel",
     "instagram_story",
+    "linkedin",
+    "tiktok",
   ]);
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
@@ -1680,13 +1717,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     ...(isPrePublish && !isPrePublishInline
       ? ([{ value: "preview", label: "Preview", count: null }] as const)
       : []),
-    {
-      value: "draft",
-      label: "Draft",
-      count: null,
-      disabled: true,
-      disabledReason: "Draft tab UI is still in development. Edit the tweet inline on the Details tab.",
-    },
     ...(!isPrePublish &&
     (!hideDerivativeSections ||
       data.reposts.length > 0 ||
@@ -2405,6 +2435,56 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           descriptRenderState={descriptRenderState}
         />
       )}
+      {/* Title — promoted out of the metadata card so it reads as the page
+       *  heading, not a row in a properties table. The pencil button shows
+       *  on hover (and while editing) and swaps the heading for an Input;
+       *  Enter / blur saves, Esc reverts. YouTube items remain read-only —
+       *  no pencil is shown when `isYouTube`. */}
+      <div className="group/title flex items-start gap-2">
+        {editingTitle ? (
+          <Input
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={() => {
+              setEditingTitle(false);
+              if ((item.title ?? "") !== title) void persistField({ title });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setTitle(item.title ?? "");
+                setEditingTitle(false);
+              }
+            }}
+            aria-label="Title"
+            placeholder="Untitled"
+            className="border-0 bg-transparent shadow-none h-auto px-0 py-0 text-2xl font-semibold tracking-tight focus-visible:ring-0 focus-visible:ring-offset-0"
+          />
+        ) : (
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground min-w-0 flex-1 break-words">
+            {title || (
+              <span className="text-muted-foreground">Untitled</span>
+            )}
+          </h1>
+        )}
+        {!isYouTube && !editingTitle && (
+          <button
+            type="button"
+            onClick={() => setEditingTitle(true)}
+            aria-label="Edit title"
+            title="Edit title"
+            className="mt-1.5 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted/50 hover:text-foreground group-hover/title:opacity-100 focus-visible:opacity-100"
+          >
+            <PencilIcon className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         {isYouTube && (
           <div className="flex items-center justify-end gap-2 px-3 py-1.5 border-b border-border/60">
@@ -2414,39 +2494,87 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </div>
         )}
 
-        <div className="border-b border-border/60">
-          <Input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => {
-              if ((item.title ?? "") !== title) void persistField({ title });
-            }}
-            disabled={isYouTube}
-            aria-label="Title"
-            placeholder="Untitled"
-            className="border-0 bg-transparent shadow-none rounded-none h-auto px-3 py-2.5 text-base font-medium focus-visible:ring-0 focus-visible:ring-offset-0"
-          />
-        </div>
+        <PropertyRowGroup single>
+          <PropertyRow label="Editor">
+            <Select
+              value={editorUserId || ""}
+              onValueChange={(v) => {
+                if (!v) return;
+                setEditorUserId(v);
+                void persistField({ editorUserId: v });
+              }}
+            >
+              <SelectTrigger
+                aria-label="Editor"
+                className={cn(
+                  PROPERTY_TRIGGER_CLASS,
+                  "[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1"
+                )}
+              >
+                {editorUser ? (
+                  <UserChip user={editorUser} />
+                ) : (
+                  <span className="text-muted-foreground">Select editor</span>
+                )}
+              </SelectTrigger>
+              <SelectContent>
+                {assignableUsers.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    <UserChip user={u} />
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </PropertyRow>
+        </PropertyRowGroup>
 
         <PropertyRowGroup single={isPrePublish}>
-          <PropertyRow label="Account">
-            <AccountPostTypePicker
-              accounts={accounts}
-              accountId={accountId}
-              postType={postType}
-              publishedLink={publishedLink || null}
-              brandSlug={brand}
-              disabled={isYouTube}
-              onChange={({ accountId: nextId, postType: nextType }) => {
-                setAccountId(nextId);
-                setPostType(nextType);
-                void persistField({
-                  accountId: nextId,
-                  postType: nextType,
+          <PropertyRow label="Status">
+            <Select
+              value={status}
+              onValueChange={(v) => {
+                const prev = status;
+                const next = v ?? "";
+                if (next === prev) return;
+                if (next === "Killed") {
+                  setPendingKill({ previousStatus: prev });
+                  return;
+                }
+                setStatus(next);
+                void persistField({ status: next || null }).then((ok) => {
+                  if (!ok) setStatus(prev);
                 });
               }}
-              className="w-full"
-            />
+            >
+              <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Status">
+                <SelectValue placeholder="Select status…">
+                  {status ? (
+                    <span
+                      className={cn(
+                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
+                        statusClassWithPalette(status, statusPalette),
+                      )}
+                    >
+                      {status}
+                    </span>
+                  ) : null}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {statusOptions.map((s) => (
+                  <SelectItem key={s.id} value={s.name}>
+                    <span
+                      className={cn(
+                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
+                        statusClassFromToken(s.color),
+                      )}
+                    >
+                      {s.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </PropertyRow>
 
           <PropertyRow label="Format">
@@ -2554,155 +2682,97 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </PropertyRow>
         </PropertyRowGroup>
 
-        <PropertyRowGroup single={isPrePublish}>
-          <PropertyRow label="Status">
-            <Select
-              value={status}
-              onValueChange={(v) => {
-                const prev = status;
-                const next = v ?? "";
-                if (next === prev) return;
-                if (next === "Killed") {
-                  setPendingKill({ previousStatus: prev });
-                  return;
-                }
-                setStatus(next);
-                void persistField({ status: next || null }).then((ok) => {
-                  if (!ok) setStatus(prev);
-                });
-              }}
-            >
-              <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Status">
-                <SelectValue placeholder="Select status…">
-                  {status ? (
-                    <span
-                      className={cn(
-                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
-                        statusClassWithPalette(status, statusPalette),
-                      )}
-                    >
-                      {status}
-                    </span>
-                  ) : null}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map((s) => (
-                  <SelectItem key={s.id} value={s.name}>
-                    <span
-                      className={cn(
-                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
-                        statusClassFromToken(s.color),
-                      )}
-                    >
-                      {s.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </PropertyRow>
+        {showMore && (
+          <>
+            <PropertyRowGroup single={isPrePublish}>
+              <PropertyRow label="Account">
+                <AccountPostTypePicker
+                  accounts={accounts}
+                  accountId={accountId}
+                  postType={postType}
+                  publishedLink={publishedLink || null}
+                  brandSlug={brand}
+                  disabled={isYouTube}
+                  onChange={({ accountId: nextId, postType: nextType }) => {
+                    setAccountId(nextId);
+                    setPostType(nextType);
+                    void persistField({
+                      accountId: nextId,
+                      postType: nextType,
+                    });
+                  }}
+                  className="w-full"
+                />
+              </PropertyRow>
 
-          <PropertyRow label="Pillar content">
-            <PillarPicker
-              brand={brand}
-              excludeId={contentId}
-              value={pillar}
-              onChange={(next) => {
-                setPillar(next);
-                void persistField({ pillarContentItemId: next?.id ?? null });
-              }}
-              triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
-            />
-          </PropertyRow>
-        </PropertyRowGroup>
+              <PropertyRow label="Pillar content">
+                <PillarPicker
+                  brand={brand}
+                  excludeId={contentId}
+                  value={pillar}
+                  onChange={(next) => {
+                    setPillar(next);
+                    void persistField({ pillarContentItemId: next?.id ?? null });
+                  }}
+                  triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
+                />
+              </PropertyRow>
+            </PropertyRowGroup>
 
-        <PropertyRowSolo>
-          <PropertyRow label="Source type">
-            <div className="flex flex-col gap-0.5">
-              <Select
-                value={sourceType}
-                onValueChange={(v) => {
-                  const next = v ?? "original";
-                  const prev = sourceType;
-                  if (next === prev) return;
-                  setSourceType(next);
-                  void persistField({ sourceType: next }).then((ok) => {
-                    if (!ok) setSourceType(prev);
-                  });
-                }}
-              >
-                <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Source type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="original">Original</SelectItem>
-                  <SelectItem value="repost">Repost</SelectItem>
-                  <SelectItem value="cross_post">Cross-post</SelectItem>
-                </SelectContent>
-              </Select>
-              {(sourceType === "repost" || sourceType === "cross_post") && (
-                <p className="text-[11px] text-muted-foreground px-2">
-                  Exempt from the (pillar, format) uniqueness — can reuse the
-                  original&rsquo;s format.
-                </p>
-              )}
-            </div>
-          </PropertyRow>
-        </PropertyRowSolo>
+            <PropertyRowSolo>
+              <PropertyRow label="Source type">
+                <div className="flex flex-col gap-0.5">
+                  <Select
+                    value={sourceType}
+                    onValueChange={(v) => {
+                      const next = v ?? "original";
+                      const prev = sourceType;
+                      if (next === prev) return;
+                      setSourceType(next);
+                      void persistField({ sourceType: next }).then((ok) => {
+                        if (!ok) setSourceType(prev);
+                      });
+                    }}
+                  >
+                    <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Source type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="original">Original</SelectItem>
+                      <SelectItem value="repost">Repost</SelectItem>
+                      <SelectItem value="cross_post">Cross-post</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {(sourceType === "repost" || sourceType === "cross_post") && (
+                    <p className="text-[11px] text-muted-foreground px-2">
+                      Exempt from the (pillar, format) uniqueness — can reuse the
+                      original&rsquo;s format.
+                    </p>
+                  )}
+                </div>
+              </PropertyRow>
+            </PropertyRowSolo>
 
-        {(sourceType === "repost" || sourceType === "cross_post") && (
-          <PropertyRowSolo>
-            <PropertyRow label="Reposted from">
-              <PillarPicker
-                brand={brand}
-                excludeId={contentId}
-                value={repostedFromOption}
-                onChange={(next) => {
-                  setRepostedFromOption(next);
-                  void persistField({ repostedFromItemId: next?.id ?? null });
-                }}
-                placeholder="No source — click to choose…"
-                includeAll
-                triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
-              />
-            </PropertyRow>
-          </PropertyRowSolo>
+            {(sourceType === "repost" || sourceType === "cross_post") && (
+              <PropertyRowSolo>
+                <PropertyRow label="Reposted from">
+                  <PillarPicker
+                    brand={brand}
+                    excludeId={contentId}
+                    value={repostedFromOption}
+                    onChange={(next) => {
+                      setRepostedFromOption(next);
+                      void persistField({ repostedFromItemId: next?.id ?? null });
+                    }}
+                    placeholder="No source — click to choose…"
+                    includeAll
+                    triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
+                  />
+                </PropertyRow>
+              </PropertyRowSolo>
+            )}
+          </>
         )}
-
-        <PropertyRowGroup single>
-          <PropertyRow label="Editor">
-            <Select
-              value={editorUserId || ""}
-              onValueChange={(v) => {
-                if (!v) return;
-                setEditorUserId(v);
-                void persistField({ editorUserId: v });
-              }}
-            >
-              <SelectTrigger
-                aria-label="Editor"
-                className={cn(
-                  PROPERTY_TRIGGER_CLASS,
-                  "[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1"
-                )}
-              >
-                {editorUser ? (
-                  <UserChip user={editorUser} />
-                ) : (
-                  <span className="text-muted-foreground">Select editor</span>
-                )}
-              </SelectTrigger>
-              <SelectContent>
-                {assignableUsers.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    <UserChip user={u} />
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </PropertyRow>
-        </PropertyRowGroup>
 
         {/* Published link + Published date are stamps that exist only after
          * the post is live. Hiding them pre-publish keeps the drafting
@@ -2846,6 +2916,26 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             </PropertyRow>
           </PropertyRowSolo>
         )}
+
+        <div className="flex items-center justify-center border-t border-border/60 px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setShowMore((v) => !v)}
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          >
+            {showMore ? (
+              <>
+                <ChevronUpIcon className="h-3.5 w-3.5" />
+                Hide extra fields
+              </>
+            ) : (
+              <>
+                <ChevronDownIcon className="h-3.5 w-3.5" />
+                See more fields
+              </>
+            )}
+          </button>
+        </div>
 
         {deleteError && (
           <div className="text-sm px-3 py-2 bg-red-50 text-red-700 border-t border-red-200">
