@@ -44,7 +44,8 @@ export function InstagramPostSimulator({
         </DraftMediaDropZone>
       </div>
 
-      {/* RIGHT: caption panel — minimalist, mirrors the IG Reel layout. */}
+      {/* RIGHT: ig-embed-style sidebar — same layout as IG Reel. No
+       *  "Original audio" subtitle since IG Posts are static. */}
       <CaptionPanel
         itemId={itemId}
         fieldKey={fieldMap.caption}
@@ -54,6 +55,10 @@ export function InstagramPostSimulator({
         onCommit={onCommit}
         showRegenerate
         onRegenerated={onDraftMutated}
+        variant="ig-embed"
+        author={data.author}
+        subtitle={null}
+        publishedAt={data.publishedAt}
       />
     </div>
   );
@@ -100,14 +105,17 @@ function IgPostCarousel({
             className="group relative h-full w-full shrink-0 snap-center"
           >
             {entry.removeButton}
-            {entry.slide.kind === "video" ? (
-              <video
-                src={entry.slide.url ?? undefined}
-                poster={entry.slide.posterUrl ?? undefined}
-                controls
-                playsInline
-                className="h-full w-full object-contain"
-              />
+            {entry.slide.kind === "video" && entry.slide.url ? (
+              <>
+                <video
+                  src={entry.slide.url}
+                  poster={entry.slide.posterUrl ?? undefined}
+                  controls
+                  playsInline
+                  className="h-full w-full object-contain"
+                />
+                <MediaActions src={entry.slide.url} kind="video" />
+              </>
             ) : entry.slide.url ? (
               <>
                 {/* eslint-disable-next-line @next/next/no-img-element */}

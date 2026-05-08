@@ -44,8 +44,9 @@ export function InstagramReelSimulator({
       {/* LEFT: 9:16 video player or render-state placeholder. No overlays
        *  on the video itself — the burned-in hook text already lives in
        *  the rendered MP4, and a duplicate simulator overlay just clashes
-       *  with it. */}
-      <div className="relative aspect-[9/16] w-full max-w-[320px] shrink-0 overflow-hidden rounded-lg bg-black">
+       *  with it. `group` on the wrapper enables the hover-reveal of the
+       *  MediaActions overlay (Resync / Download / Copy). */}
+      <div className="group relative aspect-[9/16] w-full max-w-[320px] shrink-0 overflow-hidden rounded-lg bg-black">
         {showStatePlaceholder ? (
           <ReelStatePlaceholder
             state={descriptRenderState!}
@@ -64,14 +65,23 @@ export function InstagramReelSimulator({
               const placeholder = placeholders[0];
               return (
                 <>
-                  {enriched?.slide.kind === "video" ? (
-                    <video
-                      src={enriched.slide.url ?? undefined}
-                      poster={enriched.slide.posterUrl ?? undefined}
-                      controls
-                      playsInline
-                      className="absolute inset-0 h-full w-full object-cover"
-                    />
+                  {enriched?.slide.kind === "video" && enriched.slide.url ? (
+                    <>
+                      <video
+                        src={enriched.slide.url}
+                        poster={enriched.slide.posterUrl ?? undefined}
+                        controls
+                        playsInline
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                      <MediaActions
+                        src={enriched.slide.url}
+                        kind="video"
+                        onResync={async () => {
+                          await triggerResync(itemId);
+                        }}
+                      />
+                    </>
                   ) : enriched?.slide.url ? (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -99,8 +109,10 @@ export function InstagramReelSimulator({
         )}
       </div>
 
-      {/* RIGHT: caption only — keeps the simulator focused on the one
-       *  field editors actually iterate on for Reels. */}
+      {/* RIGHT: ig-embed-style sidebar — account avatar + handle +
+       *  "Original audio", then a handle-prefixed editable caption, then
+       *  a faux engagement rail. Visually mirrors instagram.com so the
+       *  editor sees the post roughly as it'll ship. */}
       <CaptionPanel
         itemId={itemId}
         fieldKey={fieldMap.caption}
@@ -110,9 +122,40 @@ export function InstagramReelSimulator({
         onCommit={onCommit}
         showRegenerate
         onRegenerated={onDraftMutated}
+        variant="ig-embed"
+        author={data.author}
+        subtitle="Original audio"
+        publishedAt={data.publishedAt}
       />
     </div>
   );
+}
+
+/**
+ * Re-sync the rendered MP4 from Descript. Hits the same endpoint as the
+ * "Re-sync from Descript" button in the DescriptStatusPill popover, with
+ * `force: true` so it kicks off a fresh publish job even if the existing
+ * rendered MP4 looks complete. Used by the MediaActions overlay on the
+ * playable video — editors who tweak the composition in Descript want to
+ * pull the new render without digging into menus.
+ */
+async function triggerResync(itemId: string): Promise<void> {
+  const res = await fetch(
+    `/api/production-items/${itemId}/sync-descript-publish`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    },
+  );
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(json?.error || `HTTP ${res.status}`);
+  }
+  toast.success("Re-syncing from Descript…", {
+    description:
+      "New MP4 will replace this one in ~2–10 min. The simulator updates automatically.",
+  });
 }
 
 /**

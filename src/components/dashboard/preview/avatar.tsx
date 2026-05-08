@@ -31,11 +31,16 @@ function pickColor(seed: string | null): string {
 export function MonogramAvatar({
   displayName,
   handle,
+  avatarUrl,
   size = "md",
   className,
 }: {
   displayName: string | null;
   handle: string | null;
+  /** When set, renders the actual profile pic. Falls back to a deterministic
+   *  pastel monogram when null OR when the image fails to load (no auth on
+   *  IG CDN — can fail silently). */
+  avatarUrl?: string | null;
   size?: "sm" | "md" | "lg";
   className?: string;
 }) {
@@ -47,6 +52,25 @@ export function MonogramAvatar({
       : size === "lg"
         ? "h-12 w-12 text-base"
         : "h-9 w-9 text-xs";
+  if (avatarUrl) {
+    return (
+      <div
+        className={cn(
+          "relative shrink-0 overflow-hidden rounded-full",
+          sizeClass,
+          className,
+        )}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={avatarUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          referrerPolicy="no-referrer"
+        />
+      </div>
+    );
+  }
   return (
     <div
       className={cn(
