@@ -5,8 +5,7 @@ import { SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { EditableField } from "./editable-field";
-import { MonogramAvatar } from "./avatar";
-import { VerifiedBadge } from "./verified-badge";
+import { SocialEmbedHeader } from "./social-embed-header";
 import type { SimulatorProps } from "./simulator-types";
 import type { PreviewData } from "./resolve-preview-data";
 
@@ -140,39 +139,26 @@ function IgEmbedCaption({
   placeholder: string;
 }) {
   const handle = author.handle ?? "your_handle";
-  const displayName = author.displayName ?? handle;
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-3">
-      {/* Account header — borderless, just avatar + handle + subtitle.
-       *  No card chrome, no faux engagement rail; the editor wants to see
-       *  who's posting + edit the caption, that's it. */}
-      <div className="flex items-center gap-2.5">
-        <MonogramAvatar
-          displayName={displayName}
-          handle={handle}
-          avatarUrl={author.avatarUrl ?? null}
-          size="md"
-        />
-        <div className="min-w-0 flex-1 leading-tight">
-          <div className="flex items-center gap-1">
-            <span className="truncate text-sm font-semibold">{handle}</span>
-            {author.verified && <VerifiedBadge />}
-          </div>
-          {subtitle && (
-            <div className="text-xs text-muted-foreground">{subtitle}</div>
-          )}
-        </div>
-        {showRegenerate && (
-          <RegenerateCaptionButton
-            itemId={itemId}
-            hasExisting={value.trim().length > 0}
-            hasDraft={editable}
-            onRegenerated={onRegenerated}
-          />
-        )}
-      </div>
-
-      {/* Caption — editable textarea, no extra label or background. */}
+      <SocialEmbedHeader
+        // IG convention: handle is the bold primary line.
+        name={handle}
+        subtitle={subtitle}
+        avatarUrl={author.avatarUrl}
+        verified={author.verified}
+        monogramSeed={{ displayName: author.displayName, handle: author.handle }}
+        actions={
+          showRegenerate ? (
+            <RegenerateCaptionButton
+              itemId={itemId}
+              hasExisting={value.trim().length > 0}
+              hasDraft={editable}
+              onRegenerated={onRegenerated}
+            />
+          ) : null
+        }
+      />
       <EditableField
         fieldKey={fieldKey}
         editable={editable}

@@ -2,6 +2,7 @@
 
 import { ImagePlusIcon } from "lucide-react";
 import { CaptionPanel } from "../caption-panel";
+import { SocialEmbedHeader } from "../social-embed-header";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import {
   DraftMediaDropZone,
@@ -85,6 +86,23 @@ export function TikTokSimulator({
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col gap-3">
+              <SocialEmbedHeader
+                // TikTok convention: `@handle` is the bold primary line,
+                // a small caption-line of bio underneath when set.
+                name={
+                  data.author.handle
+                    ? `@${data.author.handle}`
+                    : data.author.displayName ?? "you"
+                }
+                subtitle={data.author.bio ?? data.author.displayName}
+                avatarUrl={data.author.avatarUrl}
+                verified={data.author.verified}
+                monogramSeed={{
+                  displayName: data.author.displayName,
+                  handle: data.author.handle,
+                }}
+              />
+
               <CaptionPanel
                 itemId={itemId}
                 fieldKey={fieldMap.caption}

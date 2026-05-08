@@ -2,6 +2,7 @@
 
 import { ImagePlusIcon } from "lucide-react";
 import { CaptionPanel } from "../caption-panel";
+import { SocialEmbedHeader } from "../social-embed-header";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import {
   DraftMediaDropZone,
@@ -82,6 +83,22 @@ export function XSimulator({
             )}
 
             <div className="flex min-w-0 flex-1 flex-col gap-3">
+              <SocialEmbedHeader
+                // X convention: bold display name, then `@handle` as the
+                // subtitle (or the bio when set, but the handle is the
+                // canonical second line on x.com).
+                name={data.author.displayName ?? data.author.handle ?? "You"}
+                subtitle={
+                  data.author.handle ? `@${data.author.handle}` : null
+                }
+                avatarUrl={data.author.avatarUrl}
+                verified={data.author.verified}
+                monogramSeed={{
+                  displayName: data.author.displayName,
+                  handle: data.author.handle,
+                }}
+              />
+
               <CaptionPanel
                 itemId={itemId}
                 fieldKey={fieldMap.caption}

@@ -2,6 +2,7 @@
 
 import { ImagePlusIcon } from "lucide-react";
 import { CaptionPanel } from "../caption-panel";
+import { SocialEmbedHeader } from "../social-embed-header";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import {
   DraftMediaDropZone,
@@ -96,6 +97,17 @@ export function LinkedInSimulator({
             )}
 
             <div className="flex min-w-0 flex-1 flex-col gap-3">
+              <SocialEmbedHeader
+                name={data.author.displayName ?? data.author.handle ?? "You"}
+                subtitle={data.author.bio}
+                avatarUrl={data.author.avatarUrl}
+                verified={data.author.verified}
+                monogramSeed={{
+                  displayName: data.author.displayName,
+                  handle: data.author.handle,
+                }}
+              />
+
               <CaptionPanel
                 itemId={itemId}
                 fieldKey={fieldMap.caption}

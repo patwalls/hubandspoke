@@ -32,6 +32,10 @@ export type PreviewData = {
     followerCount: number | null;
     verified: boolean;
     avatarUrl: string | null;
+    /** Free-text bio / headline. LinkedIn shows this as the editor's
+     *  subtitle ("Founder, Starter Story"), X uses it as the post-author
+     *  bio under the display name. Null when the account has none. */
+    bio: string | null;
   };
   caption: string;
   secondaryText: string | null;
@@ -138,6 +142,7 @@ export function resolvePreviewData(
         followerCount: account.followerCount ?? null,
         verified: account.verified ?? false,
         avatarUrl: account.avatarUrl,
+        bio: account.bio ?? null,
       }
     : {
         handle: item.authorHandle ?? null,
@@ -145,6 +150,7 @@ export function resolvePreviewData(
         followerCount: item.authorFollowerCount ?? null,
         verified: !!item.authorVerified,
         avatarUrl: null,
+        bio: null,
       };
 
   return {

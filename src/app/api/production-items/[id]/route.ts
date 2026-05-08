@@ -599,7 +599,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
     // Joined account summary for the UI's AccountBadge / picker AND for the
     // preview simulator card (handle, displayName, avatar, verified,
-    // followerCount). Null when the item predates the accounts backfill
+    // followerCount, bio). Null when the item predates the accounts backfill
     // (shouldn't happen in prod but kept defensive).
     let joinedAccount: {
       id: string;
@@ -611,6 +611,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       brandLabel: string;
       verified: boolean | null;
       followerCount: number | null;
+      bio: string | null;
     } | null = null;
     if (item.accountId) {
       const [row] = await db
@@ -624,6 +625,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           brandLabel: brands.label,
           verified: accounts.verified,
           followerCount: accounts.followerCount,
+          bio: accounts.bio,
         })
         .from(accounts)
         .innerJoin(brands, eq(brands.id, accounts.brandId))

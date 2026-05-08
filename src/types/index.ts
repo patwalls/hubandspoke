@@ -37,6 +37,10 @@ export interface ProductionItem {
     // don't need them aren't forced to expand their selectors.
     verified?: boolean | null;
     followerCount?: number | null;
+    /** Free-text bio / headline (LinkedIn calls this a headline; X calls
+     *  it a bio). Used as the subtitle in the social-embed header on the
+     *  simulator. Optional — only the single-item detail GET expands it. */
+    bio?: string | null;
   } | null;
   format: string | null;
   brand: string;
