@@ -4,7 +4,9 @@ import { test, expect } from "@playwright/test";
  * Verifies the content-detail metadata card cleanup:
  *  - Title is editable inline at the top (pencil + Input swap, Esc reverts).
  *  - Default rows are Editor / Status / Format only.
- *  - "See more fields" reveals Account / Source type (and Pillar content).
+ *  - "See more fields" reveals Account / Source type / Pillar content +
+ *    secondary fields (CTA UTM, DM keyword) — keeping the default surface
+ *    focused on the fields a clip operator routinely edits.
  *  - There is exactly one Title heading on the page (no duplicate from a
  *    stray block left behind during the refactor).
  *
@@ -28,9 +30,12 @@ test.describe("content detail metadata card", () => {
     await expect(card.getByText("Editor", { exact: true })).toBeVisible();
     await expect(card.getByText("Status", { exact: true })).toBeVisible();
     await expect(card.getByText("Format", { exact: true })).toBeVisible();
+    // Everything else is gated behind "See more fields" — including
+    // CTA UTM and DM keyword, which used to be always-visible.
     await expect(card.getByText("Account", { exact: true })).toHaveCount(0);
     await expect(card.getByText("Source type", { exact: true })).toHaveCount(0);
     await expect(card.getByText("Pillar content", { exact: true })).toHaveCount(0);
+    await expect(card.getByText("CTA UTM", { exact: true })).toHaveCount(0);
   });
 
   test("See more fields reveals hidden rows", async ({ page }) => {
@@ -41,6 +46,7 @@ test.describe("content detail metadata card", () => {
     await expect(page.getByText("Account", { exact: true })).toBeVisible();
     await expect(page.getByText("Source type", { exact: true })).toBeVisible();
     await expect(page.getByText("Pillar content", { exact: true })).toBeVisible();
+    await expect(page.getByText("CTA UTM", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /hide extra fields/i })).toBeVisible();
   });
 

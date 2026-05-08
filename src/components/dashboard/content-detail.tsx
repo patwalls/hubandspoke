@@ -1270,23 +1270,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     [],
   );
 
-  // Auto-expand "More fields" once per item when the source-type flag
-  // genuinely needs to be visible — i.e. this item is a repost or
-  // cross-post, where hiding the row would also hide the Reposted-from
-  // picker that sits underneath it. Items with sourceType=clip / original
-  // and a set pillar are the common case; auto-expanding for those would
-  // defeat the toggle's whole point. Fires once per item id so a later
-  // refetch doesn't override a user's manual collapse.
-  const showMoreInitedRef = useRef<string | null>(null);
-  useEffect(() => {
-    const it = data?.item;
-    if (!it) return;
-    if (showMoreInitedRef.current === it.id) return;
-    showMoreInitedRef.current = it.id;
-    if (it.sourceType === "repost" || it.sourceType === "cross_post") {
-      setShowMore(true);
-    }
-  }, [data?.item]);
+  // Note: previously we auto-expanded "See more fields" for repost /
+  // cross-post items (so the Reposted-from picker would be visible).
+  // Removed 2026-05-08 per user request — extras stay collapsed by
+  // default on every item; the editor clicks "See more fields" when
+  // they need to inspect or change the routing.
 
   const slugAttached = data?.item?.shortLinkSlug ?? null;
   useEffect(() => {
@@ -2862,27 +2850,29 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </PropertyRowGroup>
         )}
 
-        <PropertyRowSolo>
-          <PropertyRow label="CTA UTM">
-            <Input
-              value={utmCampaign}
-              onChange={(e) => setUtmCampaign(e.target.value)}
-              onBlur={() => {
-                const next = utmCampaign.trim();
-                if ((item.utmCampaign ?? "") !== next) {
-                  void persistField({ utmCampaign: next }).then((ok) => {
-                    if (!ok) setUtmCampaign(item.utmCampaign ?? "");
-                  });
-                }
-              }}
-              aria-label="CTA UTM campaign"
-              className={cn(PROPERTY_INPUT_CLASS, "font-mono")}
-              placeholder="e.g. angus-warner-42"
-            />
-          </PropertyRow>
-        </PropertyRowSolo>
+        {showMore && (
+          <PropertyRowSolo>
+            <PropertyRow label="CTA UTM">
+              <Input
+                value={utmCampaign}
+                onChange={(e) => setUtmCampaign(e.target.value)}
+                onBlur={() => {
+                  const next = utmCampaign.trim();
+                  if ((item.utmCampaign ?? "") !== next) {
+                    void persistField({ utmCampaign: next }).then((ok) => {
+                      if (!ok) setUtmCampaign(item.utmCampaign ?? "");
+                    });
+                  }
+                }}
+                aria-label="CTA UTM campaign"
+                className={cn(PROPERTY_INPUT_CLASS, "font-mono")}
+                placeholder="e.g. angus-warner-42"
+              />
+            </PropertyRow>
+          </PropertyRowSolo>
+        )}
 
-        {postType?.startsWith("instagram_") && (
+        {showMore && postType?.startsWith("instagram_") && (
           <PropertyRowSolo>
             <PropertyRow label="DM keyword">
               {item.shortLinkSlug ? (
