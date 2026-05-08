@@ -307,19 +307,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
-  // After the seed tx commits, fire the AI caption generator for IG
-  // targets — same auto-fire seam as the repost route. Fire-and-forget;
-  // failure here doesn't block the redirect to the new item.
-  if (
-    typeof targetPostType === "string" &&
-    targetPostType.startsWith("instagram_")
-  ) {
+  // After the seed tx commits, fire the Draft Algorithm. The algorithm
+  // skips internally for unsupported post types (e.g. youtube_long,
+  // newsletter), so we can enqueue unconditionally for any seeded target.
+  // Fire-and-forget; failure here doesn't block the redirect to the new
+  // item.
+  if (CROSS_POST_SEEDED_TARGETS.has(targetPostType as PostType)) {
     try {
-      await enqueue("generate-instagram-caption", {
+      await enqueue("draft-algorithm-run", {
         productionItemId: created.id,
       });
     } catch (err) {
-      console.error("generate-ig-caption enqueue (cross-post) failed:", err);
+      console.error("draft-algorithm-run enqueue (cross-post) failed:", err);
     }
   }
 

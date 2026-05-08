@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth-guards";
-import { generateInstagramCaptionForItem } from "@/lib/services/generate-instagram-caption";
+import { runDraftAlgorithm } from "@/lib/services/draft-algorithm/run";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -10,17 +10,17 @@ interface RouteContext {
 export const maxDuration = 60;
 
 /**
- * POST /api/production-items/[id]/generate-caption
+ * POST /api/production-items/[id]/draft
  *
- * Manual trigger for the Instagram caption-generation primitive. The
- * Regenerate button on the simulator caption panel POSTs here.
+ * Manual entry point for the Draft Algorithm. Regenerate buttons across
+ * the simulator panels POST here.
  *
  * - Body: `{ force?: boolean }`. `force=true` overrides the
  *   "already-filled" guard — needed when an editor clicks Regenerate on a
- *   caption that's already been touched.
+ *   draft that's already been touched.
  * - 200 with `{ status, draftId?, captionPreview? }` on success.
  * - 400 with `{ error }` for the user-actionable cases (no transcript,
- *   non-IG post type) so the caller can surface a friendly toast.
+ *   unsupported post type) so the caller can surface a friendly toast.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireSession();
@@ -33,16 +33,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
   };
 
   try {
-    const result = await generateInstagramCaptionForItem(id, {
+    const result = await runDraftAlgorithm(id, {
       force: !!body.force,
       actorUserId,
     });
     if (result.status === "skipped") {
-      // 200 with the skip reason — the UI distinguishes via response.status.
       const userActionable =
         result.reason === "no_transcript" ||
-        result.reason === "not_instagram" ||
-        result.reason === "no_platform_schema";
+        result.reason === "unsupported_post_type" ||
+        result.reason === "no_platform_schema" ||
+        result.reason === "no_caption_field";
       if (userActionable) {
         return NextResponse.json(
           {
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("generate-caption failed:", err);
+    console.error("draft-algorithm failed:", err);
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }
@@ -74,11 +74,13 @@ function friendlyReason(reason: string | undefined): string {
   switch (reason) {
     case "no_transcript":
       return "No transcript available for this item's pillar. Fetch the transcript first.";
-    case "not_instagram":
-      return "Caption generation is only supported on Instagram post types.";
+    case "unsupported_post_type":
+      return "Draft generation isn't supported for this post type yet.";
     case "no_platform_schema":
-      return "This item has no platform — pick one before generating a caption.";
+      return "This item has no platform schema — pick a post type before generating.";
+    case "no_caption_field":
+      return "This post type has no caption field configured.";
     default:
-      return reason ?? "Unable to generate caption.";
+      return reason ?? "Unable to generate draft.";
   }
 }

@@ -7,6 +7,7 @@ import { resolveAssignees } from "@/lib/services/assignees";
 import { getChannelsForFormats } from "@/lib/format-channels";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
+import { enqueue } from "@/jobs/enqueue";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -154,6 +155,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
     targetFormatId: target.id,
     compositionName: target.name,
   });
+
+  // Fire the Draft Algorithm so the editor lands on a populated form
+  // instead of a blank one. Skips internally if the pillar has no
+  // transcript, or if the inherited post_type isn't in the V1 supported
+  // set — the editor still sees the item, just empty in those cases.
+  // Fire-and-forget; a failed enqueue mustn't block the create response.
+  try {
+    await enqueue("draft-algorithm-run", {
+      productionItemId: created.id,
+    });
+  } catch (err) {
+    console.error("draft-algorithm-run enqueue (repurpose) failed:", err);
+  }
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

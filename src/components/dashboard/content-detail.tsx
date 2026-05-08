@@ -610,13 +610,16 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.item?.id, data?.item?.postType, data?.item?.status, data?.currentDraft]);
 
-  // Auto-fire AI caption generation when an editor lands on an IG drafting
-  // surface that has no draft yet. The repost route already enqueues this
-  // post-seed, but clip-promotion writes a `production_items` row WITHOUT
-  // a `content_drafts` row — so without this hook those items show no
-  // generated caption until the user clicks Generate. Fires once per item
-  // per page-mount; idempotent on retry because the service skips when a
-  // non-`copy:source` draft already exists.
+  // Auto-fire the Draft Algorithm when an editor lands on an IG drafting
+  // surface that has no draft yet. The cross-post / repurpose routes
+  // already enqueue this post-create, but clip-promotion writes a
+  // `production_items` row WITHOUT a `content_drafts` row — so without
+  // this hook those clip items show no generated caption until the user
+  // clicks Generate. Scoped to IG to preserve today's behavior; new
+  // platforms (X / LinkedIn / TikTok / Threads / etc.) get coverage via
+  // the route-side enqueues. Fires once per item per page-mount;
+  // idempotent because the service skips when a non-`copy:source` draft
+  // already exists.
   const autoGenCaptionFiredRef = useRef<string | null>(null);
   useEffect(() => {
     const item = data?.item;
@@ -628,7 +631,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     if (!isIg || !noDraft || !hasTranscript) return;
     if (autoGenCaptionFiredRef.current === item.id) return;
     autoGenCaptionFiredRef.current = item.id;
-    void fetch(`/api/production-items/${item.id}/generate-caption`, {
+    void fetch(`/api/production-items/${item.id}/draft`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ force: false }),

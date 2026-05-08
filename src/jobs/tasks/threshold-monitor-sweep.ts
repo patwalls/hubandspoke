@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { enqueue } from "@/jobs/enqueue";
 
 /**
  * Threshold monitor: scan all published items and automatically create
@@ -160,6 +161,22 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
               targetFormatId: targetFormat.id,
               viewsAtTrigger: item.views,
             });
+
+            // Fire the Draft Algorithm so the editor lands on a populated
+            // form. Skips internally if the inherited postType isn't in V1
+            // supported set, or if the pillar has no transcript yet.
+            // Fire-and-forget — a failed enqueue mustn't fail the sweep.
+            try {
+              await enqueue("draft-algorithm-run", {
+                productionItemId: created.id,
+              });
+            } catch (err) {
+              helpers.logger.error(
+                `draft-algorithm-run enqueue (threshold-sweep) failed for ${created.id}: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
 
             itemsCreated++;
             helpers.logger.debug(

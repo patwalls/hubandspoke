@@ -37,7 +37,8 @@ USER / API ENTRY POINTS
   POST /api/accounts (new account row)                    → account-content-sync (backfill) + account-refresh
   POST /api/production-items/[id]/transcript/fetch        → transcribe-whisper
   POST /api/uploads/confirm                               → transcribe-whisper
-  POST /api/production-items/[id]/repurpose               → (no job — synchronous insert + redirect)
+  POST /api/production-items/[id]/repurpose               → draft-algorithm-run (auto-fire after insert)
+  POST /api/production-items/[id]/cross-post              → draft-algorithm-run (auto-fire after seed, any seeded target)
   POST /api/descript/clip-out                             → descript-clip-resolve  (format-detail quick-clip only as of 2026-05-02)
   POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve
   POST /api/clip-ideas/[id]/create-in-descript-precise    → clip-idea-precise-cut
@@ -46,8 +47,8 @@ USER / API ENTRY POINTS
   PUT  /api/production-items (→ Published w/ link, or link added on Published) → refresh-item-metrics
   POST /api/production-items, /comments, /clip-ideas/triage  → notification-send
   POST /api/queue/refill-reposts (admin-only)             → evergreen-scan (manual trigger from /queue/repost)
-  POST /api/production-items/[id]/repost (IG postType)    → generate-instagram-caption (auto-fire after seed)
-  POST /api/production-items/[id]/generate-caption        → (synchronous; no job)
+  POST /api/production-items/[id]/repost                  → (no job — verbatim seed kept; algorithm doesn't run on repost)
+  POST /api/production-items/[id]/draft                   → (synchronous; no job — manual Draft Algorithm trigger)
 
 AUTO-CHAINS (one task enqueues another)
   enrich-item        ── if updates.mediaS3Key set ─→ transcribe-whisper
@@ -86,7 +87,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Files:** `src/jobs/tasks/threshold-monitor-sweep.ts`
 - **Inputs:** every published `productionItems` row with `views > 0` and a `format`; all `formats` rows (parent→child tree); existing `repurposeTriggers` (for dedup)
 - **Outputs:** new `productionItems` rows with `sourceType='repurposed'`, `pillarContentItemId=parent.id`, `status='Idea'` (inherits brand, title, thumbnail from parent); paired `repurposeTriggers` row (sourceFormatId, targetFormatId, viewsAtTrigger)
-- **Downstream:** none directly — the new `Idea` row enters the normal post lifecycle and may itself be picked up by enrichment / metrics / hook sweeps once published
+- **Downstream:** `draft-algorithm-run` enqueued for each created row so the editor lands on a populated form (skipped internally for unsupported post types or when the pillar has no transcript yet). Otherwise the new `Idea` row enters the normal post lifecycle and may itself be picked up by enrichment / metrics / hook sweeps once published.
 - **Rules:**
   - **In-place scan**, not a fan-out — does the work directly because it's pure DB and cheap
   - Dedup key = `(productionItemId, sourceFormatId, targetFormatId)`. Once a trigger row exists for that triple, that target is never re-created for that parent (even if views drop and recover later).
@@ -715,17 +716,18 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - Producer/editor on the new prod_item rows: manual route uses the actor; cron/backfill path falls through `resolveAssignees` (source item → format default → brand default → global fallback).
   - Cost: one Sonnet call per pillar (~$0.10). Worker concurrency keeps backfill bursts cheap; ~30 historic pillars ≈ $3 of Sonnet.
 
-### `generate-instagram-caption` — Opus IG caption auto-fill (2026-05-07)
-- **Trigger:** auto-enqueued at the end of `POST /api/production-items/[id]/repost` (after the seed-content tx commits) when the source's `postType` starts with `instagram_`. Also called *synchronously* by `POST /api/production-items/[id]/generate-caption` — the Regenerate button on the IG simulator caption panel skips the queue and waits for the agent inline (Opus call ~5–10s; route's `maxDuration` is 60s).
-- **Files:** `src/jobs/tasks/generate-instagram-caption.ts`, `src/lib/services/generate-instagram-caption.ts`, `src/lib/draft-agent.ts` (extended with `pastCaptions`), `src/app/api/production-items/[id]/generate-caption/route.ts`
-- **Inputs:** `{ productionItemId, force? }`. Service loads (a) the pillar transcript via `getTranscriptForPrompt(item.pillarContentItemId ?? item.id)`, (b) `formats.instructions` for editorial voice, (c) up to 8 most-recent published `productionItems.contentBody` rows where `(brand, format, postType)` match — these are the team's strongest tone signal.
-- **Outputs:** a new `contentDrafts` row via the `contentDrafts` demote-then-insert tx (current row → `is_current=false`, new row → `is_current=true`, same `production_item_id`, version+1). `generatedBy = "claude-opus-4-7:v2"`, `modelUsage` populated.
+### `draft-algorithm-run` — The Draft Algorithm V1 (2026-05-08)
+- **Trigger:** auto-enqueued from three places — (1) `POST /api/production-items/[id]/cross-post` after the seed-content tx commits, for any post type in `CROSS_POST_SEEDED_TARGETS`; (2) `POST /api/production-items/[id]/repurpose` after the new row + repurpose-trigger inserts (manual repurpose); (3) `threshold-monitor-sweep.ts` after each cron-created `sourceType='repurposed'` row — so derivatives created when a pillar crosses a child format's `viewThreshold` land with a populated draft instead of a blank form. Also called *synchronously* by `POST /api/production-items/[id]/draft` — the Regenerate button on every simulator caption panel skips the queue and waits for the agent inline (Opus call ~5–10s; route's `maxDuration` is 60s). **Repost does not fire** — the seeded `copy:source` body is kept verbatim because same-content same-platform doesn't benefit from a rewrite.
+- **Files:** `src/jobs/tasks/draft-algorithm-run.ts`, `src/lib/services/draft-algorithm/run.ts`, `src/lib/services/draft-algorithm/exemplars.ts`, `src/lib/draft-agent.ts` (the underlying Opus agent — unchanged), `src/app/api/production-items/[id]/draft/route.ts`. **Forwarder:** `src/jobs/tasks/generate-instagram-caption.ts` is kept under the old task name so any in-flight `generate-instagram-caption` jobs in `graphile_worker.jobs` resolve to the new algorithm; safe to delete in V2 once queue has drained.
+- **Inputs:** `{ productionItemId, force? }`. Service loads (a) the pillar transcript via `getTranscriptForPrompt(item.pillarContentItemId ?? item.id)`, (b) `formats.instructions` for editorial voice, (c) up to 8 **view-ranked** published `productionItems.contentBody` rows where `(brand, post_type)` match and `published_at > now() - 180 days` — switched from the IG-era recency ordering, the single biggest quality lever in V1.
+- **Outputs:** a new `contentDrafts` row via the demote-then-insert tx (current row → `is_current=false`, new row → `is_current=true`, same `production_item_id`, version+1). `generatedBy = "draft-algo:v1:claude-opus-4-7:v2"` — the `draft-algo:v1` prefix tags the algorithm version, the suffix carries the underlying agent model+prompt version. `modelUsage` populated.
 - **Downstream:** none.
 - **Rules:**
-  - **Idempotency:** skips with `reason="already_filled"` when the current draft has a non-empty caption AND `generatedBy !== "copy:source"` AND `force=false`. Auto-fire path overwrites the seeded `copy:source` body; manual Regenerate button passes `force=true` when an existing caption is present.
-  - **Gate:** post type must start with `instagram_` (Reel / Post / Story). Non-IG items get `skipped: "not_instagram"` and the manual route returns 400 with a friendly message.
+  - **Source-type branch:** `repost` skips with `repost_kept_verbatim`; `original` with no `pillarContentItemId` (= a true pillar item) skips with `pillar_item_no_draft`; `cross_post`, `clip`, `repurposed` (cron-created via `threshold-monitor-sweep`), and `original`-with-pillar (manually-created repurpose) all fall through and draft.
+  - **V1 supported post types** (everything else skips with `unsupported_post_type`): `x`, `linkedin`, `instagram_post`, `instagram_reel`, `instagram_story`, `tiktok`, `youtube_community`, `youtube_shorts`, `threads`. Newsletter + youtube_long are out of scope — editors hand-write those today.
+  - **Idempotency:** skips with `reason="already_filled"` when the current draft has a non-empty primary caption AND `generatedBy !== "copy:source"` AND `force=false`. Auto-fire overwrites the seeded `copy:source` body; manual Regenerate button passes `force=true` when an existing caption is present.
   - **Skips on missing transcript** — `skipped: "no_transcript"`. Auto-fire silently no-ops; manual route returns 400 so the editor knows to fetch the transcript first.
-  - **Prompt caching:** `cache_control: { type: "ephemeral" }` markers on the system prompt and the format-stable preamble (target platform + field schema + `formatInstructions` + past captions). Transcript stays uncached because it's per-item. A Regenerate click within 5 minutes reads the cached prefix.
+  - **Prompt caching:** `cache_control: { type: "ephemeral" }` markers on the system prompt and the format-stable preamble (target platform + field schema + `formatInstructions` + past captions). Transcript stays uncached because it's per-item. Regenerate within 5 minutes reads the cached prefix.
   - **Cost:** ~$0.03 per Opus call. Caching takes a chunk off the input tokens on Regenerate.
 
 ### `descript-clip-resolve` — poll Descript clip-out

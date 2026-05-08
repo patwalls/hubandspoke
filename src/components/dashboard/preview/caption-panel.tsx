@@ -48,9 +48,9 @@ interface Props {
  *     editable caption, then a faux like/comment/share rail. Editors get
  *     the visual fidelity they want without us mocking real engagement.
  *
- * The Regenerate button calls /api/production-items/[id]/generate-caption
- * which (re)runs the draft agent with the pillar transcript + past-format
- * captions and writes a new contentDrafts row.
+ * The Regenerate button calls /api/production-items/[id]/draft which
+ * (re)runs the Draft Algorithm with the pillar transcript + view-ranked
+ * past-format captions and writes a new contentDrafts row.
  */
 export function CaptionPanel({
   itemId,
@@ -191,7 +191,7 @@ function RegenerateCaptionButton({
     setBusy(true);
     try {
       const res = await fetch(
-        `/api/production-items/${itemId}/generate-caption`,
+        `/api/production-items/${itemId}/draft`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
