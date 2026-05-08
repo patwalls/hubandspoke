@@ -200,3 +200,54 @@ Heroku Postgres Essential-0 = 20 connections. Splits roughly:
 Scaling web past 1 dyno without lowering worker concurrency or upgrading
 Postgres will start to hit the cap. Update `docs/automation.md` if you
 change pool sizes.
+
+## End-to-end testing (Playwright)
+
+E2e tests live in `tests/e2e/`. They drive a real Chromium against
+`http://localhost:3000` and depend on `npm run dev` being able to come up
+cleanly (the runner boots one for you when nothing is on :3000, otherwise
+reuses what's there).
+
+**Run:**
+
+- `npm run test:e2e` — headless, normal output
+- `npm run test:e2e:ui` — Playwright's interactive UI mode
+- `npm run test:e2e:debug` — pauses at every action for inspector debugging
+
+**One-time setup (per dev machine / per fresh DB):**
+
+1. Seed a known test user once:
+   ```bash
+   node --env-file=.env.local scripts/seed-user.mjs e2e@local.test 'change-me-locally' 'E2E Test'
+   ```
+2. Add the credentials to `.env.local`:
+   ```
+   E2E_TEST_USER_EMAIL=e2e@local.test
+   E2E_TEST_USER_PASSWORD=change-me-locally
+   ```
+
+**How auth works.** `tests/e2e/auth.setup.ts` runs once per `playwright
+test` invocation, logs in via the real `/login` form, and writes the
+session cookie to `tests/e2e/.auth/user.json`. Every other spec opens a
+browser with that storage state attached, so individual tests start
+already-authenticated. The `.auth/` directory is gitignored — the cookie
+is real.
+
+**Adding a new spec.** Drop a `*.spec.ts` in `tests/e2e/`. Default
+`storageState` from the `chromium` project applies. If a spec needs a
+fresh-no-auth browser, add
+`test.use({ storageState: { cookies: [], origins: [] } })` to the file.
+
+**Local-only for now.** The e2e suite is not wired into CI. Heroku's
+release phase only runs migrations; GitHub Actions auto-deploy pushes the
+commit but doesn't run tests. Adding e2e to CI is a follow-up (browser
+caching, secrets, flake budget) — out of scope for the initial scaffold.
+
+**Visual verification from Claude Code.** `@playwright/mcp` is registered
+in `.mcp.json` as the `playwright` server. From inside Claude Code,
+`mcp__playwright__browser_navigate` + `mcp__playwright__browser_snapshot`
+let the AI see the page in your dev browser session — useful when
+diagnosing UI bugs that need eyeballs (the "black video player" symptom
+that motivated this scaffold). The MCP keeps a persistent profile in
+`~/Library/Caches/ms-playwright/mcp-chrome-profile/` so logging in once
+sticks across sessions.

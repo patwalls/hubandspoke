@@ -40,6 +40,11 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 - `npm run worker:migrate` - Apply graphile-worker's own migrations (creates/updates the `graphile_worker` schema)
 - `node --env-file=.env.local scripts/seed-user.mjs <email> <pass> [name]` - Seed a user
 
+## Testing & visual verification
+- `npm run test` - Vitest (unit + integration). `:unit` and `:integration` projects defined in `vitest.config.ts`.
+- `npm run test:e2e` - Playwright e2e tests against the local dev server. Tests live in `tests/e2e/`. See `docs/conventions.md` → End-to-end testing for the one-time auth setup.
+- **Visual verification from Claude Code:** `@playwright/mcp` is registered in `.mcp.json` (`playwright` server). When a UI change needs eyeballs, use `mcp__playwright__browser_navigate` to reach `http://localhost:3000`, log in once, then `mcp__playwright__browser_snapshot` / `mcp__playwright__browser_take_screenshot` to see what the user sees. The MCP's persistent profile keeps you logged in across sessions.
+
 ## Database Migrations
 Rails-style versioned migrations via `drizzle-kit`. Versioned SQL files live in
 `drizzle/` and are committed to git. Heroku's release phase runs

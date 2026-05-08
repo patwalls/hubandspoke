@@ -48,3 +48,11 @@ next-env.d.ts
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# Playwright (e2e tests)
+/test-results/
+/playwright-report/
+/playwright/.cache/
+/blob-report/
+# Per-developer auth state — holds a real session cookie. Never commit.
+/tests/e2e/.auth/
