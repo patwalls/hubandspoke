@@ -1,17 +1,6 @@
 "use client";
 
-import {
-  BarChart2Icon,
-  BookmarkIcon,
-  HeartIcon,
-  MessageCircleIcon,
-  MoreHorizontalIcon,
-  Repeat2Icon,
-  UploadIcon,
-} from "lucide-react";
-import { MonogramAvatar } from "../avatar";
-import { VerifiedBadge } from "../verified-badge";
-import { EditableField } from "../editable-field";
+import { CaptionPanel } from "../caption-panel";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import {
   DraftMediaDropZone,
@@ -19,6 +8,14 @@ import {
 } from "../draft-media-dropzone";
 import { MediaActions } from "../media-actions";
 
+/**
+ * Minimalist X simulator. Twitter-card chrome (avatar / handle / engagement
+ * rail) added noise without helping the editor iterate on the post copy —
+ * the team only ever stares at the caption text. Layout mirrors IG Reel
+ * and IG Post: optional media on the left, caption panel on the right.
+ * X has no required media, so when there are no slides the caption fills
+ * the row.
+ */
 export function XSimulator({
   data,
   fieldMap,
@@ -30,45 +27,13 @@ export function XSimulator({
   onMediaMutated,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
-  const handle = data.author.handle ?? "you";
-  const displayName = data.author.displayName ?? handle;
   const slides = data.slides;
+  const hasMedia = slides.length > 0;
 
   return (
-    <div className="mx-auto w-full max-w-[560px] rounded-xl border border-border bg-background text-foreground">
-      <div className="flex gap-3 px-4 pt-3 pb-2">
-        <MonogramAvatar
-          displayName={data.author.displayName}
-          handle={data.author.handle}
-          size="md"
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="flex items-center gap-1 leading-tight">
-                <span className="truncate text-sm font-bold">{displayName}</span>
-                {data.author.verified && <VerifiedBadge tone="x" />}
-              </div>
-              <div className="truncate text-xs text-muted-foreground">
-                @{handle}
-              </div>
-            </div>
-            <MoreHorizontalIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-          </div>
-
-          <div className="mt-1.5 text-[15px] leading-snug">
-            <EditableField
-              fieldKey={fieldMap.caption}
-              editable={editable}
-              onLocalEdit={onLocalEdit}
-              onCommit={onCommit}
-              value={caption}
-              placeholder="What's happening?"
-              multiline
-              className="text-[15px] leading-snug"
-            />
-          </div>
-
+    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">
+      {hasMedia && (
+        <div className="relative aspect-video w-full max-w-[400px] shrink-0 overflow-hidden rounded-lg bg-black">
           <DraftMediaDropZone
             itemId={itemId}
             postType="x"
@@ -79,26 +44,14 @@ export function XSimulator({
             {({ slides: enrichedSlides, placeholders }) => {
               const total = enrichedSlides.length + placeholders.length;
               if (total === 0) return null;
-              const gridClass =
-                total >= 4
-                  ? "grid-cols-2 grid-rows-2 aspect-video"
-                  : total === 3
-                    ? "grid-cols-2 grid-rows-2 aspect-video"
-                    : total === 2
-                      ? "grid-cols-2 aspect-video"
-                      : "grid-cols-1 aspect-video";
               return (
-                <div
-                  className={`mt-3 grid gap-0.5 overflow-hidden rounded-2xl border border-border ${gridClass}`}
-                >
-                  {enrichedSlides.slice(0, 4).map((entry, i) => {
+                <div className="grid h-full w-full grid-cols-1 gap-0.5">
+                  {enrichedSlides.slice(0, 1).map((entry, i) => {
                     const { slide, removeButton } = entry;
                     return (
                       <div
                         key={slide.mediaId ?? `slide-${i}`}
-                        className={`group relative w-full bg-black ${
-                          total === 3 && i === 0 ? "row-span-2" : ""
-                        }`}
+                        className="group relative h-full w-full bg-black"
                       >
                         {removeButton}
                         {slide.kind === "video" ? (
@@ -123,10 +76,9 @@ export function XSimulator({
                       </div>
                     );
                   })}
-                  {placeholders
-                    .slice(0, Math.max(0, 4 - enrichedSlides.length))
-                    .map((p) => (
-                      <div key={p.id} className="relative w-full">
+                  {enrichedSlides.length === 0 &&
+                    placeholders.slice(0, 1).map((p) => (
+                      <div key={p.id} className="relative h-full w-full">
                         <PlaceholderSlideRender placeholder={p} />
                       </div>
                     ))}
@@ -134,23 +86,17 @@ export function XSimulator({
               );
             }}
           </DraftMediaDropZone>
-
-          <div className="mt-3 flex max-w-[420px] items-center justify-between text-xs text-muted-foreground">
-            <ActionIcon icon={<MessageCircleIcon className="h-4 w-4" />} />
-            <ActionIcon icon={<Repeat2Icon className="h-4 w-4" />} />
-            <ActionIcon icon={<HeartIcon className="h-4 w-4" />} />
-            <ActionIcon icon={<BarChart2Icon className="h-4 w-4" />} />
-            <ActionIcon icon={<BookmarkIcon className="h-4 w-4" />} />
-            <ActionIcon icon={<UploadIcon className="h-4 w-4" />} />
-          </div>
         </div>
-      </div>
-    </div>
-  );
-}
+      )}
 
-function ActionIcon({ icon }: { icon: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-1 text-muted-foreground">{icon}</div>
+      <CaptionPanel
+        itemId={itemId}
+        fieldKey={fieldMap.caption}
+        value={caption}
+        editable={editable}
+        onLocalEdit={onLocalEdit}
+        onCommit={onCommit}
+      />
+    </div>
   );
 }

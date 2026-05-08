@@ -9,6 +9,7 @@ import { seedRepostContent } from "@/lib/services/repost-seed";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
+import { enqueue } from "@/jobs/enqueue";
 import type { PostType } from "@/lib/platform-field-schemas";
 
 // Platforms whose new repost rows get seeded with mirrored media + a v1
@@ -187,6 +188,24 @@ export async function POST(request: Request, context: RouteContext) {
 
     return row;
   });
+
+  // After the seed tx commits, kick off the AI caption-generation primitive
+  // for any IG draft. The agent reads the pillar transcript + past-format
+  // captions and overwrites the seeded `copy:source` body with one grounded
+  // in the team's voice for this exact format. Fire-and-forget — failure
+  // here doesn't block the redirect to the new item.
+  if (
+    typeof source.postType === "string" &&
+    source.postType.startsWith("instagram_")
+  ) {
+    try {
+      await enqueue("generate-instagram-caption", {
+        productionItemId: created.id,
+      });
+    } catch (err) {
+      console.error("generate-ig-caption enqueue failed:", err);
+    }
+  }
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

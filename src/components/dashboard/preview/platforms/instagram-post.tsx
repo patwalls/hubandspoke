@@ -1,18 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import {
-  BookmarkIcon,
-  HeartIcon,
-  MessageCircleIcon,
-  MoreHorizontalIcon,
-  SendIcon,
-} from "lucide-react";
-import { MonogramAvatar } from "../avatar";
-import { VerifiedBadge } from "../verified-badge";
-import { EditableField } from "../editable-field";
+import { CaptionPanel } from "../caption-panel";
 import { readLive, type SimulatorProps } from "../simulator-types";
-import { formatCompactCount } from "../resolve-preview-data";
 import {
   DraftMediaDropZone,
   PlaceholderSlideRender,
@@ -28,101 +18,43 @@ export function InstagramPostSimulator({
   onCommit,
   itemId,
   onMediaMutated,
+  onDraftMutated,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
-  const handle = data.author.handle ?? "your_handle";
-  const followerLabel =
-    data.author.followerCount != null
-      ? `${formatCompactCount(data.author.followerCount)} followers`
-      : null;
-  const estimatedLikes =
-    data.author.followerCount != null
-      ? Math.round(data.author.followerCount * 0.02)
-      : null;
 
   return (
-    <div className="mx-auto w-full max-w-[468px] overflow-hidden rounded-xl border border-border bg-background text-foreground">
-      {/* Header */}
-      <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <div className="rounded-full bg-gradient-to-tr from-amber-400 via-rose-500 to-fuchsia-600 p-[2px]">
-          <div className="rounded-full bg-background p-[2px]">
-            <MonogramAvatar
-              displayName={data.author.displayName}
-              handle={data.author.handle}
-              size="sm"
+    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">
+      {/* LEFT: 1:1 carousel — drop in up to 10 photos/videos. The dropzone
+       *  already handles uploading/deleting per-slide; the inner carousel
+       *  is responsible for snap scrolling + per-slide chrome. */}
+      <div className="relative aspect-square w-full max-w-[400px] shrink-0 overflow-hidden rounded-lg bg-black">
+        <DraftMediaDropZone
+          itemId={itemId}
+          postType="instagram_post"
+          editable={editable}
+          slides={data.slides}
+          onMediaMutated={onMediaMutated}
+        >
+          {({ slides: enrichedSlides, placeholders }) => (
+            <IgPostCarousel
+              enrichedSlides={enrichedSlides}
+              placeholders={placeholders}
             />
-          </div>
-        </div>
-        <div className="min-w-0 flex-1 leading-tight">
-          <div className="flex items-center gap-1">
-            <span className="truncate text-[13px] font-semibold">{handle}</span>
-            {data.author.verified && <VerifiedBadge />}
-          </div>
-          {followerLabel && (
-            <div className="text-[11px] text-muted-foreground">
-              {followerLabel}
-            </div>
           )}
-        </div>
-        <MoreHorizontalIcon className="h-5 w-5 text-foreground" />
+        </DraftMediaDropZone>
       </div>
 
-      {/* Media — wrapped with the dropzone so the user can drag-drop /
-          click to add up to 10 photos/videos and × any existing slide. */}
-      <DraftMediaDropZone
+      {/* RIGHT: caption panel — minimalist, mirrors the IG Reel layout. */}
+      <CaptionPanel
         itemId={itemId}
-        postType="instagram_post"
+        fieldKey={fieldMap.caption}
+        value={caption}
         editable={editable}
-        slides={data.slides}
-        onMediaMutated={onMediaMutated}
-      >
-        {({ slides: enrichedSlides, placeholders }) => (
-          <IgPostCarousel
-            enrichedSlides={enrichedSlides}
-            placeholders={placeholders}
-          />
-        )}
-      </DraftMediaDropZone>
-
-      {/* Actions */}
-      <div className="flex items-center gap-4 px-3 pt-3">
-        <HeartIcon className="h-6 w-6" strokeWidth={1.75} />
-        <MessageCircleIcon
-          className="h-6 w-6 -scale-x-100"
-          strokeWidth={1.75}
-        />
-        <SendIcon className="h-6 w-6" strokeWidth={1.75} />
-        <BookmarkIcon className="ml-auto h-6 w-6" strokeWidth={1.75} />
-      </div>
-
-      {/* Likes + caption */}
-      <div className="px-3 pb-3 pt-2 text-sm">
-        {estimatedLikes != null && (
-          <div className="mb-1 text-[13px] font-semibold">
-            {formatCompactCount(estimatedLikes)} likes
-          </div>
-        )}
-        <div className="leading-snug">
-          <span className="mr-1.5 text-[13px] font-semibold">{handle}</span>
-          <EditableField
-            fieldKey={fieldMap.caption}
-            editable={editable}
-            onLocalEdit={onLocalEdit}
-            onCommit={onCommit}
-            value={caption}
-            placeholder="Write a caption…"
-            className="text-[13px] leading-snug"
-          />
-        </div>
-        {data.publishedAt && (
-          <div className="mt-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-            {new Date(data.publishedAt).toLocaleDateString("en-US", {
-              month: "long",
-              day: "numeric",
-            })}
-          </div>
-        )}
-      </div>
+        onLocalEdit={onLocalEdit}
+        onCommit={onCommit}
+        showRegenerate
+        onRegenerated={onDraftMutated}
+      />
     </div>
   );
 }
@@ -147,15 +79,15 @@ function IgPostCarousel({
   const total = enrichedSlides.length + placeholders.length;
   if (total === 0) {
     return (
-      <div className="flex aspect-[4/5] items-center justify-center bg-muted text-xs text-muted-foreground">
-        No media — drop photos or videos to add
+      <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-white/60">
+        Drop photos or videos to add
       </div>
     );
   }
   return (
-    <div className="relative w-full">
+    <div className="relative h-full w-full">
       <div
-        className="flex aspect-[4/5] w-full snap-x snap-mandatory overflow-x-auto scroll-smooth bg-black [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex h-full w-full snap-x snap-mandatory overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onScroll={(e) => {
           const el = e.currentTarget;
           const i = Math.round(el.scrollLeft / el.clientWidth);

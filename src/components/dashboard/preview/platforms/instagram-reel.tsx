@@ -7,7 +7,7 @@ import {
   PlayCircleIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { EditableField } from "../editable-field";
+import { CaptionPanel } from "../caption-panel";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import {
   DraftMediaDropZone,
@@ -24,14 +24,23 @@ export function InstagramReelSimulator({
   onCommit,
   itemId,
   onMediaMutated,
+  onDraftMutated,
   descriptRenderState,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   const noMedia = data.slides.length === 0;
-  // Render the rendering/awaiting/failed placeholder when we KNOW the
-  // MP4 isn't here yet (Descript clip mid-flight) — otherwise hand off to
-  // the dropzone so editors of non-clip items can still drag a video in.
-  const showStatePlaceholder = !!descriptRenderState && noMedia;
+  // Edge case: a `production_item_media` row exists but its presigned URL
+  // came back null (the resolve-preview-data presigner timed out, or the
+  // S3 key is missing). Falling back to the rendering placeholder beats
+  // rendering an empty `<video>` tag — that's the "black box" the user
+  // hit when the publish task had finished but the simulator hadn't yet
+  // gotten a refreshed presign.
+  const firstSlide = data.slides[0];
+  const videoNotReady =
+    firstSlide?.kind === "video" && !firstSlide.url;
+  const showStatePlaceholder =
+    (!!descriptRenderState && noMedia) ||
+    (videoNotReady && !!descriptRenderState);
 
   return (
     <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">
@@ -95,21 +104,16 @@ export function InstagramReelSimulator({
 
       {/* RIGHT: caption only — keeps the simulator focused on the one
        *  field editors actually iterate on for Reels. */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="mb-1.5 text-xs font-mono uppercase tracking-wider text-muted-foreground">
-          Caption
-        </div>
-        <EditableField
-          fieldKey={fieldMap.caption}
-          editable={editable}
-          onLocalEdit={onLocalEdit}
-          onCommit={onCommit}
-          value={caption}
-          placeholder="Caption…"
-          multiline
-          className="whitespace-pre-wrap text-sm leading-snug text-foreground"
-        />
-      </div>
+      <CaptionPanel
+        itemId={itemId}
+        fieldKey={fieldMap.caption}
+        value={caption}
+        editable={editable}
+        onLocalEdit={onLocalEdit}
+        onCommit={onCommit}
+        showRegenerate
+        onRegenerated={onDraftMutated}
+      />
     </div>
   );
 }

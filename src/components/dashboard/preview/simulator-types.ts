@@ -20,6 +20,9 @@ export interface SimulatorProps {
   // Fires after a successful media upload or delete so the parent can
   // refetch and re-render with the new rows.
   onMediaMutated?: () => void;
+  // Fires after a successful draft mutation (e.g. AI caption regenerate)
+  // so the parent can refetch and pick up the new contentDrafts row.
+  onDraftMutated?: () => void;
   // Descript-render state for the placeholder UX. Drives the IG Reel
   // simulator's embed-style empty state (video left, caption right) and
   // its sub-state copy. `null` = not Descript-derived OR already rendered;

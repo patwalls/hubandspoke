@@ -46,6 +46,8 @@ USER / API ENTRY POINTS
   PUT  /api/production-items (→ Published w/ link, or link added on Published) → refresh-item-metrics
   POST /api/production-items, /comments, /clip-ideas/triage  → notification-send
   POST /api/queue/refill-reposts (admin-only)             → evergreen-scan (manual trigger from /queue/repost)
+  POST /api/production-items/[id]/repost (IG postType)    → generate-instagram-caption (auto-fire after seed)
+  POST /api/production-items/[id]/generate-caption        → (synchronous; no job)
 
 AUTO-CHAINS (one task enqueues another)
   enrich-item        ── if updates.mediaS3Key set ─→ transcribe-whisper
@@ -707,6 +709,19 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - Uses jobKey `generate-clip-ideas-<id>` so concurrent manual + backfill enqueues for the same pillar dedupe.
   - Producer/editor on the new prod_item rows: manual route uses the actor; cron/backfill path falls through `resolveAssignees` (source item → format default → brand default → global fallback).
   - Cost: one Sonnet call per pillar (~$0.10). Worker concurrency keeps backfill bursts cheap; ~30 historic pillars ≈ $3 of Sonnet.
+
+### `generate-instagram-caption` — Opus IG caption auto-fill (2026-05-07)
+- **Trigger:** auto-enqueued at the end of `POST /api/production-items/[id]/repost` (after the seed-content tx commits) when the source's `postType` starts with `instagram_`. Also called *synchronously* by `POST /api/production-items/[id]/generate-caption` — the Regenerate button on the IG simulator caption panel skips the queue and waits for the agent inline (Opus call ~5–10s; route's `maxDuration` is 60s).
+- **Files:** `src/jobs/tasks/generate-instagram-caption.ts`, `src/lib/services/generate-instagram-caption.ts`, `src/lib/draft-agent.ts` (extended with `pastCaptions`), `src/app/api/production-items/[id]/generate-caption/route.ts`
+- **Inputs:** `{ productionItemId, force? }`. Service loads (a) the pillar transcript via `getTranscriptForPrompt(item.pillarContentItemId ?? item.id)`, (b) `formats.instructions` for editorial voice, (c) up to 8 most-recent published `productionItems.contentBody` rows where `(brand, format, postType)` match — these are the team's strongest tone signal.
+- **Outputs:** a new `contentDrafts` row (demote-then-insert tx, same pattern as `/api/production-items/[id]/drafts/generate`). `generatedBy = "claude-opus-4-7:v2"`, `modelUsage` populated.
+- **Downstream:** none.
+- **Rules:**
+  - **Idempotency:** skips with `reason="already_filled"` when the current draft has a non-empty caption AND `generatedBy !== "copy:source"` AND `force=false`. Auto-fire path overwrites the seeded `copy:source` body; manual Regenerate button passes `force=true` when an existing caption is present.
+  - **Gate:** post type must start with `instagram_` (Reel / Post / Story). Non-IG items get `skipped: "not_instagram"` and the manual route returns 400 with a friendly message.
+  - **Skips on missing transcript** — `skipped: "no_transcript"`. Auto-fire silently no-ops; manual route returns 400 so the editor knows to fetch the transcript first.
+  - **Prompt caching:** `cache_control: { type: "ephemeral" }` markers on the system prompt and the format-stable preamble (target platform + field schema + `formatInstructions` + past captions). Transcript stays uncached because it's per-item. A Regenerate click within 5 minutes reads the cached prefix.
+  - **Cost:** ~$0.03 per Opus call. Caching takes a chunk off the input tokens on Regenerate.
 
 ### `descript-clip-resolve` — poll Descript clip-out
 - **Trigger:** enqueued by `POST /api/descript/clip-out`; enqueued by `promote-clip-idea` service (agent flow + full-video flow)

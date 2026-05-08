@@ -458,6 +458,70 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     data?.item?.descriptCompositionId,
   ]);
 
+  // Poll for the rendered MP4 to land in `production_item_media` while a
+  // Descript publish-and-archive job is in flight. The publish task in
+  // src/jobs/tasks/descript-publish-and-archive.ts can take 2–10 minutes;
+  // without this poll the simulator stays on the rendering placeholder
+  // until the editor manually refreshes. Bails out as soon as a video row
+  // appears (then the simulator switches to the playable `<video>`), or
+  // after the publish job errors out, or after 15 minutes.
+  useEffect(() => {
+    const item = data?.item;
+    if (!item) return;
+    const renderInFlight =
+      !!item.descriptCompositionId &&
+      !item.descriptPublishedAt &&
+      !item.descriptPublishError &&
+      !!item.descriptPublishJobId;
+    const renderJustLanded =
+      !!item.descriptPublishedAt &&
+      !(data.media ?? []).some((m) => m.kind === "video" && !!m.url);
+    if (!renderInFlight && !renderJustLanded) return;
+
+    let cancelled = false;
+    const deadline = Date.now() + 15 * 60 * 1000;
+    const tick = async () => {
+      if (cancelled || Date.now() > deadline) {
+        clearInterval(interval);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/production-items/${item.id}`, {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as DetailResponse;
+        const hasVideo = (json.media ?? []).some(
+          (m) => m.kind === "video" && !!m.url,
+        );
+        if (
+          hasVideo ||
+          json.item.descriptPublishError ||
+          (!json.item.descriptPublishJobId && !json.item.descriptPublishedAt)
+        ) {
+          setData(json);
+          clearInterval(interval);
+        } else {
+          setData(json);
+        }
+      } catch {
+        // Silent: next tick will retry.
+      }
+    };
+    const interval = setInterval(tick, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [
+    data?.item?.id,
+    data?.item?.descriptCompositionId,
+    data?.item?.descriptPublishJobId,
+    data?.item?.descriptPublishedAt,
+    data?.item?.descriptPublishError,
+    data?.media,
+  ]);
+
   // Auto-clear per-field "Saved" pills 1.5s after each successful save.
   useEffect(() => {
     const savedKeys = Object.entries(fieldSaves)
@@ -2254,6 +2318,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           onLocalEdit={onLocalEdit}
           onCommit={onCommit}
           onMediaMutated={() => void load()}
+          onDraftMutated={() => void load()}
           descriptRenderState={descriptRenderState}
         />
       )}
@@ -2827,6 +2892,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               onLocalEdit={onLocalEdit}
               onCommit={onCommit}
               onMediaMutated={() => void load()}
+              onDraftMutated={() => void load()}
               descriptRenderState={descriptRenderState}
             />
           </TabsContent>

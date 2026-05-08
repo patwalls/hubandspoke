@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentDrafts, formats, productionItems } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
@@ -8,6 +8,7 @@ import {
   generateDraft,
   GENERATED_BY,
   PROMPT_VERSION,
+  type PastCaptionExample,
 } from "@/lib/draft-agent";
 import { resolveSchemaForPlatforms } from "@/lib/platform-field-schemas";
 
@@ -88,6 +89,45 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     );
   }
 
+  // For IG post types, surface the team's most-recent published captions
+  // for THIS exact (brand, format, postType) as exemplars. These are the
+  // strongest tone signal we have — real shipped copy on the same surface.
+  // Skipped for non-IG platforms today; expand as more platforms benefit.
+  let pastCaptions: PastCaptionExample[] = [];
+  if (
+    item.format &&
+    item.postType &&
+    item.postType.startsWith("instagram_")
+  ) {
+    const rows = await db
+      .select({
+        caption: productionItems.contentBody,
+        publishedAt: productionItems.publishedAt,
+        publishedLink: productionItems.publishedLink,
+        views: productionItems.views,
+      })
+      .from(productionItems)
+      .where(
+        and(
+          eq(productionItems.brand, item.brand),
+          eq(productionItems.format, item.format),
+          eq(productionItems.postType, item.postType),
+          eq(productionItems.status, "Published"),
+          isNotNull(productionItems.contentBody),
+          ne(productionItems.id, item.id),
+          sql`length(trim(${productionItems.contentBody})) > 0`,
+        ),
+      )
+      .orderBy(desc(productionItems.publishedAt))
+      .limit(8);
+    pastCaptions = rows.map((row) => ({
+      caption: row.caption ?? "",
+      publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
+      publishedLink: row.publishedLink ?? null,
+      views: row.views ?? null,
+    }));
+  }
+
   // Load pillar title for context if we're deriving from one.
   let pillarTitle: string | null = item.title;
   if (item.pillarContentItemId) {
@@ -113,6 +153,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       pillarTitle,
       transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
       transcriptDurationSec: transcript.durationSec,
+      pastCaptions,
     });
 
     // Demote previous current + insert new current as version+1 in a single

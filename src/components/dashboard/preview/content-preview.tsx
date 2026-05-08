@@ -67,6 +67,10 @@ interface ContentPreviewProps {
    *  drafting surface. Parent should refetch so canonical rows replace
    *  local placeholders. */
   onMediaMutated?: () => void;
+  /** Fires after a successful draft mutation (e.g. AI caption regenerate)
+   *  on the inline drafting surface. Parent should refetch so the new
+   *  contentDrafts row lands in `liveContent`. */
+  onDraftMutated?: () => void;
   /** Descript-render state. Forwarded to the per-platform simulator so
    *  it can render an Instagram-embed-style placeholder in place of the
    *  drag-to-add empty state. See `SimulatorProps.descriptRenderState`. */
@@ -81,6 +85,7 @@ export function ContentPreview({
   onLocalEdit,
   onCommit,
   onMediaMutated,
+  onDraftMutated,
   descriptRenderState,
 }: ContentPreviewProps) {
   // Prefer the canonical `postType` ("x", "instagram_reel", …) — it's the
@@ -130,6 +135,7 @@ export function ContentPreview({
           onCommit={onCommit}
           itemId={item.id}
           onMediaMutated={onMediaMutated}
+          onDraftMutated={onDraftMutated}
           descriptRenderState={descriptRenderState}
         />
       </div>

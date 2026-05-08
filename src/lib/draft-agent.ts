@@ -36,6 +36,18 @@ OUTPUT RULES
 - Match the tone implied by the reference posts when any are given.
 - Call the propose_draft tool exactly once with a value for every field. Never respond with plain text.`;
 
+export interface PastCaptionExample {
+  /** Original post URL when known; helps the model see real published copy. */
+  publishedLink?: string | null;
+  /** Plain-text caption body. Required. */
+  caption: string;
+  /** ISO timestamp; just used as ordering hint in the prompt. */
+  publishedAt?: string | null;
+  /** Lifetime views, when known. Lets the model bias toward higher-performing
+   *  exemplars. */
+  views?: number | null;
+}
+
 export interface GenerateDraftArgs {
   item: {
     id: string;
@@ -49,6 +61,11 @@ export interface GenerateDraftArgs {
   pillarTitle: string | null;
   transcriptSegmentsMarkdown: string;
   transcriptDurationSec: number;
+  /** Optional past captions for THIS format (most-recent-first). Surfaced to
+   *  the model as exemplars so the generated copy matches the team's
+   *  established voice for the format. Pre-trim to ~8 entries — long lists
+   *  bloat the prompt without helping. */
+  pastCaptions?: PastCaptionExample[];
 }
 
 export interface GenerateDraftResult {
@@ -198,14 +215,16 @@ export async function generateDraft(
     })
     .join("\n");
 
-  const userMessage = [
+  // Stable preamble — same across every call for this format / platform.
+  // Marked with a cache breakpoint so a Regenerate click within 5 minutes
+  // (and any other call with the same format/platform context) reads the
+  // cached prefix instead of paying full input-token cost.
+  const stablePreamble = [
     `Target platform: ${args.item.platform?.[0] ?? "(unspecified)"}`,
     args.item.platform && args.item.platform.length > 1
       ? `Secondary platforms (not drafting for these): ${args.item.platform.slice(1).join(", ")}`
       : null,
     args.item.format ? `Source editorial format: ${args.item.format}` : null,
-    `Pillar title: ${args.pillarTitle ?? args.item.title ?? "(untitled)"}`,
-    `Pillar duration: ${Math.round(args.transcriptDurationSec)}s`,
     ``,
     `## TARGET FIELDS`,
     `You must fill in every field below via the propose_draft tool.`,
@@ -221,24 +240,77 @@ export async function generateDraft(
           ``,
         ].join("\n")
       : null,
+    args.pastCaptions && args.pastCaptions.length > 0
+      ? [
+          `## PAST CAPTIONS FOR THIS FORMAT`,
+          `These are real captions the team has already shipped for this exact format on the same brand. They are the strongest tone/structure signal you have — match the rhythm, sentence shape, and voice of these (not the generic platform vibe). Higher-view exemplars are better signal; see the views figure when present.`,
+          ``,
+          args.pastCaptions
+            .map((ex, i) => {
+              const meta = [
+                ex.views != null ? `${ex.views.toLocaleString()} views` : null,
+                ex.publishedAt
+                  ? new Date(ex.publishedAt).toISOString().slice(0, 10)
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
+              const header = meta ? `--- example ${i + 1} (${meta}) ---` : `--- example ${i + 1} ---`;
+              return `${header}\n${ex.caption.trim()}`;
+            })
+            .join("\n\n"),
+          ``,
+        ].join("\n")
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  // Per-call payload — transcript + task. Not cached: transcript is per
+  // item, and the task block sits at the end so the cache breakpoint above
+  // it stays warm across different items in the same format/platform run.
+  const perCallPayload = [
+    `Pillar title: ${args.pillarTitle ?? args.item.title ?? "(untitled)"}`,
+    `Pillar duration: ${Math.round(args.transcriptDurationSec)}s`,
+    ``,
     `## PILLAR TRANSCRIPT`,
     `Transcript cues, pre-segmented with [MM:SS] timestamps. Pull specifics — numbers, names, direct quotes — from this.`,
     ``,
     args.transcriptSegmentsMarkdown,
     ``,
     `## TASK`,
-    `Call propose_draft exactly once with a value for every field. Ground every field in specifics from the transcript. Match tone to any reference posts shown in the editorial notes.`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `Call propose_draft exactly once with a value for every field. Ground every field in specifics from the transcript. Match tone to any reference posts shown in the editorial notes${
+      args.pastCaptions && args.pastCaptions.length > 0
+        ? " AND to the past-caption exemplars"
+        : ""
+    }.`,
+  ].join("\n");
 
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 4096,
-    system: SYSTEM_PROMPT,
+    system: [
+      {
+        type: "text",
+        text: SYSTEM_PROMPT,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     tools,
     tool_choice: { type: "tool", name: "propose_draft" },
-    messages: [{ role: "user", content: userMessage }],
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: stablePreamble,
+            cache_control: { type: "ephemeral" },
+          },
+          { type: "text", text: perCallPayload },
+        ],
+      },
+    ],
   });
 
   let rawInput: unknown = null;

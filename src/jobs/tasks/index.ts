@@ -77,6 +77,10 @@ import {
   typefullyCreateDraftTask,
   type TypefullyCreateDraftPayload,
 } from "./typefully-create-draft";
+import {
+  generateInstagramCaptionTask,
+  type GenerateInstagramCaptionPayload,
+} from "./generate-instagram-caption";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -98,6 +102,7 @@ export interface TaskPayloads {
   "capture-velocity-snapshot": CaptureVelocitySnapshotPayload;
   "generate-clip-ideas": GenerateClipIdeasPayload;
   "typefully-create-draft": TypefullyCreateDraftPayload;
+  "generate-instagram-caption": GenerateInstagramCaptionPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
@@ -141,6 +146,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "capture-velocity-snapshot": captureVelocitySnapshotTask,
   "generate-clip-ideas": generateClipIdeasTask,
   "typefully-create-draft": typefullyCreateDraftTask,
+  "generate-instagram-caption": generateInstagramCaptionTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,
