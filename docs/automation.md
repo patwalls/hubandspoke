@@ -291,14 +291,18 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **`generated_by` sentinels:** `copy:source` (this seed), `ai:<model>:v<n>` (drafts generation route), `user` (manual edits via the editor UI). The split lets us later filter "did the editor rewrite this, or ship it verbatim?" analytics without ambiguity.
 - **Why synchronous:** the seed is sub-50ms (≤4 small INSERTs) — invisible next to the redirect. A background job would race the redirect and the user would see exactly the blank simulator card the seed exists to fix.
 
-### On-demand source enrichment for repost / cross-post (2026-05-07)
+### On-demand source enrichment for repost / cross-post (2026-05-07, force-when-missing-media added 2026-05-08)
 
-When the user clicks **Repost** or **Cross-post**, the route now calls `enrichSingleItem(source.id)` synchronously before building the new row — best-effort, with the source re-fetched after to pick up the new `contentBody` / `productionItemMedia` rows / author fields. This closes a gap where a source published just before the auto-enrich sweep ran would produce an empty repost (no body, no photos).
+When the user clicks **Repost** or **Cross-post**, the route calls `enrichSingleItem(source.id)` synchronously before building the new row — best-effort, with the source re-fetched after to pick up the new `contentBody` / `productionItemMedia` rows / author fields. Two firing conditions:
 
-- **Files:** `src/app/api/production-items/[id]/repost/route.ts`, `src/app/api/production-items/[id]/cross-post/route.ts`. No changes to the orchestrator itself — both routes call the existing `enrichSingleItem` from `src/lib/services/enrichment/orchestrator.ts`.
-- **Idempotent:** `enrichSingleItem` short-circuits to `null` when `enrichmentCompletedAt` is already set (no SC credits spent).
-- **Failure-tolerant:** wrapped in try/catch. If upstream is broken or the source has no published link, the error is logged and the create proceeds — the new repost ends up as empty as it would have been before this change. Never blocks the user's action.
-- **Latency:** adds one Scrape Creators round-trip + S3 archive (typically 2–5 s for X tweets). The user explicitly opted into the wait — they prefer correct data over instant redirect.
+1. **Source has never been enriched** (`enrichmentCompletedAt` IS NULL). Standard fetch — `withMedia` defaults to false (matches the auto-sweep cost model: 1 SC credit).
+2. **Source IS enriched but has no archived video** for a video-bearing post type (Reel / TikTok / IG Story / etc.). Detected by `isVideoBearingPostType(source.postType) && !source.mediaS3Key && !(await hasAnyCarouselRow(source.id))`. The auto-sweep's `withMedia: false` default never archives MP4s, so a Reel that the cron successfully enriched can still be missing its video bytes. In this branch the route forces `enrichSingleItem(source.id, { withMedia: true, force: true })` — bumps the call to 10 SC credits but is the only way to backfill the MP4 in time for the seed step.
+
+- **Files:** `src/app/api/production-items/[id]/repost/route.ts`, `src/app/api/production-items/[id]/cross-post/route.ts`. The `withMedia` / `force` flags are passed through to `src/lib/services/enrichment/orchestrator.ts:enrichSingleItem`.
+- **Helpers:** `isVideoBearingPostType` in `src/lib/platform-media-rules.ts` (single source of truth for "this post type's primary asset is a video"); `hasAnyCarouselRow` in `src/lib/services/draft-media.ts` (cheap LIMIT 1 row probe).
+- **Idempotent:** branch (1) short-circuits when the source is already enriched and has its media. Branch (2) re-runs with per-slide idempotency (`archiveCarouselMedia` skips slides whose `(itemId, index, sourceUrl)` is already archived). Re-running on a source that already has its MP4 is a 10-credit no-op INSERT, so the cost only kicks in for genuinely cold sources.
+- **Failure-tolerant:** wrapped in try/catch. If upstream is broken or the source has no published link, the error is logged and the create proceeds. Never blocks the user's action.
+- **Latency:** adds one Scrape Creators round-trip + S3 archive (typically 2–5 s for X tweets, 5–10 s for IG videos). The user explicitly opted into the wait — they prefer correct data over instant redirect.
 
 ### Descript publish + archive (2026-05-07)
 

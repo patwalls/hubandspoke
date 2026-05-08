@@ -14,6 +14,7 @@ import {
   PlaceholderSlideRender,
 } from "../draft-media-dropzone";
 import { MediaActions } from "../media-actions";
+import { PLATFORM_MEDIA_RULES } from "@/lib/platform-media-rules";
 
 export function InstagramReelSimulator({
   data,
@@ -47,7 +48,9 @@ export function InstagramReelSimulator({
        *  the rendered MP4, and a duplicate simulator overlay just clashes
        *  with it. `group` on the wrapper enables the hover-reveal of the
        *  MediaActions overlay (Resync / Download / Copy). */}
-      <div className="group relative aspect-[9/16] w-full max-w-[320px] shrink-0 overflow-hidden rounded-lg bg-black">
+      <div
+        className={`group relative ${PLATFORM_MEDIA_RULES.instagram_reel.aspectClass} w-full max-w-[320px] shrink-0 overflow-hidden rounded-lg bg-black`}
+      >
         {showStatePlaceholder ? (
           <ReelStatePlaceholder
             state={descriptRenderState!}

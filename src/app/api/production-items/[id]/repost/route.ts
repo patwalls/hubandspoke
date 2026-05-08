@@ -6,6 +6,8 @@ import { contentEvents, productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { buildRepostValues } from "@/lib/services/repost-values";
 import { seedRepostContent } from "@/lib/services/repost-seed";
+import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
+import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
@@ -85,14 +87,31 @@ export async function POST(request: Request, context: RouteContext) {
   // Best-effort: enrich the source first so the new repost inherits a
   // populated `contentBody` + media rows, even if the source was created
   // before the auto-enrich sweep had a chance to run. Synchronous wait —
-  // the user explicitly wants to block on this. Failures (no published
-  // link, broken upstream, etc.) are logged and we proceed; the repost
-  // ends up no worse than today. `enrichSingleItem` is a no-op when
-  // `enrichmentCompletedAt` is already set, so this is safe to always
-  // call (cheap idempotent guard).
-  if (!source.enrichmentCompletedAt) {
+  // the user explicitly wants to block on this.
+  //
+  // Two firing conditions:
+  //   1. Source has never been enriched at all (`enrichmentCompletedAt` null).
+  //      Standard fetch — `withMedia` defaults to false on the orchestrator,
+  //      which matches the auto-sweep cost model.
+  //   2. Source IS enriched but is a video-bearing post type with NO archived
+  //      video on hand (no carousel rows AND no legacy `mediaS3Key`). The
+  //      auto-sweep doesn't archive the MP4 (cost: 1 SC credit) — it only
+  //      runs the photo / caption / transcript pass. Without this branch,
+  //      reposting a Reel that the cron enriched but never downloaded gives
+  //      the new repost zero media → black-box simulator. Force a
+  //      `withMedia: true, force: true` re-enrichment to backfill (10 credits).
+  //      Per-slide idempotency in `archiveCarouselMedia` makes this safe to
+  //      re-run repeatedly.
+  const sourceNeedsMedia =
+    isVideoBearingPostType(source.postType) &&
+    !source.mediaS3Key &&
+    !(await hasAnyCarouselRow(source.id));
+  if (sourceNeedsMedia || !source.enrichmentCompletedAt) {
     try {
-      await enrichSingleItem(source.id);
+      await enrichSingleItem(source.id, {
+        withMedia: sourceNeedsMedia ? true : undefined,
+        force: !!source.enrichmentCompletedAt && sourceNeedsMedia,
+      });
       const [refreshed] = await db
         .select()
         .from(productionItems)

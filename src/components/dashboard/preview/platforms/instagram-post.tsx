@@ -4,6 +4,7 @@ import { CaptionPanel } from "../caption-panel";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import { DraftMediaDropZone } from "../draft-media-dropzone";
 import { MultiSlideCarousel } from "../multi-slide-carousel";
+import { PLATFORM_MEDIA_RULES } from "@/lib/platform-media-rules";
 
 export function InstagramPostSimulator({
   data,
@@ -24,7 +25,9 @@ export function InstagramPostSimulator({
       {/* LEFT: 1:1 carousel — drop in up to 10 photos/videos. The dropzone
        *  handles uploads/deletes per slide; `MultiSlideCarousel` handles
        *  snap-scroll, dots, count badge, and per-slide overlays. */}
-      <div className="relative aspect-square w-full max-w-[400px] shrink-0 overflow-hidden rounded-lg bg-black">
+      <div
+        className={`relative ${PLATFORM_MEDIA_RULES.instagram_post.aspectClass} w-full max-w-[400px] shrink-0 overflow-hidden rounded-lg bg-black`}
+      >
         <DraftMediaDropZone
           itemId={itemId}
           postType="instagram_post"

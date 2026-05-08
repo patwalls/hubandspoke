@@ -6,6 +6,8 @@ import { accounts, contentEvents, productionItems, users } from "@/lib/db/schema
 import { resolveAssignees } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
+import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
+import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { seedRepostContent } from "@/lib/services/repost-seed";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -130,15 +132,24 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Source item not found" }, { status: 404 });
   }
 
-  // Best-effort: enrich the source first so the new cross-post inherits
-  // populated `contentBody` + media rows, even if the source predates the
-  // auto-enrich sweep. Synchronous wait by design — the user wants this
-  // to block. Failures are logged and we proceed; the cross-post ends up
-  // no worse than today. `enrichSingleItem` is a no-op when already
-  // enriched, so unconditionally calling it is safe.
-  if (!source.enrichmentCompletedAt) {
+  // Best-effort: enrich the source first. Two firing conditions, identical
+  // to the repost route:
+  //   1. Source has never been enriched (`enrichmentCompletedAt` null).
+  //   2. Source is enriched but a video-bearing post type with no archived
+  //      video (no carousel rows AND no legacy `mediaS3Key`). Force a
+  //      `withMedia: true` re-enrichment so the cross-post doesn't ship
+  //      with an empty media slot. See repost/route.ts for the full
+  //      cost-model rationale.
+  const sourceNeedsMedia =
+    isVideoBearingPostType(source.postType) &&
+    !source.mediaS3Key &&
+    !(await hasAnyCarouselRow(source.id));
+  if (sourceNeedsMedia || !source.enrichmentCompletedAt) {
     try {
-      await enrichSingleItem(source.id);
+      await enrichSingleItem(source.id, {
+        withMedia: sourceNeedsMedia ? true : undefined,
+        force: !!source.enrichmentCompletedAt && sourceNeedsMedia,
+      });
       const [refreshed] = await db
         .select()
         .from(productionItems)

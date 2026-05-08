@@ -61,7 +61,16 @@ export function DraftMediaDropZone({
   const options = dropZoneOptionsForPostType(postType);
   const accept = options?.accept ?? "";
   const maxTotal = options?.maxTotal ?? 0;
-  const addButtonLabel = options?.addButtonLabel ?? "Add media";
+  const replaceOnUpload = options?.replaceOnUpload ?? false;
+  // Slide count is the source-of-truth count for cap decisions.
+  const slideCount = slides.length;
+  const atCap = slideCount >= maxTotal;
+  // Show the replace label whenever a single-* platform's slot is full and
+  // we'd swap on the next drop. Otherwise show the standard "Add ..." label.
+  const buttonLabel =
+    options && replaceOnUpload && atCap
+      ? options.replaceButtonLabel
+      : (options?.addButtonLabel ?? "Add media");
   const [dragOver, setDragOver] = useState(false);
   const [placeholders, setPlaceholders] = useState<PlaceholderSlide[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -86,6 +95,36 @@ export function DraftMediaDropZone({
           `Up to ${maxTotal} file${maxTotal === 1 ? "" : "s"} at a time.`,
         );
         return;
+      }
+
+      // Replace flow: on single-* platforms (Reel, TikTok, Story) when the
+      // slot is full, treat a new drop as "swap the existing media for the
+      // new one." Delete every existing row first; the upload then takes
+      // its place. We do this before the optimistic-placeholder phase so
+      // the simulator briefly shows the empty state instead of two stacked
+      // videos.
+      if (replaceOnUpload && slides.length >= maxTotal) {
+        try {
+          await Promise.all(
+            slides
+              .filter((s) => s.mediaId)
+              .map((s) =>
+                fetch(
+                  `/api/production-items/${itemId}/media/${s.mediaId}`,
+                  { method: "DELETE" },
+                ),
+              ),
+          );
+          // Don't refetch here — we'll do one refetch after the upload
+          // confirms, which catches both the deletes and the new row.
+        } catch (err) {
+          toast.error(
+            err instanceof Error
+              ? err.message
+              : "Failed to remove existing media before upload.",
+          );
+          return;
+        }
       }
 
       // Optimistic placeholders — one per file. Replaced on success.
@@ -192,7 +231,16 @@ export function DraftMediaDropZone({
         // they auto-clear on the next successful mutation.
       }
     },
-    [editable, itemId, onMediaMutated, options, accept, maxTotal],
+    [
+      editable,
+      itemId,
+      onMediaMutated,
+      options,
+      accept,
+      maxTotal,
+      replaceOnUpload,
+      slides,
+    ],
   );
 
   // Wipe error placeholders whenever the canonical slide set changes (a
@@ -296,8 +344,16 @@ export function DraftMediaDropZone({
 
   const totalCount = slides.length + placeholders.length;
   const wired = options !== null;
-  const canAddMore = wired && editable && totalCount < maxTotal;
-  const allowMultiple = maxTotal > 1;
+  // "Add" affordance is shown when:
+  //   - there's room under the cap (normal add flow), OR
+  //   - we're in single-* replace mode and at-cap (drop swaps in-place).
+  const canAddMore =
+    wired &&
+    editable &&
+    (totalCount < maxTotal || (replaceOnUpload && totalCount >= maxTotal));
+  // Multi-file picker only when the underlying mode supports >1 slide AND
+  // we're not in replace-mode at-cap (where the next drop is one file).
+  const allowMultiple = maxTotal > 1 && !(replaceOnUpload && atCap);
 
   return (
     <div
@@ -327,7 +383,7 @@ export function DraftMediaDropZone({
             className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           >
             <ImagePlusIcon className="h-3.5 w-3.5" />
-            {addButtonLabel}
+            {buttonLabel}
           </button>
           <span className="text-[11px] text-muted-foreground">
             or drop files anywhere on the card

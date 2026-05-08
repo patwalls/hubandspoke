@@ -148,9 +148,17 @@ export const productionItems = pgTable(
       withTimezone: true,
     }),
     typefullyError: text("typefully_error"),
-    // Permanent media archive: source video uploaded to S3 before being
-    // handed to Descript via a presigned GET URL. Lets us re-import to
-    // Descript without re-uploading from the browser.
+    // ── Legacy single-media columns ──────────────────────────────────────
+    // Source-of-truth for media is `production_item_media` (carousel rows).
+    // The columns below mirror the row at `index = 0` for cheap reads (queue
+    // cards, list views, sync-errors page) — they avoid a JOIN per list view.
+    // INVARIANT: every writer that adds/removes a `production_item_media`
+    // row must keep these in sync (the upload route, the DELETE route,
+    // enrichment writers, repost-seed). Don't write these standalone — they
+    // are a derived cache, not an independent storage path.
+    // The `scripts/backfill-legacy-media.mjs` one-shot promotes any item
+    // that has these set but no carousel rows into a real row.
+    // ─────────────────────────────────────────────────────────────────────
     mediaS3Bucket: text("media_s3_bucket"),
     mediaS3Key: text("media_s3_key"),
     mediaS3UploadedAt: timestamp("media_s3_uploaded_at", {
@@ -158,10 +166,8 @@ export const productionItems = pgTable(
     }),
     mediaSizeBytes: bigint("media_size_bytes", { mode: "number" }),
     mediaContentType: text("media_content_type"),
-    // Durable cover image for video platforms (IG reel, YT, TikTok) and a
-    // backup copy of the cover for image posts. Distinct from `thumbnail`,
-    // which holds an upstream CDN URL that may expire. Lives in the same
-    // bucket as `mediaS3Key` (see `mediaS3Bucket`).
+    // Durable cover image. Distinct from `thumbnail`, which holds an upstream
+    // CDN URL that may expire. Lives in the same bucket as `mediaS3Key`.
     posterS3Key: text("poster_s3_key"),
     // Long-form description (YouTube video description, LinkedIn article body
     // intro). Distinct from `contentBody`, which is the short-form caption /

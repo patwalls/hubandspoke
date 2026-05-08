@@ -15,6 +15,11 @@
 import { and, desc, eq } from "drizzle-orm";
 import { productionItemMedia } from "@/lib/db/schema";
 import type { db as dbClient } from "@/lib/db";
+import {
+  getMediaRule,
+  isSingleMediaMode,
+  type MediaMode,
+} from "@/lib/platform-media-rules";
 
 type Tx = Parameters<Parameters<typeof dbClient.transaction>[0]>[0];
 
@@ -93,9 +98,10 @@ export async function removeMediaRowFromDraft(
 }
 
 /**
- * Per-platform media rules. Encodes platform truth (X = up to 4 photos
- * OR 1 video, no mixing). Validate at both the presign and confirm steps
- * so a stale client can't sneak past.
+ * Validate a proposed media set against a platform's rule. Generic over
+ * `MediaMode` — adding a new platform = adding a row to
+ * `PLATFORM_MEDIA_RULES`, no branching here. Validate at both the presign
+ * and confirm steps so a stale client can't sneak past.
  */
 export type MediaValidationOk = { ok: true };
 export type MediaValidationErr = { ok: false; reason: string };
@@ -104,6 +110,14 @@ export type MediaValidationResult = MediaValidationOk | MediaValidationErr;
 interface MediaShape {
   kind: "image" | "video";
 }
+
+const SINGULAR_REASON: Record<MediaMode, string> = {
+  "single-video": "This platform allows a single video.",
+  "single-any": "This platform allows one photo or video.",
+  "photos-or-video": "Choose photos OR one video — not both.",
+  "carousel-mixed": "",
+  none: "",
+};
 
 export function validateMediaForPostType(
   postType: string | null,
@@ -114,92 +128,68 @@ export function validateMediaForPostType(
     return { ok: false, reason: "Set a post type before uploading media." };
   }
 
+  const rule = getMediaRule(postType);
+  if (rule.mode === "none") {
+    return {
+      ok: false,
+      reason: `Manual media upload isn't enabled for ${postType} yet.`,
+    };
+  }
+
   const combined = [...existing, ...incoming];
 
-  if (postType === "x") {
-    if (combined.length > 4) {
+  // Cap check is uniform across modes.
+  if (combined.length > rule.maxCount) {
+    return {
+      ok: false,
+      reason: `${postTypeLabel(postType)} allows up to ${rule.maxCount} ${
+        rule.maxCount === 1 ? "item" : "items"
+      }.`,
+    };
+  }
+
+  // Per-item kind allowlist (e.g., Reel rejects photos).
+  for (const m of incoming) {
+    if (!rule.allowedKinds.includes(m.kind)) {
       return {
         ok: false,
-        reason: "Tweets allow up to 4 photos or 1 video.",
+        reason: SINGULAR_REASON[rule.mode] || `${m.kind} not allowed here.`,
       };
     }
+  }
+
+  // Mode-specific cross-item rules.
+  if (rule.mode === "photos-or-video") {
     const hasVideo = combined.some((m) => m.kind === "video");
     if (hasVideo && combined.length > 1) {
-      return {
-        ok: false,
-        reason: "A tweet can have 1 video OR up to 4 photos, not both.",
-      };
+      return { ok: false, reason: SINGULAR_REASON["photos-or-video"] };
     }
-    return { ok: true };
   }
-
-  if (postType === "instagram_post") {
-    // Up to 10 items per carousel; photos and videos can mix freely.
-    if (combined.length > 10) {
-      return {
-        ok: false,
-        reason: "Instagram carousels allow up to 10 items.",
-      };
-    }
-    return { ok: true };
-  }
-
-  if (postType === "instagram_reel") {
-    // Exactly 1 video. Photos rejected outright.
-    if (combined.length > 1) {
-      return { ok: false, reason: "Reels are a single video." };
-    }
-    if (combined.length === 1 && combined[0].kind !== "video") {
-      return { ok: false, reason: "Reels are a single video." };
-    }
-    return { ok: true };
-  }
-
-  if (postType === "instagram_story") {
-    // Exactly 1 photo OR 1 video.
-    if (combined.length > 1) {
-      return { ok: false, reason: "Stories allow one photo or video." };
-    }
-    return { ok: true };
-  }
-
-  if (postType === "linkedin") {
-    // LinkedIn allows up to 9 images, OR exactly 1 video. (Documents
-    // upload is its own flow, not wired here.) Mixed image+video isn't
-    // supported by the LI feed UI.
-    if (combined.length > 9) {
-      return { ok: false, reason: "LinkedIn posts allow up to 9 images." };
-    }
-    const hasVideo = combined.some((m) => m.kind === "video");
-    if (hasVideo && combined.length > 1) {
-      return {
-        ok: false,
-        reason:
-          "A LinkedIn post can have 1 video OR up to 9 images, not both.",
-      };
-    }
-    return { ok: true };
-  }
-
-  if (postType === "tiktok") {
-    // Exactly 1 video. Photo-carousels exist on TikTok but the team isn't
-    // shipping them through this surface yet — re-open if/when they do.
-    if (combined.length > 1) {
-      return { ok: false, reason: "TikTok posts are a single video." };
-    }
-    if (combined.length === 1 && combined[0].kind !== "video") {
-      return { ok: false, reason: "TikTok posts are a single video." };
-    }
-    return { ok: true };
-  }
-
-  // Other platforms haven't been wired for manual upload yet. Refuse so the
-  // call site explicitly opts in when adding (and adds the right rule).
-  return {
-    ok: false,
-    reason: `Manual media upload isn't enabled for ${postType} yet.`,
-  };
+  // single-video / single-any / carousel-mixed are fully covered by the
+  // count + allowedKinds checks above.
+  void isSingleMediaMode;
+  return { ok: true };
 }
+
+function postTypeLabel(postType: string): string {
+  switch (postType) {
+    case "x":
+      return "Tweets";
+    case "instagram_post":
+      return "Instagram carousels";
+    case "instagram_reel":
+      return "Reels";
+    case "instagram_story":
+      return "Stories";
+    case "linkedin":
+      return "LinkedIn posts";
+    case "tiktok":
+      return "TikTok posts";
+    default:
+      return "This platform";
+  }
+}
+
 
 /**
  * Server-side allowlist of MIME types accepted by ANY supported platform.
@@ -224,64 +214,36 @@ export const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 export const MAX_FILES_PER_REQUEST = 10;
 
 /**
- * Per-platform dropzone configuration for the React component. Drives the
- * file-picker `accept`, the "Add ..." button label, and when the "add
- * more" button is shown. Returns null for post types that haven't been
- * wired for manual upload yet — the dropzone then renders no UI but still
- * displays existing slides.
+ * Per-platform dropzone configuration for the React component. Thin
+ * adapter over `PLATFORM_MEDIA_RULES` — keeps the dropzone props stable
+ * while platform truth lives one place. Returns null for `mode: "none"`
+ * post types so the dropzone renders no UI but still displays slides.
  */
 export interface DropZoneOptions {
   accept: string;
   /** Combined cap (existing + new). Drives "add more" button visibility. */
   maxTotal: number;
   addButtonLabel: string;
+  /** Replace label when at-cap on a single-* mode. */
+  replaceButtonLabel: string;
+  /** True when the dropzone should treat a new file as "delete existing
+   *  then upload" rather than rejecting on cap. */
+  replaceOnUpload: boolean;
 }
 
 export function dropZoneOptionsForPostType(
   postType: string | null,
 ): DropZoneOptions | null {
-  switch (postType) {
-    case "x":
-      return {
-        accept:
-          "image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime",
-        maxTotal: 4,
-        addButtonLabel: "Add photo or video",
-      };
-    case "instagram_post":
-      return {
-        accept: "image/jpeg,image/png,video/mp4,video/quicktime",
-        maxTotal: 10,
-        addButtonLabel: "Add photo or video",
-      };
-    case "instagram_reel":
-      return {
-        accept: "video/mp4,video/quicktime",
-        maxTotal: 1,
-        addButtonLabel: "Add video",
-      };
-    case "instagram_story":
-      return {
-        accept: "image/jpeg,image/png,video/mp4,video/quicktime",
-        maxTotal: 1,
-        addButtonLabel: "Add photo or video",
-      };
-    case "linkedin":
-      return {
-        accept:
-          "image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime",
-        maxTotal: 9,
-        addButtonLabel: "Add photo or video",
-      };
-    case "tiktok":
-      return {
-        accept: "video/mp4,video/quicktime",
-        maxTotal: 1,
-        addButtonLabel: "Add video",
-      };
-    default:
-      return null;
-  }
+  if (!postType) return null;
+  const rule = getMediaRule(postType);
+  if (rule.mode === "none") return null;
+  return {
+    accept: rule.accept,
+    maxTotal: rule.maxCount,
+    addButtonLabel: rule.addLabel,
+    replaceButtonLabel: rule.replaceLabel,
+    replaceOnUpload: isSingleMediaMode(rule.mode),
+  };
 }
 
 export function inferKindFromContentType(contentType: string): "image" | "video" | null {

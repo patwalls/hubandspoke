@@ -8,6 +8,7 @@ import {
   PlaceholderSlideRender,
 } from "../draft-media-dropzone";
 import { MediaActions } from "../media-actions";
+import { PLATFORM_MEDIA_RULES } from "@/lib/platform-media-rules";
 
 export function InstagramStorySimulator({
   data,
@@ -35,7 +36,9 @@ export function InstagramStorySimulator({
         const placeholder = placeholders[0];
         return (
           <div className="mx-auto w-full max-w-[360px] overflow-hidden rounded-xl bg-black">
-            <div className="group relative aspect-[9/16] w-full">
+            <div
+              className={`group relative ${PLATFORM_MEDIA_RULES.instagram_story.aspectClass} w-full`}
+            >
               {enriched?.slide.kind === "video" ? (
                 <video
                   src={enriched.slide.url ?? undefined}
