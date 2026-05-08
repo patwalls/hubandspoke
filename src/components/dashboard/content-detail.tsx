@@ -2583,7 +2583,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </PropertyRow>
         </PropertyRowGroup>
 
-        <PropertyRowGroup single={isPrePublish}>
+        <PropertyRowGroup single={showLeftPane}>
           <PropertyRow label="Status">
             <Select
               value={status}
@@ -2739,7 +2739,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
         {showMore && (
           <>
-            <PropertyRowGroup single={isPrePublish}>
+            <PropertyRowGroup single={showLeftPane}>
               <PropertyRow label="Account">
                 <AccountPostTypePicker
                   accounts={accounts}
@@ -2834,7 +2834,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
          * surface uncluttered (the user explicitly asked for this). They
          * reappear automatically once status flips to Published. */}
         {!isPrePublish && (
-          <PropertyRowGroup single={isPrePublish}>
+          <PropertyRowGroup single={showLeftPane}>
             <PropertyRow label="Published link">
               <div className="flex flex-col gap-1 min-w-0">
                 <div className="flex items-center gap-1 min-w-0">
