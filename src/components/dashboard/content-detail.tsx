@@ -572,6 +572,43 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     data?.item?.descriptPublishError,
   ]);
 
+  // Auto-create an empty draft row for any inline-drafting item that
+  // doesn't have one yet, so the simulator flips from "Read-only — no
+  // draft yet" to editable on first land. Only IG goes through the
+  // generate-caption auto-fire below; X / LinkedIn / TikTok / Threads
+  // need at minimum an empty draft so the editor can start typing and
+  // upload media. Idempotent server-side; ref-gated client-side so we
+  // don't fire twice per id.
+  const ensureDraftFiredRef = useRef<string | null>(null);
+  useEffect(() => {
+    const it = data?.item;
+    if (!it) return;
+    if (data?.currentDraft) return;
+    const isInlineDrafting =
+      typeof it.postType === "string" &&
+      INLINE_DRAFTING_POST_TYPES.has(it.postType);
+    const isPrePub = it.status !== "Published";
+    if (!isInlineDrafting || !isPrePub) return;
+    if (ensureDraftFiredRef.current === it.id) return;
+    ensureDraftFiredRef.current = it.id;
+    void fetch(`/api/production-items/${it.id}/drafts/ensure`, {
+      method: "POST",
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        // Refetch so `currentDraft` lands and the simulator becomes
+        // editable. The IG auto-generate hook below picks up from here
+        // for IG items and fills in an AI caption.
+        void load();
+      })
+      .catch(() => {
+        // Silent — user can refresh manually if this fails.
+      });
+    // Intentionally omitting `load` from deps; `ensureDraftFiredRef`
+    // already prevents repeat fires per id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.item?.id, data?.item?.postType, data?.item?.status, data?.currentDraft]);
+
   // Auto-fire AI caption generation when an editor lands on an IG drafting
   // surface that has no draft yet. The repost route already enqueues this
   // post-seed, but clip-promotion writes a `production_items` row WITHOUT
