@@ -12,7 +12,11 @@ import type {
 // PROMPT_VERSION when prompt structure changes so clip-ideas-style audits
 // can A/B the rows.
 const MODEL = "claude-opus-4-7";
-export const PROMPT_VERSION = 3;
+// v4 (2026-05-08): added CTA RULES. Some platforms now ship a `cta` field
+// (reply tweet / LinkedIn comment / pinned YouTube Community comment); the
+// agent fills it only when the editorial notes include CTA guidance and
+// returns "" otherwise.
+export const PROMPT_VERSION = 4;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -36,6 +40,13 @@ Pick exactly one media_action value:
 - "attach_pillar_full_video" — attach the pillar's full archived YouTube video. Pick this when the skill explicitly says to use the full video / source video / pillar video as the post's media. Only valid if the pillar has a full video AND the platform's media rule allows video.
 - "attach_pillar_poster" — attach the pillar's cover image (YouTube thumbnail) as a single still image. Pick this when the skill says to use the thumbnail / cover / poster. Only valid if the pillar has a poster AND the platform's media rule allows images.
 - "none" — do not attach pillar media. Pick this when the skill is silent on media, when the directive can't be fulfilled (no available pillar media of that kind, or the platform's rule rejects it), or when the post is text-only by design.
+
+CTA RULES
+Some target platforms include a "cta" field (X reply tweet, LinkedIn first comment, YouTube Community pinned comment) — the secondary post that carries the actual call-to-action.
+- Look in FORMAT REFERENCES & EDITORIAL NOTES for CTA guidance: a link template, a UTM scheme, copy patterns like "always reply with the full episode link" or "pin a comment with starterstory.com/<handle>".
+- If the notes specify a CTA pattern, write the cta field following that pattern. Reuse any literal links / UTM templates verbatim. Keep it short and factual — no hard sell.
+- If the notes say NOTHING about a CTA, return an empty string for the cta field. Do not invent a CTA. An empty cta is the correct, expected output when the skill is silent.
+- The cta is independent of media_action — a post can have a CTA reply with no media, or media on the main post with no CTA reply.
 
 OUTPUT RULES
 - Ground every field in specifics from the transcript: numbers, named people, direct quotes, concrete outcomes. No generic platitudes.

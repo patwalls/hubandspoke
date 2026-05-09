@@ -5,6 +5,7 @@ import { EditableField } from "../editable-field";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import { formatFeedTime } from "../resolve-preview-data";
 import { PLATFORM_FONT } from "../platform-tokens";
+import { CtaCard } from "../cta-card";
 
 // YouTube Community posts are text-first cards on the channel's Community
 // tab. Layout mirrors the real feed: channel row on top, body text below,
@@ -22,6 +23,10 @@ export function YouTubeCommunitySimulator({
   const displayName = data.author.displayName ?? data.author.handle ?? "Channel";
   const firstSlide = data.slides[0] ?? null;
   const time = formatFeedTime(data.publishedAt);
+  // CTA gate — see x.tsx for the rationale.
+  const ctaKey = fieldMap.cta;
+  const showCta = !!ctaKey && !!liveContent && ctaKey in liveContent;
+  const ctaValue = ctaKey ? readLive(liveContent, ctaKey, "") : "";
 
   return (
     <div
@@ -80,6 +85,21 @@ export function YouTubeCommunitySimulator({
         <YTAction label="Dislike" icon={<ThumbsDownIcon />} />
         <YTAction label="Reply" icon={<CommentIcon />} />
       </div>
+
+      {showCta && ctaKey && (
+        <div className="mt-3 -mx-4">
+          <CtaCard
+            variant="youtube_community"
+            fieldKey={ctaKey}
+            value={ctaValue}
+            editable={editable}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+            author={data.author}
+            maxLength={10000}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -22,7 +22,11 @@ export type PostType =
  *  rollout so downstream imports don't break mid-PR. Delete after sweep. */
 export type PlatformKey = PostType;
 
-const SCHEMA_VERSION = 1;
+// v2 (2026-05-08): added optional `cta` longtext field to x / linkedin /
+// youtube_community — the secondary post (reply tweet, comment, pinned
+// community comment) that carries the actual link + UTM. Older drafts keep
+// their v1 snapshot and don't get a CTA editor until they're redrafted.
+const SCHEMA_VERSION = 2;
 
 // Field schemas are keyed by *platform* (where the post lives), not by
 // format (the editorial template). A Reel-format item that gets cross-posted
@@ -40,6 +44,15 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         required: true,
         prompt:
           "The full tweet text. Open with a single concrete hook drawn from the pillar transcript — a specific number, a contrarian claim, or a before/after moment. Hard cap 280 chars. No hashtags, no emojis unless one is clearly warranted. First line must stand on its own as a scroll-stopper even in a feed preview.",
+      },
+      {
+        key: "cta",
+        label: "Reply tweet",
+        type: "longtext",
+        maxLength: 280,
+        required: false,
+        prompt:
+          "Reply tweet that lands the call-to-action. Apply the CTA RULES: only fill this in if the FORMAT REFERENCES & EDITORIAL NOTES specify a CTA pattern (link template, UTM, copy guidance, 'add a reply with X'). If the notes say nothing about a CTA, return an empty string — do not invent one.",
       },
     ],
   },
@@ -158,6 +171,15 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         prompt:
           "YouTube Community post body. Conversational and direct — like a Threads / LinkedIn post. Open with a single concrete hook from the pillar. Soft line breaks are fine. No hashtag walls, no emoji spam.",
       },
+      {
+        key: "cta",
+        label: "Pinned comment",
+        type: "longtext",
+        maxLength: 10000,
+        required: false,
+        prompt:
+          "Pinned comment under the Community post that lands the call-to-action. Apply the CTA RULES: only fill this in if the FORMAT REFERENCES & EDITORIAL NOTES specify a CTA pattern (link template, UTM, copy guidance). If the notes say nothing about a CTA, return an empty string — do not invent one.",
+      },
     ],
   },
   linkedin: {
@@ -171,6 +193,15 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         required: true,
         prompt:
           "LinkedIn post. Open with a one-line hook (no 'I' or 'we' in the first line). 3–6 short paragraphs drawn from the pillar transcript — specifics over platitudes. End with a one-line takeaway. No hashtag walls.",
+      },
+      {
+        key: "cta",
+        label: "Comment",
+        type: "longtext",
+        maxLength: 1250,
+        required: false,
+        prompt:
+          "First comment under the LinkedIn post that lands the call-to-action. Apply the CTA RULES: only fill this in if the FORMAT REFERENCES & EDITORIAL NOTES specify a CTA pattern (link template, UTM, copy guidance). If the notes say nothing about a CTA, return an empty string — do not invent one.",
       },
     ],
   },
@@ -234,20 +265,26 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
 export type PlatformFieldMap = {
   caption: string | null;
   secondary: string | null;
+  // Per-platform call-to-action slot: the reply tweet on X, the first comment
+  // on LinkedIn, the pinned community comment on YouTube. `null` for platforms
+  // without a native CTA slot. The simulator gates its render on the field
+  // also being present in the draft's `fieldSchemaSnapshot`, so v1 drafts
+  // (pre-2026-05-08) don't show an editor that the validator would reject.
+  cta: string | null;
 };
 
 export const PLATFORM_FIELD_MAP: Record<PostType, PlatformFieldMap> = {
-  x: { caption: "tweet", secondary: null },
-  instagram_reel: { caption: "caption", secondary: null },
-  instagram_post: { caption: "caption", secondary: null },
-  instagram_story: { caption: "caption", secondary: null },
-  youtube_long: { caption: "description", secondary: "title" },
-  youtube_shorts: { caption: "description", secondary: "title" },
-  youtube_community: { caption: "body", secondary: null },
-  linkedin: { caption: "body", secondary: null },
-  newsletter: { caption: "body", secondary: "subject" },
-  tiktok: { caption: "caption", secondary: null },
-  threads: { caption: "post", secondary: null },
+  x: { caption: "tweet", secondary: null, cta: "cta" },
+  instagram_reel: { caption: "caption", secondary: null, cta: null },
+  instagram_post: { caption: "caption", secondary: null, cta: null },
+  instagram_story: { caption: "caption", secondary: null, cta: null },
+  youtube_long: { caption: "description", secondary: "title", cta: null },
+  youtube_shorts: { caption: "description", secondary: "title", cta: null },
+  youtube_community: { caption: "body", secondary: null, cta: "cta" },
+  linkedin: { caption: "body", secondary: null, cta: "cta" },
+  newsletter: { caption: "body", secondary: "subject", cta: null },
+  tiktok: { caption: "caption", secondary: null, cta: null },
+  threads: { caption: "post", secondary: null, cta: null },
 };
 
 // Map a historical platform string to a canonical post-type key. Used by

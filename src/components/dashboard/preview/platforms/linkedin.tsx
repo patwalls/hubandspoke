@@ -10,6 +10,7 @@ import {
 } from "../draft-media-dropzone";
 import { MediaActions } from "../media-actions";
 import { MultiSlideCarousel } from "../multi-slide-carousel";
+import { CtaCard } from "../cta-card";
 
 /**
  * LinkedIn simulator.
@@ -44,6 +45,11 @@ export function LinkedInSimulator({
   const body = readLive(liveContent, fieldMap.caption, data.caption);
   const slides = data.slides;
   const hasMedia = slides.length > 0;
+  // CTA gate — see x.tsx for the rationale on why this checks live
+  // content rather than the static field map.
+  const ctaKey = fieldMap.cta;
+  const showCta = !!ctaKey && !!liveContent && ctaKey in liveContent;
+  const ctaValue = ctaKey ? readLive(liveContent, ctaKey, "") : "";
 
   return (
     <DraftMediaDropZone
@@ -136,6 +142,19 @@ export function LinkedInSimulator({
                 <ImagePlusIcon className="h-3.5 w-3.5" />
                 {hasMedia ? "Add another" : "Add photo or video"}
               </button>
+            )}
+
+            {showCta && ctaKey && (
+              <CtaCard
+                variant="linkedin"
+                fieldKey={ctaKey}
+                value={ctaValue}
+                editable={editable}
+                onLocalEdit={onLocalEdit}
+                onCommit={onCommit}
+                author={data.author}
+                maxLength={1250}
+              />
             )}
           </div>
         );

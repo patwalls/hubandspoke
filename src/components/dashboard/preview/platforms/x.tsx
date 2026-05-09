@@ -10,6 +10,7 @@ import {
 } from "../draft-media-dropzone";
 import { MediaActions } from "../media-actions";
 import { MultiSlideCarousel } from "../multi-slide-carousel";
+import { CtaCard } from "../cta-card";
 
 /**
  * X simulator.
@@ -39,6 +40,13 @@ export function XSimulator({
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   const slides = data.slides;
   const hasMedia = slides.length > 0;
+  // Only render the CTA editor when the draft's snapshot actually carries
+  // a `cta` field. v1 drafts (pre-2026-05-08) have no cta key in content,
+  // so the API would reject a PATCH on it — gating the render off the
+  // live content keeps the UI honest about what's editable.
+  const ctaKey = fieldMap.cta;
+  const showCta = !!ctaKey && !!liveContent && ctaKey in liveContent;
+  const ctaValue = ctaKey ? readLive(liveContent, ctaKey, "") : "";
 
   return (
     <DraftMediaDropZone
@@ -133,6 +141,19 @@ export function XSimulator({
                 <ImagePlusIcon className="h-3.5 w-3.5" />
                 {hasMedia ? "Add another" : "Add photo or video"}
               </button>
+            )}
+
+            {showCta && ctaKey && (
+              <CtaCard
+                variant="x"
+                fieldKey={ctaKey}
+                value={ctaValue}
+                editable={editable}
+                onLocalEdit={onLocalEdit}
+                onCommit={onCommit}
+                author={data.author}
+                maxLength={280}
+              />
             )}
           </div>
         );
