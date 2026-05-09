@@ -90,6 +90,14 @@ async function main() {
     pillarTitle: item.title,
     transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
     transcriptDurationSec: transcript.durationSec,
+    // Smoke script doesn't exercise the V1.1 media path — feed a minimal
+    // MediaContext that nudges the agent toward `media_action: "none"`.
+    mediaContext: {
+      pillarHasFullVideo: false,
+      pillarHasPoster: false,
+      platformMode: "none",
+      platformAllowedKinds: [],
+    },
   });
 
   console.log(

@@ -12,15 +12,16 @@ import type {
 // PROMPT_VERSION when prompt structure changes so clip-ideas-style audits
 // can A/B the rows.
 const MODEL = "claude-opus-4-7";
-export const PROMPT_VERSION = 2;
+export const PROMPT_VERSION = 3;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
 
 You will be given:
 1. The target *platform* (where the post lives) and its field schema — each field has a per-field directive telling you what to write.
-2. Optional FORMAT REFERENCES & EDITORIAL NOTES — free text the team maintains per format. Use these to ground tone and style.
+2. Optional FORMAT REFERENCES & EDITORIAL NOTES (the format's "Skill") — free text the team maintains per format. Use these to ground tone and style AND to decide media attachment.
 3. The pillar video's title and full transcript.
+4. MEDIA ACTION context — what pillar media is available, and what the target platform's media rule allows.
 
 RULES FOR READING FORMAT REFERENCES & EDITORIAL NOTES
 The editorial notes may contain a mix of useful and not-useful material:
@@ -28,13 +29,20 @@ The editorial notes may contain a mix of useful and not-useful material:
 - Loom / loom.com links — these are walkthrough videos for human editors; you cannot watch them. IGNORE.
 - Login credentials, tool names ("Descript", "Slack"), "ask me via Slack" notes — editor-onboarding admin noise. IGNORE.
 - Any free-text style guidance — FOLLOW it.
+- Any media directive ("attach the full video", "use the YouTube cover as the image") — translate into the media_action enum.
+
+MEDIA ACTION RULES
+Pick exactly one media_action value:
+- "attach_pillar_full_video" — attach the pillar's full archived YouTube video. Pick this when the skill explicitly says to use the full video / source video / pillar video as the post's media. Only valid if the pillar has a full video AND the platform's media rule allows video.
+- "attach_pillar_poster" — attach the pillar's cover image (YouTube thumbnail) as a single still image. Pick this when the skill says to use the thumbnail / cover / poster. Only valid if the pillar has a poster AND the platform's media rule allows images.
+- "none" — do not attach pillar media. Pick this when the skill is silent on media, when the directive can't be fulfilled (no available pillar media of that kind, or the platform's rule rejects it), or when the post is text-only by design.
 
 OUTPUT RULES
 - Ground every field in specifics from the transcript: numbers, named people, direct quotes, concrete outcomes. No generic platitudes.
 - No clickbait the content can't back up.
 - No hashtag walls.
 - Match the tone implied by the reference posts when any are given.
-- Call the propose_draft tool exactly once with a value for every field. Never respond with plain text.`;
+- Call the propose_draft tool exactly once with a value for every content field AND a media_action. Never respond with plain text.`;
 
 export interface PastCaptionExample {
   /** Original post URL when known; helps the model see real published copy. */
@@ -66,10 +74,34 @@ export interface GenerateDraftArgs {
    *  established voice for the format. Pre-trim to ~8 entries — long lists
    *  bloat the prompt without helping. */
   pastCaptions?: PastCaptionExample[];
+  /** What pillar media exists and what the target platform's rule allows.
+   *  Drives the `media_action` field on the tool output. */
+  mediaContext: MediaContext;
+}
+
+/** The action the agent picks for media attachment on this draft. The
+ *  service in `src/lib/services/draft-algorithm/run.ts` translates this
+ *  into a `production_item_media` row insert (or no-op for `none`). */
+export type MediaAction =
+  | "attach_pillar_full_video"
+  | "attach_pillar_poster"
+  | "none";
+
+export interface MediaContext {
+  /** Whether the pillar has an archived full video (S3-backed `mediaS3Key`). */
+  pillarHasFullVideo: boolean;
+  /** Whether the pillar has an archived poster image (S3-backed `posterS3Key`). */
+  pillarHasPoster: boolean;
+  /** The target platform's media rule mode (`photos-or-video`, `single-video`,
+   *  `single-any`, `carousel-mixed`, or `none`). Mirrors `PlatformMediaRule.mode`. */
+  platformMode: string;
+  /** Which media kinds the platform accepts. Mirrors `PlatformMediaRule.allowedKinds`. */
+  platformAllowedKinds: ReadonlyArray<"image" | "video">;
 }
 
 export interface GenerateDraftResult {
   content: ContentDraftContent;
+  mediaAction: MediaAction;
   modelUsage: {
     input_tokens: number;
     output_tokens: number;
@@ -128,11 +160,36 @@ function buildToolSchema(
     properties[field.key] = prop;
     required.push(field.key);
   }
+  // V1.1: media_action peer to the dynamic content fields. Always required
+  // so the agent makes an explicit decision rather than silently omitting.
+  // Service-side `resolveAttachment` re-validates against the platform rule
+  // and skips if the agent picked something the platform doesn't actually
+  // accept (belt-and-braces — the prompt also tells the model the rule).
+  properties["media_action"] = {
+    type: "string",
+    enum: ["attach_pillar_full_video", "attach_pillar_poster", "none"],
+    description:
+      "Decide whether to attach pillar media to this post based on the format skill and the available pillar media + platform rule.",
+  };
+  required.push("media_action");
   return {
     type: "object" as const,
     properties,
     required,
   };
+}
+
+// Pull the media_action enum value out of the tool input. Defaults to "none"
+// if missing or malformed (model should always emit it given the schema, but
+// the service must never crash on a bad model output).
+function normalizeMediaAction(raw: unknown): MediaAction {
+  const input =
+    typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const value = input["media_action"];
+  if (value === "attach_pillar_full_video" || value === "attach_pillar_poster") {
+    return value;
+  }
+  return "none";
 }
 
 // Validate + normalize the model's tool output. Unknown-shape values fall
@@ -266,9 +323,11 @@ export async function generateDraft(
     .filter(Boolean)
     .join("\n");
 
-  // Per-call payload — transcript + task. Not cached: transcript is per
-  // item, and the task block sits at the end so the cache breakpoint above
-  // it stays warm across different items in the same format/platform run.
+  // Per-call payload — transcript + media context + task. Not cached:
+  // transcript and pillar-media availability are per-item, and the task
+  // block sits at the end so the cache breakpoint above it stays warm
+  // across different items in the same format/platform run.
+  const mc = args.mediaContext;
   const perCallPayload = [
     `Pillar title: ${args.pillarTitle ?? args.item.title ?? "(untitled)"}`,
     `Pillar duration: ${Math.round(args.transcriptDurationSec)}s`,
@@ -278,8 +337,16 @@ export async function generateDraft(
     ``,
     args.transcriptSegmentsMarkdown,
     ``,
+    `## MEDIA CONTEXT`,
+    `Pillar media available:`,
+    `- full_video: ${mc.pillarHasFullVideo ? "yes" : "no"}`,
+    `- poster (cover image): ${mc.pillarHasPoster ? "yes" : "no"}`,
+    `Target platform media rule:`,
+    `- mode: ${mc.platformMode}`,
+    `- allowed kinds: ${mc.platformAllowedKinds.join(", ") || "(none)"}`,
+    ``,
     `## TASK`,
-    `Call propose_draft exactly once with a value for every field. Ground every field in specifics from the transcript. Match tone to any reference posts shown in the editorial notes${
+    `Call propose_draft exactly once. Fill in every content field, AND set media_action per the MEDIA ACTION RULES. Ground every field in specifics from the transcript. Match tone to any reference posts shown in the editorial notes${
       args.pastCaptions && args.pastCaptions.length > 0
         ? " AND to the past-caption exemplars"
         : ""
@@ -326,9 +393,11 @@ export async function generateDraft(
   }
 
   const content = normalizeContent(rawInput, args.fieldSchema);
+  const mediaAction = normalizeMediaAction(rawInput);
 
   return {
     content,
+    mediaAction,
     modelUsage: {
       input_tokens: response.usage.input_tokens,
       output_tokens: response.usage.output_tokens,

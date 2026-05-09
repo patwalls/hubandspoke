@@ -1,17 +1,26 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { contentDrafts, formats, productionItems } from "@/lib/db/schema";
+import {
+  contentDrafts,
+  formats,
+  productionItemMedia,
+  productionItems,
+} from "@/lib/db/schema";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import {
   generateDraft,
   GENERATED_BY as AGENT_GENERATED_BY,
   PROMPT_VERSION,
+  type MediaAction,
+  type MediaContext,
 } from "@/lib/draft-agent";
 import {
   getSchemaForPostType,
   PLATFORM_FIELD_MAP,
   type PostType,
 } from "@/lib/platform-field-schemas";
+import { getMediaRule } from "@/lib/platform-media-rules";
+import { addMediaRowsToDraft } from "@/lib/services/draft-media";
 import { getTopPerformingCaptions } from "./exemplars";
 
 // The Draft Algorithm — V1.
@@ -28,8 +37,71 @@ import { getTopPerformingCaptions } from "./exemplars";
 // Bumping `DRAFT_ALGORITHM_VERSION` invalidates audits — use it when the
 // branch logic / data assembly changes meaningfully. Prompt-string changes
 // belong in `PROMPT_VERSION` on the agent.
-export const DRAFT_ALGORITHM_VERSION = 1;
+//
+// V1.1 (2026-05-08): the agent now also picks a `media_action` (attach
+// pillar full video / attach pillar poster / none); the service translates
+// that into a `production_item_media` row inside the same tx. The
+// per-format Skill text is the directive — see draft-agent.ts MEDIA ACTION
+// RULES. Idempotent on re-run: if any media row already exists on the
+// item, media attachment is skipped (preserves manual edits).
+export const DRAFT_ALGORITHM_VERSION = "1.1";
 export const GENERATED_BY = `draft-algo:v${DRAFT_ALGORITHM_VERSION}:${AGENT_GENERATED_BY}`;
+
+// Translate the agent's MediaAction into a concrete file payload for
+// `addMediaRowsToDraft`, or return null if unfulfillable. Two reasons we'd
+// return null even when the agent picked something:
+//   1. The pillar doesn't have the requested asset (e.g. agent said attach
+//      full video but pillar has no archived video).
+//   2. The platform rule rejects the kind (e.g. youtube_community is text-
+//      only). The prompt also surfaces the rule, so this is belt-and-braces.
+function resolveAttachment(
+  action: MediaAction,
+  pillar: {
+    mediaS3Bucket: string | null;
+    mediaS3Key: string | null;
+    mediaContentType: string | null;
+    posterS3Key: string | null;
+  },
+  rule: ReturnType<typeof getMediaRule>,
+): {
+  s3Bucket: string;
+  s3Key: string;
+  contentType: string;
+  sizeBytes: number;
+  kind: "image" | "video";
+  posterS3Key?: string | null;
+} | null {
+  if (action === "attach_pillar_full_video") {
+    if (!pillar.mediaS3Key || !pillar.mediaS3Bucket) return null;
+    if (!rule.allowedKinds.includes("video")) return null;
+    return {
+      s3Bucket: pillar.mediaS3Bucket,
+      s3Key: pillar.mediaS3Key,
+      contentType: pillar.mediaContentType ?? "video/mp4",
+      // sizeBytes is required by AddDraftMediaInput's schema, but we don't
+      // re-fetch the S3 HEAD here — the upload-confirm path already
+      // populated it on the pillar. 0 is a benign placeholder; consumers
+      // that care (UI byte-meter) read the row's stored value, not this.
+      sizeBytes: 0,
+      kind: "video",
+      posterS3Key: pillar.posterS3Key ?? null,
+    };
+  }
+  if (action === "attach_pillar_poster") {
+    if (!pillar.posterS3Key || !pillar.mediaS3Bucket) return null;
+    if (!rule.allowedKinds.includes("image")) return null;
+    return {
+      s3Bucket: pillar.mediaS3Bucket,
+      s3Key: pillar.posterS3Key,
+      // Posters are archived as JPEG by the YouTube enrichment path
+      // (services/enrichment/youtube.ts:archiveRemoteToS3).
+      contentType: "image/jpeg",
+      sizeBytes: 0,
+      kind: "image",
+    };
+  }
+  return null;
+}
 
 // Platforms the algorithm drafts for in V1. Newsletter + youtube_long are
 // out of scope — editors hand-write those today and the leverage isn't
@@ -199,18 +271,53 @@ export async function runDraftAlgorithm(
     excludeId: productionItemId,
   });
 
-  // Pillar title for context when this is a derivative.
+  // Pillar title + media for context when this is a derivative. The media
+  // metadata (S3 keys + poster) drives the V1.1 MediaContext: the agent
+  // sees what's available, picks an action, and we attach in the tx below.
   let pillarTitle: string | null = item.title;
+  let pillar: {
+    id: string;
+    mediaS3Bucket: string | null;
+    mediaS3Key: string | null;
+    mediaContentType: string | null;
+    posterS3Key: string | null;
+  } | null = null;
   if (item.pillarContentItemId) {
-    const [pillar] = await db
-      .select({ title: productionItems.title })
+    const [row] = await db
+      .select({
+        id: productionItems.id,
+        title: productionItems.title,
+        mediaS3Bucket: productionItems.mediaS3Bucket,
+        mediaS3Key: productionItems.mediaS3Key,
+        mediaContentType: productionItems.mediaContentType,
+        posterS3Key: productionItems.posterS3Key,
+      })
       .from(productionItems)
       .where(eq(productionItems.id, item.pillarContentItemId))
       .limit(1);
-    if (pillar) pillarTitle = pillar.title;
+    if (row) {
+      pillarTitle = row.title;
+      pillar = {
+        id: row.id,
+        mediaS3Bucket: row.mediaS3Bucket,
+        mediaS3Key: row.mediaS3Key,
+        mediaContentType: row.mediaContentType,
+        posterS3Key: row.posterS3Key,
+      };
+    }
   }
 
   const platformArr = (item.platform as string[] | null) ?? [item.postType];
+
+  // Build the MediaContext for the agent. Tells it what pillar media is
+  // archived and what the target platform's media rule allows.
+  const mediaRule = getMediaRule(item.postType);
+  const mediaContext: MediaContext = {
+    pillarHasFullVideo: !!pillar?.mediaS3Key,
+    pillarHasPoster: !!pillar?.posterS3Key,
+    platformMode: mediaRule.mode,
+    platformAllowedKinds: mediaRule.allowedKinds,
+  };
 
   const result = await generateDraft({
     item: {
@@ -226,6 +333,7 @@ export async function runDraftAlgorithm(
     transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
     transcriptDurationSec: transcript.durationSec,
     pastCaptions,
+    mediaContext,
   });
 
   // Demote previous current + insert new current as version+1 in a tx —
@@ -264,6 +372,44 @@ export async function runDraftAlgorithm(
         createdByUserId: actorUserId,
       })
       .returning();
+
+    // V1.1 media attachment. Only attach when:
+    //   1. Agent picked an actionable action (not "none").
+    //   2. Item has zero existing media rows — preserves manual edits and
+    //      makes Redraft idempotent (re-runs don't churn media).
+    //   3. The action is fulfillable: pillar has the requested asset AND
+    //      the platform rule accepts the implied kind. Belt-and-braces with
+    //      the prompt — if the model misjudges, we silently skip here.
+    if (result.mediaAction !== "none" && pillar) {
+      const [hasMedia] = await tx
+        .select({ id: productionItemMedia.id })
+        .from(productionItemMedia)
+        .where(eq(productionItemMedia.productionItemId, productionItemId))
+        .limit(1);
+      if (!hasMedia) {
+        const file = resolveAttachment(result.mediaAction, pillar, mediaRule);
+        if (file) {
+          await addMediaRowsToDraft(tx, {
+            itemId: productionItemId,
+            files: [file],
+          });
+          // Mirror to the legacy single-media columns on production_items
+          // (the index-0 carousel row is the source of truth; legacy
+          // columns are a derived cache that other writers — enrichment,
+          // seedRepostContent, the media route — keep in sync).
+          await tx
+            .update(productionItems)
+            .set({
+              mediaS3Bucket: file.s3Bucket,
+              mediaS3Key: file.s3Key,
+              mediaContentType: file.contentType,
+              posterS3Key: file.posterS3Key ?? null,
+            })
+            .where(eq(productionItems.id, productionItemId));
+        }
+      }
+    }
+
     return row;
   });
 
