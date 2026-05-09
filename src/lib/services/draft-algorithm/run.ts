@@ -44,7 +44,16 @@ import { getTopPerformingCaptions } from "./exemplars";
 // per-format Skill text is the directive — see draft-agent.ts MEDIA ACTION
 // RULES. Idempotent on re-run: if any media row already exists on the
 // item, media attachment is skipped (preserves manual edits).
-export const DRAFT_ALGORITHM_VERSION = "1.1";
+//
+// V1.2 (2026-05-09): exemplar selection becomes format-aware. Previously
+// the prompt header said "PAST CAPTIONS FOR THIS FORMAT" but the query
+// filtered only by (brand, post_type) — so an X repost in "Full Video On
+// X!" got the top 8 X tweets across every format on the brand, diluting
+// the structural signal that lives at the format level (timestamp
+// breakdown, listicle, etc.). The exemplars helper now pulls format-scoped
+// winners first and tops up with platform-scoped rows only when a format
+// is sparse; the prompt labels each block honestly. See exemplars.ts.
+export const DRAFT_ALGORITHM_VERSION = "1.2";
 export const GENERATED_BY = `draft-algo:v${DRAFT_ALGORITHM_VERSION}:${AGENT_GENERATED_BY}`;
 
 // Translate the agent's MediaAction into a concrete file payload for
@@ -262,12 +271,14 @@ export async function runDraftAlgorithm(
     formatInstructions = fmt?.instructions ?? null;
   }
 
-  // Past captions for this exact (brand, post_type), view-ranked. The
-  // single biggest quality lever vs. the previous recency ordering — top
-  // performers carry the structural signal we want the model to mirror.
+  // Past captions, view-ranked. v1.2: format-scoped first, with a
+  // platform-scoped top-up when the format is sparse (see exemplars.ts).
+  // Format is the strongest structural signal — same-format winners
+  // share opening shape, list patterns, timestamp breakdowns, etc.
   const pastCaptions = await getTopPerformingCaptions({
     brand: item.brand,
     postType: item.postType,
+    format: item.format ?? null,
     excludeId: productionItemId,
   });
 

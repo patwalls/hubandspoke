@@ -16,7 +16,11 @@ const MODEL = "claude-opus-4-7";
 // (reply tweet / LinkedIn comment / pinned YouTube Community comment); the
 // agent fills it only when the editorial notes include CTA guidance and
 // returns "" otherwise.
-export const PROMPT_VERSION = 4;
+// v5 (2026-05-09): the past-captions block is now split into format-scoped
+// vs platform-scoped sub-blocks (see exemplars.ts v1.2), and a STRUCTURE
+// RULE was added so the agent mirrors recurring patterns (timestamp
+// breakdowns, listicles) when the format examples share one.
+export const PROMPT_VERSION = 5;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -48,6 +52,9 @@ Some target platforms include a "cta" field (X reply tweet, LinkedIn first comme
 - If the notes say NOTHING about a CTA, return an empty string for the cta field. Do not invent a CTA. An empty cta is the correct, expected output when the skill is silent.
 - The cta is independent of media_action — a post can have a CTA reply with no media, or media on the main post with no CTA reply.
 
+STRUCTURE RULE
+When the prompt includes a "TOP-PERFORMING EXAMPLES IN THIS FORMAT" block and a recurring structural pattern shows up across those examples (e.g. opening hook + bulleted timestamp breakdown like "(2:46)", listicle with em-dashes, two-line setup + punchline, "Here's the top 1% of our chat:" + list, etc.), mirror that structure in your draft. Don't invent a structure that isn't repeated across the format examples; the platform-only examples are voice/tone reference, not structural.
+
 OUTPUT RULES
 - Ground every field in specifics from the transcript: numbers, named people, direct quotes, concrete outcomes. No generic platitudes.
 - No clickbait the content can't back up.
@@ -65,6 +72,13 @@ export interface PastCaptionExample {
   /** Lifetime views, when known. Lets the model bias toward higher-performing
    *  exemplars. */
   views?: number | null;
+  /** v1.2: which pool this example came from. "format" = same brand + same
+   *  post_type + same format (case-insensitive); the strongest structural
+   *  signal. "platform" = same brand + same post_type only — top-up rows
+   *  used as voice/tone reference when the format pool is sparse. The prompt
+   *  builder splits these into two labeled blocks so the agent can apply
+   *  the STRUCTURE RULE selectively. */
+  source: "format" | "platform";
 }
 
 export interface GenerateDraftArgs {
@@ -80,10 +94,12 @@ export interface GenerateDraftArgs {
   pillarTitle: string | null;
   transcriptSegmentsMarkdown: string;
   transcriptDurationSec: number;
-  /** Optional past captions for THIS format (most-recent-first). Surfaced to
-   *  the model as exemplars so the generated copy matches the team's
-   *  established voice for the format. Pre-trim to ~8 entries — long lists
-   *  bloat the prompt without helping. */
+  /** Past captions surfaced to the model as exemplars. v1.2: each entry
+   *  carries a `source` tag — "format" rows are same-format winners (the
+   *  STRUCTURE RULE points at these), "platform" rows are top-up
+   *  voice/tone reference when the format pool is sparse. Pre-trim to ~8
+   *  entries — long lists bloat the prompt without helping. View-ranked,
+   *  not recency-ranked. */
   pastCaptions?: PastCaptionExample[];
   /** What pillar media exists and what the target platform's rule allows.
    *  Drives the `media_action` field on the tool output. */
@@ -119,6 +135,67 @@ export interface GenerateDraftResult {
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
   };
+}
+
+// Render the past-captions section of the prompt. v1.2: format-scoped and
+// platform-scoped exemplars get separate blocks so the STRUCTURE RULE can
+// point only at the format block. Returns null when there are no exemplars
+// (caller filters nulls out of the prompt).
+function renderPastCaptions(
+  examples: PastCaptionExample[] | undefined,
+  itemFormat: string | null,
+): string | null {
+  if (!examples || examples.length === 0) return null;
+  const formatExamples = examples.filter((ex) => ex.source === "format");
+  const platformExamples = examples.filter((ex) => ex.source === "platform");
+  const renderBlock = (rows: PastCaptionExample[]): string =>
+    rows
+      .map((ex, i) => {
+        const meta = [
+          ex.views != null ? `${ex.views.toLocaleString()} views` : null,
+          ex.publishedAt
+            ? new Date(ex.publishedAt).toISOString().slice(0, 10)
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const header = meta
+          ? `--- example ${i + 1} (${meta}) ---`
+          : `--- example ${i + 1} ---`;
+        return `${header}\n${ex.caption.trim()}`;
+      })
+      .join("\n\n");
+
+  const sections: string[] = [];
+  if (formatExamples.length > 0 && itemFormat) {
+    sections.push(
+      [
+        `## TOP-PERFORMING EXAMPLES IN THIS FORMAT — "${itemFormat}" (${formatExamples.length}, ranked by views)`,
+        `Real published posts on the same brand + post_type + format. These are your structural template — see the STRUCTURE RULE in the system prompt. Higher-view examples are stronger signal.`,
+        ``,
+        renderBlock(formatExamples),
+        ``,
+      ].join("\n"),
+    );
+  }
+  if (platformExamples.length > 0) {
+    const titleSuffix =
+      formatExamples.length > 0
+        ? `OTHER STRONG EXAMPLES ON THIS PLATFORM (used as voice/tone reference, not structural)`
+        : `TOP-PERFORMING EXAMPLES ON THIS PLATFORM`;
+    sections.push(
+      [
+        `## ${titleSuffix} (${platformExamples.length}, ranked by views)`,
+        formatExamples.length > 0
+          ? `Top performers on the same brand + post_type but a different format. Use these for tone, sentence rhythm, voice — NOT for structure (see STRUCTURE RULE).`
+          : `Real captions the team has already shipped on this platform. Match tone, rhythm, voice. Higher-view examples are stronger signal.`,
+        ``,
+        renderBlock(platformExamples),
+        ``,
+      ].join("\n"),
+    );
+  }
+  return sections.length > 0 ? sections.join("\n") : null;
 }
 
 // Build the JSON schema for the `propose_draft` tool dynamically from the
@@ -308,28 +385,7 @@ export async function generateDraft(
           ``,
         ].join("\n")
       : null,
-    args.pastCaptions && args.pastCaptions.length > 0
-      ? [
-          `## PAST CAPTIONS FOR THIS FORMAT`,
-          `These are real captions the team has already shipped for this exact format on the same brand. They are the strongest tone/structure signal you have — match the rhythm, sentence shape, and voice of these (not the generic platform vibe). Higher-view exemplars are better signal; see the views figure when present.`,
-          ``,
-          args.pastCaptions
-            .map((ex, i) => {
-              const meta = [
-                ex.views != null ? `${ex.views.toLocaleString()} views` : null,
-                ex.publishedAt
-                  ? new Date(ex.publishedAt).toISOString().slice(0, 10)
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(" · ");
-              const header = meta ? `--- example ${i + 1} (${meta}) ---` : `--- example ${i + 1} ---`;
-              return `${header}\n${ex.caption.trim()}`;
-            })
-            .join("\n\n"),
-          ``,
-        ].join("\n")
-      : null,
+    renderPastCaptions(args.pastCaptions, args.item.format),
   ]
     .filter(Boolean)
     .join("\n");
