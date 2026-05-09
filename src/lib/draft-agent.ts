@@ -25,7 +25,17 @@ const MODEL = "claude-opus-4-7";
 // post's body/title text (text-primary cross-posts: LinkedIn → X, X → Threads).
 // The per-call payload renders one of two blocks (## PILLAR TRANSCRIPT or
 // ## SOURCE POST BODY) and the TASK line adapts accordingly.
-export const PROMPT_VERSION = 6;
+// v7 (2026-05-09): two refinements paired with v1.4 of the algorithm.
+// (a) When the SOURCE POST BODY substrate is multi-paragraph (≥120 chars
+// or contains a newline), the prompt swaps in a "pull every concrete
+// element — list items, numbers, named people, the hook AND the closing"
+// directive instead of the softer "adapt this." Stops the agent from
+// echoing a one-line summary when it has a full post to riff on.
+// (b) `MediaContext.itemAlreadyHasMedia` is rendered into the MEDIA
+// CONTEXT block; when count > 0 the agent is told to pick
+// `media_action: "none"` so it doesn't try to attach pillar media on
+// top of source-mirrored media.
+export const PROMPT_VERSION = 7;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -49,6 +59,8 @@ Pick exactly one media_action value:
 - "attach_pillar_full_video" — attach the pillar's full archived YouTube video. Pick this when the skill explicitly says to use the full video / source video / pillar video as the post's media. Only valid if the pillar has a full video AND the platform's media rule allows video.
 - "attach_pillar_poster" — attach the pillar's cover image (YouTube thumbnail) as a single still image. Pick this when the skill says to use the thumbnail / cover / poster. Only valid if the pillar has a poster AND the platform's media rule allows images.
 - "none" — do not attach pillar media. Pick this when the skill is silent on media, when the directive can't be fulfilled (no available pillar media of that kind, or the platform's rule rejects it), or when the post is text-only by design.
+
+If the MEDIA CONTEXT shows the post already has media rows attached (cross-posts mirror their source's media on creation), pick "none" — the post will publish with those images/videos, you do not need to attach pillar media on top. Compose the caption assuming those attached items will be visible.
 
 CTA RULES
 Some target platforms include a "cta" field (X reply tweet, LinkedIn first comment, YouTube Community pinned comment) — the secondary post that carries the actual call-to-action.
@@ -138,6 +150,15 @@ export interface MediaContext {
   platformMode: string;
   /** Which media kinds the platform accepts. Mirrors `PlatformMediaRule.allowedKinds`. */
   platformAllowedKinds: ReadonlyArray<"image" | "video">;
+  /** v1.4: media rows that are ALREADY attached to the item (e.g. cross-posts
+   *  whose source had images — `seedRepostContent` mirrors source media onto
+   *  the new row before the algorithm runs). When count > 0 the agent should
+   *  pick `media_action: "none"` and compose a caption that assumes those
+   *  attachments are visible. Optional; defaults to no attached media. */
+  itemAlreadyHasMedia?: {
+    count: number;
+    kinds: ReadonlyArray<"image" | "video">;
+  };
 }
 
 export interface GenerateDraftResult {
@@ -412,6 +433,18 @@ export async function generateDraft(
   // derivatives) or the source post body (text-primary cross-posts).
   const mc = args.mediaContext;
   const substrate = args.substrate;
+  // v1.4: detect "rich" source bodies — multi-paragraph (newlines) or
+  // long enough to carry real structure. With <120 chars and one line,
+  // the agent gets the softer "adapt this" directive (sometimes there
+  // genuinely isn't more to say). At ≥120 chars or multiline we know
+  // there's a real post to fully ingest, so the directive turns into
+  // "pull every concrete element."
+  const isRichSourceBody =
+    substrate.kind === "source_body" &&
+    (substrate.text.length >= 120 || substrate.text.includes("\n"));
+  const sourceBodyDirective = isRichSourceBody
+    ? `This is the FULL source post text. Adapt it for the target platform — pull EVERY concrete element into the new post: every list item, every numbered example, every named person, the hook AND the closing. The output should feel like the same idea retold for the target platform's voice and field schema, not a one-line summary of the opener. Keep facts, numbers, and direct quotes verbatim where possible.`
+    : `The original post text from the source platform. This IS the substance — there's no long-form video to transcribe; the post itself is what the team wants adapted to the target platform. Keep its concrete ideas, facts/numbers/named people, and angle. Change the format and voice to match the target platform's field schema and the past captions in this format. Don't paraphrase generically.`;
   const substrateBlock =
     substrate.kind === "transcript"
       ? [
@@ -428,7 +461,7 @@ export async function generateDraft(
           `Source post title: ${args.pillarTitle ?? args.item.title ?? "(untitled)"}`,
           ``,
           `## SOURCE POST BODY`,
-          `The original post text from the source platform. This IS the substance — there's no long-form video to transcribe; the post itself is what the team wants adapted to the target platform. Keep its concrete ideas, facts/numbers/named people, and angle. Change the format and voice to match the target platform's field schema and the past captions in this format. Don't paraphrase generically.`,
+          sourceBodyDirective,
           ``,
           substrate.text,
         ].join("\n");
@@ -438,6 +471,12 @@ export async function generateDraft(
       ? "Ground every field in specifics from the transcript."
       : "Ground every field in the source post's specifics; treat it as the canonical statement of the idea.";
 
+  const alreadyAttached = mc.itemAlreadyHasMedia ?? { count: 0, kinds: [] };
+  const alreadyAttachedLine =
+    alreadyAttached.count > 0
+      ? `Already attached on this post (mirrored from the source, will publish as-is): ${alreadyAttached.count} ${alreadyAttached.kinds.join("/") || "media"} ${alreadyAttached.count === 1 ? "item" : "items"} — pick media_action="none" and compose the caption assuming these are visible.`
+      : `Already attached on this post: none.`;
+
   const perCallPayload = [
     substrateBlock,
     ``,
@@ -445,6 +484,7 @@ export async function generateDraft(
     `Pillar media available:`,
     `- full_video: ${mc.pillarHasFullVideo ? "yes" : "no"}`,
     `- poster (cover image): ${mc.pillarHasPoster ? "yes" : "no"}`,
+    alreadyAttachedLine,
     `Target platform media rule:`,
     `- mode: ${mc.platformMode}`,
     `- allowed kinds: ${mc.platformAllowedKinds.join(", ") || "(none)"}`,

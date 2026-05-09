@@ -66,7 +66,19 @@ import { getTopPerformingCaptions } from "./exemplars";
 // `pillarContentItemId ?? repostedFromItemId ?? item.id` so cross-posts
 // actually resolve their source row. See draft-agent.ts for the
 // substrate-aware prompt rendering.
-export const DRAFT_ALGORITHM_VERSION = "1.3";
+//
+// V1.4 (2026-05-09): three lifts. (1) Substrate chain now includes the
+// `description` column — LinkedIn enrichment routinely populates that
+// long-form column with the full post body when SC's short-form fields
+// come back empty, and v1.3 walked right past it (echoing the four-word
+// title). Chain is now contentBody → description → title. (2) The agent
+// gets a "rich substrate" prompt directive when the source body is
+// multi-paragraph, telling it to adapt EVERY concrete element rather
+// than echo the opener. (3) `MediaContext.itemAlreadyHasMedia` surfaces
+// source-mirrored media on cross-posts so the agent picks
+// `media_action: "none"` and composes a caption that assumes the images
+// are visible.
+export const DRAFT_ALGORITHM_VERSION = "1.4";
 export const GENERATED_BY = `draft-algo:v${DRAFT_ALGORITHM_VERSION}:${AGENT_GENERATED_BY}`;
 
 // Translate the agent's MediaAction into a concrete file payload for
@@ -170,15 +182,19 @@ export interface RunDraftAlgorithmOpts {
 }
 
 /**
- * V1.3: resolve the substrate the agent will draft from. Tries in order:
+ * V1.4: resolve the substrate the agent will draft from. Tries in order:
  *   1. The upstream's transcript (long-form pillar derivatives — usual path).
- *   2. The upstream's contentBody (text-primary cross-posts: LinkedIn → X
- *      where the source's body IS the substance).
- *   3. The upstream's title (fallback when SC/the enricher came up empty
- *      on contentBody but the title carries the post's text — common for
- *      one-line tweets and short LinkedIn updates).
- *   4. The item's own contentBody/title (covers an exotic case where
- *      seed copied the source body but no `repostedFromItemId` was set).
+ *   2. The upstream's contentBody (text-primary cross-posts: tweet body,
+ *      IG caption — what the SC enrichers normally populate).
+ *   3. The upstream's `description` long-form column (LinkedIn share posts:
+ *      SC returns the multi-paragraph body under `data.description` and the
+ *      LinkedIn enricher writes it here, NOT into contentBody. v1.3 missed
+ *      this column entirely and ended up echoing the four-word title
+ *      because that was the only non-empty field in its chain).
+ *   4. The upstream's title (last fallback when SC came up empty on body
+ *      and description — common for one-line tweets).
+ *   5. The item's own contentBody/description/title (covers an exotic case
+ *      where seed copied the source body but no `repostedFromItemId` was set).
  *
  * Upstream chain is `pillarContentItemId ?? repostedFromItemId ?? item.id`,
  * so cross-posts (which set `repostedFromItemId` but not pillar) actually
@@ -192,6 +208,7 @@ async function loadDraftSubstrate(item: {
   id: string;
   title: string | null;
   contentBody: string | null;
+  description: string | null;
   pillarContentItemId: string | null;
   repostedFromItemId: string | null;
 }): Promise<
@@ -212,11 +229,15 @@ async function loadDraftSubstrate(item: {
   }
 
   // No transcript on the upstream. For cross-posts (and the rare
-  // self-pointing case) fall back to the upstream's body / title.
+  // self-pointing case) fall back to the upstream's body / description /
+  // title. Description ranks ABOVE title because LinkedIn enrichment
+  // routinely populates description with the full post body when SC
+  // doesn't surface text/bodyText/postBody/headline.
   if (upstreamId !== item.id) {
     const [upstream] = await db
       .select({
         contentBody: productionItems.contentBody,
+        description: productionItems.description,
         title: productionItems.title,
         postType: productionItems.postType,
       })
@@ -231,6 +252,14 @@ async function loadDraftSubstrate(item: {
         sourcePostType: upstream?.postType ?? null,
       };
     }
+    const description = upstream?.description?.trim();
+    if (description && description.length > 0) {
+      return {
+        kind: "source_body",
+        text: description,
+        sourcePostType: upstream?.postType ?? null,
+      };
+    }
     const title = upstream?.title?.trim();
     if (title && title.length > 0) {
       return {
@@ -242,11 +271,16 @@ async function loadDraftSubstrate(item: {
   }
 
   // Last-ditch: maybe the seed copied the source body onto the new
-  // item's contentBody / title before this ran. Almost never the right
-  // path but cheaper to read than to skip and confuse the editor.
+  // item's own contentBody / description / title before this ran.
+  // Almost never the right path but cheaper to read than to skip and
+  // confuse the editor.
   const ownBody = item.contentBody?.trim();
   if (ownBody && ownBody.length > 0) {
     return { kind: "source_body", text: ownBody, sourcePostType: null };
+  }
+  const ownDescription = item.description?.trim();
+  if (ownDescription && ownDescription.length > 0) {
+    return { kind: "source_body", text: ownDescription, sourcePostType: null };
   }
   const ownTitle = item.title?.trim();
   if (ownTitle && ownTitle.length > 0) {
@@ -357,11 +391,11 @@ export async function runDraftAlgorithm(
     }
   }
 
-  // V1.3 substrate resolution. Long-form pillar derivatives prefer the
+  // V1.4 substrate resolution. Long-form pillar derivatives prefer the
   // pillar transcript (timestamps + segment text); cross-posts whose
-  // source is text-primary (LinkedIn, X, Threads) fall back to the
-  // upstream's contentBody, then its title. Skip with `no_substrate`
-  // only when nothing — transcript, body, or title — resolves.
+  // source is text-primary fall back to the upstream's contentBody,
+  // then `description` (LinkedIn long-form bodies live here), then
+  // title. Skip with `no_substrate` only when nothing resolves.
   const substrate = await loadDraftSubstrate(item);
   if (!substrate) return { status: "skipped", reason: "no_substrate" };
 
@@ -425,14 +459,37 @@ export async function runDraftAlgorithm(
 
   const platformArr = (item.platform as string[] | null) ?? [item.postType];
 
+  // V1.4: count media rows already on the item itself. For cross-posts
+  // `seedRepostContent` mirrors the source's `productionItemMedia` rows
+  // onto the new row before the algorithm fires, so the agent should
+  // know the post will publish with N images already attached and pick
+  // `media_action: "none"` rather than try to attach pillar media on
+  // top. The query is a single WHERE-by-id read; cheap.
+  const existingMediaRows = await db
+    .select({ kind: productionItemMedia.kind })
+    .from(productionItemMedia)
+    .where(eq(productionItemMedia.productionItemId, productionItemId));
+  const itemAlreadyHasMedia = {
+    count: existingMediaRows.length,
+    kinds: Array.from(
+      new Set(
+        existingMediaRows
+          .map((r) => r.kind)
+          .filter((k): k is "image" | "video" => k === "image" || k === "video"),
+      ),
+    ),
+  };
+
   // Build the MediaContext for the agent. Tells it what pillar media is
-  // archived and what the target platform's media rule allows.
+  // archived, what the target platform's media rule allows, and whether
+  // media rows are ALREADY on this item from a source seed.
   const mediaRule = getMediaRule(item.postType);
   const mediaContext: MediaContext = {
     pillarHasFullVideo: !!pillar?.mediaS3Key,
     pillarHasPoster: !!pillar?.posterS3Key,
     platformMode: mediaRule.mode,
     platformAllowedKinds: mediaRule.allowedKinds,
+    itemAlreadyHasMedia,
   };
 
   const result = await generateDraft({

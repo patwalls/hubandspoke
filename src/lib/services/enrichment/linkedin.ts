@@ -115,6 +115,19 @@ export async function enrichLinkedInItem(
     result.fields.descriptionFetched = true;
   }
 
+  // Visibility log: when SC returns NOTHING for the short-form body
+  // fields, the draft algorithm has to fall back to `description` /
+  // `title` as substrate. The fallback works (see draft-algorithm/run.ts
+  // v1.4 substrate chain) but we want to know how often SC under-reports
+  // here so we can tell SC vs LinkedIn vs our enricher apart.
+  const hadAnyBodyField =
+    !!data.text || !!data.bodyText || !!data.postBody || !!data.headline;
+  if (!hadAnyBodyField) {
+    console.info(
+      `linkedin enrichment: SC returned no short-form body fields for ${item.publishedLink}; description=${data.description ? "present" : "empty"}`,
+    );
+  }
+
   const author = data.author;
   if (author?.name || author?.username) {
     result.updates.authorHandle =
@@ -144,6 +157,28 @@ export async function enrichLinkedInItem(
     if (fallback) slides.push({ url: fallback, kind: "image", fileNameHint: stem });
   }
 
+  // v1.4: when SC returns no images AND no thumbnail, try the post URL's
+  // Open Graph tag as a last resort. LinkedIn share pages serve og:image
+  // publicly; SC under-reports media for some post variants so this
+  // closes the gap. Best-effort: 5s timeout, never throws — image is
+  // always optional.
+  if (slides.length === 0) {
+    const ogImage = await fetchOpenGraphImage(item.publishedLink).catch(
+      (err) => {
+        console.warn(
+          `linkedin enrichment: og:image fallback failed for ${item.publishedLink}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
+      },
+    );
+    if (ogImage) {
+      slides.push({ url: ogImage, kind: "image", fileNameHint: stem });
+      console.info(
+        `linkedin enrichment: og:image fallback resolved for ${item.publishedLink}`,
+      );
+    }
+  }
+
   if (slides.length > 0) {
     const res = await archiveCarouselMedia(itemId, slides);
     if (res.primary) {
@@ -171,5 +206,61 @@ function lastPathSegment(url: string): string | null {
     return parts[parts.length - 1] ?? null;
   } catch {
     return null;
+  }
+}
+
+const OG_FETCH_TIMEOUT_MS = 5_000;
+const OG_USER_AGENT =
+  // Pretend to be a generic crawler — LinkedIn serves OG tags to crawlers
+  // even on share URLs that block normal Mozilla UAs.
+  "Mozilla/5.0 (compatible; HubAndSpokeBot/1.0; +https://hubandspoke.starterstory.com)";
+
+/** Fetch the page at `url` and parse `<meta property="og:image">` (or
+ *  `og:image:secure_url`) from the head. Returns the image URL or null
+ *  on miss. Capped at 5s; only the first ~64 KB are read so we don't
+ *  pull a whole HTML body for one tag. */
+async function fetchOpenGraphImage(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OG_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": OG_USER_AGENT,
+        Accept: "text/html",
+      },
+      redirect: "follow",
+    });
+    if (!res.ok || !res.body) return null;
+    // Read only the first ~64 KB — meta tags live in <head> early on.
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    const limit = 64 * 1024;
+    while (total < limit) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+    reader.cancel().catch(() => {});
+    const head = new TextDecoder().decode(
+      chunks.length === 1
+        ? chunks[0]
+        : Buffer.concat(chunks.map((c) => Buffer.from(c))),
+    );
+    const match =
+      head.match(
+        /<meta\s+property=["']og:image:secure_url["']\s+content=["']([^"']+)["']/i,
+      ) ??
+      head.match(
+        /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i,
+      ) ??
+      head.match(
+        /<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i,
+      );
+    return match?.[1] ?? null;
+  } finally {
+    clearTimeout(timer);
   }
 }
