@@ -673,13 +673,16 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     return () => clearTimeout(t);
   }, [fieldSaves]);
 
-  // Per-format Create state, keyed by format id. The simplified flow has
-  // exactly one in-flight state ("creating") + a sticky "done" badge for
-  // duplicates we redirected to instead of creating fresh.
+  // Per-format Create state, keyed by format id.
   type CreateState = "idle" | "creating";
   const [createStatus, setCreateStatus] = useState<Record<string, CreateState>>(
     {}
   );
+  // Synchronous in-flight guard. The button's `disabled` attribute is driven
+  // by `createStatus`, but state updates don't paint until the next render —
+  // a fast double-click can fire `onClick` twice before React disables the
+  // button. The ref blocks the second call instantly.
+  const createInFlight = useRef<Set<string>>(new Set());
   const [creatingAll, setCreatingAll] = useState(false);
 
   // Descript upload modal state
@@ -721,14 +724,16 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   >({ kind: "idle" });
 
   // Spawn a derivative production_item in the target format, assigned to
-  // the calling user. On success → redirect to its detail page. On 409
-  // (a derivative for this pillar+format already exists) → redirect to
-  // the existing one.
+  // the calling user. Always creates a new draft — the route no longer
+  // dedups on (pillar, format), since a manual click is treated as the
+  // editor deliberately wanting another angle.
   async function createDerivative(
     targetFormatId: string,
     targetFormatName: string,
     options: { redirectOnSuccess: boolean } = { redirectOnSuccess: true }
-  ): Promise<{ id: string; existed: boolean } | null> {
+  ): Promise<{ id: string } | null> {
+    if (createInFlight.current.has(targetFormatId)) return null;
+    createInFlight.current.add(targetFormatId);
     setCreateStatus((prev) => ({ ...prev, [targetFormatId]: "creating" }));
     try {
       const res = await fetch(
@@ -745,14 +750,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           toast.success(`Created ${targetFormatName}`);
           router.push(`/${brand}/content/${json.id}`);
         }
-        return { id: json.id, existed: false };
-      }
-      if (res.status === 409 && json?.existingId) {
-        if (options.redirectOnSuccess) {
-          toast.info(`A ${targetFormatName} draft already exists — opening it.`);
-          router.push(`/${brand}/content/${json.existingId}`);
-        }
-        return { id: json.existingId, existed: true };
+        return { id: json.id };
       }
       toast.error(json?.error || `Failed to create ${targetFormatName}`);
       return null;
@@ -762,6 +760,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       );
       return null;
     } finally {
+      createInFlight.current.delete(targetFormatId);
       setCreateStatus((prev) => ({ ...prev, [targetFormatId]: "idle" }));
     }
   }
@@ -770,21 +769,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     if (creatingAll || targets.length === 0) return;
     setCreatingAll(true);
     let created = 0;
-    let existed = 0;
     let failed = 0;
     try {
       for (const t of targets) {
         const result = await createDerivative(t.id, t.name, {
           redirectOnSuccess: false,
         });
-        if (!result) failed++;
-        else if (result.existed) existed++;
-        else created++;
+        if (result) created++;
+        else failed++;
       }
       const parts: string[] = [];
       if (created > 0)
         parts.push(`${created} new draft${created === 1 ? "" : "s"}`);
-      if (existed > 0) parts.push(`${existed} already existed`);
       if (failed > 0) parts.push(`${failed} failed`);
       const summary = parts.join(" · ") || "Nothing happened";
       if (failed > 0 && created === 0) toast.error(summary);
@@ -1838,19 +1834,17 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
   return (
     <div className="space-y-6">
-      {/* Breadcrumb / back */}
-      <div className="flex items-center justify-between gap-3">
-        <Link
-          href={`/${brand}/content`}
-          className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-        >
-          ← Content
-        </Link>
-      </div>
-
-      {/* Header */}
+      {/* Header. Back link sits as a tiny breadcrumb above the title (used
+       *  to be its own row + `space-y-6` gap; folding it inline reclaims
+       *  ~50px of vertical space at the top of the page). */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0 flex-1">
+          <Link
+            href={`/${brand}/content`}
+            className="mb-1.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            ← Content
+          </Link>
           <div className="flex items-center gap-3 flex-wrap">
             <CoverImg
               src={coverImageUrl(item)}

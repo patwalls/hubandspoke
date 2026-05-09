@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
@@ -23,11 +23,11 @@ interface RouteContext {
  * Claude+Descript dispatcher: no LLM, no Descript clip job — the editor
  * does the work by hand on the new item's detail page.
  *
- * Dedup: if a derivative already exists for `(source.id, target.name)`, the
- * route returns 409 with `existingId` so the client can redirect to the
- * existing draft instead of creating a duplicate. The `repurpose_triggers`
- * row is also written so `threshold-monitor-sweep`'s cron-side dedup
- * doesn't double-create later.
+ * No application-level dedup: a manual click is treated as the editor
+ * deliberately wanting another draft (different angle, different framing,
+ * etc.), so we always create. `threshold-monitor-sweep` does its own
+ * dedup against `repurpose_triggers` for cron-driven fan-out, so this
+ * change doesn't cause runaway auto-creation.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireSession();
@@ -83,30 +83,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json(
       { error: "Target format must belong to the same brand" },
       { status: 400 }
-    );
-  }
-
-  // Dedup against an existing derivative for this (source, format) pair.
-  // Case-insensitive on `format` to match the formats table's
-  // (brand, lower(name)) uniqueness convention.
-  const [existing] = await db
-    .select({ id: productionItems.id })
-    .from(productionItems)
-    .where(
-      and(
-        eq(productionItems.pillarContentItemId, source.id),
-        sql`lower(${productionItems.format}) = lower(${target.name})`,
-        isNull(productionItems.deletedAt)
-      )
-    )
-    .limit(1);
-  if (existing) {
-    return NextResponse.json(
-      {
-        error: `A "${target.name}" derivative already exists for this pillar`,
-        existingId: existing.id,
-      },
-      { status: 409 }
     );
   }
 
