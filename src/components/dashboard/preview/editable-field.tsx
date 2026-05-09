@@ -66,8 +66,13 @@ export function EditableField({
         onChange={(e) => onLocalEdit(fieldKey, e.target.value)}
         onBlur={() => onCommit?.(fieldKey)}
         rows={1}
+        // overflow-hidden: the auto-resize effect above keeps height ===
+        // scrollHeight, so there's never anything to scroll inside.
+        // Without this the textarea's default `overflow: auto` traps wheel
+        // events while the cursor is over it, making the page scroll feel
+        // stuck on long captions.
         className={cn(
-          "block w-full resize-none border-0 bg-transparent p-0 outline-none",
+          "block w-full resize-none overflow-hidden border-0 bg-transparent p-0 outline-none",
           "placeholder:text-muted-foreground/60",
           "focus:ring-0 focus:outline-none",
           "focus-visible:ring-0",
