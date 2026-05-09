@@ -18,6 +18,7 @@ import {
 } from "@/lib/descript";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { enqueue } from "@/jobs/enqueue";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 /**
  * Check if a caught database error is a unique constraint violation for a
@@ -349,6 +350,7 @@ export async function assignClipIdea(args: {
         sourceClipIdeaId: args.clipIdeaId,
         producerUserId: args.decidedByUserId,
         editorUserId: args.editorUserId,
+        utmCampaign: await generateUtmCampaign(row.hook),
         hook: row.hook,
         hookSource: "clip_idea",
         hookExtractedAt: new Date(),
@@ -571,6 +573,7 @@ export async function createClipIdeaInDescript(args: {
         editorUserId: args.actorUserId,
         descriptProjectId: row.descriptProjectId,
         descriptProjectUrl: agent.projectUrl,
+        utmCampaign: await generateUtmCampaign(row.hook),
         hook: row.hook,
         hookSource: "clip_idea",
         hookExtractedAt: new Date(),

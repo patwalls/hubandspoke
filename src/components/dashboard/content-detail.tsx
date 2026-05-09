@@ -1100,6 +1100,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const [publishedLink, setPublishedLink] = useState("");
   const [publishedDate, setPublishedDate] = useState("");
   const [utmCampaign, setUtmCampaign] = useState("");
+  const [generatingUtm, setGeneratingUtm] = useState(false);
   const [sourceType, setSourceType] = useState<string>("original");
   const [dmKeywordDialogOpen, setDmKeywordDialogOpen] = useState(false);
   // Destination URL for the attached DM keyword slug. Fetched from the
@@ -2941,21 +2942,60 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         {showMore && (
           <PropertyRowSolo>
             <PropertyRow label="CTA UTM">
-              <Input
-                value={utmCampaign}
-                onChange={(e) => setUtmCampaign(e.target.value)}
-                onBlur={() => {
-                  const next = utmCampaign.trim();
-                  if ((item.utmCampaign ?? "") !== next) {
-                    void persistField({ utmCampaign: next }).then((ok) => {
-                      if (!ok) setUtmCampaign(item.utmCampaign ?? "");
-                    });
-                  }
-                }}
-                aria-label="CTA UTM campaign"
-                className={cn(PROPERTY_INPUT_CLASS, "font-mono")}
-                placeholder="e.g. angus-warner-42"
-              />
+              <div className="flex items-center gap-2 w-full">
+                <Input
+                  value={utmCampaign}
+                  onChange={(e) => setUtmCampaign(e.target.value)}
+                  onBlur={() => {
+                    const next = utmCampaign.trim();
+                    if ((item.utmCampaign ?? "") !== next) {
+                      void persistField({ utmCampaign: next }).then((ok) => {
+                        if (!ok) setUtmCampaign(item.utmCampaign ?? "");
+                      });
+                    }
+                  }}
+                  aria-label="CTA UTM campaign"
+                  className={cn(PROPERTY_INPUT_CLASS, "font-mono flex-1")}
+                  placeholder="e.g. angus-warner-42"
+                />
+                {!utmCampaign.trim() && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs shrink-0"
+                    disabled={generatingUtm}
+                    onClick={async () => {
+                      if (generatingUtm) return;
+                      setGeneratingUtm(true);
+                      try {
+                        const res = await fetch(
+                          "/api/production-items/generate-utm",
+                          {
+                            method: "POST",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({ title: item.title ?? "" }),
+                          },
+                        );
+                        const json = await res.json().catch(() => ({}));
+                        if (!res.ok || typeof json?.utmCampaign !== "string") {
+                          toast.error(
+                            json?.error || "Couldn't generate CTA UTM",
+                          );
+                          return;
+                        }
+                        const slug = json.utmCampaign as string;
+                        const ok = await persistField({ utmCampaign: slug });
+                        if (ok) setUtmCampaign(slug);
+                      } finally {
+                        setGeneratingUtm(false);
+                      }
+                    }}
+                  >
+                    {generatingUtm ? "Generating…" : "Generate"}
+                  </Button>
+                )}
+              </div>
             </PropertyRow>
           </PropertyRowSolo>
         )}

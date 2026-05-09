@@ -14,6 +14,7 @@ import { topShortFormPerformers } from "@/lib/db/queries";
 import { findAccountForBrandPlatform } from "@/lib/db/accounts";
 import { getPromotedClipFormat } from "@/lib/services/promote-clip-idea";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 const SHORT_FORM_PLATFORMS = ["YouTube Shorts", "Instagram Reel", "TikTok"];
 const AUTO_GENERATE_POST_TYPES = new Set(["youtube_long"]);
@@ -276,6 +277,7 @@ export async function generateClipIdeasForItem(
         sourceClipIdeaId: ci.id,
         producerUserId: assignees.producerUserId,
         editorUserId: assignees.editorUserId,
+        utmCampaign: await generateUtmCampaign(ci.hook),
         hook: ci.hook,
         hookSource: "clip_idea",
         hookExtractedAt: new Date(),
