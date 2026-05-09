@@ -88,8 +88,11 @@ async function main() {
     fieldSchema,
     formatInstructions: format.instructions,
     pillarTitle: item.title,
-    transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
-    transcriptDurationSec: transcript.durationSec,
+    substrate: {
+      kind: "transcript",
+      segmentsMarkdown: transcript.segmentsMarkdown,
+      durationSec: transcript.durationSec,
+    },
     // Smoke script doesn't exercise the V1.1 media path — feed a minimal
     // MediaContext that nudges the agent toward `media_action: "none"`.
     mediaContext: {

@@ -53,7 +53,20 @@ import { getTopPerformingCaptions } from "./exemplars";
 // breakdown, listicle, etc.). The exemplars helper now pulls format-scoped
 // winners first and tops up with platform-scoped rows only when a format
 // is sparse; the prompt labels each block honestly. See exemplars.ts.
-export const DRAFT_ALGORITHM_VERSION = "1.2";
+//
+// V1.3 (2026-05-09): the algorithm no longer requires a transcript to
+// run. Cross-posts from text-primary sources (LinkedIn, X, Threads)
+// have nothing to transcribe — the source body IS the substance — but
+// V1.2 skipped them with `no_transcript` and produced empty drafts.
+// `loadDraftSubstrate` now returns either a transcript (long-form pillar
+// derivatives — unchanged path) or the upstream item's contentBody/title
+// (text-primary fallback). Skip code renamed to `no_substrate` for the
+// genuinely-empty case. Upstream resolution chain expanded from
+// `pillarContentItemId ?? item.id` to
+// `pillarContentItemId ?? repostedFromItemId ?? item.id` so cross-posts
+// actually resolve their source row. See draft-agent.ts for the
+// substrate-aware prompt rendering.
+export const DRAFT_ALGORITHM_VERSION = "1.3";
 export const GENERATED_BY = `draft-algo:v${DRAFT_ALGORITHM_VERSION}:${AGENT_GENERATED_BY}`;
 
 // Translate the agent's MediaAction into a concrete file payload for
@@ -135,7 +148,10 @@ export type DraftAlgorithmSkipReason =
   | "no_platform_schema"
   | "no_caption_field"
   | "already_filled"
-  | "no_transcript";
+  // No transcript AND no source body/title to draft from. Renamed in v1.3
+  // from `no_transcript` — the algorithm now also accepts source post text
+  // as a substrate, so a missing transcript alone no longer skips.
+  | "no_substrate";
 
 export interface RunDraftAlgorithmResult {
   status: "generated" | "skipped";
@@ -151,6 +167,93 @@ export interface RunDraftAlgorithmOpts {
    *  explicitly clicks Regenerate on a draft that already has content. */
   force?: boolean;
   actorUserId?: string | null;
+}
+
+/**
+ * V1.3: resolve the substrate the agent will draft from. Tries in order:
+ *   1. The upstream's transcript (long-form pillar derivatives — usual path).
+ *   2. The upstream's contentBody (text-primary cross-posts: LinkedIn → X
+ *      where the source's body IS the substance).
+ *   3. The upstream's title (fallback when SC/the enricher came up empty
+ *      on contentBody but the title carries the post's text — common for
+ *      one-line tweets and short LinkedIn updates).
+ *   4. The item's own contentBody/title (covers an exotic case where
+ *      seed copied the source body but no `repostedFromItemId` was set).
+ *
+ * Upstream chain is `pillarContentItemId ?? repostedFromItemId ?? item.id`,
+ * so cross-posts (which set `repostedFromItemId` but not pillar) actually
+ * resolve their source — V1.2 always fell back to `item.id` for those,
+ * which is the just-created empty new row.
+ *
+ * Returns null only when nothing resolves; the algorithm then skips with
+ * `no_substrate`.
+ */
+async function loadDraftSubstrate(item: {
+  id: string;
+  title: string | null;
+  contentBody: string | null;
+  pillarContentItemId: string | null;
+  repostedFromItemId: string | null;
+}): Promise<
+  | { kind: "transcript"; segmentsMarkdown: string; durationSec: number }
+  | { kind: "source_body"; text: string; sourcePostType: string | null }
+  | null
+> {
+  const upstreamId =
+    item.pillarContentItemId ?? item.repostedFromItemId ?? item.id;
+
+  const transcript = await getTranscriptForPrompt(upstreamId);
+  if (transcript) {
+    return {
+      kind: "transcript",
+      segmentsMarkdown: transcript.segmentsMarkdown,
+      durationSec: transcript.durationSec,
+    };
+  }
+
+  // No transcript on the upstream. For cross-posts (and the rare
+  // self-pointing case) fall back to the upstream's body / title.
+  if (upstreamId !== item.id) {
+    const [upstream] = await db
+      .select({
+        contentBody: productionItems.contentBody,
+        title: productionItems.title,
+        postType: productionItems.postType,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, upstreamId))
+      .limit(1);
+    const body = upstream?.contentBody?.trim();
+    if (body && body.length > 0) {
+      return {
+        kind: "source_body",
+        text: body,
+        sourcePostType: upstream?.postType ?? null,
+      };
+    }
+    const title = upstream?.title?.trim();
+    if (title && title.length > 0) {
+      return {
+        kind: "source_body",
+        text: title,
+        sourcePostType: upstream?.postType ?? null,
+      };
+    }
+  }
+
+  // Last-ditch: maybe the seed copied the source body onto the new
+  // item's contentBody / title before this ran. Almost never the right
+  // path but cheaper to read than to skip and confuse the editor.
+  const ownBody = item.contentBody?.trim();
+  if (ownBody && ownBody.length > 0) {
+    return { kind: "source_body", text: ownBody, sourcePostType: null };
+  }
+  const ownTitle = item.title?.trim();
+  if (ownTitle && ownTitle.length > 0) {
+    return { kind: "source_body", text: ownTitle, sourcePostType: null };
+  }
+
+  return null;
 }
 
 /**
@@ -254,11 +357,13 @@ export async function runDraftAlgorithm(
     }
   }
 
-  // Transcript — pillar's transcript for derivatives, the item's own for
-  // the (rare) case of an originally-cross_post that points at itself.
-  const transcriptSourceId = item.pillarContentItemId ?? item.id;
-  const transcript = await getTranscriptForPrompt(transcriptSourceId);
-  if (!transcript) return { status: "skipped", reason: "no_transcript" };
+  // V1.3 substrate resolution. Long-form pillar derivatives prefer the
+  // pillar transcript (timestamps + segment text); cross-posts whose
+  // source is text-primary (LinkedIn, X, Threads) fall back to the
+  // upstream's contentBody, then its title. Skip with `no_substrate`
+  // only when nothing — transcript, body, or title — resolves.
+  const substrate = await loadDraftSubstrate(item);
+  if (!substrate) return { status: "skipped", reason: "no_substrate" };
 
   // Format instructions (editorial voice / style guide). Optional.
   let formatInstructions: string | null = null;
@@ -341,8 +446,7 @@ export async function runDraftAlgorithm(
     fieldSchema,
     formatInstructions,
     pillarTitle,
-    transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
-    transcriptDurationSec: transcript.durationSec,
+    substrate,
     pastCaptions,
     mediaContext,
   });

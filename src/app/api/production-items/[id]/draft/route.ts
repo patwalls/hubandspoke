@@ -39,7 +39,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
     if (result.status === "skipped") {
       const userActionable =
-        result.reason === "no_transcript" ||
+        result.reason === "no_substrate" ||
         result.reason === "unsupported_post_type" ||
         result.reason === "no_platform_schema" ||
         result.reason === "no_caption_field";
@@ -72,8 +72,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
 function friendlyReason(reason: string | undefined): string {
   switch (reason) {
-    case "no_transcript":
-      return "No transcript available for this item's pillar. Fetch the transcript first.";
+    case "no_substrate":
+      return "No transcript, body, or title is available on this item's source. Fetch the transcript or fill in a caption on the source post first.";
     case "unsupported_post_type":
       return "Draft generation isn't supported for this post type yet.";
     case "no_platform_schema":

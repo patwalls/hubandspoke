@@ -20,7 +20,12 @@ const MODEL = "claude-opus-4-7";
 // vs platform-scoped sub-blocks (see exemplars.ts v1.2), and a STRUCTURE
 // RULE was added so the agent mirrors recurring patterns (timestamp
 // breakdowns, listicles) when the format examples share one.
-export const PROMPT_VERSION = 5;
+// v6 (2026-05-09): substrate becomes a discriminated input — either the
+// pillar transcript (long-form derivatives, unchanged path) or the source
+// post's body/title text (text-primary cross-posts: LinkedIn → X, X → Threads).
+// The per-call payload renders one of two blocks (## PILLAR TRANSCRIPT or
+// ## SOURCE POST BODY) and the TASK line adapts accordingly.
+export const PROMPT_VERSION = 6;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -62,6 +67,12 @@ OUTPUT RULES
 - Match the tone implied by the reference posts when any are given.
 - Call the propose_draft tool exactly once with a value for every content field AND a media_action. Never respond with plain text.`;
 
+/** v1.3: the substantive input that grounds the agent's draft. Picked by
+ *  `loadDraftSubstrate` in `src/lib/services/draft-algorithm/run.ts`. */
+export type DraftSubstrate =
+  | { kind: "transcript"; segmentsMarkdown: string; durationSec: number }
+  | { kind: "source_body"; text: string; sourcePostType: string | null };
+
 export interface PastCaptionExample {
   /** Original post URL when known; helps the model see real published copy. */
   publishedLink?: string | null;
@@ -92,8 +103,11 @@ export interface GenerateDraftArgs {
   fieldSchema: FormatFieldSchema;
   formatInstructions: string | null;
   pillarTitle: string | null;
-  transcriptSegmentsMarkdown: string;
-  transcriptDurationSec: number;
+  /** v1.3: the substantive input the agent grounds its draft in. Either a
+   *  long-form transcript (pillar derivatives) or the source post's text
+   *  (text-primary cross-posts where the body IS the content). The
+   *  per-call payload renders one block or the other. */
+  substrate: DraftSubstrate;
   /** Past captions surfaced to the model as exemplars. v1.2: each entry
    *  carries a `source` tag — "format" rows are same-format winners (the
    *  STRUCTURE RULE points at these), "platform" rows are top-up
@@ -390,19 +404,42 @@ export async function generateDraft(
     .filter(Boolean)
     .join("\n");
 
-  // Per-call payload — transcript + media context + task. Not cached:
-  // transcript and pillar-media availability are per-item, and the task
+  // Per-call payload — substrate + media context + task. Not cached:
+  // substrate and pillar-media availability are per-item, and the task
   // block sits at the end so the cache breakpoint above it stays warm
-  // across different items in the same format/platform run.
+  // across different items in the same format/platform run. v1.3: the
+  // substrate block is either the pillar transcript (long-form
+  // derivatives) or the source post body (text-primary cross-posts).
   const mc = args.mediaContext;
+  const substrate = args.substrate;
+  const substrateBlock =
+    substrate.kind === "transcript"
+      ? [
+          `Pillar title: ${args.pillarTitle ?? args.item.title ?? "(untitled)"}`,
+          `Pillar duration: ${Math.round(substrate.durationSec)}s`,
+          ``,
+          `## PILLAR TRANSCRIPT`,
+          `Transcript cues, pre-segmented with [MM:SS] timestamps. Pull specifics — numbers, names, direct quotes — from this.`,
+          ``,
+          substrate.segmentsMarkdown,
+        ].join("\n")
+      : [
+          `Source post type: ${substrate.sourcePostType ?? "(unknown)"}`,
+          `Source post title: ${args.pillarTitle ?? args.item.title ?? "(untitled)"}`,
+          ``,
+          `## SOURCE POST BODY`,
+          `The original post text from the source platform. This IS the substance — there's no long-form video to transcribe; the post itself is what the team wants adapted to the target platform. Keep its concrete ideas, facts/numbers/named people, and angle. Change the format and voice to match the target platform's field schema and the past captions in this format. Don't paraphrase generically.`,
+          ``,
+          substrate.text,
+        ].join("\n");
+
+  const groundingPhrase =
+    substrate.kind === "transcript"
+      ? "Ground every field in specifics from the transcript."
+      : "Ground every field in the source post's specifics; treat it as the canonical statement of the idea.";
+
   const perCallPayload = [
-    `Pillar title: ${args.pillarTitle ?? args.item.title ?? "(untitled)"}`,
-    `Pillar duration: ${Math.round(args.transcriptDurationSec)}s`,
-    ``,
-    `## PILLAR TRANSCRIPT`,
-    `Transcript cues, pre-segmented with [MM:SS] timestamps. Pull specifics — numbers, names, direct quotes — from this.`,
-    ``,
-    args.transcriptSegmentsMarkdown,
+    substrateBlock,
     ``,
     `## MEDIA CONTEXT`,
     `Pillar media available:`,
@@ -413,7 +450,7 @@ export async function generateDraft(
     `- allowed kinds: ${mc.platformAllowedKinds.join(", ") || "(none)"}`,
     ``,
     `## TASK`,
-    `Call propose_draft exactly once. Fill in every content field, AND set media_action per the MEDIA ACTION RULES. Ground every field in specifics from the transcript. Match tone to any reference posts shown in the editorial notes${
+    `Call propose_draft exactly once. Fill in every content field, AND set media_action per the MEDIA ACTION RULES. ${groundingPhrase} Match tone to any reference posts shown in the editorial notes${
       args.pastCaptions && args.pastCaptions.length > 0
         ? " AND to the past-caption exemplars"
         : ""
