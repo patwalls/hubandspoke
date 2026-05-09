@@ -1834,17 +1834,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
   return (
     <div className="space-y-6">
-      {/* Header. Back link sits as a tiny breadcrumb above the title (used
-       *  to be its own row + `space-y-6` gap; folding it inline reclaims
-       *  ~50px of vertical space at the top of the page). */}
+      {/* Header. The "← Content" back link is rendered by `<SectionTabs>`
+       *  in the dashboard layout when the path matches a content-detail
+       *  page — keeps the full vertical space of this column for the
+       *  title + metadata. */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0 flex-1">
-          <Link
-            href={`/${brand}/content`}
-            className="mb-1.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          >
-            ← Content
-          </Link>
           <div className="flex items-center gap-3 flex-wrap">
             <CoverImg
               src={coverImageUrl(item)}

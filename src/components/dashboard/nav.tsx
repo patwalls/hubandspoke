@@ -392,34 +392,57 @@ export function SectionTabs({
           { href: `/${currentBrand}/accounts`, label: "Accounts" },
         ];
 
+  // Surface a "← Content" back link to the LEFT of the tabs when we're on
+  // a content-detail page (`/<brand>/content/<id>`). The detail page used
+  // to render its own breadcrumb row, which ate ~50px of vertical space
+  // for a single link in an otherwise-empty row. The section-tabs row is
+  // already drawn and has plenty of free horizontal space — fold the back
+  // affordance there instead.
+  const contentDetailMatch = pathname.match(
+    /^\/([^/]+)\/content\/[^/]+(?:\/|$)/,
+  );
+  const contentBackHref = contentDetailMatch
+    ? `/${contentDetailMatch[1]}/content`
+    : null;
+
   return (
-    <div className="inline-flex items-center gap-1 rounded-lg bg-muted/60 p-1">
-      {tabs.map((tab) => {
-        const isActive =
-          pathname === tab.href ||
-          (tab.label === "Dashboard" && pathname === "/") ||
-          (tab.label === "Content" && pathname === "/content") ||
-          (tab.label === "Queue" &&
-            (pathname === "/queue" || pathname.startsWith(`${tab.href}/`))) ||
-          (tab.label === "Production" && pathname === "/production") ||
-          (tab.label === "Formats" && pathname === "/formats") ||
-          (tab.label === "Accounts" && pathname.endsWith("/accounts"));
-        return (
-          <Link
-            key={tab.href}
-            href={tab.href}
-            aria-current={isActive ? "page" : undefined}
-            className={cn(
-              "px-3 py-1.5 rounded-md text-sm transition-colors",
-              isActive
-                ? "bg-card text-foreground font-medium shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {tab.label}
-          </Link>
-        );
-      })}
+    <div className="flex items-center gap-3">
+      {contentBackHref && (
+        <Link
+          href={contentBackHref}
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          ← Content
+        </Link>
+      )}
+      <div className="inline-flex items-center gap-1 rounded-lg bg-muted/60 p-1">
+        {tabs.map((tab) => {
+          const isActive =
+            pathname === tab.href ||
+            (tab.label === "Dashboard" && pathname === "/") ||
+            (tab.label === "Content" && pathname === "/content") ||
+            (tab.label === "Queue" &&
+              (pathname === "/queue" || pathname.startsWith(`${tab.href}/`))) ||
+            (tab.label === "Production" && pathname === "/production") ||
+            (tab.label === "Formats" && pathname === "/formats") ||
+            (tab.label === "Accounts" && pathname.endsWith("/accounts"));
+          return (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              aria-current={isActive ? "page" : undefined}
+              className={cn(
+                "px-3 py-1.5 rounded-md text-sm transition-colors",
+                isActive
+                  ? "bg-card text-foreground font-medium shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {tab.label}
+            </Link>
+          );
+        })}
+      </div>
     </div>
   );
 }
