@@ -1725,6 +1725,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     "linkedin",
     "tiktok",
     "youtube_community",
+    "youtube_shorts",
   ]);
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
