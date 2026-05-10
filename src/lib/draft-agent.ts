@@ -49,7 +49,17 @@ const MODEL = "claude-opus-4-7";
 // result body now carries `requestedCount` + `validatedCount` so the
 // agent can reason about gaps structurally rather than counting an
 // array by eyeballing it.
-export const PROMPT_VERSION = 9;
+// v10 (2026-05-10): length-from-exemplars. The X tweet field had a
+// hardcoded 280-char cap baked into BOTH the JSON schema maxLength
+// AND the field's per-field prompt ("Hard cap 280 chars"). That was
+// the free-tier limit; @starter_story is verified and posts long-form
+// X up to ~25K chars. Top-performing "Full Video On X!" tweets in the
+// exemplar pool are 400-600 chars with 5-6 timestamp bullets — the
+// cap was forcing the agent to truncate. Schema cap bumped to 25000
+// (X's real ceiling), prompt rewritten to teach length-from-exemplars.
+// New OUTPUT RULE here reinforces the same principle agent-wide:
+// length comes from the exemplar pool, not from a hardcoded cap.
+export const PROMPT_VERSION = 10;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -101,6 +111,7 @@ OUTPUT RULES
 - No clickbait the content can't back up.
 - No hashtag walls.
 - Match the tone implied by the reference posts when any are given.
+- LENGTH: learn appropriate length from the past-caption exemplars in this format. Don't pin yourself to platform free-tier limits (e.g. 280-char tweets) — the accounts we post to are verified and post long-form. If the top exemplars run 400–600 chars with 5–6 bullets, your draft should too. A short, truncated draft that loses the bullet structure is WORSE than a longer draft that fits all the elements the format Skill calls for.
 - Call the propose_draft tool exactly once with a value for every content field AND a media_action. Never respond with plain text.`;
 
 /** v1.3: the substantive input that grounds the agent's draft. Picked by

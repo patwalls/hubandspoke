@@ -152,7 +152,10 @@ export function XSimulator({
                 onLocalEdit={onLocalEdit}
                 onCommit={onCommit}
                 author={data.author}
-                maxLength={280}
+                // No maxLength: @starter_story is a verified account and
+                // posts long-form X — the 280 cap was misleading. The
+                // CtaCard's CharCounter renders null when maxLength is
+                // undefined, so the bottom-right "0/280" counter is gone.
               />
             )}
           </div>

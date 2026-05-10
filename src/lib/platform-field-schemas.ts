@@ -37,22 +37,31 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
     version: SCHEMA_VERSION,
     fields: [
       {
+        // X Premium / verified accounts (which @starter_story is) post
+        // long-form tweets up to ~25,000 chars. The previous 280 cap was
+        // the free-tier limit and was forcing the agent to truncate
+        // multi-bullet timestamp breakdowns. Real top-performing "Full
+        // Video On X!" posts in our pool run 400–600 chars. We keep
+        // 25000 as the schema-level safety net (X's real platform max)
+        // but the prompt now teaches the agent to learn appropriate
+        // length from the past-caption exemplars rather than aim at a
+        // specific number.
         key: "tweet",
         label: "Tweet",
         type: "longtext",
-        maxLength: 280,
+        maxLength: 25000,
         required: true,
         prompt:
-          "The full tweet text. Open with a single concrete hook drawn from the pillar transcript — a specific number, a contrarian claim, or a before/after moment. Hard cap 280 chars. No hashtags, no emojis unless one is clearly warranted. First line must stand on its own as a scroll-stopper even in a feed preview.",
+          "The full tweet text. Open with a single concrete hook drawn from the pillar transcript — a specific number, a contrarian claim, or a before/after moment. First line must stand on its own as a scroll-stopper. **Length: match the distribution of past-caption exemplars for this format. Don't hard-cap to 280 — this account posts long-form X. If the format Skill calls for N bullets and the exemplars demonstrate it, fit all N (a 500-char tweet with 5 timestamp bullets beats a 250-char tweet with 1).** No hashtags, no emojis unless one is clearly warranted.",
       },
       {
         key: "cta",
         label: "Reply tweet",
         type: "longtext",
-        maxLength: 280,
+        maxLength: 25000,
         required: false,
         prompt:
-          "Reply tweet that lands the call-to-action. Apply the CTA RULES: only fill this in if the FORMAT REFERENCES & EDITORIAL NOTES specify a CTA pattern (link template, UTM, copy guidance, 'add a reply with X'). If the notes say nothing about a CTA, return an empty string — do not invent one.",
+          "Reply tweet that lands the call-to-action. Apply the CTA RULES: only fill this in if the FORMAT REFERENCES & EDITORIAL NOTES specify a CTA pattern (link template, UTM, copy guidance, 'add a reply with X'). If the notes say nothing about a CTA, return an empty string — do not invent one. Same length guidance as the main tweet: match the exemplar reply lengths, don't hard-cap to 280.",
       },
     ],
   },
