@@ -140,7 +140,7 @@ export function LinkedInSimulator({
                 className="inline-flex items-center gap-1.5 self-start rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
               >
                 <ImagePlusIcon className="h-3.5 w-3.5" />
-                {hasMedia ? "Add another" : "Add photo or video"}
+                {hasMedia ? "Add more media" : "Add photo or video"}
               </button>
             )}
 
