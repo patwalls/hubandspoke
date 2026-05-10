@@ -5,6 +5,7 @@ import type {
   ContentDraftSlide,
   FormatFieldSchema,
 } from "@/lib/db/schema";
+import { findInterestingTimestamps } from "@/lib/services/draft-algorithm/timestamp-finder";
 
 // Opus for copywriting judgment. Short-form copy rewards nuance more than
 // speed — a weak hook sinks a post, and the cost delta vs haiku is trivial
@@ -35,7 +36,13 @@ const MODEL = "claude-opus-4-7";
 // CONTEXT block; when count > 0 the agent is told to pick
 // `media_action: "none"` so it doesn't try to attach pillar media on
 // top of source-mirrored media.
-export const PROMPT_VERSION = 7;
+// v8 (2026-05-10): agentic tool loop. The agent now picks tool calls
+// itself (tool_choice: "auto"); a TOOLS section in the system prompt
+// describes when to invoke specialized tools vs proposing the draft
+// directly. First tool is find_interesting_timestamps — see
+// src/lib/services/draft-algorithm/timestamp-finder.ts. Tool is
+// registered only when substrate.kind === "transcript".
+export const PROMPT_VERSION = 8;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -72,6 +79,13 @@ Some target platforms include a "cta" field (X reply tweet, LinkedIn first comme
 STRUCTURE RULE
 When the prompt includes a "TOP-PERFORMING EXAMPLES IN THIS FORMAT" block and a recurring structural pattern shows up across those examples (e.g. opening hook + bulleted timestamp breakdown like "(2:46)", listicle with em-dashes, two-line setup + punchline, "Here's the top 1% of our chat:" + list, etc.), mirror that structure in your draft. Don't invent a structure that isn't repeated across the format examples; the platform-only examples are voice/tone reference, not structural.
 
+TOOLS
+You have specialized tools available in this conversation. Treat them as capabilities you should USE rather than guess at. Tool calls are cheap; hallucinations are expensive.
+
+- find_interesting_timestamps — call this whenever the format Skill mentions timestamps, real timestamps, or "pulling moments from the video." Reads the pillar transcript directly and returns N curated MM:SS picks with editor-voice labels. Never invent timestamps from your own scan of the transcript text — use this tool, then compose the draft using the timestamps it returns. You can call it multiple times if the format wants distinct lists (e.g. "5 strategy moments AND 3 funny moments").
+
+When you've gathered everything you need, call propose_draft as your final tool call. Never respond with plain text.
+
 OUTPUT RULES
 - Ground every field in specifics from the transcript: numbers, named people, direct quotes, concrete outcomes. No generic platitudes.
 - No clickbait the content can't back up.
@@ -80,9 +94,23 @@ OUTPUT RULES
 - Call the propose_draft tool exactly once with a value for every content field AND a media_action. Never respond with plain text.`;
 
 /** v1.3: the substantive input that grounds the agent's draft. Picked by
- *  `loadDraftSubstrate` in `src/lib/services/draft-algorithm/run.ts`. */
+ *  `loadDraftSubstrate` in `src/lib/services/draft-algorithm/run.ts`.
+ *  v1.5: transcript variant now carries the raw segments array so the
+ *  `find_interesting_timestamps` tool can ground picks in real segment
+ *  text, not just the rendered markdown. Optional for back-compat with
+ *  callers that only have markdown (e.g. the smoke test). */
 export type DraftSubstrate =
-  | { kind: "transcript"; segmentsMarkdown: string; durationSec: number }
+  | {
+      kind: "transcript";
+      segmentsMarkdown: string;
+      durationSec: number;
+      segments?: ReadonlyArray<{
+        startSec: number;
+        endSec: number;
+        text: string;
+        speaker?: string;
+      }>;
+    }
   | { kind: "source_body"; text: string; sourcePostType: string | null };
 
 export interface PastCaptionExample {
@@ -388,6 +416,40 @@ export async function generateDraft(
     },
   ];
 
+  // v1.5: register find_interesting_timestamps only when we actually have
+  // transcript segments to query. Cross-posts using source-body substrate
+  // have no timestamps to find — exposing the tool would just waste an
+  // iteration and confuse the model.
+  const transcriptSegments =
+    args.substrate.kind === "transcript" && args.substrate.segments
+      ? args.substrate.segments
+      : null;
+  if (transcriptSegments && transcriptSegments.length > 0) {
+    tools.push({
+      name: "find_interesting_timestamps",
+      description:
+        "Find N real timestamps from the pillar video's transcript matching an editorial focus. Use this when the format Skill calls for timestamps in the copy — never invent timestamps from your own scan of the transcript text. Returns an array of { mmss, label, reason } records with the start times of real segments. Multiple calls are fine when you need distinct lists.",
+      input_schema: {
+        type: "object",
+        properties: {
+          focus: {
+            type: "string",
+            description:
+              "What KIND of moments to find. Lift this from the format Skill where possible — e.g. 'most interesting moments for a business breakdown', 'the funniest moments', 'moments about pricing strategy'.",
+          },
+          count: {
+            type: "integer",
+            minimum: 1,
+            maximum: 10,
+            description:
+              "How many timestamps to return. Default 5 unless the format Skill specifies otherwise.",
+          },
+        },
+        required: ["focus", "count"],
+      },
+    });
+  }
+
   const fieldsBlock = args.fieldSchema.fields
     .map((f) => {
       const limit = f.maxLength ? ` (max ${f.maxLength} chars)` : "";
@@ -497,58 +559,163 @@ export async function generateDraft(
     }.`,
   ].join("\n");
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 4096,
-    system: [
-      {
-        type: "text",
-        text: SYSTEM_PROMPT,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    tools,
-    tool_choice: { type: "tool", name: "propose_draft" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: stablePreamble,
-            cache_control: { type: "ephemeral" },
-          },
-          { type: "text", text: perCallPayload },
-        ],
-      },
-    ],
-  });
+  // v1.5: multi-turn agentic loop. The agent picks tool calls itself
+  // (tool_choice: "auto"); we run any non-final tools (currently
+  // find_interesting_timestamps), append the result, and re-call.
+  // Final tool is propose_draft — when seen we extract and return.
+  // MAX_ITERATIONS is a safety net; in practice a normal draft is 1–2
+  // iterations (zero or one timestamp call + the propose_draft call).
+  const MAX_ITERATIONS = 5;
+  const messages: Anthropic.MessageParam[] = [
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: stablePreamble,
+          cache_control: { type: "ephemeral" },
+        },
+        { type: "text", text: perCallPayload },
+      ],
+    },
+  ];
 
-  let rawInput: unknown = null;
-  for (const block of response.content) {
-    if (block.type === "tool_use" && block.name === "propose_draft") {
-      rawInput = block.input;
+  // Cumulative token usage across iterations — modelUsage on the
+  // resulting content_drafts row reports the full draft cost, not just
+  // the final iteration.
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheCreationTokens = 0;
+  let cacheReadTokens = 0;
+
+  let proposeDraftInput: unknown = null;
+
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      system: [
+        {
+          type: "text",
+          text: SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+      tools,
+      tool_choice: { type: "auto" },
+      messages,
+    });
+
+    inputTokens += response.usage.input_tokens;
+    outputTokens += response.usage.output_tokens;
+    cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
+    cacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
+
+    if (response.stop_reason !== "tool_use") {
+      // Plain-text response with no tool call. Normally the system
+      // prompt forbids this but bail loud rather than silent.
+      throw new Error(
+        `draft-agent: model stopped without tool call (stop_reason=${response.stop_reason})`,
+      );
+    }
+
+    // Append the assistant's full response so the conversation history
+    // round-trips correctly to the next iteration. content blocks are
+    // already in the SDK's expected shape.
+    messages.push({ role: "assistant", content: response.content });
+
+    // Find any tool_use blocks. If propose_draft is present, that's
+    // terminal — extract it and exit. Otherwise run any other tool
+    // calls (currently just find_interesting_timestamps), build
+    // tool_result blocks, append, and loop.
+    const toolUses = response.content.filter(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+    );
+    const proposeBlock = toolUses.find((b) => b.name === "propose_draft");
+    if (proposeBlock) {
+      proposeDraftInput = proposeBlock.input;
       break;
     }
+
+    if (toolUses.length === 0) {
+      // stop_reason was "tool_use" but no tool_use blocks. Shouldn't
+      // happen but bail rather than infinite-loop.
+      throw new Error("draft-agent: stop_reason=tool_use but no tool blocks");
+    }
+
+    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    for (const tu of toolUses) {
+      if (tu.name === "find_interesting_timestamps") {
+        const input = (tu.input ?? {}) as { focus?: unknown; count?: unknown };
+        const focus = typeof input.focus === "string" ? input.focus : "";
+        const rawCount =
+          typeof input.count === "number" ? Math.round(input.count) : 5;
+        const count = Math.max(1, Math.min(10, rawCount));
+        const segments = transcriptSegments ?? [];
+        let resultBody: string;
+        try {
+          const found = await findInterestingTimestamps({
+            segments,
+            formatInstructions: args.formatInstructions,
+            focus: focus || "most interesting moments",
+            count,
+          });
+          resultBody = JSON.stringify({
+            timestamps: found.map((f) => ({
+              mmss: f.mmss,
+              label: f.label,
+              reason: f.reason,
+            })),
+            note:
+              found.length === 0
+                ? "Tool returned no validated timestamps. Try a different focus, or compose without timestamps."
+                : undefined,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          resultBody = JSON.stringify({
+            error: `find_interesting_timestamps failed: ${message}`,
+          });
+        }
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: resultBody,
+        });
+      } else {
+        // Unknown tool — surface a clear error result so the agent can
+        // recover (e.g. immediately call propose_draft).
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: JSON.stringify({
+            error: `Unknown tool: ${tu.name}. Call propose_draft now.`,
+          }),
+          is_error: true,
+        });
+      }
+    }
+
+    messages.push({ role: "user", content: toolResults });
   }
 
-  if (!rawInput) {
-    throw new Error("draft-agent returned no tool call");
+  if (!proposeDraftInput) {
+    throw new Error(
+      `draft-agent: tool loop exceeded ${MAX_ITERATIONS} iterations without a propose_draft call`,
+    );
   }
 
-  const content = normalizeContent(rawInput, args.fieldSchema);
-  const mediaAction = normalizeMediaAction(rawInput);
+  const content = normalizeContent(proposeDraftInput, args.fieldSchema);
+  const mediaAction = normalizeMediaAction(proposeDraftInput);
 
   return {
     content,
     mediaAction,
     modelUsage: {
-      input_tokens: response.usage.input_tokens,
-      output_tokens: response.usage.output_tokens,
-      cache_creation_input_tokens:
-        response.usage.cache_creation_input_tokens ?? undefined,
-      cache_read_input_tokens:
-        response.usage.cache_read_input_tokens ?? undefined,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cache_creation_input_tokens: cacheCreationTokens || undefined,
+      cache_read_input_tokens: cacheReadTokens || undefined,
     },
   };
 }

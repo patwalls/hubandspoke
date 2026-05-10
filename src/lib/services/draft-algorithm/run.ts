@@ -78,7 +78,20 @@ import { getTopPerformingCaptions } from "./exemplars";
 // source-mirrored media on cross-posts so the agent picks
 // `media_action: "none"` and composes a caption that assumes the images
 // are visible.
-export const DRAFT_ALGORITHM_VERSION = "1.4";
+//
+// V1.5 (2026-05-10): the agent gets specialized tools, the first of
+// which is `find_interesting_timestamps`. v1.4 handed the agent the
+// transcript markdown and asked it to compose copy + scout interesting
+// moments + write timestamps in one shot. That conflated editorial
+// scouting with copywriting — agents hallucinated mmss values or wrote
+// vague ranges. v1.5 splits scouting into a dedicated Opus 4.7
+// sub-agent the main agent can call mid-draft. `generateDraft` is now
+// a multi-turn loop (max 5 iterations) with `tool_choice: "auto"`; the
+// timestamp tool is registered only when substrate.kind === "transcript"
+// so cross-posts using source-body substrate single-shot exactly like
+// v1.4. Architecture supports adding more tools (find_money_quote,
+// find_image_moment) without further plumbing.
+export const DRAFT_ALGORITHM_VERSION = "1.5";
 export const GENERATED_BY = `draft-algo:v${DRAFT_ALGORITHM_VERSION}:${AGENT_GENERATED_BY}`;
 
 // Translate the agent's MediaAction into a concrete file payload for
@@ -212,7 +225,17 @@ async function loadDraftSubstrate(item: {
   pillarContentItemId: string | null;
   repostedFromItemId: string | null;
 }): Promise<
-  | { kind: "transcript"; segmentsMarkdown: string; durationSec: number }
+  | {
+      kind: "transcript";
+      segmentsMarkdown: string;
+      durationSec: number;
+      segments: ReadonlyArray<{
+        startSec: number;
+        endSec: number;
+        text: string;
+        speaker?: string;
+      }>;
+    }
   | { kind: "source_body"; text: string; sourcePostType: string | null }
   | null
 > {
@@ -225,6 +248,11 @@ async function loadDraftSubstrate(item: {
       kind: "transcript",
       segmentsMarkdown: transcript.segmentsMarkdown,
       durationSec: transcript.durationSec,
+      // v1.5: surface the raw segments[] so the find_interesting_timestamps
+      // tool can ground its picks in real segment text (not just the
+      // rendered markdown). Tool implementation in
+      // src/lib/services/draft-algorithm/timestamp-finder.ts.
+      segments: transcript.segments,
     };
   }
 
