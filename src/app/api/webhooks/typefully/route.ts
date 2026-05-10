@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { verifyTypefullySignature } from "@/lib/typefully";
+
+// Short SHA-256 prefix of the secret. Lets us tell two configured secrets
+// apart in logs (so we can spot a Typefully-side rotation) without
+// printing the secret itself.
+function createHashShort(s: string): string {
+  return createHash("sha256").update(s).digest("hex").slice(0, 8);
+}
 
 interface TypefullyWebhookPayload {
   event: string;
@@ -48,6 +56,28 @@ export async function POST(request: NextRequest) {
       secret,
     })
   ) {
+    // Log enough to diagnose without leaking the secret. Shipped after
+    // Typefully disabled the webhook for the SECOND time after 100
+    // 401s — we couldn't tell whether the headers were missing, the
+    // recipe drifted, or the secret was rotated upstream. Log: header
+    // presence, lengths, and a SHA-prefix of the secret so we can spot
+    // a mismatch after a Typefully-side regenerate.
+    const secretFingerprint = createHashShort(secret);
+    console.warn(
+      "[typefully-webhook] signature verify failed",
+      JSON.stringify({
+        hasTimestamp: !!timestamp,
+        hasSignature: !!signatureHeader,
+        signatureLen: signatureHeader?.length ?? 0,
+        rawBodyLen: rawBody.length,
+        secretFingerprint,
+        // Useful when Typefully renames a header — surfaces what they
+        // actually sent so we can fix the recipe.
+        typefullyHeaderNames: Array.from(request.headers.keys())
+          .filter((h) => h.toLowerCase().includes("typefully"))
+          .join(","),
+      }),
+    );
     return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   }
 
