@@ -91,7 +91,22 @@ import { getTopPerformingCaptions } from "./exemplars";
 // so cross-posts using source-body substrate single-shot exactly like
 // v1.4. Architecture supports adding more tools (find_money_quote,
 // find_image_moment) without further plumbing.
-export const DRAFT_ALGORITHM_VERSION = "1.5";
+//
+// V1.6 (2026-05-10): train on real top performers + honor Skill counts.
+// (1) Exemplar selection no longer pre-filters on contentBody — it
+// pulls the top N by views regardless, then on-demand enriches any
+// missing bodies (10s wall-time cap). The previous behavior silently
+// excluded top-performer items that hadn't been enriched yet — the
+// 373K-view tweet for "Full Video On X!" was sitting in the DB
+// unenriched and never reaching the agent. (2) Diagnostic logs at
+// draft start surface the format name + Skill chars + Skill head so
+// "is the algorithm reading the Skill?" is observable in worker
+// logs. (3) System prompt + tool_result payloads now teach the main
+// agent to honor Skill-specified counts (e.g. "4-6 timestamp
+// bulletpoints") by passing the count to the timestamp tool and
+// retrying ONCE if the tool short-returns. See draft-agent.ts +
+// timestamp-finder.ts.
+export const DRAFT_ALGORITHM_VERSION = "1.6";
 export const GENERATED_BY = `draft-algo:v${DRAFT_ALGORITHM_VERSION}:${AGENT_GENERATED_BY}`;
 
 // Translate the agent's MediaAction into a concrete file payload for
@@ -438,16 +453,40 @@ export async function runDraftAlgorithm(
     formatInstructions = fmt?.instructions ?? null;
   }
 
+  // v1.6 diagnostic: surface what the agent will see. Pat can grep
+  // `heroku logs --dyno worker` for `draft-algorithm v1.6 item=<id>`
+  // and confirm the algorithm read the current Skill text and pulled
+  // enough exemplars. Logs are concise on purpose — full prompts can
+  // be reconstructed from PROMPT_VERSION + DRAFT_ALGORITHM_VERSION.
+  const skillChars = formatInstructions?.length ?? 0;
+  const skillHead = (formatInstructions ?? "")
+    .slice(0, 160)
+    .replace(/\s+/g, " ")
+    .trim();
+  console.info(
+    `draft-algorithm v1.6 item=${productionItemId} format="${item.format ?? "(none)"}" substrate=${substrate.kind} skill_chars=${skillChars} skill_head="${skillHead}"`,
+  );
+
   // Past captions, view-ranked. v1.2: format-scoped first, with a
   // platform-scoped top-up when the format is sparse (see exemplars.ts).
-  // Format is the strongest structural signal — same-format winners
-  // share opening shape, list patterns, timestamp breakdowns, etc.
+  // v1.6: format-scoped pulls top N by views regardless of contentBody
+  // state; missing bodies are enriched on-demand with a 10s wall-time
+  // cap before the exemplar pool is finalized.
   const pastCaptions = await getTopPerformingCaptions({
     brand: item.brand,
     postType: item.postType,
     format: item.format ?? null,
     excludeId: productionItemId,
   });
+  const formatExemplarCount = pastCaptions.filter(
+    (e) => e.source === "format",
+  ).length;
+  const platformExemplarCount = pastCaptions.filter(
+    (e) => e.source === "platform",
+  ).length;
+  console.info(
+    `draft-algorithm v1.6 item=${productionItemId} exemplars_format=${formatExemplarCount} exemplars_platform=${platformExemplarCount}`,
+  );
 
   // Pillar title + media for context when this is a derivative. The media
   // metadata (S3 keys + poster) drives the V1.1 MediaContext: the agent

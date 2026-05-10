@@ -210,28 +210,44 @@ export async function findInterestingTimestamps(
 
   const validated: FoundTimestamp[] = [];
   const seen = new Set<string>();
+  let dropped = 0;
   for (const pick of picks) {
     if (!pick || typeof pick !== "object") continue;
     const rec = pick as Record<string, unknown>;
     const mmss = typeof rec.mmss === "string" ? rec.mmss.trim() : "";
     const label = typeof rec.label === "string" ? rec.label.trim() : "";
     const reason = typeof rec.reason === "string" ? rec.reason.trim() : "";
-    if (!mmss || !label) continue;
+    if (!mmss || !label) {
+      dropped++;
+      continue;
+    }
     const sec = mmssToSec(mmss);
     if (sec === null) {
       console.warn(`timestamp-finder: dropped malformed mmss "${mmss}"`);
+      dropped++;
       continue;
     }
     if (!within2s(sec)) {
       console.warn(
         `timestamp-finder: dropped out-of-range mmss "${mmss}" (no segment within ±2s of ${sec}s)`,
       );
+      dropped++;
       continue;
     }
-    if (seen.has(mmss)) continue;
+    if (seen.has(mmss)) {
+      dropped++;
+      continue;
+    }
     seen.add(mmss);
     validated.push({ mmss, label, reason, startSec: sec });
   }
 
-  return validated.slice(0, count);
+  const final = validated.slice(0, count);
+  // v1.6: single summary log so the main agent loop's observation of
+  // "validated vs requested" is grepable in one line.
+  console.info(
+    `timestamp-finder: focus="${args.focus.slice(0, 80)}" requested=${count} validated=${final.length}${dropped > 0 ? ` (dropped ${dropped})` : ""}`,
+  );
+
+  return final;
 }

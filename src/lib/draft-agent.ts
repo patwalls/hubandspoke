@@ -42,7 +42,14 @@ const MODEL = "claude-opus-4-7";
 // directly. First tool is find_interesting_timestamps — see
 // src/lib/services/draft-algorithm/timestamp-finder.ts. Tool is
 // registered only when substrate.kind === "transcript".
-export const PROMPT_VERSION = 8;
+// v9 (2026-05-10): Skill-count adherence. TOOLS section now instructs
+// the agent to mirror counts the Skill specifies (e.g. "4-6 timestamp
+// bulletpoints") when calling find_interesting_timestamps, and to
+// retry ONCE with broader focus if the tool short-returns. The tool
+// result body now carries `requestedCount` + `validatedCount` so the
+// agent can reason about gaps structurally rather than counting an
+// array by eyeballing it.
+export const PROMPT_VERSION = 9;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -83,6 +90,9 @@ TOOLS
 You have specialized tools available in this conversation. Treat them as capabilities you should USE rather than guess at. Tool calls are cheap; hallucinations are expensive.
 
 - find_interesting_timestamps — call this whenever the format Skill mentions timestamps, real timestamps, or "pulling moments from the video." Reads the pillar transcript directly and returns N curated MM:SS picks with editor-voice labels. Never invent timestamps from your own scan of the transcript text — use this tool, then compose the draft using the timestamps it returns. You can call it multiple times if the format wants distinct lists (e.g. "5 strategy moments AND 3 funny moments").
+
+HONORING SKILL COUNTS
+If the Skill specifies a count (e.g. "4-6 timestamp bulletpoints", "top 5 sections", "exactly 3 takeaways"), pass that count to find_interesting_timestamps and write the corresponding number of items in the draft. Read the tool's response carefully — it returns { requestedCount, validatedCount, timestamps }. If validatedCount < the Skill's minimum, call find_interesting_timestamps ONE more time with a broader or different focus string before settling for fewer. After one retry, accept whatever the tool returned and compose the draft with that many items. Don't fabricate extra picks to hit the count.
 
 When you've gathered everything you need, call propose_draft as your final tool call. Never respond with plain text.
 
@@ -651,6 +661,12 @@ export async function generateDraft(
         const rawCount =
           typeof input.count === "number" ? Math.round(input.count) : 5;
         const count = Math.max(1, Math.min(10, rawCount));
+        // v1.6: log the agent's intent (focus + count) before running
+        // the tool. Pat can audit Skill adherence by checking that this
+        // count matches what the Skill specified.
+        console.info(
+          `draft-agent v1.6 tool=find_interesting_timestamps iter=${iter} focus="${focus.slice(0, 120)}" count=${count}`,
+        );
         const segments = transcriptSegments ?? [];
         let resultBody: string;
         try {
@@ -660,7 +676,13 @@ export async function generateDraft(
             focus: focus || "most interesting moments",
             count,
           });
+          // v1.6: tool_result carries structured counts so the agent
+          // can decide whether to retry (validatedCount < requestedCount).
+          // The HONORING SKILL COUNTS rule in the system prompt tells it
+          // to retry once with a broader focus before accepting fewer.
           resultBody = JSON.stringify({
+            requestedCount: count,
+            validatedCount: found.length,
             timestamps: found.map((f) => ({
               mmss: f.mmss,
               label: f.label,
@@ -668,8 +690,10 @@ export async function generateDraft(
             })),
             note:
               found.length === 0
-                ? "Tool returned no validated timestamps. Try a different focus, or compose without timestamps."
-                : undefined,
+                ? "Tool returned no validated timestamps. Retry with a different focus, or compose without timestamps."
+                : found.length < count
+                  ? `Tool returned ${found.length} of ${count} requested. If the Skill requires more, retry ONCE with a broader focus before accepting.`
+                  : undefined,
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
