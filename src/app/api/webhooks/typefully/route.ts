@@ -12,16 +12,23 @@ function createHashShort(s: string): string {
   return createHash("sha256").update(s).digest("hex").slice(0, 8);
 }
 
+// Typefully sends webhook fields FLAT — `event`, `id`, `status`,
+// `share_url`, `private_url`, `scheduled_date`, `published_at`, etc.
+// all live at the top level alongside one block per network
+// (twitter / threads / linkedin / bluesky / mastodon). Earlier code
+// here expected `{ event, data: {...} }` and silently ignored every
+// delivery as "no draft id" — fixed 2026-05-10 after Typefully's
+// dashboard request log made the actual shape visible.
 interface TypefullyWebhookPayload {
   event: string;
-  data: {
-    id: number;
-    status?: string;
-    scheduled_date?: string | null;
-    published_at?: string | null;
-    share_url?: string | null;
-    private_url?: string | null;
-  };
+  id?: number;
+  // Some events also expose `draft_id` (same number); accept either.
+  draft_id?: number;
+  status?: string;
+  scheduled_date?: string | null;
+  published_at?: string | null;
+  share_url?: string | null;
+  private_url?: string | null;
 }
 
 /**
@@ -88,8 +95,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid json" }, { status: 400 });
   }
 
-  const draftId = payload.data?.id;
-  if (typeof draftId !== "number") {
+  const draftId =
+    typeof payload.id === "number"
+      ? payload.id
+      : typeof payload.draft_id === "number"
+        ? payload.draft_id
+        : null;
+  if (draftId == null) {
     return NextResponse.json({ ok: true, ignored: "no draft id" });
   }
 
@@ -129,15 +141,15 @@ export async function POST(request: NextRequest) {
     await db
       .update(productionItems)
       .set({
-        typefullyStatus: payload.data.status ?? null,
-        typefullyScheduledDate: payload.data.scheduled_date
-          ? new Date(payload.data.scheduled_date)
+        typefullyStatus: payload.status ?? null,
+        typefullyScheduledDate: payload.scheduled_date
+          ? new Date(payload.scheduled_date)
           : null,
-        typefullyPublishedAt: payload.data.published_at
-          ? new Date(payload.data.published_at)
+        typefullyPublishedAt: payload.published_at
+          ? new Date(payload.published_at)
           : null,
-        typefullyShareUrl: payload.data.share_url ?? null,
-        typefullyPrivateUrl: payload.data.private_url ?? null,
+        typefullyShareUrl: payload.share_url ?? null,
+        typefullyPrivateUrl: payload.private_url ?? null,
       })
       .where(eq(productionItems.id, item.id));
     return NextResponse.json({ ok: true });
