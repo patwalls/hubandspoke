@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
-import { productionItems } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { productionItems, contentComments } from "@/lib/db/schema";
+import { eq, and, count } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
 export interface MergeResult {
@@ -9,6 +9,51 @@ export interface MergeResult {
   primaryId: string;
   secondaryId: string;
   deletedId: string;
+}
+
+/**
+ * Determine which item should be kept (keeper).
+ * The keeper is the one with more "ownership" signals:
+ * - Has comments (edited by team)
+ * - Created earlier (likely the original, API pulled duplicate later)
+ * - Has editor email/name (explicitly assigned)
+ */
+async function determineKeeper(
+  itemA: typeof productionItems.$inferSelect,
+  itemB: typeof productionItems.$inferSelect
+): Promise<{ keeper: typeof productionItems.$inferSelect; duplicate: typeof productionItems.$inferSelect }> {
+  // Count comments for each item
+  const [commentsA, commentsB] = await Promise.all([
+    db
+      .select({ count: count() })
+      .from(contentComments)
+      .where(eq(contentComments.contentItemId, itemA.id)),
+    db
+      .select({ count: count() })
+      .from(contentComments)
+      .where(eq(contentComments.contentItemId, itemB.id)),
+  ]);
+
+  const countA = commentsA[0]?.count || 0;
+  const countB = commentsB[0]?.count || 0;
+
+  // Keeper signals (in priority order):
+  // 1. Has comments (indicates editorial work)
+  if (countA > countB) return { keeper: itemA, duplicate: itemB };
+  if (countB > countA) return { keeper: itemB, duplicate: itemA };
+
+  // 2. Has editor metadata (explicitly assigned)
+  const itemAHasEditor = itemA.editorEmail || itemA.editorName;
+  const itemBHasEditor = itemB.editorEmail || itemB.editorName;
+  if (itemAHasEditor && !itemBHasEditor) return { keeper: itemA, duplicate: itemB };
+  if (itemBHasEditor && !itemAHasEditor) return { keeper: itemB, duplicate: itemA };
+
+  // 3. Created earlier (likely the original)
+  if (itemA.createdAt < itemB.createdAt) return { keeper: itemA, duplicate: itemB };
+  if (itemB.createdAt < itemA.createdAt) return { keeper: itemB, duplicate: itemA };
+
+  // Fallback: keep the first one
+  return { keeper: itemA, duplicate: itemB };
 }
 
 /**
@@ -42,17 +87,17 @@ export async function mergeProductionItems(
 
   try {
     // 1. Fetch both items
-    const [primary] = await db
+    const [itemById1] = await db
       .select()
       .from(productionItems)
       .where(eq(productionItems.id, primaryId));
 
-    const [secondary] = await db
+    const [itemById2] = await db
       .select()
       .from(productionItems)
       .where(eq(productionItems.id, secondaryId));
 
-    if (!primary || !secondary) {
+    if (!itemById1 || !itemById2) {
       return {
         success: false,
         message: "One or both items not found",
@@ -62,8 +107,8 @@ export async function mergeProductionItems(
       };
     }
 
-    // 2. Validate they belong to same account
-    if (primary.accountId !== secondary.accountId) {
+    // Validate they belong to same account
+    if (itemById1.accountId !== itemById2.accountId) {
       return {
         success: false,
         message: "Items belong to different accounts, cannot merge",
@@ -71,6 +116,18 @@ export async function mergeProductionItems(
         secondaryId,
         deletedId: "",
       };
+    }
+
+    // 2. Smart detection: Determine which item should be kept
+    const { keeper, duplicate } = await determineKeeper(itemById1, itemById2);
+    const primary = keeper;
+    const secondary = duplicate;
+
+    // Log if we swapped the IDs for transparency
+    if (primary.id !== primaryId) {
+      console.log(
+        `[merge-production-items] Auto-swapped IDs: keeping ${primary.id} (${primary.title}), deleting ${secondary.id} (${secondary.title})`
+      );
     }
 
     // 3. Repoint foreign keys from secondary to primary
@@ -178,7 +235,7 @@ export async function mergeProductionItems(
     try {
       await db.execute(sql`
         INSERT INTO production_items_merges (id, primary_item_id, secondary_item_id, merged_by, merge_strategy, created_at)
-        VALUES (gen_random_uuid(), ${primaryId}, ${secondaryId}, ${userId}, 'smart_merge', now())
+        VALUES (gen_random_uuid(), ${primary.id}, ${secondary.id}, ${userId}, 'smart_merge', now())
       `);
     } catch (err: any) {
       // Table might not exist yet (migration pending), log but don't fail the merge
@@ -188,9 +245,9 @@ export async function mergeProductionItems(
     return {
       success: true,
       message: `Successfully merged duplicate into primary item. Kept editor metadata, transferred API data and metrics.`,
-      primaryId,
-      secondaryId,
-      deletedId: secondaryId,
+      primaryId: primary.id,
+      secondaryId: secondary.id,
+      deletedId: secondary.id,
     };
   } catch (err: any) {
     console.error("[merge-production-items] merge failed:", err);
