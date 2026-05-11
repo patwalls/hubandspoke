@@ -205,28 +205,25 @@ export async function mergeProductionItems(
       })
       .where(eq(productionItems.id, secondary.id));
 
-    // 6. Now update primary with merged data (safe because secondary is already soft-deleted)
-    const updateData: any = {
-      views: combinedViews,
-      updatedAt: new Date(),
-    };
+    // 6. Now update primary with merged data using raw SQL
+    // Raw SQL to bypass any Drizzle type system issues
+    let updateSql = sql`UPDATE production_items SET views = ${combinedViews}, updated_at = now()`;
 
     // Transfer platformContentId from duplicate to keeper if keeper doesn't have it
-    // Safe now because secondary is already marked as deleted
     if (!primary.platformContentId && secondary.platformContentId) {
-      updateData.platformContentId = secondary.platformContentId;
-      console.log(
-        `[merge-production-items] Setting platformContentId on ${primary.id}: ${secondary.platformContentId}`
-      );
+      updateSql = sql`UPDATE production_items SET views = ${combinedViews}, platform_content_id = ${secondary.platformContentId}, updated_at = now()`;
     }
 
+    updateSql = sql`${updateSql} WHERE id = ${primary.id}`;
+
     try {
-      await db
-        .update(productionItems)
-        .set(updateData)
-        .where(eq(productionItems.id, primary.id));
+      await db.execute(updateSql);
       console.log(
-        `[merge-production-items] Successfully updated primary ${primary.id} with views=${combinedViews}`
+        `[merge-production-items] Successfully updated primary ${primary.id} with views=${combinedViews}${
+          !primary.platformContentId && secondary.platformContentId
+            ? `, platformContentId=${secondary.platformContentId}`
+            : ""
+        }`
       );
     } catch (updateErr: any) {
       console.error(
