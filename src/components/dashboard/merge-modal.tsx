@@ -191,11 +191,18 @@ export function MergeModal({
                     <p className="font-medium text-sm line-clamp-2">
                       {item.title}
                     </p>
-                    <div className="flex gap-2 text-xs text-muted-foreground mt-1">
+                    <div className="space-y-1.5 mt-2">
                       {item.platform && (
-                        <span>{(item.platform as string[])[0]}</span>
+                        <p className="text-xs font-medium text-foreground">
+                          {(item.platform as string[])[0]}
+                        </p>
                       )}
-                      {item.views && <span>{item.views.toLocaleString()} views</span>}
+                      <div className="flex gap-2 text-xs text-muted-foreground">
+                        {item.views && <span>{item.views.toLocaleString()} views</span>}
+                        {item.publishedDate && (
+                          <span>{new Date(item.publishedDate).toLocaleDateString()}</span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 ))}
