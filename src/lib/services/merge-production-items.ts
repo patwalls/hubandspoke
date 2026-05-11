@@ -113,7 +113,8 @@ export async function mergeProductionItems(
         : "production_item_id";
 
       // Start a savepoint for this table
-      await db.execute(sql`SAVEPOINT merge_${sql.raw(table)}`);
+      const savepointName = `merge_${table}`;
+      await db.execute(sql.raw(`SAVEPOINT ${savepointName}`));
 
       try {
         // Try to update all references from secondary to primary
@@ -124,9 +125,7 @@ export async function mergeProductionItems(
         if (err.code === "23505") {
           // UNIQUE constraint violation
           // Delete the secondary's child rows instead of updating
-          await db.execute(
-            sql`ROLLBACK TO SAVEPOINT merge_${sql.raw(table)}`
-          );
+          await db.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${savepointName}`));
           await db.execute(
             sql`DELETE FROM ${sql.identifier(table)} WHERE ${sql.identifier(columnName)} = ${secondaryId}`
           );
@@ -136,7 +135,7 @@ export async function mergeProductionItems(
       }
 
       // Release the savepoint
-      await db.execute(sql`RELEASE SAVEPOINT merge_${sql.raw(table)}`);
+      await db.execute(sql.raw(`RELEASE SAVEPOINT ${savepointName}`));
     }
 
     // 4. Merge: Keep primary's metadata, transfer API data (platformContentId, publishedLink) and metrics from secondary
