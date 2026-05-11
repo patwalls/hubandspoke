@@ -69,6 +69,13 @@ type EventPayload =
       sourceItemId: string;
       sourceTitle: string | null;
     }
+  | {
+      type: "item_created";
+      source: string;
+      format: string | null;
+      sourceType: string;
+      postType: string | null;
+    }
   | ToolActionPayload;
 
 // Registry for `tool_action` events. Key on the `tool` string the worker
@@ -832,6 +839,30 @@ function EventBody({
   if (event.payload.type === "tool_action") {
     return <ToolActionBody actor={actorName} payload={event.payload} />;
   }
+  if (event.payload.type === "item_created") {
+    const { source, format, sourceType, postType } = event.payload;
+    const sourceLabel = SOURCE_LABELS[source] ?? source;
+    const detailParts: string[] = [];
+    if (sourceType && sourceType !== "original") detailParts.push(sourceType);
+    if (postType) detailParts.push(postType);
+    const detail = detailParts.length > 0 ? ` (${detailParts.join(" · ")})` : "";
+    return (
+      <span>
+        <span className="font-medium text-foreground">{actorName}</span> created
+        this item via{" "}
+        <span className="font-mono text-[12px] text-muted-foreground">
+          {sourceLabel}
+        </span>
+        {detail}
+        {format ? (
+          <>
+            {" · "}format{" "}
+            <span className="font-medium text-foreground">{format}</span>
+          </>
+        ) : null}
+      </span>
+    );
+  }
   return (
     <span>
       <span className="font-medium text-foreground">{actorName}</span> logged{" "}
@@ -839,6 +870,24 @@ function EventBody({
     </span>
   );
 }
+
+// Pretty labels for the `source` string emitted by recordItemCreated.
+// Unknown sources fall through to the raw string — safer than throwing
+// when a new insert site lands before this map gets updated.
+const SOURCE_LABELS: Record<string, string> = {
+  "api:create": "Add Post dialog",
+  "api:repost": "Repost flow",
+  "api:cross-post": "Cross-post flow",
+  "api:repurpose": "Repurpose flow",
+  "api:duplicate": "Duplicate action",
+  "sync:account-content": "Account content sync",
+  "sync:notion": "Notion sync",
+  "cron:threshold-monitor-sweep": "Auto-repurpose (cron)",
+  "service:clip-promote": "Clip promotion",
+  "service:clip-promote-full": "Clip promotion (full video)",
+  "service:clip-idea-generate": "Clip idea pipeline",
+  "legacy:descript-clip-out": "Descript clip-out (legacy)",
+};
 
 function ToolActionBody({
   actor,

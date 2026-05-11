@@ -14,6 +14,7 @@ import { topShortFormPerformers } from "@/lib/db/queries";
 import { findAccountForBrandPlatform } from "@/lib/db/accounts";
 import { getPromotedClipFormat } from "@/lib/services/promote-clip-idea";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { recordItemCreated } from "@/lib/services/item-created";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 const SHORT_FORM_PLATFORMS = ["YouTube Shorts", "Instagram Reel", "TikTok"];
@@ -261,6 +262,7 @@ export async function generateClipIdeasForItem(
       rationale: ci.rationale,
     });
 
+    const promotedFormat = getPromotedClipFormat(item.brand);
     const [created] = await db
       .insert(productionItems)
       .values({
@@ -269,7 +271,7 @@ export async function generateClipIdeasForItem(
         platform: ["Instagram Reel"],
         postType: "instagram_reel",
         accountId: igAccount?.id ?? null,
-        format: getPromotedClipFormat(item.brand),
+        format: promotedFormat,
         brand: item.brand,
         contentBody: body,
         pillarContentItemId: productionItemId,
@@ -281,8 +283,26 @@ export async function generateClipIdeasForItem(
         hook: ci.hook,
         hookSource: "clip_idea",
         hookExtractedAt: new Date(),
+        createdVia: "service:clip-idea-generate",
       })
       .returning({ id: productionItems.id });
+    if (created) {
+      try {
+        await recordItemCreated(db, {
+          itemId: created.id,
+          source: "service:clip-idea-generate",
+          actorUserId: null,
+          format: promotedFormat,
+          sourceType: "clip",
+          postType: "instagram_reel",
+        });
+      } catch (err) {
+        console.error(
+          "[service:clip-idea-generate] recordItemCreated failed",
+          err,
+        );
+      }
+    }
 
     if (created) {
       await db

@@ -1008,6 +1008,43 @@ Sentry capture.
 
 ---
 
+## Item-creation provenance (2026-05-11)
+
+Every `production_items` insert site now sets a `created_via` string on
+the row AND writes a `content_events` row with `eventType='item_created'`.
+The two together answer "where did this item come from?" both at the SQL
+level (fast `WHERE created_via = '...'` audits) and per-item (full
+`payload` snapshot at the moment of creation, surfaced as the first row
+of the Activity tab).
+
+Helper: `recordItemCreated` in `src/lib/services/item-created.ts`. Every
+insert site calls it inside the same surrounding transaction (when one
+exists) or fire-and-forget against `db`. Failures are caught + logged;
+they never block the row insert.
+
+Canonical `source` strings:
+
+| source | call site |
+|---|---|
+| `api:create` | `src/app/api/production-items/route.ts` (manual "Add Post") |
+| `api:repost` | `src/app/api/production-items/[id]/repost/route.ts` |
+| `api:cross-post` | `src/app/api/production-items/[id]/cross-post/route.ts` |
+| `api:repurpose` | `src/app/api/production-items/[id]/repurpose/route.ts` |
+| `api:duplicate` | `src/app/api/production-items/[id]/duplicate/route.ts` |
+| `sync:account-content` | `src/lib/services/account-content-sync.ts` (cron) |
+| `sync:notion` | `src/lib/services/notion-sync.ts` (cron) |
+| `cron:threshold-monitor-sweep` | `src/jobs/tasks/threshold-monitor-sweep.ts` |
+| `service:clip-promote` | `src/lib/services/promote-clip-idea.ts` (agent + precise-cut paths) |
+| `service:clip-promote-full` | `src/lib/services/promote-clip-idea.ts` (full-video path) |
+| `service:clip-idea-generate` | `src/lib/services/clip-idea-generate.ts` |
+| `legacy:descript-clip-out` | `src/app/api/descript/clip-out/route.ts` (two sub-paths) |
+
+The schema column is nullable; rows created before this commit have
+`created_via = NULL`. The Activity-tab renderer falls back gracefully —
+no `item_created` event means no "created via" row, no error.
+
+---
+
 ## Known seams (future cleanup)
 
 These show up here so changes don't accidentally widen them. Each one

@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
+import { recordItemCreated } from "@/lib/services/item-created";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -57,8 +58,22 @@ export async function POST(_request: Request, context: RouteContext) {
       utmCampaign: await generateUtmCampaign(title),
       producerUserId: source.producerUserId,
       editorUserId: source.editorUserId,
+      createdVia: "api:duplicate",
     })
     .returning({ id: productionItems.id });
+
+  try {
+    await recordItemCreated(db, {
+      itemId: created.id,
+      source: "api:duplicate",
+      actorUserId: (guard.session.user.id as string) ?? null,
+      format: inheritedFormat,
+      sourceType: "original",
+      postType: null,
+    });
+  } catch (err) {
+    console.error("[api:duplicate] recordItemCreated failed", err);
+  }
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

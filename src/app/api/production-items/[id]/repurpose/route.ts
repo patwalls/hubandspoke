@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
+import { recordItemCreated } from "@/lib/services/item-created";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { getChannelsForFormats } from "@/lib/format-channels";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -120,8 +121,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
       utmCampaign: await generateUtmCampaign(source.title),
       producerUserId: resolved.producerUserId,
       editorUserId: actorUserId,
+      createdVia: "api:repurpose",
     })
     .returning({ id: productionItems.id });
+
+  try {
+    await recordItemCreated(db, {
+      itemId: created.id,
+      source: "api:repurpose",
+      actorUserId,
+      format: canonicalFormat,
+      sourceType: "original",
+      postType: firstChannel?.postType ?? null,
+    });
+  } catch (err) {
+    console.error("[api:repurpose] recordItemCreated failed", err);
+  }
 
   // Mirror the existing manual-task trigger shape so threshold-monitor-
   // sweep's dedup on (productionItemId, targetFormatId) catches manually-

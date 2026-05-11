@@ -11,6 +11,7 @@ import {
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { enqueue } from "@/jobs/enqueue";
+import { recordItemCreated } from "@/lib/services/item-created";
 
 /**
  * Threshold monitor: scan all published items and automatically create
@@ -150,10 +151,27 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
               producerUserId: assignees.producerUserId,
               editorUserId: assignees.editorUserId,
               utmCampaign: await generateUtmCampaign(item.title),
+              createdVia: "cron:threshold-monitor-sweep",
             })
             .returning({ id: productionItems.id });
 
           if (created) {
+            try {
+              await recordItemCreated(db, {
+                itemId: created.id,
+                source: "cron:threshold-monitor-sweep",
+                actorUserId: null,
+                format: targetFormat.name,
+                sourceType: "repurposed",
+                postType: formatChannel?.postType ?? null,
+              });
+            } catch (err) {
+              console.error(
+                "[cron:threshold-monitor-sweep] recordItemCreated failed",
+                err,
+              );
+            }
+
             // Record the trigger to prevent re-queueing
             await db.insert(repurposeTriggers).values({
               productionItemId: item.id,

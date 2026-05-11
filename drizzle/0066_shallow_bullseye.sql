@@ -1,0 +1,1 @@
+ALTER TABLE "production_items" ADD COLUMN "created_via" text;

@@ -19,6 +19,7 @@ import {
 import { getPresignedGetUrl } from "@/lib/s3";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
+import { recordItemCreated } from "@/lib/services/item-created";
 
 /**
  * Check if a caught database error is a unique constraint violation for a
@@ -336,13 +337,14 @@ export async function assignClipIdea(args: {
   let created: { id: string } | undefined;
   try {
     const brand = row.sourceBrand ?? "starter-story";
+    const promotedFormat = getPromotedClipFormat(brand);
     const rows = await db
       .insert(productionItems)
       .values({
         title: row.hook,
         status: "Assigned",
         platform: ["YouTube Shorts"],
-        format: getPromotedClipFormat(brand),
+        format: promotedFormat,
         brand,
         contentBody: body,
         pillarContentItemId: row.sourceProductionItemId,
@@ -354,9 +356,24 @@ export async function assignClipIdea(args: {
         hook: row.hook,
         hookSource: "clip_idea",
         hookExtractedAt: new Date(),
+        createdVia: "service:clip-promote",
       })
       .returning({ id: productionItems.id });
     created = rows[0];
+    if (created) {
+      try {
+        await recordItemCreated(db, {
+          itemId: created.id,
+          source: "service:clip-promote",
+          actorUserId: args.decidedByUserId ?? null,
+          format: promotedFormat,
+          sourceType: "clip",
+          postType: null,
+        });
+      } catch (e) {
+        console.error("[service:clip-promote] recordItemCreated failed", e);
+      }
+    }
   } catch (err) {
     // Translate the DB-level double-promote guard to the same 409 the
     // app-level status check uses. Happens on concurrent double-clicks or
@@ -577,9 +594,27 @@ export async function createClipIdeaInDescript(args: {
         hook: row.hook,
         hookSource: "clip_idea",
         hookExtractedAt: new Date(),
+        createdVia: "service:clip-promote-full",
       })
       .returning({ id: productionItems.id });
     created = rows[0];
+    if (created) {
+      try {
+        await recordItemCreated(db, {
+          itemId: created.id,
+          source: "service:clip-promote-full",
+          actorUserId: args.actorUserId ?? null,
+          format: format.name,
+          sourceType: "clip",
+          postType: null,
+        });
+      } catch (e) {
+        console.error(
+          "[service:clip-promote-full] recordItemCreated failed",
+          e,
+        );
+      }
+    }
   } catch (err) {
     if (isUniqueViolation(err, "uniq_production_items_source_clip_idea")) {
       throw new ClipIdeaAlreadyDecidedError("assigned");

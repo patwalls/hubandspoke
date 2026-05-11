@@ -6,6 +6,7 @@ import { productionItems, formats, repurposeTriggers } from "@/lib/db/schema";
 import { invokeDescriptAgent } from "@/lib/descript";
 import { dispatchRepurpose, type RepurposeAction } from "@/lib/repurpose-agent";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { recordItemCreated } from "@/lib/services/item-created";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { getChannelsForFormats } from "@/lib/format-channels";
 import { enqueue } from "@/jobs/enqueue";
@@ -120,9 +121,22 @@ export async function POST(request: NextRequest) {
             utmCampaign: await generateUtmCampaign(action.compositionName),
             producerUserId: derivativeAssignees.producerUserId,
             editorUserId: derivativeAssignees.editorUserId,
+            createdVia: "legacy:descript-clip-out",
           })
           .returning({ id: productionItems.id });
         derivativeItemId = derivative.id;
+        try {
+          await recordItemCreated(db, {
+            itemId: derivative.id,
+            source: "legacy:descript-clip-out",
+            actorUserId: null,
+            format: target.name,
+            sourceType: "original",
+            postType: derivativePostType,
+          });
+        } catch (e) {
+          console.error("[legacy:descript-clip-out] recordItemCreated failed", e);
+        }
       } catch (err) {
         console.error("Derivative production_item insert failed:", err);
       }
@@ -178,9 +192,22 @@ export async function POST(request: NextRequest) {
         utmCampaign: await generateUtmCampaign(action.taskName),
         producerUserId: derivativeAssignees.producerUserId,
         editorUserId: derivativeAssignees.editorUserId,
+        createdVia: "legacy:descript-clip-out",
       })
       .returning({ id: productionItems.id });
     derivativeItemId = derivative.id;
+    try {
+      await recordItemCreated(db, {
+        itemId: derivative.id,
+        source: "legacy:descript-clip-out",
+        actorUserId: null,
+        format: target.name,
+        sourceType: "original",
+        postType: derivativePostType,
+      });
+    } catch (e) {
+      console.error("[legacy:descript-clip-out] recordItemCreated failed", e);
+    }
   } catch (err) {
     console.error("Derivative production_item insert failed:", err);
   }

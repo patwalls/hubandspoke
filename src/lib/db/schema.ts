@@ -316,6 +316,17 @@ export const productionItems = pgTable(
     // flight jobs finish writing to a hidden row harmlessly. Restore by
     // setting back to NULL.
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    // Provenance: which code path created this row. Set at every insert
+    // site so SELECTs can audit "where did all these tagged-with-X items
+    // come from?" without crawling logs. Standard values: 'api:create',
+    // 'api:repost', 'api:cross-post', 'api:repurpose', 'api:duplicate',
+    // 'sync:account-content', 'sync:notion', 'cron:threshold-monitor-sweep',
+    // 'service:clip-promote', 'service:clip-promote-full',
+    // 'service:clip-idea-generate', 'legacy:descript-clip-out'. Null on
+    // rows created before 2026-05-11. Paired with a content_events row
+    // (eventType='item_created') that carries the full {actor_user_id,
+    // format, source_type, post_type} payload for the Activity tab.
+    createdVia: text("created_via"),
   },
   (table) => [
     index("idx_production_items_published_date").on(table.publishedDate),
@@ -1083,6 +1094,19 @@ export type ContentEventPayload =
       label: string;
       url: string | null;
       meta?: Record<string, string | number | null>;
+    }
+  // Provenance for new production_items. Written from every insert site
+  // (api:create, api:repost, sync:account-content, cron:threshold-monitor-
+  // sweep, …). Pairs with productionItems.createdVia (which stores the
+  // same `source` string for fast SELECT-WHERE audits). Rendered as the
+  // first row of the Activity tab so editors can see where a tagged item
+  // came from. See `recordItemCreated` in `src/lib/services/item-created.ts`.
+  | {
+      type: "item_created";
+      source: string; // e.g. "api:create", "sync:account-content"
+      format: string | null;
+      sourceType: string; // "original" | "repost" | "cross_post" | "clip" | "repurposed"
+      postType: string | null;
     };
 
 export const contentEvents = pgTable(

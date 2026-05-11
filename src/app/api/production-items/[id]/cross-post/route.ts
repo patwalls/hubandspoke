@@ -9,6 +9,7 @@ import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
 import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { seedRepostContent } from "@/lib/services/repost-seed";
+import { recordItemCreated } from "@/lib/services/item-created";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { isNotionAuthoritative } from "@/lib/platform";
@@ -232,8 +233,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
         utmCampaign: utm,
         producerUserId: assignees.producerUserId,
         editorUserId,
+        createdVia: "api:cross-post",
       })
       .returning({ id: productionItems.id });
+    await recordItemCreated(tx, {
+      itemId: row.id,
+      source: "api:cross-post",
+      actorUserId: (guard.session.user.id as string) ?? null,
+      format: inheritedFormat,
+      sourceType: "cross_post",
+      postType: targetPostType,
+    });
 
     // Seed mirrored media + a v1 contentDrafts row so the simulator on the
     // redirect page lands editable — same UX promise as the repost route.

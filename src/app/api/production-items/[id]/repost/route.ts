@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { buildRepostValues } from "@/lib/services/repost-values";
+import { recordItemCreated } from "@/lib/services/item-created";
 import { seedRepostContent } from "@/lib/services/repost-seed";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
 import { isVideoBearingPostType } from "@/lib/platform-media-rules";
@@ -177,8 +178,20 @@ export async function POST(request: Request, context: RouteContext) {
   const created = await db.transaction(async (tx) => {
     const [row] = await tx
       .insert(productionItems)
-      .values({ ...baseValues, status: requestedStatus })
+      .values({
+        ...baseValues,
+        status: requestedStatus,
+        createdVia: "api:repost",
+      })
       .returning({ id: productionItems.id });
+    await recordItemCreated(tx, {
+      itemId: row.id,
+      source: "api:repost",
+      actorUserId,
+      format: baseValues.format ?? null,
+      sourceType: "repost",
+      postType: baseValues.postType ?? null,
+    });
 
     if (SEEDED_POST_TYPES.has(source.postType as PostType)) {
       await seedRepostContent(tx, {

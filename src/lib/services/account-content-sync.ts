@@ -30,6 +30,7 @@ import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
+import { recordItemCreated } from "@/lib/services/item-created";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { SC_BASE, headers } from "@/lib/services/sc-client";
@@ -840,8 +841,26 @@ async function upsertItems(
             utmCampaign: await generateUtmCampaign(item.title),
             producerUserId: assignees.producerUserId,
             editorUserId: assignees.editorUserId,
+            createdVia: "sync:account-content",
           })
           .returning({ id: productionItems.id });
+        if (inserted) {
+          try {
+            await recordItemCreated(db, {
+              itemId: inserted.id,
+              source: "sync:account-content",
+              actorUserId: null,
+              format: null,
+              sourceType: "original",
+              postType: item.postType ?? null,
+            });
+          } catch (err) {
+            console.error(
+              "[sync:account-content] recordItemCreated failed",
+              err,
+            );
+          }
+        }
         // Schedule the 5 velocity snapshots (15m/30m/1h/2h/4h after publish)
         // so the cross-post scanner has real data when the operator hits
         // "Populate queue". Checkpoints whose windows have already closed

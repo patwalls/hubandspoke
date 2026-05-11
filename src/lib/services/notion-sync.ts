@@ -4,6 +4,7 @@ import { productionItems, syncLogs, users } from "@/lib/db/schema";
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { resolveAssignees } from "@/lib/services/assignees";
+import { recordItemCreated } from "@/lib/services/item-created";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
 import { extractContentId } from "@/lib/platform-url";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -622,19 +623,40 @@ export async function syncFromNotion(): Promise<{
         }
         const utmCampaign =
           notionUtmCampaign ?? (await generateUtmCampaign(title));
-        await db.insert(productionItems).values({
-          ...commonData,
-          utmCampaign,
-          producerEmail: producer.email,
-          producerNotionUserId: producer.userId,
-          producerName: producer.name,
-          editorEmail: editor.email,
-          editorNotionUserId: editor.userId,
-          editorName: editor.name,
-          producerUserId,
-          editorUserId,
-        });
+        const [inserted] = await db
+          .insert(productionItems)
+          .values({
+            ...commonData,
+            utmCampaign,
+            producerEmail: producer.email,
+            producerNotionUserId: producer.userId,
+            producerName: producer.name,
+            editorEmail: editor.email,
+            editorNotionUserId: editor.userId,
+            editorName: editor.name,
+            producerUserId,
+            editorUserId,
+            createdVia: "sync:notion",
+          })
+          .returning({
+            id: productionItems.id,
+            format: productionItems.format,
+            sourceType: productionItems.sourceType,
+            postType: productionItems.postType,
+          });
         totalCreated++;
+        try {
+          await recordItemCreated(db, {
+            itemId: inserted.id,
+            source: "sync:notion",
+            actorUserId: null,
+            format: inserted.format,
+            sourceType: inserted.sourceType,
+            postType: inserted.postType,
+          });
+        } catch (err) {
+          console.error("[sync:notion] recordItemCreated failed", err);
+        }
 
         // If Notion had no utm_campaign, push the auto-generated one back so
         // Notion reflects reality. Fire-and-forget: the row is already saved,

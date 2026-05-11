@@ -24,6 +24,7 @@ import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { enqueue } from "@/jobs/enqueue";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
+import { recordItemCreated } from "@/lib/services/item-created";
 
 function getNotion(): Client {
   const auth = process.env.NOTION_API_SECRET;
@@ -96,6 +97,8 @@ async function pushUtmCampaignToNotion(
  */
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    const actorUserId = session?.user?.id ?? null;
     const body = await request.json();
     const {
       title,
@@ -297,8 +300,25 @@ export async function POST(request: NextRequest) {
         producerUserId,
         editorUserId,
         lastPerformanceSyncAt,
+        createdVia: "api:create",
       })
       .returning();
+
+    // Provenance audit row. Pairs with productionItems.createdVia for
+    // the Activity-tab renderer. Best-effort: log + swallow, never
+    // block the create response if the event-write fails.
+    try {
+      await recordItemCreated(db, {
+        itemId: created.id,
+        source: "api:create",
+        actorUserId,
+        format: created.format,
+        sourceType: created.sourceType,
+        postType: created.postType,
+      });
+    } catch (err) {
+      console.error("[api:create] recordItemCreated failed", err);
+    }
 
     // Kick off a platform-API metrics fetch for new items with a published
     // link — unless we already have fresh metrics from the preview-link flow
