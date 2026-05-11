@@ -328,7 +328,11 @@ export async function GET(request: NextRequest) {
       publishedDate: item.publishedDate,
       publishedAt: item.publishedAt?.toISOString() ?? null,
       status: item.status,
-      sourceType: item.sourceType,
+      sourceType: item.sourceType as
+        | "original"
+        | "repost"
+        | "cross_post"
+        | "clip",
       platform: item.platform as string[] | null,
       postType: item.postType ?? null,
       accountId: item.accountId ?? null,
