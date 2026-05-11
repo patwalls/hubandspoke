@@ -41,9 +41,28 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 - `node --env-file=.env.local scripts/seed-user.mjs <email> <pass> [name]` - Seed a user
 
 ## Testing & visual verification
-- `npm run test` - Vitest (unit + integration). `:unit` and `:integration` projects defined in `vitest.config.ts`.
-- `npm run test:e2e` - Playwright e2e tests against the local dev server. Tests live in `tests/e2e/`. See `docs/conventions.md` → End-to-end testing for the one-time auth setup.
-- **Visual verification from Claude Code:** `@playwright/mcp` is registered in `.mcp.json` (`playwright` server). When a UI change needs eyeballs, use `mcp__playwright__browser_navigate` to reach `http://localhost:3000`, log in once, then `mcp__playwright__browser_snapshot` / `mcp__playwright__browser_take_screenshot` to see what the user sees. The MCP's persistent profile keeps you logged in across sessions.
+
+- `npm run test` — Vitest (unit + integration). `:unit` and `:integration` projects defined in `vitest.config.ts`.
+- `npm run test:e2e` — Playwright e2e specs in `tests/e2e/`. Boots a dev server on :3000 if one isn't already running. Auth state is set up once by `tests/e2e/auth.setup.ts` and reused across specs. Deeper setup notes (seeding the user, fresh-DB bootstrap) live in `docs/conventions.md` → End-to-end testing.
+
+### Verifying UI changes — always use Playwright MCP
+
+**Whenever you change anything user-facing under `src/app/(dashboard)/**` or `src/app/(auth)/**`, open it in a real browser via Playwright MCP before reporting the task complete.** `curl` is not enough — auth-gated pages 302 to `/login` for unauthed requests, and JS-rendered components (charts, the workflow board, modals, polling dashboards) don't show up in raw HTML.
+
+The reliable loop:
+
+1. **Make sure `npm run dev` is up on :3000.** If not, start it in the background (it hot-reloads on file changes).
+2. **Navigate** with `mcp__playwright__browser_navigate` to `http://localhost:3000/<path>`. There is no `*.test` hostname here — only `localhost:3000`.
+3. **If you land on `/login`, log in:**
+   - email: `e2e@local.test`
+   - password: `change-me-locally`
+   (These live in `.env.local` as `E2E_TEST_USER_EMAIL` / `E2E_TEST_USER_PASSWORD`. On a fresh DB or after `/pulldb` blew the user away, re-seed with `node --env-file=.env.local scripts/seed-user.mjs e2e@local.test change-me-locally 'E2E Test'`.) The MCP profile is persistent (`~/Library/Caches/ms-playwright/mcp-chrome-profile/`), so subsequent navigations in the same session stay logged in.
+4. **See the page** with `mcp__playwright__browser_snapshot` (accessibility tree — usually enough) or `mcp__playwright__browser_take_screenshot` (pixels — for visual layout bugs). Verify the thing you changed actually looks right.
+5. **If the MCP session is dead** (`Target page, context or browser has been closed`), ask Pat to restart the playwright MCP server, then retry.
+
+**When NOT to use Playwright MCP.** Public/unauthed routes or API JSON → `curl` is fine. Pure data verification (row counts, job state, queue contents) → `heroku pg:psql` or a local Drizzle query, not a browser.
+
+**When to also write/extend an e2e spec.** If the UI you just changed has a clear golden path that future regressions would break silently (e.g. a new dashboard tab, a new form submission, a new auth-gated flow), add or extend a `tests/e2e/*.spec.ts` so `npm run test:e2e` catches it next time. MCP verifies *now*; a spec verifies *every push*.
 
 ## Database Migrations
 Rails-style versioned migrations via `drizzle-kit`. Versioned SQL files live in
