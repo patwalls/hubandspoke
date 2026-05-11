@@ -195,32 +195,32 @@ export async function mergeProductionItems(
     const secondaryViews = secondary.views || 0;
     const combinedViews = primaryViews + secondaryViews;
 
-    // Build update data
-    const updateData: any = {
-      views: combinedViews,
-      updatedAt: new Date(),
-    };
-
-    // Critical: Transfer platformContentId from duplicate to keeper if keeper doesn't have it
-    // This allows the API sync to find and update this item with new view counts
-    if (!primary.platformContentId && secondary.platformContentId) {
-      updateData.platformContentId = secondary.platformContentId;
-    }
-
-    // 5. Update primary with merged data
-    await db
-      .update(productionItems)
-      .set(updateData)
-      .where(eq(productionItems.id, primary.id));
-
-    // 6. Soft-delete secondary (set deletedAt)
+    // 5. Soft-delete secondary FIRST (before updating primary with its platformContentId)
+    // This avoids unique constraint violations when the secondary has platformContentId
     await db
       .update(productionItems)
       .set({
         deletedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(productionItems.id, secondaryId));
+      .where(eq(productionItems.id, secondary.id));
+
+    // 6. Now update primary with merged data (safe because secondary is already soft-deleted)
+    const updateData: any = {
+      views: combinedViews,
+      updatedAt: new Date(),
+    };
+
+    // Transfer platformContentId from duplicate to keeper if keeper doesn't have it
+    // Safe now because secondary is already marked as deleted
+    if (!primary.platformContentId && secondary.platformContentId) {
+      updateData.platformContentId = secondary.platformContentId;
+    }
+
+    await db
+      .update(productionItems)
+      .set(updateData)
+      .where(eq(productionItems.id, primary.id));
 
     // 7. Create audit log entry
     // Note: This assumes a productionItemsMerges table exists in the schema
