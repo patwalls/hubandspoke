@@ -277,15 +277,19 @@ async function getWeekOverWeekComparison(args: {
   const elapsedMs = now.getTime() - weekStart.getTime();
   const priorWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
   const priorAnchor = new Date(priorWeekStart.getTime() + elapsedMs);
-  // production_items.publishedDate is a `date` column (no time), so
-  // compare via ISO date strings (same idiom getContentReport uses).
-  // The anchor times are used for view_snapshots.taken_at which IS a
-  // timestamp, so those stay as Date objects below.
-  const toIsoDate = (d: Date) => d.toISOString().slice(0, 10);
+  // ISO strings for all timestamp params — postgres.js doesn't accept
+  // raw Date objects through drizzle's `sql` template tag.
+  const weekStartIso = weekStart.toISOString();
+  const nowIso = now.toISOString();
+  const priorWeekStartIso = priorWeekStart.toISOString();
+  const priorAnchorIso = priorAnchor.toISOString();
 
   const brandFilter = brand === "all" ? sql`true` : sql`pi.brand = ${brand}`;
 
-  // Production: two simple counts.
+  // Production: hourly precision via published_at (timestamptz). Fall
+  // back to published_date::timestamptz for legacy rows that only have
+  // the date column set. The COALESCE lets us count both modern (hour-
+  // accurate) and legacy (day-bucketed) items in the same window.
   const productionRows = (await db.execute(sql`
     SELECT
       (
@@ -293,18 +297,18 @@ async function getWeekOverWeekComparison(args: {
         WHERE ${brandFilter}
           AND pi.status = 'Published'
           AND pi.deleted_at IS NULL
-          AND pi.published_date IS NOT NULL
-          AND pi.published_date >= ${toIsoDate(weekStart)}
-          AND pi.published_date <= ${toIsoDate(now)}
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) IS NOT NULL
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) >= ${weekStartIso}::timestamptz
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) <= ${nowIso}::timestamptz
       )::int AS current_production,
       (
         SELECT COUNT(*) FROM production_items pi
         WHERE ${brandFilter}
           AND pi.status = 'Published'
           AND pi.deleted_at IS NULL
-          AND pi.published_date IS NOT NULL
-          AND pi.published_date >= ${toIsoDate(priorWeekStart)}
-          AND pi.published_date <= ${toIsoDate(priorAnchor)}
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) IS NOT NULL
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) >= ${priorWeekStartIso}::timestamptz
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) <= ${priorAnchorIso}::timestamptz
       )::int AS prior_production
   `)) as unknown as Array<{
     current_production: number;
@@ -315,11 +319,12 @@ async function getWeekOverWeekComparison(args: {
     prior_production: 0,
   };
 
-  // Views: current is sum of pi.views in [week_start, now] (same
-  // shape as today's primary KPI). Prior uses the LATERAL join to
-  // pull each item's snapshot-nearest-the-anchor, falling back to
-  // pi.views when no snapshot exists. The idx_view_snapshots_item_taken
-  // index covers the lookup.
+  // Views: same hourly-precision publication window as production.
+  // Current = sum of pi.views in [week_start, now]. Prior uses the
+  // LATERAL join to pull each item's snapshot nearest the anchor,
+  // falling back to pi.views when no snapshot exists ≤ anchor (rows
+  // synced late and missed early checkpoints). The
+  // idx_view_snapshots_item_taken index covers the lookup.
   const viewsRows = (await db.execute(sql`
     SELECT
       (
@@ -327,9 +332,9 @@ async function getWeekOverWeekComparison(args: {
         WHERE ${brandFilter}
           AND pi.status = 'Published'
           AND pi.deleted_at IS NULL
-          AND pi.published_date IS NOT NULL
-          AND pi.published_date >= ${toIsoDate(weekStart)}
-          AND pi.published_date <= ${toIsoDate(now)}
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) IS NOT NULL
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) >= ${weekStartIso}::timestamptz
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) <= ${nowIso}::timestamptz
       ) AS current_views,
       (
         SELECT COALESCE(SUM(
@@ -340,16 +345,16 @@ async function getWeekOverWeekComparison(args: {
           SELECT vs.views
           FROM view_snapshots vs
           WHERE vs.production_item_id = pi.id
-            AND vs.taken_at <= ${priorAnchor}
+            AND vs.taken_at <= ${priorAnchorIso}::timestamptz
           ORDER BY vs.taken_at DESC
           LIMIT 1
         ) latest_snapshot ON TRUE
         WHERE ${brandFilter}
           AND pi.status = 'Published'
           AND pi.deleted_at IS NULL
-          AND pi.published_date IS NOT NULL
-          AND pi.published_date >= ${toIsoDate(priorWeekStart)}
-          AND pi.published_date <= ${toIsoDate(priorAnchor)}
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) IS NOT NULL
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) >= ${priorWeekStartIso}::timestamptz
+          AND COALESCE(pi.published_at, pi.published_date::timestamptz) <= ${priorAnchorIso}::timestamptz
       ) AS prior_views
   `)) as unknown as Array<{
     current_views: string | number;
