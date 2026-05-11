@@ -215,12 +215,26 @@ export async function mergeProductionItems(
     // Safe now because secondary is already marked as deleted
     if (!primary.platformContentId && secondary.platformContentId) {
       updateData.platformContentId = secondary.platformContentId;
+      console.log(
+        `[merge-production-items] Setting platformContentId on ${primary.id}: ${secondary.platformContentId}`
+      );
     }
 
-    await db
-      .update(productionItems)
-      .set(updateData)
-      .where(eq(productionItems.id, primary.id));
+    try {
+      await db
+        .update(productionItems)
+        .set(updateData)
+        .where(eq(productionItems.id, primary.id));
+      console.log(
+        `[merge-production-items] Successfully updated primary ${primary.id} with views=${combinedViews}`
+      );
+    } catch (updateErr: any) {
+      console.error(
+        `[merge-production-items] Failed to update primary ${primary.id}:`,
+        updateErr.message
+      );
+      throw updateErr;
+    }
 
     // 7. Create audit log entry
     // Note: This assumes a productionItemsMerges table exists in the schema
