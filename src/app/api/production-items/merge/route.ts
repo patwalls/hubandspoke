@@ -5,7 +5,6 @@ import { requireSession } from "@/lib/auth-guards";
 interface MergeRequest {
   primaryId: string;
   secondaryId: string;
-  mergeStrategy: "keepPrimary" | "keepSecondary" | "mergeMetrics";
 }
 
 /**
@@ -13,15 +12,15 @@ interface MergeRequest {
  *
  * Request body:
  * {
- *   primaryId: string,      // Item to keep
- *   secondaryId: string,    // Item to merge into primary
- *   mergeStrategy: string   // "keepPrimary" | "keepSecondary" | "mergeMetrics"
+ *   primaryId: string,      // Item to keep (the one with editor metadata/comments)
+ *   secondaryId: string,    // Item to merge and delete (the duplicate pulled by API)
  * }
  *
- * Strategies:
- * - keepPrimary: Keep primary's data, soft-delete secondary
- * - keepSecondary: Use secondary's data, soft-delete it anyway (data moved to primary)
- * - mergeMetrics: Keep primary's structure, sum views from both
+ * Smart merge behavior:
+ * - Primary item keeps: editor metadata, sourceType, format, title, comments, history
+ * - Primary item receives: platformContentId, publishedLink, and summed metrics from secondary
+ * - Secondary item is soft-deleted
+ * - Future API syncs will find and update the primary item
  *
  * Response:
  * {
@@ -39,20 +38,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = (await request.json()) as MergeRequest;
-    const { primaryId, secondaryId, mergeStrategy } = body;
+    const { primaryId, secondaryId } = body;
 
     // Validate required fields
-    if (!primaryId || !secondaryId || !mergeStrategy) {
+    if (!primaryId || !secondaryId) {
       return NextResponse.json(
-        { error: "Missing required fields: primaryId, secondaryId, mergeStrategy" },
-        { status: 400 }
-      );
-    }
-
-    // Validate merge strategy
-    if (!["keepPrimary", "keepSecondary", "mergeMetrics"].includes(mergeStrategy)) {
-      return NextResponse.json(
-        { error: "Invalid mergeStrategy. Must be one of: keepPrimary, keepSecondary, mergeMetrics" },
+        { error: "Missing required fields: primaryId, secondaryId" },
         { status: 400 }
       );
     }
@@ -61,7 +52,6 @@ export async function POST(request: NextRequest) {
     const result = await mergeProductionItems(
       primaryId,
       secondaryId,
-      mergeStrategy as "keepPrimary" | "keepSecondary" | "mergeMetrics",
       userId
     );
 

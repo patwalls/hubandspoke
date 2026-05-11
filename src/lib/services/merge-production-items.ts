@@ -3,8 +3,6 @@ import { productionItems } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
-export type MergeStrategy = "keepPrimary" | "keepSecondary" | "mergeMetrics";
-
 export interface MergeResult {
   success: boolean;
   message: string;
@@ -16,22 +14,20 @@ export interface MergeResult {
 /**
  * Merge two duplicate production items.
  *
- * This function:
+ * This function performs a smart merge that:
  * 1. Validates both items exist and belong to same account/brand
- * 2. Repoints foreign keys using savepoints to handle unique constraint collisions
- * 3. Merges data based on strategy (keepPrimary, keepSecondary, or mergeMetrics)
- * 4. Soft-deletes the secondary item (secondary_role)
- * 5. Creates an audit log entry in production_items_merges table
+ * 2. Repoints foreign keys from secondary to primary using savepoints
+ * 3. Transfers API metadata (platformContentId, publishedLink) from secondary to primary
+ * 4. Sums view counts from both items
+ * 5. Soft-deletes the secondary item
+ * 6. Creates an audit log entry in production_items_merges table
  *
- * Strategies:
- * - keepPrimary: Keep all data from primary, discard secondary
- * - keepSecondary: Use secondary's data, make it the primary
- * - mergeMetrics: Keep primary's structure, but sum views from both
+ * The primary item (kept) retains: editor metadata, comments, history, sourceType
+ * The secondary item (deleted) contributes: platformContentId, publishedLink, metrics
  */
 export async function mergeProductionItems(
   primaryId: string,
   secondaryId: string,
-  strategy: MergeStrategy,
   userId: string
 ): Promise<MergeResult> {
   if (primaryId === secondaryId) {
@@ -143,35 +139,20 @@ export async function mergeProductionItems(
       await db.execute(sql`RELEASE SAVEPOINT merge_${sql.raw(table)}`);
     }
 
-    // 4. Merge data based on strategy
-    let primaryUpdateData: Partial<typeof primary> = {};
+    // 4. Merge: Keep primary's metadata, transfer API data (platformContentId, publishedLink) and metrics from secondary
+    const primaryViews = primary.views || 0;
+    const secondaryViews = secondary.views || 0;
 
-    if (strategy === "keepSecondary") {
-      // Use secondary's data for primary
-      // IMPORTANT: Include platformContentId so API can find this item in future syncs
-      primaryUpdateData = {
-        title: secondary.title,
-        publishedLink: secondary.publishedLink,
-        platformContentId: secondary.platformContentId,
-        platform: secondary.platform,
-        postType: secondary.postType,
-        format: secondary.format,
-        status: secondary.status,
-        thumbnail: secondary.thumbnail,
-      };
-    } else if (strategy === "mergeMetrics") {
-      // Keep primary's data but merge metrics
-      // IMPORTANT: Include platformContentId from secondary so API can find this item in future syncs
-      const primaryViews = primary.views || 0;
-      const secondaryViews = secondary.views || 0;
-      primaryUpdateData = {
-        views: primaryViews + secondaryViews,
-        likes: Math.max(primary.likes || 0, secondary.likes || 0),
-        comments: Math.max(primary.comments || 0, secondary.comments || 0),
-        platformContentId: secondary.platformContentId || primary.platformContentId,
-      };
-    }
-    // else keepPrimary: no updates, keep primary as-is
+    const primaryUpdateData: Partial<typeof primary> = {
+      // Transfer critical API fields from secondary so future syncs work
+      platformContentId: secondary.platformContentId || primary.platformContentId,
+      publishedLink: secondary.publishedLink || primary.publishedLink,
+      // Transfer/update metrics from secondary
+      views: primaryViews + secondaryViews,
+      likes: Math.max(primary.likes || 0, secondary.likes || 0),
+      comments: Math.max(primary.comments || 0, secondary.comments || 0),
+      // Keep primary's other fields (title, format, status, etc.)
+    };
 
     // 5. Update primary with merged data
     if (Object.keys(primaryUpdateData).length > 0) {
@@ -198,7 +179,7 @@ export async function mergeProductionItems(
     try {
       await db.execute(sql`
         INSERT INTO production_items_merges (id, primary_item_id, secondary_item_id, merged_by, merge_strategy, created_at)
-        VALUES (gen_random_uuid(), ${primaryId}, ${secondaryId}, ${userId}, ${strategy}, now())
+        VALUES (gen_random_uuid(), ${primaryId}, ${secondaryId}, ${userId}, 'smart_merge', now())
       `);
     } catch (err: any) {
       // Table might not exist yet (migration pending), log but don't fail the merge
@@ -207,7 +188,7 @@ export async function mergeProductionItems(
 
     return {
       success: true,
-      message: `Successfully merged ${secondaryId} into ${primaryId} using ${strategy} strategy`,
+      message: `Successfully merged duplicate into primary item. Kept editor metadata, transferred API data and metrics.`,
       primaryId,
       secondaryId,
       deletedId: secondaryId,

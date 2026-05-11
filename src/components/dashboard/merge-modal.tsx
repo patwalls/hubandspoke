@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Search, GitMerge } from "lucide-react";
 import type { ProductionItem } from "@/types";
@@ -13,13 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
 interface MergeModalProps {
@@ -30,8 +23,6 @@ interface MergeModalProps {
   contentId: string;
   onMergeComplete?: () => void;
 }
-
-type MergeStrategy = "keepPrimary" | "keepSecondary" | "mergeMetrics";
 
 export function MergeModal({
   open,
@@ -45,9 +36,6 @@ export function MergeModal({
   const [foundItems, setFoundItems] = useState<ProductionItem[]>([]);
   const [selectedSecondaryId, setSelectedSecondaryId] = useState<string | null>(
     null
-  );
-  const [mergeStrategy, setMergeStrategy] = useState<MergeStrategy>(
-    "keepPrimary"
   );
   const [searching, setSearching] = useState(false);
   const [merging, setMerging] = useState(false);
@@ -98,7 +86,6 @@ export function MergeModal({
         body: JSON.stringify({
           primaryId: contentId,
           secondaryId: selectedSecondaryId,
-          mergeStrategy,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -107,7 +94,7 @@ export function MergeModal({
         return;
       }
       toast.success(
-        `Merged with ${selectedSecondaryItem?.title || "item"}. The duplicate has been archived.`
+        `Merged successfully. The duplicate has been archived.`
       );
       onOpenChange(false);
       onMergeComplete?.();
@@ -115,7 +102,6 @@ export function MergeModal({
       setSearchQuery("");
       setFoundItems([]);
       setSelectedSecondaryId(null);
-      setMergeStrategy("keepPrimary");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to merge");
     } finally {
@@ -210,49 +196,16 @@ export function MergeModal({
             </div>
           )}
 
-          {/* Merge strategy */}
-          {selectedSecondaryItem && (
-            <div className="space-y-2">
-              <Label htmlFor="merge-strategy">Merge strategy</Label>
-              <Select value={mergeStrategy} onValueChange={(v) => setMergeStrategy(v as MergeStrategy)}>
-                <SelectTrigger id="merge-strategy">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="keepPrimary">
-                    <span className="font-medium">Keep this item's data</span>
-                    <span className="text-xs text-muted-foreground block">
-                      Archive the selected item, keep all data from this one
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="keepSecondary">
-                    <span className="font-medium">Use duplicate's data</span>
-                    <span className="text-xs text-muted-foreground block">
-                      Use the selected item's data instead, archive this one
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="mergeMetrics">
-                    <span className="font-medium">Combine view counts</span>
-                    <span className="text-xs text-muted-foreground block">
-                      Keep this item's data but sum view counts from both
-                    </span>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
           {/* Confirmation */}
           {selectedSecondaryItem && (
-            <div className="rounded-lg border border-border bg-card p-3 text-sm">
-              <p className="font-medium mb-2">Preview:</p>
-              <p className="text-xs">
-                {mergeStrategy === "keepPrimary"
-                  ? `Keeping "${primaryItem.title}". Archiving "${selectedSecondaryItem.title}".`
-                  : mergeStrategy === "keepSecondary"
-                  ? `Using data from "${selectedSecondaryItem.title}". Archiving the current item.`
-                  : `Keeping "${primaryItem.title}". Combining view counts: ${(primaryItem.views || 0).toLocaleString()} + ${(selectedSecondaryItem.views || 0).toLocaleString()} views.`}
-              </p>
+            <div className="rounded-lg border border-border bg-card p-3 text-sm space-y-2">
+              <p className="font-medium">What will happen:</p>
+              <ul className="text-xs space-y-1 text-muted-foreground">
+                <li>✓ Keep "{primaryItem.title}" with all your comments and history</li>
+                <li>✓ Transfer view data: {(primaryItem.views || 0).toLocaleString()} + {(selectedSecondaryItem.views || 0).toLocaleString()} = {((primaryItem.views || 0) + (selectedSecondaryItem.views || 0)).toLocaleString()} views</li>
+                <li>✓ Future view updates will sync automatically</li>
+                <li>✓ Archive the duplicate "{selectedSecondaryItem.title}"</li>
+              </ul>
             </div>
           )}
 
