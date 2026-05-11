@@ -206,15 +206,16 @@ export async function mergeProductionItems(
       .where(eq(productionItems.id, secondary.id));
 
     // 6. Now update primary with merged data using raw SQL
-    // Raw SQL to bypass any Drizzle type system issues
-    let updateSql = sql`UPDATE production_items SET views = ${combinedViews}, updated_at = now()`;
+    // Build the complete SQL statement properly (don't nest template literals)
+    let updateSql;
 
-    // Transfer platformContentId from duplicate to keeper if keeper doesn't have it
     if (!primary.platformContentId && secondary.platformContentId) {
-      updateSql = sql`UPDATE production_items SET views = ${combinedViews}, platform_content_id = ${secondary.platformContentId}, updated_at = now()`;
+      // Transfer platformContentId if keeper doesn't have it
+      updateSql = sql`UPDATE production_items SET views = ${combinedViews}, platform_content_id = ${secondary.platformContentId}, updated_at = now() WHERE id = ${primary.id}`;
+    } else {
+      // Just update views and timestamp
+      updateSql = sql`UPDATE production_items SET views = ${combinedViews}, updated_at = now() WHERE id = ${primary.id}`;
     }
-
-    updateSql = sql`${updateSql} WHERE id = ${primary.id}`;
 
     try {
       await db.execute(updateSql);
