@@ -92,7 +92,19 @@ async function runRedrive(id: string) {
   `)) as unknown as Array<{ id: number; identifier: string }>;
   const idByName = new Map(taskIds.map((r) => [r.identifier, r.id]));
   const ids = [...idByName.values()];
-  const updated = (ids.length
+
+  // Find the most recent job first to avoid parameter duplication in a single UPDATE
+  const recentJob = ids.length
+    ? ((await db.execute(sql`
+        SELECT id FROM graphile_worker._private_jobs
+        WHERE task_id = ANY(${ids})
+          AND payload->>'triggerId' = ${trigger.id}
+        ORDER BY id DESC
+        LIMIT 1
+      `)) as unknown as Array<{ id: number }>)
+    : [];
+
+  const updated = recentJob.length
     ? ((await db.execute(sql`
         UPDATE graphile_worker._private_jobs
         SET locked_at = NULL,
@@ -100,25 +112,18 @@ async function runRedrive(id: string) {
             attempts = 0,
             run_at = now(),
             last_error = NULL
-        WHERE task_id = ANY(${ids})
-          AND payload->>'triggerId' = ${trigger.id}
-          AND id IN (
-            SELECT id FROM graphile_worker._private_jobs
-            WHERE task_id = ANY(${ids})
-              AND payload->>'triggerId' = ${trigger.id}
-            ORDER BY id DESC
-            LIMIT 1
-          )
+        WHERE id = ${recentJob[0].id}
         RETURNING id::text, task_id
       `)) as unknown as Array<{ id: string; task_id: number }>)
-    : []
-  ).map((r) => ({
+    : [];
+
+  const jobResults = updated.map((r) => ({
     id: r.id,
     task_identifier:
       [...idByName.entries()].find(([, v]) => v === r.task_id)?.[0] ?? "unknown",
   }));
 
-  const job = updated[0] ?? null;
+  const job = jobResults[0] ?? null;
   if (!job) {
     // Stalled state: trigger exists, project was created in Descript,
     // but no queue job is around to redrive (the original task either
