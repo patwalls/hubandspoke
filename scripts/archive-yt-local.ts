@@ -368,7 +368,27 @@ async function main() {
   const failures: Array<{ id: string; title: string | null; err: string }> = [];
 
   for (let i = 0; i < items.length; i++) {
-    const item = items[i];
+    let item = items[i];
+
+    // MATG deduplication: if this youtube_url already exists as a different
+    // item (e.g., a clip), use that item instead. Prevents creating duplicate
+    // production_items for the same YouTube video.
+    if (BRANDS.includes("matg") && ID_LIST.length === 0) {
+      const existing = await pool.query<{ id: string; source_type: string }>(
+        `SELECT id, source_type FROM production_items
+          WHERE youtube_url = $1
+            AND id != $2
+            AND brand = 'matg'
+          LIMIT 1`,
+        [item.youtube_url, item.id],
+      );
+      if (existing.rows.length > 0) {
+        const existingItem = existing.rows[0];
+        console.log(`    ↳ Found existing ${existingItem.source_type} (${existingItem.id.slice(0, 8)}...), updating that instead`);
+        item = { ...item, id: existingItem.id };
+      }
+    }
+
     const prefix = `[${i + 1}/${items.length}] ${item.id}`;
     process.stdout.write(`${prefix} ${(item.title ?? "").slice(0, 50)}... `);
     const start = Date.now();
