@@ -195,15 +195,17 @@ export async function mergeProductionItems(
     const secondaryViews = secondary.views || 0;
     const combinedViews = primaryViews + secondaryViews;
 
-    // 5. Soft-delete secondary FIRST (before updating primary with its platformContentId)
-    // This avoids unique constraint violations when the secondary has platformContentId
-    await db
-      .update(productionItems)
-      .set({
-        deletedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(productionItems.id, secondary.id));
+    // 5. Clear secondary's platformContentId FIRST (before updating primary)
+    // This removes the unique constraint conflict since soft-deletes don't free up UNIQUE constraints
+    if (secondary.platformContentId) {
+      await db
+        .update(productionItems)
+        .set({
+          platformContentId: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(productionItems.id, secondary.id));
+    }
 
     // 6. Now update primary with merged data using raw SQL
     // Build the complete SQL statement properly (don't nest template literals)
@@ -234,7 +236,16 @@ export async function mergeProductionItems(
       throw updateErr;
     }
 
-    // 7. Create audit log entry
+    // 7. Now soft-delete secondary (safe since its platformContentId is already cleared)
+    await db
+      .update(productionItems)
+      .set({
+        deletedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, secondary.id));
+
+    // 8. Create audit log entry
     // Note: This assumes a productionItemsMerges table exists in the schema
     try {
       await db.execute(sql`
