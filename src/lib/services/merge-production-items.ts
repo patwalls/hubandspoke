@@ -59,16 +59,14 @@ async function determineKeeper(
 /**
  * Merge two duplicate production items.
  *
- * This function performs a smart merge that:
- * 1. Validates both items exist and belong to same account/brand
- * 2. Repoints foreign keys from secondary to primary using savepoints
- * 3. Transfers API metadata (platformContentId, publishedLink) from secondary to primary
- * 4. Sums view counts from both items
- * 5. Soft-deletes the secondary item
- * 6. Creates an audit log entry in production_items_merges table
+ * This function performs a simple, safe merge that:
+ * 1. Determines which item to keep (keeper) using smart detection
+ * 2. Sums the view counts from both items
+ * 3. Soft-deletes the duplicate item
+ * 4. Creates an audit log entry
  *
- * The primary item (kept) retains: editor metadata, comments, history, sourceType
- * The secondary item (deleted) contributes: platformContentId, publishedLink, metrics
+ * The keeper retains: title, format, comments, history, Descript data, sourceType, etc.
+ * The duplicate is soft-deleted (archived, not permanently removed).
  */
 export async function mergeProductionItems(
   primaryId: string,
@@ -191,37 +189,20 @@ export async function mergeProductionItems(
       }
     }
 
-    // 4. Merge: Keep primary's metadata, transfer critical API data from secondary
-    const primaryUpdateData: Partial<typeof primary> = {};
-
-    // Only update platformContentId if primary doesn't have one (to avoid unique constraint conflicts)
-    if (!primary.platformContentId && secondary.platformContentId) {
-      primaryUpdateData.platformContentId = secondary.platformContentId;
-    }
-
-    // Only update publishedLink if primary doesn't have one (to avoid unique constraint conflicts)
-    if (!primary.publishedLink && secondary.publishedLink) {
-      primaryUpdateData.publishedLink = secondary.publishedLink;
-    }
-
-    // Sum view counts if the secondary has views
+    // 4. Merge: Just sum view counts, keep everything else on the keeper
+    // The keeper already has platformContentId/publishedLink/comments/history/descript info
     const primaryViews = primary.views || 0;
     const secondaryViews = secondary.views || 0;
-    if (secondaryViews > 0) {
-      primaryUpdateData.views = primaryViews + secondaryViews;
-    }
-    // Note: We don't update likes/comments - those are API metrics that shouldn't be manually merged
+    const combinedViews = primaryViews + secondaryViews;
 
-    // 5. Update primary with merged data
-    if (Object.keys(primaryUpdateData).length > 0) {
-      await db
-        .update(productionItems)
-        .set({
-          ...primaryUpdateData,
-          updatedAt: new Date(),
-        })
-        .where(eq(productionItems.id, primaryId));
-    }
+    // 5. Update primary with combined view count only
+    await db
+      .update(productionItems)
+      .set({
+        views: combinedViews,
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, primary.id));
 
     // 6. Soft-delete secondary (set deletedAt)
     await db
