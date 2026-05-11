@@ -4,7 +4,7 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronDownIcon, ChevronUpIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, GitMerge, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import {
@@ -78,6 +78,7 @@ import type { PostType } from "@/lib/platform-field-schemas";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
 import { ContentPreview } from "./preview/content-preview";
+import { MergeModal } from "./merge-modal";
 import { PublishedEmbed } from "./preview/published-embed";
 import type { ContentDraftContent, FormatFieldSchema } from "@/lib/db/schema";
 
@@ -706,6 +707,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   // can be generated even on a not-yet-published item.
   const [mediaUploadOpen, setMediaUploadOpen] = useState(false);
   const [mediaUploadFile, setMediaUploadFile] = useState<File | null>(null);
+
+  // Merge modal for manually merging duplicate items
+  const [showMergeModal, setShowMergeModal] = useState(false);
   const [mediaUploadStage, setMediaUploadStage] = useState<
     "idle" | "uploading" | "confirming" | "done"
   >("idle");
@@ -2291,6 +2295,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     onClick={() => void handleDuplicate()}
                   >
                     <CopyIcon className="size-3.5" /> Duplicate
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={actionPending}
+                    onClick={() => setShowMergeModal(true)}
+                  >
+                    <GitMerge className="size-3.5" /> Merge…
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {!hasDescriptProject && item.mediaS3Key && (
@@ -3959,6 +3969,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         onSaved={async (nextSlug) => {
           await persistField({ shortLinkSlug: nextSlug });
           setDmRefresh((k) => k + 1);
+        }}
+      />
+
+      <MergeModal
+        open={showMergeModal}
+        onOpenChange={setShowMergeModal}
+        primaryItem={item}
+        brand={brand}
+        contentId={contentId}
+        onMergeComplete={() => {
+          // Refresh after successful merge
+          router.refresh();
         }}
       />
 
