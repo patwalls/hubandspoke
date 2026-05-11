@@ -22,6 +22,13 @@ interface MetricTilesProps {
   currentPeriodLabel: string | null;
   weeklyGoal: number | null;
   brand: string;
+  /** Week-over-week pacing comparison, prorated to the elapsed hours of
+   *  the current week. Brand-scoped (independent of the page's filters).
+   *  See `getWeekOverWeekComparison` in `src/lib/db/queries.ts`. */
+  weekOverWeek?: {
+    production: { current: number; prior: number | null };
+    views: { current: number; prior: number | null };
+  };
 }
 
 function formatCompact(n: number): string {
@@ -37,6 +44,66 @@ function sumPeriod(metric: MetricData, periodLabel: string | null): number {
     total += pd[periodLabel] || 0;
   });
   return total;
+}
+
+/**
+ * Small inline pill showing the week-over-week delta. Green when up,
+ * red when down, muted when flat. Renders nothing when prior is null
+ * (degenerate case — brand-new install, no prior-week signal).
+ *
+ * The percentage is the meaningful number; the raw delta is in the
+ * tooltip. When prior is 0 and current > 0, percent is undefined math,
+ * so we just show "↑ NEW".
+ */
+function DeltaBadge({
+  current,
+  prior,
+  label,
+}: {
+  current: number;
+  prior: number | null;
+  label: string;
+}) {
+  if (prior == null) return null;
+  const diff = current - prior;
+  let display: string;
+  let color: "up" | "down" | "flat";
+  if (prior === 0) {
+    if (current === 0) return null;
+    display = "↑ NEW";
+    color = "up";
+  } else {
+    const pct = (diff / prior) * 100;
+    if (diff === 0) {
+      display = "→ 0%";
+      color = "flat";
+    } else if (diff > 0) {
+      display = `↑ +${Math.abs(pct).toFixed(0)}%`;
+      color = "up";
+    } else {
+      display = `↓ -${Math.abs(pct).toFixed(0)}%`;
+      color = "down";
+    }
+  }
+  const palette =
+    color === "up"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : color === "down"
+        ? "bg-red-50 text-red-700 border-red-200"
+        : "bg-muted text-muted-foreground border-border";
+  const titleParts: string[] = [];
+  const diffSign = diff > 0 ? "+" : "";
+  titleParts.push(`${label}: ${current.toLocaleString()} this wk so far`);
+  titleParts.push(`${prior.toLocaleString()} prior wk at same point`);
+  titleParts.push(`Δ ${diffSign}${diff.toLocaleString()}`);
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${palette}`}
+      title={titleParts.join(" · ")}
+    >
+      {display}
+    </span>
+  );
 }
 
 function InfoIcon() {
@@ -62,6 +129,7 @@ export function MetricTiles({
   currentPeriodLabel,
   weeklyGoal,
   brand,
+  weekOverWeek,
 }: MetricTilesProps) {
   // Recompute on the client so the fractional day/hour reflects the user's
   // local wall clock (the server runs in UTC). Re-tick every 5 min so the card
@@ -132,12 +200,19 @@ export function MetricTiles({
             </PopoverContent>
           </Popover>
         </div>
-        <div className="mt-2 flex items-baseline gap-1.5">
+        <div className="mt-2 flex items-baseline gap-1.5 flex-wrap">
           <span className="text-3xl font-semibold text-foreground tabular-nums">
             {currentPeriodTotal}
           </span>
           {hasGoal && (
             <span className="text-lg text-muted-foreground">/ {weeklyGoal}</span>
+          )}
+          {weekOverWeek?.production && (
+            <DeltaBadge
+              current={weekOverWeek.production.current}
+              prior={weekOverWeek.production.prior}
+              label="Production"
+            />
           )}
         </div>
         {hasGoal ? (
@@ -175,10 +250,17 @@ export function MetricTiles({
         <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
           Views This Week
         </p>
-        <div className="mt-2">
+        <div className="mt-2 flex items-baseline gap-1.5 flex-wrap">
           <span className="text-3xl font-semibold text-foreground tabular-nums">
             {formatCompact(viewsThisWeek)}
           </span>
+          {weekOverWeek?.views && (
+            <DeltaBadge
+              current={weekOverWeek.views.current}
+              prior={weekOverWeek.views.prior}
+              label="Views"
+            />
+          )}
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
           Across all platforms

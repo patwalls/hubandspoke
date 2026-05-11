@@ -206,6 +206,17 @@ export interface ContentReportData {
    *  with cohort < 10 within the (format, post_type) bucket are
    *  silently absent — no bar means "—" in the UI. */
   formatBars?: Record<string, Record<string, FormatViewBar>>;
+  /** Week-over-week pacing comparison, prorated to the elapsed hours
+   *  of the current week. `current` = published items / views in
+   *  [week_start, now]. `prior` = same window in the prior week —
+   *  for production a count; for views, view_snapshots-at-the-
+   *  equivalent-moment with current-views fallback per item when no
+   *  snapshot exists. `prior` is null only when prior-week bounds
+   *  yield no comparable data. */
+  weekOverWeek?: {
+    production: { current: number; prior: number | null };
+    views: { current: number; prior: number | null };
+  };
 }
 
 export interface SyncLog {

@@ -186,6 +186,7 @@ export function ContentReport({ brand }: { brand: string }) {
           currentPeriodLabel={currentPeriodLabel}
           weeklyGoal={data.weeklyGoal}
           brand={brand}
+          weekOverWeek={data.weekOverWeek}
         />
       ) : !fetchError ? (
         <div className="flex items-center justify-center py-12">

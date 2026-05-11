@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts } from "@/lib/db/schema";
+import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts, viewSnapshots } from "@/lib/db/schema";
 import { aliasedTable } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
@@ -215,6 +215,7 @@ function normalizeWeekStart(value: number | null | undefined): WeekStartsOn {
   return clamped as WeekStartsOn;
 }
 
+import { startOfWeek } from "date-fns";
 import {
   buildPeriods,
   findPeriod,
@@ -241,6 +242,139 @@ interface ReportParams {
   postType?: string;
   format: string;
   source: string;
+}
+
+/**
+ * Week-over-week pacing comparison for the Content Command Center
+ * KPI cards. Prorated to the hour: if we're 36 hours into this week,
+ * the prior-week comparison covers the first 36 hours of the prior
+ * week (same brand, same Published/non-deleted filter as the
+ * primary KPIs).
+ *
+ * Production = plain count of items with publishedDate in the window.
+ * Views = sum of "views at the equivalent moment of last week" per
+ * item — sourced from view_snapshots at the velocity checkpoint
+ * nearest to (and not after) the prior anchor. If an item has no
+ * snapshot ≤ anchor (sometimes happens when the item was added to
+ * Hub & Spoke after the early checkpoints' windows had closed),
+ * fall back to productionItems.views — a slight over-count for that
+ * row, but the only signal we have. Pat acknowledged the imperfection
+ * upfront.
+ *
+ * Returns `prior: null` when prior-week bounds are degenerate
+ * (brand-new install, no Published items in the prior window at all).
+ */
+async function getWeekOverWeekComparison(args: {
+  brand: string;
+  weekStartsOn: WeekStartsOn;
+}): Promise<NonNullable<ContentReportData["weekOverWeek"]>> {
+  const { brand, weekStartsOn } = args;
+  const now = new Date();
+  // `startOfWeek` honors weekStartsOn 0..6. elapsedMs is how far into
+  // the current week we are; prior_anchor sits at the same offset in
+  // the prior week.
+  const weekStart = startOfWeek(now, { weekStartsOn });
+  const elapsedMs = now.getTime() - weekStart.getTime();
+  const priorWeekStart = new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const priorAnchor = new Date(priorWeekStart.getTime() + elapsedMs);
+  // production_items.publishedDate is a `date` column (no time), so
+  // compare via ISO date strings (same idiom getContentReport uses).
+  // The anchor times are used for view_snapshots.taken_at which IS a
+  // timestamp, so those stay as Date objects below.
+  const toIsoDate = (d: Date) => d.toISOString().slice(0, 10);
+
+  const brandFilter = brand === "all" ? sql`true` : sql`pi.brand = ${brand}`;
+
+  // Production: two simple counts.
+  const productionRows = (await db.execute(sql`
+    SELECT
+      (
+        SELECT COUNT(*) FROM production_items pi
+        WHERE ${brandFilter}
+          AND pi.status = 'Published'
+          AND pi.deleted_at IS NULL
+          AND pi.published_date IS NOT NULL
+          AND pi.published_date >= ${toIsoDate(weekStart)}
+          AND pi.published_date <= ${toIsoDate(now)}
+      )::int AS current_production,
+      (
+        SELECT COUNT(*) FROM production_items pi
+        WHERE ${brandFilter}
+          AND pi.status = 'Published'
+          AND pi.deleted_at IS NULL
+          AND pi.published_date IS NOT NULL
+          AND pi.published_date >= ${toIsoDate(priorWeekStart)}
+          AND pi.published_date <= ${toIsoDate(priorAnchor)}
+      )::int AS prior_production
+  `)) as unknown as Array<{
+    current_production: number;
+    prior_production: number;
+  }>;
+  const productionCounts = productionRows[0] ?? {
+    current_production: 0,
+    prior_production: 0,
+  };
+
+  // Views: current is sum of pi.views in [week_start, now] (same
+  // shape as today's primary KPI). Prior uses the LATERAL join to
+  // pull each item's snapshot-nearest-the-anchor, falling back to
+  // pi.views when no snapshot exists. The idx_view_snapshots_item_taken
+  // index covers the lookup.
+  const viewsRows = (await db.execute(sql`
+    SELECT
+      (
+        SELECT COALESCE(SUM(pi.views), 0)::bigint FROM production_items pi
+        WHERE ${brandFilter}
+          AND pi.status = 'Published'
+          AND pi.deleted_at IS NULL
+          AND pi.published_date IS NOT NULL
+          AND pi.published_date >= ${toIsoDate(weekStart)}
+          AND pi.published_date <= ${toIsoDate(now)}
+      ) AS current_views,
+      (
+        SELECT COALESCE(SUM(
+          COALESCE(latest_snapshot.views, pi.views, 0)
+        ), 0)::bigint
+        FROM production_items pi
+        LEFT JOIN LATERAL (
+          SELECT vs.views
+          FROM view_snapshots vs
+          WHERE vs.production_item_id = pi.id
+            AND vs.taken_at <= ${priorAnchor}
+          ORDER BY vs.taken_at DESC
+          LIMIT 1
+        ) latest_snapshot ON TRUE
+        WHERE ${brandFilter}
+          AND pi.status = 'Published'
+          AND pi.deleted_at IS NULL
+          AND pi.published_date IS NOT NULL
+          AND pi.published_date >= ${toIsoDate(priorWeekStart)}
+          AND pi.published_date <= ${toIsoDate(priorAnchor)}
+      ) AS prior_views
+  `)) as unknown as Array<{
+    current_views: string | number;
+    prior_views: string | number;
+  }>;
+  const viewsCounts = viewsRows[0] ?? { current_views: 0, prior_views: 0 };
+  const currentViews = Number(viewsCounts.current_views ?? 0);
+  const priorViews = Number(viewsCounts.prior_views ?? 0);
+
+  // `prior: null` only when the prior-week window genuinely has zero
+  // signal (brand-new brand, no Published items at all). Otherwise
+  // show the comparison even if it's 0 — that's a real data point.
+  const priorWindowEmpty =
+    productionCounts.prior_production === 0 && priorViews === 0;
+
+  return {
+    production: {
+      current: productionCounts.current_production,
+      prior: priorWindowEmpty ? null : productionCounts.prior_production,
+    },
+    views: {
+      current: currentViews,
+      prior: priorWindowEmpty ? null : priorViews,
+    },
+  };
 }
 
 export async function getContentReport(
@@ -571,6 +705,17 @@ export async function getContentReport(
   // shares its definition with the cross-post candidate finder.
   const formatBars = await fetchFormatViewBars();
 
+  // Week-over-week pacing data for the KPI cards. Brand-scoped (not
+  // affected by the platform/account/format filters above — those filters
+  // are for the chart breakdowns, not the "are we tracking ahead or
+  // behind last week?" tile). Fire in parallel with the rest of the
+  // page; latency is dominated by the LATERAL snapshot join, ~few hundred
+  // ms at typical scale.
+  const weekOverWeek = await getWeekOverWeekComparison({
+    brand,
+    weekStartsOn: weekStartDay,
+  });
+
   return {
     periods,
     byPlatform: {
@@ -597,6 +742,7 @@ export async function getContentReport(
     // row labels in place of raw platform strings.
     primaryRowMeta,
     formatBars,
+    weekOverWeek,
   };
 }
 
