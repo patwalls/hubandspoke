@@ -191,20 +191,20 @@ export async function mergeProductionItems(
       }
     }
 
-    // 4. Merge: Keep primary's metadata, transfer API data (platformContentId, publishedLink) and metrics from secondary
-    const primaryViews = primary.views || 0;
-    const secondaryViews = secondary.views || 0;
-
+    // 4. Merge: Keep primary's metadata, transfer critical API data from secondary
     const primaryUpdateData: Partial<typeof primary> = {
       // Transfer critical API fields from secondary so future syncs work
       platformContentId: secondary.platformContentId || primary.platformContentId,
       publishedLink: secondary.publishedLink || primary.publishedLink,
-      // Transfer/update metrics from secondary
-      views: primaryViews + secondaryViews,
-      likes: Math.max(primary.likes || 0, secondary.likes || 0),
-      comments: Math.max(primary.comments || 0, secondary.comments || 0),
-      // Keep primary's other fields (title, format, status, etc.)
     };
+
+    // Sum view counts if the secondary has views
+    const primaryViews = primary.views || 0;
+    const secondaryViews = secondary.views || 0;
+    if (secondaryViews > 0) {
+      primaryUpdateData.views = primaryViews + secondaryViews;
+    }
+    // Note: We don't update likes/comments - those are API metrics that shouldn't be manually merged
 
     // 5. Update primary with merged data
     if (Object.keys(primaryUpdateData).length > 0) {
