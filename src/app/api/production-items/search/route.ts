@@ -90,6 +90,7 @@ export async function GET(request: NextRequest) {
       views: productionItems.views,
       sourceType: productionItems.sourceType,
       postType: productionItems.postType,
+      platform: productionItems.platform,
       accountId: accounts.id,
       accountPlatform: accounts.platform,
       accountHandle: accounts.handle,
@@ -120,6 +121,7 @@ export async function GET(request: NextRequest) {
     views: r.views,
     sourceType: r.sourceType,
     postType: r.postType,
+    platform: r.platform,
     account:
       r.accountId && r.accountPlatform && r.accountHandle
         ? {

@@ -148,9 +148,11 @@ export async function mergeProductionItems(
 
     if (strategy === "keepSecondary") {
       // Use secondary's data for primary
+      // IMPORTANT: Include platformContentId so API can find this item in future syncs
       primaryUpdateData = {
         title: secondary.title,
         publishedLink: secondary.publishedLink,
+        platformContentId: secondary.platformContentId,
         platform: secondary.platform,
         postType: secondary.postType,
         format: secondary.format,
@@ -159,12 +161,14 @@ export async function mergeProductionItems(
       };
     } else if (strategy === "mergeMetrics") {
       // Keep primary's data but merge metrics
+      // IMPORTANT: Include platformContentId from secondary so API can find this item in future syncs
       const primaryViews = primary.views || 0;
       const secondaryViews = secondary.views || 0;
       primaryUpdateData = {
         views: primaryViews + secondaryViews,
         likes: Math.max(primary.likes || 0, secondary.likes || 0),
         comments: Math.max(primary.comments || 0, secondary.comments || 0),
+        platformContentId: secondary.platformContentId || primary.platformContentId,
       };
     }
     // else keepPrimary: no updates, keep primary as-is
