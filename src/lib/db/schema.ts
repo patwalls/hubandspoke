@@ -1408,3 +1408,32 @@ export const scCallLog = pgTable(
   ]
 );
 
+/**
+ * Audit log for manual merges of duplicate production items.
+ * Tracks which items were merged, by whom, when, and what strategy was used.
+ */
+export const productionItemsMerges = pgTable(
+  "production_items_merges",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    primaryItemId: uuid("primary_item_id")
+      .references(() => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    secondaryItemId: uuid("secondary_item_id")
+      .references(() => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    mergedBy: uuid("merged_by")
+      .references(() => users.id, { onDelete: "set null" })
+      .notNull(),
+    mergeStrategy: text("merge_strategy").notNull(), // "keepPrimary" | "keepSecondary" | "mergeMetrics"
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("idx_production_items_merges_primary").on(t.primaryItemId),
+    index("idx_production_items_merges_secondary").on(t.secondaryItemId),
+    index("idx_production_items_merges_created_at").on(t.createdAt),
+  ]
+);
+
