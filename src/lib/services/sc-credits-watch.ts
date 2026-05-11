@@ -29,6 +29,12 @@ export interface ScCreditsExhaustionState {
  * The error column lags — it stamps once per item per sync. The
  * call log is the moment-by-moment ground truth and survives item
  * re-syncs.
+ *
+ * **Recency clear (2026-05-11):** if a successful SC call has happened
+ * AFTER the most recent 402, treat the credits as flowing again. SC has
+ * been known to return 402 transiently (top-up races, gateway hiccups)
+ * and without this check the banner camps for a full hour after a 5-second
+ * upstream glitch — a stale signal that trains editors to ignore it.
  */
 export async function getScCreditsExhaustionState(): Promise<ScCreditsExhaustionState> {
   const since = new Date(Date.now() - LOOKBACK_MINUTES * 60_000);
@@ -37,6 +43,7 @@ export async function getScCreditsExhaustionState(): Promise<ScCreditsExhaustion
     .select({
       n: count(scCallLog.id),
       first: sql<string | null>`MIN(${scCallLog.createdAt})::text`,
+      lastFailed: sql<string | null>`MAX(${scCallLog.createdAt})::text`,
     })
     .from(scCallLog)
     .where(
@@ -52,6 +59,24 @@ export async function getScCreditsExhaustionState(): Promise<ScCreditsExhaustion
 
   const failedCount = Number(agg?.n ?? 0);
   if (failedCount === 0) {
+    return { exhausted: false, failedCount: 0, sinceIso: null, sampleError: null };
+  }
+
+  // Recency clear: any successful call after the latest 402 means SC is
+  // accepting our key again. The banner clears the moment the next sweep
+  // tick lands an OK row.
+  const [latestOk] = await db
+    .select({ createdAt: scCallLog.createdAt })
+    .from(scCallLog)
+    .where(and(eq(scCallLog.ok, true), gte(scCallLog.createdAt, since)))
+    .orderBy(desc(scCallLog.createdAt))
+    .limit(1);
+  const lastFailedIso = agg?.lastFailed ?? null;
+  if (
+    latestOk &&
+    lastFailedIso &&
+    latestOk.createdAt.getTime() > new Date(lastFailedIso).getTime()
+  ) {
     return { exhausted: false, failedCount: 0, sinceIso: null, sampleError: null };
   }
 
