@@ -641,15 +641,32 @@ async function fetchThreadsLatest(
  *  on the fly so manual entries created before the column existed still
  *  match. The looseUrl map is a last-ditch fallback for URLs we can't
  *  parse (custom shortlinks etc.). */
+/**
+ * Normalize a URL for dedup matching by removing query strings,
+ * fragments, and trailing slashes.
+ */
+function normalizeUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.endsWith("/")
+      ? parsed.pathname.slice(0, -1)
+      : parsed.pathname;
+    return `${parsed.origin}${pathname}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 async function loadExisting(
   accountId: string,
   items: NormalizedItem[]
 ): Promise<{
   byContentId: Map<string, string>;
   byLooseUrl: Map<string, string>;
+  byPublishedLink: Map<string, string>;
 }> {
   if (items.length === 0) {
-    return { byContentId: new Map(), byLooseUrl: new Map() };
+    return { byContentId: new Map(), byLooseUrl: new Map(), byPublishedLink: new Map() };
   }
   const contentIds = items.map((i) => i.platformContentId).filter(Boolean);
 
@@ -678,6 +695,7 @@ async function loadExisting(
 
   const byContentId = new Map<string, string>();
   const byLooseUrl = new Map<string, string>();
+  const byPublishedLink = new Map<string, string>();
   for (const r of rows) {
     if (r.platformContentId) {
       byContentId.set(r.platformContentId, r.id);
@@ -691,8 +709,11 @@ async function loadExisting(
       const key = looseUrlKey(r.publishedLink);
       if (key) byLooseUrl.set(key, r.id);
     }
+    // Third fallback: normalized publishedLink for robust dedup
+    const normalized = normalizeUrl(r.publishedLink);
+    if (normalized) byPublishedLink.set(normalized, r.id);
   }
-  return { byContentId, byLooseUrl };
+  return { byContentId, byLooseUrl, byPublishedLink };
 }
 
 async function upsertItems(
@@ -712,16 +733,20 @@ async function upsertItems(
   if (items.length === 0)
     return { created, updated, errors, skippedDuplicates };
 
-  const { byContentId, byLooseUrl } = await loadExisting(accountId, items);
+  const { byContentId, byLooseUrl, byPublishedLink } = await loadExisting(accountId, items);
 
   for (const item of items) {
     try {
       const looseKey = item.publishedLink
         ? looseUrlKey(item.publishedLink)
         : null;
+      const normalizedIncomingUrl = item.publishedLink
+        ? normalizeUrl(item.publishedLink)
+        : null;
       const existingId =
         byContentId.get(item.platformContentId) ??
         (looseKey ? byLooseUrl.get(looseKey) : undefined) ??
+        (normalizedIncomingUrl ? byPublishedLink.get(normalizedIncomingUrl) : undefined) ??
         null;
 
       // Per-column policy. Sync used to write the same payload to both
