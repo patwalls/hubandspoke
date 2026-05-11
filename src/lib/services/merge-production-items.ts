@@ -192,11 +192,17 @@ export async function mergeProductionItems(
     }
 
     // 4. Merge: Keep primary's metadata, transfer critical API data from secondary
-    const primaryUpdateData: Partial<typeof primary> = {
-      // Transfer critical API fields from secondary so future syncs work
-      platformContentId: secondary.platformContentId || primary.platformContentId,
-      publishedLink: secondary.publishedLink || primary.publishedLink,
-    };
+    const primaryUpdateData: Partial<typeof primary> = {};
+
+    // Only update platformContentId if primary doesn't have one (to avoid unique constraint conflicts)
+    if (!primary.platformContentId && secondary.platformContentId) {
+      primaryUpdateData.platformContentId = secondary.platformContentId;
+    }
+
+    // Only update publishedLink if primary doesn't have one (to avoid unique constraint conflicts)
+    if (!primary.publishedLink && secondary.publishedLink) {
+      primaryUpdateData.publishedLink = secondary.publishedLink;
+    }
 
     // Sum view counts if the secondary has views
     const primaryViews = primary.views || 0;
