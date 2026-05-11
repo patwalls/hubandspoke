@@ -189,19 +189,28 @@ export async function mergeProductionItems(
       }
     }
 
-    // 4. Merge: Just sum view counts, keep everything else on the keeper
-    // The keeper already has platformContentId/publishedLink/comments/history/descript info
+    // 4. Merge: Sum view counts and transfer platformContentId if keeper lacks it
+    // This ensures the API can find and update the merged item in future syncs
     const primaryViews = primary.views || 0;
     const secondaryViews = secondary.views || 0;
     const combinedViews = primaryViews + secondaryViews;
 
-    // 5. Update primary with combined view count only
+    // Build update data
+    const updateData: any = {
+      views: combinedViews,
+      updatedAt: new Date(),
+    };
+
+    // Critical: Transfer platformContentId from duplicate to keeper if keeper doesn't have it
+    // This allows the API sync to find and update this item with new view counts
+    if (!primary.platformContentId && secondary.platformContentId) {
+      updateData.platformContentId = secondary.platformContentId;
+    }
+
+    // 5. Update primary with merged data
     await db
       .update(productionItems)
-      .set({
-        views: combinedViews,
-        updatedAt: new Date(),
-      })
+      .set(updateData)
       .where(eq(productionItems.id, primary.id));
 
     // 6. Soft-delete secondary (set deletedAt)
