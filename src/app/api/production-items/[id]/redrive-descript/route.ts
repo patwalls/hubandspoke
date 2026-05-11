@@ -93,16 +93,18 @@ async function runRedrive(id: string) {
   const idByName = new Map(taskIds.map((r) => [r.identifier, r.id]));
   const ids = [...idByName.values()];
 
-  // Find the most recent job first to avoid parameter duplication in a single UPDATE
-  const recentJob = ids.length
+  // Find the most recent job with matching triggerId, then filter by task_id in JS
+  // to avoid Drizzle's array parameter expansion issue with ANY()
+  const candidateJobs = ids.length
     ? ((await db.execute(sql`
-        SELECT id FROM graphile_worker._private_jobs
-        WHERE task_id = ANY(${ids})
-          AND payload->>'triggerId' = ${trigger.id}
+        SELECT id, task_id FROM graphile_worker._private_jobs
+        WHERE payload->>'triggerId' = ${trigger.id}
         ORDER BY id DESC
-        LIMIT 1
-      `)) as unknown as Array<{ id: number }>)
+        LIMIT 10
+      `)) as unknown as Array<{ id: number; task_id: number }>)
     : [];
+
+  const recentJob = candidateJobs.filter((j) => ids.includes(j.task_id)).slice(0, 1);
 
   const updated = recentJob.length
     ? ((await db.execute(sql`
