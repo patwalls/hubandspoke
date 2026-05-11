@@ -116,7 +116,7 @@ function mapProductionItem(
     editorUserId: item.editorUserId,
     viewsEstimated: item.viewsEstimated ?? false,
     lastPerformanceSyncAt: item.lastPerformanceSyncAt?.toISOString() ?? null,
-    sourceType: (item.sourceType ?? "original") as
+    sourceType: item.sourceType as
       | "original"
       | "repost"
       | "cross_post"
