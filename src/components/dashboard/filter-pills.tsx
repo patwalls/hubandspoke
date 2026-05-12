@@ -72,8 +72,9 @@ const INTERVALS = [
 const SOURCES = [
   { value: "all", label: "All sources" },
   { value: "original", label: "Original" },
-  { value: "repost", label: "Repost" },
+  { value: "repurposed", label: "Repurposed" },
   { value: "cross_post", label: "Cross-post" },
+  { value: "repost", label: "Repost" },
 ];
 
 function resolvePreset(

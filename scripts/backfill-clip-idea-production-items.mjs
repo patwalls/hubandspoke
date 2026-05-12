@@ -31,19 +31,19 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 /**
- * Brand-specific short-form formats for clip promotion. Each brand has its own
- * preferred format with a Descript pack attached. Must match getPromotedClipFormat
- * in src/lib/services/promote-clip-idea.ts.
+ * Resolve the brand's clip-promotion format via the `formats.is_clip_descript_format`
+ * flag — matches the runtime helper in `src/lib/services/promote-clip-idea.ts`
+ * (see the 2026-05-11 sourceType consolidation). Returns null if the brand
+ * has no flagged format; caller bails on the insert in that case.
  */
-const PROMOTED_CLIP_FORMAT_BY_BRAND = {
-  "starter-story": "Reel: Repackage Section w/ Hook",
-  "matg": "Podcast Clip With Hook",
-  "my-first-million": "Repackage section with hook",
-  "futurepedia": "Repackage section with hook",
-};
-
-function getPromotedClipFormat(brand) {
-  return PROMOTED_CLIP_FORMAT_BY_BRAND[brand] || "Repackage section with hook";
+async function getPromotedClipFormat(sql, brand) {
+  const rows = await sql`
+    SELECT name
+    FROM formats
+    WHERE brand = ${brand} AND is_clip_descript_format = true
+    LIMIT 1
+  `;
+  return rows[0]?.name ?? null;
 }
 
 function parseArgs() {
@@ -124,7 +124,9 @@ async function getInstagramAccountId(sql, brandSlug) {
 // Single bulk UPDATE for (b) since it doesn't need per-brand resolution.
 // Then a per-row loop for (a) which does. Idempotent — skips rows already set.
 async function repairExistingClipProductionItems(sql, dryRun) {
-  // (b) Pillar reference — bulk UPDATE.
+  // The match key is sourceClipIdeaId — it identifies "this row was promoted
+  // from a clip idea" regardless of whether source_type is 'clip' (pre-
+  // consolidation) or 'repurposed' (2026-05-11+).
   if (!dryRun) {
     const pillar = await sql`
       UPDATE production_items pi
@@ -132,7 +134,6 @@ async function repairExistingClipProductionItems(sql, dryRun) {
           updated_at = NOW()
       FROM clip_ideas ci
       WHERE pi.source_clip_idea_id = ci.id
-        AND pi.source_type = 'clip'
         AND pi.deleted_at IS NULL
         AND pi.pillar_content_item_id IS NULL
         AND ci.source_production_item_id IS NOT NULL
@@ -147,7 +148,7 @@ async function repairExistingClipProductionItems(sql, dryRun) {
   const rows = await sql`
     SELECT id, brand
     FROM production_items
-    WHERE source_type = 'clip'
+    WHERE source_clip_idea_id IS NOT NULL
       AND deleted_at IS NULL
       AND (account_id IS NULL OR post_type IS NULL OR platform IS NULL OR platform::text = '[]')
   `;
@@ -251,7 +252,14 @@ async function main() {
     }
 
     const accountId = await getInstagramAccountId(sql, brand);
-    const promotedFormat = getPromotedClipFormat(brand);
+    const promotedFormat = await getPromotedClipFormat(sql, brand);
+    if (!promotedFormat) {
+      console.error(
+        `   ✗ skipping ${row.id}: brand "${brand}" has no format flagged is_clip_descript_format=true`,
+      );
+      failed++;
+      continue;
+    }
     try {
       const created = await sql`
         INSERT INTO production_items (
@@ -271,7 +279,7 @@ async function main() {
           ${brand},
           ${body},
           ${row.source_production_item_id},
-          'clip',
+          'repurposed',
           ${row.id},
           ${userId},
           ${userId},

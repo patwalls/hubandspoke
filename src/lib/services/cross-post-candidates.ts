@@ -45,8 +45,9 @@ const PERCENTILE = 0.6; // P60 — looser than P75 to compensate for age bias.
 const COHORT_WINDOW_DAYS = 90;
 
 /** Source types eligible for the cross-post queue. Excludes `cross_post`
- *  to avoid recommending cross-posts of cross-posts. */
-const ELIGIBLE_SOURCE_TYPES = ["original", "clip", "repost"] as const;
+ *  to avoid recommending cross-posts of cross-posts. `repurposed` covers
+ *  the old `clip` value after the 2026-05-11 consolidation. */
+const ELIGIBLE_SOURCE_TYPES = ["original", "repurposed", "repost"] as const;
 
 export interface HotnessSignal {
   /** "lifetime" or one of the velocity checkpoint keys (15m/30m/1h/...). */
@@ -302,8 +303,9 @@ export async function selectCrossPostCandidates(opts: {
   //
   //   1. `lineage`: walk UP from each candidate via `reposted_from_item_id`
   //      until the parent is null. The terminal node is the lineage root
-  //      (the `original` / `clip` the candidate descends from). Tag every
-  //      walked row with the candidate id it came from.
+  //      (the `original` or `repurposed` row the candidate descends from
+  //      via repost/cross_post edges). Tag every walked row with the
+  //      candidate id it came from.
   //   2. `descendants`: walk DOWN from each lineage root through every
   //      `reposted_from_item_id` edge, regardless of `source_type`. This
   //      catches siblings on the other side of the tree (cross_posts of

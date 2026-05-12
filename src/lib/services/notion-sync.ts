@@ -10,6 +10,7 @@ import { extractContentId } from "@/lib/platform-url";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { findAccount } from "@/lib/db/accounts";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
+import { resolveSourceTypeForFormat } from "@/lib/services/source-type-resolver";
 import type { PostType } from "@/lib/platform-field-schemas";
 
 /**
@@ -623,10 +624,20 @@ export async function syncFromNotion(): Promise<{
         }
         const utmCampaign =
           notionUtmCampaign ?? (await generateUtmCampaign(title));
+        // Defer to the format-level `labels_as_original` flag. Notion sync
+        // only ingests YouTube long-form (the gate is `accounts.syncedFromNotion`)
+        // so the resolver returns 'original' for pillar formats (Business
+        // Breakdown etc., already flagged via the consolidation script) and
+        // 'repurposed' for any anomalous row whose format is a derivative.
+        const resolvedSourceType = await resolveSourceTypeForFormat(
+          "starter-story",
+          formatName,
+        );
         const [inserted] = await db
           .insert(productionItems)
           .values({
             ...commonData,
+            sourceType: resolvedSourceType,
             utmCampaign,
             producerEmail: producer.email,
             producerNotionUserId: producer.userId,

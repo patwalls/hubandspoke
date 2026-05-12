@@ -18,10 +18,10 @@ import type { QueueHistoryEvent } from "@/app/api/queue/history/route";
 
 export type QueueSource =
   | "all"
-  | "original"
-  | "repost"
+  | "repurposed"
+  | "clip_ideas"
   | "cross_post"
-  | "clip"
+  | "repost"
   | "history";
 
 interface QueueViewProps {
@@ -34,10 +34,10 @@ interface QueueViewProps {
 
 const SOURCE_TABS = [
   { value: "all", label: "All", slug: "" },
-  { value: "original", label: "Original", slug: "original" },
-  { value: "repost", label: "Repost", slug: "repost" },
+  { value: "repurposed", label: "Triggered", slug: "triggered" },
+  { value: "clip_ideas", label: "Clip Ideas", slug: "clip-ideas" },
   { value: "cross_post", label: "Cross-post", slug: "cross-post" },
-  { value: "clip", label: "Clip", slug: "clip" },
+  { value: "repost", label: "Repost", slug: "repost" },
   { value: "history", label: "History", slug: "history" },
 ] as const;
 
@@ -314,17 +314,23 @@ export function QueueView({
   const sourceCounts = useMemo(() => {
     const counts = {
       all: 0,
-      original: 0,
-      repost: 0,
+      repurposed: 0,
+      clip_ideas: 0,
       cross_post: 0,
-      clip: 0,
+      repost: 0,
       history: 0,
     };
     for (const item of baseFiltered) {
       counts.all += 1;
       const source = item.sourceType ?? "original";
       if (source === "cross_post" || source === "repost") continue;
-      if (source in counts) counts[source as keyof typeof counts] += 1;
+      // Split repurposed rows by whether they came from a clip-idea: those
+      // with sourceClipIdeaId set belong under "Clip Ideas"; the rest are
+      // threshold-monitor-sweep / manual-repurpose triggered.
+      if (source === "repurposed") {
+        if (item.sourceClipIdeaId) counts.clip_ideas += 1;
+        else counts.repurposed += 1;
+      }
     }
     counts.cross_post = crossPostFiltered.length;
     counts.repost = repostFiltered.length;
@@ -335,6 +341,14 @@ export function QueueView({
   const filtered = baseFiltered.filter((item) => {
     if (selectedSource === "all") return true;
     const source = item.sourceType ?? "original";
+    // Triggered tab: repurposed rows without a clip-idea attached. Clip
+    // Ideas tab: repurposed rows WITH a clip-idea attached.
+    if (selectedSource === "repurposed") {
+      return source === "repurposed" && !item.sourceClipIdeaId;
+    }
+    if (selectedSource === "clip_ideas") {
+      return source === "repurposed" && !!item.sourceClipIdeaId;
+    }
     return source === selectedSource;
   });
 

@@ -1,0 +1,1 @@
+ALTER TABLE "formats" ADD COLUMN "labels_as_original" boolean DEFAULT false NOT NULL;

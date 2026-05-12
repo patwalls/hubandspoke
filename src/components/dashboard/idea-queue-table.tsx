@@ -498,7 +498,7 @@ function IdeaQueueRow({
   onToggleSelected: (checked: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const isClip = item.sourceType === "clip" && !!item.sourceClipIdeaId;
+  const isClip = !!item.sourceClipIdeaId;
   const [clipIdea, setClipIdea] = useState<ClipIdeaSummary | null>(null);
   const [clipIdeaError, setClipIdeaError] = useState<string | null>(null);
 

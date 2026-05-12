@@ -3,7 +3,6 @@ import { db } from "@/lib/db";
 import {
   clipIdeas,
   contentComments,
-  descriptPacks,
   formats,
   productionItems,
   repurposeTriggers,
@@ -116,34 +115,55 @@ export class ClipIdeaProductionItemMissingError extends Error {
   }
 }
 
-export class FormatMissingDescriptPackError extends Error {
+export class FormatMissingSkillError extends Error {
   constructor(
     public readonly formatId: string,
     public readonly formatName: string,
     public readonly brand: string,
   ) {
     super(
-      `Format "${formatName}" has no Descript pack attached. Set one at /${brand}/formats/${formatId}.`,
+      `Format "${formatName}" has no Skill defined. Open /${brand}/formats/${formatId} and fill in the Skill — the Descript Underlord reads it on every clip.`,
     );
-    this.name = "FormatMissingDescriptPackError";
+    this.name = "FormatMissingSkillError";
   }
 }
 
 /**
- * Brand-specific short-form formats for clip promotion. Each brand has its own
- * preferred format with a Descript pack attached. This prevents the hardcoded
- * format issue from recurring where MATG clips were assigned Starter Story's
- * format name instead of their own.
+ * Back-compat alias. Older callers still import this name; the underlying
+ * concept is now "format skill" since the Descript-packs table was rolled
+ * into `formats.instructions` (2026-05-11). Remove after one release.
  */
-const PROMOTED_CLIP_FORMAT_BY_BRAND: Record<string, string> = {
-  "starter-story": "Reel: Repackage Section w/ Hook",
-  "matg": "Podcast Clip With Hook",
-  "my-first-million": "Repackage section with hook",
-  "futurepedia": "Repackage section with hook",
-};
+export const FormatMissingDescriptPackError = FormatMissingSkillError;
 
-export function getPromotedClipFormat(brand: string): string {
-  return PROMOTED_CLIP_FORMAT_BY_BRAND[brand] || "Repackage section with hook";
+export class NoClipDescriptFormatForBrandError extends Error {
+  constructor(public readonly brand: string) {
+    super(
+      `No format on brand "${brand}" has is_clip_descript_format=true. Open /${brand}/formats and tick the "Clip Descript format" checkbox on the format that should receive clip-idea promotions.`,
+    );
+    this.name = "NoClipDescriptFormatForBrandError";
+  }
+}
+
+/**
+ * Resolve the short-form clip-promotion format for a brand by looking up the
+ * single `formats` row with `is_clip_descript_format=true`. Replaces the old
+ * hardcoded PROMOTED_CLIP_FORMAT_BY_BRAND map (lived here until 2026-05-11);
+ * the seed for existing brands is set by
+ * `scripts/migrate-source-type-consolidation.mjs` and afterwards the flag is
+ * managed via the format detail page checkbox.
+ *
+ * Returns `null` when no format on the brand carries the flag — callers that
+ * need a hard requirement should `throw new NoClipDescriptFormatForBrandError`.
+ */
+export async function getPromotedClipFormat(
+  brand: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ name: formats.name })
+    .from(formats)
+    .where(and(eq(formats.brand, brand), eq(formats.isClipDescriptFormat, true)))
+    .limit(1);
+  return row?.name ?? null;
 }
 
 function formatTimestamp(sec: number): string {
@@ -327,17 +347,16 @@ export async function assignClipIdea(args: {
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-  // Create the real production_items row. sourceType='clip' bypasses the
-  // uniq(pillar, format) index, which is scoped to 'original' — many clips
-  // per pillar+format is the whole point. The partial uniq index on
-  // source_clip_idea_id is the replacement guarantee: one production item
-  // per clip idea, enforced at the DB. Default producer = the admin who
-  // assigned; editor = the assignee. Default platform = YouTube Shorts,
-  // editor can swap on the detail page.
+  // Create the real production_items row. The partial uniq index on
+  // source_clip_idea_id guarantees one production item per clip idea at
+  // the DB. Default producer = the admin who assigned; editor = the
+  // assignee. Default platform = YouTube Shorts, editor can swap on the
+  // detail page.
   let created: { id: string } | undefined;
   try {
     const brand = row.sourceBrand ?? "starter-story";
-    const promotedFormat = getPromotedClipFormat(brand);
+    const promotedFormat = await getPromotedClipFormat(brand);
+    if (!promotedFormat) throw new NoClipDescriptFormatForBrandError(brand);
     const rows = await db
       .insert(productionItems)
       .values({
@@ -348,7 +367,7 @@ export async function assignClipIdea(args: {
         brand,
         contentBody: body,
         pillarContentItemId: row.sourceProductionItemId,
-        sourceType: "clip",
+        sourceType: "repurposed",
         sourceClipIdeaId: args.clipIdeaId,
         producerUserId: args.decidedByUserId,
         editorUserId: args.editorUserId,
@@ -367,7 +386,7 @@ export async function assignClipIdea(args: {
           source: "service:clip-promote",
           actorUserId: args.decidedByUserId ?? null,
           format: promotedFormat,
-          sourceType: "clip",
+          sourceType: "repurposed",
           postType: null,
         });
       } catch (e) {
@@ -412,84 +431,48 @@ interface PromotedClipFormat {
   id: string;
   name: string;
   brand: string;
-  /** Loaded from the attached descript_packs row. Always present — the
-   *  caller is `loadPromotedClipFormat` which throws
-   *  `FormatMissingDescriptPackError` before returning when null. */
-  packPrompt: string;
+  /** The format's Skill (formats.instructions) — sent to the Descript
+   *  Underlord verbatim, with `{{hook}}` / timestamp placeholders
+   *  substituted. Replaces the descript_packs table (rolled into Skill
+   *  on 2026-05-11). Throws `FormatMissingSkillError` when empty. */
+  skill: string;
 }
 
 /**
- * Find or create the canonical clip-promotion format for a brand, then load
- * its attached Descript pack. The format name is brand-specific (e.g., "Podcast
- * Clip With Hook" for MATG, "Reel: Repackage Section w/ Hook" for Starter Story).
- * Throws `FormatMissingDescriptPackError` when no pack is attached so the
- * three create-in-descript service functions all gate uniformly on the
- * pack being present (Pat's "don't let me generate anything in Descript
- * unless I have a prompt set" rule).
+ * Resolve the brand's clip-promotion format (the one with
+ * `is_clip_descript_format=true`) and load its Skill. Throws
+ * `FormatMissingSkillError` when the Skill is empty so the four
+ * create-in-descript service functions gate uniformly (Pat's "don't let
+ * me generate anything in Descript unless the format has a prompt" rule).
  */
 async function loadPromotedClipFormat(brand: string): Promise<PromotedClipFormat> {
-  const formatName = getPromotedClipFormat(brand);
-  const formatId = await ensurePromotedClipFormat(brand, formatName);
   const [row] = await db
     .select({
       id: formats.id,
       name: formats.name,
       brand: formats.brand,
-      packPrompt: descriptPacks.prompt,
+      skill: formats.instructions,
     })
     .from(formats)
-    .leftJoin(descriptPacks, eq(formats.descriptPackId, descriptPacks.id))
-    .where(eq(formats.id, formatId))
+    .where(
+      and(eq(formats.brand, brand), eq(formats.isClipDescriptFormat, true)),
+    )
     .limit(1);
-  if (!row) {
-    throw new Error(`Format ${formatId} disappeared between insert and read`);
-  }
-  if (!row.packPrompt) {
-    throw new FormatMissingDescriptPackError(row.id, row.name, row.brand);
+  if (!row) throw new NoClipDescriptFormatForBrandError(brand);
+  if (!row.skill || !row.skill.trim()) {
+    throw new FormatMissingSkillError(row.id, row.name, row.brand);
   }
   return {
     id: row.id,
     name: row.name,
     brand: row.brand,
-    packPrompt: row.packPrompt,
+    skill: row.skill,
   };
 }
 
-async function ensurePromotedClipFormat(brand: string, formatName: string): Promise<string> {
-  const [existing] = await db
-    .select({ id: formats.id })
-    .from(formats)
-    .where(
-      and(eq(formats.name, formatName), eq(formats.brand, brand)),
-    )
-    .limit(1);
-  if (existing) return existing.id;
-
-  // formats.name is globally unique (not scoped by brand). If the row exists
-  // under a different brand, adopt it by updating brand — a single format
-  // row per name is the schema's invariant, and the assign flow stamps the
-  // same name regardless of brand anyway.
-  const [byName] = await db
-    .select({ id: formats.id })
-    .from(formats)
-    .where(eq(formats.name, formatName))
-    .limit(1);
-  if (byName) return byName.id;
-
-  const [created] = await db
-    .insert(formats)
-    .values({ name: formatName, brand })
-    .returning({ id: formats.id });
-  if (!created) {
-    throw new Error(
-      `Failed to create format row "${formatName}" for brand "${brand}"`,
-    );
-  }
-  return created.id;
-}
 
 function buildDescriptPrompt(args: {
-  packPrompt: string;
+  skill: string;
   hook: string;
   startSec: number;
   endSec: number;
@@ -498,7 +481,7 @@ function buildDescriptPrompt(args: {
   const start = formatTimestamp(args.startSec);
   const end = formatTimestamp(args.endSec);
   const safeHook = args.hook.replace(/"/g, '\\"');
-  const inner = substituteFormatPrompt(args.packPrompt, {
+  const inner = substituteFormatPrompt(args.skill, {
     hook: args.hook,
     startSec: args.startSec,
     endSec: args.endSec,
@@ -562,7 +545,7 @@ export async function createClipIdeaInDescript(args: {
   const format = await loadPromotedClipFormat(brand);
 
   const prompt = buildDescriptPrompt({
-    packPrompt: format.packPrompt,
+    skill: format.skill,
     hook: row.hook,
     startSec,
     endSec,
@@ -584,7 +567,7 @@ export async function createClipIdeaInDescript(args: {
         brand,
         contentBody: body,
         pillarContentItemId: row.sourceProductionItemId,
-        sourceType: "clip",
+        sourceType: "repurposed",
         sourceClipIdeaId: args.clipIdeaId,
         producerUserId: args.actorUserId,
         editorUserId: args.actorUserId,
@@ -605,7 +588,7 @@ export async function createClipIdeaInDescript(args: {
           source: "service:clip-promote-full",
           actorUserId: args.actorUserId ?? null,
           format: format.name,
-          sourceType: "clip",
+          sourceType: "repurposed",
           postType: null,
         });
       } catch (e) {

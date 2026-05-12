@@ -18,6 +18,7 @@ import { enqueueNotification } from "@/lib/services/notifications";
 import { resolveAssignees } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
+import { resolveSourceTypeForFormat } from "@/lib/services/source-type-resolver";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { extractContentId, extractContentIdFromUrl } from "@/lib/platform-url";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
@@ -273,6 +274,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Look up the format flag. Falls back to "repurposed" when no format is
+    // set OR the format isn't marked as a pillar (labels_as_original=false).
+    // Manual creates without a format → "repurposed" (caller can flip the
+    // format later; we won't auto-correct retroactively).
+    const resolvedSourceType = await resolveSourceTypeForFormat(
+      brand,
+      validatedFormat ?? null,
+    );
+
     const [created] = await db
       .insert(productionItems)
       .values({
@@ -281,6 +291,7 @@ export async function POST(request: NextRequest) {
         accountId: accountId || null,
         postType: postType || null,
         format: validatedFormat,
+        sourceType: resolvedSourceType,
         publishedLink: publishedLink || null,
         platformContentId,
         publishedDate,
@@ -423,19 +434,10 @@ export async function PUT(request: NextRequest) {
       clicks,
       leads,
       salesAmount,
-      sourceType,
       killReason,
       utmCampaign,
       shortLinkSlug,
     } = body;
-
-    const VALID_SOURCE_TYPES = new Set(["original", "repost", "cross_post"]);
-    if (sourceType !== undefined && !VALID_SOURCE_TYPES.has(sourceType)) {
-      return NextResponse.json(
-        { error: `sourceType must be one of: ${[...VALID_SOURCE_TYPES].join(", ")}` },
-        { status: 400 }
-      );
-    }
 
     if (!id) {
       return NextResponse.json(
@@ -571,33 +573,12 @@ export async function PUT(request: NextRequest) {
     if (leads !== undefined) updateData.leads = leads === "" || leads === null ? null : Number(leads);
     if (salesAmount !== undefined) updateData.salesAmount = salesAmount === "" || salesAmount === null ? null : String(salesAmount);
 
-    // Source type: original → repost/cross_post mirrors pillar into
-    // reposted_from_item_id if the latter is empty (matches the backfill
-    // classifier's semantic). Flipping back to original clears it so the
-    // repost graph stays clean.
-    if (sourceType !== undefined) {
-      updateData.sourceType = sourceType;
-      const [existing] = await db
-        .select({
-          pillarContentItemId: productionItems.pillarContentItemId,
-          repostedFromItemId: productionItems.repostedFromItemId,
-        })
-        .from(productionItems)
-        .where(eq(productionItems.id, id))
-        .limit(1);
-      if (sourceType === "original") {
-        updateData.repostedFromItemId = null;
-      } else if (existing && !existing.repostedFromItemId) {
-        const nextPillar =
-          pillarContentItemId !== undefined
-            ? pillarContentItemId
-            : existing.pillarContentItemId;
-        if (nextPillar) updateData.repostedFromItemId = nextPillar;
-      }
-    }
+    // Source type is not user-editable as of 2026-05-11 — it's derived
+    // exclusively by system flows (notion-sync, account-content-sync,
+    // threshold-monitor-sweep, clip-idea-generate, repost / cross-post /
+    // duplicate route handlers) and corrected in bulk via
+    // `scripts/migrate-source-type-consolidation.mjs`.
 
-    // Explicit reposted-from override. Runs after the sourceType auto-mirror
-    // so a user's pick from the detail-page picker wins over the default.
     if (repostedFromItemId !== undefined) {
       if (repostedFromItemId) {
         if (repostedFromItemId === id) {

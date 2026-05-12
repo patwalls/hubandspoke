@@ -114,6 +114,7 @@ export async function POST(request: NextRequest) {
             postType: derivativePostType,
             format: target.name,
             status: "Idea",
+            sourceType: "repurposed",
             pillarContentNotionId: item.notionId,
             pillarContentItemId: item.id,
             descriptProjectId: item.descriptProjectId,
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
             source: "legacy:descript-clip-out",
             actorUserId: null,
             format: target.name,
-            sourceType: "original",
+            sourceType: "repurposed",
             postType: derivativePostType,
           });
         } catch (e) {
@@ -187,6 +188,7 @@ export async function POST(request: NextRequest) {
         postType: derivativePostType,
         format: target.name,
         status: "Idea",
+        sourceType: "repurposed",
         pillarContentNotionId: item.notionId,
         pillarContentItemId: item.id,
         utmCampaign: await generateUtmCampaign(action.taskName),
@@ -202,7 +204,7 @@ export async function POST(request: NextRequest) {
         source: "legacy:descript-clip-out",
         actorUserId: null,
         format: target.name,
-        sourceType: "original",
+        sourceType: "repurposed",
         postType: derivativePostType,
       });
     } catch (e) {

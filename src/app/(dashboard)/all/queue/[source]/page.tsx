@@ -12,19 +12,19 @@ interface AllQueueSourcePageProps {
 }
 
 const SLUG_TO_SOURCE: Record<string, QueueSource> = {
-  original: "original",
-  repost: "repost",
+  triggered: "repurposed",
+  "clip-ideas": "clip_ideas",
   "cross-post": "cross_post",
-  clip: "clip",
+  repost: "repost",
   history: "history",
 };
 
 const SOURCE_LABEL: Record<QueueSource, string> = {
   all: "All",
-  original: "Original",
-  repost: "Repost",
+  repurposed: "Triggered",
+  clip_ideas: "Clip Ideas",
   cross_post: "Cross-post",
-  clip: "Clip",
+  repost: "Repost",
   history: "History",
 };
 

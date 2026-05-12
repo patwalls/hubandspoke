@@ -379,15 +379,12 @@ export async function runDraftAlgorithm(
       }
       break;
     case "cross_post":
-    case "clip":
     case "repurposed":
       // cross_post: different platform than the source; pillar transcript
       //   is the right grounding.
-      // clip: paired to a clip_idea (which sets hook + angle metadata),
-      //   but the post-side caption still needs drafting — same as IG had
-      //   under the old path.
-      // repurposed: cron-created derivative of a pillar; same shape as
-      //   the manual repurpose path, just a different `sourceType` label.
+      // repurposed: derivative of a pillar — covers both threshold-monitor
+      //   auto-spawns and clip-idea-promoted rows (sourceClipIdeaId set);
+      //   in both cases the pillar transcript is the right grounding.
       break;
     default:
       return { status: "skipped", reason: "pillar_item_no_draft" };

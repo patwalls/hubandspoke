@@ -139,7 +139,7 @@ export function HistoryQueueTable({
                 </td>
                 <td className="px-3 py-2 align-top">
                   {event.item.sourceType &&
-                  ["original", "repost", "cross_post", "clip"].includes(
+                  ["original", "repost", "cross_post", "repurposed"].includes(
                     event.item.sourceType,
                   ) ? (
                     <SourceBadge
@@ -148,7 +148,7 @@ export function HistoryQueueTable({
                           | "original"
                           | "repost"
                           | "cross_post"
-                          | "clip"
+                          | "repurposed"
                       }
                     />
                   ) : (

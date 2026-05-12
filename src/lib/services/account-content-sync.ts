@@ -838,6 +838,14 @@ async function upsertItems(
           .values({
             ...insertPayload,
             format: null,
+            // Raw incoming syncs default to 'original'. The format is null
+            // at sync time — once an editor tags a derivative format on
+            // the row later, mass corrections via
+            // `scripts/migrate-source-type-consolidation.mjs` reclassify
+            // (or the operator does it on the format detail page via the
+            // `labels_as_original` toggle). Don't defer to the resolver
+            // here — null-format → 'repurposed' is wrong for raw posts.
+            sourceType: "original",
             utmCampaign: await generateUtmCampaign(item.title),
             producerUserId: assignees.producerUserId,
             editorUserId: assignees.editorUserId,

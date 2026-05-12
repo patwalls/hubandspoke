@@ -72,17 +72,18 @@ export function substituteFormatPrompt(
 /**
  * Build a layout-apply Underlord prompt for the precise-cut path: the
  * composition already exists (we just ffmpeg-trimmed bytes and Descript
- * imported them), and we want Underlord to apply the format's pack-defined
- * treatment in place. The pack prompt is author-defined per-format and
- * substituted via {@link substituteFormatPrompt} before being wrapped with
- * the path-specific scaffolding.
+ * imported them), and we want Underlord to apply the format's skill-defined
+ * treatment in place. The skill text (`formats.instructions`) is
+ * author-defined per-format and substituted via
+ * {@link substituteFormatPrompt} before being wrapped with the
+ * path-specific scaffolding.
  */
 export function buildLayoutPackPrompt(args: {
-  packPrompt: string;
+  skill: string;
   compositionId: string;
   hookText: string;
 }): string {
-  const inner = substituteFormatPrompt(args.packPrompt, {
+  const inner = substituteFormatPrompt(args.skill, {
     hook: args.hookText,
     compositionId: args.compositionId,
   });

@@ -1,6 +1,12 @@
 import { cn } from "@/lib/utils";
 
-type SourceType = "original" | "repost" | "cross_post" | "clip" | null | undefined;
+type SourceType =
+  | "original"
+  | "repost"
+  | "cross_post"
+  | "repurposed"
+  | null
+  | undefined;
 
 const STYLES: Record<
   Exclude<SourceType, null | undefined>,
@@ -21,10 +27,11 @@ const STYLES: Record<
     className: "bg-indigo-100 text-indigo-900 border-indigo-200",
     title: "Same content, different platform from the original",
   },
-  clip: {
-    label: "Clip",
+  repurposed: {
+    label: "Repurposed",
     className: "bg-sky-100 text-sky-900 border-sky-200",
-    title: "Clip cut from another piece of content",
+    title:
+      "Derivative of a pillar — clip, short cut, or other format spawned from longer content",
   },
 };
 

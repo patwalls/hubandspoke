@@ -177,7 +177,8 @@ export async function PUT(request: NextRequest) {
       producer?: string | null;
       instructions?: string | null;
       parentFormatId?: string | null;
-      descriptPackId?: string | null;
+      isClipDescriptFormat?: boolean;
+      labelsAsOriginal?: boolean;
     };
     const { id, accountChannels, parentFormatId } = body;
 
@@ -232,8 +233,10 @@ export async function PUT(request: NextRequest) {
       updateData.instructions = body.instructions || null;
     if (parentFormatId !== undefined)
       updateData.parentFormatId = parentFormatId || null;
-    if (body.descriptPackId !== undefined)
-      updateData.descriptPackId = body.descriptPackId || null;
+    if (body.isClipDescriptFormat !== undefined)
+      updateData.isClipDescriptFormat = body.isClipDescriptFormat;
+    if (body.labelsAsOriginal !== undefined)
+      updateData.labelsAsOriginal = body.labelsAsOriginal;
 
     const [updated] = await db
       .update(formats)

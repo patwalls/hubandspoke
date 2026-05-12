@@ -213,21 +213,22 @@ export const productionItems = pgTable(
     // How this item entered the system. See docs/post-classification.md for
     // the canonical rules; the platform-based axis is: same content + same
     // platform (any account) = "repost", same content + different platform =
-    // "cross_post". "clip" is promoted from a clip-idea triage (many clips
-    // can share a pillar + format, so the uniq (pillar, format) index below
-    // deliberately scopes itself to sourceType='original'). "repurposed" is
-    // auto-created by threshold-monitor-sweep. Distinct from
-    // pillarContentItemId (format-derivative tree) so repost rollups and
-    // repurpose queries don't collide.
+    // "cross_post". "repurposed" covers every derivative of a pillar — both
+    // threshold-monitor-sweep auto-spawns and items promoted from clip ideas.
+    // Distinct from pillarContentItemId (format-derivative tree) so repost
+    // rollups and repurpose queries don't collide. Not editable from the UI;
+    // set only by system flows + the one-shot consolidation backfill.
     sourceType: text("source_type").notNull().default("original"),
     repostedFromItemId: uuid("reposted_from_item_id").references(
       (): AnyPgColumn => productionItems.id,
       { onDelete: "set null" }
     ),
-    // For sourceType='clip' rows: FK back to the triaged clip_ideas row this
-    // production item was promoted from. Enables a direct "came from clip
-    // idea X" lookup; the partial uniq index below guarantees exactly one
-    // production item per clip idea at the DB level.
+    // When set, this productionItem was promoted from a clip-idea row.
+    // sourceType is always "repurposed" in that case (post-consolidation),
+    // and the FK is what UI / API code keys on to render the
+    // ClipTriageDialog, run the Descript clip pipeline, and use the LLM
+    // estimated_views in production reports. The partial uniq index below
+    // guarantees one productionItem per clip idea at the DB level.
     sourceClipIdeaId: uuid("source_clip_idea_id").references(
       (): AnyPgColumn => clipIdeas.id,
       { onDelete: "set null" }
@@ -619,24 +620,6 @@ export const contentDrafts = pgTable(
   ],
 );
 
-// Reusable Underlord prompt templates. A pack bundles a Descript layout-pack
-// reference (URL inside the prompt body) with the Underlord instructions for
-// applying it to a composition (set hook track, ignore fillers, etc.). One
-// pack can attach to many formats — same pack reused across an SS YouTube
-// short and an SS Reel, or shared across a brand's clip-style formats.
-// Detached when null on a format (FK below). Global, not brand-scoped.
-export const descriptPacks = pgTable("descript_packs", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  name: text("name").notNull(),
-  prompt: text("prompt").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
-
 export const formats = pgTable(
   "formats",
   {
@@ -653,15 +636,37 @@ export const formats = pgTable(
     contentOwner: text("content_owner"), // deprecated — use editor/producer
     editor: text("editor"),
     producer: text("producer"),
+    // The format's "Skill" — author-defined natural-language brief that
+    // covers what the format is, how to produce it, and (for clip
+    // formats) the verbatim Descript Underlord prompt. Folded the old
+    // `descript_packs.prompt` content into this column on 2026-05-11
+    // so the format has a single source of truth. Supports `{{hook}}`,
+    // `{{startTimestamp}}`, `{{endTimestamp}}`, `{{durationSec}}`,
+    // `{{compositionId}}` placeholders that get substituted by
+    // `substituteFormatPrompt` before being sent to Descript.
     instructions: text("instructions"),
-    // Optional Descript Underlord pack. Null = no Descript clip creation
-    // allowed on this format (UI gates all four "Create in Descript" actions
-    // when unset). ON DELETE SET NULL detaches gracefully if a pack is
-    // deleted; clip creation re-gates afterwards.
-    descriptPackId: uuid("descript_pack_id").references(
-      () => descriptPacks.id,
-      { onDelete: "set null" }
-    ),
+    // Marks this format as the short-form clip target for its brand:
+    // clip-idea generation spawns productionItems rows into this format,
+    // and the Descript clip pipeline (four "Create in Descript" flows)
+    // is enabled here. Exactly one format per brand should carry the
+    // flag in normal operation — `getPromotedClipFormat(brand)` does a
+    // `WHERE is_clip_descript_format=true LIMIT 1` lookup. Replaces the
+    // old hardcoded PROMOTED_CLIP_FORMAT_BY_BRAND constant.
+    isClipDescriptFormat: boolean("is_clip_descript_format")
+      .default(false)
+      .notNull(),
+    // When true, new productionItems created in this format default to
+    // `sourceType='original'` instead of `'repurposed'`. Pillar/source
+    // formats (Business Breakdown, YouTube long-form, etc.) get this
+    // ticked; derivative formats leave it off. Replaces the YT-long-form
+    // heuristic from the 2026-05-11 consolidation backfill — going
+    // forward the source of truth is this format-level flag, looked up
+    // by every sourceType-assigning write site via
+    // `resolveSourceTypeForFormat(brand, format)` in
+    // `src/lib/services/source-type-resolver.ts`.
+    labelsAsOriginal: boolean("labels_as_original")
+      .default(false)
+      .notNull(),
     // NULL parent = root (pillar). ON DELETE SET NULL promotes direct children
     // to roots so we don't silently wipe entire subtrees.
     parentFormatId: uuid("parent_format_id").references(
@@ -1105,7 +1110,7 @@ export type ContentEventPayload =
       type: "item_created";
       source: string; // e.g. "api:create", "sync:account-content"
       format: string | null;
-      sourceType: string; // "original" | "repost" | "cross_post" | "clip" | "repurposed"
+      sourceType: string; // "original" | "repost" | "cross_post" | "repurposed"
       postType: string | null;
     };
 

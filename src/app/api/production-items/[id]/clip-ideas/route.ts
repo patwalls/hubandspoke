@@ -3,7 +3,6 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   clipIdeas,
-  descriptPacks,
   formats,
   productionItems,
   transcripts,
@@ -11,7 +10,6 @@ import {
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
-import { getPromotedClipFormat } from "@/lib/services/promote-clip-idea";
 
 const TRANSCRIPT_EXCERPT_MAX = 220;
 
@@ -113,29 +111,32 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .where(eq(productionItems.id, id))
     .limit(1);
   const brand = source?.brand ?? "starter-story";
-  const promotionFormatName = getPromotedClipFormat(brand);
   const [formatRow] = await db
     .select({
       id: formats.id,
       name: formats.name,
       brand: formats.brand,
-      packId: descriptPacks.id,
-      packName: descriptPacks.name,
+      skill: formats.instructions,
     })
     .from(formats)
-    .leftJoin(descriptPacks, eq(formats.descriptPackId, descriptPacks.id))
     .where(
-      and(eq(formats.name, promotionFormatName), eq(formats.brand, brand)),
+      and(eq(formats.brand, brand), eq(formats.isClipDescriptFormat, true)),
     )
     .limit(1);
+  // The shape exposes `pack` for back-compat with the existing
+  // ClipTriageDialog gating: any non-null `pack` means "this format has a
+  // prompt configured." Since packs were folded into the Skill on
+  // 2026-05-11, we synthesize a sentinel from the skill text — the UI
+  // only checks pack != null, never reads its fields.
   const promotionFormat = formatRow
     ? {
         id: formatRow.id,
         name: formatRow.name,
         brand: formatRow.brand,
-        pack: formatRow.packId
-          ? { id: formatRow.packId, name: formatRow.packName ?? "" }
-          : null,
+        pack:
+          formatRow.skill && formatRow.skill.trim()
+            ? { id: formatRow.id, name: "Skill" }
+            : null,
       }
     : null;
 

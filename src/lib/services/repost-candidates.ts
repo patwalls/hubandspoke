@@ -43,10 +43,11 @@ const DISMISSAL_TTL_DAYS = 30;
 const FORMAT_FALLBACK_WINDOW_DAYS = 365;
 
 /** Source types eligible for the repost queue. Excludes `repost` itself
- *  (no recursion) and items synced as a duplicate of an external post. */
+ *  (no recursion) and items synced as a duplicate of an external post.
+ *  `repurposed` covers the old `clip` value after the 2026-05-11
+ *  consolidation. */
 const ELIGIBLE_SOURCE_TYPES = [
   "original",
-  "clip",
   "cross_post",
   "repurposed",
 ] as const;

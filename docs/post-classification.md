@@ -2,21 +2,27 @@
 
 Canonical definitions for the `productionItems.sourceType` column. Read this
 before adding any new write site, classifier, or report that branches on
-source type. Cross-references: schema in `src/lib/db/schema.ts:179-198`,
+source type. Cross-references: schema in `src/lib/db/schema.ts:213-234`,
 display in `src/components/ui/source-badge.tsx`, write sites listed at the
 bottom of this doc.
 
 ---
 
-## The five values
+## The four values
 
 | Value | Meaning |
 |---|---|
 | `original` | The first time this content was posted on this platform. Default. |
 | `repost` | Same content, **same platform**, posted again — same account *or* a different one. |
 | `cross_post` | Same content, **different platform** from the original. |
-| `clip` | Short-form derivative cut from a longer piece (a pillar). Different content, same source. |
-| `repurposed` | Auto-created by `threshold-monitor-sweep` when a pillar crosses a child format's view threshold. Different content, same pillar. |
+| `repurposed` | Derivative of a pillar — different content, same source. Covers both `threshold-monitor-sweep` auto-spawns and rows promoted from clip ideas. |
+
+The five-value form (with a separate `clip` value) was collapsed into this
+four-value form on 2026-05-11. Rows that used to be `sourceType='clip'`
+became `sourceType='repurposed'` while keeping their `sourceClipIdeaId`
+FK — the clip-triage modal and the Descript pipeline both key off the FK,
+not the source-type string. See
+`scripts/migrate-source-type-consolidation.mjs` for the one-shot backfill.
 
 ---
 
@@ -39,10 +45,9 @@ Notes:
 - **`repostedFromItemId` always points to the earliest member of the cluster**,
   not the immediate prior post. A repost-of-a-repost should still link back to
   the original. Keeps the graph one level deep and the rollups correct.
-- **`clip` and `repurposed` are not on this axis.** They're different content
-  derived from a parent, not the same content re-run. Use them only when the
-  derivation is automated or explicitly tracked (`sourceClipIdeaId` /
-  `pillarContentItemId`).
+- **`repurposed` is not on this axis.** It's different content derived from a
+  parent, not the same content re-run. Use it only when the derivation is
+  automated or explicitly tracked (`sourceClipIdeaId` / `pillarContentItemId`).
 
 ---
 
@@ -70,8 +75,8 @@ The post is *not* the same content (do not classify as repost/cross-post) if:
 - It uses the same hook or topic but a different angle, claim, or example.
   "Five reasons why X" and "Three reasons why X" are not the same post even
   if every word in the shorter title appears in the longer one.
-- It's a clip cut from a longer piece. That's `clip`, set via the clip-idea
-  triage flow, not a repost.
+- It's a clip cut from a longer piece. That's `repurposed` with a
+  `sourceClipIdeaId` set, written by the clip-idea pipeline — not a repost.
 
 ---
 
@@ -92,8 +97,7 @@ independent of which account owns the row:
 
 When in doubt, the joined `accounts.platform` value is the source of truth
 for "platform". The legacy `productionItems.platform` JSONB column is being
-phased out (see `docs/features.md` line 69) and should not be used by new
-code.
+phased out (see `docs/features.md`) and should not be used by new code.
 
 ---
 
@@ -104,12 +108,17 @@ code.
 | `original`   | NULL             | NULL             | NULL (allowed when distinct from any pillar) |
 | `repost`     | **REQUIRED** — earliest item in cluster | NULL | NULL |
 | `cross_post` | **REQUIRED** — earliest item in cluster | NULL | NULL |
-| `clip`       | NULL             | **REQUIRED**     | typically points at the source pillar |
-| `repurposed` | NULL             | NULL             | **REQUIRED** — points at the parent pillar |
+| `repurposed` | NULL             | OPTIONAL — set when promoted from a clip idea | **REQUIRED** — points at the parent pillar |
 
 A row that violates this table is mis-classified. The cleanup script
 (`scripts/backfill-repost-classification.mjs`) enforces the first three
-rows; manual operator changes via the detail-page picker also enforce them.
+rows. `scripts/migrate-source-type-consolidation.mjs` (one-shot,
+2026-05-11) collapsed `clip` into `repurposed` and reclassified
+derivative-format originals.
+
+The detail-page picker for source type was removed on 2026-05-11. Source
+type is no longer editable from the UI — it's set exclusively by the
+system flows below and corrected in bulk via the consolidation script.
 
 ---
 
@@ -121,14 +130,14 @@ rows; manual operator changes via the detail-page picker also enforce them.
 | `original` | `POST /api/production-items` | manual create dialog |
 | `original` | `POST /api/production-items/[id]/duplicate` | always — duplicates start fresh |
 | `original` | `POST /api/production-items/preview-link` → save | "Add post from link" flow |
-| `repost` | `POST /api/production-items/[id]/repost` | user button on item detail |
-| `repost` | `src/lib/services/evergreen-scan.ts` (Phase B) | daily 15:00 cron, refills Idea queue |
+| `original` | `src/lib/services/account-content-sync.ts` | per-account content sync |
+| `repost` | `POST /api/production-items/[id]/repost` | user button on item detail / repost queue |
 | `repost` | `scripts/backfill-repost-classification.mjs` | one-shot cleanup; --apply commits |
 | `cross_post` | `POST /api/production-items/[id]/cross-post` | user button on item detail; v3 cross-post queue modal calls the same route with `assign:true` (creates `Assigned` rows). The candidate finder (`src/lib/services/cross-post-candidates.ts`) is read-only — it never writes. |
-| `clip` | `POST /api/production-items/[id]/clip-ideas/generate` | sibling row at clip-idea generation |
-| `clip` | `POST /api/clip-ideas/[id]/triage` (and create-in-descript variants) | flips existing sibling, no new insert |
 | `repurposed` | `src/jobs/tasks/threshold-monitor-sweep.ts` | hourly :15, parent crosses `viewThreshold` |
-| `original` → `repost` (PATCH) | `PUT /api/production-items` (route.ts:364-519) | operator edits source type via detail-page picker |
+| `repurposed` | `src/lib/services/clip-idea-generate.ts` | clip-idea generation spawns paired rows (sourceClipIdeaId set) |
+| `repurposed` | `src/lib/services/promote-clip-idea.ts` | `assignClipIdea` and `createClipIdeaInDescriptFull` paths |
+| `repurposed` | `scripts/migrate-source-type-consolidation.mjs` | one-shot 2026-05-11 consolidation |
 
 When adding a new write site, append a row to this table and update
 `docs/automation.md` Post Lifecycle if it's a scheduled or auto-triggered

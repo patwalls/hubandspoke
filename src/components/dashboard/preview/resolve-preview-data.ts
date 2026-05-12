@@ -88,7 +88,7 @@ export function resolvePreviewData(
   // empty until a draft / AI-generated caption lands.
   const caption =
     captionFromDraft ??
-    (item.sourceType === "clip"
+    (item.sourceClipIdeaId != null
       ? ""
       : pickString(item.contentBody) ?? "");
 

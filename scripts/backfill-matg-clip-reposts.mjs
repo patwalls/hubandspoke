@@ -27,7 +27,9 @@ const sql = postgres(process.env.DATABASE_URL, {
 async function main() {
   console.log(`🔄 Linking MATG clips to source originals${dryRun ? " [dry-run]" : ""}...`);
 
-  // Find clips that should be linked to their sources
+  // Find clips that should be linked to their sources. Post-consolidation
+  // (2026-05-11) clips live under sourceType='repurposed', identified by a
+  // non-null source_clip_idea_id back-link to the originating clip-idea row.
   const candidates = await sql`
     SELECT
       id,
@@ -36,7 +38,7 @@ async function main() {
       reposted_from_item_id
     FROM production_items
     WHERE brand = 'matg'
-      AND source_type = 'clip'
+      AND source_clip_idea_id IS NOT NULL
       AND reposted_from_item_id IS NULL
       AND pillar_content_item_id IS NOT NULL
     ORDER BY created_at ASC

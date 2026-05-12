@@ -41,7 +41,7 @@ export interface PillarOption {
   } | null;
 }
 
-const SOURCE_BADGE_TYPES = ["original", "repost", "cross_post", "clip"] as const;
+const SOURCE_BADGE_TYPES = ["original", "repost", "cross_post", "repurposed"] as const;
 type RenderableSourceType = (typeof SOURCE_BADGE_TYPES)[number];
 function isRenderableSourceType(s: unknown): s is RenderableSourceType {
   return typeof s === "string" && (SOURCE_BADGE_TYPES as readonly string[]).includes(s);

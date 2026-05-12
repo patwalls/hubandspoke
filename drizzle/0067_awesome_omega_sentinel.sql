@@ -1,0 +1,1 @@
+ALTER TABLE "formats" ADD COLUMN "is_clip_descript_format" boolean DEFAULT false NOT NULL;

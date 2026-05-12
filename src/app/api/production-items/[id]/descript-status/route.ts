@@ -184,11 +184,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     status = "stalled";
     detail =
       "Descript project exists but no composition was written and no queue job is active. Re-run to start fresh.";
-  } else if (
-    item.sourceType === "clip" ||
-    item.sourceClipIdeaId ||
-    item.pillarContentItemId
-  ) {
+  } else if (item.sourceClipIdeaId || item.pillarContentItemId) {
     status = "not_started";
     detail = "No Descript work has been started for this item yet.";
   } else {

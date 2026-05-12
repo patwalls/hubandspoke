@@ -422,7 +422,7 @@ function ContentRow({ hit, title }: { hit: ContentHit; title: string }) {
                 | "original"
                 | "repost"
                 | "cross_post"
-                | "clip"
+                | "repurposed"
                 | null
             }
           />

@@ -65,6 +65,7 @@ import {
   type PickerAccount,
 } from "@/components/ui/account-post-type-picker";
 import { AccountBadge } from "@/components/ui/account-badge";
+import { SourceBadge } from "@/components/ui/source-badge";
 import {
   Table,
   TableBody,
@@ -433,7 +434,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     const item = data?.item;
     if (!item) return;
     const pending =
-      item.sourceType === "clip" &&
+      !!item.sourceClipIdeaId &&
       !!item.descriptProjectId &&
       !item.descriptCompositionId;
     if (!pending) return;
@@ -550,7 +551,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     const item = data?.item;
     if (!item) return;
     const awaitingPublish =
-      item.sourceType === "clip" &&
+      !!item.sourceClipIdeaId &&
       !!item.descriptCompositionId &&
       !item.descriptPublishJobId &&
       !item.descriptPublishedAt &&
@@ -1927,27 +1928,19 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap mt-2">
-            {item.sourceType === "repost" && (
-              <Badge
-                variant="secondary"
-                className="bg-amber-100 text-amber-900 border border-amber-200"
-                title="This is a repost of an earlier piece of content"
-              >
-                Repost
-              </Badge>
-            )}
-            {item.sourceType === "cross_post" && (
-              <Badge
-                variant="secondary"
-                className="bg-indigo-100 text-indigo-900 border border-indigo-200"
-                title="Same content syndicated to a different platform"
-              >
-                Cross-post
-              </Badge>
-            )}
             <AccountBadge
               account={item.account}
               postType={item.postType}
+            />
+            <SourceBadge
+              sourceType={
+                item.sourceType as
+                  | "original"
+                  | "repost"
+                  | "cross_post"
+                  | "repurposed"
+                  | null
+              }
             />
 
             {item.format && (
@@ -2818,40 +2811,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 />
               </PropertyRow>
             </PropertyRowGroup>
-
-            <PropertyRowSolo>
-              <PropertyRow label="Source type">
-                <div className="flex flex-col gap-0.5">
-                  <Select
-                    value={sourceType}
-                    onValueChange={(v) => {
-                      const next = v ?? "original";
-                      const prev = sourceType;
-                      if (next === prev) return;
-                      setSourceType(next);
-                      void persistField({ sourceType: next }).then((ok) => {
-                        if (!ok) setSourceType(prev);
-                      });
-                    }}
-                  >
-                    <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Source type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="original">Original</SelectItem>
-                      <SelectItem value="repost">Repost</SelectItem>
-                      <SelectItem value="cross_post">Cross-post</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {(sourceType === "repost" || sourceType === "cross_post") && (
-                    <p className="text-[11px] text-muted-foreground px-2">
-                      Exempt from the (pillar, format) uniqueness — can reuse the
-                      original&rsquo;s format.
-                    </p>
-                  )}
-                </div>
-              </PropertyRow>
-            </PropertyRowSolo>
 
             {(sourceType === "repost" || sourceType === "cross_post") && (
               <PropertyRowSolo>

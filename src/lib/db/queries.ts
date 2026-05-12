@@ -120,7 +120,7 @@ function mapProductionItem(
       | "original"
       | "repost"
       | "cross_post"
-      | "clip",
+      | "repurposed",
     sourceClipIdeaId: item.sourceClipIdeaId,
     clipEstimatedViews: extras.clipEstimatedViews ?? null,
     clipAlgorithmLabel: extras.clipAlgorithmLabel ?? null,
@@ -447,12 +447,15 @@ export async function getContentReport(
     conditions.push(eq(productionItems.format, format));
   }
 
-  // Source filter classifies by sourceType (original / repost / cross_post).
-  // NULL is treated as "original" since that's the historical default.
+  // Source filter classifies by sourceType (original / repurposed /
+  // cross_post / repost). NULL is treated as "original" since that's the
+  // historical default.
   if (source === "original") {
     conditions.push(
       sql`(${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')`
     );
+  } else if (source === "repurposed") {
+    conditions.push(eq(productionItems.sourceType, "repurposed"));
   } else if (source === "repost") {
     conditions.push(eq(productionItems.sourceType, "repost"));
   } else if (source === "cross_post") {
@@ -773,9 +776,10 @@ export async function getProductionPipeline(
       accountAvatarUrl: accounts.avatarUrl,
       accountBrandSlug: brands.slug,
       accountBrandLabel: brands.label,
-      // LLM per-clip estimate (sourceType='clip' rows only). The partial
-      // unique index on source_clip_idea_id keeps the join 1:1 without
-      // exploding row counts for non-clip items.
+      // LLM per-clip estimate (rows promoted from a clip-idea only — i.e.
+      // sourceClipIdeaId IS NOT NULL). The partial unique index on
+      // source_clip_idea_id keeps the join 1:1 without exploding row
+      // counts for non-clip items.
       clipEstimatedViews: clipIdeas.estimatedViews,
       // Algorithm version that generated this clip idea (V5, V6 = "Splice v6", etc.).
       clipPromptVersion: clipIdeas.promptVersion,

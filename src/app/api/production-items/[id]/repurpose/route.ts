@@ -116,6 +116,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       accountId: firstChannel?.accountId ?? null,
       postType: firstChannel?.postType ?? null,
       format: canonicalFormat,
+      sourceType: "repurposed",
       pillarContentNotionId: source.notionId,
       pillarContentItemId: source.id,
       utmCampaign: await generateUtmCampaign(source.title),
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       source: "api:repurpose",
       actorUserId,
       format: canonicalFormat,
-      sourceType: "original",
+      sourceType: "repurposed",
       postType: firstChannel?.postType ?? null,
     });
   } catch (err) {

@@ -60,10 +60,12 @@ async function main() {
       );
     }
 
-    // Show the new state
+    // Show the new state. Post-consolidation (2026-05-11) clips live under
+    // sourceType='repurposed' and are identified by a non-null
+    // source_clip_idea_id.
     const newState = await sql`
       SELECT format, COUNT(*) as count FROM production_items
-      WHERE brand = 'matg' AND source_type = 'clip'
+      WHERE brand = 'matg' AND source_clip_idea_id IS NOT NULL
       GROUP BY format
       ORDER BY count DESC
     `;

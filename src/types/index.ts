@@ -82,17 +82,20 @@ export interface ProductionItem {
    *  with `pillarContentItemId` set). Populated by queries that self-join
    *  productionItems. The clip queue surfaces this as a column. */
   pillarContentTitle?: string | null;
-  sourceType?: "original" | "repost" | "cross_post" | "clip" | null;
-  /** FK to `clip_ideas.id` for sourceType='clip' rows. The triage modal in
-   *  the queue fetches the clip-idea on click via this id. */
+  sourceType?: "original" | "repost" | "cross_post" | "repurposed" | null;
+  /** FK to `clip_ideas.id` when this row was promoted from a clip-idea
+   *  (sourceType='repurposed' post-consolidation). The triage modal in the
+   *  queue fetches the clip-idea on click via this id and renders the
+   *  clip-specific UI; absence of this id falls back to the standard
+   *  TriageDialog. */
   sourceClipIdeaId?: string | null;
   /** LLM per-clip view estimate from `clip_ideas.estimated_views`. Set only
-   *  for clip rows; consumers prefer this over the generic format-based
-   *  predictor when surfacing Est. Views in the queue. */
+   *  on rows promoted from a clip idea; consumers prefer this over the
+   *  generic format-based predictor when surfacing Est. Views in the queue. */
   clipEstimatedViews?: number | null;
   /** Friendly name + version of the clip-idea algorithm that produced this
    *  row (e.g. "Splice v6"). Computed from `clip_ideas.prompt_version` via
-   *  `algorithmLabel()`. Set only for sourceType='clip' rows. */
+   *  `algorithmLabel()`. Set only on rows promoted from a clip idea. */
   clipAlgorithmLabel?: string | null;
   repostedFromItemId?: string | null;
   mediaS3Bucket?: string | null;

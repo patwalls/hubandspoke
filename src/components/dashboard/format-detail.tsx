@@ -98,16 +98,8 @@ interface FormatRow {
   producerAsanaGid: string | null;
   instructions: string | null;
   parentFormatId: string | null;
-  descriptPackId: string | null;
-  /** Inline-joined Descript pack (full text) — present only on the
-   *  detail GET response, not on list responses. */
-  descriptPack?: { id: string; name: string; prompt: string } | null;
-}
-
-interface DescriptPackSummary {
-  id: string;
-  name: string;
-  prompt: string;
+  isClipDescriptFormat: boolean;
+  labelsAsOriginal: boolean;
 }
 
 interface ContentItem {
@@ -258,9 +250,8 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [editorAsanaGid, setEditorAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
-  const [descriptPackId, setDescriptPackId] = useState<string | null>(null);
-  const [allPacks, setAllPacks] = useState<DescriptPackSummary[]>([]);
-  const [packModalOpen, setPackModalOpen] = useState(false);
+  const [isClipDescriptFormat, setIsClipDescriptFormat] = useState(false);
+  const [labelsAsOriginal, setLabelsAsOriginal] = useState(false);
 
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
   const [channelsPopoverOpen, setChannelsPopoverOpen] = useState(false);
@@ -645,16 +636,16 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     setEditorAsanaGid(f.editorAsanaGid || "");
     setInstructions(f.instructions || "");
     setParentFormatId(f.parentFormatId ?? null);
-    setDescriptPackId(f.descriptPackId ?? null);
+    setIsClipDescriptFormat(f.isClipDescriptFormat ?? false);
+    setLabelsAsOriginal(f.labelsAsOriginal ?? false);
   }
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [detailRes, listRes, packsRes] = await Promise.all([
+      const [detailRes, listRes] = await Promise.all([
         fetch(`/api/formats/${formatId}`),
         fetch(`/api/formats?brand=${brand}`),
-        fetch(`/api/descript-packs`),
       ]);
       if (!detailRes.ok) {
         setData(null);
@@ -666,12 +657,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
       if (listRes.ok) {
         const list = await listRes.json();
         setAllFormats(list);
-      }
-      if (packsRes.ok) {
-        const { packs } = (await packsRes.json()) as {
-          packs: DescriptPackSummary[];
-        };
-        setAllPacks(packs);
       }
     } catch (err) {
       console.error("Failed to load format detail:", err);
@@ -1408,37 +1393,60 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </div>
           </PropertyRowSolo>
 
+          {/* Descript pack panel removed 2026-05-11. Pack prompt was folded
+              into the format Skill above — `formats.instructions` is now the
+              single source of truth that the Underlord agent reads. Supports
+              `{{hook}}`, `{{startTimestamp}}`, `{{endTimestamp}}`,
+              `{{durationSec}}`, `{{compositionId}}` placeholders inline in
+              the Skill text. */}
+
           <PropertyRowSolo>
             <div className="px-3 py-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm text-muted-foreground">
-                  Descript pack
-                </Label>
-                <button
-                  type="button"
-                  onClick={() => setPackModalOpen(true)}
-                  className="text-xs text-primary hover:underline"
-                >
-                  {data.format.descriptPack ? "Edit / change pack" : "Attach a pack"}
-                </button>
-              </div>
-              {data.format.descriptPack ? (
-                <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs space-y-1">
-                  <div className="font-medium text-foreground">
-                    {data.format.descriptPack.name}
-                  </div>
-                  <div className="font-mono text-[11px] text-muted-foreground line-clamp-3 whitespace-pre-wrap">
-                    {data.format.descriptPack.prompt}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  No pack attached. Without a pack, all four &quot;Create in Descript&quot; options on this format are disabled.
-                </p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                Defines the Underlord prompt + Descript layout-pack URL sent when promoting clips. Reusable across formats. Supports <code className="font-mono">{"{{hook}}"}</code>, <code className="font-mono">{"{{startTimestamp}}"}</code>, <code className="font-mono">{"{{endTimestamp}}"}</code>, <code className="font-mono">{"{{durationSec}}"}</code>, <code className="font-mono">{"{{compositionId}}"}</code> placeholders.
-              </p>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isClipDescriptFormat}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setIsClipDescriptFormat(next);
+                    void persistField({ isClipDescriptFormat: next });
+                  }}
+                  className="mt-0.5"
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Clip Descript format</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    Items in this format are short-form clips edited in Descript. Clip-idea generation spawns rows into this format, and the four &quot;Create in Descript&quot; flows are wired to it. Exactly one format per brand should carry this flag.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </PropertyRowSolo>
+
+          <PropertyRowSolo>
+            <div className="px-3 py-3 space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={labelsAsOriginal}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setLabelsAsOriginal(next);
+                    void persistField({ labelsAsOriginal: next });
+                  }}
+                  className="mt-0.5"
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Label as original</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    New items created in this format default to source type
+                    &ldquo;Original&rdquo; instead of &ldquo;Repurposed&rdquo;.
+                    Tick for pillar / source-of-truth formats (e.g. Business
+                    Breakdown, YouTube long-form). Leave unchecked for any
+                    derivative format.
+                  </span>
+                </span>
+              </label>
             </div>
           </PropertyRowSolo>
         </div>
@@ -2246,340 +2254,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
         </DialogContent>
       </Dialog>
 
-      <DescriptPackModal
-        open={packModalOpen}
-        onOpenChange={setPackModalOpen}
-        packs={allPacks}
-        attachedPackId={descriptPackId}
-        onAttachmentChange={(nextPackId) => {
-          setDescriptPackId(nextPackId);
-          void persistField({ descriptPackId: nextPackId });
-        }}
-        onPacksChange={(nextPacks) => setAllPacks(nextPacks)}
-      />
     </div>
   );
 }
 
-const DESCRIPT_PACK_STARTER = `Apply the layout pack at https://web.descript.com/PASTE-LAYOUT-PACK-PROJECT-URL-HERE to this composition. The pack handles vertical 9:16 framing, the hook-text track, and the captions slot — use it instead of manually setting aspect ratio or adding caption tracks.
-
-Set the hook text track at the top of the composition to: "{{hook}}". Replace whatever placeholder or default text the layout pack provides — do not append; replace.
-
-Inside the composition, mark filler words ("um", "uh", "like" when used as filler, "you know", "I mean", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words.
-
-Do not add transitions, effects, music, or title cards beyond what the layout pack already includes. Do not re-order anything. Do not rewrite the transcript.`;
-
-interface DescriptPackModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  packs: DescriptPackSummary[];
-  attachedPackId: string | null;
-  onAttachmentChange: (nextPackId: string | null) => void;
-  onPacksChange: (next: DescriptPackSummary[]) => void;
-}
-
-/**
- * Inline pack editor: pick from existing packs, edit name + prompt, create
- * new, attach to the current format, or detach. Single source of truth for
- * pack-management UI in v1 — once we have many packs, a dedicated
- * `/admin/descript-packs` page makes more sense.
- */
-function DescriptPackModal({
-  open,
-  onOpenChange,
-  packs,
-  attachedPackId,
-  onAttachmentChange,
-  onPacksChange,
-}: DescriptPackModalProps) {
-  // null = pick a pack from the list (default state when modal opens with
-  // packs available); "new" = creating a new pack; "<uuid>" = editing
-  // that pack.
-  const [editingId, setEditingId] = useState<string | null | "new">(null);
-  const [draftName, setDraftName] = useState("");
-  const [draftPrompt, setDraftPrompt] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Reset to a sensible state every time the modal opens. If a pack is
-  // already attached, jump straight into editing it (the most common
-  // first action). Otherwise show the list.
-  useEffect(() => {
-    if (open) {
-      setError(null);
-      if (attachedPackId) {
-        const pack = packs.find((p) => p.id === attachedPackId);
-        if (pack) {
-          setEditingId(pack.id);
-          setDraftName(pack.name);
-          setDraftPrompt(pack.prompt);
-          return;
-        }
-      }
-      setEditingId(null);
-      setDraftName("");
-      setDraftPrompt("");
-    }
-  }, [open, attachedPackId, packs]);
-
-  function selectPackForEdit(pack: DescriptPackSummary) {
-    setEditingId(pack.id);
-    setDraftName(pack.name);
-    setDraftPrompt(pack.prompt);
-    setError(null);
-  }
-
-  function startNewPack() {
-    setEditingId("new");
-    setDraftName("");
-    setDraftPrompt(DESCRIPT_PACK_STARTER);
-    setError(null);
-  }
-
-  async function handleSave() {
-    if (!draftName.trim()) {
-      setError("Name is required");
-      return;
-    }
-    if (!draftPrompt.trim()) {
-      setError("Prompt is required");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      if (editingId === "new") {
-        const res = await fetch("/api/descript-packs", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: draftName.trim(), prompt: draftPrompt }),
-        });
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({}));
-          setError(json?.error || `Failed (${res.status})`);
-          return;
-        }
-        const created = (await res.json()) as DescriptPackSummary;
-        onPacksChange([...packs, created].sort((a, b) => a.name.localeCompare(b.name)));
-        // Auto-attach a freshly-created pack to the current format —
-        // matches the most common intent ("I made this for this format").
-        onAttachmentChange(created.id);
-        setEditingId(created.id);
-      } else if (typeof editingId === "string") {
-        const res = await fetch(`/api/descript-packs/${editingId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: draftName.trim(), prompt: draftPrompt }),
-        });
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({}));
-          setError(json?.error || `Failed (${res.status})`);
-          return;
-        }
-        const updated = (await res.json()) as DescriptPackSummary;
-        onPacksChange(
-          packs
-            .map((p) => (p.id === updated.id ? updated : p))
-            .sort((a, b) => a.name.localeCompare(b.name)),
-        );
-      }
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDelete(packId: string) {
-    if (!confirm("Delete this pack? Formats currently using it will lose the attachment and re-gate.")) {
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/descript-packs/${packId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        setError(json?.error || `Failed (${res.status})`);
-        return;
-      }
-      onPacksChange(packs.filter((p) => p.id !== packId));
-      if (attachedPackId === packId) {
-        onAttachmentChange(null);
-      }
-      setEditingId(null);
-      setDraftName("");
-      setDraftPrompt("");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleAttach(packId: string) {
-    onAttachmentChange(packId);
-  }
-
-  function handleDetach() {
-    onAttachmentChange(null);
-  }
-
-  const editing = typeof editingId === "string" || editingId === "new";
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>Descript packs</DialogTitle>
-        </DialogHeader>
-        <div className="flex-1 overflow-y-auto space-y-4">
-          {!editing ? (
-            <>
-              <div className="space-y-2">
-                {packs.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No packs yet. Create one to attach to this format.
-                  </p>
-                ) : (
-                  packs.map((pack) => (
-                    <div
-                      key={pack.id}
-                      className="rounded-md border border-border bg-card px-3 py-2 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">
-                          {pack.name}
-                          {attachedPackId === pack.id && (
-                            <span className="ml-2 text-[10px] uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5">
-                              Attached
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground truncate font-mono">
-                          {pack.prompt.slice(0, 80)}…
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {attachedPackId !== pack.id && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleAttach(pack.id)}
-                          >
-                            Attach
-                          </Button>
-                        )}
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => selectPackForEdit(pack)}
-                        >
-                          Edit
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
-                <Button type="button" variant="outline" onClick={startNewPack}>
-                  + New pack
-                </Button>
-                {attachedPackId && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleDetach}
-                    className="text-red-600 hover:text-red-700"
-                  >
-                    Detach from this format
-                  </Button>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => setEditingId(null)}
-                className="text-xs text-primary hover:underline"
-              >
-                ← Back to pack list
-              </button>
-              <div className="space-y-1">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                  Pack name
-                </Label>
-                <Input
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value)}
-                  placeholder="e.g. Starter Story Reels"
-                />
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                    Underlord prompt
-                  </Label>
-                  <button
-                    type="button"
-                    onClick={() => setDraftPrompt(DESCRIPT_PACK_STARTER)}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Load starter template
-                  </button>
-                </div>
-                <Textarea
-                  value={draftPrompt}
-                  onChange={(e) => setDraftPrompt(e.target.value)}
-                  rows={16}
-                  className="font-mono text-xs"
-                  placeholder="Apply the layout pack at https://web.descript.com/... — set hook text to {{hook}} — mark fillers as IGNORED — etc."
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Sent to Descript&apos;s Underlord agent on every clip
-                  promotion using this format. Supports{" "}
-                  <code className="font-mono">{"{{hook}}"}</code>,{" "}
-                  <code className="font-mono">{"{{startTimestamp}}"}</code>,{" "}
-                  <code className="font-mono">{"{{endTimestamp}}"}</code>,{" "}
-                  <code className="font-mono">{"{{durationSec}}"}</code>,{" "}
-                  <code className="font-mono">{"{{compositionId}}"}</code>.
-                </p>
-              </div>
-              {error && <p className="text-xs text-red-600">{error}</p>}
-              <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
-                {typeof editingId === "string" && editingId !== "new" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => handleDelete(editingId)}
-                    disabled={saving}
-                    className="text-red-600 hover:text-red-700"
-                  >
-                    Delete pack
-                  </Button>
-                ) : (
-                  <span />
-                )}
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => onOpenChange(false)}
-                    disabled={saving}
-                  >
-                    Close
-                  </Button>
-                  <Button type="button" onClick={handleSave} disabled={saving}>
-                    {editingId === "new" ? "Create + attach" : "Save"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}

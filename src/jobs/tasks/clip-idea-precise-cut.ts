@@ -8,7 +8,6 @@ import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { db } from "@/lib/db";
 import {
   clipIdeas,
-  descriptPacks,
   formats,
   productionItems,
   repurposeTriggers,
@@ -276,12 +275,11 @@ async function pollUploadOnce(
         descriptProjectId: productionItems.descriptProjectId,
         hook: productionItems.hook,
         compositionName: repurposeTriggers.compositionName,
-        packPrompt: descriptPacks.prompt,
-        packName: descriptPacks.name,
+        formatSkill: formats.instructions,
+        formatName: formats.name,
       })
       .from(repurposeTriggers)
       .leftJoin(formats, eq(repurposeTriggers.targetFormatId, formats.id))
-      .leftJoin(descriptPacks, eq(formats.descriptPackId, descriptPacks.id))
       .leftJoin(
         productionItems,
         eq(productionItems.id, payload.derivativeItemId),
@@ -294,9 +292,9 @@ async function pollUploadOnce(
       );
       return;
     }
-    if (!row.packPrompt) {
+    if (!row.formatSkill || !row.formatSkill.trim()) {
       helpers.logger.info(
-        `precise-cut layout-skip clip=${payload.clipIdeaId} reason=no_pack`,
+        `precise-cut layout-skip clip=${payload.clipIdeaId} reason=no_skill`,
       );
       return;
     }
@@ -306,7 +304,7 @@ async function pollUploadOnce(
     const hookText = row.hook ?? row.compositionName ?? "";
 
     const prompt = buildLayoutPackPrompt({
-      packPrompt: row.packPrompt,
+      skill: row.formatSkill,
       compositionId,
       hookText,
     });
@@ -319,7 +317,7 @@ async function pollUploadOnce(
       .set({ descriptPrompt: prompt })
       .where(eq(repurposeTriggers.id, payload.triggerId));
     helpers.logger.info(
-      `precise-cut layout-start clip=${payload.clipIdeaId} pack="${row.packName ?? "unknown"}" job=${agent.jobId}`,
+      `precise-cut layout-start clip=${payload.clipIdeaId} format="${row.formatName ?? "unknown"}" job=${agent.jobId}`,
     );
 
     await helpers.addJob(

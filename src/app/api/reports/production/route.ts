@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
       // than the format median. Wrap it into the same ViewPrediction shape
       // so the UI doesn't need a special-case render path.
       if (
-        item.sourceType === "clip" &&
+        item.sourceClipIdeaId != null &&
         item.clipEstimatedViews != null &&
         prediction
       ) {

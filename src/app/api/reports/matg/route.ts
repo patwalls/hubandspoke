@@ -96,12 +96,15 @@ export async function GET(request: NextRequest) {
       conditions.push(eq(productionItems.format, formatFilter));
     }
 
-    // Source filter classifies by sourceType (original / repost / cross_post).
-    // NULL is treated as "original" since that's the historical default.
+    // Source filter classifies by sourceType (original / repurposed /
+    // repost / cross_post). NULL is treated as "original" since that's
+    // the historical default.
     if (sourceFilter === "original") {
       conditions.push(
         sql`(${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')`
       );
+    } else if (sourceFilter === "repurposed") {
+      conditions.push(eq(productionItems.sourceType, "repurposed"));
     } else if (sourceFilter === "repost") {
       conditions.push(eq(productionItems.sourceType, "repost"));
     } else if (sourceFilter === "cross_post") {
@@ -332,7 +335,7 @@ export async function GET(request: NextRequest) {
         | "original"
         | "repost"
         | "cross_post"
-        | "clip",
+        | "repurposed",
       platform: item.platform as string[] | null,
       postType: item.postType ?? null,
       accountId: item.accountId ?? null,

@@ -5,7 +5,7 @@ import {
   ClipIdeaAlreadyDecidedError,
   ClipIdeaNotFoundError,
   ClipIdeaSourceMissingMediaError,
-  FormatMissingDescriptPackError,
+  FormatMissingSkillError,
 } from "@/lib/services/promote-clip-idea";
 
 interface RouteContext {
@@ -42,7 +42,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     if (err instanceof ClipIdeaSourceMissingMediaError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
-    if (err instanceof FormatMissingDescriptPackError) {
+    if (err instanceof FormatMissingSkillError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
     const message = err instanceof Error ? err.message : "Unknown error";

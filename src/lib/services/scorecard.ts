@@ -25,7 +25,7 @@ export interface BrandScorecard {
   originals: number;
   reposts: number;
   crossPosts: number;
-  clips: number;
+  repurposed: number;
   accountsShipped: number;
   totalAccounts: number;
 }
@@ -39,7 +39,7 @@ export interface ScorecardWindow {
   totalOriginals: number;
   totalReposts: number;
   totalCrossPosts: number;
-  totalClips: number;
+  totalRepurposed: number;
   totalAccountsShipped: number;
   totalAccounts: number;
   byBrand: BrandScorecard[];
@@ -136,7 +136,7 @@ async function loadWindow(
     originals: 0,
     reposts: 0,
     crossPosts: 0,
-    clips: 0,
+    repurposed: 0,
     accountsShipped: shippedByBrand.get(b.slug) ?? 0,
     totalAccounts: b.activeAccountCount,
   }));
@@ -156,8 +156,8 @@ async function loadWindow(
       case "cross_post":
         target.crossPosts = row.count;
         break;
-      case "clip":
-        target.clips = row.count;
+      case "repurposed":
+        target.repurposed = row.count;
         break;
     }
   }
@@ -167,7 +167,7 @@ async function loadWindow(
       acc.totalOriginals += b.originals;
       acc.totalReposts += b.reposts;
       acc.totalCrossPosts += b.crossPosts;
-      acc.totalClips += b.clips;
+      acc.totalRepurposed += b.repurposed;
       acc.totalAccountsShipped += b.accountsShipped;
       acc.totalAccounts += b.totalAccounts;
       return acc;
@@ -176,7 +176,7 @@ async function loadWindow(
       totalOriginals: 0,
       totalReposts: 0,
       totalCrossPosts: 0,
-      totalClips: 0,
+      totalRepurposed: 0,
       totalAccountsShipped: 0,
       totalAccounts: 0,
     }

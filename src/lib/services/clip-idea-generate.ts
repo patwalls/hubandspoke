@@ -171,10 +171,17 @@ export async function generateClipIdeasForItem(
       hook: d.hook,
     }));
 
+  const promotedFormat = await getPromotedClipFormat(item.brand);
+  if (!promotedFormat) {
+    return {
+      status: "skip",
+      reason: `no-clip-format-for-brand-${item.brand}`,
+    };
+  }
   const { blueprint: blueprintRows, bench: benchRows } = await topShortFormPerformers({
     brand: item.brand,
     excludeDerivativesOfPillarId: productionItemId,
-    preferredFormat: getPromotedClipFormat(item.brand),
+    preferredFormat: promotedFormat,
   });
   const blueprint: BlueprintRow[] = blueprintRows.map((r) => ({
     title: r.title,
@@ -262,7 +269,6 @@ export async function generateClipIdeasForItem(
       rationale: ci.rationale,
     });
 
-    const promotedFormat = getPromotedClipFormat(item.brand);
     const [created] = await db
       .insert(productionItems)
       .values({
@@ -275,7 +281,7 @@ export async function generateClipIdeasForItem(
         brand: item.brand,
         contentBody: body,
         pillarContentItemId: productionItemId,
-        sourceType: "clip",
+        sourceType: "repurposed",
         sourceClipIdeaId: ci.id,
         producerUserId: assignees.producerUserId,
         editorUserId: assignees.editorUserId,
@@ -293,7 +299,7 @@ export async function generateClipIdeasForItem(
           source: "service:clip-idea-generate",
           actorUserId: null,
           format: promotedFormat,
-          sourceType: "clip",
+          sourceType: "repurposed",
           postType: "instagram_reel",
         });
       } catch (err) {

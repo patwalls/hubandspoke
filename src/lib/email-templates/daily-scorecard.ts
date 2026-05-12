@@ -61,7 +61,7 @@ export function renderDailyScorecardEmail(data: ScorecardData): RenderedEmail {
     `Originals published: ${thisWeek.totalOriginals}  (${headlineDelta.arrow}${headlineDelta.text} vs prior 7 days)`
   );
   textLines.push(
-    `Reposts: ${thisWeek.totalReposts}    Cross-posts: ${thisWeek.totalCrossPosts}    Clips: ${thisWeek.totalClips}`
+    `Reposts: ${thisWeek.totalReposts}    Cross-posts: ${thisWeek.totalCrossPosts}    Repurposed: ${thisWeek.totalRepurposed}`
   );
   textLines.push(
     `Accounts shipping: ${thisWeek.totalAccountsShipped} of ${thisWeek.totalAccounts}`
@@ -75,7 +75,7 @@ export function renderDailyScorecardEmail(data: ScorecardData): RenderedEmail {
     const sub = [
       b.reposts ? `${b.reposts} reposts` : null,
       b.crossPosts ? `${b.crossPosts} cross-posts` : null,
-      b.clips ? `${b.clips} clips` : null,
+      b.repurposed ? `${b.repurposed} repurposed` : null,
     ]
       .filter(Boolean)
       .join(", ");
@@ -110,7 +110,7 @@ export function renderDailyScorecardEmail(data: ScorecardData): RenderedEmail {
         ${[
           ["Reposts", thisWeek.totalReposts, lastWeek.totalReposts],
           ["Cross-posts", thisWeek.totalCrossPosts, lastWeek.totalCrossPosts],
-          ["Clips", thisWeek.totalClips, lastWeek.totalClips],
+          ["Repurposed", thisWeek.totalRepurposed, lastWeek.totalRepurposed],
         ]
           .map(([label, curr, prev]) => {
             const c = curr as number;
@@ -163,7 +163,7 @@ function renderBrandTable(
         b.crossPosts
           ? `${b.crossPosts} cross-post${b.crossPosts === 1 ? "" : "s"}`
           : null,
-        b.clips ? `${b.clips} clip${b.clips === 1 ? "" : "s"}` : null,
+        b.repurposed ? `${b.repurposed} repurposed` : null,
       ].filter(Boolean) as string[];
       const goalCell = b.weeklyGoal
         ? `<span style="color:#737373;">/ ${b.weeklyGoal} goal</span>`

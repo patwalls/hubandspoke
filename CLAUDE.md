@@ -64,6 +64,55 @@ The reliable loop:
 
 **When to also write/extend an e2e spec.** If the UI you just changed has a clear golden path that future regressions would break silently (e.g. a new dashboard tab, a new form submission, a new auth-gated flow), add or extend a `tests/e2e/*.spec.ts` so `npm run test:e2e` catches it next time. MCP verifies *now*; a spec verifies *every push*.
 
+### Writing tests — default-on for new logic
+
+**Write a test when you add or change anything in these buckets:**
+- A pure function with branches (formatters, classifiers, prompt builders, validators) → **unit test** at `<module>.test.ts` next to it.
+- A DB-touching service or helper that's called from multiple sites (resolvers, lookup helpers, lineage walks) → **integration test** at `<module>.integration.test.ts` next to it.
+- A new column with conditional behavior on its value (like the `labels_as_original` / `is_clip_descript_format` flags we just shipped) → integration test that proves the flag actually flips behavior.
+- A bug fix → a test that reproduces the bug, then proves the fix.
+
+**Skip the test when:**
+- It's a one-shot backfill script — those are validated by `--dry-run` output.
+- It's a pure rename / file move / dead-code removal.
+- The logic is "fetch and render" with no branching (the e2e spec covers it).
+
+Don't write a test "for coverage." A test that asserts what the code already says (`expect(x).toBe(x)`) is noise. Aim for one of: a behavior contract a future contributor could violate, a bug regression, or a boundary case the implementation handles non-obviously.
+
+#### Test fixture factories
+
+Integration tests use the shared factories at `src/test/factories.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { createTestFormat, createTestProductionItem } from "@/test/factories";
+
+describe("my feature", () => {
+  it("respects the format flag", async () => {
+    const fmt = await createTestFormat({ labelsAsOriginal: true });
+    const item = await createTestProductionItem({ format: fmt.name });
+    expect(item.format).toBe(fmt.name);
+    // No teardown — importing factories registers an afterEach hook that
+    // bulk-deletes everything this file created.
+  });
+});
+```
+
+The factories cover the common shapes (`createTestFormat`, `createTestProductionItem`, `createTestClipIdea`) and look up a default test user / account dynamically so tests aren't coupled to hardcoded UUIDs. Override `accountId` / `producerUserId` / `editorUserId` when the test cares.
+
+**Don't reach for `db.insert` directly in a new test.** If a fixture shape isn't covered by a factory, extend the factory — the next test will need it too.
+
+#### Running tests
+
+- `npm run test` — all of them (unit + integration). Should finish in <3s.
+- `npm run test:unit` — unit only. Pure, fast. Run this in tight feedback loops while iterating on a pure function.
+- `npm run test:integration` — integration only. Needs `DATABASE_URL` in `.env.local`.
+- `npm run test:watch` — vitest watch mode.
+- `npx vitest run path/to/file.test.ts` — single file.
+- `npx vitest run -t "exact test name"` — single test.
+
+The full suite is fast enough to run on every commit — don't let it grow into something you skip. If it starts to slow down, fix the slow test, don't add a `.skip()`.
+
 ## Database Migrations
 Rails-style versioned migrations via `drizzle-kit`. Versioned SQL files live in
 `drizzle/` and are committed to git. Heroku's release phase runs
