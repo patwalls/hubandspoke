@@ -347,6 +347,18 @@ Click "Create" on an IG-Post format whose `is_canva_format=true` and whose Skill
 - **UI:** `CanvaStatusPill` next to `DescriptStatusPill` on content-detail. Renders "Creating in Canva…" (amber, pulsing) while `canva_autofill_job_id` is set; "Open in Canva" (green, external-link icon) once `canva_edit_url` lands. Hidden when neither is set. Self-polls `/api/production-items/[id]` every 5s during the in-flight window.
 - **Brand-template setup:** the template must (a) be published as a Brand Template (Share → Brand Template; Teams plan is sufficient — Enterprise is not required despite what Canva's docs imply) and (b) have at least one autofill-tagged element. Bulk Create's "Connect data" toolbar action is the only Teams-accessible way to tag fields. See `MEMORY.md` → `project-canva-autofill` for the full setup quirks.
 
+### `canva-export-design` — archive Canva slides into production_item_media (2026-05-12)
+
+Closes the loop on the Canva-autofill flow: when autofill stamps `canva_design_id`, this task exports the design's pages as PNG via `POST /v1/exports`, polls until ready, downloads each URL, archives to S3, and upserts one `productionItemMedia` row per page so the IG-Post simulator on the detail page renders the autofilled slides. Auto-fires after `canva-create-copy` succeeds.
+
+- **Files:**
+  - `src/jobs/tasks/canva-export-design.ts` — self-polling task. Phase 1: `createCanvaExport({designId, type:"png"})`, stamp `canva_export_job_id` on the row, re-enqueue with `jobId` set + 5s delay. Phase 2: `fetchCanvaExportJob(jobId)` once per invocation; on success hands the returned URL array to `archiveCarouselMedia` (the same helper Instagram enrichment uses for source-of-truth carousel ingestion), which downloads each URL, uploads to S3 under `hubandspoke/uploads/<itemId>/<uuid>-canva-slide-N.png`, and upserts `productionItemMedia` rows keyed by `(productionItemId, index)`. Mirrors the index-0 cover into legacy `productionItems.mediaS3Key`/`mediaContentType`/`mediaSizeBytes` so list-view queries don't need a join. Stamps `canva_exported_at` and clears `canva_export_job_id`. 5-minute deadline. Each invocation < 1s.
+  - `src/lib/canva.ts` — `createCanvaExport({designId, type, pages?})` → `{jobId}`. `fetchCanvaExportJob(jobId)` → `{status, urls, errorMessage}`. PNG exports return one URL per page; PDF/MP4/GIF return a single URL.
+  - `src/jobs/tasks/canva-create-copy.ts` — auto-chains: after stamping `canva_design_id`, enqueues `canva-export-design`. Fire-and-forget.
+- **Schema:** `canva_export_job_id`, `canva_exported_at`, `canva_export_error` on `production_items`. Mirrors the descript publish-and-archive shape.
+- **Idempotency:** `archiveCarouselMedia` upserts by `(productionItemId, index)` — re-running the export rewrites the same rows. Safe to redrive when the editor tweaks the design in Canva.
+- **Cross-derivative leak fix (2026-05-12):** the descript-status endpoint now short-circuits when the item's own descript_* columns are all NULL. Without this gate the trigger lookup walked up to the pillar and picked up Descript triggers from sibling derivatives, so a Tech Stack Slideshow item showed "Descript ready" because the pillar happened to have a clip in flight.
+
 ### Manual media upload to drafts (X + Instagram, 2026-05-07)
 
 Browser-driven companion to `archiveCarouselMedia` (enrichment-time URL ingest) and `seedRepostContent` (repost-time row mirror). All three write into the same `production_item_media` table with identical column conventions — that's the **single shared schema** for media on a production item.

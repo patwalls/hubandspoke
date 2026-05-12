@@ -63,6 +63,35 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Short-circuit when the item itself has zero Descript context. Both
+  // the agent flow and the precise-cut flow stamp the derivative's own
+  // descript_* columns once Descript work is in flight; if everything is
+  // still null the item isn't a Descript clip — it's a Canva post, a
+  // text-only item, or a fresh row that never got promoted. Without this
+  // gate the trigger lookup below walks up to the pillar and picks up
+  // ANY Descript trigger the pillar has (often from a sibling derivative
+  // that's a different format), so the "Descript ready" pill leaks onto
+  // unrelated rows.
+  const itemHasDescriptContext =
+    item.descriptProjectId !== null ||
+    item.descriptCompositionId !== null ||
+    item.descriptPublishJobId !== null ||
+    item.descriptPublishedAt !== null ||
+    item.descriptPublishError !== null;
+  if (!itemHasDescriptContext) {
+    return NextResponse.json({
+      status: "not_started" as const,
+      detail: "Not a Descript clip.",
+      compositionId: null,
+      compositionUrl: null,
+      projectId: null,
+      projectUrl: null,
+      queueJob: null,
+      trigger: null,
+      publish: { state: "idle" as const, jobId: null, publishedAt: null, error: null },
+    });
+  }
+
   // Trigger row keyed off the source pillar (clip promotions write the
   // trigger against the pillar's production_item id, not the derivative).
   // Fall back to any trigger created BY this row if the row IS a pillar.

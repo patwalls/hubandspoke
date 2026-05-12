@@ -512,6 +512,13 @@
       "when": 1778628200025,
       "tag": "0072_fearless_snowbird",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1778629914321,
+      "tag": "0073_flimsy_excalibur",
+      "breakpoints": true
     }
   ]
 }

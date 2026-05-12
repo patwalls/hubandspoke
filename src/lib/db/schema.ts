@@ -144,6 +144,18 @@ export const productionItems = pgTable(
     canvaAutofillJobId: text("canva_autofill_job_id"),
     canvaDesignId: text("canva_design_id"),
     canvaEditUrl: text("canva_edit_url"),
+    // Canva design-export state (parallels descript publish-and-archive).
+    // After autofill succeeds, we export every page of the design as PNG via
+    // /v1/exports and insert one `production_item_media` row per page so the
+    // IG-Post carousel simulator on the detail page renders the slides.
+    // Derivable states (mirror descript pattern):
+    //   idle: both null → nothing exported, never asked to export
+    //   exporting: jobId set, exportedAt null, error null → polling
+    //   exported: exportedAt set → PNGs archived, media rows present
+    //   failed: error set → most recent attempt failed; user can retry
+    canvaExportJobId: text("canva_export_job_id"),
+    canvaExportedAt: timestamp("canva_exported_at", { withTimezone: true }),
+    canvaExportError: text("canva_export_error"),
     // Typefully draft created automatically when a new X/LinkedIn item is
     // inserted with no publishedLink. The pill in the content-detail header
     // links to typefullyPrivateUrl. Webhook receiver (/api/webhooks/typefully)

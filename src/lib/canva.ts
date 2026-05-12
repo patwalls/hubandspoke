@@ -209,6 +209,104 @@ export interface CanvaAutofillJobResult {
   errorMessage?: string;
 }
 
+export interface CreateExportArgs {
+  designId: string;
+  /** Format type. "png" produces one URL per page. "pdf"/"mp4"/"gif" produce
+   *  a single URL. MVP only uses "png" for slideshow archival. */
+  type?: "png" | "pdf" | "mp4" | "gif" | "jpg";
+  /** Optional 1-indexed page subset. Omit for all pages. */
+  pages?: number[];
+}
+
+/**
+ * Export a Canva design via `POST /v1/exports`. Asynchronous: returns a job
+ * id that the caller polls via {@link fetchCanvaExportJob}. PNG exports
+ * return one URL per page (a 4-page slideshow → 4 URLs). PDF/MP4/GIF return
+ * a single URL.
+ *
+ * Defaults to PNG because we use this to archive each slide of a slideshow
+ * separately into `production_item_media` rows.
+ */
+export async function createCanvaExport(
+  args: CreateExportArgs,
+): Promise<{ jobId: string }> {
+  const accessToken = await getCanvaAccessToken();
+  type ExportFormat = {
+    type: "png" | "pdf" | "mp4" | "gif" | "jpg";
+    pages?: number[];
+  };
+  const format: ExportFormat = { type: args.type ?? "png" };
+  if (args.pages && args.pages.length > 0) format.pages = args.pages;
+  const res = await fetch(`${BASE_URL}/v1/exports`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      design_id: args.designId,
+      format,
+    }),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail =
+      (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    throw new Error(`Canva exports create failed: ${detail}`);
+  }
+  type CreateExportResp = { job?: { id?: string } };
+  const jobId = (json as CreateExportResp | null)?.job?.id;
+  if (!jobId) {
+    throw new Error(
+      `Canva exports response had no job.id — ${JSON.stringify(json).slice(0, 300)}`,
+    );
+  }
+  return { jobId };
+}
+
+export interface CanvaExportJobResult {
+  status: "in_progress" | "success" | "failed";
+  /** One URL per exported page for PNG exports. Single-entry array for
+   *  PDF/MP4/GIF exports. Empty/undefined while status === "in_progress". */
+  urls?: string[];
+  errorMessage?: string;
+}
+
+export async function fetchCanvaExportJob(
+  jobId: string,
+): Promise<CanvaExportJobResult> {
+  const accessToken = await getCanvaAccessToken();
+  const res = await fetch(`${BASE_URL}/v1/exports/${jobId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail =
+      (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    throw new Error(`Canva exports/${jobId} fetch failed: ${detail}`);
+  }
+  type ExportJob = {
+    job?: {
+      status?: "in_progress" | "success" | "failed";
+      urls?: string[];
+      error?: { message?: string };
+    };
+  };
+  const job = (json as ExportJob | null)?.job;
+  if (!job?.status) {
+    throw new Error(
+      `Canva exports/${jobId} response had no job.status — ${JSON.stringify(json).slice(0, 300)}`,
+    );
+  }
+  if (job.status === "success") {
+    return { status: "success", urls: job.urls ?? [] };
+  }
+  if (job.status === "failed") {
+    return { status: "failed", errorMessage: job.error?.message };
+  }
+  return { status: "in_progress" };
+}
+
 export async function fetchCanvaAutofillJob(
   jobId: string,
 ): Promise<CanvaAutofillJobResult> {

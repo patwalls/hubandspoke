@@ -142,6 +142,24 @@ export const canvaCreateCopyTask: Task = async (rawPayload, helpers) => {
       },
     });
 
+    // Auto-chain: export the design's pages as PNGs and archive into S3 so
+    // the IG-Post simulator on the detail page renders the slides
+    // immediately. Idempotent — re-running the export rewrites the same
+    // production_item_media rows keyed by index. Fire-and-forget; a failed
+    // enqueue must not unwind the design creation.
+    if (designId) {
+      try {
+        await helpers.addJob("canva-export-design", {
+          productionItemId: payload.productionItemId,
+          designId,
+        });
+      } catch (err) {
+        helpers.logger.warn(
+          `canva-create-copy: failed to enqueue canva-export-design for item ${payload.productionItemId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     helpers.logger.info(
       `canva-create-copy ok item=${payload.productionItemId} design=${designId} url=${editUrl}`,
     );
