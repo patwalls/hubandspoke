@@ -150,6 +150,19 @@ async function phase1bLabelOriginalFormats(sql, apply) {
 
 async function phase1cFoldPacksIntoSkill(sql, apply) {
   console.log("\n— Phase 1c: fold descript_packs.prompt into formats.instructions —");
+  // Migration 0069 also performs this fold inline (atomic with the table
+  // drop) so the script's Phase 1c is only meaningful when run against a
+  // DB that hasn't yet had 0069 applied. Once 0069 is in, the table is
+  // gone — skip cleanly instead of crashing.
+  const [existsRow] = await sql`
+    SELECT to_regclass('descript_packs') AS tbl
+  `;
+  if (!existsRow.tbl) {
+    console.log(
+      "  descript_packs table already dropped (migration 0069 ran) — skipping",
+    );
+    return;
+  }
   const rows = await sql`
     SELECT f.id, f.name, f.brand,
            coalesce(f.instructions, '') AS instructions,
