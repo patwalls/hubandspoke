@@ -109,24 +109,20 @@ async function phase1FlagFormats(sql, apply) {
 
 async function phase1bLabelOriginalFormats(sql, apply) {
   console.log("\n— Phase 1b: flag pillar formats as labels_as_original —");
-  // Heuristic: a format counts as a pillar / source-of-truth when it is
-  // (a) a ROOT format — parent_format_id IS NULL, and
-  // (b) has at least one production item with post_type='youtube_long'.
-  // Both filters together. Without (a) we over-flagged derivatives like
-  // "TMZ" / "Test Clip" that had one mis-typed YT-long item among many
-  // non-YT items. Operator can tick more flags by hand on the format
-  // detail page; auto-seed is conservative on purpose. Idempotent.
+  // Heuristic: every ROOT format (parent_format_id IS NULL) is a pillar
+  // candidate — by the schema's own model, derivatives have a parent.
+  // We previously required at least one youtube_long item too, but that
+  // missed legitimate IG/X-only pillar formats like "Founder Observation
+  // /Trend", "Laptop POV", "Pillar Personal Post" — content Pat
+  // authors directly, not derived from anything. Going wider is the
+  // right default; the operator can untick `labels_as_original` on the
+  // format detail page for the rare root that's actually derivative-shaped.
+  // Idempotent — `WHERE labels_as_original = false` skips re-flags.
   const rows = await sql`
     SELECT DISTINCT f.id, f.brand, f.name
     FROM formats f
     WHERE f.labels_as_original = false
       AND f.parent_format_id IS NULL
-      AND EXISTS (
-        SELECT 1 FROM production_items pi
-        WHERE lower(pi.format) = lower(f.name)
-          AND pi.brand = f.brand
-          AND pi.post_type = 'youtube_long'
-      )
     ORDER BY f.brand, f.name
   `;
   if (rows.length === 0) {
