@@ -109,20 +109,24 @@ async function phase1FlagFormats(sql, apply) {
 
 async function phase1bLabelOriginalFormats(sql, apply) {
   console.log("\n— Phase 1b: flag pillar formats as labels_as_original —");
-  // Heuristic: a format counts as a pillar / source-of-truth when it has
-  // at least one production item with post_type='youtube_long' (the rule
-  // the user used to describe true originals). We auto-seed those formats
-  // with labels_as_original=true; the operator can tick more by hand on
-  // the format detail page after this script runs. Idempotent: skips
-  // already-flagged rows.
+  // Heuristic: a format counts as a pillar / source-of-truth when it is
+  // (a) a ROOT format — parent_format_id IS NULL, and
+  // (b) has at least one production item with post_type='youtube_long'.
+  // Both filters together. Without (a) we over-flagged derivatives like
+  // "TMZ" / "Test Clip" that had one mis-typed YT-long item among many
+  // non-YT items. Operator can tick more flags by hand on the format
+  // detail page; auto-seed is conservative on purpose. Idempotent.
   const rows = await sql`
     SELECT DISTINCT f.id, f.brand, f.name
     FROM formats f
-    JOIN production_items pi
-      ON lower(pi.format) = lower(f.name)
-     AND pi.brand = f.brand
     WHERE f.labels_as_original = false
-      AND pi.post_type = 'youtube_long'
+      AND f.parent_format_id IS NULL
+      AND EXISTS (
+        SELECT 1 FROM production_items pi
+        WHERE lower(pi.format) = lower(f.name)
+          AND pi.brand = f.brand
+          AND pi.post_type = 'youtube_long'
+      )
     ORDER BY f.brand, f.name
   `;
   if (rows.length === 0) {
@@ -227,10 +231,15 @@ async function phase2ClipToRepurposed(sql, apply) {
 }
 
 async function phase3ReclassifyOriginals(sql, apply) {
-  console.log("\n— Phase 3: reclassify derivative-format originals → repurposed —");
+  console.log(
+    "\n— Phase 3: reclassify originals in non-pillar formats → repurposed —",
+  );
 
-  // Preview: per-(brand, format) counts of what's about to flip. Lets the
-  // operator eyeball the change set before committing.
+  // Source of truth is now `formats.labels_as_original`: items in any
+  // format that is NOT explicitly flagged as a pillar become repurposed.
+  // Phase 1b just seeded the obvious pillar formats; the operator can
+  // manually tick more on the format detail page and re-run this script
+  // for clean idempotent corrections.
   const preview = await sql`
     SELECT pi.brand,
            pi.format,
@@ -240,15 +249,14 @@ async function phase3ReclassifyOriginals(sql, apply) {
       ON lower(f.name) = lower(pi.format)
      AND f.brand = pi.brand
     WHERE pi.source_type = 'original'
-      AND (pi.post_type IS NULL OR pi.post_type <> 'youtube_long')
       AND pi.format IS NOT NULL
       AND pi.brand IS NOT NULL
-      AND f.parent_format_id IS NOT NULL
+      AND f.labels_as_original = false
     GROUP BY pi.brand, pi.format
     ORDER BY count(*) DESC
   `;
   if (preview.length === 0) {
-    console.log("  no derivative-format originals to flip");
+    console.log("  no non-pillar originals to flip");
     return;
   }
   console.log("  affected rows by (brand, format):");
@@ -268,12 +276,11 @@ async function phase3ReclassifyOriginals(sql, apply) {
     SET source_type = 'repurposed', updated_at = NOW()
     FROM formats f
     WHERE pi.source_type = 'original'
-      AND (pi.post_type IS NULL OR pi.post_type <> 'youtube_long')
       AND pi.format IS NOT NULL
       AND pi.brand IS NOT NULL
       AND lower(f.name) = lower(pi.format)
       AND f.brand = pi.brand
-      AND f.parent_format_id IS NOT NULL
+      AND f.labels_as_original = false
     RETURNING pi.id
   `;
   console.log(`  updated ${rows.length} rows`);

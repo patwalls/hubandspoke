@@ -1,3 +1,5 @@
+import { extractDescriptSection } from "@/lib/format-skill";
+
 const BASE_URL = "https://descriptapi.com/v1";
 
 export const DEFAULT_CLIP_PROMPT = [
@@ -73,17 +75,20 @@ export function substituteFormatPrompt(
  * Build a layout-apply Underlord prompt for the precise-cut path: the
  * composition already exists (we just ffmpeg-trimmed bytes and Descript
  * imported them), and we want Underlord to apply the format's skill-defined
- * treatment in place. The skill text (`formats.instructions`) is
- * author-defined per-format and substituted via
- * {@link substituteFormatPrompt} before being wrapped with the
- * path-specific scaffolding.
+ * treatment in place. Underlord only sees the operational Descript section
+ * of the Skill — the editorial sections (Hook / Clip guidance / Avoid)
+ * are stripped via {@link extractDescriptSection} so the agent doesn't
+ * get confused by guidance meant for Claude. Falls back to the whole
+ * Skill when no `### Descript Clip & Pack Info` heading exists. Placeholder
+ * substitution via {@link substituteFormatPrompt} runs after extraction.
  */
 export function buildLayoutPackPrompt(args: {
   skill: string;
   compositionId: string;
   hookText: string;
 }): string {
-  const inner = substituteFormatPrompt(args.skill, {
+  const descriptOnly = extractDescriptSection(args.skill);
+  const inner = substituteFormatPrompt(descriptOnly, {
     hook: args.hookText,
     compositionId: args.compositionId,
   });

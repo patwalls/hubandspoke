@@ -47,3 +47,32 @@ export function applyStarterTemplate(existing: string): string {
     .join("\n");
   return `${existing.trimEnd()}\n\n${appended}`;
 }
+
+const DESCRIPT_SECTION_HEADING = /^[ \t]*##{1,2}[ \t]+Descript Clip & Pack Info[ \t]*$/im;
+const ANY_HEADING_AT_LEVEL_OR_HIGHER = /^[ \t]*##{0,2}[ \t]+\S/m;
+
+/**
+ * Pull the operational Descript section out of a format Skill so the
+ * Descript Underlord agent receives only what it cares about (layout-
+ * pack URL, hook-track instruction, filler-word marking) — NOT the
+ * editorial sections meant for Claude (`## Hook`, `## Clip guidance`,
+ * `## Avoid`, etc.).
+ *
+ * Returns the body under the first `### Descript Clip & Pack Info`
+ * heading (accepts `##` h2 or `###` h3, case-insensitive), up to but
+ * not including the next heading. Falls back to the whole input when
+ * no such heading exists — back-compat for formats whose Skill hasn't
+ * been re-organized into sections yet (graceful degradation, never
+ * blocks a clip from being made).
+ */
+export function extractDescriptSection(skill: string): string {
+  const match = DESCRIPT_SECTION_HEADING.exec(skill);
+  if (!match) return skill;
+  const afterHeadingStart = match.index + match[0].length;
+  const remainder = skill.slice(afterHeadingStart);
+  const nextHeading = ANY_HEADING_AT_LEVEL_OR_HIGHER.exec(remainder);
+  const section = nextHeading
+    ? remainder.slice(0, nextHeading.index)
+    : remainder;
+  return section.trim();
+}

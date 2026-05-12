@@ -19,6 +19,7 @@ import { getPresignedGetUrl } from "@/lib/s3";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { recordItemCreated } from "@/lib/services/item-created";
+import { extractDescriptSection } from "@/lib/format-skill";
 
 /**
  * Check if a caught database error is a unique constraint violation for a
@@ -481,7 +482,12 @@ function buildDescriptPrompt(args: {
   const start = formatTimestamp(args.startSec);
   const end = formatTimestamp(args.endSec);
   const safeHook = args.hook.replace(/"/g, '\\"');
-  const inner = substituteFormatPrompt(args.skill, {
+  // Underlord only needs the operational Descript section of the Skill —
+  // the editorial sections (Hook, Clip guidance, Avoid) are for Claude /
+  // the dispatcher. Falls back to the whole Skill when no Descript
+  // section heading exists (back-compat for older formats).
+  const descriptOnly = extractDescriptSection(args.skill);
+  const inner = substituteFormatPrompt(descriptOnly, {
     hook: args.hook,
     startSec: args.startSec,
     endSec: args.endSec,
