@@ -1,0 +1,42 @@
+# Repo-local lazygit theme — orange to match Hub & Spoke.
+# Activate by setting LG_CONFIG_FILE=$PWD/.lazygit.yml before running
+# lazygit (the shell-function hookup at the bottom of this file makes
+# that automatic when cwd is inside this repo).
+gui:
+  theme:
+    activeBorderColor: ["#f97316", bold]      # orange-500 — selected pane border
+    inactiveBorderColor: ["#52525b"]          # neutral-600 — quiet borders
+    selectedLineBgColor: ["#7c2d12"]          # orange-900 — current row highlight
+    selectedRangeBgColor: ["#9a3412"]         # orange-800 — multi-select bg
+    optionsTextColor: ["#fb923c"]             # orange-400 — bottom bar shortcut keys
+    cherryPickedCommitBgColor: ["#fb923c"]
+    cherryPickedCommitFgColor: ["#1c1917"]
+    markedBaseCommitBgColor: ["#f97316"]
+    markedBaseCommitFgColor: ["#1c1917"]
+    unstagedChangesColor: ["#dc2626"]         # red-600 — keep destructive things obviously red
+    defaultFgColor: ["default"]
+  authorColors:
+    "Pat Walls": "#f97316"
+
+# How to wire this up — pick ONE:
+#
+# 1) zsh/bash function: paste into ~/.zshrc (or ~/.bashrc), reload shell.
+#    Auto-uses the repo theme when you run `lazygit` from anywhere inside
+#    a repo that has a .lazygit.yml at its root; falls back to your
+#    global theme otherwise.
+#
+#    lazygit() {
+#      local root
+#      root="$(git rev-parse --show-toplevel 2>/dev/null)"
+#      if [[ -n "$root" && -f "$root/.lazygit.yml" ]]; then
+#        LG_CONFIG_FILE="$root/.lazygit.yml" command lazygit "$@"
+#      else
+#        command lazygit "$@"
+#      fi
+#    }
+#
+# 2) direnv: if you have direnv installed, drop an `.envrc` in the repo
+#    root containing one line — `export LG_CONFIG_FILE=$PWD/.lazygit.yml`
+#    — then `direnv allow`.
+#
+# 3) One-shot: `lazygit --use-config-file=.lazygit.yml`.
