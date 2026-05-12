@@ -27,9 +27,11 @@ import { getTopPerformingCaptions } from "./exemplars";
 //
 // Generalizes the IG-only `generate-instagram-caption` path. Same Opus 4.7
 // agent, same cached preamble, same demote-then-insert tx — but:
-//   1. Source-type aware: skips repost (verbatim seed stays) and clip ideas
-//      (their copy comes from the clip-idea pipeline). Runs on cross_post
-//      and on `original` items that have a pillar (= a repurpose).
+//   1. Source-type aware: skips repost (verbatim seed stays). Runs on
+//      cross_post, on `original` items that have a pillar (= a manual
+//      repurpose), and on `repurposed` items — which covers both the
+//      threshold-monitor auto-spawns AND clip-idea-promoted rows (these
+//      set sourceClipIdeaId; promote-clip-idea.ts fires the enqueue).
 //   2. Platform-general: every post type in PLATFORM_FIELD_MAP that's in
 //      the V1 supported set gets a draft. Schema is resolved per-postType.
 //   3. Exemplars are view-ranked, not recency-ranked. See exemplars.ts.

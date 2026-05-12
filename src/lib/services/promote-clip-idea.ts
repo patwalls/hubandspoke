@@ -417,6 +417,16 @@ export async function assignClipIdea(args: {
     })
     .where(eq(clipIdeas.id, args.clipIdeaId));
 
+  // Fire-and-forget: kick the Draft Algorithm so the new clip lands with
+  // a populated caption instead of an empty "Write a caption…" field.
+  // `force: false` (default) prevents clobbering editor edits on retries
+  // — see run.ts idempotency guard.
+  try {
+    await enqueue("draft-algorithm-run", { productionItemId });
+  } catch (err) {
+    console.error("draft-algorithm-run enqueue (clip-assign) failed:", err);
+  }
+
   return {
     sourceProductionItemId: row.sourceProductionItemId,
     sourceTitle: row.sourceTitle,
@@ -648,6 +658,14 @@ export async function createClipIdeaInDescript(args: {
     row,
   });
 
+  // Fire-and-forget Draft Algorithm. Mirrors the cross-post / repurpose
+  // routes; the algo's `force: false` guard keeps retries idempotent.
+  try {
+    await enqueue("draft-algorithm-run", { productionItemId });
+  } catch (err) {
+    console.error("draft-algorithm-run enqueue (clip-descript) failed:", err);
+  }
+
   return {
     sourceProductionItemId: row.sourceProductionItemId,
     sourceTitle: row.sourceTitle,
@@ -744,6 +762,18 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     actorUserId: args.actorUserId,
     row,
   });
+
+  // Fire-and-forget Draft Algorithm. Safe to fire before the precise-cut
+  // worker finishes — the algo grounds copy in the pillar transcript +
+  // format Skill, not in the clipped video bytes.
+  try {
+    await enqueue("draft-algorithm-run", { productionItemId });
+  } catch (err) {
+    console.error(
+      "draft-algorithm-run enqueue (clip-precise-cut) failed:",
+      err,
+    );
+  }
 
   return {
     sourceProductionItemId: row.sourceProductionItemId,
@@ -922,6 +952,17 @@ export async function createClipIdeaInDescriptFullVideo(args: {
     actorUserId: args.actorUserId,
     row,
   });
+
+  // Fire-and-forget Draft Algorithm. Same pillar transcript grounding the
+  // other clip-promote paths use.
+  try {
+    await enqueue("draft-algorithm-run", { productionItemId });
+  } catch (err) {
+    console.error(
+      "draft-algorithm-run enqueue (clip-full-video) failed:",
+      err,
+    );
+  }
 
   return {
     sourceProductionItemId: row.sourceProductionItemId,
