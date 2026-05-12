@@ -58,7 +58,8 @@ The reliable loop:
    - password: `change-me-locally`
    (These live in `.env.local` as `E2E_TEST_USER_EMAIL` / `E2E_TEST_USER_PASSWORD`. On a fresh DB or after `/pulldb` blew the user away, re-seed with `node --env-file=.env.local scripts/seed-user.mjs e2e@local.test change-me-locally 'E2E Test'`.) The MCP profile is persistent (`~/Library/Caches/ms-playwright/mcp-chrome-profile/`), so subsequent navigations in the same session stay logged in.
 4. **See the page** with `mcp__playwright__browser_snapshot` (accessibility tree — usually enough) or `mcp__playwright__browser_take_screenshot` (pixels — for visual layout bugs). Verify the thing you changed actually looks right.
-5. **If the MCP session is dead** (`Target page, context or browser has been closed`), ask Pat to restart the playwright MCP server, then retry.
+5. **Save screenshots to `.playwright-mcp/screenshots/`** — always pass `filename: ".playwright-mcp/screenshots/<descriptive-name>.png"` to `mcp__playwright__browser_take_screenshot`. That directory is already gitignored (matches the snapshot/console scratch the MCP server writes there). Without the explicit path, screenshots land in the project root as untracked noise.
+6. **If the MCP session is dead** (`Target page, context or browser has been closed`), ask Pat to restart the playwright MCP server, then retry.
 
 **When NOT to use Playwright MCP.** Public/unauthed routes or API JSON → `curl` is fine. Pure data verification (row counts, job state, queue contents) → `heroku pg:psql` or a local Drizzle query, not a browser.
 
