@@ -2031,6 +2031,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </Popover>
             )}
           <DescriptStatusPill productionItemId={item.id} />
+          <CanvaStatusPill productionItemId={item.id} initialItem={item} />
           {/* TypefullyStatusPill hidden for now — to be revisited once the
            * drafting surface owns the publish flow. The pill component
            * itself stays in the file for easy reinstatement. */}
@@ -4362,6 +4363,92 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
       </PopoverContent>
     </Popover>
   );
+}
+
+/**
+ * Small pill that surfaces Canva autofill state on the content-detail page.
+ * Renders nothing when no Canva fields are set on the item (most posts).
+ *
+ *   - autofillJobId set, no editUrl: "Creating in Canva…" with amber pulse;
+ *     polls /api/production-items/{id} every 5s until the URL appears.
+ *   - editUrl set: green "Open in Canva" link button — opens the autofilled
+ *     design in a new tab.
+ */
+function CanvaStatusPill({
+  productionItemId,
+  initialItem,
+}: {
+  productionItemId: string;
+  initialItem: ProductionItem;
+}) {
+  const [state, setState] = useState({
+    jobId: initialItem.canvaAutofillJobId ?? null,
+    designId: initialItem.canvaDesignId ?? null,
+    editUrl: initialItem.canvaEditUrl ?? null,
+  });
+
+  // Poll while autofill is in flight (job id set, no URL yet). Stops as soon
+  // as the URL lands — the canva-create-copy worker task is the only writer.
+  useEffect(() => {
+    if (state.editUrl) return;
+    if (!state.jobId) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/production-items/${productionItemId}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { item: ProductionItem };
+        if (cancelled) return;
+        setState({
+          jobId: json.item.canvaAutofillJobId ?? null,
+          designId: json.item.canvaDesignId ?? null,
+          editUrl: json.item.canvaEditUrl ?? null,
+        });
+      } catch {
+        // Silent — next tick will retry. Editors don't need a toast for a
+        // transient network blip while waiting on Canva.
+      }
+    };
+    const interval = setInterval(() => void tick(), 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [productionItemId, state.jobId, state.editUrl]);
+
+  if (state.editUrl) {
+    return (
+      <a
+        href={state.editUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:text-emerald-900",
+        )}
+        title="Open the autofilled Canva design in a new tab"
+      >
+        <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
+        Open in Canva
+        <ExternalLinkIcon className="size-3.5" />
+      </a>
+    );
+  }
+  if (state.jobId) {
+    return (
+      <span
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          "border-amber-200 bg-amber-50 text-amber-800 cursor-default",
+        )}
+        title="Canva is generating the autofilled design"
+      >
+        <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" aria-hidden />
+        Creating in Canva…
+      </span>
+    );
+  }
+  return null;
 }
 
 interface TypefullyStatusResponse {

@@ -85,6 +85,10 @@ import {
   draftAlgorithmRunTask,
   type DraftAlgorithmRunPayload,
 } from "./draft-algorithm-run";
+import {
+  canvaCreateCopyTask,
+  type CanvaCreateCopyPayload,
+} from "./canva-create-copy";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -108,6 +112,7 @@ export interface TaskPayloads {
   "typefully-create-draft": TypefullyCreateDraftPayload;
   "generate-instagram-caption": GenerateInstagramCaptionPayload;
   "draft-algorithm-run": DraftAlgorithmRunPayload;
+  "canva-create-copy": CanvaCreateCopyPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
@@ -153,6 +158,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "typefully-create-draft": typefullyCreateDraftTask,
   "generate-instagram-caption": generateInstagramCaptionTask,
   "draft-algorithm-run": draftAlgorithmRunTask,
+  "canva-create-copy": canvaCreateCopyTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,

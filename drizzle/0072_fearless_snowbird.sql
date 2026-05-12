@@ -1,0 +1,1 @@
+ALTER TABLE "formats" ADD COLUMN "is_canva_format" boolean DEFAULT false NOT NULL;

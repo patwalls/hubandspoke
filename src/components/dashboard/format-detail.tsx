@@ -99,6 +99,7 @@ interface FormatRow {
   instructions: string | null;
   parentFormatId: string | null;
   isClipDescriptFormat: boolean;
+  isCanvaFormat: boolean;
   labelsAsOriginal: boolean;
 }
 
@@ -251,6 +252,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [instructions, setInstructions] = useState("");
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
   const [isClipDescriptFormat, setIsClipDescriptFormat] = useState(false);
+  const [isCanvaFormat, setIsCanvaFormat] = useState(false);
   const [labelsAsOriginal, setLabelsAsOriginal] = useState(false);
 
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
@@ -637,6 +639,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     setInstructions(f.instructions || "");
     setParentFormatId(f.parentFormatId ?? null);
     setIsClipDescriptFormat(f.isClipDescriptFormat ?? false);
+    setIsCanvaFormat(f.isCanvaFormat ?? false);
     setLabelsAsOriginal(f.labelsAsOriginal ?? false);
   }
 
@@ -1417,6 +1420,29 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                   <span className="font-medium">Clip Descript format</span>
                   <span className="block text-xs text-muted-foreground mt-0.5">
                     Items in this format are short-form clips edited in Descript. Clip-idea generation spawns rows into this format, and the four &quot;Create in Descript&quot; flows are wired to it. Exactly one format per brand should carry this flag.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </PropertyRowSolo>
+
+          <PropertyRowSolo>
+            <div className="px-3 py-3 space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isCanvaFormat}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setIsCanvaFormat(next);
+                    void persistField({ isCanvaFormat: next });
+                  }}
+                  className="mt-0.5"
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Canva autofill format</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    Items in this format are Canva-based posts. When ticked and the Skill above contains a Canva brand-template URL, clicking Create on a derivative spawns a Claude-extracted autofilled design via the Canva Connect API. Leave unchecked for formats where a Canva URL in the Skill is just a reference.
                   </span>
                 </span>
               </label>

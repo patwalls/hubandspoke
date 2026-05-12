@@ -1,0 +1,171 @@
+import type { Task } from "graphile-worker";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { productionItems } from "@/lib/db/schema";
+import {
+  createCanvaAutofill,
+  fetchCanvaAutofillJob,
+} from "@/lib/canva";
+import { extractCanvaSlideText } from "@/lib/canva-text-extractor";
+import { recordToolAction } from "@/lib/services/content-events";
+
+export interface CanvaCreateCopyPayload {
+  productionItemId: string;
+  brandTemplateId: string;
+  /** Optional override. When unset (the normal case from
+   *  /api/production-items/[id]/repurpose), the task extracts text fields
+   *  from the pillar transcript via Claude. Setting this skips extraction —
+   *  used by manual redrives that want to feed handcrafted copy. */
+  textFields?: Record<string, string>;
+  /** Set after the first invocation creates the autofill job. */
+  jobId?: string;
+  /** Epoch ms. Set on the first invocation; carried forward across re-enqueues. */
+  deadlineAt?: number;
+}
+
+// Empty 5s poll cadence + 5min total — Canva autofill jobs typically settle
+// in 5-15 seconds in our smoke runs. 5min is the cliff we throw past so a
+// stuck job surfaces as a worker failure rather than silently churning.
+const POLL_INTERVAL_MS = 5000;
+const DEADLINE_MS = 5 * 60 * 1000;
+
+/**
+ * Run a single phase of the Canva "create autofilled copy from a brand
+ * template" flow. Two phases compressed into one task:
+ *
+ *   1. First invocation (no jobId in payload): create the autofill job
+ *      against Canva, stamp `canva_autofill_job_id` on the productionItem,
+ *      then re-enqueue ourselves with `jobId` set + a 5s delay.
+ *
+ *   2. Subsequent invocations: poll the job once. On success, write the
+ *      design id + edit URL back to the productionItem, clear the in-flight
+ *      job-id pointer, and emit a `recordToolAction("canva", "design_created")`
+ *      event so the activity feed picks it up. On failure, throw so
+ *      graphile-worker retries with exponential backoff. On in-progress,
+ *      re-enqueue with another 5s delay if still inside the deadline.
+ *
+ * Each invocation stays under 1s of synchronous work + one HTTP call so
+ * SIGTERM during a deploy can never catch us mid-step. The job's row-lock
+ * never leaks even if Heroku kills the dyno.
+ */
+export const canvaCreateCopyTask: Task = async (rawPayload, helpers) => {
+  const payload = rawPayload as CanvaCreateCopyPayload;
+  const deadlineAt = payload.deadlineAt ?? Date.now() + DEADLINE_MS;
+
+  // First phase: extract slide text from the pillar (skippable via
+  // payload.textFields override) and create the autofill job.
+  if (!payload.jobId) {
+    const [item] = await db
+      .select({
+        id: productionItems.id,
+        title: productionItems.title,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, payload.productionItemId))
+      .limit(1);
+    if (!item) {
+      helpers.logger.warn(
+        `canva-create-copy: production_item ${payload.productionItemId} not found, dropping`,
+      );
+      return;
+    }
+    const title = item.title
+      ? `${item.title} — IG Post`
+      : "IG Post (Canva autofill)";
+
+    let textFields = payload.textFields;
+    if (!textFields) {
+      const extracted = await extractCanvaSlideText(payload.productionItemId);
+      textFields = {
+        hook: extracted.hook,
+        stack_list: extracted.stack_list,
+        cta: extracted.cta,
+      };
+      helpers.logger.info(
+        `canva-create-copy extracted text for item=${payload.productionItemId} hookChars=${extracted.hook.length}`,
+      );
+    }
+
+    const { jobId } = await createCanvaAutofill({
+      brandTemplateId: payload.brandTemplateId,
+      title,
+      textFields,
+    });
+
+    await db
+      .update(productionItems)
+      .set({ canvaAutofillJobId: jobId })
+      .where(eq(productionItems.id, payload.productionItemId));
+
+    await helpers.addJob(
+      "canva-create-copy",
+      { ...payload, jobId, deadlineAt },
+      { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+    );
+    helpers.logger.info(
+      `canva-create-copy created job ${jobId} for item ${payload.productionItemId}`,
+    );
+    return;
+  }
+
+  // Second phase: poll.
+  const result = await fetchCanvaAutofillJob(payload.jobId);
+  if (result.status === "success") {
+    const editUrl = result.editUrl ?? null;
+    const designId = result.designId ?? null;
+    await db
+      .update(productionItems)
+      .set({
+        canvaDesignId: designId,
+        canvaEditUrl: editUrl,
+        canvaAutofillJobId: null,
+      })
+      .where(eq(productionItems.id, payload.productionItemId));
+
+    const [item] = await db
+      .select({ editorUserId: productionItems.editorUserId })
+      .from(productionItems)
+      .where(eq(productionItems.id, payload.productionItemId))
+      .limit(1);
+
+    await recordToolAction({
+      contentItemId: payload.productionItemId,
+      userId: item?.editorUserId ?? null,
+      tool: "canva",
+      action: "design_created",
+      status: "success",
+      label: "Design ready in Canva",
+      url: editUrl,
+      meta: {
+        brandTemplateId: payload.brandTemplateId,
+        ...(result.pageCount ? { pageCount: result.pageCount } : {}),
+      },
+    });
+
+    helpers.logger.info(
+      `canva-create-copy ok item=${payload.productionItemId} design=${designId} url=${editUrl}`,
+    );
+    return;
+  }
+
+  if (result.status === "failed") {
+    // Throw so graphile-worker retries with exponential backoff. Once
+    // attempts are exhausted the row will still have canvaAutofillJobId
+    // set, which is the operator's signal to investigate.
+    throw new Error(
+      `Canva autofill job ${payload.jobId} failed: ${result.errorMessage ?? "unknown"}`,
+    );
+  }
+
+  // In-progress: re-enqueue if still inside the deadline; otherwise blow up.
+  if (Date.now() >= deadlineAt) {
+    throw new Error(
+      `Canva autofill job ${payload.jobId} did not finish before deadline`,
+    );
+  }
+  await helpers.addJob(
+    "canva-create-copy",
+    { ...payload, deadlineAt },
+    { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+  );
+};

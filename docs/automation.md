@@ -38,6 +38,7 @@ USER / API ENTRY POINTS
   POST /api/production-items/[id]/transcript/fetch        → transcribe-whisper
   POST /api/uploads/confirm                               → transcribe-whisper
   POST /api/production-items/[id]/repurpose               → draft-algorithm-run (auto-fire after insert)
+  POST /api/production-items/[id]/repurpose               → canva-create-copy   (auto-fire when target.is_canva_format AND Skill has brand-template URL)
   POST /api/production-items/[id]/cross-post              → draft-algorithm-run (auto-fire after seed, any seeded target)
   POST /api/descript/clip-out                             → descript-clip-resolve  (format-detail quick-clip only as of 2026-05-02)
   POST /api/clip-ideas/[id]/triage (action=assign)        → draft-algorithm-run (auto-fire after promote)
@@ -324,6 +325,27 @@ Closes the loop on the clip-creation flow: when Descript finishes assembling a c
 - **Race condition:** every polling tick re-reads `descript_publish_job_id` from the row; if it doesn't match the payload's job id (the user clicked Sync mid-poll and a fresh job kicked off), the stale poller bails.
 - **Failure tolerance:** task throws on Descript errors / timeout; graphile-worker retries with backoff. Final error is stamped on `descript_publish_error` and surfaced via the pill with a Retry button.
 - **UI:** Actions dropdown gains a "Download from Descript" item when `hasDescriptProject && descriptCompositionId`. The `DescriptStatusPill` shows a Render section inside its popover with rendering/rendered/failed sub-state and a Retry/Re-sync button. Once `descript_published_at` flips, the next page-data refresh returns the new media row and the simulator re-renders with the actual MP4.
+
+### `canva-create-copy` — autofill a Canva Brand Template for IG Post derivatives (2026-05-12)
+
+Click "Create" on an IG-Post format whose `is_canva_format=true` and whose Skill contains a `canva.com/brand/brand-templates/<id>` URL → the new derivative gets an autofilled copy of that template in the team Canva account, with hook / stack_list / cta text extracted from the pillar's transcript by Claude. Editor lands on the derivative's detail page and sees an "Open in Canva" pill linking to the editable design.
+
+- **Files:**
+  - `src/jobs/tasks/canva-create-copy.ts` — self-polling task. Phase 1: extract text fields via `extractCanvaSlideText` (Claude Opus tool-use, grounded in pillar transcript), call `createCanvaAutofill`, stamp `canva_autofill_job_id` on the productionItem, re-enqueue with `jobId` set + 5s delay. Phase 2: `fetchCanvaAutofillJob` once per invocation; on success write `canva_design_id` + `canva_edit_url`, clear the in-flight job-id, emit a `recordToolAction("canva", "design_created")` event. 5-minute deadline. Each invocation < 1s so SIGTERM never catches mid-step.
+  - `src/lib/canva.ts` — Connect API client. `getCanvaAccessToken` (DB-backed RT rotation, serialized via `pg_advisory_xact_lock` so concurrent workers don't race-invalidate the token), `createCanvaAutofill({brandTemplateId, title, textFields})` → `{jobId}`, `fetchCanvaAutofillJob(jobId)` → `{status, designId, editUrl, pageCount}`. Canva quirks documented inline: empty `data:{}` is rejected when the template has any tagged fields; RT rotates on every exchange.
+  - `src/lib/canva-text-extractor.ts` — Claude Opus tool-use call. Grounded in pillar transcript; falls back to `{hook: title, stack_list: "coming soon", cta: stock pattern}` when no transcript is available so the editor still gets a usable copy.
+  - `src/lib/canva-skill.ts` — `extractCanvaTemplateId(skill)` regex on Skill text. Matches `canva.com/brand/brand-templates/<id>` (preferred) and falls back to `canva.com/design/DA<id>` for legacy formats.
+  - `src/app/api/production-items/[id]/repurpose/route.ts` — gates the enqueue on `target.isCanvaFormat && target.instructions && extractCanvaTemplateId(target.instructions) != null`. Fire-and-forget — a failed enqueue must not block the create response.
+  - `scripts/canva-oauth.mjs` — one-shot CLI helper to mint the initial refresh token via PKCE. Redirect URI `http://127.0.0.1:8765/callback` must be registered on the Canva Connect integration.
+- **Schema:**
+  - `production_items.canva_autofill_job_id` — set during in-flight autofill, NULL after success.
+  - `production_items.canva_design_id` — the Canva design id once autofill succeeds.
+  - `production_items.canva_edit_url` — `https://www.canva.com/design/<designId>/edit`, what the "Open in Canva" pill links to.
+  - `formats.is_canva_format` — editor-toggleable flag (sibling to `is_clip_descript_format`). When false, the integration stays inert even if a Canva URL appears in the Skill.
+  - `canva_oauth` — singleton row (`id='default'`) holding the rotating `refresh_token` + cached `access_token` + `access_token_expires_at`. Necessary because Canva invalidates the RT on every exchange — env vars alone would break after the first API call.
+- **Env vars:** `CANVA_CLIENT_ID`, `CANVA_CLIENT_SECRET`, `CANVA_REFRESH_TOKEN` (seed; production source of truth is the `canva_oauth` row).
+- **UI:** `CanvaStatusPill` next to `DescriptStatusPill` on content-detail. Renders "Creating in Canva…" (amber, pulsing) while `canva_autofill_job_id` is set; "Open in Canva" (green, external-link icon) once `canva_edit_url` lands. Hidden when neither is set. Self-polls `/api/production-items/[id]` every 5s during the in-flight window.
+- **Brand-template setup:** the template must (a) be published as a Brand Template (Share → Brand Template; Teams plan is sufficient — Enterprise is not required despite what Canva's docs imply) and (b) have at least one autofill-tagged element. Bulk Create's "Connect data" toolbar action is the only Teams-accessible way to tag fields. See `MEMORY.md` → `project-canva-autofill` for the full setup quirks.
 
 ### Manual media upload to drafts (X + Instagram, 2026-05-07)
 

@@ -9,6 +9,7 @@ import { getChannelsForFormats } from "@/lib/format-channels";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { enqueue } from "@/jobs/enqueue";
+import { extractCanvaTemplateId } from "@/lib/canva-skill";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -159,6 +160,29 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
   } catch (err) {
     console.error("draft-algorithm-run enqueue (repurpose) failed:", err);
+  }
+
+  // Canva create-copy: only when the target format is explicitly tagged
+  // as is_canva_format AND its Skill contains a Canva brand-template URL.
+  // Both gates needed: the flag is the "yes this format wants Canva"
+  // signal (editor-toggleable, sibling to is_clip_descript_format), the
+  // URL is where the template lives. Without the flag, the integration
+  // stays inert even if a Canva URL was pasted as a reference. The worker
+  // task does the slow work — Claude-extracts hook/stack_list/cta from the
+  // pillar transcript, then calls the Canva autofill API and polls until
+  // done. Fire-and-forget so the create response stays fast.
+  if (target.isCanvaFormat && target.instructions) {
+    const brandTemplateId = extractCanvaTemplateId(target.instructions);
+    if (brandTemplateId) {
+      try {
+        await enqueue("canva-create-copy", {
+          productionItemId: created.id,
+          brandTemplateId,
+        });
+      } catch (err) {
+        console.error("canva-create-copy enqueue (repurpose) failed:", err);
+      }
+    }
   }
 
   return NextResponse.json({ id: created.id }, { status: 201 });

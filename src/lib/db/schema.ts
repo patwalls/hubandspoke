@@ -132,6 +132,18 @@ export const productionItems = pgTable(
       withTimezone: true,
     }),
     descriptPublishError: text("descript_publish_error"),
+    // Canva "create copy" state. Fires when an instagram_post derivative is
+    // created from a format whose Skill contains a canva.com/design link.
+    // Three derivable states (same pattern as descriptPublish*):
+    //   idle: all null → no Canva link in the format Skill, or repurpose
+    //         predates this feature
+    //   creating: canvaAutofillJobId set, canvaDesignId null → polling
+    //   ready: canvaDesignId + canvaEditUrl set, canvaAutofillJobId null →
+    //          unfilled copy exists in our Canva account, editor opens the
+    //          edit URL and fills it in
+    canvaAutofillJobId: text("canva_autofill_job_id"),
+    canvaDesignId: text("canva_design_id"),
+    canvaEditUrl: text("canva_edit_url"),
     // Typefully draft created automatically when a new X/LinkedIn item is
     // inserted with no publishedLink. The pill in the content-detail header
     // links to typefullyPrivateUrl. Webhook receiver (/api/webhooks/typefully)
@@ -655,6 +667,15 @@ export const formats = pgTable(
     isClipDescriptFormat: boolean("is_clip_descript_format")
       .default(false)
       .notNull(),
+    // Marks this format as a Canva-autofill target. When true AND the Skill
+    // contains a canva.com/brand/brand-templates/<id> URL, the repurpose
+    // route enqueues canva-create-copy to produce an autofilled design.
+    // When false, the Canva path is skipped entirely — even if the Skill
+    // happens to include a Canva URL (so editors can paste Canva links as
+    // reference material without accidentally triggering the integration).
+    // Unlike isClipDescriptFormat, this can be true on multiple formats per
+    // brand (every IG-Post-style format that maps to a Canva template).
+    isCanvaFormat: boolean("is_canva_format").default(false).notNull(),
     // When true, new productionItems created in this format default to
     // `sourceType='original'` instead of `'repurposed'`. Pillar/source
     // formats (Business Breakdown, YouTube long-form, etc.) get this
@@ -1465,4 +1486,25 @@ export const productionItemsMerges = pgTable(
     index("idx_production_items_merges_created_at").on(t.createdAt),
   ]
 );
+
+// Canva Connect OAuth state. Singleton row (id="default") because we
+// authenticate as one Canva account globally — not per-brand, not per-user.
+// Refresh tokens rotate on EVERY exchange, so they must be persisted: storing
+// them in an env var alone would invalidate after the first API call. The
+// access token is cached here too so multiple worker invocations within a 1h
+// window share a single refresh.
+//
+// Concurrent refresh is serialized via pg_advisory_lock in src/lib/canva.ts —
+// otherwise two parallel refreshes would invalidate each other's RT.
+export const canvaOauth = pgTable("canva_oauth", {
+  id: text("id").primaryKey(), // always "default"
+  refreshToken: text("refresh_token").notNull(),
+  accessToken: text("access_token"),
+  accessTokenExpiresAt: timestamp("access_token_expires_at", {
+    withTimezone: true,
+  }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
 

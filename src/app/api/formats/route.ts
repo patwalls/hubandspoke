@@ -178,6 +178,7 @@ export async function PUT(request: NextRequest) {
       instructions?: string | null;
       parentFormatId?: string | null;
       isClipDescriptFormat?: boolean;
+      isCanvaFormat?: boolean;
       labelsAsOriginal?: boolean;
     };
     const { id, accountChannels, parentFormatId } = body;
@@ -235,6 +236,8 @@ export async function PUT(request: NextRequest) {
       updateData.parentFormatId = parentFormatId || null;
     if (body.isClipDescriptFormat !== undefined)
       updateData.isClipDescriptFormat = body.isClipDescriptFormat;
+    if (body.isCanvaFormat !== undefined)
+      updateData.isCanvaFormat = body.isCanvaFormat;
     if (body.labelsAsOriginal !== undefined)
       updateData.labelsAsOriginal = body.labelsAsOriginal;
 

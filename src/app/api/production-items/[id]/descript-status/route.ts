@@ -66,6 +66,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   // Trigger row keyed off the source pillar (clip promotions write the
   // trigger against the pillar's production_item id, not the derivative).
   // Fall back to any trigger created BY this row if the row IS a pillar.
+  // Filter to triggers that actually carry Descript state — every
+  // repurpose action (including non-Descript paths like Canva) writes a
+  // trigger row for dedup, but only Descript-promoted clips populate
+  // descriptJobId / descriptCompositionId. Without this filter the
+  // "Descript stalled" pill leaks onto every repurpose target.
   const triggerSourceId = item.pillarContentItemId ?? item.id;
   const [trigger] = await db
     .select({
@@ -76,7 +81,12 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       descriptProjectUrl: repurposeTriggers.descriptProjectUrl,
     })
     .from(repurposeTriggers)
-    .where(eq(repurposeTriggers.productionItemId, triggerSourceId))
+    .where(
+      and(
+        eq(repurposeTriggers.productionItemId, triggerSourceId),
+        sql`(${repurposeTriggers.descriptJobId} IS NOT NULL OR ${repurposeTriggers.descriptCompositionId} IS NOT NULL)`,
+      ),
+    )
     .orderBy(desc(repurposeTriggers.id))
     .limit(1);
 
