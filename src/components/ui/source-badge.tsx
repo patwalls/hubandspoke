@@ -24,7 +24,7 @@ const STYLES: Record<
   },
   cross_post: {
     label: "Cross-post",
-    className: "bg-indigo-100 text-indigo-900 border-indigo-200",
+    className: "bg-rose-100 text-rose-900 border-rose-200",
     title: "Same content, different platform from the original",
   },
   repurposed: {
