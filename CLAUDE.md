@@ -47,7 +47,9 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 
 ### Verifying UI changes — always use Playwright MCP
 
-**Whenever you change anything user-facing under `src/app/(dashboard)/**` or `src/app/(auth)/**`, open it in a real browser via Playwright MCP before reporting the task complete.** `curl` is not enough — auth-gated pages 302 to `/login` for unauthed requests, and JS-rendered components (charts, the workflow board, modals, polling dashboards) don't show up in raw HTML.
+**Whenever you change anything user-facing under `src/app/(dashboard)/**` or `src/app/(auth)/**`, open it in a real browser before reporting the task complete.** `curl` is not enough — auth-gated pages 302 to `/login` for unauthed requests, and JS-rendered components (charts, the workflow board, modals, polling dashboards) don't show up in raw HTML.
+
+**Hard rule:** do NOT report a UI task as done without an actual visual check — either an MCP snapshot/screenshot, or output from a Playwright spec run (`npx playwright test …`) that exercises the changed surface. If every avenue genuinely failed, say so explicitly ("I could not visually verify because X — here is exactly what I tried") instead of letting the user discover it. "I ran the integration tests" is not a substitute for seeing the page.
 
 The reliable loop:
 
@@ -59,7 +61,17 @@ The reliable loop:
    (These live in `.env.local` as `E2E_TEST_USER_EMAIL` / `E2E_TEST_USER_PASSWORD`. On a fresh DB or after `/pulldb` blew the user away, re-seed with `node --env-file=.env.local scripts/seed-user.mjs e2e@local.test change-me-locally 'E2E Test'`.) The MCP profile is persistent (`~/Library/Caches/ms-playwright/mcp-chrome-profile/`), so subsequent navigations in the same session stay logged in.
 4. **See the page** with `mcp__playwright__browser_snapshot` (accessibility tree — usually enough) or `mcp__playwright__browser_take_screenshot` (pixels — for visual layout bugs). Verify the thing you changed actually looks right.
 5. **Save screenshots to `.playwright-mcp/screenshots/`** — always pass `filename: ".playwright-mcp/screenshots/<descriptive-name>.png"` to `mcp__playwright__browser_take_screenshot`. That directory is already gitignored (matches the snapshot/console scratch the MCP server writes there). Without the explicit path, screenshots land in the project root as untracked noise.
-6. **If the MCP session is dead** (`Target page, context or browser has been closed`), ask Pat to restart the playwright MCP server, then retry.
+
+#### When the MCP session is dead
+
+A `Target page, context or browser has been closed` (or any "browser not running" error) is the most common failure mode here — usually because a previous run or another worktree closed the shared browser. **Do not stop at the first error and ask Pat to restart the server.** Work through this recovery ladder in order:
+
+1. **Retry `mcp__playwright__browser_navigate` once.** The MCP server frequently spins a fresh browser on the next navigate call after one died.
+2. **Force a clean context:** call `mcp__playwright__browser_close`, then `mcp__playwright__browser_navigate` again. This drops whatever stale context the server was hanging onto.
+3. **If MCP still won't come up, fall back to the Playwright CLI — that path has zero dependency on the MCP server.** Write a throwaway spec at `tests/e2e/_scratch.spec.ts` (gitignored prefix — clean it up when done) that navigates to the route, asserts on the thing you changed, and on failure saves a screenshot to `.playwright-mcp/screenshots/`. Run it with `npx playwright test tests/e2e/_scratch.spec.ts --reporter=line`. The existing `tests/e2e/auth.setup.ts` handles login, so you get an authed session for free.
+4. **Only after 1–3 all fail**, surface it to Pat — and surface it loudly, with the exact commands you ran and their errors. Then ask him to restart the playwright MCP server. Never silently downgrade to "integration tests passed, shipping it."
+
+The goal: a dead MCP session is an obstacle to route around, not a license to skip the visual check.
 
 **When NOT to use Playwright MCP.** Public/unauthed routes or API JSON → `curl` is fine. Pure data verification (row counts, job state, queue contents) → `heroku pg:psql` or a local Drizzle query, not a browser.
 

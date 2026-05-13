@@ -561,8 +561,8 @@ function ShortsPreview({
           Caption and reaction rail sit absolute at the bottom so they overlay
           the video like a real Reel. Parent is `relative` so the absolute
           children anchor inside the canvas, not the dialog. */}
-      <div className="px-3 pt-3 z-10">
-        <p className="text-[15px] font-extrabold leading-tight line-clamp-3">
+      <div className="px-8 pt-3 z-10">
+        <p className="text-[15px] font-extrabold leading-tight line-clamp-3 text-center">
           {hook}
         </p>
       </div>
