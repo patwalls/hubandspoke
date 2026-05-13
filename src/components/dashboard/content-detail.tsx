@@ -4418,20 +4418,30 @@ function CanvaStatusPill({
 
   if (state.editUrl) {
     return (
-      <a
-        href={state.editUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={cn(
-          buttonVariants({ variant: "outline", size: "sm" }),
-          "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:text-emerald-900",
-        )}
-        title="Open the autofilled Canva design in a new tab"
-      >
-        <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
-        Open in Canva
-        <ExternalLinkIcon className="size-3.5" />
-      </a>
+      <>
+        <a
+          href={state.editUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            buttonVariants({ variant: "outline", size: "sm" }),
+            "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:text-emerald-900",
+          )}
+          title="Open the autofilled Canva design in a new tab"
+        >
+          <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
+          Open in Canva
+          <ExternalLinkIcon className="size-3.5" />
+        </a>
+        <a
+          href={`/api/production-items/${productionItemId}/media/zip`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          title="Download every slide of the Canva slideshow as a zip"
+        >
+          <DownloadIcon className="size-3.5" />
+          Download all
+        </a>
+      </>
     );
   }
   if (state.jobId) {

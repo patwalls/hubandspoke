@@ -361,10 +361,24 @@ export async function uploadCanvaAssetAndWait(args: {
 export interface CreateExportArgs {
   designId: string;
   /** Format type. "png" produces one URL per page. "pdf"/"mp4"/"gif" produce
-   *  a single URL. MVP only uses "png" for slideshow archival. */
+   *  a single URL. MVP uses "png" for slideshow archival + "mp4" for the
+   *  video-bearing page. */
   type?: "png" | "pdf" | "mp4" | "gif" | "jpg";
   /** Optional 1-indexed page subset. Omit for all pages. */
   pages?: number[];
+  /** Required for mp4 exports. Canva rejects mp4 exports without this
+   *  with `'quality' must not be null`. Square designs (1080×1080 IG
+   *  Post template) render at the implied resolution regardless of
+   *  orientation, so we default to horizontal_1080p. */
+  quality?:
+    | "horizontal_480p"
+    | "horizontal_720p"
+    | "horizontal_1080p"
+    | "horizontal_4k"
+    | "vertical_480p"
+    | "vertical_720p"
+    | "vertical_1080p"
+    | "vertical_4k";
 }
 
 /**
@@ -383,9 +397,16 @@ export async function createCanvaExport(
   type ExportFormat = {
     type: "png" | "pdf" | "mp4" | "gif" | "jpg";
     pages?: number[];
+    quality?: CreateExportArgs["quality"];
   };
-  const format: ExportFormat = { type: args.type ?? "png" };
+  const t = args.type ?? "png";
+  const format: ExportFormat = { type: t };
   if (args.pages && args.pages.length > 0) format.pages = args.pages;
+  // mp4 / gif both require quality. Default to horizontal_1080p — square
+  // canvases (the IG Post template) render at the implied resolution.
+  if (t === "mp4" || t === "gif") {
+    format.quality = args.quality ?? "horizontal_1080p";
+  }
   const res = await fetch(`${BASE_URL}/v1/exports`, {
     method: "POST",
     headers: {

@@ -89,45 +89,95 @@ export const canvaCreateCopyTask: Task = async (rawPayload, helpers) => {
       );
     }
 
-    // Hero image (page 1 background). Pull the pillar's poster_s3_key —
-    // that's the YouTube thumbnail / scraped cover, which is usually a
-    // founder shot for our Business Breakdown pillars. Upload to Canva
-    // and reference by asset_id in the autofill payload. Best-effort:
-    // a missing poster or a failed upload just means we skip the
-    // hero_image field, and the template renders its default placeholder.
+    // Hero image (page 1 background). Try sources in priority order:
+    //   1. pillar.thumbnail (always an image URL — YouTube hqdefault.jpg etc)
+    //   2. pillar.posterS3Key (in-bucket cover image)
+    // Skip when neither is available, or when posterS3Key is set to a
+    // video — pillars that did the Descript publish-and-archive flow can
+    // end up with descript-rendered.mp4 in their posterS3Key column, and
+    // Canva's autofill API tags video uploads as a different asset type
+    // (VA… prefix vs MA…) that autofill rejects with
+    // "Media ID '…' is malformed". Best-effort: a missing/unusable hero
+    // just leaves the template's default placeholder in page 1.
     const imageAssetIds: Record<string, string> = {};
     const heroSourceId = item.pillarContentItemId ?? item.id;
     const [heroSource] = await db
-      .select({ posterS3Key: productionItems.posterS3Key })
+      .select({
+        posterS3Key: productionItems.posterS3Key,
+        thumbnail: productionItems.thumbnail,
+        mediaContentType: productionItems.mediaContentType,
+      })
       .from(productionItems)
       .where(eq(productionItems.id, heroSourceId))
       .limit(1);
-    if (heroSource?.posterS3Key) {
-      try {
-        const presignedUrl = await getPresignedGetUrl(heroSource.posterS3Key, 300);
-        const imgRes = await fetch(presignedUrl);
-        if (!imgRes.ok) {
-          throw new Error(`pillar poster fetch HTTP ${imgRes.status}`);
+    let heroBytes: Buffer | null = null;
+    let heroFetchedFrom: string | null = null;
+    try {
+      // Pass 1: YT thumbnail (or whatever external thumbnail the enricher
+      // set). Always an image. Cheapest path — direct HTTPS fetch.
+      if (heroSource?.thumbnail && /^https?:\/\//.test(heroSource.thumbnail)) {
+        const r = await fetch(heroSource.thumbnail);
+        if (r.ok) {
+          const ct = r.headers.get("content-type") ?? "";
+          if (ct.startsWith("image/")) {
+            heroBytes = Buffer.from(await r.arrayBuffer());
+            heroFetchedFrom = "thumbnail";
+          }
         }
-        const buf = Buffer.from(await imgRes.arrayBuffer());
+      }
+      // Pass 2: posterS3Key, but only if the column isn't pointing at a
+      // video (the descript-archive edge case). Cheap pre-check via the
+      // mediaContentType mirror — if it says video/*, skip without an
+      // S3 round-trip.
+      if (
+        !heroBytes &&
+        heroSource?.posterS3Key &&
+        !(heroSource.mediaContentType ?? "").startsWith("video/") &&
+        !heroSource.posterS3Key.endsWith(".mp4") &&
+        !heroSource.posterS3Key.endsWith(".webm")
+      ) {
+        const presignedUrl = await getPresignedGetUrl(
+          heroSource.posterS3Key,
+          300,
+        );
+        const r = await fetch(presignedUrl);
+        if (r.ok) {
+          const ct = r.headers.get("content-type") ?? "";
+          if (ct.startsWith("image/")) {
+            heroBytes = Buffer.from(await r.arrayBuffer());
+            heroFetchedFrom = "posterS3Key";
+          }
+        }
+      }
+
+      if (heroBytes) {
         // Keep the filename short + alphanumeric — Canva's
         // Asset-Upload-Metadata header parser rejected longer UUID-based
         // names with "Invalid upload metadata header" even though shorter
         // names work. Cosmetic field only; not a content gate.
         const shortId = heroSourceId.replace(/-/g, "").slice(0, 8);
         const upload = await uploadCanvaAssetAndWait({
-          bytes: buf,
+          bytes: heroBytes,
           fileName: `pillar${shortId}.jpg`,
         });
-        imageAssetIds.hero_image = upload.assetId;
-        helpers.logger.info(
-          `canva-create-copy uploaded hero_image asset=${upload.assetId} for item=${payload.productionItemId}`,
-        );
-      } catch (err) {
-        helpers.logger.warn(
-          `canva-create-copy: hero_image upload skipped for item=${payload.productionItemId}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        // Guard against video-asset uploads even after the content-type
+        // gate (extra paranoid since we've been bitten once): autofill
+        // image fields only accept MA-prefixed asset ids.
+        if (!upload.assetId.startsWith("M")) {
+          helpers.logger.warn(
+            `canva-create-copy: rejecting non-image asset ${upload.assetId} (source=${heroFetchedFrom}) for item=${payload.productionItemId}`,
+          );
+        } else {
+          imageAssetIds.hero_image = upload.assetId;
+          helpers.logger.info(
+            `canva-create-copy uploaded hero_image asset=${upload.assetId} source=${heroFetchedFrom} for item=${payload.productionItemId}`,
+          );
+        }
       }
+    } catch (err) {
+      helpers.logger.warn(
+        `canva-create-copy: hero_image upload skipped for item=${payload.productionItemId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     const { jobId } = await createCanvaAutofill({

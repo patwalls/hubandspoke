@@ -93,6 +93,10 @@ import {
   canvaExportDesignTask,
   type CanvaExportDesignPayload,
 } from "./canva-export-design";
+import {
+  canvaExportPageVideoTask,
+  type CanvaExportPageVideoPayload,
+} from "./canva-export-page-video";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -118,6 +122,7 @@ export interface TaskPayloads {
   "draft-algorithm-run": DraftAlgorithmRunPayload;
   "canva-create-copy": CanvaCreateCopyPayload;
   "canva-export-design": CanvaExportDesignPayload;
+  "canva-export-page-video": CanvaExportPageVideoPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
@@ -165,6 +170,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "draft-algorithm-run": draftAlgorithmRunTask,
   "canva-create-copy": canvaCreateCopyTask,
   "canva-export-design": canvaExportDesignTask,
+  "canva-export-page-video": canvaExportPageVideoTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,

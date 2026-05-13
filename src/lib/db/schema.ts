@@ -156,6 +156,16 @@ export const productionItems = pgTable(
     canvaExportJobId: text("canva_export_job_id"),
     canvaExportedAt: timestamp("canva_exported_at", { withTimezone: true }),
     canvaExportError: text("canva_export_error"),
+    // Page-3 video export state. After PNG slides land, we also export
+    // the video-bearing page as MP4 so the IG simulator can render a
+    // playable <video> at the right carousel index instead of a static
+    // image. Same idle / exporting / exported / failed shape as
+    // canva_export_*.
+    canvaVideoExportJobId: text("canva_video_export_job_id"),
+    canvaVideoExportedAt: timestamp("canva_video_exported_at", {
+      withTimezone: true,
+    }),
+    canvaVideoExportError: text("canva_video_export_error"),
     // Typefully draft created automatically when a new X/LinkedIn item is
     // inserted with no publishedLink. The pill in the content-detail header
     // links to typefullyPrivateUrl. Webhook receiver (/api/webhooks/typefully)

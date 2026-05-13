@@ -159,16 +159,23 @@ function IgEmbedCaption({
           ) : null
         }
       />
-      <EditableField
-        fieldKey={fieldKey}
-        editable={editable}
-        onLocalEdit={onLocalEdit}
-        onCommit={onCommit}
-        value={value}
-        placeholder={placeholder}
-        multiline
-        className="whitespace-pre-wrap text-sm leading-snug text-foreground"
-      />
+      {/* Cap the caption block at ~slide height so a long Canva-generated
+       *  draft doesn't push the right column to 2000+ px (which was also
+       *  forcing the left-column carousel to stretch into a portrait
+       *  letterbox before sm:items-start was added on instagram-post.tsx).
+       *  Scrolls vertically when the caption overflows. */}
+      <div className="max-h-[400px] overflow-y-auto pr-1">
+        <EditableField
+          fieldKey={fieldKey}
+          editable={editable}
+          onLocalEdit={onLocalEdit}
+          onCommit={onCommit}
+          value={value}
+          placeholder={placeholder}
+          multiline
+          className="whitespace-pre-wrap text-sm leading-snug text-foreground"
+        />
+      </div>
     </div>
   );
 }

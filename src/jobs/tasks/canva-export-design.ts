@@ -135,6 +135,21 @@ export const canvaExportDesignTask: Task = async (rawPayload, helpers) => {
     helpers.logger.info(
       `canva-export-design ok item=${payload.productionItemId} design=${payload.designId} archived=${archive.archived}/${archive.total}`,
     );
+
+    // Auto-chain: kick off an MP4 export of the video-bearing page so the
+    // carousel can render a real <video> at that slot instead of a static
+    // PNG snapshot of the video element. Fire-and-forget — best-effort,
+    // failure here doesn't unwind the PNG archive above.
+    try {
+      await helpers.addJob("canva-export-page-video", {
+        productionItemId: payload.productionItemId,
+        designId: payload.designId,
+      });
+    } catch (err) {
+      helpers.logger.warn(
+        `canva-export-design: failed to enqueue canva-export-page-video for item ${payload.productionItemId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     return;
   }
 
