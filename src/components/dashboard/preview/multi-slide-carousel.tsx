@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { ChevronLeftIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { PlaceholderSlideRender } from "./draft-media-dropzone";
 import { MediaActions } from "./media-actions";
 
@@ -106,12 +107,10 @@ export function MultiSlideCarousel({
             {entry.removeButton}
             {entry.slide.kind === "video" && entry.slide.url ? (
               <>
-                <video
+                <VideoSlide
                   src={entry.slide.url}
-                  poster={entry.slide.posterUrl ?? undefined}
-                  controls
-                  playsInline
-                  className={`h-full w-full object-${objectFit}`}
+                  posterUrl={entry.slide.posterUrl}
+                  objectFit={objectFit}
                 />
                 <MediaActions
                   src={entry.slide.url}
@@ -144,6 +143,30 @@ export function MultiSlideCarousel({
           <div className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums">
             {index + 1}/{total}
           </div>
+          {/* IG-style prev / next chevrons — small white-glassy pill,
+           *  always visible (Instagram web shows them this way too).
+           *  Hidden when there's nowhere to scroll: no prev on slide 1,
+           *  no next on the last slide. */}
+          {index > 0 && (
+            <button
+              type="button"
+              onClick={() => scrollToIndex(index - 1)}
+              aria-label="Previous slide"
+              className="absolute left-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/85 text-neutral-900 shadow-md transition-opacity hover:bg-white"
+            >
+              <ChevronLeftIcon className="h-4 w-4" />
+            </button>
+          )}
+          {index < total - 1 && (
+            <button
+              type="button"
+              onClick={() => scrollToIndex(index + 1)}
+              aria-label="Next slide"
+              className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/85 text-neutral-900 shadow-md transition-opacity hover:bg-white"
+            >
+              <ChevronRightIcon className="h-4 w-4" />
+            </button>
+          )}
           <div className="absolute inset-x-0 bottom-2 flex items-center justify-center gap-1">
             {Array.from({ length: total }).map((_, i) => (
               <button
@@ -160,5 +183,59 @@ export function MultiSlideCarousel({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Native `<video controls>` puts the play button at the bottom-left and
+ * adds a heavy chrome bar that fights with our 1:1 IG-Post aesthetic. We
+ * render a centered semi-transparent play badge instead — click anywhere
+ * on the video to start playback; once playing, the badge disappears and
+ * the native controls take over (so the user can seek/pause).
+ */
+function VideoSlide({
+  src,
+  posterUrl,
+  objectFit,
+}: {
+  src: string;
+  posterUrl: string | null;
+  objectFit: "contain" | "cover";
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [started, setStarted] = useState(false);
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        src={src}
+        poster={posterUrl ?? undefined}
+        controls={started}
+        playsInline
+        className={`h-full w-full object-${objectFit}`}
+        onPlay={() => setStarted(true)}
+        // Don't hide controls on pause — once the user has started the
+        // video, they expect the native scrubber to stay available.
+      />
+      {!started && (
+        <button
+          type="button"
+          onClick={() => {
+            const v = videoRef.current;
+            if (!v) return;
+            v.play().catch(() => {
+              /* autoplay rules, etc — surface via the native badge if it
+               * fails; user can retry by clicking the native control once
+               * controls are rendered. */
+            });
+          }}
+          aria-label="Play video"
+          className="absolute inset-0 m-auto h-14 w-14 rounded-full bg-black/55 text-white shadow-lg backdrop-blur-sm transition-transform hover:scale-105 hover:bg-black/65 inline-flex items-center justify-center"
+        >
+          <PlayIcon className="h-7 w-7 translate-x-[2px] fill-white" />
+        </button>
+      )}
+    </>
   );
 }
