@@ -1,0 +1,1 @@
+ALTER TABLE "brands" ADD COLUMN "weekly_views_goal" integer;

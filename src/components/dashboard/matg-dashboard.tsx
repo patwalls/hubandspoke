@@ -115,6 +115,7 @@ export function MATGDashboard() {
           weekStartDay={data.weekStartDay}
           currentPeriodLabel={currentPeriodLabel}
           weeklyGoal={data.weeklyGoal}
+          weeklyViewsGoal={data.weeklyViewsGoal}
           brand="matg"
         />
       ) : (

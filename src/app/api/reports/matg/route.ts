@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
   const sourceFilter = searchParams.get("source") || "all";
 
   try {
-    const { weeklyGoal, weekStartDay } = await getBrandSettings("matg");
+    const { weeklyGoal, weeklyViewsGoal, weekStartDay } = await getBrandSettings("matg");
 
     // Build periods
     const periods = buildPeriods(
@@ -391,6 +391,7 @@ export async function GET(request: NextRequest) {
       formats: formatList,
       showingFormats,
       weeklyGoal,
+      weeklyViewsGoal,
       primaryRowMeta,
     };
 

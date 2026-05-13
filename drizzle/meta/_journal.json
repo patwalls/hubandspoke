@@ -526,6 +526,13 @@
       "when": 1778631852880,
       "tag": "0074_curious_quentin_quire",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1778679816667,
+      "tag": "0075_amusing_black_tarantula",
+      "breakpoints": true
     }
   ]
 }

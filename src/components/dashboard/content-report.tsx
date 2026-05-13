@@ -185,6 +185,7 @@ export function ContentReport({ brand }: { brand: string }) {
           weekStartDay={data.weekStartDay}
           currentPeriodLabel={currentPeriodLabel}
           weeklyGoal={data.weeklyGoal}
+          weeklyViewsGoal={data.weeklyViewsGoal}
           brand={brand}
           weekOverWeek={data.weekOverWeek}
         />

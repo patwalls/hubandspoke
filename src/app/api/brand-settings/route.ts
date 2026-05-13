@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       brand: row.slug,
       weeklyGoal: row.weeklyGoal ?? null,
+      weeklyViewsGoal: row.weeklyViewsGoal ?? null,
       weekStartDay: row.weekStartDay ?? 0,
       defaultProducerUserId: row.defaultProducerUserId ?? null,
       defaultEditorUserId: row.defaultEditorUserId ?? null,
@@ -37,12 +38,14 @@ export async function PUT(request: NextRequest) {
     const {
       brand,
       weeklyGoal,
+      weeklyViewsGoal,
       weekStartDay,
       defaultProducerUserId,
       defaultEditorUserId,
     } = body as {
       brand?: string;
       weeklyGoal?: number | null;
+      weeklyViewsGoal?: number | null;
       weekStartDay?: number;
       defaultProducerUserId?: string | null;
       defaultEditorUserId?: string | null;
@@ -74,6 +77,20 @@ export async function PUT(request: NextRequest) {
         patch.weeklyGoal = n;
       }
     }
+    if (weeklyViewsGoal !== undefined) {
+      if (weeklyViewsGoal === null) {
+        patch.weeklyViewsGoal = null;
+      } else {
+        const n = Number(weeklyViewsGoal);
+        if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+          return NextResponse.json(
+            { error: "weeklyViewsGoal must be a non-negative integer or null" },
+            { status: 400 }
+          );
+        }
+        patch.weeklyViewsGoal = n;
+      }
+    }
     if (weekStartDay !== undefined) {
       const n = Number(weekStartDay);
       if (!Number.isInteger(n) || n < 0 || n > 6) {
@@ -102,6 +119,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({
       brand: row.slug,
       weeklyGoal: row.weeklyGoal,
+      weeklyViewsGoal: row.weeklyViewsGoal,
       weekStartDay: row.weekStartDay,
       defaultProducerUserId: row.defaultProducerUserId,
       defaultEditorUserId: row.defaultEditorUserId,

@@ -205,6 +205,7 @@ export interface ContentReportData {
   formats: string[];
   showingFormats: boolean;
   weeklyGoal: number | null;
+  weeklyViewsGoal: number | null;
   /** Keyed by the row's display label — same label used as the key
    *  inside `byPlatform.*`. When present the UI renders an
    *  AccountBadge instead of the raw text. */

@@ -21,6 +21,7 @@ interface MetricTilesProps {
   weekStartDay: number;
   currentPeriodLabel: string | null;
   weeklyGoal: number | null;
+  weeklyViewsGoal: number | null;
   brand: string;
   /** Week-over-week pacing comparison, prorated to the elapsed hours of
    *  the current week. Brand-scoped (independent of the page's filters).
@@ -128,6 +129,7 @@ export function MetricTiles({
   weekStartDay,
   currentPeriodLabel,
   weeklyGoal,
+  weeklyViewsGoal,
   brand,
   weekOverWeek,
 }: MetricTilesProps) {
@@ -160,6 +162,20 @@ export function MetricTiles({
   const tileBorder = !hasGoal
     ? "border-border bg-card"
     : onTrack
+    ? "border-primary/30 bg-primary/5"
+    : "border-amber-300 bg-amber-50";
+
+  const viewsProjection =
+    wp && wp.percent > 0
+      ? Math.round(viewsThisWeek / (wp.percent / 100))
+      : 0;
+  const hasViewsGoal = weeklyViewsGoal != null && weeklyViewsGoal > 0;
+  const viewsOnTrack =
+    hasViewsGoal &&
+    viewsThisWeek >= (weeklyViewsGoal * (wp?.percent ?? 0)) / 100;
+  const viewsTileBorder = !hasViewsGoal
+    ? "border-border bg-card"
+    : viewsOnTrack
     ? "border-primary/30 bg-primary/5"
     : "border-amber-300 bg-amber-50";
 
@@ -246,7 +262,7 @@ export function MetricTiles({
         )}
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-4">
+      <div className={`rounded-lg border p-4 ${viewsTileBorder}`}>
         <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
           Views This Week
         </p>
@@ -254,6 +270,11 @@ export function MetricTiles({
           <span className="text-3xl font-semibold text-foreground tabular-nums">
             {formatCompact(viewsThisWeek)}
           </span>
+          {hasViewsGoal && (
+            <span className="text-lg text-muted-foreground">
+              / {formatCompact(weeklyViewsGoal)}
+            </span>
+          )}
           {weekOverWeek?.views && (
             <DeltaBadge
               current={weekOverWeek.views.current}
@@ -262,9 +283,35 @@ export function MetricTiles({
             />
           )}
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Across all platforms
-        </p>
+        {hasViewsGoal ? (
+          <div className="mt-3">
+            <div className="w-full bg-border rounded-full h-1.5">
+              <div
+                className={`h-1.5 rounded-full transition-all ${viewsOnTrack ? 'bg-primary' : 'bg-amber-500'}`}
+                style={{
+                  width: `${Math.min(100, (viewsThisWeek / weeklyViewsGoal) * 100)}%`,
+                }}
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground tabular-nums">
+              {wp
+                ? `Day ${wp.day.toFixed(1)} of 7 (${Math.round(wp.percent)}%)`
+                : ""}
+              {" · "}
+              Proj: {formatCompact(viewsProjection)}
+            </p>
+          </div>
+        ) : (
+          <div className="mt-3">
+            <Link
+              href={`/${brand}/accounts`}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            >
+              Set goal
+              <span aria-hidden="true">→</span>
+            </Link>
+          </div>
+        )}
       </div>
 
       <div className="rounded-lg border border-border bg-card p-4">

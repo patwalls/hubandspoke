@@ -1253,6 +1253,7 @@ export const brands = pgTable(
     color: text("color"),
     disabled: boolean("disabled").notNull().default(false),
     weeklyGoal: integer("weekly_goal"),
+    weeklyViewsGoal: integer("weekly_views_goal"),
     // 0 = Sunday .. 6 = Saturday. Controls dashboard week buckets.
     weekStartDay: integer("week_start_day").notNull().default(0),
     defaultProducerUserId: uuid("default_producer_user_id").references(

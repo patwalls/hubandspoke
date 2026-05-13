@@ -59,6 +59,8 @@ export function SettingsPageContent({
   const showCrossPostTeaser = section == null;
   const [weeklyGoal, setWeeklyGoal] = useState<string>("");
   const [savedGoal, setSavedGoal] = useState<number | null>(null);
+  const [weeklyViewsGoal, setWeeklyViewsGoal] = useState<string>("");
+  const [savedViewsGoal, setSavedViewsGoal] = useState<number | null>(null);
   const [weekStartDay, setWeekStartDay] = useState<number>(0);
   const [defaultProducerUserId, setDefaultProducerUserId] = useState<
     string | null
@@ -81,6 +83,13 @@ export function SettingsPageContent({
     | { kind: "error"; message: string }
     | null
   >(null);
+  const [viewsStatus, setViewsStatus] = useState<
+    | { kind: "saved" }
+    | { kind: "cleared" }
+    | { kind: "error"; message: string }
+    | null
+  >(null);
+  const [viewsSaving, setViewsSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +106,9 @@ export function SettingsPageContent({
         const goal: number | null = settingsJson?.weeklyGoal ?? null;
         setSavedGoal(goal);
         setWeeklyGoal(goal != null ? String(goal) : "");
+        const viewsGoal: number | null = settingsJson?.weeklyViewsGoal ?? null;
+        setSavedViewsGoal(viewsGoal);
+        setWeeklyViewsGoal(viewsGoal != null ? String(viewsGoal) : "");
         setWeekStartDay(
           typeof settingsJson?.weekStartDay === "number"
             ? settingsJson.weekStartDay
@@ -142,6 +154,34 @@ export function SettingsPageContent({
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function persistViews(value: number | null) {
+    setViewsSaving(true);
+    setViewsStatus(null);
+    try {
+      const res = await fetch("/api/brand-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brand, weeklyViewsGoal: value }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to save");
+      }
+      const json = await res.json();
+      const goal: number | null = json?.weeklyViewsGoal ?? null;
+      setSavedViewsGoal(goal);
+      setWeeklyViewsGoal(goal != null ? String(goal) : "");
+      setViewsStatus({ kind: value == null ? "cleared" : "saved" });
+    } catch (err) {
+      setViewsStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Failed to save",
+      });
+    } finally {
+      setViewsSaving(false);
     }
   }
 
@@ -215,9 +255,31 @@ export function SettingsPageContent({
     persist(null);
   }
 
+  function handleViewsSave(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = weeklyViewsGoal.trim();
+    if (trimmed === "") {
+      setViewsStatus({ kind: "error", message: "Enter a number or use Clear goal." });
+      return;
+    }
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+      setViewsStatus({ kind: "error", message: "Goal must be a non-negative whole number." });
+      return;
+    }
+    persistViews(n);
+  }
+
+  function handleViewsClear() {
+    persistViews(null);
+  }
+
   const dirty =
     !loading &&
     weeklyGoal.trim() !== (savedGoal != null ? String(savedGoal) : "");
+  const viewsDirty =
+    !loading &&
+    weeklyViewsGoal.trim() !== (savedViewsGoal != null ? String(savedViewsGoal) : "");
 
   const producerUser = defaultProducerUserId
     ? assignableUsers.find((u) => u.id === defaultProducerUserId) ?? null
@@ -295,6 +357,67 @@ export function SettingsPageContent({
           )}
           {status?.kind === "error" && (
             <span className="text-xs text-amber-600">{status.message}</span>
+          )}
+        </div>
+      </form>
+      )}
+
+      {showGoals && (
+      <form
+        onSubmit={handleViewsSave}
+        className="rounded-lg border border-border bg-card p-5 space-y-4"
+      >
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            Views goals
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Used by the &ldquo;Views this week&rdquo; tile on the dashboard.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="weekly-views-goal">Weekly views goal</Label>
+          <Input
+            id="weekly-views-goal"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1}
+            placeholder="e.g. 1000000"
+            value={weeklyViewsGoal}
+            onChange={(e) => {
+              setWeeklyViewsGoal(e.target.value);
+              setViewsStatus(null);
+            }}
+            disabled={loading || viewsSaving}
+            className="max-w-[200px]"
+          />
+          <p className="text-xs text-muted-foreground">
+            Views per week target across all platforms. Leave blank and Clear to remove.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 pt-1">
+          <Button type="submit" disabled={viewsSaving || loading || !viewsDirty}>
+            {viewsSaving ? "Saving..." : "Save"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleViewsClear}
+            disabled={viewsSaving || loading || savedViewsGoal == null}
+          >
+            Clear goal
+          </Button>
+          {viewsStatus?.kind === "saved" && (
+            <span className="text-xs text-primary">Saved.</span>
+          )}
+          {viewsStatus?.kind === "cleared" && (
+            <span className="text-xs text-muted-foreground">Goal cleared.</span>
+          )}
+          {viewsStatus?.kind === "error" && (
+            <span className="text-xs text-amber-600">{viewsStatus.message}</span>
           )}
         </div>
       </form>

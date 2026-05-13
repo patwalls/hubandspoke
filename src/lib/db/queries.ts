@@ -182,8 +182,26 @@ export async function getWeeklyGoal(brand: string): Promise<number | null> {
   return row?.weeklyGoal ?? null;
 }
 
+export async function getWeeklyViewsGoal(brand: string): Promise<number | null> {
+  if (brand === "all") {
+    const rows = await db
+      .select({ weeklyViewsGoal: brands.weeklyViewsGoal })
+      .from(brands)
+      .where(eq(brands.disabled, false));
+    const sum = rows.reduce((acc, r) => acc + (r.weeklyViewsGoal ?? 0), 0);
+    return sum > 0 ? sum : null;
+  }
+  const [row] = await db
+    .select({ weeklyViewsGoal: brands.weeklyViewsGoal })
+    .from(brands)
+    .where(eq(brands.slug, brand))
+    .limit(1);
+  return row?.weeklyViewsGoal ?? null;
+}
+
 export type BrandSettings = {
   weeklyGoal: number | null;
+  weeklyViewsGoal: number | null;
   weekStartDay: WeekStartsOn;
 };
 
@@ -192,12 +210,16 @@ export async function getBrandSettings(brand: string): Promise<BrandSettings> {
     // Cross-brand "All": sum-of-goals + Sunday week start. Picking one
     // weekStartDay across brands is impossible; default to Sunday (the
     // schema default) — week-keyed UI on /all renders against this.
-    const weeklyGoal = await getWeeklyGoal("all");
-    return { weeklyGoal, weekStartDay: 0 };
+    const [weeklyGoal, weeklyViewsGoal] = await Promise.all([
+      getWeeklyGoal("all"),
+      getWeeklyViewsGoal("all"),
+    ]);
+    return { weeklyGoal, weeklyViewsGoal, weekStartDay: 0 };
   }
   const [row] = await db
     .select({
       weeklyGoal: brands.weeklyGoal,
+      weeklyViewsGoal: brands.weeklyViewsGoal,
       weekStartDay: brands.weekStartDay,
     })
     .from(brands)
@@ -205,6 +227,7 @@ export async function getBrandSettings(brand: string): Promise<BrandSettings> {
     .limit(1);
   return {
     weeklyGoal: row?.weeklyGoal ?? null,
+    weeklyViewsGoal: row?.weeklyViewsGoal ?? null,
     weekStartDay: normalizeWeekStart(row?.weekStartDay),
   };
 }
@@ -398,7 +421,7 @@ export async function getContentReport(
     source,
   } = params;
 
-  const { weeklyGoal, weekStartDay } = await getBrandSettings(brand);
+  const { weeklyGoal, weeklyViewsGoal, weekStartDay } = await getBrandSettings(brand);
 
   // Build periods
   const periods = buildPeriods(
@@ -746,6 +769,7 @@ export async function getContentReport(
     formats: formatList,
     showingFormats,
     weeklyGoal,
+    weeklyViewsGoal,
     // New metadata consumed by the UI to render `[icon] @handle · Type`
     // row labels in place of raw platform strings.
     primaryRowMeta,
