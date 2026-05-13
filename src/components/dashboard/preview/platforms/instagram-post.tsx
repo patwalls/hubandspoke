@@ -21,10 +21,15 @@ export function InstagramPostSimulator({
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
 
   return (
-    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">
+    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row sm:items-start">
       {/* LEFT: 1:1 carousel — drop in up to 10 photos/videos. The dropzone
        *  handles uploads/deletes per slide; `MultiSlideCarousel` handles
-       *  snap-scroll, dots, count badge, and per-slide overlays. */}
+       *  snap-scroll, dots, count badge, and per-slide overlays.
+       *  `sm:items-start` on the parent prevents the right-column caption
+       *  (which can run hundreds of lines on a Canva-generated draft)
+       *  from flex-stretching this square carousel into a tall portrait
+       *  letterbox. Without it `aspect-square` gets overridden and the
+       *  4-slide images sit in massive black bars. */}
       <div
         className={`relative ${PLATFORM_MEDIA_RULES.instagram_post.aspectClass} w-full max-w-[400px] shrink-0 overflow-hidden rounded-lg bg-black`}
       >
