@@ -571,56 +571,29 @@ export async function createClipIdeaInDescript(args: {
     prompt,
   });
 
-  let created: { id: string } | undefined;
-  try {
-    const rows = await db
-      .insert(productionItems)
-      .values({
-        title: row.hook,
-        status: "Assigned",
-        platform: ["YouTube Shorts"],
-        format: format.name,
-        brand,
-        contentBody: body,
-        pillarContentItemId: row.sourceProductionItemId,
-        sourceType: "repurposed",
-        sourceClipIdeaId: args.clipIdeaId,
-        producerUserId: args.actorUserId,
-        editorUserId: args.actorUserId,
-        descriptProjectId: row.descriptProjectId,
-        descriptProjectUrl: agent.projectUrl,
-        utmCampaign: await generateUtmCampaign(row.hook),
-        hook: row.hook,
-        hookSource: "clip_idea",
-        hookExtractedAt: new Date(),
-        createdVia: "service:clip-promote-full",
-      })
-      .returning({ id: productionItems.id });
-    created = rows[0];
-    if (created) {
-      try {
-        await recordItemCreated(db, {
-          itemId: created.id,
-          source: "service:clip-promote-full",
-          actorUserId: args.actorUserId ?? null,
-          format: format.name,
-          sourceType: "repurposed",
-          postType: null,
-        });
-      } catch (e) {
-        console.error(
-          "[service:clip-promote-full] recordItemCreated failed",
-          e,
-        );
-      }
-    }
-  } catch (err) {
-    if (isUniqueViolation(err, "uniq_production_items_source_clip_idea")) {
-      throw new ClipIdeaAlreadyDecidedError("assigned");
-    }
-    throw err;
-  }
-  if (!created) throw new Error("Failed to create production item for clip");
+  // Promote the pre-created draft production_item (the row that
+  // clip-idea generation seeds for every idea) — flip it to Assigned and
+  // stamp the Descript IDs we just got from the agent call. Mirrors the
+  // precise-cut path's update pattern. Earlier versions of this function
+  // INSERTed a new row here, but every promote now collides on the
+  // unique (source_clip_idea_id) index because the pre-create already
+  // occupies that slot — manifested as the route's catch-all 502.
+  await db
+    .update(productionItems)
+    .set({
+      status: "Assigned",
+      title: row.hook,
+      hook: row.hook,
+      hookSource: "clip_idea",
+      hookExtractedAt: new Date(),
+      contentBody: body,
+      producerUserId: args.actorUserId,
+      editorUserId: args.actorUserId,
+      descriptProjectId: row.descriptProjectId,
+      descriptProjectUrl: agent.projectUrl,
+      updatedAt: new Date(),
+    })
+    .where(eq(productionItems.id, productionItemId));
 
   const [trigger] = await db
     .insert(repurposeTriggers)
