@@ -8,7 +8,6 @@ import {
   publishDescriptComposition,
 } from "@/lib/descript";
 import { archiveRemoteToS3 } from "@/lib/services/enrichment/shared";
-import { addMediaRowsToDraft } from "@/lib/services/draft-media";
 import { bucketName } from "@/lib/s3";
 import {
   recordContentChanges,
@@ -226,20 +225,39 @@ export const descriptPublishAndArchiveTask: Task = async (
         ),
       );
 
-    const insertedRows = await addMediaRowsToDraft(tx, {
-      itemId: item.id,
-      files: [
-        {
-          s3Bucket: bucketName(),
-          s3Key: archive.key,
-          contentType: archive.contentType,
-          sizeBytes: archive.size,
-          kind: "video",
-          posterS3Key: null,
-          sourceUrl: downloadUrl,
-        },
-      ],
-    });
+    // Make room at index 0 by shifting every remaining row up by 1. The
+    // rendered clip is the canonical video for a repurposed reel — it has
+    // to land at index 0 so the simulator's slides[0] (and the legacy
+    // mediaS3Key mirror below, which picks the lowest index) both point at
+    // it instead of inherited source media that repost-seed copied in.
+    // Two-pass via negative scratch indexes — a direct `SET index = index
+    // + 1` collides on (production_item_id, index) mid-update.
+    await tx.execute(sql`
+      UPDATE production_item_media
+         SET index = -(index + 1)
+       WHERE production_item_id = ${item.id}
+    `);
+    await tx.execute(sql`
+      UPDATE production_item_media
+         SET index = -index
+       WHERE production_item_id = ${item.id}
+         AND index < 0
+    `);
+
+    const insertedRows = await tx
+      .insert(productionItemMedia)
+      .values({
+        productionItemId: item.id,
+        index: 0,
+        kind: "video",
+        s3Bucket: bucketName(),
+        s3Key: archive.key,
+        contentType: archive.contentType,
+        sizeBytes: archive.size,
+        posterS3Key: null,
+        sourceUrl: downloadUrl,
+      })
+      .returning();
 
     // Audit: one media_removed per replaced prior render + one
     // media_added for the freshly archived MP4. Source is the
