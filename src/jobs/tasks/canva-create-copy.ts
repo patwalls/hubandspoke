@@ -5,8 +5,10 @@ import { productionItems } from "@/lib/db/schema";
 import {
   createCanvaAutofill,
   fetchCanvaAutofillJob,
+  uploadCanvaAssetAndWait,
 } from "@/lib/canva";
 import { extractCanvaSlideText } from "@/lib/canva-text-extractor";
+import { getPresignedGetUrl } from "@/lib/s3";
 import { recordToolAction } from "@/lib/services/content-events";
 
 export interface CanvaCreateCopyPayload {
@@ -59,6 +61,7 @@ export const canvaCreateCopyTask: Task = async (rawPayload, helpers) => {
       .select({
         id: productionItems.id,
         title: productionItems.title,
+        pillarContentItemId: productionItems.pillarContentItemId,
       })
       .from(productionItems)
       .where(eq(productionItems.id, payload.productionItemId))
@@ -86,10 +89,52 @@ export const canvaCreateCopyTask: Task = async (rawPayload, helpers) => {
       );
     }
 
+    // Hero image (page 1 background). Pull the pillar's poster_s3_key —
+    // that's the YouTube thumbnail / scraped cover, which is usually a
+    // founder shot for our Business Breakdown pillars. Upload to Canva
+    // and reference by asset_id in the autofill payload. Best-effort:
+    // a missing poster or a failed upload just means we skip the
+    // hero_image field, and the template renders its default placeholder.
+    const imageAssetIds: Record<string, string> = {};
+    const heroSourceId = item.pillarContentItemId ?? item.id;
+    const [heroSource] = await db
+      .select({ posterS3Key: productionItems.posterS3Key })
+      .from(productionItems)
+      .where(eq(productionItems.id, heroSourceId))
+      .limit(1);
+    if (heroSource?.posterS3Key) {
+      try {
+        const presignedUrl = await getPresignedGetUrl(heroSource.posterS3Key, 300);
+        const imgRes = await fetch(presignedUrl);
+        if (!imgRes.ok) {
+          throw new Error(`pillar poster fetch HTTP ${imgRes.status}`);
+        }
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        // Keep the filename short + alphanumeric — Canva's
+        // Asset-Upload-Metadata header parser rejected longer UUID-based
+        // names with "Invalid upload metadata header" even though shorter
+        // names work. Cosmetic field only; not a content gate.
+        const shortId = heroSourceId.replace(/-/g, "").slice(0, 8);
+        const upload = await uploadCanvaAssetAndWait({
+          bytes: buf,
+          fileName: `pillar${shortId}.jpg`,
+        });
+        imageAssetIds.hero_image = upload.assetId;
+        helpers.logger.info(
+          `canva-create-copy uploaded hero_image asset=${upload.assetId} for item=${payload.productionItemId}`,
+        );
+      } catch (err) {
+        helpers.logger.warn(
+          `canva-create-copy: hero_image upload skipped for item=${payload.productionItemId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     const { jobId } = await createCanvaAutofill({
       brandTemplateId: payload.brandTemplateId,
       title,
       textFields,
+      imageAssetIds,
     });
 
     await db

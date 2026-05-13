@@ -152,6 +152,14 @@ export interface CreateAutofillArgs {
   /** Plain key→string map of every text field tagged on the brand template.
    *  Canva rejects autofill if any tagged field is missing from `data`. */
   textFields: Record<string, string>;
+  /** Optional image fields. Each value is a Canva-hosted asset_id obtained
+   *  by uploading via {@link uploadCanvaAssetFromBuffer} and polling
+   *  {@link fetchCanvaAssetUpload} until success. Empty/omitted = no
+   *  image fields are sent. Canva ignores unknown keys, but if the
+   *  template has any IMAGE-typed tagged field that we DON'T send, the
+   *  autofill response keeps that element at its default placeholder
+   *  (same as text fields). */
+  imageAssetIds?: Record<string, string>;
 }
 
 /**
@@ -169,9 +177,15 @@ export async function createCanvaAutofill(
   args: CreateAutofillArgs,
 ): Promise<{ jobId: string }> {
   const accessToken = await getCanvaAccessToken();
-  const data: Record<string, { type: "text"; text: string }> = {};
+  type AutofillValue =
+    | { type: "text"; text: string }
+    | { type: "image"; asset_id: string };
+  const data: Record<string, AutofillValue> = {};
   for (const [name, value] of Object.entries(args.textFields)) {
     data[name] = { type: "text", text: value };
+  }
+  for (const [name, assetId] of Object.entries(args.imageAssetIds ?? {})) {
+    data[name] = { type: "image", asset_id: assetId };
   }
   const res = await fetch(`${BASE_URL}/v1/autofills`, {
     method: "POST",
@@ -207,6 +221,141 @@ export interface CanvaAutofillJobResult {
   editUrl?: string;
   pageCount?: number;
   errorMessage?: string;
+}
+
+/**
+ * Upload image bytes to Canva and return a job id. The Canva Autofill API
+ * only accepts image fields that reference an asset already in the Canva
+ * account — external image URLs are not supported in autofill payloads
+ * directly. So the flow is: upload bytes → poll until success → use the
+ * returned asset id in the autofill `data` block.
+ *
+ * Bytes are PUT to /v1/asset-uploads with a base64'd filename in the
+ * Asset-Upload-Metadata header. The endpoint is async — caller polls
+ * via {@link fetchCanvaAssetUpload}.
+ */
+export async function uploadCanvaAssetFromBuffer(args: {
+  /** Raw image bytes. Canva accepts jpg/jpeg/png/heic/webp/svg/gif/tiff. */
+  bytes: Uint8Array | Buffer;
+  /** Filename used in the Canva asset-library row (cosmetic). */
+  fileName: string;
+}): Promise<{ jobId: string }> {
+  const accessToken = await getCanvaAccessToken();
+  const nameB64 = Buffer.from(args.fileName, "utf8").toString("base64");
+  const res = await fetch(`${BASE_URL}/v1/asset-uploads`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/octet-stream",
+      "Asset-Upload-Metadata": JSON.stringify({ name_base64: nameB64 }),
+    },
+    // Cast to BodyInit-compatible: fetch in Node 18+ accepts Buffer / Uint8Array.
+    body: args.bytes as unknown as BodyInit,
+  });
+  const text = await res.text();
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    // leave json null; raw body is in `text`
+  }
+  if (!res.ok) {
+    type ErrJson = { message?: string; error?: string; code?: string };
+    const j = json as ErrJson | null;
+    const detail =
+      (j && (j.message || j.error || j.code)) ||
+      text.slice(0, 300) ||
+      `HTTP ${res.status}`;
+    throw new Error(
+      `Canva asset-uploads create failed (HTTP ${res.status}): ${detail}`,
+    );
+  }
+  type CreateAssetResp = { job?: { id?: string } };
+  const jobId = (json as CreateAssetResp | null)?.job?.id;
+  if (!jobId) {
+    throw new Error(
+      `Canva asset-uploads response had no job.id — ${text.slice(0, 300)}`,
+    );
+  }
+  return { jobId };
+}
+
+export interface CanvaAssetUploadResult {
+  status: "in_progress" | "success" | "failed";
+  assetId?: string;
+  errorMessage?: string;
+}
+
+export async function fetchCanvaAssetUpload(
+  jobId: string,
+): Promise<CanvaAssetUploadResult> {
+  const accessToken = await getCanvaAccessToken();
+  const res = await fetch(`${BASE_URL}/v1/asset-uploads/${jobId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail =
+      (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    throw new Error(`Canva asset-uploads/${jobId} fetch failed: ${detail}`);
+  }
+  type AssetUploadJob = {
+    job?: {
+      status?: "in_progress" | "success" | "failed";
+      asset?: { id?: string };
+      error?: { message?: string };
+    };
+  };
+  const job = (json as AssetUploadJob | null)?.job;
+  if (!job?.status) {
+    throw new Error(
+      `Canva asset-uploads/${jobId} response had no job.status — ${JSON.stringify(json).slice(0, 300)}`,
+    );
+  }
+  if (job.status === "success") {
+    return { status: "success", assetId: job.asset?.id };
+  }
+  if (job.status === "failed") {
+    return { status: "failed", errorMessage: job.error?.message };
+  }
+  return { status: "in_progress" };
+}
+
+/**
+ * Convenience wrapper: upload bytes, poll until success, return the asset id.
+ * Used by `canva-create-copy` to attach a pillar poster as the hero_image
+ * field on the brand template. Throws if the upload doesn't settle within
+ * `timeoutMs` (default 60s — image uploads typically finish in 2-5s).
+ */
+export async function uploadCanvaAssetAndWait(args: {
+  bytes: Uint8Array | Buffer;
+  fileName: string;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+}): Promise<{ assetId: string }> {
+  const { jobId } = await uploadCanvaAssetFromBuffer(args);
+  const deadline = Date.now() + (args.timeoutMs ?? 60_000);
+  const interval = args.pollIntervalMs ?? 2000;
+  while (Date.now() < deadline) {
+    const result = await fetchCanvaAssetUpload(jobId);
+    if (result.status === "success") {
+      if (!result.assetId) {
+        throw new Error(
+          `Canva asset-uploads/${jobId} succeeded with no asset.id`,
+        );
+      }
+      return { assetId: result.assetId };
+    }
+    if (result.status === "failed") {
+      throw new Error(
+        `Canva asset-uploads/${jobId} failed: ${result.errorMessage ?? "unknown"}`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  throw new Error(
+    `Canva asset-uploads/${jobId} did not finish within ${args.timeoutMs ?? 60_000}ms`,
+  );
 }
 
 export interface CreateExportArgs {
