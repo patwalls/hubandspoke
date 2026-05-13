@@ -86,6 +86,14 @@ export function InstagramReelSimulator({
                           await triggerResync(itemId);
                         }}
                       />
+                      {descriptRenderState === "rendering" && (
+                        <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center px-2">
+                          <div className="flex items-center gap-1.5 rounded-full bg-black/75 px-3 py-1.5 text-[11px] font-semibold text-white shadow-lg backdrop-blur-sm">
+                            <Loader2Icon className="h-3.5 w-3.5 animate-spin" />
+                            <span>Rendering MP4…</span>
+                          </div>
+                        </div>
+                      )}
                     </>
                   ) : enriched?.slide.url ? (
                     <>
