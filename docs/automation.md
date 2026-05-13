@@ -700,6 +700,13 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - 20-min timeout per download
   - Skips if `mediaS3Key` set (unless `force=true`)
   - Errors truncated to 500 chars in `youtubeDownloadError`
+- **Out-of-band path when Heroku IP is bot-checked:** see *home-machine archive cron* below.
+
+### Home-machine archive cron — yt-dlp from a residential IP (2026-05-13)
+- **Why this exists:** YouTube routinely bot-checks Heroku's AWS IP range, returning empty bodies / 403s / "Sign in to confirm" gates that the in-dyno `youtube-download` task can't bypass. A residential IP isn't gated the same way, so we run the same yt-dlp binary from Pat's always-on home Mac.
+- **What runs:** `scripts/archive-yt-local.ts` (writes directly to prod S3 + `production_items` — same columns as `youtube-download`, plus enqueues `transcribe-whisper` on the prod queue).
+- **How it's scheduled:** `launchd` job installed by `home-machine/yt-archive/install.sh` on a single designated Mac. Hourly tick, small batch (`--limit=30 --since-days=2`), polite-mode yt-dlp (`--sleep-min=2 --sleep-max=6`). The wrapper refuses to run on any machine whose hostname doesn't match the marker file pinned at install time — see `home-machine/yt-archive/README.md` for the install/operate playbook.
+- **Operationally:** if the home Mac goes down, the queue does NOT back up — the Heroku `youtube-download` task is still trying (and mostly failing) in parallel. Recently-published items with `youtube_download_attempts >= 3` get skipped by the home cron too, so dead videos don't stall the batch.
 
 ### `refresh-item-metrics` — on-demand per-item metrics pull
 - **Trigger:** enqueued by `POST /api/production-items` when a new row has a `publishedLink` and no inline metrics; enqueued by `PUT /api/production-items` when a row flips to `status='Published'` with a link, or when `publishedLink` is freshly added/changed on an already-Published row

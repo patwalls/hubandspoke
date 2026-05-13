@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd job for the home-machine yt-archive cron.
+
+  install.sh substitutes __HOME__ and __USER__ before writing this file to
+  ~/Library/LaunchAgents/com.hubandspoke.yt-archive.plist.
+
+  Hourly schedule via StartInterval. If the Mac is asleep when the tick
+  fires, launchd runs the job as soon as it wakes — no missed-tick storm,
+  one extra run on wake.
+
+  RunAtLoad is OFF on purpose. We don't want install.sh to double-fire
+  alongside its smoke-test run. The first scheduled tick happens 3600s
+  after bootstrap.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hubandspoke.yt-archive</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/Library/Application Support/hubandspoke-yt-archive/wrapper.sh</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/hubandspoke-yt-archive.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/hubandspoke-yt-archive.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd starts with a minimal PATH; we need brew + nvm + system bins. -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <!--
+      Throttle restarts so a misconfigured wrapper can't busy-loop launchd.
+      ThrottleInterval = min seconds between launches; default 10 is fine.
+    -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <!--
+      Don't run on battery — yt-dlp + ffmpeg are CPU-hungry. If the home
+      Mac is ever a laptop on battery, skip until plugged in.
+    -->
+    <key>LowPriorityIO</key>
+    <true/>
+</dict>
+</plist>

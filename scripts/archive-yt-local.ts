@@ -14,10 +14,13 @@
 //
 // Flags:
 //   --brands=a,b       comma-separated brand list (required)
-//   --since=YYYY-MM-DD only items with published_date >= this (required)
+//   --since=YYYY-MM-DD only items with published_date >= this (required unless --since-days)
+//   --since-days=N     equivalent to --since=<N days ago>; useful for cron wrappers
 //   --limit=N          cap candidates (default: 500)
 //   --max-height=N     yt-dlp resolution cap (default: 1080 — Twitter caps at 1920×1200)
 //   --ids=uuid1,uuid2  specific IDs to re-try (overrides filter query)
+//   --sleep-min=N      min seconds yt-dlp sleeps between downloads (default: 0 — off)
+//   --sleep-max=N      max seconds yt-dlp sleeps between downloads (default: 0 — off)
 //
 // Output is always Twitter-compatible MP4: H.264 video + AAC LC audio +
 // faststart. YouTube's high-quality audio is Opus-in-WebM, which Twitter
@@ -46,18 +49,38 @@ function arg(name: string): string | undefined {
 }
 
 const BRANDS = (arg("brands") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-const SINCE = arg("since");
+const SINCE_ARG = arg("since");
+const SINCE_DAYS = arg("since-days");
 const LIMIT = Number(arg("limit") ?? "500");
 const MAX_HEIGHT = Number(arg("max-height") ?? "1080");
 const ID_LIST = (arg("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+// Polite-mode throttling for cron contexts (home-machine hourly job). Default
+// 0 keeps manual ad-hoc runs fast. yt-dlp randomizes between min and max
+// between each video — a few seconds of jitter dramatically reduces the
+// "you're a bot" signal without meaningfully slowing a 20-video batch.
+const SLEEP_MIN = Number(arg("sleep-min") ?? "0");
+const SLEEP_MAX = Number(arg("sleep-max") ?? "0");
 // `--cookies-from-browser=chrome` (or firefox/safari/...) defeats YouTube's
 // "Sign in to confirm you're not a bot" gate on aged accounts and trending
 // videos. Default to chrome since that's where Pat is signed in. Pass
 // `--cookies-from-browser=none` to disable.
 const COOKIES_FROM_BROWSER = (arg("cookies-from-browser") ?? "chrome").trim();
 
+const SINCE = SINCE_ARG ?? (SINCE_DAYS ? computeSince(Number(SINCE_DAYS)) : undefined);
+
+function computeSince(days: number): string {
+  if (!Number.isFinite(days) || days <= 0) {
+    console.error(`--since-days must be a positive number (got: ${days})`);
+    process.exit(1);
+  }
+  const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
 if (ID_LIST.length === 0 && (!BRANDS.length || !SINCE)) {
-  console.error("Usage: --brands=a,b --since=YYYY-MM-DD [--limit=N] [--max-height=N] | --ids=uuid1,uuid2");
+  console.error(
+    "Usage: --brands=a,b (--since=YYYY-MM-DD | --since-days=N) [--limit=N] [--max-height=N] [--sleep-min=N --sleep-max=N] | --ids=uuid1,uuid2",
+  );
   process.exit(1);
 }
 
@@ -151,6 +174,12 @@ function runYtDlp(url: string, outputPath: string, clients: string): Promise<voi
     ];
     if (COOKIES_FROM_BROWSER && COOKIES_FROM_BROWSER !== "none") {
       ytDlpArgs.push("--cookies-from-browser", COOKIES_FROM_BROWSER);
+    }
+    if (SLEEP_MIN > 0) {
+      ytDlpArgs.push("--sleep-interval", String(SLEEP_MIN));
+      if (SLEEP_MAX > 0 && SLEEP_MAX >= SLEEP_MIN) {
+        ytDlpArgs.push("--max-sleep-interval", String(SLEEP_MAX));
+      }
     }
     ytDlpArgs.push(url);
     const proc = spawn(YT_DLP_PATH, ytDlpArgs, {
