@@ -10,6 +10,10 @@ import {
 import { archiveRemoteToS3 } from "@/lib/services/enrichment/shared";
 import { addMediaRowsToDraft } from "@/lib/services/draft-media";
 import { bucketName } from "@/lib/s3";
+import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
 
 export interface DescriptPublishAndArchivePayload {
   productionItemId: string;
@@ -195,6 +199,24 @@ export const descriptPublishAndArchiveTask: Task = async (
   await db.transaction(async (tx) => {
     // Delete only previously-Descript-published rows. Manually-uploaded
     // media has a different (or null) `source_url` and is preserved.
+    // Snapshot the rows about to be dropped so we can emit one
+    // media_removed event per deleted row to the activity feed (the row
+    // is gone after the delete, so we capture s3Key + index here).
+    const priorDescriptRows = await tx
+      .select({
+        id: productionItemMedia.id,
+        index: productionItemMedia.index,
+        kind: productionItemMedia.kind,
+        s3Key: productionItemMedia.s3Key,
+        posterS3Key: productionItemMedia.posterS3Key,
+      })
+      .from(productionItemMedia)
+      .where(
+        and(
+          eq(productionItemMedia.productionItemId, item.id),
+          sql`${productionItemMedia.sourceUrl} LIKE ${DESCRIPT_EXPORT_URL_PREFIX + "%"}`,
+        ),
+      );
     await tx
       .delete(productionItemMedia)
       .where(
@@ -204,7 +226,7 @@ export const descriptPublishAndArchiveTask: Task = async (
         ),
       );
 
-    await addMediaRowsToDraft(tx, {
+    const insertedRows = await addMediaRowsToDraft(tx, {
       itemId: item.id,
       files: [
         {
@@ -218,6 +240,47 @@ export const descriptPublishAndArchiveTask: Task = async (
         },
       ],
     });
+
+    // Audit: one media_removed per replaced prior render + one
+    // media_added for the freshly archived MP4. Source is the
+    // slice-algorithm — the conceptual pipeline that selects, trims, and
+    // renders this clip. (Descript is the tool inside that pipeline; its
+    // step-by-step events are already captured by the existing
+    // `tool_action` variant — composition ready, render started, etc.)
+    const sliceChanges: ContentChange[] = [];
+    for (const prior of priorDescriptRows) {
+      sliceChanges.push({
+        target: {
+          kind: "media_removed",
+          mediaId: prior.id,
+          index: prior.index,
+          mediaKind: prior.kind as "image" | "video",
+          s3Key: prior.s3Key,
+          posterS3Key: prior.posterS3Key ?? null,
+        },
+      });
+    }
+    for (const inserted of insertedRows) {
+      sliceChanges.push({
+        target: {
+          kind: "media_added",
+          mediaId: inserted.id,
+          index: inserted.index,
+          mediaKind: inserted.kind as "image" | "video",
+          s3Key: inserted.s3Key,
+          posterS3Key: inserted.posterS3Key ?? null,
+        },
+      });
+    }
+    if (sliceChanges.length > 0) {
+      await recordContentChanges({
+        tx,
+        contentItemId: item.id,
+        userId: null,
+        source: { kind: "algorithm", name: "slice-algorithm" },
+        changes: sliceChanges,
+      });
+    }
 
     // Mirror the new index-0 onto legacy single-cover columns so cover
     // thumbnails + content_media_url consumers see the latest. Same

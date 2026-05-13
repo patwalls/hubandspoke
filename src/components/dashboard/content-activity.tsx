@@ -17,6 +17,22 @@ import {
   FilmIcon,
   Send as SendIcon,
   Wrench as WrenchIcon,
+  SparklesIcon,
+  ScissorsIcon,
+  FishIcon,
+  EyeIcon,
+  GaugeIcon,
+  LayersIcon,
+  StarIcon,
+  ShuffleIcon,
+  CloudIcon,
+  DatabaseIcon,
+  ImageIcon,
+  FilmIcon as VideoIcon,
+  TrashIcon,
+  MoveHorizontalIcon,
+  CodeIcon,
+  PaletteIcon,
   type LucideIcon,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -53,6 +69,48 @@ type ToolActionPayload = {
   meta?: Record<string, string | number | null>;
 };
 
+// Discriminated source for `content_changed` events. Keep in sync with
+// `ContentChangeSource` in src/lib/db/schema.ts.
+type ContentChangeSource =
+  | { kind: "user" }
+  | { kind: "algorithm"; name: string }
+  | { kind: "tool"; tool: "descript" | "canva" | "typefully" }
+  | { kind: "sync"; system: "notion" | "account-content" | "metrics" }
+  | { kind: "import" }
+  | { kind: "api" };
+
+type ContentChangeTarget =
+  | { kind: "production_item_field"; field: string }
+  | {
+      kind: "draft_field";
+      draftId: string;
+      version: number;
+      field: string;
+    }
+  | {
+      kind: "media_added" | "media_removed";
+      mediaId: string;
+      index: number;
+      mediaKind: "image" | "video";
+      s3Key: string | null;
+      posterS3Key: string | null;
+    }
+  | {
+      kind: "media_reordered";
+      mediaId: string;
+      fromIndex: number;
+      toIndex: number;
+    };
+
+type ContentChangedPayload = {
+  type: "content_changed";
+  source: ContentChangeSource;
+  target: ContentChangeTarget;
+  from?: string | number | boolean | null;
+  to?: string | number | boolean | null;
+  truncated?: boolean;
+};
+
 type EventPayload =
   | { type: "status_change"; from: string | null; to: string | null }
   | { type: "killed"; from: string | null; reason: string | null }
@@ -76,6 +134,7 @@ type EventPayload =
       sourceType: string;
       postType: string | null;
     }
+  | ContentChangedPayload
   | ToolActionPayload;
 
 // Registry for `tool_action` events. Key on the `tool` string the worker
@@ -89,6 +148,86 @@ const TOOL_REGISTRY: Record<
   typefully: { label: "Typefully", Icon: SendIcon, accent: "text-blue-600" },
 };
 const TOOL_FALLBACK = { label: "Tool", Icon: WrenchIcon, accent: "text-muted-foreground" };
+
+// Registry for named algorithms that emit `content_changed` events under
+// `source: { kind: "algorithm", name }`. Activity feed renders the badge
+// (icon + label + accent) in place of a user avatar. Adding a new algo =
+// one row here.
+const ALGORITHM_REGISTRY: Record<
+  string,
+  { label: string; Icon: LucideIcon; accent: string }
+> = {
+  "draft-algorithm": { label: "Draft Algorithm", Icon: SparklesIcon, accent: "text-violet-600" },
+  "slice-algorithm": { label: "Slice Algorithm", Icon: ScissorsIcon, accent: "text-orange-600" },
+  "hook-extractor": { label: "Hook Extractor", Icon: FishIcon, accent: "text-cyan-600" },
+  "vision-extractor": { label: "Vision Extractor", Icon: EyeIcon, accent: "text-emerald-600" },
+  "threshold-monitor": { label: "Threshold Monitor", Icon: GaugeIcon, accent: "text-amber-600" },
+  "clip-idea-generator": { label: "Clip Idea Generator", Icon: LayersIcon, accent: "text-pink-600" },
+  "evergreen-classifier": { label: "Evergreen Classifier", Icon: StarIcon, accent: "text-lime-600" },
+  "cross-post-classifier": { label: "Cross-Post Classifier", Icon: ShuffleIcon, accent: "text-sky-600" },
+  enrichment: { label: "Enrichment", Icon: PaletteIcon, accent: "text-fuchsia-600" },
+};
+const ALGORITHM_FALLBACK = { label: "Algorithm", Icon: SparklesIcon, accent: "text-muted-foreground" };
+
+// Sync-source badges (Notion sync, metrics refresh, account content sync).
+const SYNC_REGISTRY: Record<
+  string,
+  { label: string; Icon: LucideIcon; accent: string }
+> = {
+  notion: { label: "Notion Sync", Icon: CloudIcon, accent: "text-slate-600" },
+  "account-content": { label: "Account Sync", Icon: DatabaseIcon, accent: "text-slate-600" },
+  metrics: { label: "Metrics Refresh", Icon: GaugeIcon, accent: "text-slate-600" },
+};
+const SYNC_FALLBACK = { label: "Sync", Icon: CloudIcon, accent: "text-muted-foreground" };
+
+const IMPORT_BADGE = { label: "Imported", Icon: DatabaseIcon, accent: "text-muted-foreground" };
+const API_BADGE = { label: "API", Icon: CodeIcon, accent: "text-muted-foreground" };
+
+/** Resolve a discriminated `ContentChangeSource` to its display badge.
+ *  Returns null for `{ kind: "user" }` — those use the actor avatar. */
+function badgeForSource(
+  source: ContentChangeSource,
+): { label: string; Icon: LucideIcon; accent: string } | null {
+  if (source.kind === "user") return null;
+  if (source.kind === "algorithm") {
+    return ALGORITHM_REGISTRY[source.name] ?? ALGORITHM_FALLBACK;
+  }
+  if (source.kind === "tool") {
+    return TOOL_REGISTRY[source.tool] ?? TOOL_FALLBACK;
+  }
+  if (source.kind === "sync") {
+    return SYNC_REGISTRY[source.system] ?? SYNC_FALLBACK;
+  }
+  if (source.kind === "import") return IMPORT_BADGE;
+  return API_BADGE;
+}
+
+/** Human-readable labels for `production_item_field.field` strings.
+ *  Falls through to the raw key when not listed — safer than throwing. */
+const FIELD_LABELS: Record<string, string> = {
+  title: "Title",
+  hook: "Hook",
+  overlay: "Overlay text",
+  description: "Description",
+  coverDescription: "Cover description",
+  contentBody: "Content body",
+  format: "Format",
+  accountId: "Account",
+  postType: "Post type",
+  publishedLink: "Published link",
+  publishedDate: "Published date",
+  pillarContentItemId: "Pillar",
+  repostedFromItemId: "Reposted from",
+  producerUserId: "Producer",
+  utmCampaign: "UTM campaign",
+  shortLinkSlug: "Short link slug",
+  authorHandle: "Author handle",
+  authorDisplayName: "Author name",
+};
+
+function fieldLabel(field: string): string {
+  return FIELD_LABELS[field] ?? field;
+}
 
 interface EventItem {
   kind: "event";
@@ -490,13 +629,76 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
     }
   };
 
+  // System-change toggle: hides cron / algorithm / tool / sync writes by
+  // default so the feed stays tame on items with chatty cron history.
+  // Editor preference, persisted in localStorage per user (no server
+  // round-trip). Comments and human edits always show.
+  const [showSystem, setShowSystem] = useState(false);
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(
+        "hubandspoke:activity:show-system",
+      );
+      if (stored === "true") setShowSystem(true);
+    } catch {
+      // localStorage may be unavailable (SSR, private mode) — default to
+      // hidden is the safest user experience.
+    }
+  }, []);
+  const toggleShowSystem = () => {
+    setShowSystem((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(
+          "hubandspoke:activity:show-system",
+          String(next),
+        );
+      } catch {
+        // ignore — toggle still works in-session
+      }
+      return next;
+    });
+  };
+  // Filter only `content_changed` events whose source.kind is non-user.
+  // All other event variants (status_change, item_created, tool_action,
+  // killed, repost_created, …) stay visible regardless — they're already
+  // editorially meaningful by their existence.
+  const hiddenSystemCount = items.filter(
+    (item) =>
+      item.kind === "event" &&
+      item.payload.type === "content_changed" &&
+      item.payload.source.kind !== "user",
+  ).length;
+  const visibleItems = showSystem
+    ? items
+    : items.filter(
+        (item) =>
+          item.kind !== "event" ||
+          item.payload.type !== "content_changed" ||
+          item.payload.source.kind === "user",
+      );
+
   return (
     <div className="rounded-lg border border-border bg-card p-5 space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">Activity</h2>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Comments and status changes as this post moves through review.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Activity</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Comments, content edits, and tool integrations as this post moves through review.
+          </p>
+        </div>
+        {hiddenSystemCount > 0 && (
+          <button
+            type="button"
+            onClick={toggleShowSystem}
+            className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            title="Toggle system-generated changes (cron enrichment, AI regenerates, sync writes)"
+          >
+            {showSystem
+              ? "Hide system changes"
+              : `Show system changes (${hiddenSystemCount})`}
+          </button>
+        )}
       </div>
 
       {error && (
@@ -508,12 +710,12 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
       <div className="space-y-4">
         {loading && !hasLoaded ? (
           <p className="text-sm text-muted-foreground">Loading activity…</p>
-        ) : items.length === 0 ? (
+        ) : visibleItems.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No activity yet. Start the discussion.
           </p>
         ) : (
-          items.map((item) =>
+          visibleItems.map((item) =>
             item.kind === "comment" ? (
               <CommentRow
                 key={item.id}
@@ -681,6 +883,14 @@ function EventRow({
   const tool = isToolAction
     ? TOOL_REGISTRY[(event.payload as ToolActionPayload).tool] ?? TOOL_FALLBACK
     : null;
+  // content_changed with a non-user source: render the source badge
+  // (algorithm / tool / sync / import / api) in place of an avatar.
+  // User-sourced content_changed events fall through to the avatar.
+  const sourceBadge =
+    event.payload.type === "content_changed" &&
+    event.payload.source.kind !== "user"
+      ? badgeForSource(event.payload.source)
+      : null;
   return (
     <div className="flex gap-3 items-center">
       {tool ? (
@@ -691,6 +901,16 @@ function EventRow({
           )}
         >
           <tool.Icon className="size-4" />
+        </div>
+      ) : sourceBadge ? (
+        <div
+          className={cn(
+            "size-8 rounded-full bg-accent inline-flex items-center justify-center shrink-0",
+            sourceBadge.accent,
+          )}
+          title={sourceBadge.label}
+        >
+          <sourceBadge.Icon className="size-4" />
         </div>
       ) : avatarUrl ? (
         /* eslint-disable-next-line @next/next/no-img-element */
@@ -839,6 +1059,14 @@ function EventBody({
   if (event.payload.type === "tool_action") {
     return <ToolActionBody actor={actorName} payload={event.payload} />;
   }
+  if (event.payload.type === "content_changed") {
+    return (
+      <ContentChangedBody
+        actorName={actorName}
+        payload={event.payload}
+      />
+    );
+  }
   if (event.payload.type === "item_created") {
     const { source, format, sourceType, postType } = event.payload;
     const sourceLabel = SOURCE_LABELS[source] ?? source;
@@ -942,6 +1170,204 @@ function StatusChip({
       )}
     >
       {label}
+    </span>
+  );
+}
+
+/**
+ * Renders a `content_changed` event. The actor (user vs algorithm vs tool
+ * vs sync vs import vs api) drives the leading phrasing. The target.kind
+ * picks the body: production_item_field / draft_field get a compact
+ * before → after diff; media variants render a thumbnail-bearing line.
+ */
+function ContentChangedBody({
+  actorName,
+  payload,
+}: {
+  actorName: string;
+  payload: ContentChangedPayload;
+}) {
+  const { source, target } = payload;
+  const subject =
+    source.kind === "user" ? (
+      <span className="font-medium text-foreground">{actorName}</span>
+    ) : (
+      (() => {
+        const badge = badgeForSource(source);
+        if (!badge) return <span className="font-medium text-foreground">{actorName}</span>;
+        const { Icon, label, accent } = badge;
+        return (
+          <span className={cn("inline-flex items-center gap-1 font-medium", accent)}>
+            <Icon className="size-3.5" />
+            {label}
+          </span>
+        );
+      })()
+    );
+
+  if (target.kind === "production_item_field") {
+    return (
+      <div className="space-y-1">
+        <div>
+          {subject} changed{" "}
+          <span className="font-medium text-foreground">
+            {fieldLabel(target.field)}
+          </span>
+        </div>
+        <EditValueDiff
+          from={payload.from ?? null}
+          to={payload.to ?? null}
+          truncated={!!payload.truncated}
+        />
+      </div>
+    );
+  }
+  if (target.kind === "draft_field") {
+    return (
+      <div className="space-y-1">
+        <div>
+          {subject} edited the{" "}
+          <span className="font-medium text-foreground">
+            {fieldLabel(target.field)}
+          </span>{" "}
+          <span className="text-xs text-muted-foreground">
+            (caption v{target.version})
+          </span>
+        </div>
+        <EditValueDiff
+          from={payload.from ?? null}
+          to={payload.to ?? null}
+          truncated={!!payload.truncated}
+        />
+      </div>
+    );
+  }
+  if (target.kind === "media_added" || target.kind === "media_removed") {
+    const verb = target.kind === "media_added" ? "added" : "removed";
+    const Icon = target.kind === "media_added" ? ImageIcon : TrashIcon;
+    return (
+      <div className="flex items-center gap-2">
+        <span>
+          {subject} {verb} slide {target.index + 1}{" "}
+          <span className="text-xs text-muted-foreground">
+            ({target.mediaKind})
+          </span>
+        </span>
+        <MediaThumb
+          s3Key={target.s3Key}
+          posterS3Key={target.posterS3Key}
+          kind={target.mediaKind}
+          fallbackIcon={Icon}
+        />
+      </div>
+    );
+  }
+  if (target.kind === "media_reordered") {
+    return (
+      <span>
+        {subject} moved slide {target.fromIndex + 1} to position{" "}
+        {target.toIndex + 1}{" "}
+        <MoveHorizontalIcon className="inline size-3.5 align-text-bottom" />
+      </span>
+    );
+  }
+  return null;
+}
+
+/** Compact diff renderer used by ContentChangedBody. Two stacked mono rows
+ *  for before / after with 120-char clamp. Long values get a "Show full"
+ *  expander that pops the un-truncated text in a small popover. */
+function EditValueDiff({
+  from,
+  to,
+  truncated,
+}: {
+  from: string | number | boolean | null;
+  to: string | number | boolean | null;
+  truncated: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const f = formatValue(from);
+  const t = formatValue(to);
+  const needsClamp =
+    !expanded && (f.length > 120 || t.length > 120 || truncated);
+  const renderFrom = needsClamp ? clamp(f, 120) : f;
+  const renderTo = needsClamp ? clamp(t, 120) : t;
+  return (
+    <div className="space-y-0.5 text-xs font-mono">
+      <div className="text-muted-foreground/80">
+        <span className="inline-block w-12 text-muted-foreground/60">from</span>
+        <span className="whitespace-pre-wrap break-words">{renderFrom}</span>
+      </div>
+      <div className="text-foreground">
+        <span className="inline-block w-12 text-muted-foreground/60">to</span>
+        <span className="whitespace-pre-wrap break-words">{renderTo}</span>
+      </div>
+      {(needsClamp || (expanded && truncated)) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="ml-12 mt-0.5 inline-flex items-center gap-1 text-[11px] font-sans text-primary hover:underline"
+        >
+          {expanded ? "Hide" : "Show full"}
+        </button>
+      )}
+      {truncated && expanded && (
+        <p className="ml-12 text-[10px] font-sans text-muted-foreground/70">
+          Truncated at write time; longer values are recoverable from the
+          version chain.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function formatValue(v: string | number | boolean | null): string {
+  if (v === null || v === undefined) return "(empty)";
+  if (typeof v === "string") return v.length === 0 ? "(empty)" : v;
+  return String(v);
+}
+
+function clamp(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + "…";
+}
+
+/** Tiny thumbnail for media_added / media_removed events. Falls back to
+ *  a generic icon when no s3Key is recoverable. Presigned URLs are
+ *  fetched lazily via /api/files (server-side auth proxy) so deleted-row
+ *  snapshots still render after the underlying row is gone. */
+function MediaThumb({
+  s3Key,
+  posterS3Key,
+  kind,
+  fallbackIcon: FallbackIcon,
+}: {
+  s3Key: string | null;
+  posterS3Key: string | null;
+  kind: "image" | "video";
+  fallbackIcon: LucideIcon;
+}) {
+  const key = posterS3Key ?? s3Key;
+  if (!key) {
+    return (
+      <span className="inline-flex size-8 items-center justify-center rounded border border-border bg-muted text-muted-foreground">
+        <FallbackIcon className="size-4" />
+      </span>
+    );
+  }
+  return (
+    <span className="relative inline-flex size-8 overflow-hidden rounded border border-border bg-muted">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`/api/files/${encodeURIComponent(key)}`}
+        alt=""
+        className="h-full w-full object-cover"
+        loading="lazy"
+      />
+      {kind === "video" && (
+        <VideoIcon className="absolute right-0 bottom-0 size-3 rounded-tl bg-black/60 p-0.5 text-white" />
+      )}
     </span>
   );
 }

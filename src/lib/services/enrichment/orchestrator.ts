@@ -10,7 +10,69 @@ import { enrichThreadsItem } from "./threads";
 import { enrichLinkedInItem } from "./linkedin";
 import { enrichTikTokItem } from "./tiktok";
 import { maybeEnqueueWhisperTranscribe } from "@/lib/services/transcribe-after-upload";
+import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
 import type { EnrichmentResult } from "./types";
+
+/** Columns enrichment writes that we audit in the activity feed. Excludes
+ *  pure system-state columns (enrichment_* counters, media_s3_* mirrors,
+ *  thumbnail URL, performance metrics) — those change on every sweep and
+ *  have no audit value. Title is excluded because Notion-authoritative
+ *  items already capture title changes through `cron:notion-sync`. */
+const AUDITED_ENRICHMENT_FIELDS = [
+  "hook",
+  "overlay",
+  "description",
+  "coverDescription",
+  "contentBody",
+  "authorHandle",
+  "authorDisplayName",
+] as const;
+
+/**
+ * Compare an enrichment-result `updates` payload against the item's
+ * current row state and emit one `content_changed` event per audited
+ * field that actually moved. Source is the `enrichment` algorithm —
+ * activity feed renders these under the "Show system changes" filter.
+ *
+ * Best-effort: failure here logs and continues so we don't unwind an
+ * otherwise-successful enrichment.
+ */
+async function auditEnrichmentDiff(
+  itemId: string,
+  updates: Partial<typeof productionItems.$inferInsert>,
+  before: Record<string, unknown>,
+): Promise<void> {
+  const changes: ContentChange[] = [];
+  for (const key of AUDITED_ENRICHMENT_FIELDS) {
+    const incoming = updates[key];
+    if (incoming === undefined) continue;
+    const fromVal = before[key];
+    if (fromVal === incoming) continue;
+    changes.push({
+      target: { kind: "production_item_field", field: key },
+      from: (fromVal ?? null) as string | number | boolean | null,
+      to: (incoming ?? null) as string | number | boolean | null,
+    });
+  }
+  if (changes.length === 0) return;
+  try {
+    await recordContentChanges({
+      tx: db,
+      contentItemId: itemId,
+      userId: null,
+      source: { kind: "algorithm", name: "enrichment" },
+      changes,
+    });
+  } catch (err) {
+    console.error(
+      `[enrichment] audit emit failed for item=${itemId}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
 
 /** Items per sweep tick. Conservative — first sweep after deploy will be the
  *  largest because nothing is enriched yet; tune up once steady state hits. */
@@ -99,6 +161,22 @@ export async function enrichSingleItem(
 
   if (!result) return null;
 
+  // Snapshot audited fields before applying the update so we can diff
+  // and emit `content_changed` events for any of them that moved.
+  const [beforeRow] = await db
+    .select({
+      hook: productionItems.hook,
+      overlay: productionItems.overlay,
+      description: productionItems.description,
+      coverDescription: productionItems.coverDescription,
+      contentBody: productionItems.contentBody,
+      authorHandle: productionItems.authorHandle,
+      authorDisplayName: productionItems.authorDisplayName,
+    })
+    .from(productionItems)
+    .where(eq(productionItems.id, itemId))
+    .limit(1);
+
   await db
     .update(productionItems)
     .set({
@@ -108,6 +186,10 @@ export async function enrichSingleItem(
       enrichmentAttempts: sql`${productionItems.enrichmentAttempts} + 1`,
     })
     .where(eq(productionItems.id, itemId));
+
+  if (beforeRow) {
+    await auditEnrichmentDiff(itemId, result.updates, beforeRow);
+  }
 
   // If this enrichment just wrote a new mediaS3Key, kick off a Whisper
   // transcribe — every archived video/audio item should get a transcript
@@ -265,6 +347,20 @@ export async function runEnrichmentSweep(
     summary.creditsSpent += result.creditsSpent;
     summary.enriched++;
 
+    const [beforeRow] = await db
+      .select({
+        hook: productionItems.hook,
+        overlay: productionItems.overlay,
+        description: productionItems.description,
+        coverDescription: productionItems.coverDescription,
+        contentBody: productionItems.contentBody,
+        authorHandle: productionItems.authorHandle,
+        authorDisplayName: productionItems.authorDisplayName,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, item.id))
+      .limit(1);
+
     await db
       .update(productionItems)
       .set({
@@ -274,6 +370,10 @@ export async function runEnrichmentSweep(
         enrichmentAttempts: sql`${productionItems.enrichmentAttempts} + 1`,
       })
       .where(eq(productionItems.id, item.id));
+
+    if (beforeRow) {
+      await auditEnrichmentDiff(item.id, result.updates, beforeRow);
+    }
   }
 
   await db.insert(syncLogs).values({

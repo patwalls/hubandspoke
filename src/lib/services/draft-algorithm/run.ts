@@ -21,7 +21,32 @@ import {
 } from "@/lib/platform-field-schemas";
 import { getMediaRule } from "@/lib/platform-media-rules";
 import { addMediaRowsToDraft } from "@/lib/services/draft-media";
+import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
 import { getTopPerformingCaptions } from "./exemplars";
+
+/**
+ * Coerce a content-draft field value to the primitive shape the
+ * `content_changed` event payload expects. String/number/boolean pass
+ * through; tags (string[]) become a comma-joined string so the diff
+ * renders compactly; anything else lands as null.
+ */
+function coerceForEvent(v: unknown): string | number | boolean | null {
+  if (v == null) return null;
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+    return v;
+  }
+  if (Array.isArray(v)) {
+    const parts = v
+      .filter((x): x is string => typeof x === "string")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    return parts.join(", ");
+  }
+  return null;
+}
 
 // The Draft Algorithm — V1.
 //
@@ -579,7 +604,10 @@ export async function runDraftAlgorithm(
   // happy. Works for first insert too (prevCurrent is undefined → version 1).
   const inserted = await db.transaction(async (tx) => {
     const [prevCurrent] = await tx
-      .select({ version: contentDrafts.version })
+      .select({
+        version: contentDrafts.version,
+        content: contentDrafts.content,
+      })
       .from(contentDrafts)
       .where(eq(contentDrafts.productionItemId, productionItemId))
       .orderBy(desc(contentDrafts.version))
@@ -610,6 +638,41 @@ export async function runDraftAlgorithm(
         createdByUserId: actorUserId,
       })
       .returning();
+
+    // Emit one `content_changed` event per content key that the algorithm
+    // actually moved. Surfaces "Draft Algorithm rewrote the caption" in
+    // the activity feed under the Algorithm-source filter. Skipping
+    // first-time inserts where prevCurrent is null avoids a useless
+    // "(empty) → ..." row on item creation. userId is null — the
+    // ALGORITHM_REGISTRY entry renders an icon/badge for it.
+    if (prevCurrent) {
+      const prevContent = (prevCurrent.content ?? {}) as Record<string, unknown>;
+      const nextContent = result.content as unknown as Record<string, unknown>;
+      const allKeys = new Set([
+        ...Object.keys(prevContent),
+        ...Object.keys(nextContent),
+      ]);
+      const draftChanges: ContentChange[] = [];
+      for (const key of allKeys) {
+        draftChanges.push({
+          target: {
+            kind: "draft_field",
+            draftId: row.id,
+            version: row.version,
+            field: key,
+          },
+          from: coerceForEvent(prevContent[key]),
+          to: coerceForEvent(nextContent[key]),
+        });
+      }
+      await recordContentChanges({
+        tx,
+        contentItemId: productionItemId,
+        userId: null,
+        source: { kind: "algorithm", name: "draft-algorithm" },
+        changes: draftChanges,
+      });
+    }
 
     // V1.1 media attachment. Only attach when:
     //   1. Agent picked an actionable action (not "none").

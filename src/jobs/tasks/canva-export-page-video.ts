@@ -6,6 +6,10 @@ import { createCanvaExport, fetchCanvaExportJob } from "@/lib/canva";
 import { archiveRemoteToS3 } from "@/lib/services/enrichment/shared";
 import { bucketName } from "@/lib/s3";
 import { recordToolAction } from "@/lib/services/content-events";
+import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
 
 export interface CanvaExportPageVideoPayload {
   productionItemId: string;
@@ -88,7 +92,12 @@ export const canvaExportPageVideoTask: Task = async (rawPayload, helpers) => {
     // the carousel a real thumbnail while the video metadata loads, and
     // also gives the editor a frame fallback if the playback fails.
     const [existing] = await db
-      .select({ s3Key: productionItemMedia.s3Key })
+      .select({
+        id: productionItemMedia.id,
+        s3Key: productionItemMedia.s3Key,
+        kind: productionItemMedia.kind,
+        posterS3Key: productionItemMedia.posterS3Key,
+      })
       .from(productionItemMedia)
       .where(
         and(
@@ -115,8 +124,9 @@ export const canvaExportPageVideoTask: Task = async (rawPayload, helpers) => {
       sourceUrl: url,
       uploadedAt: new Date(),
     };
+    let mediaRowId: string;
     if (existing) {
-      await db
+      const [updated] = await db
         .update(productionItemMedia)
         .set(row)
         .where(
@@ -124,10 +134,51 @@ export const canvaExportPageVideoTask: Task = async (rawPayload, helpers) => {
             eq(productionItemMedia.productionItemId, payload.productionItemId),
             eq(productionItemMedia.index, targetMediaIndex),
           ),
-        );
+        )
+        .returning({ id: productionItemMedia.id });
+      mediaRowId = updated.id;
     } else {
-      await db.insert(productionItemMedia).values(row);
+      const [inserted] = await db
+        .insert(productionItemMedia)
+        .values(row)
+        .returning({ id: productionItemMedia.id });
+      mediaRowId = inserted.id;
     }
+
+    // Audit trail: removed the PNG snapshot, added the MP4. Both events
+    // share the (item, index) so the activity feed renders the swap as
+    // two adjacent rows with thumbnails. Skip the removed event when
+    // there was no prior row (first run of a never-archived item).
+    const mediaChanges: ContentChange[] = [];
+    if (existing) {
+      mediaChanges.push({
+        target: {
+          kind: "media_removed",
+          mediaId: existing.id,
+          index: targetMediaIndex,
+          mediaKind: existing.kind as "image" | "video",
+          s3Key: existing.s3Key,
+          posterS3Key: existing.posterS3Key ?? null,
+        },
+      });
+    }
+    mediaChanges.push({
+      target: {
+        kind: "media_added",
+        mediaId: mediaRowId,
+        index: targetMediaIndex,
+        mediaKind: "video",
+        s3Key: archived.key,
+        posterS3Key,
+      },
+    });
+    await recordContentChanges({
+      tx: db,
+      contentItemId: payload.productionItemId,
+      userId: null,
+      source: { kind: "tool", tool: "canva" },
+      changes: mediaChanges,
+    });
 
     await db
       .update(productionItems)

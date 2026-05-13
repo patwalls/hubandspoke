@@ -19,6 +19,10 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { openai } from "@/lib/openai";
+import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
 import { BadRequestError } from "openai";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
@@ -270,6 +274,9 @@ export async function extractVisionForItem(
       id: productionItems.id,
       posterS3Key: productionItems.posterS3Key,
       hookSource: productionItems.hookSource,
+      hook: productionItems.hook,
+      overlay: productionItems.overlay,
+      coverDescription: productionItems.coverDescription,
       visionExtractedAt: productionItems.visionExtractedAt,
     })
     .from(productionItems)
@@ -331,6 +338,52 @@ export async function extractVisionForItem(
     .update(productionItems)
     .set(updates)
     .where(eq(productionItems.id, productionItemId));
+
+  // Audit hook / overlay / coverDescription changes from this vision pass.
+  // Each emitted under the `vision-extractor` algorithm so the activity
+  // feed can show "Vision Extractor wrote overlay text" alongside the
+  // human edits. Best-effort.
+  try {
+    const visionChanges: ContentChange[] = [];
+    if (updates.hook !== undefined && updates.hook !== existing.hook) {
+      visionChanges.push({
+        target: { kind: "production_item_field", field: "hook" },
+        from: existing.hook ?? null,
+        to: (updates.hook ?? null) as string | null,
+      });
+    }
+    if (updates.overlay !== undefined && updates.overlay !== existing.overlay) {
+      visionChanges.push({
+        target: { kind: "production_item_field", field: "overlay" },
+        from: existing.overlay ?? null,
+        to: (updates.overlay ?? null) as string | null,
+      });
+    }
+    if (
+      updates.coverDescription !== undefined &&
+      updates.coverDescription !== existing.coverDescription
+    ) {
+      visionChanges.push({
+        target: { kind: "production_item_field", field: "coverDescription" },
+        from: existing.coverDescription ?? null,
+        to: (updates.coverDescription ?? null) as string | null,
+      });
+    }
+    if (visionChanges.length > 0) {
+      await recordContentChanges({
+        tx: db,
+        contentItemId: productionItemId,
+        userId: null,
+        source: { kind: "algorithm", name: "vision-extractor" },
+        changes: visionChanges,
+      });
+    }
+  } catch (err) {
+    console.error(
+      `[vision-extract] audit emit failed for item=${productionItemId}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
 
   if (canUpgradeHook) {
     return { status: "ok", upgradedHook: true };

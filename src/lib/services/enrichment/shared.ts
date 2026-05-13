@@ -99,6 +99,20 @@ export interface ArchiveCarouselResult {
    *  columns on production_items. */
   primary: ArchiveResult | null;
   primaryPoster: ArchiveResult | null;
+  /** Rows the helper actually inserted or replaced, in slide-index order.
+   *  Workers use this to emit one `media_added` event per affected slide
+   *  for the activity-feed audit trail. Empty when archive was a complete
+   *  no-op (every slide's sourceUrl already matched what's in the table). */
+  affected: AffectedSlide[];
+}
+
+export interface AffectedSlide {
+  mediaId: string;
+  index: number;
+  kind: "image" | "video";
+  s3Key: string;
+  posterS3Key: string | null;
+  mode: "inserted" | "replaced";
 }
 
 /**
@@ -120,11 +134,13 @@ export async function archiveCarouselMedia(
     total: slides.length,
     primary: null,
     primaryPoster: null,
+    affected: [],
   };
   if (!slides.length) return out;
 
   const existing = await db
     .select({
+      id: productionItemMedia.id,
       index: productionItemMedia.index,
       sourceUrl: productionItemMedia.sourceUrl,
       s3Key: productionItemMedia.s3Key,
@@ -202,8 +218,10 @@ export async function archiveCarouselMedia(
       sourceUrl: slide.url,
       uploadedAt: new Date(),
     };
+    let mediaId: string;
+    let mode: "inserted" | "replaced";
     if (prev) {
-      await db
+      const [returned] = await db
         .update(productionItemMedia)
         .set(row)
         .where(
@@ -211,12 +229,28 @@ export async function archiveCarouselMedia(
             eq(productionItemMedia.productionItemId, productionItemId),
             eq(productionItemMedia.index, i)
           )
-        );
+        )
+        .returning({ id: productionItemMedia.id });
+      mediaId = returned.id;
+      mode = "replaced";
     } else {
-      await db.insert(productionItemMedia).values(row);
+      const [returned] = await db
+        .insert(productionItemMedia)
+        .values(row)
+        .returning({ id: productionItemMedia.id });
+      mediaId = returned.id;
+      mode = "inserted";
     }
 
     out.archived += 1;
+    out.affected.push({
+      mediaId,
+      index: i,
+      kind: slide.kind,
+      s3Key: mediaRes.key,
+      posterS3Key: posterRes?.key ?? null,
+      mode,
+    });
     if (i === 0) {
       out.primary = mediaRes;
       out.primaryPoster = posterRes;

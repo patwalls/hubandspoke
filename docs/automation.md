@@ -58,6 +58,31 @@ AUTO-CHAINS (one task enqueues another)
   archive-yt-local.ts (script)         ── on S3 upload ─→ transcribe-whisper
   backfill-instagram-bodies.mjs (script) ── on S3 upload ─→ transcribe-whisper
   enqueueNotification() ───────────────────────────→ notification-send
+
+CONTENT VERSIONING (2026-05-13)
+  Every state-changing write to tracked content (production_items field,
+  content_drafts.content, production_item_media row) calls
+  `recordContentChanges()` in `src/lib/services/content-revisions.ts`
+  inside the same transaction as the mutating write. Emits one
+  `content_changed` row to `content_events` per moved field/media. The
+  payload's `source` discriminator (user / algorithm / tool / sync /
+  import / api) drives the activity-feed renderer's badge + filter. No
+  separate versions table — content_events IS the audit trail. The
+  draft-edit path additionally clones content_drafts on every commit so
+  the full prior text is recoverable from the version chain.
+
+  Instrumented write sites:
+    PUT /api/production-items                       → user
+    PUT /api/production-items/[id]/drafts/[draftId] → user (clone-on-write)
+    POST /api/production-items/[id]/draft (regen)   → algorithm:draft-algorithm
+    POST/DELETE /api/production-items/[id]/media    → user
+    canva-create-copy / canva-export-design /
+      canva-export-page-video tasks                 → tool:canva
+    descript-publish-and-archive task               → algorithm:slice-algorithm
+    enrichment orchestrator                         → algorithm:enrichment
+    hook-extract orchestrator                       → algorithm:hook-extractor
+    vision-extract                                  → algorithm:vision-extractor
+    repost-seed (also used by cross-post route)     → import
 ```
 
 All cron entries are graphile-worker crontab — no Heroku Scheduler. Worker

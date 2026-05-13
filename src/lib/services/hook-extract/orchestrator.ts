@@ -21,6 +21,7 @@ import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { openai } from "@/lib/openai";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
+import { recordContentChanges } from "@/lib/services/content-revisions";
 
 const MODEL = "gpt-4.1-mini";
 export const EXTRACTOR_VERSION = `${MODEL}:v1`;
@@ -327,6 +328,30 @@ export async function extractHookForItem(
       updatedAt: new Date(),
     })
     .where(eq(productionItems.id, productionItemId));
+
+  // Audit the hook write so the activity feed can show
+  // "Hook Extractor: 'old hook' → 'new hook'" under the system-changes
+  // filter. existing.hook is the pre-write value we snapshotted above.
+  try {
+    await recordContentChanges({
+      tx: db,
+      contentItemId: productionItemId,
+      userId: null,
+      source: { kind: "algorithm", name: "hook-extractor" },
+      changes: [
+        {
+          target: { kind: "production_item_field", field: "hook" },
+          from: existing.hook ?? null,
+          to: result.hook,
+        },
+      ],
+    });
+  } catch (err) {
+    console.error(
+      `[hook-extract] audit emit failed for item=${productionItemId}:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
 
   return { status: "ok" };
 }

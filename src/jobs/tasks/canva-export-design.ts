@@ -8,6 +8,10 @@ import {
 } from "@/lib/canva";
 import { archiveCarouselMedia } from "@/lib/services/enrichment/shared";
 import { recordToolAction } from "@/lib/services/content-events";
+import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
 
 export interface CanvaExportDesignPayload {
   productionItemId: string;
@@ -131,6 +135,32 @@ export const canvaExportDesignTask: Task = async (rawPayload, helpers) => {
         archived: archive.archived,
       },
     });
+
+    // One `content_changed` event per slide the helper inserted or
+    // replaced, sourced as the Canva tool integration. Surfaces in the
+    // activity feed as "Canva added slide 1, slide 2, …" with a thumbnail
+    // per row. archiveCarouselMedia is idempotent so re-runs (e.g. editor
+    // re-triggers export after tweaking the design) emit only the slides
+    // whose sourceUrl actually moved.
+    if (archive.affected.length > 0) {
+      const mediaChanges: ContentChange[] = archive.affected.map((slide) => ({
+        target: {
+          kind: "media_added",
+          mediaId: slide.mediaId,
+          index: slide.index,
+          mediaKind: slide.kind,
+          s3Key: slide.s3Key,
+          posterS3Key: slide.posterS3Key,
+        },
+      }));
+      await recordContentChanges({
+        tx: db,
+        contentItemId: payload.productionItemId,
+        userId: null,
+        source: { kind: "tool", tool: "canva" },
+        changes: mediaChanges,
+      });
+    }
 
     helpers.logger.info(
       `canva-export-design ok item=${payload.productionItemId} design=${payload.designId} archived=${archive.archived}/${archive.total}`,

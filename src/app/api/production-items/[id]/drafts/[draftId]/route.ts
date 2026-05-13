@@ -7,20 +7,37 @@ import {
   type FormatFieldSchema,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
+import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
 
 interface RouteContext {
   params: Promise<{ id: string; draftId: string }>;
 }
 
-// PUT /api/production-items/[id]/drafts/[draftId]
-// Mutates the current draft in place. Stage 1 supports per-field patches:
-//   { patch: { <fieldKey>: <value> } }
-// The new value is validated against fieldSchemaSnapshot (types only — per-
-// field constraints like maxLength are UI-enforced for now).
-// Only the current draft is editable. History rows are immutable.
+/**
+ * PUT /api/production-items/[id]/drafts/[draftId]
+ *
+ * Mutates the current draft. Stage 1 accepts per-field patches:
+ *
+ *   { patch: { <fieldKey>: <value> } }
+ *
+ * Clone-on-write: instead of an in-place UPDATE that throws away the
+ * prior content, we demote the current draft to isCurrent=false and
+ * insert a NEW draft row with `version + 1` carrying the merged content.
+ * The full version chain is the audit trail for caption text — the
+ * activity feed renders one `content_changed` event per field that
+ * moved, and the activity-feed expander can fetch any historical
+ * version via `GET .../drafts?version=N`.
+ *
+ * Only the current draft is editable. Patching a stale snapshot would
+ * silently bifurcate the version chain, so we reject it.
+ */
 export async function PUT(request: NextRequest, context: RouteContext) {
   const guard = await requireSession();
   if (guard.response) return guard.response;
+  const actorUserId = guard.session.user.id as string;
 
   const { id, draftId } = await context.params;
 
@@ -63,9 +80,8 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   const keyToType = new Map(schema.fields.map((f) => [f.key, f.type] as const));
 
   const patchRecord = patch as Record<string, unknown>;
-  const nextContent: ContentDraftContent = {
-    ...(draft.content as ContentDraftContent),
-  };
+  const prevContent = draft.content as ContentDraftContent;
+  const nextContent: ContentDraftContent = { ...prevContent };
 
   for (const [key, value] of Object.entries(patchRecord)) {
     if (!knownKeys.has(key)) {
@@ -108,11 +124,83 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     }
   }
 
-  const [updated] = await db
-    .update(contentDrafts)
-    .set({ content: nextContent, updatedAt: new Date() })
-    .where(eq(contentDrafts.id, draftId))
-    .returning();
+  // Clone-on-write: demote current, insert v+1. Both writes inside the
+  // same tx as the diff emission so the version chain + audit trail
+  // commit atomically. The partial unique index
+  // `uq_content_drafts_current` enforces single-current at the DB level
+  // — order matters (demote before insert) to avoid a transient
+  // violation.
+  const [inserted] = await db.transaction(async (tx) => {
+    await tx
+      .update(contentDrafts)
+      .set({ isCurrent: false, updatedAt: new Date() })
+      .where(eq(contentDrafts.id, draft.id));
 
-  return NextResponse.json({ draft: updated });
+    const [next] = await tx
+      .insert(contentDrafts)
+      .values({
+        productionItemId: id,
+        version: draft.version + 1,
+        isCurrent: true,
+        content: nextContent,
+        fieldSchemaSnapshot: draft.fieldSchemaSnapshot as FormatFieldSchema,
+        generatedBy: "user:edit",
+        promptVersion: draft.promptVersion,
+        modelUsage: null,
+        createdByUserId: actorUserId,
+      })
+      .returning();
+
+    // One `content_changed` event per field touched in the patch whose
+    // value actually moved. recordContentChanges drops no-ops so if
+    // someone re-saves the same text the activity feed stays quiet.
+    const changes: ContentChange[] = [];
+    for (const key of Object.keys(patchRecord)) {
+      const prev = prevContent[key];
+      const post = nextContent[key];
+      changes.push({
+        target: {
+          kind: "draft_field",
+          draftId: next.id,
+          version: next.version,
+          field: key,
+        },
+        from: coerce(prev),
+        to: coerce(post),
+      });
+    }
+    await recordContentChanges({
+      tx,
+      contentItemId: id,
+      userId: actorUserId,
+      source: { kind: "user" },
+      changes,
+    });
+
+    return [next];
+  });
+
+  return NextResponse.json({ draft: inserted });
+}
+
+/**
+ * Coerce a content-draft field value to the primitive shape the event
+ * payload expects. Tags become a comma-joined string so the diff renders
+ * compactly; slides intentionally pass through as null (we don't ship
+ * slide editing yet and the renderer can't sensibly diff an array of
+ * objects in the activity feed).
+ */
+function coerce(v: unknown): string | number | boolean | null {
+  if (v == null) return null;
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+    return v;
+  }
+  if (Array.isArray(v)) {
+    const parts = v
+      .filter((x): x is string => typeof x === "string")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    return parts.join(", ");
+  }
+  return null;
 }

@@ -5,6 +5,10 @@ import { db } from "@/lib/db";
 import { productionItems, productionItemMedia } from "@/lib/db/schema";
 import { getPresignedGetUrl, headObject } from "@/lib/s3";
 import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
+import {
   ALLOWED_CONTENT_TYPES,
   MAX_FILES_PER_REQUEST,
   addMediaRowsToDraft,
@@ -42,6 +46,7 @@ const PRESIGN_GET_TTL = 60 * 60; // 1h, matches detail GET
 export async function POST(request: Request, context: RouteContext) {
   const guard = await requireSession();
   if (guard.response) return guard.response;
+  const actorUserId = guard.session.user.id as string;
 
   const { id } = await context.params;
 
@@ -194,6 +199,27 @@ export async function POST(request: Request, context: RouteContext) {
         })
         .where(eq(productionItems.id, id));
     }
+
+    // One media_added event per row inserted, so the activity feed can
+    // render a thumbnail per slide. s3Key + posterS3Key snapshot in the
+    // payload means future deletes don't invalidate the renderer.
+    const mediaChanges: ContentChange[] = rows.map((row) => ({
+      target: {
+        kind: "media_added",
+        mediaId: row.id,
+        index: row.index,
+        mediaKind: row.kind as "image" | "video",
+        s3Key: row.s3Key,
+        posterS3Key: row.posterS3Key ?? null,
+      },
+    }));
+    await recordContentChanges({
+      tx,
+      contentItemId: id,
+      userId: actorUserId,
+      source: { kind: "user" },
+      changes: mediaChanges,
+    });
 
     return rows;
   });

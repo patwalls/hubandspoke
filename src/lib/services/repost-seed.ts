@@ -22,6 +22,10 @@
 import { eq } from "drizzle-orm";
 import { contentDrafts, productionItemMedia } from "@/lib/db/schema";
 import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
+import {
   PLATFORM_FIELD_MAP,
   PLATFORM_FIELD_SCHEMAS,
   type PostType,
@@ -79,20 +83,42 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
     .from(productionItemMedia)
     .where(eq(productionItemMedia.productionItemId, sourceId));
 
+  const mediaChanges: ContentChange[] = [];
   if (sourceMedia.length > 0) {
-    await tx.insert(productionItemMedia).values(
-      sourceMedia.map((m) => ({
-        productionItemId: repostId,
-        index: m.index,
-        kind: m.kind,
-        s3Bucket: m.s3Bucket,
-        s3Key: m.s3Key,
-        contentType: m.contentType,
-        sizeBytes: m.sizeBytes,
-        posterS3Key: m.posterS3Key,
-        sourceUrl: m.sourceUrl,
-      }))
-    );
+    const inserted = await tx
+      .insert(productionItemMedia)
+      .values(
+        sourceMedia.map((m) => ({
+          productionItemId: repostId,
+          index: m.index,
+          kind: m.kind,
+          s3Bucket: m.s3Bucket,
+          s3Key: m.s3Key,
+          contentType: m.contentType,
+          sizeBytes: m.sizeBytes,
+          posterS3Key: m.posterS3Key,
+          sourceUrl: m.sourceUrl,
+        })),
+      )
+      .returning({
+        id: productionItemMedia.id,
+        index: productionItemMedia.index,
+        kind: productionItemMedia.kind,
+        s3Key: productionItemMedia.s3Key,
+        posterS3Key: productionItemMedia.posterS3Key,
+      });
+    for (const row of inserted) {
+      mediaChanges.push({
+        target: {
+          kind: "media_added",
+          mediaId: row.id,
+          index: row.index,
+          mediaKind: row.kind as "image" | "video",
+          s3Key: row.s3Key,
+          posterS3Key: row.posterS3Key ?? null,
+        },
+      });
+    }
   } else if (
     sourceLegacyMedia?.s3Bucket &&
     sourceLegacyMedia.s3Key &&
@@ -104,18 +130,48 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
     // path lights up without re-rendering through Descript. Schema
     // requires s3Bucket / s3Key / contentType non-null — skip the row
     // if any is missing.
-    await tx.insert(productionItemMedia).values({
-      productionItemId: repostId,
-      index: 0,
-      kind: sourceLegacyMedia.contentType.startsWith("video/")
-        ? "video"
-        : "image",
-      s3Bucket: sourceLegacyMedia.s3Bucket,
-      s3Key: sourceLegacyMedia.s3Key,
-      contentType: sourceLegacyMedia.contentType,
-      sizeBytes: null,
-      posterS3Key: sourceLegacyMedia.posterS3Key,
-      sourceUrl: null,
+    const kind: "image" | "video" = sourceLegacyMedia.contentType.startsWith(
+      "video/",
+    )
+      ? "video"
+      : "image";
+    const [inserted] = await tx
+      .insert(productionItemMedia)
+      .values({
+        productionItemId: repostId,
+        index: 0,
+        kind,
+        s3Bucket: sourceLegacyMedia.s3Bucket,
+        s3Key: sourceLegacyMedia.s3Key,
+        contentType: sourceLegacyMedia.contentType,
+        sizeBytes: null,
+        posterS3Key: sourceLegacyMedia.posterS3Key,
+        sourceUrl: null,
+      })
+      .returning({ id: productionItemMedia.id });
+    mediaChanges.push({
+      target: {
+        kind: "media_added",
+        mediaId: inserted.id,
+        index: 0,
+        mediaKind: kind,
+        s3Key: sourceLegacyMedia.s3Key,
+        posterS3Key: sourceLegacyMedia.posterS3Key ?? null,
+      },
+    });
+  }
+
+  // Audit each mirrored slide so the activity feed on the new repost
+  // shows "imported slide 1, slide 2, …" with thumbnails. Source is
+  // `import` — distinct from `user` so the activity feed can group these
+  // as "seeded from source" later if we want a different rendering.
+  if (mediaChanges.length > 0) {
+    await recordContentChanges({
+      tx,
+      contentItemId: repostId,
+      userId: actorUserId,
+      source: { kind: "import" },
+      changes: mediaChanges,
     });
   }
 

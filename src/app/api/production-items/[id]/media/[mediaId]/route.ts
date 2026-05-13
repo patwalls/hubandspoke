@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems, productionItemMedia } from "@/lib/db/schema";
 import { removeMediaRowFromDraft } from "@/lib/services/draft-media";
+import { recordContentChanges } from "@/lib/services/content-revisions";
 
 interface RouteContext {
   params: Promise<{ id: string; mediaId: string }>;
@@ -24,6 +25,7 @@ interface RouteContext {
 export async function DELETE(_request: Request, context: RouteContext) {
   const guard = await requireSession();
   if (guard.response) return guard.response;
+  const actorUserId = guard.session.user.id as string;
 
   const { id, mediaId } = await context.params;
 
@@ -48,6 +50,29 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const result = await db.transaction(async (tx) => {
     const removed = await removeMediaRowFromDraft(tx, { itemId: id, mediaId });
     if (!removed) return { removed: null };
+
+    // Snapshot the removed row's S3 keys into a media_removed event
+    // BEFORE we recompute the legacy mirrors. Without the snapshot the
+    // activity feed couldn't render a thumbnail for a deleted slide
+    // (the row is gone and the s3 object may eventually be GC'd).
+    await recordContentChanges({
+      tx,
+      contentItemId: id,
+      userId: actorUserId,
+      source: { kind: "user" },
+      changes: [
+        {
+          target: {
+            kind: "media_removed",
+            mediaId: removed.id,
+            index: removed.index,
+            mediaKind: removed.kind as "image" | "video",
+            s3Key: removed.s3Key,
+            posterS3Key: removed.posterS3Key ?? null,
+          },
+        },
+      ],
+    });
 
     // Recompute the legacy single-cover columns from whatever's now at
     // index 0 (or null them if the carousel is empty).

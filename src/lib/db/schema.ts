@@ -1155,6 +1155,82 @@ export type ContentEventPayload =
       format: string | null;
       sourceType: string; // "original" | "repost" | "cross_post" | "repurposed"
       postType: string | null;
+    }
+  // Versioning / audit-trail variant. Emitted whenever a tracked field on
+  // a production_item, a content_drafts.content key, or a
+  // production_item_media row changes. Source identifies the writer kind
+  // so the activity feed can render "Pat changed Hook" vs
+  // "Draft Algorithm rewrote the caption" vs "Slice Algorithm trimmed
+  // this clip". User edits go on `content_events.user_id` (the existing
+  // column); algorithm / tool / sync / import writes leave it null and
+  // get a registry-driven badge instead of an avatar. See
+  // `src/lib/services/content-revisions.ts` for the single helper that
+  // emits these.
+  | {
+      type: "content_changed";
+      source: ContentChangeSource;
+      target: ContentChangeTarget;
+      /** Before-value. Omitted for media variants (target carries enough
+       *  info). String values are truncated at 2000 chars + `truncated`
+       *  flag set; full prior content is recoverable from `content_drafts`
+       *  version rows for draft_field changes. */
+      from?: string | number | boolean | null;
+      to?: string | number | boolean | null;
+      truncated?: boolean;
+    };
+
+/**
+ * Who/what wrote a `content_changed` event. Adding a new algorithm = add
+ * a literal to `name` here + a row in `ALGORITHM_REGISTRY` in
+ * `src/lib/content-event-algorithms.ts`. Tools mirror the existing
+ * `TOOL_REGISTRY` keys in `content-activity.tsx`.
+ */
+export type ContentChangeSource =
+  | { kind: "user" }
+  | {
+      kind: "algorithm";
+      name:
+        | "draft-algorithm"
+        | "slice-algorithm"
+        | "hook-extractor"
+        | "vision-extractor"
+        | "threshold-monitor"
+        | "clip-idea-generator"
+        | "evergreen-classifier"
+        | "cross-post-classifier"
+        | "enrichment";
+    }
+  | { kind: "tool"; tool: "descript" | "canva" | "typefully" }
+  | { kind: "sync"; system: "notion" | "account-content" | "metrics" }
+  | { kind: "import" }
+  | { kind: "api" };
+
+/**
+ * What changed. Discriminated by `kind`. Field-level targets carry the
+ * field name; media targets snapshot enough metadata to render a
+ * thumbnail in the activity feed even after the underlying row is gone.
+ */
+export type ContentChangeTarget =
+  | { kind: "production_item_field"; field: string }
+  | {
+      kind: "draft_field";
+      draftId: string;
+      version: number;
+      field: string;
+    }
+  | {
+      kind: "media_added" | "media_removed";
+      mediaId: string;
+      index: number;
+      mediaKind: "image" | "video";
+      s3Key: string | null;
+      posterS3Key: string | null;
+    }
+  | {
+      kind: "media_reordered";
+      mediaId: string;
+      fromIndex: number;
+      toIndex: number;
     };
 
 export const contentEvents = pgTable(

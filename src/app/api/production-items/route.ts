@@ -26,6 +26,10 @@ import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { enqueue } from "@/jobs/enqueue";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 import { recordItemCreated } from "@/lib/services/item-created";
+import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
 
 function getNotion(): Client {
   const auth = process.env.NOTION_API_SECRET;
@@ -847,6 +851,45 @@ export async function PUT(request: NextRequest) {
       }
     }
 
+    // Snapshot the tracked-field values BEFORE the update so we can emit
+    // one `content_changed` event per field that actually moved. We skip
+    // status / editorUserId here because they already get dedicated
+    // `status_change` / `editor_change` events; perf metrics are
+    // intentionally not tracked (they tick from cron writes and have no
+    // audit value). Single SELECT — additive to the partial pre-fetches
+    // above. If the row was deleted between this SELECT and the UPDATE
+    // returning() will simply return no row and we'll skip the diff.
+    const trackedKeys = [
+      "title",
+      "accountId",
+      "postType",
+      "format",
+      "publishedLink",
+      "publishedDate",
+      "pillarContentItemId",
+      "repostedFromItemId",
+      "producerUserId",
+      "utmCampaign",
+      "shortLinkSlug",
+    ] as const;
+    const [before] = await db
+      .select({
+        title: productionItems.title,
+        accountId: productionItems.accountId,
+        postType: productionItems.postType,
+        format: productionItems.format,
+        publishedLink: productionItems.publishedLink,
+        publishedDate: productionItems.publishedDate,
+        pillarContentItemId: productionItems.pillarContentItemId,
+        repostedFromItemId: productionItems.repostedFromItemId,
+        producerUserId: productionItems.producerUserId,
+        utmCampaign: productionItems.utmCampaign,
+        shortLinkSlug: productionItems.shortLinkSlug,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, id))
+      .limit(1);
+
     let updated: typeof productionItems.$inferSelect | undefined;
     try {
       [updated] = await db.transaction(async (tx) => {
@@ -855,6 +898,41 @@ export async function PUT(request: NextRequest) {
           .set(updateData)
           .where(eq(productionItems.id, id))
           .returning();
+        if (row && before) {
+          // Build the diff against the snapshot. Each entry only lands if
+          // the value actually moved (recordContentChanges drops no-ops).
+          const changes: ContentChange[] = [];
+          for (const key of trackedKeys) {
+            const fromVal = before[key] as
+              | string
+              | number
+              | boolean
+              | null
+              | undefined;
+            const toVal = (row as Record<string, unknown>)[key] as
+              | string
+              | number
+              | boolean
+              | null
+              | undefined;
+            if (toVal !== undefined && fromVal !== toVal) {
+              changes.push({
+                target: { kind: "production_item_field", field: key },
+                from: fromVal ?? null,
+                to: toVal ?? null,
+              });
+            }
+          }
+          if (changes.length > 0) {
+            await recordContentChanges({
+              tx,
+              contentItemId: id,
+              userId: actorUserId,
+              source: { kind: "user" },
+              changes,
+            });
+          }
+        }
         if (row && statusTransition) {
           if (statusTransition.to === "Killed") {
             await tx.insert(contentEvents).values({
