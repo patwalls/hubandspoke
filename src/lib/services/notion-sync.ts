@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { productionItems, syncLogs, users } from "@/lib/db/schema";
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { isNotionAuthoritative } from "@/lib/platform";
-import { resolveAssignees } from "@/lib/services/assignees";
+import { resolveEditor } from "@/lib/services/assignees";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
 import { extractContentId } from "@/lib/platform-url";
@@ -485,10 +485,8 @@ export async function syncFromNotion(): Promise<{
         continue;
       }
 
-      const producer = extractPerson(properties, "Producer");
       const editor = extractPerson(properties, "Editor/Creator");
 
-      collectPerson(peopleBucket, producer);
       collectPerson(peopleBucket, editor);
 
       const notionUtmCampaign = extractUtmCampaign(properties);
@@ -503,7 +501,7 @@ export async function syncFromNotion(): Promise<{
         accountResolution?.postType ?? null,
         publishedLink
       );
-      // Fields every sync row writes. Producer/editor are deliberately absent:
+      // Fields every sync row writes. Editor is deliberately absent:
       // assignments are app-owned post-insert (see below for INSERT-only seed).
       // utmCampaign is also absent here — UPDATE path sets it only when Notion
       // has a non-empty value, INSERT path auto-generates when Notion is empty.
@@ -540,9 +538,9 @@ export async function syncFromNotion(): Promise<{
         .limit(1);
 
       if (existing.length > 0) {
-        // UPDATE path: skip producer/editor entirely. Hub & Spoke is now the
-        // source of truth for assignments — Notion edits to Producer/Editor
-        // after first sync are intentionally ignored.
+        // UPDATE path: skip editor entirely. Hub & Spoke is now the source of
+        // truth for assignments — Notion edits to Editor after first sync are
+        // intentionally ignored.
         // utmCampaign: only overwrite when Notion has a non-empty value so we
         // don't clobber an auto-generated or editor-tweaked slug with Notion's
         // blank.
@@ -604,23 +602,16 @@ export async function syncFromNotion(): Promise<{
         }
 
         // INSERT path: seed the legacy email/name columns for display, and
-        // resolve producer/editor FKs inline — prefer an email match against
-        // users, fall through to format/brand/global via resolveAssignees.
-        // The email lookup uses an in-memory cache so each unique email hits
-        // the DB once per sync.
-        const [producerFromEmail, editorFromEmail] = await Promise.all([
-          resolveAssigneeFromEmail(producer.email),
-          resolveAssigneeFromEmail(editor.email),
-        ]);
-        let producerUserId = producerFromEmail;
-        let editorUserId = editorFromEmail;
-        if (!producerUserId || !editorUserId) {
-          const resolved = await resolveAssignees({
+        // resolve the editor FK inline — prefer an email match against users,
+        // fall through to format/brand/global via resolveEditor. The email
+        // lookup uses an in-memory cache so each unique email hits the DB once
+        // per sync.
+        let editorUserId = await resolveAssigneeFromEmail(editor.email);
+        if (!editorUserId) {
+          editorUserId = await resolveEditor({
             brand: "starter-story",
             format: formatName,
           });
-          producerUserId = producerUserId ?? resolved.producerUserId;
-          editorUserId = editorUserId ?? resolved.editorUserId;
         }
         const utmCampaign =
           notionUtmCampaign ?? (await generateUtmCampaign(title));
@@ -639,13 +630,9 @@ export async function syncFromNotion(): Promise<{
             ...commonData,
             sourceType: resolvedSourceType,
             utmCampaign,
-            producerEmail: producer.email,
-            producerNotionUserId: producer.userId,
-            producerName: producer.name,
             editorEmail: editor.email,
             editorNotionUserId: editor.userId,
             editorName: editor.name,
-            producerUserId,
             editorUserId,
             createdVia: "sync:notion",
           })

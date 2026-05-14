@@ -215,7 +215,6 @@ interface DetailResponse {
   formats: BrandFormat[];
   repurposeTargets: BrandFormat[];
   pillar: PillarRef | null;
-  producer: AssignableUser | null;
   editor: AssignableUser | null;
   topPerformers: TopPerformer[];
   reposts: RepostRow[];
@@ -1169,7 +1168,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     try {
       // Mirror the queue-triage path: land in "Ready To Publish" and emit
       // the `repost_created` activity event. Editor defaults via
-      // `resolveAssignees` server-side (no picker on this surface).
+      // `resolveEditor` server-side (no picker on this surface).
       const res = await fetch(`/api/production-items/${contentId}/repost`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1821,10 +1820,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     return activeTabParam;
   })();
 
-  // Resolve the currently-selected producer/editor for the trigger display.
-  // Prefer the freshly-loaded assignable list (stays in sync with local
-  // selections), and fall back to the detail endpoint's authoritative record
-  // so we still render name + avatar even if the user isn't in the list.
+  // Resolve the currently-selected editor for the trigger display. Prefer the
+  // freshly-loaded assignable list (stays in sync with local selections), and
+  // fall back to the detail endpoint's authoritative record so we still render
+  // name + avatar even if the user isn't in the list.
   const editorUser = editorUserId
     ? assignableUsers.find((u) => u.id === editorUserId) ??
       (data.editor?.id === editorUserId ? data.editor : null)

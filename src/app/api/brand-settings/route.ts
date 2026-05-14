@@ -20,7 +20,6 @@ export async function GET(request: NextRequest) {
       weeklyGoal: row.weeklyGoal ?? null,
       weeklyViewsGoal: row.weeklyViewsGoal ?? null,
       weekStartDay: row.weekStartDay ?? 0,
-      defaultProducerUserId: row.defaultProducerUserId ?? null,
       defaultEditorUserId: row.defaultEditorUserId ?? null,
     });
   } catch (error) {
@@ -40,14 +39,12 @@ export async function PUT(request: NextRequest) {
       weeklyGoal,
       weeklyViewsGoal,
       weekStartDay,
-      defaultProducerUserId,
       defaultEditorUserId,
     } = body as {
       brand?: string;
       weeklyGoal?: number | null;
       weeklyViewsGoal?: number | null;
       weekStartDay?: number;
-      defaultProducerUserId?: string | null;
       defaultEditorUserId?: string | null;
     };
 
@@ -101,9 +98,6 @@ export async function PUT(request: NextRequest) {
       }
       patch.weekStartDay = n;
     }
-    if (defaultProducerUserId !== undefined) {
-      patch.defaultProducerUserId = defaultProducerUserId || null;
-    }
     if (defaultEditorUserId !== undefined) {
       patch.defaultEditorUserId = defaultEditorUserId || null;
     }
@@ -121,7 +115,6 @@ export async function PUT(request: NextRequest) {
       weeklyGoal: row.weeklyGoal,
       weeklyViewsGoal: row.weeklyViewsGoal,
       weekStartDay: row.weekStartDay,
-      defaultProducerUserId: row.defaultProducerUserId,
       defaultEditorUserId: row.defaultEditorUserId,
     });
   } catch (error) {

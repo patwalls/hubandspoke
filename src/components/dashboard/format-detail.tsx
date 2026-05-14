@@ -94,8 +94,6 @@ interface FormatRow {
   viewThreshold: number | null;
   editor: string | null;
   editorAsanaGid: string | null;
-  producer: string | null;
-  producerAsanaGid: string | null;
   instructions: string | null;
   parentFormatId: string | null;
   isClipDescriptFormat: boolean;
@@ -282,8 +280,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [childViewThreshold, setChildViewThreshold] = useState("");
   const [childEditor, setChildEditor] = useState("");
   const [childEditorGid, setChildEditorGid] = useState("");
-  const [childProducer, setChildProducer] = useState("");
-  const [childProducerGid, setChildProducerGid] = useState("");
   const [childInstructions, setChildInstructions] = useState("");
   const [childEditorOpen, setChildEditorOpen] = useState(false);
   const [childChannelsOpen, setChildChannelsOpen] = useState(false);
@@ -296,8 +292,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     setChildViewThreshold("");
     setChildEditor("");
     setChildEditorGid("");
-    setChildProducer("");
-    setChildProducerGid("");
     setChildInstructions("");
     setChildError(null);
     setAddChildOpen(true);
@@ -329,8 +323,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
           viewThreshold: childViewThreshold ? parseInt(childViewThreshold, 10) : null,
           editor: childEditor || null,
           editorAsanaGid: childEditorGid || null,
-          producer: childProducer || null,
-          producerAsanaGid: childProducerGid || null,
           instructions: childInstructions || null,
           parentFormatId: formatId,
         }),
@@ -745,8 +737,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
         viewThreshold: child.viewThreshold ?? null,
         editor: child.editor ?? null,
         editorAsanaGid: child.editorAsanaGid ?? null,
-        producer: child.producer ?? null,
-        producerAsanaGid: child.producerAsanaGid ?? null,
         instructions: child.instructions ?? null,
         parentFormatId: newParentId,
       }),

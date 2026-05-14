@@ -27,7 +27,7 @@
 import { db } from "@/lib/db";
 import { productionItems, syncLogs, accounts, brands } from "@/lib/db/schema";
 import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
-import { resolveAssignees } from "@/lib/services/assignees";
+import { resolveEditor } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
 import { recordItemCreated } from "@/lib/services/item-created";
@@ -837,7 +837,7 @@ async function upsertItems(
         // tags (e.g. every tweet getting `format='Tweet'`) and have been
         // removed; the LLM-driven `scripts/backfill-missing-formats.mjs`
         // is the only remaining writer that infers format and is opt-in.
-        const assignees = await resolveAssignees({
+        const editorUserId = await resolveEditor({
           brand: brandSlug,
           format: null,
         });
@@ -855,8 +855,7 @@ async function upsertItems(
             // here — null-format → 'repurposed' is wrong for raw posts.
             sourceType: "original",
             utmCampaign: await generateUtmCampaign(item.title),
-            producerUserId: assignees.producerUserId,
-            editorUserId: assignees.editorUserId,
+            editorUserId,
             createdVia: "sync:account-content",
           })
           .returning({ id: productionItems.id });

@@ -15,7 +15,7 @@ import {
   predictViews,
 } from "@/lib/services/view-predictor";
 import { enqueueNotification } from "@/lib/services/notifications";
-import { resolveAssignees } from "@/lib/services/assignees";
+import { resolveEditor } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
 import { resolveSourceTypeForFormat } from "@/lib/services/source-type-resolver";
@@ -203,16 +203,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const bodyProducerUserId =
-      typeof body.producerUserId === "string" ? body.producerUserId : null;
     const bodyEditorUserId =
       typeof body.editorUserId === "string" ? body.editorUserId : null;
-    const resolved = await resolveAssignees({
-      brand,
-      format: validatedFormat,
-    });
-    const producerUserId = bodyProducerUserId ?? resolved.producerUserId;
-    const editorUserId = bodyEditorUserId ?? resolved.editorUserId;
+    const editorUserId =
+      bodyEditorUserId ??
+      (await resolveEditor({ brand, format: validatedFormat }));
 
     const authorHandle: string | null =
       typeof bodyAuthorHandle === "string" && bodyAuthorHandle
@@ -312,7 +307,6 @@ export async function POST(request: NextRequest) {
         youtubeUrl,
         authorHandle,
         isExternal: false,
-        producerUserId,
         editorUserId,
         lastPerformanceSyncAt,
         createdVia: "api:create",
@@ -430,7 +424,6 @@ export async function PUT(request: NextRequest) {
       status,
       pillarContentItemId,
       repostedFromItemId,
-      producerUserId,
       editorUserId,
       views,
       likes,
@@ -698,30 +691,16 @@ export async function PUT(request: NextRequest) {
     }
 
     // Capture assignment diffs before the UPDATE so we can fire a notification
-    // for each new assignee after the write commits. Producer/editor are
-    // NOT NULL at the DB level — reject explicit attempts to clear them.
+    // for each new assignee after the write commits. Editor is
+    // NOT NULL at the DB level — reject explicit attempts to clear it.
     let assignmentDiff: {
-      producerChanged: boolean;
       editorChanged: boolean;
-      nextProducerUserId: string;
       nextEditorUserId: string;
     } | null = null;
     let editorChangeNames: { from: string | null; to: string | null } | null =
       null;
-    if (producerUserId !== undefined || editorUserId !== undefined) {
-      if (
-        producerUserId !== undefined &&
-        (producerUserId === null || producerUserId === "")
-      ) {
-        return NextResponse.json(
-          { error: "producerUserId cannot be empty — every item needs a producer" },
-          { status: 400 }
-        );
-      }
-      if (
-        editorUserId !== undefined &&
-        (editorUserId === null || editorUserId === "")
-      ) {
+    if (editorUserId !== undefined) {
+      if (editorUserId === null || editorUserId === "") {
         return NextResponse.json(
           { error: "editorUserId cannot be empty — every item needs an editor" },
           { status: 400 }
@@ -729,32 +708,17 @@ export async function PUT(request: NextRequest) {
       }
 
       const [existing] = await db
-        .select({
-          producerUserId: productionItems.producerUserId,
-          editorUserId: productionItems.editorUserId,
-        })
+        .select({ editorUserId: productionItems.editorUserId })
         .from(productionItems)
         .where(eq(productionItems.id, id))
         .limit(1);
       if (!existing) {
         return NextResponse.json({ error: "Item not found" }, { status: 404 });
       }
-      const nextProducer: string =
-        producerUserId === undefined ? existing.producerUserId : producerUserId;
-      const nextEditor: string =
-        editorUserId === undefined ? existing.editorUserId : editorUserId;
-      if (producerUserId !== undefined) {
-        updateData.producerUserId = nextProducer;
-      }
-      if (editorUserId !== undefined) {
-        updateData.editorUserId = nextEditor;
-      }
+      const nextEditor: string = editorUserId;
+      updateData.editorUserId = nextEditor;
       assignmentDiff = {
-        producerChanged:
-          producerUserId !== undefined && existing.producerUserId !== nextProducer,
-        editorChanged:
-          editorUserId !== undefined && existing.editorUserId !== nextEditor,
-        nextProducerUserId: nextProducer,
+        editorChanged: existing.editorUserId !== nextEditor,
         nextEditorUserId: nextEditor,
       };
 
@@ -868,7 +832,6 @@ export async function PUT(request: NextRequest) {
       "publishedDate",
       "pillarContentItemId",
       "repostedFromItemId",
-      "producerUserId",
       "utmCampaign",
       "shortLinkSlug",
     ] as const;
@@ -882,7 +845,6 @@ export async function PUT(request: NextRequest) {
         publishedDate: productionItems.publishedDate,
         pillarContentItemId: productionItems.pillarContentItemId,
         repostedFromItemId: productionItems.repostedFromItemId,
-        producerUserId: productionItems.producerUserId,
         utmCampaign: productionItems.utmCampaign,
         shortLinkSlug: productionItems.shortLinkSlug,
       })
@@ -1074,45 +1036,27 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    // Fire assignment notifications after the write commits. Fire-and-forget —
+    // Fire assignment notification after the write commits. Fire-and-forget —
     // email send is handled inside enqueueNotification and must not block the
     // save response.
-    if (assignmentDiff) {
-      if (assignmentDiff.producerChanged && assignmentDiff.nextProducerUserId) {
-        void enqueueNotification({
-          userId: assignmentDiff.nextProducerUserId,
-          kind: "assigned",
-          contentItemId: id,
-          actorUserId: actorUserId,
-          payload: {
-            kind: "assigned",
-            role: "producer",
-            title: updated.title,
-          },
-        }).catch((err) =>
-          console.error("[assignment] producer notify failed", err)
-        );
-      }
-      if (assignmentDiff.editorChanged && assignmentDiff.nextEditorUserId) {
-        void enqueueNotification({
-          userId: assignmentDiff.nextEditorUserId,
-          kind: "assigned",
-          contentItemId: id,
-          actorUserId: actorUserId,
-          payload: {
-            kind: "assigned",
-            role: "editor",
-            title: updated.title,
-          },
-        }).catch((err) =>
-          console.error("[assignment] editor notify failed", err)
-        );
-      }
+    if (
+      assignmentDiff?.editorChanged &&
+      assignmentDiff.nextEditorUserId
+    ) {
+      void enqueueNotification({
+        userId: assignmentDiff.nextEditorUserId,
+        kind: "assigned",
+        contentItemId: id,
+        actorUserId: actorUserId,
+        payload: { kind: "assigned", title: updated.title },
+      }).catch((err) =>
+        console.error("[assignment] editor notify failed", err)
+      );
     }
 
     // Kick off a platform-API metrics fetch when the row has just become
     // Published with a link, OR when the published link was freshly added/
-    // changed on an already-Published row. Title/producer/clicks edits
+    // changed on an already-Published row. Title/editor/clicks edits
     // don't trigger — those don't change what the metrics pull would return.
     const publishedNow =
       statusTransition?.to === "Published" && !!updated.publishedLink;

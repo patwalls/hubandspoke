@@ -293,12 +293,10 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     const title = item.title?.toLowerCase() ?? "";
     const format = item.format?.toLowerCase() ?? "";
     const platforms = item.platform?.join(" ").toLowerCase() ?? "";
-    const producer = item.producerEmail?.toLowerCase() ?? "";
     return (
       title.includes(query) ||
       format.includes(query) ||
-      platforms.includes(query) ||
-      producer.includes(query)
+      platforms.includes(query)
     );
   };
 
@@ -339,7 +337,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search title, format, channel, producer…"
+          placeholder="Search title, format, channel…"
           className="h-8 w-48 sm:w-72 text-xs"
         />
       </div>

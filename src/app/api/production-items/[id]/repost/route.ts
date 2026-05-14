@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
-import { resolveAssignees } from "@/lib/services/assignees";
+import { resolveEditor } from "@/lib/services/assignees";
 import { buildRepostValues } from "@/lib/services/repost-values";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { seedRepostContent } from "@/lib/services/repost-seed";
@@ -141,12 +141,13 @@ export async function POST(request: Request, context: RouteContext) {
   const formatCheck = await normalizeFormatForWrite(source.brand, source.format);
   const inheritedFormat = formatCheck.ok ? formatCheck.value : null;
 
-  const assignees = await resolveAssignees({
-    brand: source.brand,
-    sourceItemId: source.id,
-    format: inheritedFormat,
-  });
-  const editorUserId = requestedEditorUserId ?? assignees.editorUserId;
+  const editorUserId =
+    requestedEditorUserId ??
+    (await resolveEditor({
+      brand: source.brand,
+      sourceItemId: source.id,
+      format: inheritedFormat,
+    }));
 
   const baseValues = buildRepostValues(
     {
@@ -168,7 +169,6 @@ export async function POST(request: Request, context: RouteContext) {
     },
     {
       utmCampaign: await generateUtmCampaign(source.title),
-      producerUserId: assignees.producerUserId,
       editorUserId,
     }
   );

@@ -42,8 +42,6 @@ function withIdea(names: string[]): string[] {
 type ProductionItemRow = typeof productionItems.$inferSelect;
 
 type UserExtras = {
-  producerUserName?: string | null;
-  producerAvatarUrl?: string | null;
   editorUserName?: string | null;
   editorAvatarUrl?: string | null;
   /** Joined-account summary for UI badges. When absent the consumer falls
@@ -106,10 +104,6 @@ function mapProductionItem(
     apvFirst24Hours: item.apvFirst24Hours
       ? parseFloat(item.apvFirst24Hours)
       : null,
-    producerEmail: item.producerEmail,
-    producerName: extras.producerUserName ?? item.producerName,
-    producerAvatarUrl: extras.producerAvatarUrl ?? null,
-    producerUserId: item.producerUserId,
     editorEmail: item.editorEmail,
     editorName: extras.editorUserName ?? item.editorName,
     editorAvatarUrl: extras.editorAvatarUrl ?? null,
@@ -781,7 +775,6 @@ export async function getContentReport(
 export async function getProductionPipeline(
   brand: string
 ): Promise<ProductionItem[]> {
-  const producers = aliasedTable(users, "producer_user");
   const editors = aliasedTable(users, "editor_user");
 
   const inFlightStatuses = await resolveInFlightStatuses(brand);
@@ -789,8 +782,6 @@ export async function getProductionPipeline(
   const rows = await db
     .select({
       item: productionItems,
-      producerUserName: producers.name,
-      producerAvatarUrl: producers.avatarUrl,
       editorUserName: editors.name,
       editorAvatarUrl: editors.avatarUrl,
       accountId: accounts.id,
@@ -809,7 +800,6 @@ export async function getProductionPipeline(
       clipPromptVersion: clipIdeas.promptVersion,
     })
     .from(productionItems)
-    .leftJoin(producers, eq(producers.id, productionItems.producerUserId))
     .leftJoin(editors, eq(editors.id, productionItems.editorUserId))
     .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
     .leftJoin(brands, eq(brands.id, accounts.brandId))
@@ -849,8 +839,6 @@ export async function getProductionPipeline(
 
   return rows.map((r) =>
     mapProductionItem(r.item, {
-      producerUserName: r.producerUserName,
-      producerAvatarUrl: r.producerAvatarUrl,
       editorUserName: r.editorUserName,
       editorAvatarUrl: r.editorAvatarUrl,
       account: r.accountId

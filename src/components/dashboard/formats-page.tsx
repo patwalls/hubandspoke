@@ -62,8 +62,6 @@ interface FormatRow {
   viewThreshold: number | null;
   editor: string | null;
   editorAsanaGid: string | null;
-  producer: string | null;
-  producerAsanaGid: string | null;
   instructions: string | null;
   parentFormatId: string | null;
   totalViews: number;
@@ -80,15 +78,12 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
-  const [producerPopoverOpen, setProducerPopoverOpen] = useState(false);
   const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
 
   const [name, setName] = useState("");
   const [viewThreshold, setViewThreshold] = useState("");
   const [editor, setEditor] = useState("");
   const [editorAsanaGid, setEditorAsanaGid] = useState("");
-  const [producer, setProducer] = useState("");
-  const [producerAsanaGid, setProducerAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
 
@@ -143,8 +138,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setViewThreshold("");
     setEditor("");
     setEditorAsanaGid("");
-    setProducer("");
-    setProducerAsanaGid("");
     setInstructions("");
     setParentFormatId(null);
     setDialogOpen(true);
@@ -157,8 +150,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
       editor: editor || null,
       editorAsanaGid: editorAsanaGid || null,
-      producer: producer || null,
-      producerAsanaGid: producerAsanaGid || null,
       instructions: instructions || null,
       parentFormatId,
     };
@@ -183,18 +174,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setEditor("");
     setEditorAsanaGid("");
     setEditorPopoverOpen(false);
-  }
-
-  function selectProducer(member: AsanaMember) {
-    setProducer(member.name);
-    setProducerAsanaGid(member.gid);
-    setProducerPopoverOpen(false);
-  }
-
-  function clearProducer() {
-    setProducer("");
-    setProducerAsanaGid("");
-    setProducerPopoverOpen(false);
   }
 
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -255,7 +234,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     );
   }, [formats, channelFilter]);
 
-  // Resolve stored editor/producer names to real user rows (for avatars).
+  // Resolve stored editor names to real user rows (for avatars).
   // Missing matches fall back to plain initials, so unknown names still render.
   const userByName = useMemo(() => {
     const map = new Map<string, AssignableUser>();
@@ -553,81 +532,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                     </Command>
                   </PopoverContent>
                 </Popover>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Producer (Reviewer + Publisher)</Label>
-                <Popover open={producerPopoverOpen} onOpenChange={setProducerPopoverOpen}>
-                  <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
-                    {producer ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium">
-                          {producer
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")
-                            .slice(0, 2)}
-                        </span>
-                        {producer}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">Search team members...</span>
-                    )}
-                    <svg
-                      className="ml-2 h-4 w-4 shrink-0 opacity-50"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="m7 15 5 5 5-5" />
-                      <path d="m7 9 5-5 5 5" />
-                    </svg>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-72 p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Search by name or email..." />
-                      <CommandList>
-                        <CommandEmpty>No team members found.</CommandEmpty>
-                        <CommandGroup>
-                          {producer && (
-                            <CommandItem onSelect={clearProducer} className="text-muted-foreground">
-                              <span className="text-sm">Clear selection</span>
-                            </CommandItem>
-                          )}
-                          {asanaMembers.map((member) => (
-                            <CommandItem
-                              key={member.gid}
-                              value={`${member.name} ${member.email}`}
-                              onSelect={() => selectProducer(member)}
-                              data-checked={producerAsanaGid === member.gid ? "true" : undefined}
-                            >
-                              <span className="flex items-center gap-2">
-                                <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium shrink-0">
-                                  {member.name
-                                    .split(" ")
-                                    .map((n) => n[0])
-                                    .join("")
-                                    .slice(0, 2)}
-                                </span>
-                                <span className="flex flex-col">
-                                  <span className="text-sm font-medium">{member.name}</span>
-                                  <span className="text-xs text-muted-foreground">{member.email}</span>
-                                </span>
-                              </span>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-                <p className="text-xs text-muted-foreground">
-                  Synced from Asana workspace. These roles will be included in Asana task descriptions.
-                </p>
               </div>
 
               <div className="space-y-2">

@@ -126,7 +126,6 @@ export async function sendEmailForNotification(
       to: recipient.email,
       name: recipient.name,
       itemTitle: payload.title,
-      role: payload.role,
       assignedByName: assignerName,
       itemUrl: url,
     });

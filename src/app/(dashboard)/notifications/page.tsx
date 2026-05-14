@@ -108,7 +108,7 @@ function NotificationFullRow(props: {
 
   let headline: string;
   if (props.payload.kind === "assigned") {
-    headline = `${actor} assigned you as ${props.payload.role}`;
+    headline = `${actor} assigned this to you`;
   } else if (props.payload.kind === "comment") {
     headline = `${actor} commented`;
   } else if (props.payload.kind === "mention") {

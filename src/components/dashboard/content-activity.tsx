@@ -218,7 +218,6 @@ const FIELD_LABELS: Record<string, string> = {
   publishedDate: "Published date",
   pillarContentItemId: "Pillar",
   repostedFromItemId: "Reposted from",
-  producerUserId: "Producer",
   utmCampaign: "UTM campaign",
   shortLinkSlug: "Short link slug",
   authorHandle: "Author handle",

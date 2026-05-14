@@ -120,7 +120,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Dedup key = `(productionItemId, sourceFormatId, targetFormatId)`. Once a trigger row exists for that triple, that target is never re-created for that parent (even if views drop and recover later).
   - Skips child formats with no `viewThreshold` set
   - **Account pick is deterministic**: when the target format has multiple `formatChannels` rows, picks the oldest-added one (`ORDER BY created_at, id ASC LIMIT 1`). Fan-out-to-all-channels is a deliberate non-feature — one repurposed Idea per (parent, source, target) triple regardless of how many channels the target format publishes to.
-  - Resolves producer/editor for the new item via `resolveAssignees()` chain
+  - Resolves the editor for the new item via `resolveEditor()` chain (source item → format `editorNotionUserId` → brand `defaultEditorUserId` → global fallback)
   - This task **replaces the Asana-based `/api/trigger-repurpose` flow** — same intent, different implementation. No external systems.
 
 ### `notion-sync` — Notion ⇄ DB
@@ -133,7 +133,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - **Notion is authoritative only for YouTube long-form** — gated by `accounts.syncedFromNotion`. Other platforms are Hub & Spoke-owned.
   - Maps Notion "Channel" labels to seeded YouTube accounts; remaps legacy "Twitter" → "X"
   - Skips internal Starter Story / Pat Walls handles
-  - Resolves producer/editor via Notion user ID → `users.notionUserId` → format defaults → brand defaults
+  - Resolves the editor via Notion "Editor/Creator" email → `users.email` → format `editorNotionUserId` → brand `defaultEditorUserId` → global fallback (producer was dropped 2026-05-14 — Notion's Producer column is ignored)
   - **Pillar resolution is scoped to `source_type='original'` rows.** A post-loop UPDATE resolves `pillar_content_item_id` from `pillar_content_notion_id`, and a follow-up cleanup NULLs out stale links — both restricted to `original` items. App-code-set pillars on `repost` / `cross_post` / `repurposed` rows (which never carry a `pillar_content_notion_id`) are left untouched.
 
 ### `enrichment-sweep` — fan-out parent
@@ -775,7 +775,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - **Backfill path gates** on `source_type='original'` AND `post_type='youtube_long'` so historic backfills only act on long-form pillars. Manual route passes `skipPostTypeGate: true` to bypass — operator already chose the pillar.
   - **Idempotent:** any existing `clip_ideas` row for the pillar short-circuits the task (skip status `ideas-already-exist`). Worker retries after a Sonnet timeout / DB blip are safe.
   - Uses jobKey `generate-clip-ideas-<id>` so concurrent manual + backfill enqueues for the same pillar dedupe.
-  - Producer/editor on the new prod_item rows: manual route uses the actor; cron/backfill path falls through `resolveAssignees` (source item → format default → brand default → global fallback).
+  - Editor on the new prod_item rows: manual route uses the actor; cron/backfill path falls through `resolveEditor` (source item → format default → brand default → global fallback).
   - Cost: one Sonnet call per pillar (~$0.10). Worker concurrency keeps backfill bursts cheap; ~30 historic pillars ≈ $3 of Sonnet.
 
 ### `draft-algorithm-run` — The Draft Algorithm V1.6 (2026-05-10)
@@ -1115,4 +1115,4 @@ has a row in `docs/features.md`'s cleanup backlog.
 - **`selectEnrichmentCandidates()` and the legacy `selectEnrichmentItems()`** in `enrichment/orchestrator.ts` are nearly identical. Legacy path is the in-process loop used by `runEnrichmentSweep()` (called from `/api/cron/enrichment-sweep` with no `itemId`). Consolidate the query builder when we delete the legacy `runEnrichmentSweep` path.
 - **No central status-transition state machine.** Validation logic lives in the UI, the PATCH route, and the Notion push-back independently. Adding a new status today requires touching all three.
 - **`/api/cron/*` routes** still exist. `tick` is debug; the others (`notion-sync`, `performance-sync`, `enrichment-sweep`) still run their underlying sync inline and are useful for manual re-runs. The old `/api/cron/youtube-sync` + `/api/sync/youtube` routes were removed alongside `matg-sync` — use `/api/cron/tick?name=account-content-sync-sweep` for a manual full-fleet sync.
-- **`assignees.ts` resolution chain** is duplicated implicitly: `source item → format → brand defaults → global` repeats in `notion-sync.ts` and the manual creation routes. Extract a single `resolveAssignees()` (already partially exists) and use it everywhere.
+- **`assignees.ts` resolution chain** is consolidated under `resolveEditor()` — source item → format `editorNotionUserId` → brand `defaultEditorUserId` → global fallback. The producer role and its parallel chain were dropped 2026-05-14; every creation site (Notion sync, manual CRUD, derivative routes, threshold-monitor, account-content-sync) goes through this one function.

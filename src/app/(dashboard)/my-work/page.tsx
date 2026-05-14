@@ -10,11 +10,8 @@ import { getAllStatusPalettes } from "@/lib/db/brand-statuses";
 
 export const dynamic = "force-dynamic";
 
-// Statuses where the action is on each role. Producer owns the item when it's
-// newly assigned and when copy is ready for scheduling; editor owns it while
-// reviewing and during the final polish pass.
-const PRODUCER_ACTION = ["Assigned", "Ready To Publish"];
-const EDITOR_ACTION = ["Review", "Final Review"];
+// Active editorial statuses — anything that needs an editor's attention.
+const MY_TURN = ["Assigned", "Ready To Publish", "Review", "Final Review"];
 const TERMINAL = ["Published", "Killed"];
 
 export default async function MyWorkPage() {
@@ -22,8 +19,7 @@ export default async function MyWorkPage() {
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  // All items where the user is producer or editor and not in a terminal state.
-  // One query, split into buckets in memory to avoid three near-identical round-trips.
+  // All items assigned to the user (editor) and not in a terminal state.
   const mineRows = await db
     .select({
       id: productionItems.id,
@@ -34,17 +30,13 @@ export default async function MyWorkPage() {
       platform: productionItems.platform,
       publishedDate: productionItems.publishedDate,
       thumbnail: productionItems.thumbnail,
-      producerUserId: productionItems.producerUserId,
       editorUserId: productionItems.editorUserId,
       updatedAt: productionItems.updatedAt,
     })
     .from(productionItems)
     .where(
       and(
-        or(
-          eq(productionItems.producerUserId, userId),
-          eq(productionItems.editorUserId, userId),
-        ),
+        eq(productionItems.editorUserId, userId),
         sql`${productionItems.status} IS NULL OR ${productionItems.status} NOT IN (${sql.raw(TERMINAL.map((s) => `'${s}'`).join(","))})`,
         isNull(productionItems.deletedAt),
       ),
@@ -52,11 +44,9 @@ export default async function MyWorkPage() {
     .orderBy(desc(productionItems.updatedAt))
     .limit(200);
 
-  const yourTurn = mineRows.filter((r) => {
-    if (r.producerUserId === userId && r.status && PRODUCER_ACTION.includes(r.status)) return true;
-    if (r.editorUserId === userId && r.status && EDITOR_ACTION.includes(r.status)) return true;
-    return false;
-  });
+  const yourTurn = mineRows.filter(
+    (r) => r.status !== null && MY_TURN.includes(r.status),
+  );
   const yourTurnIds = new Set(yourTurn.map((r) => r.id));
   const waitingOnOthers = mineRows.filter((r) => !yourTurnIds.has(r.id));
 
@@ -121,7 +111,7 @@ export default async function MyWorkPage() {
 
       <Section
         title="Waiting on others"
-        subtitle="You're the producer or editor, but the current stage belongs to the other role."
+        subtitle="Assigned to you, but the current stage is owned elsewhere (triage, ideation)."
         rows={waitingOnOthers}
         emptyText="Nothing here yet."
         userId={userId}
@@ -134,7 +124,7 @@ export default async function MyWorkPage() {
             Recent comments
           </h2>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            Last 30 days on items where you&apos;re producer or editor.
+            Last 30 days on items assigned to you.
           </p>
         </div>
         {recentComments.length === 0 ? (
@@ -185,7 +175,6 @@ type Row = {
   platform: string[] | null;
   publishedDate: string | null;
   thumbnail: string | null;
-  producerUserId: string | null;
   editorUserId: string | null;
 };
 
@@ -238,58 +227,44 @@ function Section({
                 <th className="px-3 py-2 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                   Status
                 </th>
-                <th className="px-3 py-2 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                  Your role
-                </th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                const role =
-                  r.producerUserId === userId && r.editorUserId === userId
-                    ? "Producer + Editor"
-                    : r.producerUserId === userId
-                    ? "Producer"
-                    : r.editorUserId === userId
-                    ? "Editor"
-                    : "—";
-                return (
-                  <tr
-                    key={r.id}
-                    className="border-b border-border/50 hover:bg-accent/30 transition-colors"
-                  >
-                    <td className="px-3 py-2">
-                      <Link
-                        href={`/${r.brand}/content/${r.id}`}
-                        className="text-foreground hover:text-primary hover:underline transition-colors"
+              {rows.map((r) => (
+                <tr
+                  key={r.id}
+                  className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                >
+                  <td className="px-3 py-2">
+                    <Link
+                      href={`/${r.brand}/content/${r.id}`}
+                      className="text-foreground hover:text-primary hover:underline transition-colors"
+                    >
+                      {r.title || "(Untitled)"}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {r.brand}
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {r.format || "—"}
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.status ? (
+                      <span
+                        className={cn(
+                          "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
+                          statusClassWithPalette(r.status, palettes.get(r.brand))
+                        )}
                       >
-                        {r.title || "(Untitled)"}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground">
-                      {r.brand}
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground">
-                      {r.format || "—"}
-                    </td>
-                    <td className="px-3 py-2">
-                      {r.status ? (
-                        <span
-                          className={cn(
-                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border",
-                            statusClassWithPalette(r.status, palettes.get(r.brand))
-                          )}
-                        >
-                          {r.status}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground">{role}</td>
-                  </tr>
-                );
-              })}
+                        {r.status}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

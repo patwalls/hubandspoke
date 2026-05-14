@@ -40,7 +40,7 @@ const mockedRefresh = refreshItemMetrics as MockedFunction<
 >;
 
 // Real IDs from the dev DB — these exist so we can insert production_items
-// that satisfy the producer/editor FKs. If you reset the DB, update these.
+// that satisfy the editor FK. If you reset the DB, update these.
 const TEST_USER_ID = "c2d49735-dc16-47a2-93dd-396c586847ac"; // pwalls@starterstory.com
 const TEST_ACCOUNT_ID = "0a947afe-a088-4aff-81f8-6fb08a4f4f0f"; // x @starter_story
 
@@ -60,7 +60,6 @@ async function createTestItem(overrides: {
       accountId: TEST_ACCOUNT_ID,
       platform: ["X"],
       publishedAt: overrides.publishedAt ?? new Date(),
-      producerUserId: TEST_USER_ID,
       editorUserId: TEST_USER_ID,
       ...(overrides.createdAt ? { createdAt: overrides.createdAt } : {}),
     })

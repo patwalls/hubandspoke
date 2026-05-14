@@ -74,8 +74,7 @@ removing, or deprecating anything.
 | Format top-performers report | Active | `GET /api/formats/top-performers` | `formats`, `productionItems` | |
 | **Old `formats.channels` JSONB** | **Planned-removal** | Column still on the table; no writers, no readers as of 2026-04-25 | `formats.channels` | `legacyChannelString()` and the mirror writes were deleted 2026-04-25; column drop pending the same migration that removes `production_items.platform`. |
 | **Legacy `production_items.platform` JSONB** | **Planned-removal** | Column still on the table; remaining readers: `clip-ideas/generate`, `matg` report SQL filter, `sync-errors` page, `my-work` page, format-detail item filter, queue/format search filters | `production_items.platform` | `accountId` + `postType` superseded this; the visible-UI consumers and repost/cross-post inserts were migrated 2026-04-25. Column drop pending migration of the remaining read sites listed at left. |
-| **Asana editor/producer fields on formats** | **Deprecated** | (referenced only in legacy trigger-repurpose flow) | `formats.editorAsanaGid`, `producerAsanaGid`, `contentOwnerAsana*` | Replaced by `editorUserId` / `producerUserId` and `editorNotionUserId` / `producerNotionUserId` |
-| **Producer field (formats + content)** | **Hidden** | UI removed from formats index, format detail, content detail (2026-04-23). Column still written by `resolveAssignees()` on new items. | `formats.producer`/`producerUserId`, `productionItems.producerUserId` | Visual removal only; data preserved. Re-introduce the field or drop the columns in a later pass. |
+| **Asana editor fields on formats** | **Deprecated** | (referenced only in legacy trigger-repurpose flow) | `formats.editorAsanaGid`, `contentOwnerAsana*` | Replaced by `editorUserId` and `editorNotionUserId` |
 
 ---
 
@@ -84,7 +83,7 @@ removing, or deprecating anything.
 | Feature | Status | Entry points | Backing tables | Notes |
 |---|---|---|---|---|
 | Notification inbox | Active | `/(dashboard)/notifications`, `GET /api/notifications`, `POST /api/notifications/mark-read` | `notifications` | |
-| Email notifications (assignment, comment, mention) | Active | `notification-send` task, enqueued from comments / clip-idea triage / item create | `notifications` (emailedAt stamp) | Skips self-notifications and uninvited contractors |
+| Email notifications (assignment, comment, mention) | Active | `notification-send` task, enqueued from comments / clip-idea triage / item create | `notifications` (emailedAt stamp) | Skips self-notifications and uninvited contractors. **Comment-recipient model (2026-05-14, GitHub-style thread participation):** a new comment notifies the current `editorUserId` plus every distinct prior `content_comments.userId` on that item, minus anyone already pinged via `kind:"mention"`. Producer role removed in the same change — the editor is the single owner across the pipeline. |
 
 ---
 
@@ -110,7 +109,7 @@ removing, or deprecating anything.
 | Feature | Status | Entry points | Backing tables | Notes |
 |---|---|---|---|---|
 | Users & invites | Active | `/(dashboard)/settings/users`, `GET\|POST /api/users`, `POST\|DELETE /api/invites/[id]`, `POST /api/invites/validate`, `POST /api/invites/accept` | `users`, `invites` | |
-| Brands CRUD | Active | `/(dashboard)/settings/brands`, `/(dashboard)/settings/brands/[brand]`, `GET\|POST /api/brands`, `GET\|PATCH\|DELETE /api/brands/[slug]` | `brands` | Defaults (producer/editor, weekly production goal, weekly views goal) live here |
+| Brands CRUD | Active | `/(dashboard)/settings/brands`, `/(dashboard)/settings/brands/[brand]`, `GET\|POST /api/brands`, `GET\|PATCH\|DELETE /api/brands/[slug]` | `brands` | Defaults (editor, weekly production goal, weekly views goal) live here |
 | Short links admin (ManyChat redirect pool) | Active | `/(dashboard)/settings/links`, `GET\|POST\|PATCH\|DELETE /api/short-links/[slug]` | (none — data lives in the StarterStory Rails app's `short_links` table) | `/settings/links` page is admin-only; the underlying API routes are open to any authenticated user so editors can attach/edit DM keywords on their posts. hubandspoke proxies CRUD to `SHORT_LINKS_API_URL` (the StarterStory REST API at `go.starterstory.com`) with `SHORT_LINKS_API_KEY`. The redirect + click tracking lives in the Rails app; this is a pure control plane. |
 | Global accounts settings | Active | `/(dashboard)/settings/accounts` | `accounts` | All brands |
 | Brand-scoped settings | Active | `/(dashboard)/[brand]/settings` | `brands`, `accounts` | |
@@ -204,7 +203,7 @@ In rough priority order — each is its own PR:
 2. **`/api/trigger-repurpose` + Asana members surface area** (Deprecated). No live callers; remove with format-picker UI swap to user dropdown.
 3. **`productionItems.crossPostFitGood` + `crossPostFitReasoning`** (Deprecated). All new reads go through `crossPostFitVerdicts`. Drop columns.
 4. **`formats.channels` JSONB + `production_items.platform` JSONB** (Planned-removal). `legacyChannelString()`, `SS_CHANNELS`/`MATG_CHANNELS`, `ChannelChip`, and `platformClass()` were deleted 2026-04-25; visible-UI readers were migrated to `AccountBadge`. Remaining work: migrate `clip-ideas/generate`, the `matg` report SQL filter, `sync-errors` page, `my-work` page, format-detail item filter, and queue/format search filters off `production_items.platform`. Then drop both columns in one migration.
-5. **Format Asana columns** (`editorAsanaGid`, `producerAsanaGid`, `contentOwnerAsana*`) (Deprecated). Drop after #2 lands.
+5. **Format Asana columns** (`editorAsanaGid`, `contentOwnerAsana*`) (Deprecated). Drop after #2 lands.
 6. **Pre-2026-04 `scripts/add-*.mjs` / `create-*-table.mjs`** — historical, but we could prune any that are clearly obsolete.
 
 When you knock one out, update this file: change `Planned-removal` → remove the row, or move the relevant feature row to its successor's notes.

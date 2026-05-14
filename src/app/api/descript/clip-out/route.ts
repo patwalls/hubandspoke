@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { productionItems, formats, repurposeTriggers } from "@/lib/db/schema";
 import { invokeDescriptAgent } from "@/lib/descript";
 import { dispatchRepurpose, type RepurposeAction } from "@/lib/repurpose-agent";
-import { resolveAssignees } from "@/lib/services/assignees";
+import { resolveEditor } from "@/lib/services/assignees";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { getChannelsForFormats } from "@/lib/format-channels";
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
   const derivativeAccountId = firstChannel?.accountId ?? null;
   const derivativePostType = firstChannel?.postType ?? null;
 
-  const derivativeAssignees = await resolveAssignees({
+  const derivativeEditorUserId = await resolveEditor({
     brand: item.brand,
     sourceItemId: item.id,
     format: target.name,
@@ -120,8 +120,7 @@ export async function POST(request: NextRequest) {
             descriptProjectId: item.descriptProjectId,
             descriptProjectUrl: result.projectUrl,
             utmCampaign: await generateUtmCampaign(action.compositionName),
-            producerUserId: derivativeAssignees.producerUserId,
-            editorUserId: derivativeAssignees.editorUserId,
+            editorUserId: derivativeEditorUserId,
             createdVia: "legacy:descript-clip-out",
           })
           .returning({ id: productionItems.id });
@@ -192,8 +191,7 @@ export async function POST(request: NextRequest) {
         pillarContentNotionId: item.notionId,
         pillarContentItemId: item.id,
         utmCampaign: await generateUtmCampaign(action.taskName),
-        producerUserId: derivativeAssignees.producerUserId,
-        editorUserId: derivativeAssignees.editorUserId,
+        editorUserId: derivativeEditorUserId,
         createdVia: "legacy:descript-clip-out",
       })
       .returning({ id: productionItems.id });

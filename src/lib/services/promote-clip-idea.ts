@@ -350,9 +350,8 @@ export async function assignClipIdea(args: {
 
   // Create the real production_items row. The partial uniq index on
   // source_clip_idea_id guarantees one production item per clip idea at
-  // the DB. Default producer = the admin who assigned; editor = the
-  // assignee. Default platform = YouTube Shorts, editor can swap on the
-  // detail page.
+  // the DB. Editor = the assignee. Default platform = YouTube Shorts,
+  // editor can swap on the detail page.
   let created: { id: string } | undefined;
   try {
     const brand = row.sourceBrand ?? "starter-story";
@@ -370,7 +369,6 @@ export async function assignClipIdea(args: {
         pillarContentItemId: row.sourceProductionItemId,
         sourceType: "repurposed",
         sourceClipIdeaId: args.clipIdeaId,
-        producerUserId: args.decidedByUserId,
         editorUserId: args.editorUserId,
         utmCampaign: await generateUtmCampaign(row.hook),
         hook: row.hook,
@@ -519,7 +517,7 @@ function buildDescriptPrompt(args: {
 /**
  * Promote a clip idea by cutting a Descript composition at its exact
  * [startSec, endSec] range. Updates the pre-created production_items row
- * (editor=actor, producer=actor) to status="Assigned", invokes Descript's
+ * (editor=actor) to status="Assigned", invokes Descript's
  * agent with a timestamp-pinned prompt, logs a repurpose_triggers row, and
  * enqueues the poller task that writes descriptCompositionId back when the
  * job stops. The clip idea transitions to "assigned" exactly like the assign
@@ -587,7 +585,6 @@ export async function createClipIdeaInDescript(args: {
       hookSource: "clip_idea",
       hookExtractedAt: new Date(),
       contentBody: body,
-      producerUserId: args.actorUserId,
       editorUserId: args.actorUserId,
       descriptProjectId: row.descriptProjectId,
       descriptProjectUrl: agent.projectUrl,
@@ -696,7 +693,6 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
       title: row.hook,
       hook: row.hook,
       contentBody: body,
-      producerUserId: args.actorUserId,
       editorUserId: args.actorUserId,
       updatedAt: new Date(),
     })
@@ -880,7 +876,6 @@ export async function createClipIdeaInDescriptFullVideo(args: {
       hookExtractor: "promote-clip-idea:v1",
       hookExtractedAt: new Date(),
       contentBody: body,
-      producerUserId: args.actorUserId,
       editorUserId: args.actorUserId,
       descriptProjectId: projectId,
       descriptProjectUrl: projectUrl,

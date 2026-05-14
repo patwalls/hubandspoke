@@ -4,7 +4,6 @@ import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
 import { recordItemCreated } from "@/lib/services/item-created";
-import { resolveAssignees } from "@/lib/services/assignees";
 import { getChannelsForFormats } from "@/lib/format-channels";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
@@ -94,13 +93,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const channelMap = await getChannelsForFormats([target.id]);
   const firstChannel = channelMap.get(target.id)?.[0] ?? null;
 
-  // Producer follows the standard fallback chain; editor is the clicker.
-  const resolved = await resolveAssignees({
-    brand: source.brand,
-    sourceItemId: source.id,
-    format: target.name,
-  });
-
+  // Editor is the clicker — they're spawning the derivative for themselves.
   // Format validation is belt-and-braces — `target` is a row in the
   // formats table by construction, so this should always succeed and
   // returns the canonical-cased name.
@@ -121,7 +114,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       pillarContentNotionId: source.notionId,
       pillarContentItemId: source.id,
       utmCampaign: await generateUtmCampaign(source.title),
-      producerUserId: resolved.producerUserId,
       editorUserId: actorUserId,
       createdVia: "api:repurpose",
     })

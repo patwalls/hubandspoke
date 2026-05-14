@@ -62,9 +62,6 @@ export function SettingsPageContent({
   const [weeklyViewsGoal, setWeeklyViewsGoal] = useState<string>("");
   const [savedViewsGoal, setSavedViewsGoal] = useState<number | null>(null);
   const [weekStartDay, setWeekStartDay] = useState<number>(0);
-  const [defaultProducerUserId, setDefaultProducerUserId] = useState<
-    string | null
-  >(null);
   const [defaultEditorUserId, setDefaultEditorUserId] = useState<string | null>(
     null
   );
@@ -114,7 +111,6 @@ export function SettingsPageContent({
             ? settingsJson.weekStartDay
             : 0
         );
-        setDefaultProducerUserId(settingsJson?.defaultProducerUserId ?? null);
         setDefaultEditorUserId(settingsJson?.defaultEditorUserId ?? null);
         setAssignableUsers(usersJson?.users ?? []);
       } catch (err) {
@@ -210,13 +206,12 @@ export function SettingsPageContent({
   }
 
   async function persistAssignee(
-    field: "defaultProducerUserId" | "defaultEditorUserId",
+    field: "defaultEditorUserId",
     value: string | null
   ) {
     setAssigneeStatus(null);
     // Optimistic update so the chip re-renders instantly.
-    if (field === "defaultProducerUserId") setDefaultProducerUserId(value);
-    else setDefaultEditorUserId(value);
+    setDefaultEditorUserId(value);
     try {
       const res = await fetch("/api/brand-settings", {
         method: "PUT",
@@ -281,9 +276,6 @@ export function SettingsPageContent({
     !loading &&
     weeklyViewsGoal.trim() !== (savedViewsGoal != null ? String(savedViewsGoal) : "");
 
-  const producerUser = defaultProducerUserId
-    ? assignableUsers.find((u) => u.id === defaultProducerUserId) ?? null
-    : null;
   const editorUser = defaultEditorUserId
     ? assignableUsers.find((u) => u.id === defaultEditorUserId) ?? null
     : null;
@@ -466,69 +458,40 @@ export function SettingsPageContent({
       <div className="rounded-lg border border-border bg-card p-5 space-y-4">
         <div>
           <h2 className="text-base font-semibold text-foreground">
-            Default assignments
+            Default editor
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Producer/editor assigned to new items when they can&rsquo;t inherit
-            from a source or format. Leave unset to fall back to Pat.
+            Editor assigned to new items when they can&rsquo;t inherit from a
+            source or format. Leave unset to fall back to Pat.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>Default producer</Label>
-            <Select
-              value={defaultProducerUserId || UNASSIGNED}
-              onValueChange={(v) => {
-                const next = v === UNASSIGNED ? null : v;
-                void persistAssignee("defaultProducerUserId", next);
-              }}
-              disabled={loading}
-            >
-              <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
-                {producerUser ? (
-                  <UserChip user={producerUser} />
-                ) : (
-                  <span className="text-muted-foreground">Use global fallback (Pat)</span>
-                )}
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={UNASSIGNED}>Use global fallback (Pat)</SelectItem>
-                {assignableUsers.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    <UserChip user={u} />
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Default editor</Label>
-            <Select
-              value={defaultEditorUserId || UNASSIGNED}
-              onValueChange={(v) => {
-                const next = v === UNASSIGNED ? null : v;
-                void persistAssignee("defaultEditorUserId", next);
-              }}
-              disabled={loading}
-            >
-              <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
-                {editorUser ? (
-                  <UserChip user={editorUser} />
-                ) : (
-                  <span className="text-muted-foreground">Use global fallback (Pat)</span>
-                )}
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={UNASSIGNED}>Use global fallback (Pat)</SelectItem>
-                {assignableUsers.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    <UserChip user={u} />
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="space-y-1.5">
+          <Label>Default editor</Label>
+          <Select
+            value={defaultEditorUserId || UNASSIGNED}
+            onValueChange={(v) => {
+              const next = v === UNASSIGNED ? null : v;
+              void persistAssignee("defaultEditorUserId", next);
+            }}
+            disabled={loading}
+          >
+            <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
+              {editorUser ? (
+                <UserChip user={editorUser} />
+              ) : (
+                <span className="text-muted-foreground">Use global fallback (Pat)</span>
+              )}
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={UNASSIGNED}>Use global fallback (Pat)</SelectItem>
+              {assignableUsers.map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  <UserChip user={u} />
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {assigneeStatus?.kind === "saved" && (

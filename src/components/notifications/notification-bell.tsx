@@ -160,7 +160,7 @@ function NotificationRow({
 
   let summary: string;
   if (n.payload.kind === "assigned") {
-    summary = `${actorName} assigned you as ${n.payload.role}`;
+    summary = `${actorName} assigned this to you`;
   } else if (n.payload.kind === "comment") {
     summary = `${actorName} commented`;
   } else if (n.payload.kind === "mention") {

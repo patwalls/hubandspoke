@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
@@ -102,7 +102,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .select({
         id: productionItems.id,
         title: productionItems.title,
-        producerUserId: productionItems.producerUserId,
         editorUserId: productionItems.editorUserId,
       })
       .from(productionItems)
@@ -127,8 +126,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .where(eq(users.id, session.user.id))
       .limit(1);
 
-    // Notify @mentioned users first (higher priority than producer/editor).
-    // Self-notification is filtered inside enqueueNotification.
+    // Notify @-mentioned users first (higher priority than the generic comment
+    // notification). Self-notification is filtered inside enqueueNotification.
     const excerpt = plain.slice(0, 240);
     const authorName = user?.name || user?.email || null;
     const mentionIds = new Set(extractMentionUserIds(sanitized));
@@ -148,12 +147,24 @@ export async function POST(request: NextRequest, context: RouteContext) {
       }).catch((err) => console.error("[comment] mention notify failed", err));
     }
 
-    // Notify producer + editor, but skip anyone already pinged as a mention so
-    // nobody gets double-notified. Fire-and-forget so a Postmark or DB hiccup
-    // never breaks the comment POST.
+    // Thread-participation rule (GitHub-style): notify the current editor plus
+    // anyone who has previously commented on this item. People who never
+    // engaged with the item drop out — fixes the legacy "phantom comments" the
+    // fallback-producer was getting.
+    const priorAuthorRows = await db
+      .selectDistinct({ userId: contentComments.userId })
+      .from(contentComments)
+      .where(
+        and(
+          eq(contentComments.contentItemId, id),
+          isNotNull(contentComments.userId),
+        ),
+      );
     const recipientIds = new Set<string>();
-    if (item.producerUserId) recipientIds.add(item.producerUserId);
     if (item.editorUserId) recipientIds.add(item.editorUserId);
+    for (const row of priorAuthorRows) {
+      if (row.userId) recipientIds.add(row.userId);
+    }
     for (const recipientId of recipientIds) {
       if (mentionIds.has(recipientId)) continue;
       void enqueueNotification({

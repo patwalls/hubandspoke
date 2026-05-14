@@ -8,7 +8,7 @@ import {
   formatChannels,
   accounts,
 } from "@/lib/db/schema";
-import { resolveAssignees } from "@/lib/services/assignees";
+import { resolveEditor } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { enqueue } from "@/jobs/enqueue";
 import { recordItemCreated } from "@/lib/services/item-created";
@@ -110,8 +110,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
         }
 
         try {
-          // Resolve assignees for this brand/format
-          const assignees = await resolveAssignees({
+          const editorUserId = await resolveEditor({
             brand: item.brand,
             sourceItemId: item.id,
             format: targetFormat.name,
@@ -148,8 +147,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
               pillarContentItemId: item.id,
               accountId: formatChannel?.accountId ?? null,
               postType: formatChannel?.postType ?? null,
-              producerUserId: assignees.producerUserId,
-              editorUserId: assignees.editorUserId,
+              editorUserId,
               utmCampaign: await generateUtmCampaign(item.title),
               createdVia: "cron:threshold-monitor-sweep",
             })

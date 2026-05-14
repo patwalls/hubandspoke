@@ -13,7 +13,7 @@ import {
 import { topShortFormPerformers } from "@/lib/db/queries";
 import { findAccountForBrandPlatform } from "@/lib/db/accounts";
 import { getPromotedClipFormat } from "@/lib/services/promote-clip-idea";
-import { resolveAssignees } from "@/lib/services/assignees";
+import { resolveEditor } from "@/lib/services/assignees";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 
@@ -131,13 +131,13 @@ export async function generateClipIdeasForItem(
   const transcript = await getTranscriptForPrompt(productionItemId);
   if (!transcript) return { status: "skip", reason: "no-transcript" };
 
-  const assignees = options.actorUserId
-    ? { producerUserId: options.actorUserId, editorUserId: options.actorUserId }
-    : await resolveAssignees({
-        brand: item.brand,
-        sourceItemId: item.id,
-        format: item.format,
-      });
+  const editorUserId =
+    options.actorUserId ??
+    (await resolveEditor({
+      brand: item.brand,
+      sourceItemId: item.id,
+      format: item.format,
+    }));
 
   // Derivatives of THIS pillar — direct children only, short-form. Matches
   // the manual route's framing.
@@ -283,8 +283,7 @@ export async function generateClipIdeasForItem(
         pillarContentItemId: productionItemId,
         sourceType: "repurposed",
         sourceClipIdeaId: ci.id,
-        producerUserId: assignees.producerUserId,
-        editorUserId: assignees.editorUserId,
+        editorUserId,
         utmCampaign: await generateUtmCampaign(ci.hook),
         hook: ci.hook,
         hookSource: "clip_idea",

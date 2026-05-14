@@ -53,15 +53,13 @@ export async function sendAssignmentEmail(opts: {
   to: string;
   name?: string | null;
   itemTitle: string | null;
-  role: "producer" | "editor";
   assignedByName?: string | null;
   itemUrl: string;
 }) {
   const greeting = opts.name ? `Hi ${opts.name},` : "Hi,";
   const title = opts.itemTitle || "(Untitled)";
-  const roleLabel = opts.role === "producer" ? "producer" : "editor";
   const assigner = opts.assignedByName || "A teammate";
-  const subject = `You were assigned as ${roleLabel} on "${title}"`;
+  const subject = `You were assigned to "${title}"`;
   return getClient().sendEmail({
     From: from,
     To: opts.to,
@@ -69,7 +67,7 @@ export async function sendAssignmentEmail(opts: {
     TextBody: [
       greeting,
       "",
-      `${assigner} assigned you as ${roleLabel} on:`,
+      `${assigner} assigned you to:`,
       "",
       title,
       "",
@@ -79,7 +77,7 @@ export async function sendAssignmentEmail(opts: {
     ].join("\n"),
     HtmlBody: `
       <p>${greeting}</p>
-      <p><strong>${escapeHtml(assigner)}</strong> assigned you as <strong>${roleLabel}</strong> on:</p>
+      <p><strong>${escapeHtml(assigner)}</strong> assigned you to:</p>
       <p style="margin:16px 0;padding:12px 14px;border-left:3px solid #16a34a;background:#f6fbf7;font-weight:500;">${escapeHtml(title)}</p>
       <p><a href="${opts.itemUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Open in Hub &amp; Spoke</a></p>
       <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.itemUrl}">${opts.itemUrl}</a></p>

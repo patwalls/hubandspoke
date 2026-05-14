@@ -54,7 +54,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
         actorUserId,
         payload: {
           kind: "assigned",
-          role: "editor",
           title: result.hook,
         },
       });

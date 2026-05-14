@@ -70,7 +70,6 @@ export async function POST(_request: Request, context: RouteContext) {
       pillarContentNotionId: source.pillarContentNotionId,
       pillarContentItemId: source.pillarContentItemId,
       utmCampaign: await generateUtmCampaign(title),
-      producerUserId: source.producerUserId,
       editorUserId: source.editorUserId,
       createdVia: "api:duplicate",
     })

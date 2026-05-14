@@ -107,7 +107,6 @@ export async function POST(request: NextRequest) {
       brand,
       viewThreshold,
       editor,
-      producer,
       instructions,
       parentFormatId,
     } = body as {
@@ -116,7 +115,6 @@ export async function POST(request: NextRequest) {
       brand?: string;
       viewThreshold?: number | null;
       editor?: string | null;
-      producer?: string | null;
       instructions?: string | null;
       parentFormatId?: string | null;
     };
@@ -146,7 +144,6 @@ export async function POST(request: NextRequest) {
         channels: [],
         viewThreshold: viewThreshold || null,
         editor: editor || null,
-        producer: producer || null,
         instructions: instructions || null,
         parentFormatId: parentFormatId || null,
       })
@@ -174,7 +171,6 @@ export async function PUT(request: NextRequest) {
       accountChannels?: FormatChannelInput[];
       viewThreshold?: number | null;
       editor?: string | null;
-      producer?: string | null;
       instructions?: string | null;
       parentFormatId?: string | null;
       isClipDescriptFormat?: boolean;
@@ -229,7 +225,6 @@ export async function PUT(request: NextRequest) {
     if (body.viewThreshold !== undefined)
       updateData.viewThreshold = body.viewThreshold || null;
     if (body.editor !== undefined) updateData.editor = body.editor || null;
-    if (body.producer !== undefined) updateData.producer = body.producer || null;
     if (body.instructions !== undefined)
       updateData.instructions = body.instructions || null;
     if (parentFormatId !== undefined)

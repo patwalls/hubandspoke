@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { accounts, contentEvents, productionItems, users } from "@/lib/db/schema";
-import { resolveAssignees } from "@/lib/services/assignees";
+import { resolveEditor } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
@@ -51,7 +51,7 @@ interface RouteContext {
  *   - default (no `assign`, no `editorUserId`) → status = "Idea". Used by
  *     the per-item Cross-post submenu on `/content/[id]`.
  *   - `assign: true` and/or `editorUserId` provided → status = "Ready To
- *     Publish". `editorUserId` overrides `resolveAssignees`'s pick. Used
+ *     Publish". `editorUserId` overrides `resolveEditor`'s pick. Used
  *     by the cross-post queue modal so "Cross-post to @handle" lands the
  *     item ready for publish in a single round-trip — cross-posts have no
  *     editorial work to do, so skipping the Assigned/Review/etc. middle
@@ -198,13 +198,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const formatCheck = await normalizeFormatForWrite(source.brand, source.format);
   const inheritedFormat = formatCheck.ok ? formatCheck.value : null;
 
-  const assignees = await resolveAssignees({
-    brand: source.brand,
-    sourceItemId: source.id,
-    format: inheritedFormat,
-  });
-
-  const editorUserId = editorUserIdOverride ?? assignees.editorUserId;
+  const editorUserId =
+    editorUserIdOverride ??
+    (await resolveEditor({
+      brand: source.brand,
+      sourceItemId: source.id,
+      format: inheritedFormat,
+    }));
   // Cross-posts skip the editorial pipeline (Assigned → Review → Ready)
   // because there's no work to do — same content, different channel. Land
   // queue-driven creates straight in "Ready To Publish". Every brand has
@@ -231,7 +231,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
         pillarContentNotionId: source.pillarContentNotionId,
         pillarContentItemId: source.pillarContentItemId,
         utmCampaign: utm,
-        producerUserId: assignees.producerUserId,
         editorUserId,
         createdVia: "api:cross-post",
       })

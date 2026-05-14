@@ -57,10 +57,6 @@ export interface ProductionItem {
   salesAmount: number | null;
   ctrFirstHour: number | null;
   apvFirst24Hours: number | null;
-  producerEmail: string | null;
-  producerName: string | null;
-  producerAvatarUrl: string | null;
-  producerUserId: string | null;
   editorEmail: string | null;
   editorName: string | null;
   editorAvatarUrl: string | null;

@@ -47,7 +47,7 @@ export const productionItems = pgTable(
     // Replaces the legacy `platform` string-array for identity (which handle /
     // channel this lives on). Nullable during the accounts rollout backfill;
     // NOT NULL after the finalize migration. onDelete: "restrict" mirrors the
-    // producer/editor pattern — can't delete an account that still owns items.
+    // editor pattern — can't delete an account that still owns items.
     accountId: uuid("account_id").references((): AnyPgColumn => accounts.id, {
       onDelete: "restrict",
     }),
@@ -90,22 +90,17 @@ export const productionItems = pgTable(
     // recommender decides this; the UI surfaces it as a badge. Null for
     // everything else.
     crossPostConfidence: integer("cross_post_confidence"),
-    producerEmail: text("producer_email"),
-    producerNotionUserId: text("producer_notion_user_id"),
-    producerName: text("producer_name"),
     editorEmail: text("editor_email"),
     editorNotionUserId: text("editor_notion_user_id"),
     editorName: text("editor_name"),
-    // App-owned assignment FKs. Required: every production item has both a
-    // producer and an editor. Defaults come from resolveAssignees (source →
-    // format → brand → global). Notion sync stops touching these on update —
-    // edits happen only in-app. Legacy email/name columns remain for
-    // historical display on archived items whose people aren't in our users
-    // directory. onDelete: "restrict" over "set null" since NOT NULL would
-    // reject that anyway — user deletion is blocked while they own items.
-    producerUserId: uuid("producer_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+    // App-owned assignment FK. Required: every production item has an editor —
+    // the single owner across the pipeline (the legacy producer role was
+    // removed 2026-05-14). Defaults come from resolveEditor (source → format →
+    // brand → global). Notion sync stops touching this on update — edits
+    // happen only in-app. Legacy email/name columns remain for historical
+    // display on archived items whose people aren't in our users directory.
+    // onDelete: "restrict" since NOT NULL would reject anything else — user
+    // deletion is blocked while they own items.
     editorUserId: uuid("editor_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -381,7 +376,6 @@ export const productionItems = pgTable(
     index("idx_production_items_pillar_notion").on(table.pillarContentNotionId),
     index("idx_production_items_pillar_item").on(table.pillarContentItemId),
     index("idx_production_items_reposted_from").on(table.repostedFromItemId),
-    index("idx_production_items_producer_user").on(table.producerUserId),
     index("idx_production_items_editor_user").on(table.editorUserId),
     uniqueIndex("uniq_production_items_utm_campaign")
       .on(table.utmCampaign)
@@ -667,9 +661,8 @@ export const formats = pgTable(
     channels: jsonb("channels").$type<string[]>().default([]),
     event: text("event"),
     viewThreshold: integer("view_threshold"),
-    contentOwner: text("content_owner"), // deprecated — use editor/producer
+    contentOwner: text("content_owner"), // deprecated — use editor
     editor: text("editor"),
-    producer: text("producer"),
     // The format's "Skill" — author-defined natural-language brief that
     // covers what the format is, how to produce it, and (for clip
     // formats) the verbatim Descript Underlord prompt. Folded the old
@@ -718,7 +711,6 @@ export const formats = pgTable(
     ),
     notionPageId: text("notion_page_id"), // Notion page ID for format relation
     editorNotionUserId: text("editor_notion_user_id"), // Notion user ID for editor/creator
-    producerNotionUserId: text("producer_notion_user_id"), // Notion user ID for producer/reviewer
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -974,13 +966,9 @@ export const brandSettings = pgTable("brand_settings", {
   weeklyGoal: integer("weekly_goal"),
   // 0 = Sunday .. 6 = Saturday. Controls dashboard week buckets.
   weekStartDay: integer("week_start_day").notNull().default(0),
-  // Per-brand fallbacks used by resolveAssignees when a new item can't
-  // inherit from a source item or its format. NULL → fall through to the
-  // global fallback (pat).
-  defaultProducerUserId: uuid("default_producer_user_id").references(
-    () => users.id,
-    { onDelete: "set null" }
-  ),
+  // Per-brand fallback used by resolveEditor when a new item can't inherit
+  // from a source item or its format. NULL → fall through to the global
+  // fallback (pat).
   defaultEditorUserId: uuid("default_editor_user_id").references(
     () => users.id,
     { onDelete: "set null" }
@@ -1261,7 +1249,7 @@ export const contentEvents = pgTable(
 // and 'comment'. `emailed_at` is stamped fire-and-forget after we ship the
 // email so we don't double-send if a row gets requeued.
 export type NotificationPayload =
-  | { kind: "assigned"; role: "producer" | "editor"; title: string | null }
+  | { kind: "assigned"; title: string | null }
   | {
       kind: "comment";
       title: string | null;
@@ -1314,7 +1302,7 @@ export const notifications = pgTable(
 // First-class brand registry. Seeded from the old `src/lib/config/brands.ts`
 // constants during the accounts rollout; from there on, brands are added/edited
 // via the settings UI. Folds the old `brand_settings` row (1:1 by slug) into
-// the same table — weekly goal + week start day + default producer/editor all
+// the same table — weekly goal + week start day + default editor all
 // live here. The `brand_settings` table is dropped in the finalize migration.
 export const brands = pgTable(
   "brands",
@@ -1332,10 +1320,6 @@ export const brands = pgTable(
     weeklyViewsGoal: integer("weekly_views_goal"),
     // 0 = Sunday .. 6 = Saturday. Controls dashboard week buckets.
     weekStartDay: integer("week_start_day").notNull().default(0),
-    defaultProducerUserId: uuid("default_producer_user_id").references(
-      () => users.id,
-      { onDelete: "set null" }
-    ),
     defaultEditorUserId: uuid("default_editor_user_id").references(
       () => users.id,
       { onDelete: "set null" }
@@ -1485,7 +1469,7 @@ export const accounts = pgTable(
 
 // Users can "link" accounts to their profile — powers the "my accounts"
 // filter, default notification routing, and (eventually) per-user default
-// producer/editor assignments. No permission gating: any admin can see and
+// editor assignments. No permission gating: any admin can see and
 // edit any account. Composite PK (user_id, account_id) blocks duplicates.
 export const userAccounts = pgTable(
   "user_accounts",

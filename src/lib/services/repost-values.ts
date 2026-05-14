@@ -32,7 +32,6 @@ export interface RepostSource {
 
 export interface RepostBuildOptions {
   utmCampaign: string;
-  producerUserId: string;
   editorUserId: string;
 }
 
@@ -56,7 +55,6 @@ export function buildRepostValues(source: RepostSource, opts: RepostBuildOptions
     mediaContentType: source.mediaContentType ?? null,
     posterS3Key: source.posterS3Key ?? null,
     utmCampaign: opts.utmCampaign,
-    producerUserId: opts.producerUserId,
     editorUserId: opts.editorUserId,
   };
 }

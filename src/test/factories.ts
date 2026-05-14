@@ -31,7 +31,7 @@
  * For tests that need a unique user/account FK, this module dynamically
  * pulls the first admin user + an active starter-story X account at
  * suite-start time and caches the IDs. Override by passing
- * `producerUserId` / `accountId` directly when the test cares.
+ * `editorUserId` / `accountId` directly when the test cares.
  */
 import { afterEach } from "vitest";
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
@@ -86,9 +86,9 @@ let cachedTestUserId: string | null = null;
 let cachedTestAccountId: string | null = null;
 
 /**
- * Returns the user id every test should attach as producer/editor when it
- * doesn't care about user identity. Caches across the whole suite.
- * Falls back to the oldest user in the DB; throws if the table is empty.
+ * Returns the user id every test should attach as editor when it doesn't
+ * care about user identity. Caches across the whole suite. Falls back to
+ * the oldest user in the DB; throws if the table is empty.
  */
 export async function getTestUserId(): Promise<string> {
   if (cachedTestUserId) return cachedTestUserId;
@@ -192,7 +192,6 @@ export interface CreateTestProductionItemOptions {
   postType?: string | null;
   accountId?: string | null;
   platform?: string[];
-  producerUserId?: string;
   editorUserId?: string;
   publishedAt?: Date | null;
   views?: number;
@@ -209,7 +208,7 @@ export interface CreateTestProductionItemOptions {
 export async function createTestProductionItem(
   opts: CreateTestProductionItemOptions = {},
 ): Promise<typeof productionItems.$inferSelect> {
-  const userId = opts.producerUserId ?? (await getTestUserId());
+  const userId = opts.editorUserId ?? (await getTestUserId());
   const accountId =
     opts.accountId === undefined
       ? await getTestAccountId({ brand: opts.brand ?? "starter-story" })
@@ -229,8 +228,7 @@ export async function createTestProductionItem(
       accountId,
       platform: opts.platform ?? ["X"],
       publishedAt: opts.publishedAt === undefined ? new Date() : opts.publishedAt,
-      producerUserId: userId,
-      editorUserId: opts.editorUserId ?? userId,
+      editorUserId: userId,
       views: opts.views ?? 0,
     })
     .returning();

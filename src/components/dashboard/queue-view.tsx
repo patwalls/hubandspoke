@@ -255,7 +255,6 @@ export function QueueView({
         item.title,
         item.format,
         item.platform?.join(" "),
-        item.producerEmail,
       ]
         .filter(Boolean)
         .join(" ")
@@ -386,7 +385,7 @@ export function QueueView({
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search title, format, channel, producer…"
+          placeholder="Search title, format, channel…"
           className="h-8 w-48 sm:w-72 text-xs"
         />
       </div>

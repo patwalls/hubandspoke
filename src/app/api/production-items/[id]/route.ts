@@ -343,13 +343,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       checkpointKey: r.checkpointKey,
     }));
 
-    // Resolve producer + editor user records for the assignee pickers.
-    // Separate queries keep the main item query simple and each is indexed.
-    const assigneeIds = [item.producerUserId, item.editorUserId].filter(
-      (v): v is string => !!v
-    );
-    const assigneeRows = assigneeIds.length
-      ? await db
+    // Resolve the editor user record for the assignee picker.
+    const editor = item.editorUserId
+      ? (await db
           .select({
             id: users.id,
             email: users.email,
@@ -357,13 +353,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             avatarUrl: users.avatarUrl,
           })
           .from(users)
-          .where(inArray(users.id, assigneeIds))
-      : [];
-    const byId = new Map(assigneeRows.map((u) => [u.id, u]));
-    const producer = item.producerUserId
-      ? byId.get(item.producerUserId) ?? null
+          .where(eq(users.id, item.editorUserId))
+          .limit(1))[0] ?? null
       : null;
-    const editor = item.editorUserId ? byId.get(item.editorUserId) ?? null : null;
 
     // Scope Repurpose targets to direct children of this item's source format.
     // The item stores its format as a text name, so resolve it via brandFormats.
@@ -676,7 +668,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       formats: brandFormats,
       repurposeTargets,
       pillar,
-      producer,
       editor,
       topPerformers: topPerformers.map((t) => ({
         ...t,
