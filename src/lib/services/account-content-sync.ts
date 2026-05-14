@@ -643,8 +643,11 @@ async function fetchThreadsLatest(
  *  match. The looseUrl map is a last-ditch fallback for URLs we can't
  *  parse (custom shortlinks etc.). */
 /**
- * Normalize a URL for dedup matching by removing query strings,
- * fragments, and trailing slashes.
+ * Normalize a URL for dedup matching by removing tracking params,
+ * fragments, and trailing slashes. For YouTube watch URLs the `v` param
+ * IS the content ID, so we preserve it — without this, every YouTube
+ * long-form video URL normalized to `youtube.com/watch` and incorrectly
+ * collided in the byPublishedLink dedup map.
  */
 function normalizeUrl(url: string): string | null {
   try {
@@ -652,7 +655,12 @@ function normalizeUrl(url: string): string | null {
     const pathname = parsed.pathname.endsWith("/")
       ? parsed.pathname.slice(0, -1)
       : parsed.pathname;
-    return `${parsed.origin}${pathname}`.toLowerCase();
+    // Preserve the `v` query param for YouTube watch URLs (it's the video id)
+    const isYouTubeWatch =
+      /(?:^|\.)youtube\.com$/i.test(parsed.hostname) && pathname === "/watch";
+    const v = isYouTubeWatch ? parsed.searchParams.get("v") : null;
+    const suffix = v ? `?v=${v}` : "";
+    return `${parsed.origin}${pathname}${suffix}`.toLowerCase();
   } catch {
     return null;
   }
