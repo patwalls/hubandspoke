@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  extractCrossPostCaptionRulesSection,
   extractCrossPostRulesSection,
   extractDescriptSection,
 } from "./format-skill";
@@ -157,5 +158,54 @@ Apply the layout pack at https://example.com.
 Should not leak.`;
     const out = extractCrossPostRulesSection(skill);
     expect(out).toBe("- vertical for IG");
+  });
+});
+
+describe("extractCrossPostCaptionRulesSection", () => {
+  it("returns just the caption rules body", () => {
+    const skill = `## Hook
+Hook guidance for Claude.
+
+### Cross Post Caption Rules
+For X: use the on-screen hook verbatim as the body. No thread, no CTA, no bullets.
+
+### Cross Post Rules
+- Twitter should be horizontal
+`;
+    const out = extractCrossPostCaptionRulesSection(skill);
+    expect(out).toBe(
+      "For X: use the on-screen hook verbatim as the body. No thread, no CTA, no bullets.",
+    );
+    // Sibling sections must not leak through.
+    expect(out).not.toContain("Hook guidance");
+    expect(out).not.toContain("Twitter should be horizontal");
+  });
+
+  it("returns null when the section is absent", () => {
+    expect(
+      extractCrossPostCaptionRulesSection("## Hook\nDo the thing."),
+    ).toBeNull();
+  });
+
+  it("returns null on empty section", () => {
+    expect(
+      extractCrossPostCaptionRulesSection("### Cross Post Caption Rules\n\n"),
+    ).toBeNull();
+  });
+
+  it("does NOT pick up the framing rules section by accident", () => {
+    const skill = `### Cross Post Rules
+- Twitter should be horizontal
+`;
+    expect(extractCrossPostCaptionRulesSection(skill)).toBeNull();
+  });
+
+  it("matches case-insensitively and accepts h2", () => {
+    const skill = `## cross post caption rules
+- short hook only
+`;
+    expect(extractCrossPostCaptionRulesSection(skill)).toBe(
+      "- short hook only",
+    );
   });
 });

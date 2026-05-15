@@ -99,11 +99,21 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   // repurpose action (including non-Descript paths like Canva) writes a
   // trigger row for dedup, but only Descript-promoted clips populate
   // descriptJobId / descriptCompositionId. Without this filter the
-  // "Descript stalled" pill leaks onto every repurpose target.
-  const triggerSourceId = item.pillarContentItemId ?? item.id;
+  // working-state pill leaks onto every repurpose target.
+  //
+  // Lookup order: the derivative-copy path (cross-post / repost) creates
+  // a trigger tied to THIS row's id, so try item.id first. The full-video
+  // / agent / precise-cut clip-promotion paths create triggers tied to the
+  // pillar, so we fall back to pillar.id. ORDER BY `productionItemId =
+  // item.id` DESC ensures the derivative's own trigger wins when both
+  // exist (e.g. a clip that was then cross-posted).
+  const triggerSourceIds = [item.id, item.pillarContentItemId].filter(
+    (x): x is string => !!x,
+  );
   const [trigger] = await db
     .select({
       id: repurposeTriggers.id,
+      productionItemId: repurposeTriggers.productionItemId,
       descriptJobId: repurposeTriggers.descriptJobId,
       descriptCompositionId: repurposeTriggers.descriptCompositionId,
       descriptImportPath: repurposeTriggers.descriptImportPath,
@@ -112,11 +122,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .from(repurposeTriggers)
     .where(
       and(
-        eq(repurposeTriggers.productionItemId, triggerSourceId),
+        sql`${repurposeTriggers.productionItemId} = ANY(${triggerSourceIds})`,
         sql`(${repurposeTriggers.descriptJobId} IS NOT NULL OR ${repurposeTriggers.descriptCompositionId} IS NOT NULL)`,
       ),
     )
-    .orderBy(desc(repurposeTriggers.id))
+    .orderBy(
+      sql`(${repurposeTriggers.productionItemId} = ${item.id}) DESC`,
+      desc(repurposeTriggers.id),
+    )
     .limit(1);
 
   // Pull the most recent queue job for this trigger or for this item.
@@ -158,7 +171,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   `)) as unknown as QueueJobRow[];
   queueJob = rows[0] ?? null;
 
-  const compositionId = item.descriptCompositionId ?? trigger?.descriptCompositionId ?? null;
+  // Strict 1:1 — never surface a composition_id that isn't on THIS row.
+  // The old fallback chain (`item ?? trigger ?? null`) would emit a deep-
+  // link to the trigger's composition_id, which belongs to a different
+  // production_item (typically the pillar or a sibling clip), and clicking
+  // it sent editors to the wrong Descript composition. If this row hasn't
+  // had its composition stamped yet, return null so the UI hides the link
+  // until the resolver writes it.
+  const compositionId = item.descriptCompositionId ?? null;
   const projectId = item.descriptProjectId ?? null;
   const projectUrl =
     item.descriptProjectUrl ?? trigger?.descriptProjectUrl ?? null;

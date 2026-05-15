@@ -59,7 +59,14 @@ const MODEL = "claude-opus-4-7";
 // (X's real ceiling), prompt rewritten to teach length-from-exemplars.
 // New OUTPUT RULE here reinforces the same principle agent-wide:
 // length comes from the exemplar pool, not from a hardcoded cap.
-export const PROMPT_VERSION = 10;
+// v11 (2026-05-15): cross-post caption rules section. Format Skill can now
+// carry a `### Cross Post Caption Rules` block that the algorithm passes
+// through as a HARD OVERRIDE. Designed to fix the failure mode where the
+// 231K-view long-thread exemplar at the top of a format pool teaches every
+// new cross-post to expand, even when the format's other winners are
+// hook-only. Section is opt-in per format — empty/missing falls through to
+// pure exemplar-driven inference.
+export const PROMPT_VERSION = 11;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -163,6 +170,13 @@ export interface GenerateDraftArgs {
   };
   fieldSchema: FormatFieldSchema;
   formatInstructions: string | null;
+  /** Extracted `### Cross Post Caption Rules` body from the SOURCE format's
+   *  Skill. Only set on cross_post sourceType. When present, it's rendered
+   *  as a hard-rule block in the system prompt that OVERRIDES exemplar
+   *  inference for caption shape — e.g. "for X: just the on-screen hook,
+   *  no thread." Use this when the format's top-views exemplar is misleading
+   *  (the 231K-view long thread teaching every new X cross-post to expand). */
+  crossPostCaptionRules?: string | null;
   pillarTitle: string | null;
   /** v1.3: the substantive input the agent grounds its draft in. Either a
    *  long-form transcript (pillar derivatives) or the source post's text
@@ -533,6 +547,15 @@ export async function generateDraft(
           `Free text maintained by the team for this format. Apply the RULES FOR READING these from the system prompt — extract tone/style cues from reference posts, ignore admin noise (logins, Loom videos, "ask me via Slack").`,
           ``,
           args.formatInstructions,
+          ``,
+        ].join("\n")
+      : null,
+    args.crossPostCaptionRules
+      ? [
+          `## CROSS-POST CAPTION RULES (HARD OVERRIDE)`,
+          `These rules are AUTHORITATIVE — they override anything you'd otherwise infer from the past captions / exemplars block below. The exemplar pool is ranked by views, but the top performer can teach the wrong shape for this specific cross-post; these team-authored rules trump it. Follow them exactly.`,
+          ``,
+          args.crossPostCaptionRules,
           ``,
         ].join("\n")
       : null,

@@ -14,6 +14,7 @@ import {
   invokeDescriptAgent,
   substituteFormatPrompt,
 } from "@/lib/descript";
+import { buildCompositionName } from "@/lib/services/descript-composition";
 import { coldImportPillar } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -484,11 +485,16 @@ function buildDescriptPrompt(args: {
   hook: string;
   startSec: number;
   endSec: number;
+  productionItemId: string;
 }): string {
   const duration = Math.max(0, Math.round(args.endSec - args.startSec));
   const start = formatTimestamp(args.startSec);
   const end = formatTimestamp(args.endSec);
-  const safeHook = args.hook.replace(/"/g, '\\"');
+  const compositionName = buildCompositionName({
+    title: args.hook,
+    productionItemId: args.productionItemId,
+  });
+  const safeHook = compositionName.replace(/"/g, '\\"');
   // Underlord only needs the operational Descript section of the Skill —
   // the editorial sections (Hook, Clip guidance, Avoid) are for Claude /
   // the dispatcher. Falls back to the whole Skill when no Descript
@@ -562,6 +568,7 @@ export async function createClipIdeaInDescript(args: {
     hook: row.hook,
     startSec,
     endSec,
+    productionItemId,
   });
   const agent = await invokeDescriptAgent({
     projectId: row.descriptProjectId,
@@ -827,7 +834,10 @@ export async function createClipIdeaInDescriptFullVideo(args: {
     const dup = await duplicateDescriptComposition({
       projectId: pillar.descriptProjectId,
       sourceCompositionId: pillar.descriptSeedCompositionId,
-      newCompositionName: row.hook,
+      newCompositionName: buildCompositionName({
+        title: row.hook,
+        productionItemId,
+      }),
     });
     jobId = dup.jobId;
     projectId = dup.projectId;

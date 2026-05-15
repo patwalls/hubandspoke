@@ -21,7 +21,10 @@ import {
 } from "@/lib/descript";
 import { getPresignedGetUrl, putObjectFromFile } from "@/lib/s3";
 import { recordToolAction } from "@/lib/services/content-events";
-import { assertCompositionUnique } from "@/lib/services/descript-composition";
+import {
+  assertCompositionUnique,
+  buildCompositionName,
+} from "@/lib/services/descript-composition";
 import { downloadToFile, safeUnlink } from "./descript-upload-helpers";
 
 export interface ClipIdeaPreciseCutPayload {
@@ -161,7 +164,10 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
     const presignedClipUrl = await getPresignedGetUrl(tmpS3Key, 3600);
 
     const importRes = await createDescriptProjectFromUrl({
-      projectName: row.hook,
+      projectName: buildCompositionName({
+        title: row.hook,
+        productionItemId: payload.derivativeItemId,
+      }),
       mediaUrl: presignedClipUrl,
     });
     helpers.logger.info(

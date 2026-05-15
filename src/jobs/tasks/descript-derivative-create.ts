@@ -8,6 +8,7 @@ import {
   invokeDescriptAgent,
 } from "@/lib/descript";
 import { extractCrossPostRulesSection } from "@/lib/format-skill";
+import { buildCompositionName } from "@/lib/services/descript-composition";
 import {
   coldImportPillar,
   hasDescriptableMedia,
@@ -201,8 +202,10 @@ export const descriptDerivativeCreateTask: Task = async (
     );
   }
 
-  const newCompositionName =
-    derivative.title ?? `Derivative ${derivative.id.slice(0, 8)}`;
+  const newCompositionName = buildCompositionName({
+    title: derivative.title,
+    productionItemId: derivative.id,
+  });
 
   // When the source format's Skill carries a "### Cross Post Rules"
   // section, send a custom Underlord prompt that duplicates the composition

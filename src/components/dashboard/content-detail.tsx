@@ -4084,9 +4084,17 @@ const DESCRIPT_STATUS_STYLES: Record<
     pillClass: "border-red-200 bg-red-50 text-red-800",
   },
   stalled: {
-    dot: "bg-orange-500",
-    label: "Descript stalled",
-    pillClass: "border-orange-200 bg-orange-50 text-orange-800",
+    // "stalled" here is the underlying state name (kept stable for the API
+    // contract / popover details + redrive button), but the label is the
+    // user-visible copy. Earlier copy ("Descript stalled") read as a failure
+    // even though it's a normal in-flight state: project_id is set but
+    // composition_id hasn't been written yet (typically 30-90s window
+    // between cold-import or duplicate-composition kicking off and the
+    // resolver task stamping the new composition_id back). Amber + working
+    // language matches the actual state.
+    dot: "bg-amber-500 animate-pulse",
+    label: "Creating composition…",
+    pillClass: "border-amber-200 bg-amber-50 text-amber-800",
   },
   not_started: {
     dot: "bg-muted-foreground/40",

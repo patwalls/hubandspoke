@@ -25,6 +25,8 @@ import {
   recordContentChanges,
   type ContentChange,
 } from "@/lib/services/content-revisions";
+import { extractCrossPostCaptionRulesSection } from "@/lib/format-skill";
+import { buildCompositionName } from "@/lib/services/descript-composition";
 import { getTopPerformingCaptions } from "./exemplars";
 import {
   runDescriptStepForDerivative,
@@ -607,6 +609,16 @@ export async function runDraftAlgorithm(
     itemAlreadyHasMedia,
   };
 
+  // Cross-post caption rules: only honor this on the cross_post path. For
+  // other sourceTypes the section is irrelevant (it's specifically about
+  // adapting THIS format to a different platform's caption shape). Falls
+  // back to null when the Skill has no `### Cross Post Caption Rules`
+  // section — the exemplar pool then drives caption shape as before.
+  const crossPostCaptionRules =
+    item.sourceType === "cross_post" && formatInstructions
+      ? extractCrossPostCaptionRulesSection(formatInstructions)
+      : null;
+
   const result = await generateDraft({
     item: {
       id: item.id,
@@ -617,6 +629,7 @@ export async function runDraftAlgorithm(
     },
     fieldSchema,
     formatInstructions,
+    crossPostCaptionRules,
     pillarTitle,
     substrate,
     pastCaptions,
@@ -748,10 +761,10 @@ export async function runDraftAlgorithm(
   let descriptStep: DescriptStepStatus | undefined;
   if (formatRow?.isClipDescriptFormat) {
     try {
-      const compositionName =
-        item.hook?.trim() ||
-        item.title?.trim() ||
-        `${item.format ?? "Clip"} (${productionItemId.slice(0, 8)})`;
+      const compositionName = buildCompositionName({
+        title: item.hook?.trim() || item.title?.trim() || null,
+        productionItemId,
+      });
       const step = await runDescriptStepForDerivative({
         derivativeItemId: productionItemId,
         pillarItemId: item.pillarContentItemId ?? null,
