@@ -2206,16 +2206,187 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
            *  Transcript, Enrichment) render as chips via their
            *  `variant="chip"` mode so they match. */}
           <div className="flex items-center gap-1 flex-wrap mt-2 text-xs text-muted-foreground">
-            <SourceBadge
-              sourceType={
-                item.sourceType as
+            {/* Source-type chip — clickable for non-original items, opens
+             *  a popover with the Pillar Content + Reposted From pickers
+             *  AND the reference-post details that used to live in a
+             *  separate state-row chip. Consolidating these three
+             *  surfaces (source-type label, Reference post chip, sidebar
+             *  picker rows) into one popover removes the redundancy. */}
+            {(() => {
+              const sourceType =
+                (item.sourceType as
                   | "original"
                   | "repost"
                   | "cross_post"
                   | "repurposed"
-                  | null
+                  | null) ?? "original";
+              const SOURCE_STYLES: Record<
+                "original" | "repost" | "cross_post" | "repurposed",
+                { label: string; dot: string; description: string }
+              > = {
+                original: {
+                  label: "Original",
+                  dot: "bg-emerald-500",
+                  description: "Brand-new original content.",
+                },
+                repost: {
+                  label: "Repost",
+                  dot: "bg-amber-500",
+                  description:
+                    "Same content, same platform (any account) — a re-run of an earlier post.",
+                },
+                cross_post: {
+                  label: "Cross-post",
+                  dot: "bg-rose-500",
+                  description:
+                    "Same content, different platform from the original.",
+                },
+                repurposed: {
+                  label: "Repurposed",
+                  dot: "bg-sky-500",
+                  description:
+                    "Derivative of a pillar — clip, short cut, or other format spawned from longer content.",
+                },
+              };
+              const style = SOURCE_STYLES[sourceType];
+              const showPillar =
+                sourceType === "repost" ||
+                sourceType === "cross_post" ||
+                sourceType === "repurposed";
+              const showRepostedFrom =
+                sourceType === "repost" || sourceType === "cross_post";
+              const isInteractive = showPillar || showRepostedFrom;
+              const referenceHeading =
+                sourceType === "cross_post"
+                  ? "Cross-posted from"
+                  : "Reposted from";
+
+              // Original (or null) → no popover, plain SourceBadge.
+              // Nothing to edit; the chip is just a label.
+              if (!isInteractive) {
+                return <SourceBadge sourceType={sourceType} />;
               }
-            />
+
+              return (
+                <Popover>
+                  <PopoverTrigger
+                    className={cn(CHIP_B_BASE, CHIP_B_CLICKABLE)}
+                    title={style.description}
+                  >
+                    <span
+                      className={cn("size-1.5 rounded-full", style.dot)}
+                      aria-hidden
+                    />
+                    {style.label}
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[26rem] space-y-3" align="start">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn("size-1.5 rounded-full", style.dot)}
+                          aria-hidden
+                        />
+                        <span className="text-sm font-medium text-foreground">
+                          {style.label}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                        {style.description}
+                      </p>
+                    </div>
+
+                    {showPillar && (
+                      <div className="space-y-1.5 border-t border-border/60 pt-3">
+                        <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                          Pillar content
+                        </p>
+                        <PillarPicker
+                          brand={brand}
+                          excludeId={contentId}
+                          value={pillar}
+                          onChange={(next) => {
+                            setPillar(next);
+                            void persistField({
+                              pillarContentItemId: next?.id ?? null,
+                            });
+                          }}
+                          triggerClassName="border border-border bg-background shadow-none h-8 px-2 rounded-sm hover:bg-muted/50 w-full"
+                        />
+                      </div>
+                    )}
+
+                    {showRepostedFrom && (
+                      <div className="space-y-1.5 border-t border-border/60 pt-3">
+                        <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                          {referenceHeading}
+                        </p>
+                        <PillarPicker
+                          brand={brand}
+                          excludeId={contentId}
+                          value={repostedFromOption}
+                          onChange={(next) => {
+                            setRepostedFromOption(next);
+                            void persistField({
+                              repostedFromItemId: next?.id ?? null,
+                            });
+                          }}
+                          placeholder="No source — click to choose…"
+                          includeAll
+                          triggerClassName="border border-border bg-background shadow-none h-8 px-2 rounded-sm hover:bg-muted/50 w-full"
+                        />
+                        {/* Reference-post details — same layout the
+                         *  removed standalone Reference post chip used.
+                         *  Shows when the upstream resolves; gives
+                         *  editors the at-a-glance "originally posted X,
+                         *  Y views, with reasoning" data without leaving
+                         *  this popover. */}
+                        {data.repostedFrom && (
+                          <div className="mt-2 space-y-1.5">
+                            <div className="flex items-baseline gap-2 flex-wrap">
+                              <Link
+                                href={`/${brand}/content/${data.repostedFrom.id}`}
+                                className="text-sm font-medium text-foreground hover:text-primary hover:underline"
+                              >
+                                {data.repostedFrom.title || "(untitled)"}
+                              </Link>
+                              <span className="text-xs text-muted-foreground">
+                                {data.repostedFrom.publishedDate &&
+                                  `originally ${formatDate(data.repostedFrom.publishedDate)}`}
+                                {data.repostedFrom.views != null && (
+                                  <>
+                                    {" "}
+                                    · {formatCompact(data.repostedFrom.views)} views
+                                  </>
+                                )}
+                              </span>
+                            </div>
+                            {data.repostedFrom.publishedLink && (
+                              <a
+                                href={data.repostedFrom.publishedLink}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:underline"
+                                title="Open the published source post in a new tab"
+                              >
+                                <ExternalLinkIcon className="size-3.5" /> View published post
+                              </a>
+                            )}
+                            {data.repostedFrom.evergreenReasoning && (
+                              <p className="text-xs text-muted-foreground leading-relaxed">
+                                <span className="font-medium text-foreground">
+                                  Why this was recommended:
+                                </span>{" "}
+                                {data.repostedFrom.evergreenReasoning}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              );
+            })()}
             <DescriptStatusPill productionItemId={item.id} variant="chip" />
             <CanvaStatusPill productionItemId={item.id} initialItem={item} variant="chip" />
             <TranscriptButton
@@ -2287,58 +2458,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 </PopoverContent>
               </Popover>
             )}
-            {(item.sourceType === "repost" || item.sourceType === "cross_post") &&
-              data.repostedFrom && (
-                <Popover>
-                  <PopoverTrigger
-                    className={cn(CHIP_B_BASE, CHIP_B_CLICKABLE)}
-                    title="Show the source post this was based on"
-                  >
-                    <LinkIcon className="size-3" /> Reference post
-                  </PopoverTrigger>
-                  <PopoverContent className="w-96 space-y-2" align="end">
-                    <h3 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                      {item.sourceType === "cross_post"
-                        ? "Cross-posted from"
-                        : "Reposted from"}
-                    </h3>
-                    <div className="flex items-baseline gap-2 flex-wrap">
-                      <Link
-                        href={`/${brand}/content/${data.repostedFrom.id}`}
-                        className="text-sm font-medium text-foreground hover:text-primary hover:underline"
-                      >
-                        {data.repostedFrom.title || "(untitled)"}
-                      </Link>
-                      <span className="text-xs text-muted-foreground">
-                        {data.repostedFrom.publishedDate &&
-                          `originally ${formatDate(data.repostedFrom.publishedDate)}`}
-                        {data.repostedFrom.views != null && (
-                          <> · {formatCompact(data.repostedFrom.views)} views</>
-                        )}
-                      </span>
-                    </div>
-                    {data.repostedFrom.publishedLink && (
-                      <a
-                        href={data.repostedFrom.publishedLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:underline"
-                        title="Open the published source post in a new tab"
-                      >
-                        <ExternalLinkIcon className="size-3.5" /> View published post
-                      </a>
-                    )}
-                    {data.repostedFrom.evergreenReasoning && (
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        <span className="font-medium text-foreground">
-                          Why this was recommended:
-                        </span>{" "}
-                        {data.repostedFrom.evergreenReasoning}
-                      </p>
-                    )}
-                  </PopoverContent>
-                </Popover>
-              )}
+            {/* The standalone Reference post chip + popover was removed
+             *  2026-05-15 — its contents moved into the source-type
+             *  chip's popover above (PILLAR CONTENT + REPOSTED FROM
+             *  sections), since both surfaces were describing the same
+             *  lineage. */}
             {isPublished && (
               <EnrichmentButton
                 variant="chip"
@@ -2856,40 +2980,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
          *  pickers are identical — just relocated triggers. */}
 
         {/* Account row removed 2026-05-15 — the Account chip in the
-         *  title row IS the editing surface now. */}
-        <PropertyRowGroup single={showLeftPane}>
-              <PropertyRow label="Pillar content">
-                <PillarPicker
-                  brand={brand}
-                  excludeId={contentId}
-                  value={pillar}
-                  onChange={(next) => {
-                    setPillar(next);
-                    void persistField({ pillarContentItemId: next?.id ?? null });
-                  }}
-                  triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
-                />
-              </PropertyRow>
-            </PropertyRowGroup>
-
-        {(sourceType === "repost" || sourceType === "cross_post") && (
-          <PropertyRowSolo>
-            <PropertyRow label="Reposted from">
-              <PillarPicker
-                brand={brand}
-                excludeId={contentId}
-                value={repostedFromOption}
-                onChange={(next) => {
-                  setRepostedFromOption(next);
-                  void persistField({ repostedFromItemId: next?.id ?? null });
-                }}
-                placeholder="No source — click to choose…"
-                includeAll
-                triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
-              />
-            </PropertyRow>
-          </PropertyRowSolo>
-        )}
+         *  title row IS the editing surface now. Pillar content +
+         *  Reposted from rows removed 2026-05-15 too — both pickers
+         *  live inside the source-type chip's popover (title-area
+         *  state row). The sidebar now only carries CTA UTM / DM
+         *  keyword and the read-only published metadata. */}
 
         {/* Published link + Published date used to be editable inputs here,
          *  but that surface let editors flip status without filling in the
