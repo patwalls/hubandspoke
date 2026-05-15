@@ -328,15 +328,36 @@ export function CrossPostTriageDialog({
             };
           })
         );
+        const failureReasons: string[] = [];
         for (const r of results) {
           if (r.status === "fulfilled") {
             if (r.value.kind === "ok") created.push(r.value);
             else skipped++;
-          } else failed++;
+          } else {
+            failed++;
+            // Preserve the per-target reason from the throw in the inner
+            // map (line ~319 — `throw new Error(err.error ?? \`HTTP …\`)`).
+            // Without this the all-failed toast loses the route's actual
+            // 400 message (e.g. "No Descript-able media available — pillar
+            // has no archived video") and just says "Failed to cross-post."
+            const reason =
+              r.reason instanceof Error ? r.reason.message : String(r.reason);
+            if (reason && !failureReasons.includes(reason)) {
+              failureReasons.push(reason);
+            }
+          }
         }
         if (failed > 0 && created.length === 0) {
+          // Dedup'd reasons so 2-target / same-cause failures don't
+          // double-print. Keep the description concise (≤2 distinct
+          // reasons surface fully; more than that we summarize).
+          const description =
+            failureReasons.length > 0
+              ? failureReasons.slice(0, 2).join("\n\n")
+              : undefined;
           toast.error(
-            `Failed to cross-post (${failed} target${failed === 1 ? "" : "s"}).`
+            `Failed to cross-post (${failed} target${failed === 1 ? "" : "s"}).`,
+            description ? { description, duration: 12_000 } : undefined,
           );
           return;
         }
