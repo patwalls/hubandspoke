@@ -175,14 +175,32 @@ export function AccountPostTypePicker({
               // no post-type suffix in the trigger — the second control
               // next to us shows it already
               variant="compact"
-              className="border-none bg-transparent px-0 py-0 text-sm"
-              size={14}
+              // When the caller supplies a chip-sized triggerClassName,
+              // shrink the inner text + icon so they match the chip's
+              // text-xs line-height. Without this swap the inner content
+              // pushes the chip ~4px taller than its h-7 sibling chips
+              // (Format / Editor / Status).
+              className={cn(
+                "border-none bg-transparent px-0 py-0",
+                triggerClassName ? "text-xs" : "text-sm",
+              )}
+              size={triggerClassName ? 12 : 14}
             />
           ) : (
-            <span className="text-muted-foreground">Select account…</span>
+            <span
+              className={cn(
+                "text-muted-foreground",
+                triggerClassName ? "text-xs" : undefined,
+              )}
+            >
+              Select account…
+            </span>
           )}
           <svg
-            className="ml-2 h-4 w-4 shrink-0 opacity-50"
+            className={cn(
+              "shrink-0 opacity-50",
+              triggerClassName ? "ml-1 h-3 w-3" : "ml-2 h-4 w-4",
+            )}
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"

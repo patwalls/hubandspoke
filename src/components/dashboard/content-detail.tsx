@@ -2112,13 +2112,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             >
               <SelectTrigger
                 aria-label="Editor"
+                size="sm"
                 className={cn(
                   CHIP_A_BASE,
                   "w-auto [&>span]:flex [&>span]:items-center [&>span]:min-w-0",
                 )}
               >
                 {editorUser ? (
-                  <UserChip user={editorUser} />
+                  // xs avatar (w-5 h-5) so the chip stays the same h-7
+                  // height as Format/Status/Account. The "sm" default
+                  // (w-6 h-6) pushes it ~4px taller and breaks the
+                  // chip-row alignment.
+                  <UserChip user={editorUser} size="xs" />
                 ) : (
                   <span className="text-muted-foreground">Select editor</span>
                 )}
@@ -2156,6 +2161,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             >
               <SelectTrigger
                 aria-label="Status"
+                size="sm"
                 className={cn(
                   CHIP_A_BASE,
                   "w-auto",
