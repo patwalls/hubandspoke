@@ -423,6 +423,39 @@ function normalizeContent(
   return out;
 }
 
+/**
+ * Wrap `client.messages.create` with a single retry on Anthropic 529
+ * (overloaded_error). Brief Anthropic capacity blips are common during
+ * peak hours and would otherwise surface as "couldn't redraft" in the
+ * UI — a 1.5s retry covers the most common case (the second request
+ * usually lands on a less-loaded shard). One retry only — persistent
+ * overloads still fail fast; an unbounded loop would just stack up
+ * 30s/call latency for users.
+ */
+async function createMessagesWithOverloadRetry(
+  client: Anthropic,
+  params: Anthropic.MessageCreateParamsNonStreaming,
+): Promise<Anthropic.Message> {
+  try {
+    return await client.messages.create(params);
+  } catch (err) {
+    const isOverload =
+      err instanceof Anthropic.APIError &&
+      (err.status === 529 ||
+        ("error" in err &&
+          typeof (err as { error?: { type?: string } }).error?.type ===
+            "string" &&
+          (err as { error: { type: string } }).error.type ===
+            "overloaded_error"));
+    if (!isOverload) throw err;
+    console.warn(
+      "draft-agent: Anthropic 529 overloaded — retrying once after 1.5s",
+    );
+    await new Promise((r) => setTimeout(r, 1500));
+    return await client.messages.create(params);
+  }
+}
+
 export async function generateDraft(
   args: GenerateDraftArgs,
 ): Promise<GenerateDraftResult> {
@@ -612,7 +645,7 @@ export async function generateDraft(
   let proposeDraftInput: unknown = null;
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    const response = await client.messages.create({
+    const response = await createMessagesWithOverloadRetry(client, {
       model: MODEL,
       max_tokens: 4096,
       system: [
