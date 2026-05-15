@@ -43,12 +43,18 @@ const VISION_POST_TYPES = [
 
 export const VISION_SWEEP_BATCH_LIMIT = 50;
 
-/** Match S3 keys that look like still images. Anything else (mp4, mov, webm,
- *  no extension) is treated as not vision-eligible — see the guard in
- *  extractVisionForItem. */
-const IMAGE_KEY_RE = /\.(jpe?g|png|webp|gif|heic|heif|avif)$/i;
+/** Match S3 keys that OpenAI's vision API will actually accept. The full
+ *  set of "still image" extensions includes heic/heif/avif (iPhone-shot
+ *  originals, modern web exports), but OpenAI rejects those with
+ *  `400 You uploaded an unsupported image. Please make sure your image
+ *  has of one the following formats: ['png', 'jpeg', 'gif', 'webp']` —
+ *  see HUBANDSPOKE-V, 179 events in 8 min when an iPhone HEIC poster
+ *  slipped through the old jpeg|png|webp|gif|heic|heif|avif allow-list.
+ *  Keep this aligned with OpenAI's actual supported set; any conversion
+ *  step (Sharp / sips) would belong in enrichment, not here. */
+export const IMAGE_KEY_RE = /\.(jpe?g|png|webp|gif)$/i;
 
-function isLikelyImageKey(key: string): boolean {
+export function isLikelyImageKey(key: string): boolean {
   // Strip query string just in case (presigned URLs aren't passed here, but
   // be safe).
   const base = key.split("?")[0] ?? key;

@@ -30,6 +30,7 @@ import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { openai } from "@/lib/openai";
+import { isLikelyImageKey } from "./vision";
 import type {
   ChatCompletionContentPart,
   ChatCompletionTool,
@@ -352,9 +353,16 @@ export async function dispatchHookForItem(
     return { status: "no-signals", note: "no-signals" };
   }
 
-  const posterImageUrl = existing.posterS3Key
-    ? await getPresignedGetUrl(existing.posterS3Key, POSTER_URL_TTL_SECONDS)
-    : null;
+  // Only presign + send the poster when the key's extension is something
+  // OpenAI's vision API accepts (png/jpeg/gif/webp). HEIC / HEIF / AVIF
+  // posters return `400 You uploaded an unsupported image` from OpenAI —
+  // see HUBANDSPOKE-V. Treating an unsupported poster as "no poster"
+  // lets the dispatcher fall through to text-only signals on this item
+  // and stamp `hookExtractedAt`, so we don't loop forever on retries.
+  const posterImageUrl =
+    existing.posterS3Key && isLikelyImageKey(existing.posterS3Key)
+      ? await getPresignedGetUrl(existing.posterS3Key, POSTER_URL_TTL_SECONDS)
+      : null;
 
   const transcriptSegmentsPreview = existing.transcriptSegments
     ? formatTranscriptSegments(
