@@ -48,7 +48,11 @@ export function PublishedEmbed({ item }: { item: ProductionItem }) {
         </Badge>
       </div>
       <div className="border-t border-border px-4 py-4 sm:px-5">
-        <PreviewEmbed platform={platform} publishedLink={item.publishedLink} />
+        <PreviewEmbed
+          platform={platform}
+          publishedLink={item.publishedLink}
+          newsletterBodyHtml={item.newsletterBodyHtml}
+        />
       </div>
     </div>
   );

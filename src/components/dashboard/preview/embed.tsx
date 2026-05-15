@@ -29,12 +29,35 @@ function loadScript(src: string) {
 export function PreviewEmbed({
   platform,
   publishedLink,
+  newsletterBodyHtml,
 }: {
   platform: PlatformKey;
   publishedLink: string | null;
+  /** Raw HTML captured by the Klaviyo enricher. When present on a
+   *  newsletter, we render it in a sandboxed iframe instead of the
+   *  link-only fallback so the post can be read in place. */
+  newsletterBodyHtml?: string | null;
 }) {
   const resolution = resolveEmbed(platform, publishedLink);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Newsletters: render the captured HTML body when we have it. The iframe
+  // is fully sandboxed (no JS, no same-origin, no form submission) so the
+  // email's inline styles can't bleed into the parent and any embedded
+  // <script> tags are inert. `allow-popups` lets the reader open links —
+  // they break out of the sandbox so target="_top" still works.
+  if (platform === "newsletter" && newsletterBodyHtml) {
+    return (
+      <iframe
+        title="Newsletter body"
+        srcDoc={newsletterBodyHtml}
+        sandbox="allow-popups allow-popups-to-escape-sandbox"
+        className="w-full rounded-md border border-border bg-white"
+        style={{ height: 720 }}
+        loading="lazy"
+      />
+    );
+  }
 
   useEffect(() => {
     if (resolution.kind !== "script") return;
