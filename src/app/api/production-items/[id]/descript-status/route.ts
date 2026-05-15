@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, repurposeTriggers } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
@@ -122,7 +122,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .from(repurposeTriggers)
     .where(
       and(
-        sql`${repurposeTriggers.productionItemId} = ANY(${triggerSourceIds})`,
+        // Use `inArray` rather than a raw `= ANY(${triggerSourceIds})`.
+        // Drizzle's template-tag interpolation of a JS array becomes a
+        // tuple `($1, $2)`, which Postgres rejects ("op ANY/ALL (array)
+        // requires array on right side", 42809). Every poll on a
+        // pillar+derivative pair was 500ing, so the status pill never
+        // surfaced even when Underlord was running.
+        inArray(repurposeTriggers.productionItemId, triggerSourceIds),
         sql`(${repurposeTriggers.descriptJobId} IS NOT NULL OR ${repurposeTriggers.descriptCompositionId} IS NOT NULL)`,
       ),
     )
