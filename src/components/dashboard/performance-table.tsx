@@ -120,6 +120,13 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
   const [editingItem, setEditingItem] = useState<ProductionItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Inline format-cell editing: which row's picker is open, which row is
+  // mid-save, and an optimistic override map so the cell flips immediately
+  // without waiting for the parent's refetch.
+  const [openFormatPickerId, setOpenFormatPickerId] = useState<string | null>(null);
+  const [savingFormatId, setSavingFormatId] = useState<string | null>(null);
+  const [formatOverrides, setFormatOverrides] = useState<Record<string, string | null>>({});
   // "new"       = blank manual-entry dialog (today's behavior)
   // "from-link" = shows a paste-URL + Fetch row at the top that auto-fills
   //               all fields from the preview-link API. Edit mode leaves
@@ -267,6 +274,40 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
       setPreviewWarning(err instanceof Error ? err.message : String(err));
     } finally {
       setFetchingPreview(false);
+    }
+  }
+
+  async function handleInlineFormatChange(itemId: string, newFormat: string | null) {
+    setOpenFormatPickerId(null);
+    setSavingFormatId(itemId);
+    setFormatOverrides((prev) => ({ ...prev, [itemId]: newFormat }));
+    try {
+      const res = await fetch("/api/production-items", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: itemId, format: newFormat }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || "Failed to update format");
+        setFormatOverrides((prev) => {
+          const next = { ...prev };
+          delete next[itemId];
+          return next;
+        });
+        return;
+      }
+      toast.success(newFormat ? `Format set to ${newFormat}` : "Format cleared");
+      onPostCreated?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+      setFormatOverrides((prev) => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+    } finally {
+      setSavingFormatId(null);
     }
   }
 
@@ -915,7 +956,82 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
                     />
                   </div>
                 </td>
-                <td className="px-3 py-2 text-sm text-muted-foreground">{item.format || "-"}</td>
+                <td className="px-3 py-2 text-sm">
+                  {(() => {
+                    const currentFormat =
+                      item.id in formatOverrides ? formatOverrides[item.id] : item.format;
+                    const isSaving = savingFormatId === item.id;
+                    if (!formats || formats.length === 0) {
+                      return (
+                        <span className="text-muted-foreground">{currentFormat || "-"}</span>
+                      );
+                    }
+                    return (
+                      <Popover
+                        open={openFormatPickerId === item.id}
+                        onOpenChange={(open) =>
+                          setOpenFormatPickerId(open ? item.id : null)
+                        }
+                      >
+                        <PopoverTrigger
+                          className={cn(
+                            "inline-flex items-center gap-1 -mx-1.5 rounded px-1.5 py-0.5 text-sm cursor-pointer hover:bg-accent hover:text-foreground transition-colors",
+                            currentFormat ? "text-foreground" : "text-muted-foreground",
+                            isSaving && "opacity-50 pointer-events-none",
+                          )}
+                          disabled={isSaving}
+                        >
+                          <span>{currentFormat || "—"}</span>
+                          <svg
+                            className="h-3 w-3 shrink-0 opacity-40"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-56 p-0" align="start">
+                          <Command>
+                            <CommandInput placeholder="Search formats…" />
+                            <CommandList>
+                              <CommandEmpty>No formats found.</CommandEmpty>
+                              <CommandGroup>
+                                {currentFormat && (
+                                  <CommandItem
+                                    value="__clear__"
+                                    onSelect={() => handleInlineFormatChange(item.id, null)}
+                                  >
+                                    <span className="text-muted-foreground italic">
+                                      Clear format
+                                    </span>
+                                  </CommandItem>
+                                )}
+                                {formats.map((f) => (
+                                  <CommandItem
+                                    key={f}
+                                    value={f}
+                                    onSelect={() => handleInlineFormatChange(item.id, f)}
+                                  >
+                                    {f}
+                                    {f === currentFormat && (
+                                      <span className="ml-auto text-xs text-muted-foreground">
+                                        ✓
+                                      </span>
+                                    )}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    );
+                  })()}
+                </td>
                 <td className="px-3 py-2">
                   <SourceBadge sourceType={item.sourceType} />
                 </td>
