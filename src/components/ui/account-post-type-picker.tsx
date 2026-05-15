@@ -50,6 +50,12 @@ interface AccountPostTypePickerProps {
   brandSlug?: string | null;
   disabled?: boolean;
   className?: string;
+  /** Override the styling of BOTH Popover triggers (Account selector +
+   *  Post Type selector). When set, the picker drops its default
+   *  sidebar-shaped chrome (h-9 outlined). The content-detail title-area
+   *  chip row passes Pattern A styles here so the picker matches the
+   *  rest of the editable chip system. */
+  triggerClassName?: string;
 }
 
 /**
@@ -67,6 +73,7 @@ export function AccountPostTypePicker({
   brandSlug,
   disabled,
   className,
+  triggerClassName,
 }: AccountPostTypePickerProps) {
   const [accountPopoverOpen, setAccountPopoverOpen] = useState(false);
   const [postTypePopoverOpen, setPostTypePopoverOpen] = useState(false);
@@ -155,8 +162,11 @@ export function AccountPostTypePicker({
         <PopoverTrigger
           disabled={disabled}
           className={cn(
-            "flex h-9 min-w-0 items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
-            showPostTypeControl ? "flex-1" : "w-full"
+            triggerClassName ??
+              cn(
+                "flex h-9 min-w-0 items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
+                showPostTypeControl ? "flex-1" : "w-full",
+              ),
           )}
         >
           {selected ? (
@@ -225,7 +235,10 @@ export function AccountPostTypePicker({
         <Popover open={postTypePopoverOpen} onOpenChange={setPostTypePopoverOpen}>
           <PopoverTrigger
             disabled={disabled}
-            className="flex h-9 shrink-0 items-center gap-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            className={cn(
+              triggerClassName ??
+                "flex h-9 shrink-0 items-center gap-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
+            )}
           >
             <span className="text-muted-foreground text-xs">as</span>
             <span className="font-medium">

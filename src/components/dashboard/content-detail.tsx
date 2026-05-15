@@ -347,6 +347,24 @@ const PROPERTY_INPUT_CLASS =
 const PROPERTY_TRIGGER_CLASS =
   "border-0 bg-transparent shadow-none h-8 px-2 rounded-sm focus:ring-1 focus:ring-ring hover:bg-muted/50 transition-colors";
 
+// Title-area chip system. Two visual patterns the rest of the page leans
+// on; every chip in the identity / state rows belongs to one or the
+// other. Anything with a chevron is editable (Pattern A); anything
+// without is read-only data (Pattern B). New chips added to either row
+// should reuse these strings so the look stays consistent.
+//
+// Pattern A — "Editable property chip". Trailing chevron is mandatory
+// and supplied by the caller. The Status variant adds a palette tint via
+// `statusClassWithPalette` *on top of* this base.
+const CHIP_A_BASE =
+  "inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-muted/50 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+// Pattern B — "Read-only info tag". Optional `CHIP_B_CLICKABLE` is added
+// when the chip opens an info popover / dialog.
+const CHIP_B_BASE =
+  "inline-flex h-6 items-center gap-1.5 px-1.5 text-xs text-muted-foreground";
+const CHIP_B_CLICKABLE =
+  "hover:bg-muted/40 rounded-md cursor-pointer transition-colors";
+
 const DETAIL_TAB_VALUES = [
   "details",
   "preview",
@@ -1751,6 +1769,14 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     // layout. Pat shouldn't see editorial Instructions on a draftable
     // post.
     "threads",
+    // Newsletter (2026-05-15) — drafting surface for in-app newsletters.
+    // Subject + preview text + body editable inside the inbox mock; the
+    // draft auto-ensure machinery the other inline post types use creates
+    // an empty contentDrafts row on page mount so commits land cleanly.
+    // For Klaviyo-synced newsletters the simulator falls back to
+    // `item.title` / `item.newsletterPreviewText` / `item.contentBody`
+    // until an editor types something.
+    "newsletter",
   ]);
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
@@ -1953,19 +1979,26 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
            *  to mount, just relocated here so the right column doesn't
            *  carry three dropdowns. */}
           <div className="flex items-center gap-2 flex-wrap mt-2">
-            <AccountBadge
-              account={item.account}
-              postType={item.postType}
-            />
-            <SourceBadge
-              sourceType={
-                item.sourceType as
-                  | "original"
-                  | "repost"
-                  | "cross_post"
-                  | "repurposed"
-                  | null
-              }
+            {/* Account chip — Pattern A. Replaces the static AccountBadge
+             *  display; click opens the AccountPostTypePicker. Note this
+             *  is now the ONE editing surface for account/postType — the
+             *  sidebar's Account row was removed in the same pass. */}
+            <AccountPostTypePicker
+              accounts={accounts}
+              accountId={accountId}
+              postType={postType}
+              publishedLink={publishedLink || null}
+              brandSlug={brand}
+              disabled={isYouTube}
+              onChange={({ accountId: nextId, postType: nextType }) => {
+                setAccountId(nextId);
+                setPostType(nextType);
+                void persistField({
+                  accountId: nextId,
+                  postType: nextType,
+                });
+              }}
+              triggerClassName={CHIP_A_BASE}
             />
 
             {/* Format chip — click opens the brand-format command picker.
@@ -1979,7 +2012,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             >
               <PopoverTrigger
                 aria-label="Format"
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs hover:bg-muted/50 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className={CHIP_A_BASE}
               >
                 <span className="truncate max-w-[260px]">
                   {format || (
@@ -2079,7 +2112,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             >
               <SelectTrigger
                 aria-label="Editor"
-                className="inline-flex h-7 w-auto items-center gap-1 rounded-md border border-border bg-background px-2 text-xs hover:bg-muted/50 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring [&>span]:flex [&>span]:items-center [&>span]:min-w-0"
+                className={cn(
+                  CHIP_A_BASE,
+                  "w-auto [&>span]:flex [&>span]:items-center [&>span]:min-w-0",
+                )}
               >
                 {editorUser ? (
                   <UserChip user={editorUser} />
@@ -2120,19 +2156,19 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             >
               <SelectTrigger
                 aria-label="Status"
-                className="inline-flex h-7 w-auto items-center gap-1 rounded-md border border-border bg-background px-2 text-xs hover:bg-muted/50 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className={cn(
+                  CHIP_A_BASE,
+                  "w-auto",
+                  // Status variant: tint the chip itself rather than wrap
+                  // a nested colored pill. Palette helpers return Tailwind
+                  // class strings that include border + bg + text — they
+                  // override CHIP_A_BASE's neutral defaults via Tailwind's
+                  // last-class-wins merge. The chevron stays neutral.
+                  status && statusClassWithPalette(status, statusPalette),
+                )}
               >
                 <SelectValue placeholder="Select status…">
-                  {status ? (
-                    <span
-                      className={cn(
-                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
-                        statusClassWithPalette(status, statusPalette),
-                      )}
-                    >
-                      {status}
-                    </span>
-                  ) : null}
+                  {status || null}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
@@ -2151,47 +2187,41 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </SelectContent>
             </Select>
 
-            {(item.authorHandle || item.authorDisplayName) && (
-              <span
-                className="text-xs text-muted-foreground inline-flex items-center gap-1"
-                title={
-                  item.authorFollowerCount != null
-                    ? `${item.authorFollowerCount.toLocaleString()} followers at last enrichment`
-                    : undefined
-                }
-              >
-                · @{item.authorHandle || item.authorDisplayName}
-                {item.authorVerified && (
-                  <span className="text-blue-500" aria-label="verified">
-                    ✓
-                  </span>
-                )}
-                {item.authorFollowerCount != null && (
-                  <span className="text-muted-foreground">
-                    · {formatCompact(item.authorFollowerCount)} followers
-                  </span>
-                )}
-              </span>
-            )}
+            {/* Author handle moved into the state row below — it's
+             *  read-only source-data, belongs with the other Pattern B
+             *  tags rather than alongside the editable identity chips. */}
           </div>
 
-          {/* State row — dim, smaller. Status of attached pipelines
-           *  (Descript, Canva, transcript, enrichment) + read-only info
-           *  chips (est. views, reference post link, published date).
-           *  Everything here used to live in the top-right header strip
-           *  but conflicted with the single "Publish or Schedule" CTA. */}
-          <div className="flex items-center gap-3 flex-wrap mt-2 text-xs text-muted-foreground">
-            <DescriptStatusPill productionItemId={item.id} />
-            <CanvaStatusPill productionItemId={item.id} initialItem={item} />
+          {/* State row — Pattern B (read-only info tags). Source-type,
+           *  pipeline statuses, prediction, reference-post link, and
+           *  published date all live here. Each chip uses CHIP_B_BASE
+           *  styling — no border, dim text, optional colored dot or
+           *  icon. The four pipeline-status components (Descript, Canva,
+           *  Transcript, Enrichment) render as chips via their
+           *  `variant="chip"` mode so they match. */}
+          <div className="flex items-center gap-1 flex-wrap mt-2 text-xs text-muted-foreground">
+            <SourceBadge
+              sourceType={
+                item.sourceType as
+                  | "original"
+                  | "repost"
+                  | "cross_post"
+                  | "repurposed"
+                  | null
+              }
+            />
+            <DescriptStatusPill productionItemId={item.id} variant="chip" />
+            <CanvaStatusPill productionItemId={item.id} initialItem={item} variant="chip" />
             <TranscriptButton
               itemId={item.id}
               hasMedia={!!item.mediaS3Key}
               hasTranscript={data.transcript != null}
+              variant="chip"
             />
             {isPrePublish && data.prediction && (
               <Popover>
                 <PopoverTrigger
-                  className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 hover:bg-muted/50 transition-colors"
+                  className={cn(CHIP_B_BASE, CHIP_B_CLICKABLE)}
                   title="See how this estimate was calculated"
                 >
                   {data.prediction.prediction != null ? (
@@ -2255,7 +2285,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               data.repostedFrom && (
                 <Popover>
                   <PopoverTrigger
-                    className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 hover:bg-muted/50 transition-colors"
+                    className={cn(CHIP_B_BASE, CHIP_B_CLICKABLE)}
                     title="Show the source post this was based on"
                   >
                     <LinkIcon className="size-3" /> Reference post
@@ -2305,12 +2335,19 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               )}
             {isPublished && (
               <EnrichmentButton
+                variant="chip"
                 itemId={item.id}
                 enrichmentCompletedAt={item.enrichmentCompletedAt}
                 enrichmentAttempts={item.enrichmentAttempts}
                 enrichmentError={item.enrichmentError}
+                title={item.title}
+                postType={item.postType}
+                thumbnail={item.thumbnail}
+                publishedAt={item.publishedAt}
+                publishedDate={item.publishedDate}
                 hook={item.hook}
                 hookSource={item.hookSource}
+                hookExtractor={item.hookExtractor}
                 hookExtractedAt={item.hookExtractedAt}
                 overlay={item.overlay}
                 coverDescription={item.coverDescription}
@@ -2333,13 +2370,37 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 transcriptAudioS3Key={data.transcript?.audioS3Key ?? null}
                 transcriptModel={data.transcript?.model ?? null}
                 transcriptDurationSec={data.transcript?.durationSec ?? null}
+                newsletterPreviewText={item.newsletterPreviewText}
+                newsletterBodyHtml={item.newsletterBodyHtml}
+                newsletterRecipients={item.newsletterRecipients}
+                klaviyoListId={item.klaviyoListId}
                 media={data.media}
                 onSynced={load}
               />
             )}
             {item.publishedDate && (
-              <span className="inline-flex h-6 items-center">
+              <span className={CHIP_B_BASE}>
                 Published {formatDate(item.publishedDate)}
+              </span>
+            )}
+            {(item.authorHandle || item.authorDisplayName) && (
+              <span
+                className={CHIP_B_BASE}
+                title={
+                  item.authorFollowerCount != null
+                    ? `${item.authorFollowerCount.toLocaleString()} followers at last enrichment`
+                    : undefined
+                }
+              >
+                · @{item.authorHandle || item.authorDisplayName}
+                {item.authorVerified && (
+                  <span className="text-blue-500" aria-label="verified">
+                    ✓
+                  </span>
+                )}
+                {item.authorFollowerCount != null && (
+                  <span>· {formatCompact(item.authorFollowerCount)} followers</span>
+                )}
               </span>
             )}
           </div>
@@ -2788,27 +2849,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
          *  sidebar can hold only rare-edit / advanced fields. The
          *  pickers are identical — just relocated triggers. */}
 
+        {/* Account row removed 2026-05-15 — the Account chip in the
+         *  title row IS the editing surface now. */}
         <PropertyRowGroup single={showLeftPane}>
-              <PropertyRow label="Account">
-                <AccountPostTypePicker
-                  accounts={accounts}
-                  accountId={accountId}
-                  postType={postType}
-                  publishedLink={publishedLink || null}
-                  brandSlug={brand}
-                  disabled={isYouTube}
-                  onChange={({ accountId: nextId, postType: nextType }) => {
-                    setAccountId(nextId);
-                    setPostType(nextType);
-                    void persistField({
-                      accountId: nextId,
-                      postType: nextType,
-                    });
-                  }}
-                  className="w-full"
-                />
-              </PropertyRow>
-
               <PropertyRow label="Pillar content">
                 <PillarPicker
                   brand={brand}
@@ -4113,7 +4156,17 @@ const BLOCKED_REASON_LABELS: Record<
  * while the job is processing so the editor sees state transitions
  * without refreshing the page.
  */
-function DescriptStatusPill({ productionItemId }: { productionItemId: string }) {
+function DescriptStatusPill({
+  productionItemId,
+  variant = "default",
+}: {
+  productionItemId: string;
+  /** "default" = bordered/colored pill (legacy chrome — kept for any
+   *  call site that still expects a loud pill). "chip" = Pattern B
+   *  (colored dot + dim text, no border) — used in the content-detail
+   *  title-area state row to match the rest of the chip system. */
+  variant?: "default" | "chip";
+}) {
   const [data, setData] = useState<DescriptStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [redriving, setRedriving] = useState(false);
@@ -4241,8 +4294,9 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
     <Popover>
       <PopoverTrigger
         className={cn(
-          buttonVariants({ variant: "outline", size: "sm" }),
-          style.pillClass,
+          variant === "chip"
+            ? cn(CHIP_B_BASE, CHIP_B_CLICKABLE)
+            : cn(buttonVariants({ variant: "outline", size: "sm" }), style.pillClass),
         )}
         title={data.detail}
       >
@@ -4421,9 +4475,15 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
 function CanvaStatusPill({
   productionItemId,
   initialItem,
+  variant = "default",
 }: {
   productionItemId: string;
   initialItem: ProductionItem;
+  /** "default" = legacy bold dual-button (Open in Canva + Download all)
+   *  / colored pill. "chip" = Pattern B — single dim chip with a colored
+   *  dot, opens the same actions via popover. Used in the title-area
+   *  state row. */
+  variant?: "default" | "chip";
 }) {
   const [state, setState] = useState({
     jobId: initialItem.canvaAutofillJobId ?? null,
@@ -4461,6 +4521,38 @@ function CanvaStatusPill({
   }, [productionItemId, state.jobId, state.editUrl]);
 
   if (state.editUrl) {
+    if (variant === "chip") {
+      // Pattern B: collapse the dual buttons into a single chip with a
+      // popover that holds the two actions. Keeps the title-area state
+      // row visually consistent.
+      return (
+        <Popover>
+          <PopoverTrigger
+            className={cn(CHIP_B_BASE, CHIP_B_CLICKABLE)}
+            title="Canva design ready"
+          >
+            <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
+            Canva ready
+          </PopoverTrigger>
+          <PopoverContent className="w-48 p-1" align="end">
+            <a
+              href={state.editUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+            >
+              <ExternalLinkIcon className="size-3.5" /> Open in Canva
+            </a>
+            <a
+              href={`/api/production-items/${productionItemId}/media/zip`}
+              className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+            >
+              <DownloadIcon className="size-3.5" /> Download all slides
+            </a>
+          </PopoverContent>
+        </Popover>
+      );
+    }
     return (
       <>
         <a
@@ -4489,6 +4581,20 @@ function CanvaStatusPill({
     );
   }
   if (state.jobId) {
+    if (variant === "chip") {
+      return (
+        <span
+          className={CHIP_B_BASE}
+          title="Canva is generating the autofilled design"
+        >
+          <span
+            className="size-1.5 rounded-full bg-amber-500 animate-pulse"
+            aria-hidden
+          />
+          Canva creating…
+        </span>
+      );
+    }
     return (
       <span
         className={cn(

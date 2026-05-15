@@ -44,8 +44,29 @@ interface Props {
   enrichmentCompletedAt?: string | null;
   enrichmentAttempts?: number | null;
   enrichmentError?: string | null;
+  /** YouTube video title, newsletter subject, etc. Filled by the per-platform
+   *  enricher (`updates.title = …`). Distinct from the editorial draft
+   *  title — this is what the published platform shows. */
+  title?: string | null;
+  /** Canonical post-type. Drives whether the newsletter-specific section
+   *  renders. */
+  postType?: string | null;
+  /** Upstream thumbnail URL (CDN-hosted, may expire). Distinct from the
+   *  archived `posterUrl` we keep in S3 — the upstream URL is what the
+   *  content-list / queue cards still link to for cheap previews. */
+  thumbnail?: string | null;
+  /** When the published item went live. Filled by enrichers that have
+   *  authoritative dates (YouTube /v1/youtube/video, Klaviyo campaigns).
+   *  Shown in the dialog header so you don't have to close the modal to
+   *  check what published-date is on file. */
+  publishedAt?: string | null;
+  publishedDate?: string | null;
   hook?: string | null;
   hookSource?: string | null;
+  /** Which sweep / fallback wrote the current hook (e.g. `yt-enricher:v1`,
+   *  `newsletter-enricher:v1`, `dispatch-hook:vision`). Useful for
+   *  debugging which path won. */
+  hookExtractor?: string | null;
   hookExtractedAt?: string | null;
   /** Verbatim burn-in text painted onto the cover/video itself (the bold
    *  overlay sentence above the speaker on a Reel). Distinct field from
@@ -75,11 +96,22 @@ interface Props {
   transcriptAudioS3Key?: string | null;
   transcriptModel?: string | null;
   transcriptDurationSec?: number | null;
+  /** Newsletter-specific (Klaviyo). Surfaced in a dedicated section that
+   *  only renders when any of these is set, so non-newsletter items don't
+   *  show empty newsletter rows. */
+  newsletterPreviewText?: string | null;
+  newsletterBodyHtml?: string | null;
+  newsletterRecipients?: number | null;
+  klaviyoListId?: string | null;
   /** Full carousel — one entry per archived slide, index 0 == cover. Empty
    *  array for older items that were enriched pre-carousel support (the
    *  dialog falls back to the single `mediaUrl` / `posterUrl` fields). */
   media?: EnrichmentMedia[];
   onSynced: () => Promise<void> | void;
+  /** "default" = outlined button (legacy chrome).
+   *  "chip" = Pattern B — colored dot + dim text, matches the
+   *  content-detail title-area state row. */
+  variant?: "default" | "chip";
 }
 
 function fmtBytes(n: number | null | undefined): string {
@@ -158,8 +190,14 @@ export function EnrichmentButton(props: Props) {
     enrichmentCompletedAt,
     enrichmentAttempts,
     enrichmentError,
+    title,
+    postType,
+    thumbnail,
+    publishedAt,
+    publishedDate,
     hook,
     hookSource,
+    hookExtractor,
     hookExtractedAt,
     overlay,
     coverDescription,
@@ -182,8 +220,13 @@ export function EnrichmentButton(props: Props) {
     transcriptAudioS3Key,
     transcriptModel,
     transcriptDurationSec,
+    newsletterPreviewText,
+    newsletterBodyHtml,
+    newsletterRecipients,
+    klaviyoListId,
     media = [],
     onSynced,
+    variant = "default",
   } = props;
 
   const [open, setOpen] = useState(false);
@@ -237,24 +280,64 @@ export function EnrichmentButton(props: Props) {
         render={
           <button
             type="button"
-            className={buttonVariants({ variant: "outline", size: "sm" })}
+            className={
+              variant === "chip"
+                ? cn(
+                    "inline-flex h-6 items-center gap-1.5 px-1.5 text-xs " +
+                      "text-muted-foreground hover:bg-muted/40 rounded-md " +
+                      "cursor-pointer transition-colors",
+                  )
+                : buttonVariants({ variant: "outline", size: "sm" })
+            }
             title="See the caption, media, and author data we've archived for this post"
           />
         }
       >
-        <DatabaseIcon className="size-3.5" /> Enrichment
+        {variant === "chip" ? (
+          <>
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                enrichmentCompletedAt
+                  ? "bg-emerald-500"
+                  : enrichmentError
+                    ? "bg-rose-500"
+                    : "bg-muted-foreground/40",
+              )}
+              aria-hidden
+            />
+            {enrichmentCompletedAt
+              ? "Enriched"
+              : enrichmentError
+                ? "Enrichment failed"
+                : "Not enriched"}
+          </>
+        ) : (
+          <>
+            <DatabaseIcon className="size-3.5" /> Enrichment
+          </>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-8">
             <DialogTitle>Enrichment data</DialogTitle>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-[11px] text-muted-foreground text-right">
               {enrichmentCompletedAt
                 ? `Enriched ${fmtTimestamp(enrichmentCompletedAt)}`
                 : "Not yet enriched"}
               {enrichmentAttempts != null && enrichmentAttempts > 0
                 ? ` · ${enrichmentAttempts} attempt${enrichmentAttempts === 1 ? "" : "s"}`
                 : ""}
+              {(publishedAt || publishedDate) && (
+                <>
+                  <br />
+                  Published{" "}
+                  {publishedAt
+                    ? fmtTimestamp(publishedAt)
+                    : (publishedDate ?? "")}
+                </>
+              )}
             </span>
           </div>
         </DialogHeader>
@@ -328,6 +411,20 @@ export function EnrichmentButton(props: Props) {
             </Section>
           )}
 
+          {/* Title / subject — populated by enrichers that have an
+              authoritative title (YouTube /v1/youtube/video, Klaviyo
+              campaign-message). For newsletters this IS the email subject
+              line. Always render when set so you can confirm what the
+              published platform shows vs. the editorial draft. */}
+          {title && (
+            <Section
+              title={postType === "newsletter" ? "Subject" : "Title"}
+              actions={<CopyButton text={title} />}
+            >
+              <p className="text-[13px] leading-snug font-medium">{title}</p>
+            </Section>
+          )}
+
           {/* Hook — verbatim scroll-stopper opening. Filled by the LLM sweep
               (short-form w/ transcript), clip-idea promotion, title/body
               fallback, or manual edit. */}
@@ -335,11 +432,13 @@ export function EnrichmentButton(props: Props) {
             title="Hook"
             subtitle={
               hook
-                ? `${hookSourceLabel(hookSource)}${
-                    hookExtractedAt
-                      ? ` · ${fmtTimestamp(hookExtractedAt)}`
-                      : ""
-                  }`
+                ? [
+                    hookSourceLabel(hookSource),
+                    hookExtractor ? `via ${hookExtractor}` : null,
+                    hookExtractedAt ? fmtTimestamp(hookExtractedAt) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
                 : null
             }
             actions={hook ? <CopyButton text={hook} /> : undefined}
@@ -425,6 +524,55 @@ export function EnrichmentButton(props: Props) {
             </Section>
           )}
 
+          {/* Newsletter (Klaviyo) — preview text + raw HTML body indicator
+              + list / segment id. Renders only when any newsletter-specific
+              field is populated, so non-newsletter items don't show empty
+              rows. The HTML body itself isn't rendered inline (50KB+
+              average) — the Copy button + size is the affordance for
+              grabbing it. The plaintext body is already in the
+              "Caption / body" section above. */}
+          {(newsletterPreviewText ||
+            newsletterBodyHtml ||
+            klaviyoListId ||
+            newsletterRecipients != null) && (
+            <Section title="Newsletter">
+              <dl className="grid grid-cols-[140px_1fr] gap-x-4 gap-y-1 text-sm">
+                <dt className="text-muted-foreground">Preview text</dt>
+                <dd>
+                  {newsletterPreviewText ? (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[13px] leading-snug">
+                        {newsletterPreviewText}
+                      </span>
+                      <CopyButton text={newsletterPreviewText} />
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </dd>
+                <dt className="text-muted-foreground">Body HTML</dt>
+                <dd>
+                  {newsletterBodyHtml ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {fmtBytes(newsletterBodyHtml.length)} stored
+                      </span>
+                      <CopyButton text={newsletterBodyHtml} />
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </dd>
+                <dt className="text-muted-foreground">Recipients</dt>
+                <dd>{fmtNumber(newsletterRecipients)}</dd>
+                <dt className="text-muted-foreground">Klaviyo list / segment</dt>
+                <dd className="font-mono text-xs">
+                  {klaviyoListId || "—"}
+                </dd>
+              </dl>
+            </Section>
+          )}
+
           {/* Media */}
           <Section title="Media">
             <dl className="grid grid-cols-[140px_1fr] gap-x-4 gap-y-1 text-sm mb-3">
@@ -450,6 +598,21 @@ export function EnrichmentButton(props: Props) {
                     className="hover:underline"
                   >
                     {contentMediaUrl}
+                  </a>
+                ) : (
+                  "—"
+                )}
+              </dd>
+              <dt className="text-muted-foreground">Thumbnail URL</dt>
+              <dd className="font-mono text-xs break-all">
+                {thumbnail ? (
+                  <a
+                    href={thumbnail}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:underline"
+                  >
+                    {thumbnail}
                   </a>
                 ) : (
                   "—"

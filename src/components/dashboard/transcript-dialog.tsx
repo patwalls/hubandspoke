@@ -47,6 +47,10 @@ interface Props {
    *  When true, the dialog opens even without archived media — but the
    *  "Fetch transcript" action stays gated on hasMedia. */
   hasTranscript?: boolean;
+  /** "default" = outlined button with CaptionsIcon (legacy chrome).
+   *  "chip" = Pattern B — colored dot + dim text, matches the
+   *  content-detail title-area state row. */
+  variant?: "default" | "chip";
 }
 
 function fmtTs(sec: number): string {
@@ -60,6 +64,7 @@ export function TranscriptButton({
   itemId,
   hasMedia,
   hasTranscript = false,
+  variant = "default",
 }: Props) {
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -186,12 +191,35 @@ export function TranscriptButton({
         render={
           <button
             type="button"
-            className={buttonVariants({ variant: "outline", size: "sm" })}
+            className={
+              variant === "chip"
+                ? cn(
+                    "inline-flex h-6 items-center gap-1.5 px-1.5 text-xs " +
+                      "text-muted-foreground hover:bg-muted/40 rounded-md " +
+                      "cursor-pointer transition-colors",
+                  )
+                : buttonVariants({ variant: "outline", size: "sm" })
+            }
             title="View the transcript"
           />
         }
       >
-        <CaptionsIcon className="size-3.5" /> Transcript
+        {variant === "chip" ? (
+          <>
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                hasTranscript ? "bg-emerald-500" : "bg-muted-foreground/40",
+              )}
+              aria-hidden
+            />
+            {hasTranscript ? "Transcribed" : "No transcript"}
+          </>
+        ) : (
+          <>
+            <CaptionsIcon className="size-3.5" /> Transcript
+          </>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader>
