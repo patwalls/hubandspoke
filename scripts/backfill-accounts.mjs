@@ -404,11 +404,15 @@ try {
       ) AS exists
     `;
     if (exists) {
+      // `default_producer_user_id` was never a column on `brand_settings`
+      // (the producer role was removed in 1462b3c). The earlier version of
+      // this UPDATE referenced it and crashed every release. Editor + the
+      // weekly-goal pair are the only columns ever populated on bs, so
+      // those are all we copy here.
       await sql`
         UPDATE brands b
         SET weekly_goal = bs.weekly_goal,
             week_start_day = bs.week_start_day,
-            default_producer_user_id = bs.default_producer_user_id,
             default_editor_user_id = bs.default_editor_user_id,
             updated_at = now()
         FROM brand_settings bs
