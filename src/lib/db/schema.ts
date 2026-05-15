@@ -389,6 +389,15 @@ export const productionItems = pgTable(
     uniqueIndex("uniq_production_items_source_clip_idea")
       .on(table.sourceClipIdeaId)
       .where(sql`${table.sourceClipIdeaId} IS NOT NULL`),
+    // One Descript composition belongs to one production_item. Pillars hold
+    // a `descript_seed_composition_id` instead — that column is the warm-
+    // clip path's "duplicate from this" pointer and is exempt from this
+    // index. Cold-import-then-warm-clip flows write the same Descript
+    // composition id to both columns (different rows): the derivative's
+    // `descript_composition_id` and the pillar's `descript_seed_composition_id`.
+    uniqueIndex("uniq_production_items_descript_composition")
+      .on(table.descriptCompositionId)
+      .where(sql`${table.descriptCompositionId} IS NOT NULL`),
     // Dedup key for per-account content sync: a single platform-native id
     // can only exist once per account. Partial so legacy rows without a
     // populated platform_content_id remain valid.

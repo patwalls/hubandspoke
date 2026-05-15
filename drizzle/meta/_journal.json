@@ -568,6 +568,13 @@
       "when": 1778852733452,
       "tag": "0080_glorious_micromacro",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1778856021831,
+      "tag": "0081_sturdy_mastermind",
+      "breakpoints": true
     }
   ]
 }

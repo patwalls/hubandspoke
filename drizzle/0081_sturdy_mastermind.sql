@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uniq_production_items_descript_composition" ON "production_items" USING btree ("descript_composition_id") WHERE "production_items"."descript_composition_id" IS NOT NULL;
