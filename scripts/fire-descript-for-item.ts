@@ -82,6 +82,7 @@ async function main() {
     derivativeItemId: item.id,
     pillarItemId: item.pillarContentItemId ?? null,
     formatId: fmt.id,
+    formatName: fmt.name,
     formatSkill: fmt.instructions,
     compositionName,
     force: true,

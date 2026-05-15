@@ -9,6 +9,7 @@ import {
 import * as descriptApi from "@/lib/descript";
 import * as s3Mod from "@/lib/s3";
 import * as enqueueMod from "@/jobs/enqueue";
+import * as derivativeHookMod from "./derivative-hook";
 import {
   buildDerivativeDescriptPrompt,
   runDescriptStepForDerivative,
@@ -22,6 +23,12 @@ Inside the composition, mark filler words as IGNORED.
 
 ### Copywriting
 Don't use em dashes.`;
+
+const SKILL_WITH_HOOK_PLACEHOLDER = `### Descript Clip & Pack Info
+
+Clip the tech-stack section.
+
+Set the hook text track to: "{{hook}}". Replace whatever the layout pack provides.`;
 
 const createdTriggerIds: string[] = [];
 
@@ -77,6 +84,7 @@ describe("runDescriptStepForDerivative", () => {
       derivativeItemId: derivative.id,
       pillarItemId: pillar.id,
       formatId: format.id,
+      formatName: format.name,
       formatSkill: CLIP_INTRO_SKILL,
       compositionName: derivative.title!,
       force: false,
@@ -160,6 +168,7 @@ describe("runDescriptStepForDerivative", () => {
       derivativeItemId: derivative.id,
       pillarItemId: pillar.id,
       formatId: format.id,
+      formatName: format.name,
       formatSkill: CLIP_INTRO_SKILL,
       compositionName: "anything",
       force: false,
@@ -230,6 +239,7 @@ describe("runDescriptStepForDerivative", () => {
       derivativeItemId: derivative.id,
       pillarItemId: pillar.id,
       formatId: format.id,
+      formatName: format.name,
       formatSkill: CLIP_INTRO_SKILL,
       compositionName: "anything",
       force: false,
@@ -263,6 +273,7 @@ describe("runDescriptStepForDerivative", () => {
       derivativeItemId: derivative.id,
       pillarItemId: pillar.id,
       formatId: format.id,
+      formatName: format.name,
       // Empty skill string — exercises the no_skill gate even though the
       // pillar is warm.
       formatSkill: "",
@@ -296,6 +307,7 @@ describe("runDescriptStepForDerivative", () => {
       derivativeItemId: derivative.id,
       pillarItemId: pillar.id,
       formatId: format.id,
+      formatName: format.name,
       formatSkill: CLIP_INTRO_SKILL,
       compositionName: "anything",
       force: false,
@@ -335,6 +347,7 @@ describe("runDescriptStepForDerivative", () => {
       derivativeItemId: derivative.id,
       pillarItemId: pillar.id,
       formatId: format.id,
+      formatName: format.name,
       formatSkill: CLIP_INTRO_SKILL,
       compositionName: "redraft-name",
       force: true,
@@ -366,5 +379,189 @@ describe("buildDerivativeDescriptPrompt", () => {
     expect(out).toContain('"Angus \\"Cheng\\" intro"');
     expect(out).toContain('Cut from "intro" to "the big idea".');
     expect(out).toContain('compositionId="<uuid>"');
+  });
+});
+
+describe("runDescriptStepForDerivative — {{hook}} substitution", () => {
+  it("generates a hook, persists it, and substitutes into the Descript prompt", async () => {
+    const agentSpy = vi
+      .spyOn(descriptApi, "invokeDescriptAgent")
+      .mockResolvedValue({
+        jobId: "job-hook-1",
+        projectId: "proj-pillar-h1",
+        projectUrl: "https://web.descript.com/proj-pillar-h1",
+      });
+    vi.spyOn(enqueueMod, "enqueue").mockResolvedValue(undefined);
+    const hookSpy = vi
+      .spyOn(derivativeHookMod, "generateDerivativeHook")
+      .mockResolvedValue({
+        ok: true,
+        value: {
+          hook: "He built one website that prints $40K/month 😲",
+          source: "derivative-hook-v1",
+          extractor: "claude-haiku-4-5-20251001:derivative-hook:v1",
+          exemplarCount: 5,
+        },
+      });
+
+    const format = await createTestFormat({
+      isClipDescriptFormat: true,
+      instructions: SKILL_WITH_HOOK_PLACEHOLDER,
+    });
+    const pillar = await createTestProductionItem({
+      title: "Pillar with Descript",
+      descriptProjectId: "proj-pillar-h1",
+      descriptProjectUrl: "https://web.descript.com/proj-pillar-h1",
+      descriptCompositionId: "comp-pillar-h1",
+    });
+    const derivative = await createTestProductionItem({
+      title: "Derivative needing hook",
+      format: format.name,
+      sourceType: "repurposed",
+      pillarContentItemId: pillar.id,
+    });
+
+    const result = await runDescriptStepForDerivative({
+      derivativeItemId: derivative.id,
+      pillarItemId: pillar.id,
+      formatId: format.id,
+      formatName: format.name,
+      formatSkill: SKILL_WITH_HOOK_PLACEHOLDER,
+      compositionName: derivative.title!,
+      force: false,
+    });
+
+    expect(result.status).toBe("triggered_warm");
+    if (result.triggerId) createdTriggerIds.push(result.triggerId);
+
+    expect(hookSpy).toHaveBeenCalledTimes(1);
+    expect(hookSpy.mock.calls[0][0]).toMatchObject({
+      formatName: format.name,
+      derivativeItemId: derivative.id,
+      pillarItemId: pillar.id,
+    });
+
+    // The prompt fired to Underlord has the hook substituted in — no
+    // literal placeholder left.
+    expect(agentSpy).toHaveBeenCalledTimes(1);
+    const promptArg = agentSpy.mock.calls[0][0].prompt;
+    expect(promptArg).toContain("He built one website that prints $40K/month");
+    expect(promptArg).not.toContain("{{hook}}");
+
+    // Hook is persisted on the derivative row with the right source so
+    // future audits / reporting can attribute the hook to this pipeline.
+    const [updated] = await db
+      .select({
+        hook: productionItems.hook,
+        hookSource: productionItems.hookSource,
+        hookExtractor: productionItems.hookExtractor,
+        hookExtractedAt: productionItems.hookExtractedAt,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, derivative.id))
+      .limit(1);
+    expect(updated.hook).toBe("He built one website that prints $40K/month 😲");
+    expect(updated.hookSource).toBe("derivative-hook-v1");
+    expect(updated.hookExtractor).toContain("derivative-hook");
+    expect(updated.hookExtractedAt).not.toBeNull();
+  });
+
+  it("fails soft when hook generation fails — placeholder passes through, clip still fires", async () => {
+    const agentSpy = vi
+      .spyOn(descriptApi, "invokeDescriptAgent")
+      .mockResolvedValue({
+        jobId: "job-hook-fail-1",
+        projectId: "proj-pillar-h2",
+        projectUrl: "https://web.descript.com/proj-pillar-h2",
+      });
+    vi.spyOn(enqueueMod, "enqueue").mockResolvedValue(undefined);
+    vi.spyOn(derivativeHookMod, "generateDerivativeHook").mockResolvedValue({
+      ok: false,
+      failure: { reason: "no-pillar-transcript" },
+    });
+
+    const format = await createTestFormat({
+      isClipDescriptFormat: true,
+      instructions: SKILL_WITH_HOOK_PLACEHOLDER,
+    });
+    const pillar = await createTestProductionItem({
+      descriptProjectId: "proj-pillar-h2",
+      descriptCompositionId: "comp-pillar-h2",
+    });
+    const derivative = await createTestProductionItem({
+      format: format.name,
+      sourceType: "repurposed",
+      pillarContentItemId: pillar.id,
+    });
+
+    const result = await runDescriptStepForDerivative({
+      derivativeItemId: derivative.id,
+      pillarItemId: pillar.id,
+      formatId: format.id,
+      formatName: format.name,
+      formatSkill: SKILL_WITH_HOOK_PLACEHOLDER,
+      compositionName: "anything",
+      force: false,
+    });
+
+    expect(result.status).toBe("triggered_warm");
+    if (result.triggerId) createdTriggerIds.push(result.triggerId);
+
+    // The clip fires even though hook generation failed — but the prompt
+    // still contains the literal placeholder so the failure is visible
+    // in the resulting composition. Better than silently dropping the
+    // whole Descript step.
+    expect(agentSpy).toHaveBeenCalledTimes(1);
+    const promptArg = agentSpy.mock.calls[0][0].prompt;
+    expect(promptArg).toContain("{{hook}}");
+
+    // Derivative's hook column is NOT written when generation fails —
+    // we don't want to stamp a junk hook just because the placeholder
+    // was in the Skill.
+    const [updated] = await db
+      .select({ hook: productionItems.hook })
+      .from(productionItems)
+      .where(eq(productionItems.id, derivative.id))
+      .limit(1);
+    expect(updated.hook).toBeNull();
+  });
+
+  it("skips hook generation entirely when the Skill has no {{hook}} placeholder", async () => {
+    vi.spyOn(descriptApi, "invokeDescriptAgent").mockResolvedValue({
+      jobId: "job-no-hook-1",
+      projectId: "proj-pillar-n1",
+      projectUrl: "https://web.descript.com/proj-pillar-n1",
+    });
+    vi.spyOn(enqueueMod, "enqueue").mockResolvedValue(undefined);
+    const hookSpy = vi.spyOn(derivativeHookMod, "generateDerivativeHook");
+
+    const format = await createTestFormat({
+      isClipDescriptFormat: true,
+      instructions: CLIP_INTRO_SKILL,
+    });
+    const pillar = await createTestProductionItem({
+      descriptProjectId: "proj-pillar-n1",
+      descriptCompositionId: "comp-pillar-n1",
+    });
+    const derivative = await createTestProductionItem({
+      format: format.name,
+      sourceType: "repurposed",
+      pillarContentItemId: pillar.id,
+    });
+
+    const result = await runDescriptStepForDerivative({
+      derivativeItemId: derivative.id,
+      pillarItemId: pillar.id,
+      formatId: format.id,
+      formatName: format.name,
+      formatSkill: CLIP_INTRO_SKILL,
+      compositionName: "anything",
+      force: false,
+    });
+
+    expect(result.status).toBe("triggered_warm");
+    if (result.triggerId) createdTriggerIds.push(result.triggerId);
+    // No placeholder in the Skill → don't burn a Haiku call.
+    expect(hookSpy).not.toHaveBeenCalled();
   });
 });
