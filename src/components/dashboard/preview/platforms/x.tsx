@@ -36,16 +36,21 @@ export function XSimulator({
   onCommit,
   itemId,
   onMediaMutated,
+  onDraftMutated,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   const slides = data.slides;
   const hasMedia = slides.length > 0;
-  // Only render the CTA editor when the draft's snapshot actually carries
-  // a `cta` field. v1 drafts (pre-2026-05-08) have no cta key in content,
-  // so the API would reject a PATCH on it — gating the render off the
-  // live content keeps the UI honest about what's editable.
+  // CTA reply is part of the X post shape — always render the card when
+  // the platform has a cta slot. Empty drafts (e.g. /drafts/ensure
+  // placeholders) and user-edits that only touched the tweet body will
+  // hit this with no `cta` key in liveContent; the editable field then
+  // shows its placeholder ("Add a reply with the CTA…") and a user
+  // edit / regenerate-cta click writes the key on first commit. v1
+  // pre-2026-05-08 drafts whose schema snapshot lacks cta are stale
+  // enough that Redrafting them is the right escape hatch.
   const ctaKey = fieldMap.cta;
-  const showCta = !!ctaKey && !!liveContent && ctaKey in liveContent;
+  const showCta = !!ctaKey;
   const ctaValue = ctaKey ? readLive(liveContent, ctaKey, "") : "";
 
   return (
@@ -152,6 +157,8 @@ export function XSimulator({
                 onLocalEdit={onLocalEdit}
                 onCommit={onCommit}
                 author={data.author}
+                itemId={itemId}
+                onRegenerated={onDraftMutated}
                 // No maxLength: @starter_story is a verified account and
                 // posts long-form X — the 280 cap was misleading. The
                 // CtaCard's CharCounter renders null when maxLength is

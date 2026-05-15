@@ -122,7 +122,15 @@ Where <link> is chosen in this order of preference:
 Append UTM params to the chosen link, using the values in the CTA CONTEXT block verbatim:
 - utm_source={channel}
 - utm_campaign={utmCampaign}    (drop this param entirely when CTA CONTEXT shows utmCampaign as "(none)")
-- Use "?" for the first param. If the URL already carries a "?" query string (rare for our links), join with "&" instead.
+- Use "?" as the separator before the first param, then "&" between params. NEVER use "/" as a separator — that turns a query param into a path segment and breaks the link.
+
+URL CONSTRUCTION EXAMPLES (follow these verbatim):
+- channel="x", utmCampaign="hello-123", base="https://starterstory.com/micro"
+  → https://starterstory.com/micro?utm_source=x&utm_campaign=hello-123
+- channel="linkedin", utmCampaign="(none)", base="https://starterstory.com/solo"
+  → https://starterstory.com/solo?utm_source=linkedin
+- channel="ytcommunity", utmCampaign="ep-42", base="https://starterstory.com/episode/founder-burnout"
+  → https://starterstory.com/episode/founder-burnout?utm_source=ytcommunity&utm_campaign=ep-42
 
 OVERRIDE: if FORMAT REFERENCES & EDITORIAL NOTES specify a different CTA copy, link shape, or template, follow the Skill — Skill wins over the baseline. The baseline applies when the Skill is silent on CTAs.
 

@@ -18,14 +18,17 @@ export function YouTubeCommunitySimulator({
   liveContent,
   onLocalEdit,
   onCommit,
+  itemId,
+  onDraftMutated,
 }: SimulatorProps) {
   const body = readLive(liveContent, fieldMap.caption, data.caption);
   const displayName = data.author.displayName ?? data.author.handle ?? "Channel";
   const firstSlide = data.slides[0] ?? null;
   const time = formatFeedTime(data.publishedAt);
-  // CTA gate — see x.tsx for the rationale.
+  // CTA gate — see x.tsx for the rationale. CTA is part of the YouTube
+  // Community post shape; always render when the platform has a cta slot.
   const ctaKey = fieldMap.cta;
-  const showCta = !!ctaKey && !!liveContent && ctaKey in liveContent;
+  const showCta = !!ctaKey;
   const ctaValue = ctaKey ? readLive(liveContent, ctaKey, "") : "";
 
   return (
@@ -97,6 +100,8 @@ export function YouTubeCommunitySimulator({
             onCommit={onCommit}
             author={data.author}
             maxLength={10000}
+            itemId={itemId}
+            onRegenerated={onDraftMutated}
           />
         </div>
       )}

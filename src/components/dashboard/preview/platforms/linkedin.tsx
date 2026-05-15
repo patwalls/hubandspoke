@@ -41,14 +41,15 @@ export function LinkedInSimulator({
   onCommit,
   itemId,
   onMediaMutated,
+  onDraftMutated,
 }: SimulatorProps) {
   const body = readLive(liveContent, fieldMap.caption, data.caption);
   const slides = data.slides;
   const hasMedia = slides.length > 0;
-  // CTA gate — see x.tsx for the rationale on why this checks live
-  // content rather than the static field map.
+  // CTA gate — see x.tsx for the rationale. CTA is part of the LinkedIn
+  // post shape; always render when the platform has a cta slot.
   const ctaKey = fieldMap.cta;
-  const showCta = !!ctaKey && !!liveContent && ctaKey in liveContent;
+  const showCta = !!ctaKey;
   const ctaValue = ctaKey ? readLive(liveContent, ctaKey, "") : "";
 
   return (
@@ -154,6 +155,8 @@ export function LinkedInSimulator({
                 onCommit={onCommit}
                 author={data.author}
                 maxLength={1250}
+                itemId={itemId}
+                onRegenerated={onDraftMutated}
               />
             )}
           </div>

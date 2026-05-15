@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { SparklesIcon } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MonogramAvatar } from "./avatar";
 import { EditableField } from "./editable-field";
@@ -28,6 +31,12 @@ interface Props {
   onCommit?: SimulatorProps["onCommit"];
   author: PreviewData["author"];
   maxLength?: number;
+  // Powers the per-CTA Regenerate button (POSTs to
+  // /api/production-items/[itemId]/regenerate-cta). Optional so the card
+  // still renders fine for callers that don't have an itemId / refetch
+  // hook yet (e.g. read-only previews).
+  itemId?: string;
+  onRegenerated?: () => void;
 }
 
 export function CtaCard({
@@ -39,10 +48,12 @@ export function CtaCard({
   onCommit,
   author,
   maxLength,
+  itemId,
+  onRegenerated,
 }: Props) {
-  if (variant === "x") return <XCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength }} />;
-  if (variant === "linkedin") return <LinkedInCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength }} />;
-  return <YouTubeCommunityCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength }} />;
+  if (variant === "x") return <XCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }} />;
+  if (variant === "linkedin") return <LinkedInCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }} />;
+  return <YouTubeCommunityCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }} />;
 }
 
 interface VariantProps {
@@ -53,13 +64,15 @@ interface VariantProps {
   onCommit?: SimulatorProps["onCommit"];
   author: PreviewData["author"];
   maxLength?: number;
+  itemId?: string;
+  onRegenerated?: () => void;
 }
 
 // X reply: stacked under the main tweet with a vertical connector line on
 // the left between the two avatars (mirrors the Typefully second-tweet
 // reference). Same author as the main tweet — replies-from-self are how
 // "tweet a CTA reply" actually publishes on X.
-function XCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength }: VariantProps) {
+function XCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }: VariantProps) {
   const displayName = author.displayName ?? author.handle ?? "You";
   return (
     <div
@@ -76,13 +89,18 @@ function XCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLen
         />
       </div>
       <div className="min-w-0 flex-1 leading-tight">
-        <div className="flex items-center gap-1">
-          <span className="truncate text-sm font-semibold">{displayName}</span>
-          {author.verified && <VerifiedBadge />}
-          {author.handle && (
-            <span className="truncate text-xs text-muted-foreground">
-              @{author.handle}
-            </span>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="truncate text-sm font-semibold">{displayName}</span>
+            {author.verified && <VerifiedBadge />}
+            {author.handle && (
+              <span className="truncate text-xs text-muted-foreground">
+                @{author.handle}
+              </span>
+            )}
+          </div>
+          {editable && itemId && (
+            <RegenerateCtaButton itemId={itemId} onRegenerated={onRegenerated} />
           )}
         </div>
         <div className="mt-0.5 mb-1 text-[11px] text-muted-foreground">
@@ -109,7 +127,7 @@ function XCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLen
 // pill so editors immediately see this is the author's own pinned comment
 // (the convention LI uses to surface the link CTA without burying it in
 // the body and tanking reach).
-function LinkedInCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength }: VariantProps) {
+function LinkedInCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }: VariantProps) {
   const displayName = author.displayName ?? author.handle ?? "You";
   return (
     <div
@@ -125,13 +143,18 @@ function LinkedInCta({ fieldKey, value, editable, onLocalEdit, onCommit, author,
             size="sm"
           />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="truncate text-[13px] font-semibold">
-                {displayName}
-              </span>
-              <span className="rounded-sm bg-muted px-1 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                Author
-              </span>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-[13px] font-semibold">
+                  {displayName}
+                </span>
+                <span className="rounded-sm bg-muted px-1 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Author
+                </span>
+              </div>
+              {editable && itemId && (
+                <RegenerateCtaButton itemId={itemId} onRegenerated={onRegenerated} />
+              )}
             </div>
             {author.bio && (
               <div className="truncate text-[11px] leading-tight text-muted-foreground">
@@ -163,16 +186,21 @@ function LinkedInCta({ fieldKey, value, editable, onLocalEdit, onCommit, author,
 // with a 📌 Pinned pill. v1 always shows the pill — the actual pin state
 // is implicit (the freelancer pins it manually after publish). A pin
 // toggle is a v2 follow-up.
-function YouTubeCommunityCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength }: VariantProps) {
+function YouTubeCommunityCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }: VariantProps) {
   const displayName = author.displayName ?? author.handle ?? "Channel";
   return (
     <div
       className="mx-auto w-full max-w-[640px] border-t border-[#e5e5e5] px-4 pt-3"
       style={{ fontFamily: PLATFORM_FONT.youtube_community }}
     >
-      <div className="mb-2 inline-flex items-center gap-1 rounded-full bg-[#f2f2f2] px-2 py-0.5 text-[11px] font-medium text-[#0f0f0f]">
-        <PinIcon />
-        Pinned by {displayName}
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="inline-flex items-center gap-1 rounded-full bg-[#f2f2f2] px-2 py-0.5 text-[11px] font-medium text-[#0f0f0f]">
+          <PinIcon />
+          Pinned by {displayName}
+        </div>
+        {editable && itemId && (
+          <RegenerateCtaButton itemId={itemId} onRegenerated={onRegenerated} />
+        )}
       </div>
       <div className="flex items-start gap-2.5">
         <MonogramAvatar
@@ -235,5 +263,62 @@ function PinIcon() {
     <svg viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor" aria-hidden>
       <path d="M14 4l6 6-4 1-3 3 1 5-7-7-5 1 3-3-1-5 4-1z" />
     </svg>
+  );
+}
+
+// Per-CTA Regenerate button. POSTs to /regenerate-cta which runs a focused
+// Opus call (CTA BASELINE TEMPLATE only — no transcript, no past captions)
+// and writes a new draft version that preserves every other content field.
+// Distinct from the main caption Regenerate (which rewrites the whole post)
+// because editors often hand-type the body and want to refresh only the
+// reply link / copy without losing it.
+function RegenerateCtaButton({
+  itemId,
+  onRegenerated,
+}: {
+  itemId: string;
+  onRegenerated?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function handleClick() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(
+        `/api/production-items/${itemId}/regenerate-cta`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Couldn't regenerate CTA");
+        return;
+      }
+      if (json?.status === "skipped") {
+        toast.message("Skipped", { description: json.reason ?? "Nothing to do." });
+        return;
+      }
+      toast.success("CTA regenerated");
+      onRegenerated?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't regenerate CTA");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleClick()}
+      disabled={busy}
+      title="Regenerate the reply CTA from the format Skill (preserves the main post body)"
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50",
+      )}
+    >
+      <SparklesIcon className={cn("h-3 w-3", busy && "animate-pulse")} />
+      {busy ? "Generating…" : "Regenerate CTA"}
+    </button>
   );
 }
