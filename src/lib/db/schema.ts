@@ -768,7 +768,7 @@ export const repurposeTriggers = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     productionItemId: uuid("production_item_id")
-      .references(() => productionItems.id)
+      .references(() => productionItems.id, { onDelete: "cascade" })
       .notNull(),
     sourceFormatId: uuid("source_format_id").references(() => formats.id),
     targetFormatId: uuid("target_format_id")
