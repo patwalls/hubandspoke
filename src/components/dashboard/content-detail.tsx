@@ -2542,12 +2542,27 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
            *  strip moved into the title-area chip rows above. "Open in
            *  Notion" and "Upload source video" moved into the Actions
            *  menu below. */}
-          {/* Single path to status='Published'/'Scheduled'. Button label
-           *  flips based on current state — pre-publish items see the
-           *  "Publish or Schedule" call-to-action; already-published items
-           *  see "Edit publish info" which re-opens the modal pre-filled.
-           *  The modal's onSuccess calls `load()` to refetch the row. */}
-          {(item.status === "Published" || item.status === "Scheduled") ? (
+          {/* Single path to status='Published'/'Scheduled'. The header CTA
+           *  reflects the most useful next action per state:
+           *    - Published WITH a published_link → "View Live Post" (anchor,
+           *      opens the actual social post). Editing the publish info is
+           *      a rare follow-up so it moves into the Actions dropdown.
+           *    - Published/Scheduled WITHOUT a link (data issue, or
+           *      scheduled-not-yet-posted) → "Edit publish info" stays as
+           *      the top-level CTA so the operator can fix it.
+           *    - Pre-publish → "Publish or Schedule" primary CTA.
+           *  The Edit modal's onSuccess calls `load()` to refetch the row. */}
+          {item.status === "Published" && item.publishedLink ? (
+            <a
+              href={item.publishedLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonVariants({ variant: "default", size: "sm" })}
+              title="Open the live post on the destination platform"
+            >
+              <ExternalLinkIcon className="size-3.5" /> View Live Post
+            </a>
+          ) : item.status === "Published" || item.status === "Scheduled" ? (
             <button
               type="button"
               onClick={() => setPublishDialogOpen(true)}
@@ -2659,6 +2674,19 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   >
                     <GitMerge className="size-3.5" /> Merge…
                   </DropdownMenuItem>
+                  {/* Edit publish info — moved into the Actions menu when
+                   *  the post is Published with a link, since "View Live
+                   *  Post" took the header CTA spot. Only meaningful for
+                   *  Published/Scheduled items; pre-publish items use the
+                   *  primary "Publish or Schedule" button instead. */}
+                  {(item.status === "Published" ||
+                    item.status === "Scheduled") && (
+                    <DropdownMenuItem
+                      onClick={() => setPublishDialogOpen(true)}
+                    >
+                      <PencilIcon className="size-3.5" /> Edit publish info
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   {!hasDescriptProject && item.mediaS3Key && (
                     <DropdownMenuItem
