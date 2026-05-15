@@ -4,7 +4,7 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronDownIcon, ChevronUpIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, GitMerge, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, GitMerge, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import {
@@ -1129,7 +1129,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   // "More fields" toggle: hides Account, Pillar, Source type, Reposted from
   // by default so the metadata card surfaces only the fields a clip operator
   // routinely edits (Editor, Status, Format, CTA UTM, DM keyword).
-  const [showMore, setShowMore] = useState(false);
+  // `showMore` state removed 2026-05-15 — the "See more fields" toggle
+  // went away when Editor / Status / Format moved up to the title chip
+  // row, leaving only advanced fields in the sidebar (now always-shown).
   // Title is rendered as a heading above the card; pencil swaps in an Input
   // with autoFocus so it receives focus immediately on mount.
   const [editingTitle, setEditingTitle] = useState(false);
@@ -1945,6 +1947,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               )}
             </div>
           </div>
+          {/* Identity row — "what is this post?" Account, source-type,
+           *  format, editor, status. All chips are clickable: the format /
+           *  editor / status chips open the same pickers the sidebar used
+           *  to mount, just relocated here so the right column doesn't
+           *  carry three dropdowns. */}
           <div className="flex items-center gap-2 flex-wrap mt-2">
             <AccountBadge
               account={item.account}
@@ -1961,16 +1968,189 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               }
             />
 
-            {item.format && (
-              <span className="text-xs text-muted-foreground">
-                · {item.format}
-              </span>
+            {/* Format chip — click opens the brand-format command picker.
+             *  Same picker the sidebar Format row used to mount. */}
+            <Popover
+              open={formatPickerOpen}
+              onOpenChange={(open) => {
+                setFormatPickerOpen(open);
+                if (!open) setFormatSearch("");
+              }}
+            >
+              <PopoverTrigger
+                aria-label="Format"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs hover:bg-muted/50 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <span className="truncate max-w-[260px]">
+                  {format || (
+                    <span className="text-muted-foreground">Select format…</span>
+                  )}
+                </span>
+                <ChevronDownIcon className="size-3 opacity-50 shrink-0" />
+              </PopoverTrigger>
+              <PopoverContent className="w-96 p-0" align="start">
+                <Command>
+                  <CommandInput
+                    placeholder="Search or create format…"
+                    value={formatSearch}
+                    onValueChange={setFormatSearch}
+                  />
+                  <CommandList>
+                    {(() => {
+                      const trimmed = formatSearch.trim();
+                      const exactMatch = brandFormats.some(
+                        (f) => f.toLowerCase() === trimmed.toLowerCase(),
+                      );
+                      const showCreate = trimmed.length > 0 && !exactMatch;
+                      return (
+                        <>
+                          {!showCreate && (
+                            <CommandEmpty>No matching format.</CommandEmpty>
+                          )}
+                          {brandFormats.length > 0 && (
+                            <CommandGroup>
+                              {format && (
+                                <CommandItem
+                                  onSelect={() => {
+                                    setFormat("");
+                                    void persistField({ format: null });
+                                    setFormatPickerOpen(false);
+                                  }}
+                                  className="text-muted-foreground"
+                                >
+                                  <span className="text-sm">Clear selection</span>
+                                </CommandItem>
+                              )}
+                              {brandFormats.map((f) => (
+                                <CommandItem
+                                  key={f}
+                                  value={f}
+                                  onSelect={() => {
+                                    setFormat(f);
+                                    void persistField({ format: f });
+                                    setFormatPickerOpen(false);
+                                  }}
+                                  data-checked={format === f ? "true" : undefined}
+                                >
+                                  <span className="text-sm">{f}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          )}
+                          {showCreate && (
+                            <CommandGroup heading="Actions" forceMount>
+                              <CommandItem
+                                value={`__create__ ${trimmed}`}
+                                onSelect={() => void createFormatFromQuery(trimmed)}
+                                forceMount
+                              >
+                                <span className="text-sm">
+                                  Create <span className="font-medium">&ldquo;{trimmed}&rdquo;</span>
+                                </span>
+                              </CommandItem>
+                            </CommandGroup>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            {currentFormat && (
+              <Link
+                href={`/${brand}/formats/${currentFormat.id}`}
+                title="Open format page"
+                className="inline-flex h-7 items-center rounded-md px-1 text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+              >
+                <ExternalLinkIcon className="size-3" />
+              </Link>
             )}
-            {item.publishedDate && (
-              <span className="text-xs text-muted-foreground">
-                · published {formatDate(item.publishedDate)}
-              </span>
-            )}
+
+            {/* Editor chip — avatar + name; click opens the user picker
+             *  (same options the sidebar Editor Select used to mount). */}
+            <Select
+              value={editorUserId || ""}
+              onValueChange={(v) => {
+                if (!v) return;
+                setEditorUserId(v);
+                void persistField({ editorUserId: v });
+              }}
+            >
+              <SelectTrigger
+                aria-label="Editor"
+                className="inline-flex h-7 w-auto items-center gap-1 rounded-md border border-border bg-background px-2 text-xs hover:bg-muted/50 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring [&>span]:flex [&>span]:items-center [&>span]:min-w-0"
+              >
+                {editorUser ? (
+                  <UserChip user={editorUser} />
+                ) : (
+                  <span className="text-muted-foreground">Select editor</span>
+                )}
+              </SelectTrigger>
+              <SelectContent>
+                {assignableUsers.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    <UserChip user={u} />
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Status chip — colored pill matching the current status
+             *  palette; click opens the same filtered list of status
+             *  options the sidebar dropdown used to mount. Published /
+             *  Scheduled are still filtered out by `statusOptions` so the
+             *  only path to those values is the Publish-or-Schedule
+             *  modal. */}
+            <Select
+              value={status}
+              onValueChange={(v) => {
+                const prev = status;
+                const next = v ?? "";
+                if (next === prev) return;
+                if (next === "Killed") {
+                  setPendingKill({ previousStatus: prev });
+                  return;
+                }
+                setStatus(next);
+                void persistField({ status: next || null }).then((ok) => {
+                  if (!ok) setStatus(prev);
+                });
+              }}
+            >
+              <SelectTrigger
+                aria-label="Status"
+                className="inline-flex h-7 w-auto items-center gap-1 rounded-md border border-border bg-background px-2 text-xs hover:bg-muted/50 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <SelectValue placeholder="Select status…">
+                  {status ? (
+                    <span
+                      className={cn(
+                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
+                        statusClassWithPalette(status, statusPalette),
+                      )}
+                    >
+                      {status}
+                    </span>
+                  ) : null}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {statusOptions.map((s) => (
+                  <SelectItem key={s.id} value={s.name}>
+                    <span
+                      className={cn(
+                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
+                        statusClassFromToken(s.color),
+                      )}
+                    >
+                      {s.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             {(item.authorHandle || item.authorDisplayName) && (
               <span
                 className="text-xs text-muted-foreground inline-flex items-center gap-1"
@@ -1994,249 +2174,183 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </span>
             )}
           </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
-          {(item.sourceType === "repost" || item.sourceType === "cross_post") &&
-            data.repostedFrom && (
+
+          {/* State row — dim, smaller. Status of attached pipelines
+           *  (Descript, Canva, transcript, enrichment) + read-only info
+           *  chips (est. views, reference post link, published date).
+           *  Everything here used to live in the top-right header strip
+           *  but conflicted with the single "Publish or Schedule" CTA. */}
+          <div className="flex items-center gap-3 flex-wrap mt-2 text-xs text-muted-foreground">
+            <DescriptStatusPill productionItemId={item.id} />
+            <CanvaStatusPill productionItemId={item.id} initialItem={item} />
+            <TranscriptButton
+              itemId={item.id}
+              hasMedia={!!item.mediaS3Key}
+              hasTranscript={data.transcript != null}
+            />
+            {isPrePublish && data.prediction && (
               <Popover>
                 <PopoverTrigger
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                  title="Show the source post this was based on"
+                  className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 hover:bg-muted/50 transition-colors"
+                  title="See how this estimate was calculated"
                 >
-                  <LinkIcon className="size-3.5" /> Reference post
-                </PopoverTrigger>
-                <PopoverContent className="w-96 space-y-2" align="end">
-                  <h3 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                    {item.sourceType === "cross_post"
-                      ? "Cross-posted from"
-                      : "Reposted from"}
-                  </h3>
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <Link
-                      href={`/${brand}/content/${data.repostedFrom.id}`}
-                      className="text-sm font-medium text-foreground hover:text-primary hover:underline"
-                    >
-                      {data.repostedFrom.title || "(untitled)"}
-                    </Link>
-                    <span className="text-xs text-muted-foreground">
-                      {data.repostedFrom.publishedDate &&
-                        `originally ${formatDate(data.repostedFrom.publishedDate)}`}
-                      {data.repostedFrom.views != null && (
-                        <> · {formatCompact(data.repostedFrom.views)} views</>
-                      )}
-                    </span>
-                  </div>
-                  {data.repostedFrom.publishedLink && (
-                    <a
-                      href={data.repostedFrom.publishedLink}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:underline"
-                      title="Open the published source post in a new tab"
-                    >
-                      <ExternalLinkIcon className="size-3.5" /> View published post
-                    </a>
+                  {data.prediction.prediction != null ? (
+                    <>
+                      <span
+                        className={cn(
+                          "size-1.5 rounded-full",
+                          CONFIDENCE_STYLES[data.prediction.confidence].dot,
+                        )}
+                        aria-hidden
+                      />
+                      Est. {formatCompact(data.prediction.prediction)} views
+                    </>
+                  ) : (
+                    <>
+                      <TrendingUpIcon className="size-3" /> Est. views
+                    </>
                   )}
-                  {data.repostedFrom.evergreenReasoning && (
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      <span className="font-medium text-foreground">
-                        Why this was recommended:
-                      </span>{" "}
-                      {data.repostedFrom.evergreenReasoning}
-                    </p>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 space-y-2" align="end">
+                  {data.prediction.prediction != null ? (
+                    <>
+                      <div className="text-3xl font-bold tabular-nums">
+                        {formatCompact(data.prediction.prediction)}
+                      </div>
+                      <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                        Predicted views
+                      </div>
+                      {data.prediction.p25 != null && data.prediction.p75 != null && (
+                        <div className="text-xs text-muted-foreground">
+                          Range {formatCompact(data.prediction.p25)} –{" "}
+                          {formatCompact(data.prediction.p75)}
+                        </div>
+                      )}
+                      {data.prediction.cohortBreakdown.length > 0 && (() => {
+                        const totalN = data.prediction.cohortBreakdown.reduce(
+                          (s, c) => s + c.n,
+                          0,
+                        );
+                        return (
+                          <div className="text-xs text-muted-foreground">
+                            Based on {totalN.toFixed(0)} similar posts
+                          </div>
+                        );
+                      })()}
+                      <p className="text-[11px] text-muted-foreground leading-relaxed border-t border-border/60 pt-2">
+                        Blended estimate using format-cohort median, pillar
+                        history, and platform baseline.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">
+                      Not enough signal yet — assign a format and a pillar to
+                      see an estimate.
+                    </div>
                   )}
                 </PopoverContent>
               </Popover>
             )}
-          <DescriptStatusPill productionItemId={item.id} />
-          <CanvaStatusPill productionItemId={item.id} initialItem={item} />
-          {/* TypefullyStatusPill hidden for now — to be revisited once the
-           * drafting surface owns the publish flow. The pill component
-           * itself stays in the file for easy reinstatement. */}
-          {isPrePublish && data.prediction && (
-            <Popover>
-              <PopoverTrigger
-                className={buttonVariants({ variant: "outline", size: "sm" })}
-                title="See how this estimate was calculated"
-              >
-                {data.prediction.prediction != null ? (
-                  <>
-                    <span
-                      className={cn(
-                        "size-1.5 rounded-full",
-                        CONFIDENCE_STYLES[data.prediction.confidence].dot
-                      )}
-                      aria-hidden
-                    />
-                    Est. {formatCompact(data.prediction.prediction)} views
-                  </>
-                ) : (
-                  <>
-                    <TrendingUpIcon className="size-3.5" /> Est. views
-                  </>
-                )}
-              </PopoverTrigger>
-              <PopoverContent className="w-[28rem] space-y-4" align="end">
-                {data.prediction.prediction == null ? (
-                  <>
-                    <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                      Predicted Views
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      Not enough similar published content yet to predict views.
-                    </p>
-                  </>
-                ) : (
-                  (() => {
-                    const style = CONFIDENCE_STYLES[data.prediction.confidence];
-                    const totalN = data.prediction.cohortBreakdown.reduce(
-                      (s, c) => s + c.n,
-                      0
-                    );
-                    return (
-                      <>
-                        <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                          <div>
-                            <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                              Predicted Views
-                            </p>
-                            <div className="mt-2 flex items-baseline gap-3 flex-wrap">
-                              <span className="text-3xl font-semibold text-foreground tabular-nums">
-                                {formatCompact(data.prediction.prediction)}
-                              </span>
-                              {data.prediction.p25 != null &&
-                                data.prediction.p75 != null && (
-                                  <span className="text-sm text-muted-foreground tabular-nums">
-                                    range{" "}
-                                    {formatCompact(data.prediction.p25)}–
-                                    {formatCompact(data.prediction.p75)}
-                                  </span>
-                                )}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={cn(
-                                "w-1.5 h-1.5 rounded-full",
-                                style.dot
-                              )}
-                              aria-hidden
-                            />
-                            <span className={cn("text-xs", style.text)}>
-                              {style.label}
-                            </span>
-                          </div>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          Based on {totalN.toFixed(0)} similar posts
-                        </p>
-                        {data.prediction.cohortBreakdown.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {data.prediction.cohortBreakdown.map((c) => (
-                              <span
-                                key={c.cohort}
-                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-accent/40 text-[11px] text-muted-foreground"
-                                title={`Weight ${(c.weight * 100).toFixed(0)}% of blended prediction`}
-                              >
-                                <span className="font-medium text-foreground">
-                                  {c.label}
-                                </span>
-                                <span className="text-muted-foreground">
-                                  · {c.n.toFixed(0)} posts, median{" "}
-                                  <span className="tabular-nums">
-                                    {formatCompact(c.median)}
-                                  </span>
-                                </span>
-                              </span>
-                            ))}
-                          </div>
+            {(item.sourceType === "repost" || item.sourceType === "cross_post") &&
+              data.repostedFrom && (
+                <Popover>
+                  <PopoverTrigger
+                    className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 hover:bg-muted/50 transition-colors"
+                    title="Show the source post this was based on"
+                  >
+                    <LinkIcon className="size-3" /> Reference post
+                  </PopoverTrigger>
+                  <PopoverContent className="w-96 space-y-2" align="end">
+                    <h3 className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                      {item.sourceType === "cross_post"
+                        ? "Cross-posted from"
+                        : "Reposted from"}
+                    </h3>
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <Link
+                        href={`/${brand}/content/${data.repostedFrom.id}`}
+                        className="text-sm font-medium text-foreground hover:text-primary hover:underline"
+                      >
+                        {data.repostedFrom.title || "(untitled)"}
+                      </Link>
+                      <span className="text-xs text-muted-foreground">
+                        {data.repostedFrom.publishedDate &&
+                          `originally ${formatDate(data.repostedFrom.publishedDate)}`}
+                        {data.repostedFrom.views != null && (
+                          <> · {formatCompact(data.repostedFrom.views)} views</>
                         )}
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">
-                          Blend of historical performance from the same pillar,
-                          format, and platform. Social is noisy — treat this as
-                          a sanity-check range, not a forecast.
-                        </p>
-                      </>
-                    );
-                  })()
-                )}
-              </PopoverContent>
-            </Popover>
-          )}
-          {item.publishedLink && (
-            <a
-              href={item.publishedLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-              title="Open the live post"
-            >
-              <ExternalLinkIcon className="size-3.5" /> Published
-            </a>
-          )}
-          {notionUrl && (
-            <a
-              href={notionUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-              title="Open the Notion page for this post"
-            >
-              <FileTextIcon className="size-3.5" /> Notion
-            </a>
-          )}
-          {isYouTube && !isPublished && !item.mediaS3Key && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setMediaUploadOpen(true)}
-              title="Upload the source video so Whisper can transcribe and clip ideas can be generated, even before this post is published"
-            >
-              <UploadIcon className="size-3.5" /> Upload media
-            </Button>
-          )}
-          {isPublished && (
-            <EnrichmentButton
-              itemId={item.id}
-              enrichmentCompletedAt={item.enrichmentCompletedAt}
-              enrichmentAttempts={item.enrichmentAttempts}
-              enrichmentError={item.enrichmentError}
-              hook={item.hook}
-              hookSource={item.hookSource}
-              hookExtractedAt={item.hookExtractedAt}
-              overlay={item.overlay}
-              coverDescription={item.coverDescription}
-              visionExtractedAt={item.visionExtractedAt}
-              contentBody={item.contentBody}
-              contentBodyFetchedAt={item.contentBodyFetchedAt}
-              contentBodySource={item.contentBodySource}
-              contentMediaUrl={item.contentMediaUrl}
-              description={item.description}
-              authorHandle={item.authorHandle}
-              authorDisplayName={item.authorDisplayName}
-              authorFollowerCount={item.authorFollowerCount}
-              authorVerified={item.authorVerified}
-              posterUrl={item.posterUrl}
-              mediaUrl={item.mediaUrl}
-              mediaContentType={item.mediaContentType}
-              mediaSizeBytes={item.mediaSizeBytes}
-              mediaS3Key={item.mediaS3Key}
-              posterS3Key={item.posterS3Key}
-              transcriptAudioS3Key={data.transcript?.audioS3Key ?? null}
-              transcriptModel={data.transcript?.model ?? null}
-              transcriptDurationSec={data.transcript?.durationSec ?? null}
-              media={data.media}
-              onSynced={load}
-            />
-          )}
-          {/* Descript deep-link is consolidated into DescriptStatusPill —
-           *  its popover surfaces both the composition URL and the
-           *  project URL, so a separate button here is redundant. */}
-          <TranscriptButton
-            itemId={item.id}
-            hasMedia={!!item.mediaS3Key}
-            hasTranscript={data.transcript != null}
-          />
+                      </span>
+                    </div>
+                    {data.repostedFrom.publishedLink && (
+                      <a
+                        href={data.repostedFrom.publishedLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:underline"
+                        title="Open the published source post in a new tab"
+                      >
+                        <ExternalLinkIcon className="size-3.5" /> View published post
+                      </a>
+                    )}
+                    {data.repostedFrom.evergreenReasoning && (
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        <span className="font-medium text-foreground">
+                          Why this was recommended:
+                        </span>{" "}
+                        {data.repostedFrom.evergreenReasoning}
+                      </p>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              )}
+            {isPublished && (
+              <EnrichmentButton
+                itemId={item.id}
+                enrichmentCompletedAt={item.enrichmentCompletedAt}
+                enrichmentAttempts={item.enrichmentAttempts}
+                enrichmentError={item.enrichmentError}
+                hook={item.hook}
+                hookSource={item.hookSource}
+                hookExtractedAt={item.hookExtractedAt}
+                overlay={item.overlay}
+                coverDescription={item.coverDescription}
+                visionExtractedAt={item.visionExtractedAt}
+                contentBody={item.contentBody}
+                contentBodyFetchedAt={item.contentBodyFetchedAt}
+                contentBodySource={item.contentBodySource}
+                contentMediaUrl={item.contentMediaUrl}
+                description={item.description}
+                authorHandle={item.authorHandle}
+                authorDisplayName={item.authorDisplayName}
+                authorFollowerCount={item.authorFollowerCount}
+                authorVerified={item.authorVerified}
+                posterUrl={item.posterUrl}
+                mediaUrl={item.mediaUrl}
+                mediaContentType={item.mediaContentType}
+                mediaSizeBytes={item.mediaSizeBytes}
+                mediaS3Key={item.mediaS3Key}
+                posterS3Key={item.posterS3Key}
+                transcriptAudioS3Key={data.transcript?.audioS3Key ?? null}
+                transcriptModel={data.transcript?.model ?? null}
+                transcriptDurationSec={data.transcript?.durationSec ?? null}
+                media={data.media}
+                onSynced={load}
+              />
+            )}
+            {item.publishedDate && (
+              <span className="inline-flex h-6 items-center">
+                Published {formatDate(item.publishedDate)}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {/* Header strip is intentionally lean: one primary CTA + one
+           *  catch-all Actions dropdown. All the status pills, info
+           *  popovers, and pipeline buttons that used to clutter this
+           *  strip moved into the title-area chip rows above. "Open in
+           *  Notion" and "Upload source video" moved into the Actions
+           *  menu below. */}
           {/* Single path to status='Published'/'Scheduled'. Button label
            *  flips based on current state — pre-publish items see the
            *  "Publish or Schedule" call-to-action; already-published items
@@ -2399,6 +2513,28 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   >
                     <DownloadIcon className="size-3.5" /> Download watermarks
                   </DropdownMenuItem>
+                  {/* Pre-publish helper for YouTube — uploads the source MP4
+                   *  so Whisper can transcribe and clip ideas can fire even
+                   *  before the post goes live. Used to be a dedicated
+                   *  header button; folded into Actions since it's a rare,
+                   *  one-shot trigger per item. */}
+                  {isYouTube && !isPublished && !item.mediaS3Key && (
+                    <DropdownMenuItem
+                      onClick={() => setMediaUploadOpen(true)}
+                    >
+                      <UploadIcon className="size-3.5" /> Upload source video
+                    </DropdownMenuItem>
+                  )}
+                  {/* Notion deep-link. Used to be a header button; folded
+                   *  here so the header strip can stay focused on the
+                   *  single primary "Publish or Schedule" CTA. */}
+                  {notionUrl && (
+                    <DropdownMenuItem
+                      onClick={() => window.open(notionUrl, "_blank", "noopener,noreferrer")}
+                    >
+                      <FileTextIcon className="size-3.5" /> Open in Notion
+                    </DropdownMenuItem>
+                  )}
                   {isPublished && (
                     <DropdownMenuItem
                       disabled={isSyncing}
@@ -2646,197 +2782,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </div>
         )}
 
-        <PropertyRowGroup single>
-          <PropertyRow label="Editor">
-            <Select
-              value={editorUserId || ""}
-              onValueChange={(v) => {
-                if (!v) return;
-                setEditorUserId(v);
-                void persistField({ editorUserId: v });
-              }}
-            >
-              <SelectTrigger
-                aria-label="Editor"
-                className={cn(
-                  PROPERTY_TRIGGER_CLASS,
-                  "[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1"
-                )}
-              >
-                {editorUser ? (
-                  <UserChip user={editorUser} />
-                ) : (
-                  <span className="text-muted-foreground">Select editor</span>
-                )}
-              </SelectTrigger>
-              <SelectContent>
-                {assignableUsers.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    <UserChip user={u} />
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </PropertyRow>
-        </PropertyRowGroup>
+        {/* Editor / Status / Format rows used to live here as a sidebar
+         *  PropertyRowGroup with three Selects. As of 2026-05-15 they
+         *  moved into the title-area identity chip row above so the
+         *  sidebar can hold only rare-edit / advanced fields. The
+         *  pickers are identical — just relocated triggers. */}
 
         <PropertyRowGroup single={showLeftPane}>
-          <PropertyRow label="Status">
-            <Select
-              value={status}
-              onValueChange={(v) => {
-                const prev = status;
-                const next = v ?? "";
-                if (next === prev) return;
-                if (next === "Killed") {
-                  setPendingKill({ previousStatus: prev });
-                  return;
-                }
-                setStatus(next);
-                void persistField({ status: next || null }).then((ok) => {
-                  if (!ok) setStatus(prev);
-                });
-              }}
-            >
-              <SelectTrigger className={PROPERTY_TRIGGER_CLASS} aria-label="Status">
-                <SelectValue placeholder="Select status…">
-                  {status ? (
-                    <span
-                      className={cn(
-                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
-                        statusClassWithPalette(status, statusPalette),
-                      )}
-                    >
-                      {status}
-                    </span>
-                  ) : null}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map((s) => (
-                  <SelectItem key={s.id} value={s.name}>
-                    <span
-                      className={cn(
-                        "inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium border",
-                        statusClassFromToken(s.color),
-                      )}
-                    >
-                      {s.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </PropertyRow>
-
-          <PropertyRow label="Format">
-          <div className="flex items-center gap-2 w-full">
-          <Popover
-            open={formatPickerOpen}
-            onOpenChange={(open) => {
-              setFormatPickerOpen(open);
-              if (!open) setFormatSearch("");
-            }}
-          >
-            <PopoverTrigger
-              aria-label="Format"
-              className="flex h-8 flex-1 min-w-0 items-center justify-between rounded-sm border-0 bg-transparent px-2 text-sm hover:bg-muted/50 cursor-pointer transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              {format ? (
-                <span className="truncate">{format}</span>
-              ) : (
-                <span className="text-muted-foreground">Select format…</span>
-              )}
-              <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-            </PopoverTrigger>
-            <PopoverContent className="w-96 p-0" align="start">
-              <Command>
-                <CommandInput
-                  placeholder="Search or create format…"
-                  value={formatSearch}
-                  onValueChange={setFormatSearch}
-                />
-                <CommandList>
-                  {(() => {
-                    const trimmed = formatSearch.trim();
-                    const exactMatch = brandFormats.some(
-                      (f) => f.toLowerCase() === trimmed.toLowerCase()
-                    );
-                    const showCreate = trimmed.length > 0 && !exactMatch;
-                    return (
-                      <>
-                        {!showCreate && (
-                          <CommandEmpty>No matching format.</CommandEmpty>
-                        )}
-                        {brandFormats.length > 0 && (
-                          <CommandGroup>
-                            {format && (
-                              <CommandItem
-                                onSelect={() => {
-                                  setFormat("");
-                                  void persistField({ format: null });
-                                  setFormatPickerOpen(false);
-                                }}
-                                className="text-muted-foreground"
-                              >
-                                <span className="text-sm">Clear selection</span>
-                              </CommandItem>
-                            )}
-                            {brandFormats.map((f) => (
-                              <CommandItem
-                                key={f}
-                                value={f}
-                                onSelect={() => {
-                                  setFormat(f);
-                                  void persistField({ format: f });
-                                  setFormatPickerOpen(false);
-                                }}
-                                data-checked={format === f ? "true" : undefined}
-                              >
-                                <span className="text-sm">{f}</span>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        )}
-                        {showCreate && (
-                          <CommandGroup heading="Actions" forceMount>
-                            <CommandItem
-                              value={`__create__ ${trimmed}`}
-                              onSelect={() => void createFormatFromQuery(trimmed)}
-                              forceMount
-                            >
-                              <span className="text-sm">
-                                Create <span className="font-medium">&ldquo;{trimmed}&rdquo;</span>
-                              </span>
-                            </CommandItem>
-                          </CommandGroup>
-                        )}
-                      </>
-                    );
-                  })()}
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-          {currentFormat && (
-            <Link
-              href={`/${brand}/formats/${currentFormat.id}`}
-              title="Open format"
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "sm" }),
-                "shrink-0"
-              )}
-            >
-              <ExternalLinkIcon className="w-3.5 h-3.5" />
-            </Link>
-          )}
-          </div>
-          </PropertyRow>
-        </PropertyRowGroup>
-
-        {showMore && (
-          <>
-            <PropertyRowGroup single={showLeftPane}>
               <PropertyRow label="Account">
                 <AccountPostTypePicker
                   accounts={accounts}
@@ -2871,25 +2823,23 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </PropertyRow>
             </PropertyRowGroup>
 
-            {(sourceType === "repost" || sourceType === "cross_post") && (
-              <PropertyRowSolo>
-                <PropertyRow label="Reposted from">
-                  <PillarPicker
-                    brand={brand}
-                    excludeId={contentId}
-                    value={repostedFromOption}
-                    onChange={(next) => {
-                      setRepostedFromOption(next);
-                      void persistField({ repostedFromItemId: next?.id ?? null });
-                    }}
-                    placeholder="No source — click to choose…"
-                    includeAll
-                    triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
-                  />
-                </PropertyRow>
-              </PropertyRowSolo>
-            )}
-          </>
+        {(sourceType === "repost" || sourceType === "cross_post") && (
+          <PropertyRowSolo>
+            <PropertyRow label="Reposted from">
+              <PillarPicker
+                brand={brand}
+                excludeId={contentId}
+                value={repostedFromOption}
+                onChange={(next) => {
+                  setRepostedFromOption(next);
+                  void persistField({ repostedFromItemId: next?.id ?? null });
+                }}
+                placeholder="No source — click to choose…"
+                includeAll
+                triggerClassName="border-0 bg-transparent shadow-none h-8 px-2 rounded-sm hover:bg-muted/50"
+              />
+            </PropertyRow>
+          </PropertyRowSolo>
         )}
 
         {/* Published link + Published date used to be editable inputs here,
@@ -2935,8 +2885,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </PropertyRowGroup>
         )}
 
-        {showMore && (
-          <PropertyRowSolo>
+        <PropertyRowSolo>
             <PropertyRow label="CTA UTM">
               <div className="flex items-center gap-2 w-full">
                 <Input
@@ -2994,9 +2943,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </div>
             </PropertyRow>
           </PropertyRowSolo>
-        )}
 
-        {showMore && postType?.startsWith("instagram_") && (
+        {postType?.startsWith("instagram_") && (
           <PropertyRowSolo>
             <PropertyRow label="DM keyword">
               {item.shortLinkSlug ? (
@@ -3054,25 +3002,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </PropertyRowSolo>
         )}
 
-        <div className="flex items-center justify-center border-t border-border/60 px-3 py-1.5">
-          <button
-            type="button"
-            onClick={() => setShowMore((v) => !v)}
-            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-          >
-            {showMore ? (
-              <>
-                <ChevronUpIcon className="h-3.5 w-3.5" />
-                Hide extra fields
-              </>
-            ) : (
-              <>
-                <ChevronDownIcon className="h-3.5 w-3.5" />
-                See more fields
-              </>
-            )}
-          </button>
-        </div>
+        {/* "See more fields" toggle removed 2026-05-15. All remaining
+         *  sidebar fields are now always-visible; the Editor / Status /
+         *  Format dropdowns moved to title-area chips so there's no
+         *  longer enough sidebar content to justify hiding any of it. */}
 
         {deleteError && (
           <div className="text-sm px-3 py-2 bg-red-50 text-red-700 border-t border-red-200">
