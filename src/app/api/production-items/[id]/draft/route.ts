@@ -62,6 +62,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       status: "generated",
       draftId: result.draftId,
       captionPreview: result.captionPreview,
+      descriptStep: result.descriptStep,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

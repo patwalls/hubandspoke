@@ -195,6 +195,11 @@ export interface CreateTestProductionItemOptions {
   editorUserId?: string;
   publishedAt?: Date | null;
   views?: number;
+  descriptProjectId?: string | null;
+  descriptProjectUrl?: string | null;
+  descriptCompositionId?: string | null;
+  mediaS3Bucket?: string | null;
+  mediaS3Key?: string | null;
 }
 
 /**
@@ -230,6 +235,11 @@ export async function createTestProductionItem(
       publishedAt: opts.publishedAt === undefined ? new Date() : opts.publishedAt,
       editorUserId: userId,
       views: opts.views ?? 0,
+      descriptProjectId: opts.descriptProjectId ?? null,
+      descriptProjectUrl: opts.descriptProjectUrl ?? null,
+      descriptCompositionId: opts.descriptCompositionId ?? null,
+      mediaS3Bucket: opts.mediaS3Bucket ?? null,
+      mediaS3Key: opts.mediaS3Key ?? null,
     })
     .returning();
   trackCleanup("productionItems", row.id);

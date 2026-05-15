@@ -26,6 +26,10 @@ import {
   type ContentChange,
 } from "@/lib/services/content-revisions";
 import { getTopPerformingCaptions } from "./exemplars";
+import {
+  runDescriptStepForDerivative,
+  type DescriptStepStatus,
+} from "./descript-step";
 
 /**
  * Coerce a content-draft field value to the primitive shape the
@@ -227,6 +231,12 @@ export interface RunDraftAlgorithmResult {
   /** What the agent wrote into the primary caption field — handy for the
    *  manual endpoint to surface in its response without an extra DB read. */
   captionPreview?: string;
+  /** Set when the format is flagged `is_clip_descript_format` and the
+   *  algorithm attempted the Descript branch (regardless of whether it
+   *  actually fired Underlord — see DescriptStepStatus for the outcomes).
+   *  Lets the manual /draft route surface "Descript started" / "Descript
+   *  skipped because pillar isn't in Descript yet" without an extra read. */
+  descriptStep?: DescriptStepStatus;
 }
 
 export interface RunDraftAlgorithmOpts {
@@ -467,14 +477,28 @@ export async function runDraftAlgorithm(
   if (!substrate) return { status: "skipped", reason: "no_substrate" };
 
   // Format instructions (editorial voice / style guide). Optional.
+  // Also pull the format id + descript-flag so the Descript branch below
+  // can attribute its `repurpose_triggers` row and gate on the flag without
+  // a second lookup.
   let formatInstructions: string | null = null;
+  let formatRow: {
+    id: string;
+    isClipDescriptFormat: boolean;
+  } | null = null;
   if (item.format) {
     const [fmt] = await db
-      .select({ instructions: formats.instructions })
+      .select({
+        id: formats.id,
+        instructions: formats.instructions,
+        isClipDescriptFormat: formats.isClipDescriptFormat,
+      })
       .from(formats)
       .where(and(eq(formats.brand, item.brand), eq(formats.name, item.format)))
       .limit(1);
     formatInstructions = fmt?.instructions ?? null;
+    formatRow = fmt
+      ? { id: fmt.id, isClipDescriptFormat: fmt.isClipDescriptFormat }
+      : null;
   }
 
   // v1.6 diagnostic: surface what the agent will see. Pat can grep
@@ -716,10 +740,44 @@ export async function runDraftAlgorithm(
 
   const generatedCaption = (result.content as Record<string, unknown>)[captionFieldKey];
 
+  // Descript branch — fires only when the target format is flagged as a
+  // Clip Descript format. Editing in Descript is now part of the Draft
+  // Algorithm: clicking Create on a derivative (auto-fire) and clicking
+  // Redraft (force=true) both land here. Errors are swallowed so a flaky
+  // Descript / Underlord call never blocks a saved caption.
+  let descriptStep: DescriptStepStatus | undefined;
+  if (formatRow?.isClipDescriptFormat) {
+    try {
+      const compositionName =
+        item.hook?.trim() ||
+        item.title?.trim() ||
+        `${item.format ?? "Clip"} (${productionItemId.slice(0, 8)})`;
+      const step = await runDescriptStepForDerivative({
+        derivativeItemId: productionItemId,
+        pillarItemId: item.pillarContentItemId ?? null,
+        formatId: formatRow.id,
+        formatSkill: formatInstructions,
+        compositionName,
+        force,
+      });
+      descriptStep = step.status;
+      console.info(
+        `draft-algorithm v1.6 item=${productionItemId} descript_step=${step.status}${step.jobId ? ` job=${step.jobId}` : ""}`,
+      );
+    } catch (err) {
+      descriptStep = undefined;
+      console.error(
+        `draft-algorithm v1.6 item=${productionItemId} descript_step error:`,
+        err,
+      );
+    }
+  }
+
   return {
     status: "generated",
     draftId: inserted.id,
     captionPreview:
       typeof generatedCaption === "string" ? generatedCaption : undefined,
+    descriptStep,
   };
 }
