@@ -11,7 +11,7 @@ import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { seedRepostContent } from "@/lib/services/repost-seed";
 import { recordItemCreated } from "@/lib/services/item-created";
 import {
-  hasDescriptableMedia,
+  checkCrossPostReadiness,
   loadPillarForSource,
 } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
@@ -176,19 +176,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // Hard gate: cross-post requires Descript-able media. The source must
-  // either already have a composition, have media itself, or have a pillar
-  // with a seed/media. Without this, we'd silently create a cross-post the
-  // user can't render in Descript. The UI mirrors this check via the
-  // canCrossPost flag on the item detail API.
+  // Hard gate: cross-post requires Descript-able media AND, when source
+  // has no own composition, word-level transcripts on both the source
+  // and the import target. Without this, we'd silently create a row +
+  // queue a derivative-create that throws blocked:needs_transcript: on
+  // its second pass — the user wouldn't know until they refreshed the
+  // detail page much later. Returning 400 here puts the actionable
+  // reason in the operator's toast at click time.
   const sourcePillar = await loadPillarForSource(source);
-  if (!hasDescriptableMedia(source, sourcePillar)) {
+  const readiness = await checkCrossPostReadiness(source, sourcePillar);
+  if (!readiness.ok) {
+    const message =
+      readiness.reason === "needs_transcript"
+        ? "Cross-post needs a Whisper transcript on both the source and the pillar (the new flow anchors the source's spoken segment in the pillar's transcript before re-aspecting). Run transcription on the missing one, then retry."
+        : "No Descript-able media available. Cross-post needs the pillar's source video (or, when there's no upstream pillar, the source's own video). The Reel's exported media isn't usable — it's already cropped to its final aspect.";
     return NextResponse.json(
-      {
-        error:
-          "No Descript-able media available. Cross-post needs the pillar's source video (or, when there's no upstream pillar, the source's own video). The Reel's exported media isn't usable — it's already cropped to its final aspect.",
-      },
-      { status: 400 }
+      { error: message, reason: readiness.reason, detail: readiness.detail },
+      { status: 400 },
     );
   }
 

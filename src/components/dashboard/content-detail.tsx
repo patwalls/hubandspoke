@@ -2240,7 +2240,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                       disabled={item.canCrossPost === false}
                       title={
                         item.canCrossPost === false
-                          ? "No media available for Descript — add a video to this item or its pillar first."
+                          ? item.crossPostBlockedReason === "needs_transcript"
+                            ? "Cross-post needs a Whisper transcript on both this item and its pillar. Run transcription, then retry."
+                            : "Cross-post needs the pillar's archived video. Open the pillar and upload it (or wait for the YouTube-download flow)."
                           : undefined
                       }
                     >
@@ -2283,7 +2285,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     onClick={() => void handleRepost()}
                     title={
                       item.canRepost === false
-                        ? "No media available for Descript — add a video to this item or its pillar first."
+                        ? item.crossPostBlockedReason === "needs_transcript"
+                          ? "Repost needs a Whisper transcript on both this item and its pillar. Run transcription, then retry."
+                          : "Repost needs the pillar's archived video. Open the pillar and upload it (or wait for the YouTube-download flow)."
                         : undefined
                     }
                   >

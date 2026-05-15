@@ -1,7 +1,7 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { productionItems } from "@/lib/db/schema";
+import { productionItems, transcripts } from "@/lib/db/schema";
 import { createDescriptProjectFromUrl } from "@/lib/descript";
 import { getPresignedGetUrl } from "@/lib/s3";
 
@@ -105,6 +105,100 @@ export function hasDescriptableMedia(
     return true;
   if (target.row.mediaS3Key) return true;
   return false;
+}
+
+/** Why a cross-post / repost is blocked. Stable identifiers shared with
+ *  the BlockedReason union in descript-derivative-create and the
+ *  descript-status route. Surfaced verbatim in route 400 messages and
+ *  the pill's per-reason label. */
+export type CrossPostReadinessReason =
+  | "needs_pillar_media"
+  | "needs_transcript";
+
+export type CrossPostReadiness =
+  | { ok: true }
+  | { ok: false; reason: CrossPostReadinessReason; detail: string };
+
+/**
+ * Stronger gate than `hasDescriptableMedia` — also requires word-level
+ * Whisper transcripts on both ends when the task would have to anchor
+ * the source's segment in the target's transcript. Used by the cross-post
+ * and repost routes to refuse upfront instead of creating a row + queuing
+ * a job that will throw `blocked:needs_transcript:` two passes later.
+ *
+ * Decisions:
+ *   - Source has its own composition (Case 1 in derivative-create) → OK,
+ *     no transcript needed (we duplicate in-place; no segment search).
+ *   - Source is itself a pillar (no upstream parent) and has media → OK,
+ *     no transcript needed (we cold-import the source's own media; the
+ *     anchor search is degenerate — source IS target).
+ *   - Source has an upstream pillar → BOTH source and target (the pillar)
+ *     must have word-level transcripts. Otherwise refuse with
+ *     `needs_transcript`.
+ *   - No path to a composition at all → refuse with `needs_pillar_media`.
+ *
+ * One DB hit (the `IN (...)` transcript existence check) when applicable.
+ * Skipped entirely when source has its own composition.
+ */
+export async function checkCrossPostReadiness(
+  source: DescriptableSource,
+  pillar: DescriptablePillar | null,
+): Promise<CrossPostReadiness> {
+  // Case 1: source has its own composition — no transcript needed.
+  if (source.descriptCompositionId) return { ok: true };
+
+  const target = resolveImportTarget(source, pillar);
+  if (!target) {
+    return {
+      ok: false,
+      reason: "needs_pillar_media",
+      detail: `source ${source.id} has an upstream pillar ${source.pillarContentItemId} but it didn't load`,
+    };
+  }
+
+  const targetHasProjectSeed =
+    !!target.row.descriptProjectId && !!target.row.descriptSeedCompositionId;
+  const targetHasMedia = !!target.row.mediaS3Key;
+  if (!targetHasProjectSeed && !targetHasMedia) {
+    return {
+      ok: false,
+      reason: "needs_pillar_media",
+      detail: `import target ${target.row.id} (${target.kind}) has no Descript project and no archived media`,
+    };
+  }
+
+  // When source IS the pillar (no upstream parent), anchor matching is
+  // degenerate — source IS target. No transcript required for the cut
+  // because the new composition is just a cross-aspect of the same media.
+  if (target.kind === "source-as-pillar") return { ok: true };
+
+  // Source is a derivative; we'll need to anchor its spoken content in
+  // the target's transcript. Require word-level Whisper transcripts on
+  // both ends so `findAnchorInWords` can pin exact timestamps.
+  const ids = [source.id, target.row.id];
+  const rows = await db
+    .select({
+      productionItemId: transcripts.productionItemId,
+      hasWords: sql<boolean>`${transcripts.words} IS NOT NULL`.as("has_words"),
+    })
+    .from(transcripts)
+    .where(inArray(transcripts.productionItemId, ids));
+  const byId = new Map(rows.map((r) => [r.productionItemId, r.hasWords]));
+  if (!byId.get(source.id)) {
+    return {
+      ok: false,
+      reason: "needs_transcript",
+      detail: `source ${source.id} has no Whisper transcript with word-level timestamps; can't anchor its segment in the pillar`,
+    };
+  }
+  if (!byId.get(target.row.id)) {
+    return {
+      ok: false,
+      reason: "needs_transcript",
+      detail: `pillar ${target.row.id} has no Whisper transcript with word-level timestamps; can't search for the source's segment`,
+    };
+  }
+  return { ok: true };
 }
 
 /**

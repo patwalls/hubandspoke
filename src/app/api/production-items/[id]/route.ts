@@ -22,7 +22,7 @@ import { resolveSchemaForPlatforms } from "@/lib/platform-field-schemas";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { getChannelsForFormats } from "@/lib/format-channels";
 import {
-  hasDescriptableMedia,
+  checkCrossPostReadiness,
   loadPillarForSource,
 } from "@/lib/services/descript-derivative";
 
@@ -630,12 +630,15 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       joinedAccount = row ?? null;
     }
 
-    // Whether cross-post / repost can run for this item. Both require
-    // Descript-able media — same gate the server uses to 400 the action.
-    // Mirroring it here lets the UI disable the buttons instead of letting
-    // the user click and get rejected.
+    // Whether cross-post / repost can run for this item. Same readiness
+    // check the routes use — covers media AND word-level transcripts on
+    // both ends. Mirroring it here lets the UI disable the buttons (and
+    // surface the specific reason in the tooltip) instead of letting the
+    // user click and get rejected.
     const descriptablePillar = await loadPillarForSource(item);
-    const canDuplicate = hasDescriptableMedia(item, descriptablePillar);
+    const readiness = await checkCrossPostReadiness(item, descriptablePillar);
+    const canDuplicate = readiness.ok;
+    const blockedReason = readiness.ok ? null : readiness.reason;
 
     return NextResponse.json({
       item: {
@@ -650,6 +653,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         account: joinedAccount,
         canCrossPost: canDuplicate,
         canRepost: canDuplicate,
+        crossPostBlockedReason: blockedReason,
       },
       transcript: itemTranscript
         ? {

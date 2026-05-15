@@ -13,7 +13,7 @@ import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import {
-  hasDescriptableMedia,
+  checkCrossPostReadiness,
   loadPillarForSource,
 } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
@@ -140,18 +140,20 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  // Hard gate: repost requires Descript-able media. Mirrors cross-post —
-  // the source must have a composition, media of its own, or a pillar with
-  // seed/media. The UI exposes this as `canRepost` so the button is
-  // disabled when this would 400.
+  // Hard gate: repost requires Descript-able media AND, when source has
+  // no own composition, word-level transcripts on both the source and the
+  // import target. Mirrors cross-post — same readiness check, same
+  // surfaced reason in the 400.
   const sourcePillar = await loadPillarForSource(source);
-  if (!hasDescriptableMedia(source, sourcePillar)) {
+  const readiness = await checkCrossPostReadiness(source, sourcePillar);
+  if (!readiness.ok) {
+    const message =
+      readiness.reason === "needs_transcript"
+        ? "Repost needs a Whisper transcript on both the source and the pillar (the new flow anchors the source's spoken segment in the pillar's transcript before re-aspecting). Run transcription on the missing one, then retry."
+        : "No Descript-able media available. Repost needs the pillar's source video (or, when there's no upstream pillar, the source's own video). The Reel's exported media isn't usable — it's already cropped to its final aspect.";
     return NextResponse.json(
-      {
-        error:
-          "No Descript-able media available. Repost needs the pillar's source video (or, when there's no upstream pillar, the source's own video). The Reel's exported media isn't usable — it's already cropped to its final aspect.",
-      },
-      { status: 400 }
+      { error: message, reason: readiness.reason, detail: readiness.detail },
+      { status: 400 },
     );
   }
 

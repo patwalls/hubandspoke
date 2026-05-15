@@ -119,6 +119,11 @@ export interface ProductionItem {
   /** Server-computed: whether the repost action is available. Same gate
    *  as `canCrossPost` — both flows duplicate a Descript composition. */
   canRepost?: boolean;
+  /** When `canCrossPost === false`, the specific reason: needs the
+   *  pillar's archived video, or needs Whisper word-level transcripts.
+   *  Powers the dropdown tooltip's per-reason copy. Null when canCrossPost
+   *  is true. */
+  crossPostBlockedReason?: "needs_pillar_media" | "needs_transcript" | null;
   description?: string | null;
   contentBody?: string | null;
   contentBodyFetchedAt?: string | null;

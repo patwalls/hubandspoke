@@ -176,6 +176,25 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         t.identifier = 'descript-publish-and-archive'
         AND j.payload->>'productionItemId' = ${id}
       )
+      OR (
+        -- Cross-post / repost composition copy task. Keyed by
+        -- derivativeItemId on the payload — this row is the derivative.
+        -- Surfacing it here makes the pill show "Working on Descript
+        -- composition…" between the click and the first Descript API
+        -- call, so the operator sees that something IS happening even
+        -- before descript_project_id is stamped on the row.
+        t.identifier = 'descript-derivative-create'
+        AND j.payload->>'derivativeItemId' = ${id}
+      )
+      OR (
+        -- Whisper transcription. The cross-post chain requires a
+        -- transcript for this row (when source-side anchoring needs it),
+        -- so a queued transcribe-whisper for THIS row maps onto the
+        -- same in-progress pill — same "we're doing prep work, come
+        -- back later" semantics from the operator's POV.
+        t.identifier = 'transcribe-whisper'
+        AND j.payload->>'productionItemId' = ${id}
+      )
     ORDER BY j.id DESC
     LIMIT 1
   `)) as unknown as QueueJobRow[];
@@ -269,7 +288,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           ? "import"
           : queueJob.task_identifier === "descript-publish-and-archive"
             ? "MP4 render"
-            : queueJob.task_identifier;
+            : queueJob.task_identifier === "descript-derivative-create"
+              ? "cross-post composition"
+              : queueJob.task_identifier === "transcribe-whisper"
+                ? "transcript (prep)"
+                : queueJob.task_identifier;
     if (isMaxedOut) {
       status = "failed";
       detail = `Job exhausted ${queueJob.max_attempts} attempts. Last error: ${queueJob.last_error}`;
