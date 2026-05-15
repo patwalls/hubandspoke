@@ -112,6 +112,12 @@ export const productionItems = pgTable(
     descriptProjectId: text("descript_project_id"),
     descriptProjectUrl: text("descript_project_url"),
     descriptCompositionId: text("descript_composition_id"),
+    // Only meaningful on pillars (source_type='original'). Points at "the
+    // composition future clips should duplicate from" so the warm-clip path
+    // doesn't have to claim a composition as the pillar's own. Distinct from
+    // descript_composition_id so the unique partial index on that column can
+    // hold across pillars+derivatives.
+    descriptSeedCompositionId: text("descript_seed_composition_id"),
     descriptImportedAt: timestamp("descript_imported_at", {
       withTimezone: true,
     }),
@@ -771,9 +777,11 @@ export const repurposeTriggers = pgTable(
       .references(() => productionItems.id, { onDelete: "cascade" })
       .notNull(),
     sourceFormatId: uuid("source_format_id").references(() => formats.id),
-    targetFormatId: uuid("target_format_id")
-      .references(() => formats.id)
-      .notNull(),
+    // Nullable because cross-post and repost derivative-copy triggers don't
+    // map to a (source_format → target_format) tuple — the source already
+    // carries a format and the derivative inherits it. Clip-idea + repurpose
+    // sweep flows still populate this.
+    targetFormatId: uuid("target_format_id").references(() => formats.id),
     notionTaskPageId: text("notion_task_page_id"),
     viewsAtTrigger: integer("views_at_trigger"),
     descriptCompositionId: text("descript_composition_id"),

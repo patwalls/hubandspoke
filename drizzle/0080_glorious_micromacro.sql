@@ -1,0 +1,1 @@
+ALTER TABLE "repurpose_triggers" ALTER COLUMN "target_format_id" DROP NOT NULL;

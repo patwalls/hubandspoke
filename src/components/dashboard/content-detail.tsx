@@ -2236,7 +2236,14 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
+                    <DropdownMenuSubTrigger
+                      disabled={item.canCrossPost === false}
+                      title={
+                        item.canCrossPost === false
+                          ? "No media available for Descript — add a video to this item or its pillar first."
+                          : undefined
+                      }
+                    >
                       <Share2Icon className="size-3.5" /> Cross-post to…
                     </DropdownMenuSubTrigger>
                     <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
@@ -2272,8 +2279,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
                   <DropdownMenuItem
-                    disabled={actionPending}
+                    disabled={actionPending || item.canRepost === false}
                     onClick={() => void handleRepost()}
+                    title={
+                      item.canRepost === false
+                        ? "No media available for Descript — add a video to this item or its pillar first."
+                        : undefined
+                    }
                   >
                     <RepeatIcon className="size-3.5" /> Repost
                   </DropdownMenuItem>

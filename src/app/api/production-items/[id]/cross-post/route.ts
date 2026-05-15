@@ -10,6 +10,10 @@ import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
 import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { seedRepostContent } from "@/lib/services/repost-seed";
 import { recordItemCreated } from "@/lib/services/item-created";
+import {
+  hasDescriptableMedia,
+  loadPillarForSource,
+} from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { isNotionAuthoritative } from "@/lib/platform";
@@ -172,6 +176,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
+  // Hard gate: cross-post requires Descript-able media. The source must
+  // either already have a composition, have media itself, or have a pillar
+  // with a seed/media. Without this, we'd silently create a cross-post the
+  // user can't render in Descript. The UI mirrors this check via the
+  // canCrossPost flag on the item detail API.
+  const sourcePillar = await loadPillarForSource(source);
+  if (!hasDescriptableMedia(source, sourcePillar)) {
+    return NextResponse.json(
+      {
+        error:
+          "Source has no media to send to Descript. Cross-post requires the source or its pillar to carry video media.",
+      },
+      { status: 400 }
+    );
+  }
+
   const [existing] = await db
     .select({ id: productionItems.id })
     .from(productionItems)
@@ -330,6 +350,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
       console.error("draft-algorithm-run enqueue (cross-post) failed:", err);
     }
   }
+
+  // Kick off the Descript composition copy. This is NOT fire-and-forget:
+  // the user picked this cross-post because the source has Descript-able
+  // media (we gated above), so they expect Descript work to happen. If the
+  // queue is down we surface that rather than silently dropping it.
+  await enqueue("descript-derivative-create", {
+    derivativeItemId: created.id,
+    sourceItemId: source.id,
+  });
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

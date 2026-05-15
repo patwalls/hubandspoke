@@ -41,6 +41,8 @@ USER / API ENTRY POINTS
   POST /api/production-items/[id]/repurpose               → draft-algorithm-run (auto-fire after insert)
   POST /api/production-items/[id]/repurpose               → canva-create-copy   (auto-fire when target.is_canva_format AND Skill has brand-template URL)
   POST /api/production-items/[id]/cross-post              → draft-algorithm-run (auto-fire after seed, any seeded target)
+  POST /api/production-items/[id]/cross-post              → descript-derivative-create (composition copy; mandatory after the route gated on hasDescriptableMedia)
+  POST /api/production-items/[id]/repost                  → descript-derivative-create (composition copy; mandatory after the route gated on hasDescriptableMedia)
   POST /api/descript/clip-out                             → descript-clip-resolve  (format-detail quick-clip only as of 2026-05-02)
   POST /api/clip-ideas/[id]/triage (action=assign)        → draft-algorithm-run (auto-fire after promote)
   POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve + draft-algorithm-run (auto-fire)
@@ -803,15 +805,31 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - **Prompt caching:** `cache_control: { type: "ephemeral" }` markers on the system prompt and the format-stable preamble (target platform + field schema + `formatInstructions` + past captions). Transcript stays uncached because it's per-item. Regenerate within 5 minutes reads the cached prefix.
   - **Cost:** ~$0.03 per Opus call. Caching takes a chunk off the input tokens on Regenerate.
 
+### `descript-derivative-create` — copy a composition for cross-post / repost
+- **Trigger:** enqueued by `POST /api/production-items/[id]/cross-post` and `POST /api/production-items/[id]/repost` after the new derivative row is inserted. Both routes hard-gate on `hasDescriptableMedia(source, pillar)` and reject with 400 if no path to a composition exists — so reaching this task means the source has either (a) its own composition, (b) a pillar with a seed composition, or (c) a pillar with media we can cold-import.
+- **Files:** `src/jobs/tasks/descript-derivative-create.ts`, `src/lib/services/descript-derivative.ts` (helpers: `hasDescriptableMedia`, `loadPillarForSource`, `coldImportPillar`)
+- **Inputs:** `{ derivativeItemId, sourceItemId, attempt? }`
+- **Outputs:** Inserts a `repurpose_triggers` row tagged `descript_import_path='derivative-copy'`, enqueues `descript-clip-resolve` to poll the duplicate-composition job. The new composition_id is written to the derivative when the resolver fires.
+- **Downstream:** `descript-clip-resolve` → `descript-publish-and-archive`
+- **Rules:**
+  - Decision tree for "what composition do we duplicate from?":
+    1. Source has own composition (`source.descriptCompositionId`) → duplicate that.
+    2. Pillar has seed (`pillar.descriptSeedCompositionId`) → duplicate the seed (warm path).
+    3. Pillar has only `mediaS3Key` → call `coldImportPillar` (shared with the clip-promotion full-video cold path), enqueue `descript-clip-resolve` for the pillar import, then re-enqueue ourselves with a 60s delay; the next pass picks up the freshly-stamped seed.
+  - Idempotent: returns early if a `repurpose_triggers` row already exists for the derivative with `descript_import_path='derivative-copy'`. Repeated enqueues are no-ops.
+  - `coldImportPillar` uses `SELECT … FOR UPDATE` on the pillar to serialize parallel cold-imports; the second caller sees `descript_project_id` set and returns `imported:false` from the helper.
+  - 10 attempts max; throws after that so the failure shows up in `graphile_worker.jobs.last_error` instead of looping forever.
+
 ### `descript-clip-resolve` — poll Descript clip-out
 - **Trigger:** enqueued by `POST /api/descript/clip-out`; enqueued by `promote-clip-idea` service (agent flow + full-video flow); enqueued by `runDraftAlgorithm`'s V1.7 Descript branch when a derivative is created/redrafted for a format flagged `is_clip_descript_format` and the pillar is already in Descript
 - **Files:** `src/jobs/tasks/descript-clip-resolve.ts`
 - **Inputs:** `{ triggerId, jobId, derivativeItemId?, pillarItemId?, importMode?, deadlineAt? }`
-- **Outputs:** `repurposeTriggers.descriptCompositionId`; if `derivativeItemId`, also `productionItems.descriptCompositionId` on the derivative; if `pillarItemId` + `importMode`, also stamps composition on the pillar so future full-video clips skip the upload. Inserts a `tool_action` row into `content_events` (tool=`descript`, action=`clip_created`) so the activity feed surfaces the completion with an "Open in Descript" link.
+- **Outputs:** `repurposeTriggers.descriptCompositionId`; if `derivativeItemId`, also `productionItems.descriptCompositionId` on the derivative (pre-checked via `assertCompositionUnique` and protected by a unique partial index on `descript_composition_id`); if `pillarItemId` + `importMode`, also stamps `productionItems.descript_seed_composition_id` on the pillar so future full-video clips skip the upload. **Pillars never own a `descript_composition_id`** — that column is reserved for the derivative that holds the composition. The pillar's `descript_seed_composition_id` points at the same Descript composition (it's the "what should the warm path duplicate from?" pointer) but lives in a different column so the unique constraint holds. Inserts a `tool_action` row into `content_events` (tool=`descript`, action=`clip_created`) so the activity feed surfaces the completion with an "Open in Descript" link.
 - **Downstream:** none
 - **Rules:**
   - Polls every 5s, 10-min deadline; short-invocation re-enqueue
   - `importMode=true` switches the result parse from `agent_response` (regex) to `created_compositions[0].id` (used by the cold full-video upload path)
+  - Hard error on cross-row composition collision: writing a `descript_composition_id` that's already on another `production_items` row throws (service-layer `assertCompositionUnique` + DB unique partial index). Graphile-worker retries with exponential backoff and surfaces the error in `graphile_worker.jobs.last_error` after exhaustion.
 
 ### `clip-idea-precise-cut` — ffmpeg trim + Descript import + (optional) Underlord layout-pack apply
 - **Trigger:** enqueued by `promote-clip-idea` service from two button paths in the clip-triage dialog: "Precise cut — no AI" (`applyLayoutPack=false`) and "Precise cut + Underlord" (`applyLayoutPack=true`). Same task, same payload shape, different terminal behavior.

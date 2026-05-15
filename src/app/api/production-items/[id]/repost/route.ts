@@ -12,6 +12,10 @@ import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
+import {
+  hasDescriptableMedia,
+  loadPillarForSource,
+} from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
 import type { PostType } from "@/lib/platform-field-schemas";
 
@@ -136,6 +140,21 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
+  // Hard gate: repost requires Descript-able media. Mirrors cross-post —
+  // the source must have a composition, media of its own, or a pillar with
+  // seed/media. The UI exposes this as `canRepost` so the button is
+  // disabled when this would 400.
+  const sourcePillar = await loadPillarForSource(source);
+  if (!hasDescriptableMedia(source, sourcePillar)) {
+    return NextResponse.json(
+      {
+        error:
+          "Source has no media to send to Descript. Repost requires the source or its pillar to carry video media.",
+      },
+      { status: 400 }
+    );
+  }
+
   // Don't carry a stale `format` from the source — if it doesn't exist in
   // the brand's formats table, set null instead of propagating the drift.
   const formatCheck = await normalizeFormatForWrite(source.brand, source.format);
@@ -248,6 +267,15 @@ export async function POST(request: Request, context: RouteContext) {
       console.error("generate-ig-caption enqueue failed:", err);
     }
   }
+
+  // Kick off the Descript composition copy. Not fire-and-forget: the user
+  // picked this repost because the source has Descript-able media (gated
+  // above), so they expect Descript work to happen. If the queue is down,
+  // surface that rather than silently dropping it.
+  await enqueue("descript-derivative-create", {
+    derivativeItemId: created.id,
+    sourceItemId: source.id,
+  });
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

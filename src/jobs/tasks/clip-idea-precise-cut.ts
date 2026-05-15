@@ -21,6 +21,7 @@ import {
 } from "@/lib/descript";
 import { getPresignedGetUrl, putObjectFromFile } from "@/lib/s3";
 import { recordToolAction } from "@/lib/services/content-events";
+import { assertCompositionUnique } from "@/lib/services/descript-composition";
 import { downloadToFile, safeUnlink } from "./descript-upload-helpers";
 
 export interface ClipIdeaPreciseCutPayload {
@@ -216,6 +217,10 @@ async function pollUploadOnce(
     // processing…" and deep-link into the composition.
     const compositionId = job.result?.created_compositions?.[0]?.id;
     if (compositionId) {
+      await assertCompositionUnique({
+        compositionId,
+        intendedItemId: payload.derivativeItemId,
+      });
       await db
         .update(repurposeTriggers)
         .set({ descriptCompositionId: compositionId })

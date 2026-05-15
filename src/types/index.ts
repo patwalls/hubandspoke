@@ -111,6 +111,14 @@ export interface ProductionItem {
   posterUrl?: string | null;
   /** Presigned GET URL for the primary archived media (`mediaS3Key`). */
   mediaUrl?: string | null;
+  /** Server-computed: whether the cross-post action is available. False
+   *  when there's nothing Descript-able to copy (no own composition, no
+   *  own media, no pillar seed, no pillar media). UI uses this to disable
+   *  the cross-post button. */
+  canCrossPost?: boolean;
+  /** Server-computed: whether the repost action is available. Same gate
+   *  as `canCrossPost` — both flows duplicate a Descript composition. */
+  canRepost?: boolean;
   description?: string | null;
   contentBody?: string | null;
   contentBodyFetchedAt?: string | null;

@@ -19,6 +19,10 @@ import {
   type ClipIdeaPreciseCutPayload,
 } from "./clip-idea-precise-cut";
 import {
+  descriptDerivativeCreateTask,
+  type DescriptDerivativeCreatePayload,
+} from "./descript-derivative-create";
+import {
   transcribeWhisperTask,
   type TranscribeWhisperPayload,
 } from "./transcribe-whisper";
@@ -104,6 +108,7 @@ export interface TaskPayloads {
   "descript-clip-resolve": DescriptClipResolvePayload;
   "descript-publish-and-archive": DescriptPublishAndArchivePayload;
   "clip-idea-precise-cut": ClipIdeaPreciseCutPayload;
+  "descript-derivative-create": DescriptDerivativeCreatePayload;
   "transcribe-whisper": TranscribeWhisperPayload;
   "notification-send": NotificationSendPayload;
   "enrich-item": EnrichItemPayload;
@@ -153,6 +158,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "descript-clip-resolve": descriptClipResolveTask,
   "descript-publish-and-archive": descriptPublishAndArchiveTask,
   "clip-idea-precise-cut": clipIdeaPreciseCutTask,
+  "descript-derivative-create": descriptDerivativeCreateTask,
   "transcribe-whisper": transcribeWhisperTask,
   "notification-send": notificationSendTask,
   "enrich-item": enrichItemTask,

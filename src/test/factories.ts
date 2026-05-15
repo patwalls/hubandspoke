@@ -198,6 +198,7 @@ export interface CreateTestProductionItemOptions {
   descriptProjectId?: string | null;
   descriptProjectUrl?: string | null;
   descriptCompositionId?: string | null;
+  descriptSeedCompositionId?: string | null;
   mediaS3Bucket?: string | null;
   mediaS3Key?: string | null;
 }
@@ -238,6 +239,7 @@ export async function createTestProductionItem(
       descriptProjectId: opts.descriptProjectId ?? null,
       descriptProjectUrl: opts.descriptProjectUrl ?? null,
       descriptCompositionId: opts.descriptCompositionId ?? null,
+      descriptSeedCompositionId: opts.descriptSeedCompositionId ?? null,
       mediaS3Bucket: opts.mediaS3Bucket ?? null,
       mediaS3Key: opts.mediaS3Key ?? null,
     })

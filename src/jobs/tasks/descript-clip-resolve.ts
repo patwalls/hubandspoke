@@ -7,6 +7,7 @@ import {
   fetchDescriptJob,
   extractCompositionIdFromAgentResponse,
 } from "@/lib/descript";
+import { assertCompositionUnique } from "@/lib/services/descript-composition";
 import { recordToolAction } from "@/lib/services/content-events";
 
 export interface DescriptClipResolvePayload {
@@ -72,6 +73,10 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
       .set({ descriptCompositionId: compositionId })
       .where(eq(repurposeTriggers.id, payload.triggerId));
     if (payload.derivativeItemId && compositionId) {
+      await assertCompositionUnique({
+        compositionId,
+        intendedItemId: payload.derivativeItemId,
+      });
       await db
         .update(productionItems)
         .set({ descriptCompositionId: compositionId })
@@ -115,13 +120,16 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
         productionItemId: payload.derivativeItemId,
       });
     }
-    // Cold full-video import: stamp the pillar with the source compositionId
-    // so the next clip on this pillar takes the warm (duplicate) path
-    // instead of re-uploading.
+    // Cold full-video import: stamp the pillar's seed_composition_id (NOT
+    // its composition_id) so the next clip on this pillar takes the warm
+    // (duplicate) path. Pillars never own a composition — that belongs to
+    // derivatives. The DB has a unique partial index on
+    // descript_composition_id; writing it to the pillar here would collide
+    // with the derivative we just stamped above.
     if (payload.pillarItemId && importMode && compositionId) {
       await db
         .update(productionItems)
-        .set({ descriptCompositionId: compositionId })
+        .set({ descriptSeedCompositionId: compositionId })
         .where(eq(productionItems.id, payload.pillarItemId));
     }
     helpers.logger.info(

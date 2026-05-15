@@ -10,12 +10,11 @@ import {
   users,
 } from "@/lib/db/schema";
 import {
-  createDescriptProjectFromUrl,
   duplicateDescriptComposition,
   invokeDescriptAgent,
   substituteFormatPrompt,
 } from "@/lib/descript";
-import { getPresignedGetUrl } from "@/lib/s3";
+import { coldImportPillar } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { recordItemCreated } from "@/lib/services/item-created";
@@ -799,7 +798,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
   const format = await loadPromotedClipFormat(brand);
 
   // Re-fetch the pillar — `loadAndGuardClipIdea` only returns mediaS3Key /
-  // descriptProjectId, but the warm path also needs descriptCompositionId
+  // descriptProjectId, but the warm path also needs descriptSeedCompositionId
   // and descriptProjectUrl, and we may need to write back to the pillar.
   const [pillar] = await db
     .select({
@@ -807,7 +806,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
       title: productionItems.title,
       descriptProjectId: productionItems.descriptProjectId,
       descriptProjectUrl: productionItems.descriptProjectUrl,
-      descriptCompositionId: productionItems.descriptCompositionId,
+      descriptSeedCompositionId: productionItems.descriptSeedCompositionId,
       mediaS3Key: productionItems.mediaS3Key,
     })
     .from(productionItems)
@@ -823,11 +822,11 @@ export async function createClipIdeaInDescriptFullVideo(args: {
   let pillarItemIdToStamp: string | undefined;
   let importMode = false;
 
-  if (pillar.descriptProjectId && pillar.descriptCompositionId) {
+  if (pillar.descriptProjectId && pillar.descriptSeedCompositionId) {
     mode = "warm";
     const dup = await duplicateDescriptComposition({
       projectId: pillar.descriptProjectId,
-      sourceCompositionId: pillar.descriptCompositionId,
+      sourceCompositionId: pillar.descriptSeedCompositionId,
       newCompositionName: row.hook,
     });
     jobId = dup.jobId;
@@ -836,31 +835,26 @@ export async function createClipIdeaInDescriptFullVideo(args: {
     descriptPrompt = dup.prompt;
   } else if (pillar.mediaS3Key) {
     mode = "cold";
-    const presigned = await getPresignedGetUrl(pillar.mediaS3Key, 3600);
-    const projectName = pillar.title ?? `Pillar ${pillar.id.slice(0, 8)}`;
-    const importRes = await createDescriptProjectFromUrl({
-      projectName,
-      mediaUrl: presigned,
-    });
-    jobId = importRes.job_id;
-    projectId = importRes.project_id;
-    projectUrl = importRes.project_url;
+    // Shared helper takes the SELECT … FOR UPDATE lock on the pillar,
+    // double-checks descriptProjectId after locking, and stamps the pillar
+    // with project_id + project_url + descript_imported_at. The new
+    // composition's id arrives async via descript-clip-resolve and is
+    // written to the pillar's `descript_seed_composition_id`.
+    const importRes = await coldImportPillar({ pillarId: pillar.id });
+    if (!importRes.imported) {
+      // Race: another caller imported this pillar between our pillar read
+      // and the helper's lock acquisition. Surface the conflict instead of
+      // silently double-importing or quietly mismatching state.
+      throw new Error(
+        `Pillar ${pillar.id} was cold-imported concurrently; retry promotion in a moment`,
+      );
+    }
+    jobId = importRes.jobId;
+    projectId = importRes.projectId;
+    projectUrl = importRes.projectUrl;
     descriptPrompt = null;
     pillarItemIdToStamp = pillar.id;
     importMode = true;
-
-    // Stamp the pillar with project_id + project_url + descriptImportedAt
-    // immediately. compositionId follows via the poll task. Future clips on
-    // this pillar will see descriptCompositionId set and take the warm path.
-    await db
-      .update(productionItems)
-      .set({
-        descriptProjectId: projectId,
-        descriptProjectUrl: projectUrl,
-        descriptImportedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(productionItems.id, pillar.id));
   } else {
     throw new ClipIdeaSourceMissingMediaError();
   }
