@@ -4,6 +4,10 @@ import { db } from "@/lib/db";
 import { productionItems, repurposeTriggers } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { buildDescriptCompositionUrl } from "@/lib/descript";
+import {
+  BLOCKED_ERROR_PREFIX,
+  type BlockedReason,
+} from "@/jobs/tasks/descript-derivative-create";
 
 interface QueueJobRow {
   id: string;
@@ -199,7 +203,34 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     | "stuck"
     | "failed"
     | "stalled"
+    | "blocked"
     | "not_started";
+
+  /** Extract structured blocked-reason from a task's last_error.
+   *  `descript-derivative-create` throws Error("blocked:<reason>: <detail>")
+   *  when the cross-post can't proceed without human action. The status
+   *  route surfaces this as a distinct UI state so the pill shows
+   *  "Needs pillar media" / "Needs transcript" / etc. instead of a
+   *  generic "Descript failed" red. */
+  function parseBlockedReason(
+    err: string | null,
+  ): { reason: BlockedReason; detail: string } | null {
+    if (!err || !err.includes(BLOCKED_ERROR_PREFIX)) return null;
+    const idx = err.indexOf(BLOCKED_ERROR_PREFIX);
+    const rest = err.slice(idx + BLOCKED_ERROR_PREFIX.length);
+    const colonAt = rest.indexOf(":");
+    if (colonAt < 0) return null;
+    const reason = rest.slice(0, colonAt) as BlockedReason;
+    const detail = rest.slice(colonAt + 1).trim();
+    if (
+      reason !== "needs_pillar_media" &&
+      reason !== "needs_transcript" &&
+      reason !== "no_segment_match"
+    ) {
+      return null;
+    }
+    return { reason, detail };
+  }
   // Prefer active queue state OVER `compositionId is set`. The
   // precise-cut + Underlord flow stamps `compositionId` at end of Phase 1
   // (import) and then continues running Phase 2 (Underlord layout-pack)
@@ -211,7 +242,17 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   // here and lands on "connected" correctly.
   let status: Status;
   let detail: string;
-  if (queueJob) {
+  let blockedReason: BlockedReason | null = null;
+  // Blocked state — derivative-create raised a structured error. Surfaces
+  // even when the job hasn't fully exhausted retries yet, because the
+  // error is deterministic (won't fix itself) and we want the pill to
+  // direct the user to the actionable resolution immediately.
+  const blocked = parseBlockedReason(queueJob?.last_error ?? null);
+  if (queueJob && blocked) {
+    status = "blocked";
+    blockedReason = blocked.reason;
+    detail = blocked.detail;
+  } else if (queueJob) {
     const lockedAt = queueJob.locked_at ? new Date(queueJob.locked_at) : null;
     const lockAgeMs = lockedAt ? Date.now() - lockedAt.getTime() : 0;
     const isMaxedOut =
@@ -260,6 +301,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   return NextResponse.json({
     status,
     detail,
+    blockedReason,
+    /** Pillar id surfaced when the row has one, so the blocked-state pill
+     *  can deep-link to "open pillar" without a second fetch. Null when
+     *  this item IS the pillar (or has no pillar lineage). */
+    pillarItemId: item.pillarContentItemId,
     compositionId,
     compositionUrl,
     projectId,

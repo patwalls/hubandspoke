@@ -186,7 +186,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json(
       {
         error:
-          "Source has no media to send to Descript. Cross-post requires the source or its pillar to carry video media.",
+          "No Descript-able media available. Cross-post needs the pillar's source video (or, when there's no upstream pillar, the source's own video). The Reel's exported media isn't usable — it's already cropped to its final aspect.",
       },
       { status: 400 }
     );

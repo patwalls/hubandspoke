@@ -4030,8 +4030,19 @@ interface DescriptStatusResponse {
     | "stuck"
     | "failed"
     | "stalled"
+    | "blocked"
     | "not_started";
   detail: string;
+  /** Set when `status === "blocked"`. Drives the pill label + the popover
+   *  copy. Each reason maps to a user-actionable resolution. */
+  blockedReason:
+    | "needs_pillar_media"
+    | "needs_transcript"
+    | "no_segment_match"
+    | null;
+  /** Pillar id when this item is a derivative (null when item IS the
+   *  pillar). Used by the blocked-state pill to deep-link to the pillar. */
+  pillarItemId: string | null;
   compositionId: string | null;
   compositionUrl: string | null;
   projectId: string | null;
@@ -4096,11 +4107,30 @@ const DESCRIPT_STATUS_STYLES: Record<
     label: "Creating composition…",
     pillClass: "border-amber-200 bg-amber-50 text-amber-800",
   },
+  blocked: {
+    // Generic blocked style; the pill component overrides the label below
+    // based on `blockedReason` so the user sees the specific action
+    // ("Needs pillar media" vs "Needs transcript" vs "Segment not found").
+    dot: "bg-amber-500",
+    label: "Descript blocked",
+    pillClass: "border-amber-300 bg-amber-50 text-amber-900",
+  },
   not_started: {
     dot: "bg-muted-foreground/40",
     label: "Descript not started",
     pillClass: "border-border bg-muted/30 text-muted-foreground",
   },
+};
+
+/** Per-blocked-reason labels for the pill. Generic copy "Descript
+ *  blocked" never shows in the UI — these specific labels do. */
+const BLOCKED_REASON_LABELS: Record<
+  "needs_pillar_media" | "needs_transcript" | "no_segment_match",
+  string
+> = {
+  needs_pillar_media: "Needs pillar media",
+  needs_transcript: "Needs transcript",
+  no_segment_match: "Segment not found",
 };
 
 /**
@@ -4211,6 +4241,12 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
     return null;
 
   const baseStyle = DESCRIPT_STATUS_STYLES[data.status];
+  // Blocked: relabel with the per-reason copy so the editor sees the
+  // specific action they need to take.
+  const blockedLabelOverride =
+    data.status === "blocked" && data.blockedReason
+      ? BLOCKED_REASON_LABELS[data.blockedReason]
+      : null;
   // Override the pill while an MP4 render is in flight or has failed.
   // Without this the pill flips back to "Descript ready" the instant
   // Underlord finishes — even though the editor is still waiting on the
@@ -4228,7 +4264,9 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
             label: "Render failed",
             pillClass: "border-red-200 bg-red-50 text-red-800",
           }
-        : baseStyle;
+        : blockedLabelOverride
+          ? { ...baseStyle, label: blockedLabelOverride }
+          : baseStyle;
   return (
     <Popover>
       <PopoverTrigger
@@ -4252,6 +4290,23 @@ function DescriptStatusPill({ productionItemId }: { productionItemId: string }) 
           <p className="mt-1 text-xs text-muted-foreground leading-snug">
             {data.detail}
           </p>
+          {data.status === "blocked" && data.pillarItemId && (
+            // Brand prefix lives in the URL pathname (`/<brand>/content/<id>`).
+            // Building the link here avoids threading brand context all the
+            // way through to the pill component just for this one affordance.
+            <a
+              href={(() => {
+                const m = window.location.pathname.match(/^\/([^/]+)\/content\//);
+                const brand = m?.[1] ?? "starter-story";
+                return `/${brand}/content/${data.pillarItemId}`;
+              })()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-amber-900 hover:underline"
+            >
+              Open pillar →
+            </a>
+          )}
         </div>
         {data.queueJob && (
           <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground space-y-0.5 font-mono">

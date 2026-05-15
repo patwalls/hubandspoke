@@ -4,16 +4,20 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
 import {
+  cutSegmentWithRules,
   duplicateDescriptComposition,
   invokeDescriptAgent,
 } from "@/lib/descript";
 import { extractCrossPostRulesSection } from "@/lib/format-skill";
+import { findAnchorInWords } from "@/lib/clip-idea-agent";
 import { buildCompositionName } from "@/lib/services/descript-composition";
 import {
   coldImportPillar,
   hasDescriptableMedia,
   loadPillarForSource,
+  resolveImportTarget,
 } from "@/lib/services/descript-derivative";
+import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import { enqueue } from "@/jobs/enqueue";
 
 export interface DescriptDerivativeCreatePayload {
@@ -28,23 +32,53 @@ const DERIVATIVE_COPY_PATH = "derivative-copy";
 const COLD_IMPORT_DELAY_SECONDS = 60;
 const MAX_ATTEMPTS = 10;
 
+/** Prefixes used to communicate structured "blocked, needs human action"
+ *  states from this task up to the status route. The status route
+ *  pattern-matches on `last_error` and emits `status: "blocked"` +
+ *  `blockedReason: "<reason>"` to the UI. Kept as exported constants so
+ *  the route imports them and there's a single source of truth.
+ *
+ *  The error throws (rather than silently returning) so graphile-worker
+ *  surfaces the failure in `graphile_worker.jobs.last_error` after the
+ *  retry budget is exhausted, where the status route can find it. */
+export const BLOCKED_ERROR_PREFIX = "blocked:";
+export type BlockedReason =
+  | "needs_pillar_media"
+  | "needs_transcript"
+  | "no_segment_match";
+function blockedError(reason: BlockedReason, detail: string): Error {
+  return new Error(`${BLOCKED_ERROR_PREFIX}${reason}: ${detail}`);
+}
+
 /**
  * Creates a unique Descript composition for a cross-post / repost
- * derivative. Decision tree:
+ * derivative. Decision tree (in order):
  *
- *   1. Source itself has a composition → duplicate from it directly.
- *   2. Source's pillar has a project + seed composition → duplicate from
- *      the pillar's seed (warm path).
- *   3. Source's pillar has only mediaS3Key → cold-import the pillar, then
- *      re-enqueue ourselves; on the next pass the pillar's seed is set and
- *      we fall into case 2.
+ *   1. Source has its own composition → duplicate it (with Cross Post
+ *      Rules so Underlord re-aspects for the target platform when needed).
+ *      The new composition lives in the source's project, which already
+ *      owns the high-res media — re-aspect is safe.
  *
- * Hard-fails if `hasDescriptableMedia(source)` is false — the route layer
- * is supposed to reject those requests before they enqueue this task.
+ *   2. Import target (pillar if source is a derivative, source itself if
+ *      source IS a pillar) has a Descript project + seed composition.
+ *      Find the source's segment in the target's transcript via local
+ *      `findAnchorInWords`, then send Underlord a pinned-timestamp cut
+ *      prompt (`cutSegmentWithRules`). Strict-refuse with
+ *      `blocked:needs_transcript:` if either transcript lacks `words[]`,
+ *      or `blocked:no_segment_match:` if the anchor isn't found.
+ *
+ *   3. Import target has media but no project → cold-import + re-enqueue.
+ *      Next pass falls into Case 2 once the seed is stamped.
+ *
+ *   4. Import target has no media → `blocked:needs_pillar_media:`.
+ *
+ * Source media is NEVER cold-imported when the source is a derivative —
+ * its `mediaS3Key` is a finished export (cropped, low-res) and would
+ * produce a lossy re-aspect.
  *
  * Idempotency: if a `repurpose_triggers` row already exists for this
- * derivative with descript_import_path='derivative-copy', returns early so
- * repeated runs don't pile up duplicate Descript jobs.
+ * derivative with descript_import_path='derivative-copy', returns early
+ * so repeated runs don't pile up duplicate Descript jobs.
  */
 export const descriptDerivativeCreateTask: Task = async (
   rawPayload,
@@ -55,7 +89,7 @@ export const descriptDerivativeCreateTask: Task = async (
 
   if (attempt >= MAX_ATTEMPTS) {
     throw new Error(
-      `descript-derivative-create exceeded ${MAX_ATTEMPTS} attempts for derivative=${payload.derivativeItemId}; pillar cold-import never produced a seed composition`,
+      `descript-derivative-create exceeded ${MAX_ATTEMPTS} attempts for derivative=${payload.derivativeItemId}; cold-import never produced a seed composition`,
     );
   }
 
@@ -112,11 +146,10 @@ export const descriptDerivativeCreateTask: Task = async (
     );
   }
 
-  // Look up the source format's Cross Post Rules section, if any. Skill is
-  // (brand, name)-scoped in the formats table. When the section is present,
-  // we send a custom Underlord prompt that re-frames the duplicate for the
-  // target platform; when missing, we fall through to a vanilla
-  // byte-identical duplicate.
+  // Source format's Cross Post Rules section (target aspect, caption
+  // shape, etc.). Same section is shared with the Draft Algorithm. When
+  // absent, the duplicate / cut runs without rules — Underlord just
+  // produces a byte-identical or range-identical composition.
   let crossPostRules: string | null = null;
   if (source.format) {
     const [fmt] = await db
@@ -136,63 +169,110 @@ export const descriptDerivativeCreateTask: Task = async (
 
   const pillar = await loadPillarForSource(source);
   if (!hasDescriptableMedia(source, pillar)) {
-    throw new Error(
-      `descript-derivative-create: source ${source.id} has no Descript-able media; the route should have rejected this before enqueue`,
+    throw blockedError(
+      "needs_pillar_media",
+      `source ${source.id} has no Descript-able media (no own composition; import target has no project/seed and no media)`,
     );
   }
 
-  // Decide which composition to duplicate FROM.
-  let dupProjectId: string;
-  let dupSourceCompositionId: string;
-  let projectUrl: string | null;
+  const newCompositionName = buildCompositionName({
+    title: derivative.title,
+    productionItemId: derivative.id,
+  });
+  const targetPostType = derivative.postType ?? "unknown";
 
+  // CASE 1 — Source has its own composition. Duplicate it in-place
+  // (re-aspect is safe; the new comp lives in the source's project with
+  // its high-res media). Cross Post Rules drive any framing changes.
   if (source.descriptProjectId && source.descriptCompositionId) {
-    // Case 1: source has its own composition — duplicate it directly.
-    dupProjectId = source.descriptProjectId;
-    dupSourceCompositionId = source.descriptCompositionId;
-    projectUrl = source.descriptProjectUrl;
-  } else if (
-    source.descriptProjectId &&
-    source.descriptSeedCompositionId
-  ) {
-    // Case 1b: source has its own project + seed (acting as its own pillar
-    // because no upstream pillar carried Descript context). Warm-duplicate
-    // from the seed.
-    dupProjectId = source.descriptProjectId;
-    dupSourceCompositionId = source.descriptSeedCompositionId;
-    projectUrl = source.descriptProjectUrl;
-  } else if (
-    pillar?.descriptProjectId &&
-    pillar.descriptSeedCompositionId
-  ) {
-    // Case 2: pillar carries the project + seed. Warm-duplicate.
-    dupProjectId = pillar.descriptProjectId;
-    dupSourceCompositionId = pillar.descriptSeedCompositionId;
-    projectUrl = pillar.descriptProjectUrl;
-  } else {
-    // No existing Descript work to duplicate from — need a cold-import.
-    // Prefer cold-importing the pillar when it has media (future clips
-    // from the same source can share that project); fall back to
-    // cold-importing the source itself when it's the only thing carrying
-    // media. The chosen entity becomes the "import target" — its
-    // production_items row gets stamped with descript_project_id +
-    // descript_seed_composition_id (the latter via the resolver).
-    const importTargetId = pillar?.mediaS3Key
-      ? pillar.id
-      : source.mediaS3Key
-        ? source.id
-        : null;
-    if (!importTargetId) {
-      throw new Error(
-        `descript-derivative-create: source ${source.id} has no path to a composition (no own composition, no pillar seed, no media on source or pillar)`,
+    const dup = await invokeRulesAwareDuplicate({
+      projectId: source.descriptProjectId,
+      sourceCompositionId: source.descriptCompositionId,
+      newCompositionName,
+      crossPostRules,
+      targetPostType,
+    });
+    await finishStamp({
+      derivativeId: derivative.id,
+      dupProjectId: source.descriptProjectId,
+      projectUrl: source.descriptProjectUrl ?? dup.projectUrl ?? null,
+      dup,
+      newCompositionName,
+    });
+    helpers.logger.info(
+      `descript-derivative-create ok (case 1: source-composition): derivative=${derivative.id} source=${source.id} composition_job=${dup.jobId}`,
+    );
+    return;
+  }
+
+  // CASE 2 — Import target has project + seed: transcript-anchored cut.
+  const target = resolveImportTarget(source, pillar);
+  if (!target) {
+    throw blockedError(
+      "needs_pillar_media",
+      `source ${source.id} has an upstream pillar=${source.pillarContentItemId} but it didn't load`,
+    );
+  }
+
+  if (target.row.descriptProjectId && target.row.descriptSeedCompositionId) {
+    const sourceTranscript = await getTranscriptForPrompt(source.id);
+    if (!sourceTranscript || sourceTranscript.words.length === 0) {
+      throw blockedError(
+        "needs_transcript",
+        `source ${source.id} has no Whisper transcript with word-level timestamps; can't anchor segment in pillar`,
       );
     }
-    const importRes = await coldImportPillar({ pillarId: importTargetId });
+    // When source-is-pillar, target.row.id === source.id — no need to
+    // re-query, the transcript we just loaded IS the target's transcript.
+    const targetTranscript =
+      target.row.id === source.id
+        ? sourceTranscript
+        : await getTranscriptForPrompt(target.row.id);
+    if (!targetTranscript || targetTranscript.words.length === 0) {
+      throw blockedError(
+        "needs_transcript",
+        `import target ${target.row.id} (${target.kind}) has no Whisper transcript with word-level timestamps`,
+      );
+    }
+    const anchor = findAnchorInWords(
+      sourceTranscript.fullText,
+      targetTranscript.words,
+    );
+    if (!anchor) {
+      throw blockedError(
+        "no_segment_match",
+        `source ${source.id}'s spoken content not found in target ${target.row.id}'s transcript — pillar may be wrong`,
+      );
+    }
+    const dup = await cutSegmentWithRules({
+      projectId: target.row.descriptProjectId,
+      newCompositionName,
+      startSec: anchor.startSec,
+      endSec: anchor.endSec,
+      crossPostRules,
+      targetPostType,
+    });
+    await finishStamp({
+      derivativeId: derivative.id,
+      dupProjectId: target.row.descriptProjectId,
+      projectUrl: target.row.descriptProjectUrl ?? dup.projectUrl ?? null,
+      dup,
+      newCompositionName,
+    });
+    helpers.logger.info(
+      `descript-derivative-create ok (case 2: target-cut): derivative=${derivative.id} target=${target.row.id} (${target.kind}) range=[${anchor.startSec.toFixed(1)},${anchor.endSec.toFixed(1)}]s job=${dup.jobId}`,
+    );
+    return;
+  }
+
+  // CASE 3 — Import target has media but no project. Cold-import + re-enqueue.
+  if (target.row.mediaS3Key) {
+    const importRes = await coldImportPillar({ pillarId: target.row.id });
     if (importRes.imported) {
       const [trigger] = await db
         .insert(repurposeTriggers)
         .values({
-          productionItemId: importTargetId,
+          productionItemId: target.row.id,
           descriptJobId: importRes.jobId,
           descriptProjectUrl: importRes.projectUrl,
           descriptImportPath: "full-video",
@@ -201,102 +281,110 @@ export const descriptDerivativeCreateTask: Task = async (
       await enqueue("descript-clip-resolve", {
         triggerId: trigger.id,
         jobId: importRes.jobId,
-        pillarItemId: importTargetId,
+        pillarItemId: target.row.id,
         importMode: true,
       });
     }
-    // Re-enqueue ourselves to pick up the seed once cold-import finishes
-    // (~1–2 min for a YouTube-length video). On the next pass, the import
-    // target has both project_id and seed_composition_id set, and we fall
-    // into the warm branch.
     await helpers.addJob(
       "descript-derivative-create",
       { ...payload, attempt: attempt + 1 },
       { runAt: new Date(Date.now() + COLD_IMPORT_DELAY_SECONDS * 1000) },
     );
     helpers.logger.info(
-      `descript-derivative-create: cold-importing ${importTargetId === pillar?.id ? "pillar" : "source"}=${importTargetId}, re-enqueueing derivative=${payload.derivativeItemId} in ${COLD_IMPORT_DELAY_SECONDS}s (attempt=${attempt + 1})`,
+      `descript-derivative-create cold-import: target=${target.row.id} (${target.kind}), re-enqueueing derivative=${payload.derivativeItemId} in ${COLD_IMPORT_DELAY_SECONDS}s (attempt=${attempt + 1})`,
     );
     return;
   }
 
-  const newCompositionName = buildCompositionName({
-    title: derivative.title,
-    productionItemId: derivative.id,
-  });
+  // CASE 4 — No path. (Should be caught by hasDescriptableMedia above; this
+  // is defense in depth.)
+  throw blockedError(
+    "needs_pillar_media",
+    `import target ${target.row.id} (${target.kind}) has no project, no seed, no media`,
+  );
+};
 
-  // When the source format's Skill carries a "### Cross Post Rules"
-  // section, send a custom Underlord prompt that duplicates the composition
-  // AND applies platform-specific framing for the derivative's postType
-  // (e.g. re-aspect 9:16 → 16:9 when cross-posting to Twitter/LinkedIn).
-  // Without the section, fall back to the standard byte-identical duplicate.
-  let dup: {
-    jobId: string;
-    projectUrl: string;
-    projectId: string;
-    prompt: string;
-  };
-  if (crossPostRules) {
-    const safeName = newCompositionName.replace(/"/g, '\\"');
-    const targetPostType = derivative.postType ?? "unknown";
-    const prompt = [
-      `Duplicate the existing composition in this project — the one with compositionId="${dupSourceCompositionId}".`,
-      `Name the new composition "${safeName}". Do not modify the source composition.`,
-      ``,
-      `This duplicate is a CROSS-POST. Target platform / postType: ${targetPostType}.`,
-      `Apply the cross-post rules below to the DUPLICATE only — adjust aspect ratio,`,
-      `framing, or layout as the rules require. The transcript and media should be`,
-      `the same as the source unless a rule says otherwise.`,
-      ``,
-      `### Cross Post Rules`,
-      crossPostRules,
-      ``,
-      `Reply with the new compositionId in the form compositionId="<uuid>".`,
-    ].join("\n");
-    const result = await invokeDescriptAgent({
-      projectId: dupProjectId,
-      prompt,
-    });
-    dup = { ...result, prompt };
-  } else {
-    dup = await duplicateDescriptComposition({
-      projectId: dupProjectId,
-      sourceCompositionId: dupSourceCompositionId,
-      newCompositionName,
+/** Wraps the Underlord duplicate call with Cross Post Rules when present
+ *  (Underlord re-aspects per the rules), or falls back to the byte-
+ *  identical duplicate helper when no rules apply. */
+async function invokeRulesAwareDuplicate(args: {
+  projectId: string;
+  sourceCompositionId: string;
+  newCompositionName: string;
+  crossPostRules: string | null;
+  targetPostType: string;
+}): Promise<{
+  jobId: string;
+  projectUrl: string;
+  projectId: string;
+  prompt: string;
+}> {
+  if (!args.crossPostRules) {
+    return duplicateDescriptComposition({
+      projectId: args.projectId,
+      sourceCompositionId: args.sourceCompositionId,
+      newCompositionName: args.newCompositionName,
     });
   }
+  const safeName = args.newCompositionName.replace(/"/g, '\\"');
+  const prompt = [
+    `Duplicate the existing composition in this project — the one with compositionId="${args.sourceCompositionId}".`,
+    `Name the new composition "${safeName}". Do not modify the source composition.`,
+    ``,
+    `This duplicate is a CROSS-POST. Target platform / postType: ${args.targetPostType}.`,
+    `Apply the cross-post rules below to the DUPLICATE only — adjust aspect ratio,`,
+    `framing, or layout as the rules require. The transcript and media should be`,
+    `the same as the source unless a rule says otherwise. Bullets about caption shape`,
+    `are for a separate pipeline and you can ignore them.`,
+    ``,
+    `### Cross Post Rules`,
+    args.crossPostRules,
+    ``,
+    `Reply with the new compositionId in the form compositionId="<uuid>".`,
+  ].join("\n");
+  const result = await invokeDescriptAgent({
+    projectId: args.projectId,
+    prompt,
+  });
+  return { ...result, prompt };
+}
 
-  // Stamp the derivative with the project info; composition_id arrives via
-  // the resolver poller.
+/** Shared stamp / trigger / resolver-enqueue block used by cases 1 and 2.
+ *  Writes project IDs onto the derivative, inserts a derivative-copy
+ *  repurpose_triggers row, and enqueues descript-clip-resolve to stamp
+ *  the new composition_id once Underlord finishes. */
+async function finishStamp(args: {
+  derivativeId: string;
+  dupProjectId: string;
+  projectUrl: string | null;
+  dup: { jobId: string; projectUrl: string; prompt: string };
+  newCompositionName: string;
+}): Promise<void> {
   await db
     .update(productionItems)
     .set({
-      descriptProjectId: dupProjectId,
-      descriptProjectUrl: projectUrl ?? dup.projectUrl ?? null,
+      descriptProjectId: args.dupProjectId,
+      descriptProjectUrl: args.projectUrl ?? args.dup.projectUrl ?? null,
       updatedAt: new Date(),
     })
-    .where(eq(productionItems.id, derivative.id));
+    .where(eq(productionItems.id, args.derivativeId));
 
   const [trigger] = await db
     .insert(repurposeTriggers)
     .values({
-      productionItemId: derivative.id,
-      descriptJobId: dup.jobId,
-      descriptProjectUrl: projectUrl ?? dup.projectUrl ?? null,
-      descriptPrompt: dup.prompt,
-      compositionName: newCompositionName,
+      productionItemId: args.derivativeId,
+      descriptJobId: args.dup.jobId,
+      descriptProjectUrl: args.projectUrl ?? args.dup.projectUrl ?? null,
+      descriptPrompt: args.dup.prompt,
+      compositionName: args.newCompositionName,
       descriptImportPath: DERIVATIVE_COPY_PATH,
     })
     .returning({ id: repurposeTriggers.id });
 
   await enqueue("descript-clip-resolve", {
     triggerId: trigger.id,
-    jobId: dup.jobId,
-    derivativeItemId: derivative.id,
+    jobId: args.dup.jobId,
+    derivativeItemId: args.derivativeId,
     importMode: false,
   });
-
-  helpers.logger.info(
-    `descript-derivative-create ok: derivative=${derivative.id} source=${source.id} composition_job=${dup.jobId}`,
-  );
-};
+}

@@ -24,25 +24,86 @@ export interface DescriptablePillar {
 }
 
 /**
- * Returns true when there is *some* path to a Descript composition for this
- * source — either it already has one, its pillar has a seed, or there is
- * media we can cold-import. Used by cross-post/repost routes (server gate),
- * the item detail API (UI button state), and the derivative-create task
- * (re-check before doing work).
+ * Result of resolving where to cold-import from for a Descript derivative
+ * composition. The "import target" is the row whose media is the canonical
+ * high-quality source — never a finished derivative's cropped export.
  *
- * A source with no composition, no media of its own, and no pillar-with-media
- * cannot be cross-posted or reposted with Descript — the UI disables those
- * actions.
+ * - When `source.pillarContentItemId` is set, the source is a derivative
+ *   (a Reel, a cross-post, etc.) and its `mediaS3Key` is the final exported
+ *   pixels — useless for re-aspecting. The PILLAR is the import target.
+ * - When `source.pillarContentItemId` is null, the source IS a pillar
+ *   (the original long-form video) — its own media is the right material.
+ */
+export interface ImportTarget {
+  /** The row whose media gets cold-imported into Descript. Either the
+   *  pillar row or the source row, depending on whether the source has
+   *  an upstream parent. */
+  row: {
+    id: string;
+    title: string | null;
+    descriptProjectId: string | null;
+    descriptProjectUrl: string | null;
+    descriptSeedCompositionId: string | null;
+    mediaS3Key: string | null;
+  };
+  /** Discriminator for diagnostics/logging. */
+  kind: "pillar" | "source-as-pillar";
+}
+
+/**
+ * Pick the row whose media is the canonical Descript-cold-import source.
+ * See `ImportTarget` docstring for the rule. Returns null only when the
+ * source has an upstream pillar but the pillar wasn't loaded (caller
+ * passed null for `pillar`) — that's a precondition violation, not a
+ * recoverable state.
+ */
+export function resolveImportTarget(
+  source: DescriptableSource,
+  pillar: DescriptablePillar | null,
+): ImportTarget | null {
+  if (source.pillarContentItemId) {
+    if (!pillar) return null;
+    return { row: pillar, kind: "pillar" };
+  }
+  return {
+    row: {
+      id: source.id,
+      title: null,
+      descriptProjectId: source.descriptProjectId,
+      descriptProjectUrl: null,
+      descriptSeedCompositionId: null,
+      mediaS3Key: source.mediaS3Key,
+    },
+    kind: "source-as-pillar",
+  };
+}
+
+/**
+ * Returns true when the derivative-create task has a viable path to a
+ * unique Descript composition for this source. Two ways:
+ *
+ * 1. The source already has its own composition — we duplicate it directly.
+ * 2. The IMPORT TARGET (pillar if source is a derivative, source itself
+ *    if source is a pillar) has a Descript project + seed composition,
+ *    OR has archived media we can cold-import.
+ *
+ * Source-side `mediaS3Key` is INTENTIONALLY ignored when the source has an
+ * upstream pillar — a finished Reel's media is the wrong input for any
+ * Descript work because it's already-cropped pixels. If the pillar has no
+ * Descript context AND no media, the cross-post / repost can't produce a
+ * meaningful Descript composition; the route returns 400 and the UI
+ * surfaces the `blocked_needs_pillar_media` state.
  */
 export function hasDescriptableMedia(
   source: DescriptableSource,
   pillar: DescriptablePillar | null,
 ): boolean {
   if (source.descriptCompositionId) return true;
-  if (source.mediaS3Key) return true;
-  if (pillar?.descriptProjectId && pillar.descriptSeedCompositionId)
+  const target = resolveImportTarget(source, pillar);
+  if (!target) return false;
+  if (target.row.descriptProjectId && target.row.descriptSeedCompositionId)
     return true;
-  if (pillar?.mediaS3Key) return true;
+  if (target.row.mediaS3Key) return true;
   return false;
 }
 

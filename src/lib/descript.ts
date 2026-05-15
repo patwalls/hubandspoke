@@ -256,6 +256,67 @@ export function extractCompositionIdFromAgentResponse(
  * every subsequent clip from that pillar duplicates the source composition
  * so editors get a fresh canvas to trim manually without re-uploading.
  */
+/**
+ * Build an Underlord prompt that cuts a NEW composition from the project's
+ * existing media at a specific time range, then applies cross-post-rules
+ * (target aspect, caption shape, etc.). Used by the cross-post / repost
+ * derivative-create task when the source has a transcript-anchored
+ * segment in the pillar's project — we compute the [startSec, endSec]
+ * locally via `findAnchorInWords` and tell Underlord "create a composition
+ * between MM:SS and MM:SS, the time range is non-negotiable."
+ *
+ * Mirrors the timestamp-pinned pattern from
+ * `buildDescriptPrompt` in `src/lib/services/promote-clip-idea.ts` (the
+ * AI-clip path) but adds the Cross Post Rules block so Underlord knows
+ * to re-aspect / re-frame for the target platform.
+ *
+ * When `crossPostRules` is null, the prompt is simply a pinned-range
+ * composition create (same shape as the AI-clip path).
+ */
+export async function cutSegmentWithRules(args: {
+  projectId: string;
+  newCompositionName: string;
+  startSec: number;
+  endSec: number;
+  crossPostRules: string | null;
+  targetPostType: string;
+}): Promise<{
+  jobId: string;
+  projectUrl: string;
+  projectId: string;
+  prompt: string;
+}> {
+  const safeName = args.newCompositionName.replace(/"/g, '\\"');
+  const start = formatTimestamp(args.startSec);
+  const end = formatTimestamp(args.endSec);
+  const duration = Math.max(0, Math.round(args.endSec - args.startSec));
+  const promptParts: string[] = [
+    "You are producing a clip from this project. Follow these instructions exactly and do not deviate.",
+    "",
+    `1. In the main composition, locate the transcript segment between ${start} and ${end} (duration ≈ ${duration}s). The time range is non-negotiable.`,
+    `2. Create a NEW composition named "${safeName}" containing only that segment. Do not include footage outside this range. The start must land on the first spoken word inside the range; the end must land on the last spoken word inside the range. Do not modify the source composition.`,
+  ];
+  if (args.crossPostRules) {
+    promptParts.push(
+      "",
+      `3. This new composition is a CROSS-POST. Target platform / postType: ${args.targetPostType}. Apply the cross-post rules below to the NEW composition only — adjust aspect ratio, framing, or layout as the rules require. Bullets about caption shape are for a separate pipeline and you can ignore them.`,
+      "",
+      "### Cross Post Rules",
+      args.crossPostRules,
+    );
+  }
+  promptParts.push(
+    "",
+    'If any instruction conflicts with another, prioritize #1 (exact time range). In the agent response, report what you did, including the new compositionId in the form compositionId="<uuid>".',
+  );
+  const prompt = promptParts.join("\n");
+  const result = await invokeDescriptAgent({
+    projectId: args.projectId,
+    prompt,
+  });
+  return { ...result, prompt };
+}
+
 export async function duplicateDescriptComposition(args: {
   projectId: string;
   sourceCompositionId: string;
