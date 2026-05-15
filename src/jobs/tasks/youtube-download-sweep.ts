@@ -17,9 +17,23 @@ const MAX_ATTEMPTS = 5;
  * Parent task: selects the next batch of published YouTube videos that don't
  * yet have an S3 archive and enqueues one `youtube-download` child per item.
  * Dedupes against in-flight attempts via jobKey.
+ *
+ * **Production-disabled (2026-05-15):** YouTube bot-blocks Heroku's IP range
+ * — every yt-dlp call from the worker dyno fails with "Sign in to confirm
+ * you're not a bot" and the dead-job table grew to ~3K rows over 3 weeks.
+ * Local workers have browser cookies and succeed. So the sweep is a no-op
+ * in prod and runs normally in dev. If we ever route the download through
+ * a residential proxy or a cookies-from-browser cron on a non-Heroku host,
+ * lift this gate.
  */
 export const youtubeDownloadSweepTask: Task = async (_payload, helpers) => {
   const start = Date.now();
+  if (process.env.NODE_ENV === "production") {
+    helpers.logger.info(
+      "youtube-download-sweep noop (NODE_ENV=production — YouTube bot-blocks the dyno IP)",
+    );
+    return;
+  }
   helpers.logger.info("youtube-download-sweep start");
 
   const candidates = await db

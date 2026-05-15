@@ -99,6 +99,7 @@ export const descriptDerivativeCreateTask: Task = async (
       descriptProjectId: productionItems.descriptProjectId,
       descriptProjectUrl: productionItems.descriptProjectUrl,
       descriptCompositionId: productionItems.descriptCompositionId,
+      descriptSeedCompositionId: productionItems.descriptSeedCompositionId,
       mediaS3Key: productionItems.mediaS3Key,
       pillarContentItemId: productionItems.pillarContentItemId,
     })
@@ -146,34 +147,52 @@ export const descriptDerivativeCreateTask: Task = async (
   let projectUrl: string | null;
 
   if (source.descriptProjectId && source.descriptCompositionId) {
-    // Case 1: source is itself a derivative with its own composition.
+    // Case 1: source has its own composition — duplicate it directly.
     dupProjectId = source.descriptProjectId;
     dupSourceCompositionId = source.descriptCompositionId;
+    projectUrl = source.descriptProjectUrl;
+  } else if (
+    source.descriptProjectId &&
+    source.descriptSeedCompositionId
+  ) {
+    // Case 1b: source has its own project + seed (acting as its own pillar
+    // because no upstream pillar carried Descript context). Warm-duplicate
+    // from the seed.
+    dupProjectId = source.descriptProjectId;
+    dupSourceCompositionId = source.descriptSeedCompositionId;
     projectUrl = source.descriptProjectUrl;
   } else if (
     pillar?.descriptProjectId &&
     pillar.descriptSeedCompositionId
   ) {
-    // Case 2: warm path via pillar's seed.
+    // Case 2: pillar carries the project + seed. Warm-duplicate.
     dupProjectId = pillar.descriptProjectId;
     dupSourceCompositionId = pillar.descriptSeedCompositionId;
     projectUrl = pillar.descriptProjectUrl;
-  } else if (pillar?.mediaS3Key) {
-    // Case 3: cold-import the pillar, then re-enqueue. The resolver
-    // (descript-clip-resolve, importMode=true) will stamp the pillar's
-    // seed_composition_id when the import finishes — typically within 1-2
-    // minutes for a YouTube-length video.
-    const importRes = await coldImportPillar({ pillarId: pillar.id });
+  } else {
+    // No existing Descript work to duplicate from — need a cold-import.
+    // Prefer cold-importing the pillar when it has media (future clips
+    // from the same source can share that project); fall back to
+    // cold-importing the source itself when it's the only thing carrying
+    // media. The chosen entity becomes the "import target" — its
+    // production_items row gets stamped with descript_project_id +
+    // descript_seed_composition_id (the latter via the resolver).
+    const importTargetId = pillar?.mediaS3Key
+      ? pillar.id
+      : source.mediaS3Key
+        ? source.id
+        : null;
+    if (!importTargetId) {
+      throw new Error(
+        `descript-derivative-create: source ${source.id} has no path to a composition (no own composition, no pillar seed, no media on source or pillar)`,
+      );
+    }
+    const importRes = await coldImportPillar({ pillarId: importTargetId });
     if (importRes.imported) {
-      // Insert a placeholder trigger so the resolver has somewhere to write
-      // the composition_id. We mark it as 'full-video' (matching the
-      // existing cold-import path's trigger shape) — the actual derivative
-      // composition is created on the NEXT pass of this task, with its own
-      // 'derivative-copy' trigger.
       const [trigger] = await db
         .insert(repurposeTriggers)
         .values({
-          productionItemId: pillar.id,
+          productionItemId: importTargetId,
           descriptJobId: importRes.jobId,
           descriptProjectUrl: importRes.projectUrl,
           descriptImportPath: "full-video",
@@ -182,24 +201,23 @@ export const descriptDerivativeCreateTask: Task = async (
       await enqueue("descript-clip-resolve", {
         triggerId: trigger.id,
         jobId: importRes.jobId,
-        pillarItemId: pillar.id,
+        pillarItemId: importTargetId,
         importMode: true,
       });
     }
-    // Re-enqueue ourselves to pick up the seed once cold-import finishes.
+    // Re-enqueue ourselves to pick up the seed once cold-import finishes
+    // (~1–2 min for a YouTube-length video). On the next pass, the import
+    // target has both project_id and seed_composition_id set, and we fall
+    // into the warm branch.
     await helpers.addJob(
       "descript-derivative-create",
       { ...payload, attempt: attempt + 1 },
       { runAt: new Date(Date.now() + COLD_IMPORT_DELAY_SECONDS * 1000) },
     );
     helpers.logger.info(
-      `descript-derivative-create: cold-importing pillar=${pillar.id}, re-enqueueing derivative=${payload.derivativeItemId} in ${COLD_IMPORT_DELAY_SECONDS}s (attempt=${attempt + 1})`,
+      `descript-derivative-create: cold-importing ${importTargetId === pillar?.id ? "pillar" : "source"}=${importTargetId}, re-enqueueing derivative=${payload.derivativeItemId} in ${COLD_IMPORT_DELAY_SECONDS}s (attempt=${attempt + 1})`,
     );
     return;
-  } else {
-    throw new Error(
-      `descript-derivative-create: source ${source.id} has no path to a composition (no own composition, no pillar seed, no pillar media)`,
-    );
   }
 
   const newCompositionName = buildCompositionName({
