@@ -11,6 +11,7 @@ import parse, {
 } from "html-react-parser";
 import {
   CheckIcon,
+  ChevronRight,
   CopyIcon,
   DownloadIcon,
   ExternalLinkIcon,
@@ -1206,39 +1207,39 @@ function ContentChangedBody({
 
   if (target.kind === "production_item_field") {
     return (
-      <div className="space-y-1">
-        <div>
-          {subject} changed{" "}
-          <span className="font-medium text-foreground">
-            {fieldLabel(target.field)}
-          </span>
-        </div>
-        <EditValueDiff
-          from={payload.from ?? null}
-          to={payload.to ?? null}
-          truncated={!!payload.truncated}
-        />
-      </div>
+      <EditValueDiff
+        header={
+          <>
+            {subject} changed{" "}
+            <span className="font-medium text-foreground">
+              {fieldLabel(target.field)}
+            </span>
+          </>
+        }
+        from={payload.from ?? null}
+        to={payload.to ?? null}
+        truncated={!!payload.truncated}
+      />
     );
   }
   if (target.kind === "draft_field") {
     return (
-      <div className="space-y-1">
-        <div>
-          {subject} edited the{" "}
-          <span className="font-medium text-foreground">
-            {fieldLabel(target.field)}
-          </span>{" "}
-          <span className="text-xs text-muted-foreground">
-            (caption v{target.version})
-          </span>
-        </div>
-        <EditValueDiff
-          from={payload.from ?? null}
-          to={payload.to ?? null}
-          truncated={!!payload.truncated}
-        />
-      </div>
+      <EditValueDiff
+        header={
+          <>
+            {subject} edited the{" "}
+            <span className="font-medium text-foreground">
+              {fieldLabel(target.field)}
+            </span>{" "}
+            <span className="text-xs text-muted-foreground">
+              (caption v{target.version})
+            </span>
+          </>
+        }
+        from={payload.from ?? null}
+        to={payload.to ?? null}
+        truncated={!!payload.truncated}
+      />
     );
   }
   if (target.kind === "media_added" || target.kind === "media_removed") {
@@ -1273,14 +1274,20 @@ function ContentChangedBody({
   return null;
 }
 
-/** Compact diff renderer used by ContentChangedBody. Two stacked mono rows
- *  for before / after with 120-char clamp. Long values get a "Show full"
- *  expander that pops the un-truncated text in a small popover. */
+/** Compact diff renderer used by ContentChangedBody. Short, single-line
+ *  values render inline next to the header ("changed Published date · (empty)
+ *  → 2026-05-14"). Long / multi-line / write-truncated values collapse to
+ *  the header + a chevron; clicking the chevron reveals the full stacked
+ *  from/to block. */
+const INLINE_VALUE_MAX = 60;
+
 function EditValueDiff({
+  header,
   from,
   to,
   truncated,
 }: {
+  header: React.ReactNode;
   from: string | number | boolean | null;
   to: string | number | boolean | null;
   truncated: boolean;
@@ -1288,36 +1295,64 @@ function EditValueDiff({
   const [expanded, setExpanded] = useState(false);
   const f = formatValue(from);
   const t = formatValue(to);
-  const needsClamp =
-    !expanded && (f.length > 120 || t.length > 120 || truncated);
-  const renderFrom = needsClamp ? clamp(f, 120) : f;
-  const renderTo = needsClamp ? clamp(t, 120) : t;
+  const hasNewline = f.includes("\n") || t.includes("\n");
+  const inlineEligible =
+    !truncated &&
+    !hasNewline &&
+    f.length <= INLINE_VALUE_MAX &&
+    t.length <= INLINE_VALUE_MAX;
+
+  if (inlineEligible) {
+    return (
+      <span>
+        {header}
+        <span className="text-muted-foreground/60"> · </span>
+        <span className="font-mono text-xs text-muted-foreground/80">{f}</span>
+        <span className="font-mono text-xs text-muted-foreground/60"> → </span>
+        <span className="font-mono text-xs text-foreground">{t}</span>
+      </span>
+    );
+  }
+
   return (
-    <div className="space-y-0.5 text-xs font-mono">
-      <div className="text-muted-foreground/80">
-        <span className="inline-block w-12 text-muted-foreground/60">from</span>
-        <span className="whitespace-pre-wrap break-words">{renderFrom}</span>
-      </div>
-      <div className="text-foreground">
-        <span className="inline-block w-12 text-muted-foreground/60">to</span>
-        <span className="whitespace-pre-wrap break-words">{renderTo}</span>
-      </div>
-      {(needsClamp || (expanded && truncated)) && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="ml-12 mt-0.5 inline-flex items-center gap-1 text-[11px] font-sans text-primary hover:underline"
-        >
-          {expanded ? "Hide" : "Show full"}
-        </button>
+    <>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="inline-flex items-baseline gap-1 text-left hover:text-foreground"
+      >
+        <span>{header}</span>
+        <ChevronRight
+          className={cn(
+            "size-3 self-center text-muted-foreground/60 transition-transform",
+            expanded && "rotate-90",
+          )}
+        />
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-0.5 text-xs font-mono">
+          <div className="text-muted-foreground/80">
+            <span className="inline-block w-12 text-muted-foreground/60">
+              from
+            </span>
+            <span className="whitespace-pre-wrap break-words">{f}</span>
+          </div>
+          <div className="text-foreground">
+            <span className="inline-block w-12 text-muted-foreground/60">
+              to
+            </span>
+            <span className="whitespace-pre-wrap break-words">{t}</span>
+          </div>
+          {truncated && (
+            <p className="ml-12 text-[10px] font-sans text-muted-foreground/70">
+              Truncated at write time; longer values are recoverable from the
+              version chain.
+            </p>
+          )}
+        </div>
       )}
-      {truncated && expanded && (
-        <p className="ml-12 text-[10px] font-sans text-muted-foreground/70">
-          Truncated at write time; longer values are recoverable from the
-          version chain.
-        </p>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -1325,11 +1360,6 @@ function formatValue(v: string | number | boolean | null): string {
   if (v === null || v === undefined) return "(empty)";
   if (typeof v === "string") return v.length === 0 ? "(empty)" : v;
   return String(v);
-}
-
-function clamp(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + "…";
 }
 
 /** Tiny thumbnail for media_added / media_removed events. Falls back to
