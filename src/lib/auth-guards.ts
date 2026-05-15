@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Session } from "next-auth";
 import { auth } from "@/lib/auth";
+import { setSentrySessionUser } from "@/lib/sentry-user";
 
 export type GuardResult =
   | { session: Session; response?: undefined }
@@ -13,6 +14,7 @@ export async function requireSession(): Promise<GuardResult> {
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     };
   }
+  setSentrySessionUser(session);
   return { session };
 }
 
@@ -28,6 +30,7 @@ export async function requireAdmin(): Promise<GuardResult> {
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     };
   }
+  setSentrySessionUser(session);
   return { session };
 }
 

@@ -1069,6 +1069,21 @@ is Sentry's fallback default — see HUBANDSPOKE-M for the incident that
 prompted this. Override locally by setting `DYNO=local` if you need to test
 Sentry capture.
 
+**User context on web errors:** every authed Sentry event carries
+`{ id, email, username }` so the issue page's "Affected users" panel and
+filters work. Wired via `setSentrySessionUser(session)` (in
+`src/lib/sentry-user.ts`) called from three places that already resolve
+the session: `requireSession` / `requireAdmin` in `src/lib/auth-guards.ts`
+(every authed API route), and the `await auth()` in
+`src/app/(dashboard)/layout.tsx` + `src/app/formats/layout.tsx` (every
+authed RSC page render). The matching browser-side stamp comes from a
+tiny `<SentryUser />` client component (`src/components/sentry-user.tsx`)
+rendered at the top of each authed layout — it runs `Sentry.setUser`
+on mount so unhandled browser exceptions land with the same identity.
+Each request/page gets its own `@sentry/nextjs` isolation scope so user
+identity never leaks across users. Worker tasks don't stamp user context
+yet — most cron/sweep work isn't user-attributable.
+
 ---
 
 ## Item-creation provenance (2026-05-11)

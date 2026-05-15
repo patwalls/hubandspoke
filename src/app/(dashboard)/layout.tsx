@@ -4,9 +4,11 @@ import { Toaster } from "sonner";
 import { eq } from "drizzle-orm";
 import { DashboardNav, SectionTabs } from "@/components/dashboard/nav";
 import { ScCreditsBanner } from "@/components/dashboard/sc-credits-banner";
+import { SentryUser } from "@/components/sentry-user";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
+import { setSentrySessionUser } from "@/lib/sentry-user";
 
 export default async function DashboardLayout({
   children,
@@ -17,6 +19,7 @@ export default async function DashboardLayout({
   if (!session?.user) {
     redirect("/login");
   }
+  setSentrySessionUser(session);
 
   const [userRow] = session.user.id
     ? await db
@@ -57,6 +60,11 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-background">
+      <SentryUser
+        id={session.user.id as string}
+        email={session.user.email || ""}
+        name={userRow?.name ?? null}
+      />
       <DashboardNav
         userEmail={session.user.email || ""}
         userName={userRow?.name ?? null}
