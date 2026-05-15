@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   contentDrafts,
+  productionItems,
   type ContentDraftContent,
   type FormatFieldSchema,
 } from "@/lib/db/schema";
@@ -11,6 +12,10 @@ import {
   recordContentChanges,
   type ContentChange,
 } from "@/lib/services/content-revisions";
+import {
+  getSchemaForPostType,
+  type PostType,
+} from "@/lib/platform-field-schemas";
 
 interface RouteContext {
   params: Promise<{ id: string; draftId: string }>;
@@ -76,8 +81,28 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   }
 
   const schema = draft.fieldSchemaSnapshot as FormatFieldSchema;
-  const knownKeys = new Set(schema.fields.map((f) => f.key));
-  const keyToType = new Map(schema.fields.map((f) => [f.key, f.type] as const));
+  // Forward-compat: a draft created before a new field was added to the
+  // platform schema (e.g. Threads got a `cta` slot 2026-05-15) has a
+  // snapshot that doesn't list the new key, but PLATFORM_FIELD_SCHEMAS
+  // does. Allow PATCHing such keys — they're real and intentional, not
+  // typos. Look up the live schema by the parent item's postType and
+  // union its fields with the snapshot's.
+  const [parentItem] = await db
+    .select({ postType: productionItems.postType })
+    .from(productionItems)
+    .where(eq(productionItems.id, id))
+    .limit(1);
+  const liveSchema = parentItem?.postType
+    ? getSchemaForPostType(parentItem.postType as PostType) ?? null
+    : null;
+  const allFields = [
+    ...schema.fields,
+    ...(liveSchema?.fields ?? []).filter(
+      (f) => !schema.fields.some((sf) => sf.key === f.key),
+    ),
+  ];
+  const knownKeys = new Set(allFields.map((f) => f.key));
+  const keyToType = new Map(allFields.map((f) => [f.key, f.type] as const));
 
   const patchRecord = patch as Record<string, unknown>;
   const prevContent = draft.content as ContentDraftContent;

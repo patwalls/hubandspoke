@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import { MonogramAvatar } from "../avatar";
 import { VerifiedBadge } from "../verified-badge";
 import { EditableField } from "../editable-field";
@@ -7,6 +8,7 @@ import { readLive, type SimulatorProps } from "../simulator-types";
 import { formatFeedTime } from "../resolve-preview-data";
 import { PLATFORM_FONT } from "../platform-tokens";
 import { CtaCard } from "../cta-card";
+import { MediaActions } from "../media-actions";
 import {
   ThreadsCommentIcon,
   ThreadsHeartIcon,
@@ -24,6 +26,7 @@ export function ThreadsSimulator({
   onCommit,
   itemId,
   onDraftMutated,
+  descriptProjectUrl,
 }: SimulatorProps) {
   const post = readLive(liveContent, fieldMap.caption, data.caption);
   const handle = data.author.handle ?? "you";
@@ -78,22 +81,35 @@ export function ThreadsSimulator({
           </div>
 
           {firstSlide && firstSlide.url && (
-            <div className="mt-3 overflow-hidden rounded-[12px] border border-[#e5e5e5] bg-black">
+            <div className="group relative mt-3 overflow-hidden rounded-[12px] border border-[#e5e5e5] bg-black">
               {firstSlide.kind === "video" ? (
-                <video
-                  src={firstSlide.url}
-                  poster={firstSlide.posterUrl ?? undefined}
-                  controls
-                  playsInline
-                  className="block h-auto max-h-[560px] w-full"
-                />
+                <>
+                  <video
+                    src={firstSlide.url}
+                    poster={firstSlide.posterUrl ?? undefined}
+                    controls
+                    playsInline
+                    className="block h-auto max-h-[560px] w-full"
+                  />
+                  <MediaActions
+                    src={firstSlide.url}
+                    kind="video"
+                    editUrl={descriptProjectUrl}
+                    onResync={async () => {
+                      await triggerResync(itemId);
+                    }}
+                  />
+                </>
               ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={firstSlide.url}
-                  alt=""
-                  className="block h-auto max-h-[560px] w-full object-cover"
-                />
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={firstSlide.url}
+                    alt=""
+                    className="block h-auto max-h-[560px] w-full object-cover"
+                  />
+                  <MediaActions src={firstSlide.url} />
+                </>
               )}
             </div>
           )}
@@ -140,6 +156,26 @@ export function ThreadsSimulator({
       )}
     </div>
   );
+}
+
+async function triggerResync(itemId: string | undefined): Promise<void> {
+  if (!itemId) return;
+  const res = await fetch(
+    `/api/production-items/${itemId}/sync-descript-publish`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    },
+  );
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(json?.error || `HTTP ${res.status}`);
+  }
+  toast.success("Re-syncing from Descript…", {
+    description:
+      "New MP4 will replace this one in ~2–10 min. The simulator updates automatically.",
+  });
 }
 
 function ActionButton({ icon }: { icon: React.ReactNode }) {
