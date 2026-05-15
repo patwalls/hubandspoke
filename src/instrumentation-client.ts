@@ -29,7 +29,17 @@ if (process.env.NODE_ENV === "production") {
     // because page-level browser extensions create unhandled rejections
     // outside our await chain — see HUBANDSPOKE-N / HUBANDSPOKE-P, where
     // frame_ant.js was sandwiched in the stacktrace.
-    ignoreErrors: ["TypeError: Failed to fetch", "TypeError: Load failed"],
+    //
+    // Also drop `AbortError: signal is aborted without reason` — fired when
+    // an in-flight fetch is cancelled by a navigation (router transition,
+    // dialog close) before its abort signal can be wired to a reason. Same
+    // shape as "Failed to fetch" — never an app bug, just browser teardown
+    // racing our promise — see HUBANDSPOKE-S / HUBANDSPOKE-K.
+    ignoreErrors: [
+      "TypeError: Failed to fetch",
+      "TypeError: Load failed",
+      "AbortError: signal is aborted without reason",
+    ],
   });
 }
 
