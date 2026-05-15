@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { extractDescriptSection } from "./format-skill";
+import {
+  extractCrossPostRulesSection,
+  extractDescriptSection,
+} from "./format-skill";
 
 // `formats.instructions` (the Skill) is structured for two audiences:
 // Claude reads sections like `## What this format is` / `## Hook` /
@@ -95,5 +98,64 @@ Apply the layout pack.
 
 `;
     expect(extractDescriptSection(skill)).toBe("Apply the layout pack.");
+  });
+});
+
+describe("extractCrossPostRulesSection", () => {
+  const SKILL_WITH_RULES = `## Hook
+Hook guidance for Claude.
+
+### Cross Post Rules
+- Instagram, TikTok and YT Shorts should be vertical
+- Twitter and LinkedIn should be horizontal so make sure you apply these changes to Descript underlord etc
+
+### Descript Clip & Pack Info
+Apply the layout pack at https://example.com.
+`;
+
+  it("returns just the rules body", () => {
+    const out = extractCrossPostRulesSection(SKILL_WITH_RULES);
+    expect(out).not.toBeNull();
+    expect(out).toContain("Instagram, TikTok and YT Shorts should be vertical");
+    expect(out).toContain("Twitter and LinkedIn should be horizontal");
+    // Adjacent sections must not leak through.
+    expect(out).not.toContain("Hook guidance for Claude");
+    expect(out).not.toContain("Apply the layout pack");
+  });
+
+  it("returns null when the Skill has no Cross Post Rules section", () => {
+    const skill = "## Hook\nWrite a hook.\n\n## Avoid\nNo em dashes.";
+    expect(extractCrossPostRulesSection(skill)).toBeNull();
+  });
+
+  it("returns null when the section is empty", () => {
+    const skill = "### Cross Post Rules\n\n\n### Descript Clip & Pack Info\nbody";
+    expect(extractCrossPostRulesSection(skill)).toBeNull();
+  });
+
+  it("matches case-insensitively (Skill markdown is editor-authored)", () => {
+    const skill = `### cross post rules
+- vertical for IG
+`;
+    const out = extractCrossPostRulesSection(skill);
+    expect(out).toBe("- vertical for IG");
+  });
+
+  it("accepts h2 (## Cross Post Rules) as well as h3", () => {
+    const skill = `## Cross Post Rules
+- horizontal for Twitter
+`;
+    const out = extractCrossPostRulesSection(skill);
+    expect(out).toBe("- horizontal for Twitter");
+  });
+
+  it("terminates at the next heading", () => {
+    const skill = `### Cross Post Rules
+- vertical for IG
+
+## Some Next Section
+Should not leak.`;
+    const out = extractCrossPostRulesSection(skill);
+    expect(out).toBe("- vertical for IG");
   });
 });

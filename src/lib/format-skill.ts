@@ -49,6 +49,7 @@ export function applyStarterTemplate(existing: string): string {
 }
 
 const DESCRIPT_SECTION_HEADING = /^[ \t]*##{1,2}[ \t]+Descript Clip & Pack Info[ \t]*$/im;
+const CROSS_POST_RULES_HEADING = /^[ \t]*##{1,2}[ \t]+Cross Post Rules[ \t]*$/im;
 const ANY_HEADING_AT_LEVEL_OR_HIGHER = /^[ \t]*##{0,2}[ \t]+\S/m;
 
 /**
@@ -75,4 +76,26 @@ export function extractDescriptSection(skill: string): string {
     ? remainder.slice(0, nextHeading.index)
     : remainder;
   return section.trim();
+}
+
+/**
+ * Pull the operational Cross Post Rules section out of a format Skill.
+ * Used by the cross-post / repost Descript composition copy flow to tell
+ * Underlord how to adapt the duplicate for the target platform (e.g.
+ * "Twitter and LinkedIn should be horizontal, IG / TikTok / YT Shorts
+ * vertical"). Returns null when the Skill has no such section — the
+ * derivative-create task then falls back to a vanilla byte-identical
+ * duplicate.
+ */
+export function extractCrossPostRulesSection(skill: string): string | null {
+  const match = CROSS_POST_RULES_HEADING.exec(skill);
+  if (!match) return null;
+  const afterHeadingStart = match.index + match[0].length;
+  const remainder = skill.slice(afterHeadingStart);
+  const nextHeading = ANY_HEADING_AT_LEVEL_OR_HIGHER.exec(remainder);
+  const section = nextHeading
+    ? remainder.slice(0, nextHeading.index)
+    : remainder;
+  const trimmed = section.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }

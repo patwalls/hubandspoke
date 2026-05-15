@@ -2,8 +2,12 @@ import type { Task } from "graphile-worker";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { productionItems, repurposeTriggers } from "@/lib/db/schema";
-import { duplicateDescriptComposition } from "@/lib/descript";
+import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
+import {
+  duplicateDescriptComposition,
+  invokeDescriptAgent,
+} from "@/lib/descript";
+import { extractCrossPostRulesSection } from "@/lib/format-skill";
 import {
   coldImportPillar,
   hasDescriptableMedia,
@@ -75,6 +79,7 @@ export const descriptDerivativeCreateTask: Task = async (
     .select({
       id: productionItems.id,
       title: productionItems.title,
+      postType: productionItems.postType,
     })
     .from(productionItems)
     .where(eq(productionItems.id, payload.derivativeItemId))
@@ -88,6 +93,8 @@ export const descriptDerivativeCreateTask: Task = async (
   const [source] = await db
     .select({
       id: productionItems.id,
+      brand: productionItems.brand,
+      format: productionItems.format,
       descriptProjectId: productionItems.descriptProjectId,
       descriptProjectUrl: productionItems.descriptProjectUrl,
       descriptCompositionId: productionItems.descriptCompositionId,
@@ -101,6 +108,28 @@ export const descriptDerivativeCreateTask: Task = async (
     throw new Error(
       `descript-derivative-create: source ${payload.sourceItemId} not found`,
     );
+  }
+
+  // Look up the source format's Cross Post Rules section, if any. Skill is
+  // (brand, name)-scoped in the formats table. When the section is present,
+  // we send a custom Underlord prompt that re-frames the duplicate for the
+  // target platform; when missing, we fall through to a vanilla
+  // byte-identical duplicate.
+  let crossPostRules: string | null = null;
+  if (source.format) {
+    const [fmt] = await db
+      .select({ instructions: formats.instructions })
+      .from(formats)
+      .where(
+        and(
+          eq(formats.brand, source.brand),
+          eq(formats.name, source.format),
+        ),
+      )
+      .limit(1);
+    if (fmt?.instructions) {
+      crossPostRules = extractCrossPostRulesSection(fmt.instructions);
+    }
   }
 
   const pillar = await loadPillarForSource(source);
@@ -175,11 +204,46 @@ export const descriptDerivativeCreateTask: Task = async (
   const newCompositionName =
     derivative.title ?? `Derivative ${derivative.id.slice(0, 8)}`;
 
-  const dup = await duplicateDescriptComposition({
-    projectId: dupProjectId,
-    sourceCompositionId: dupSourceCompositionId,
-    newCompositionName,
-  });
+  // When the source format's Skill carries a "### Cross Post Rules"
+  // section, send a custom Underlord prompt that duplicates the composition
+  // AND applies platform-specific framing for the derivative's postType
+  // (e.g. re-aspect 9:16 → 16:9 when cross-posting to Twitter/LinkedIn).
+  // Without the section, fall back to the standard byte-identical duplicate.
+  let dup: {
+    jobId: string;
+    projectUrl: string;
+    projectId: string;
+    prompt: string;
+  };
+  if (crossPostRules) {
+    const safeName = newCompositionName.replace(/"/g, '\\"');
+    const targetPostType = derivative.postType ?? "unknown";
+    const prompt = [
+      `Duplicate the existing composition in this project — the one with compositionId="${dupSourceCompositionId}".`,
+      `Name the new composition "${safeName}". Do not modify the source composition.`,
+      ``,
+      `This duplicate is a CROSS-POST. Target platform / postType: ${targetPostType}.`,
+      `Apply the cross-post rules below to the DUPLICATE only — adjust aspect ratio,`,
+      `framing, or layout as the rules require. The transcript and media should be`,
+      `the same as the source unless a rule says otherwise.`,
+      ``,
+      `### Cross Post Rules`,
+      crossPostRules,
+      ``,
+      `Reply with the new compositionId in the form compositionId="<uuid>".`,
+    ].join("\n");
+    const result = await invokeDescriptAgent({
+      projectId: dupProjectId,
+      prompt,
+    });
+    dup = { ...result, prompt };
+  } else {
+    dup = await duplicateDescriptComposition({
+      projectId: dupProjectId,
+      sourceCompositionId: dupSourceCompositionId,
+      newCompositionName,
+    });
+  }
 
   // Stamp the derivative with the project info; composition_id arrives via
   // the resolver poller.
