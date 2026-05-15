@@ -262,6 +262,15 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         prompt:
           "Threads post. Conversational, more like X than Instagram. One concrete claim or story beat from the transcript. Under 500 chars.",
       },
+      {
+        key: "cta",
+        label: "Reply",
+        type: "longtext",
+        maxLength: 500,
+        required: false,
+        prompt:
+          "Reply Threads post (the secondary post that carries the link + UTM). Follow the CTA BASELINE TEMPLATE: short framing + the bare CTA URL with paste-from-context utm_source/utm_campaign. Empty string when the format explicitly opts out of a CTA.",
+      },
     ],
   },
 };
@@ -293,7 +302,7 @@ export const PLATFORM_FIELD_MAP: Record<PostType, PlatformFieldMap> = {
   linkedin: { caption: "body", secondary: null, cta: "cta" },
   newsletter: { caption: "body", secondary: "subject", cta: null },
   tiktok: { caption: "caption", secondary: null, cta: null },
-  threads: { caption: "post", secondary: null, cta: null },
+  threads: { caption: "post", secondary: null, cta: "cta" },
 };
 
 // Map a historical platform string to a canonical post-type key. Used by

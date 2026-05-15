@@ -31,6 +31,7 @@ const CROSS_POST_SEEDED_TARGETS: ReadonlySet<PostType> = new Set<PostType>([
   "instagram_story",
   "linkedin",
   "tiktok",
+  "threads",
 ]);
 
 interface RouteContext {

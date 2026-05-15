@@ -6,6 +6,7 @@ import { EditableField } from "../editable-field";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import { formatFeedTime } from "../resolve-preview-data";
 import { PLATFORM_FONT } from "../platform-tokens";
+import { CtaCard } from "../cta-card";
 import {
   ThreadsCommentIcon,
   ThreadsHeartIcon,
@@ -21,11 +22,19 @@ export function ThreadsSimulator({
   liveContent,
   onLocalEdit,
   onCommit,
+  itemId,
+  onDraftMutated,
 }: SimulatorProps) {
   const post = readLive(liveContent, fieldMap.caption, data.caption);
   const handle = data.author.handle ?? "you";
   const firstSlide = data.slides[0] ?? null;
   const time = formatFeedTime(data.publishedAt);
+  // CTA reply thread — same pattern as X / LinkedIn / YT Community.
+  // Threads gained a `cta` slot 2026-05-15 so the auto-drafted reply
+  // (link + UTM) renders inline as a chained reply card.
+  const ctaKey = fieldMap.cta;
+  const showCta = !!ctaKey;
+  const ctaValue = ctaKey ? readLive(liveContent, ctaKey, "") : "";
 
   return (
     <div
@@ -96,6 +105,22 @@ export function ThreadsSimulator({
           </div>
         </div>
       </div>
+
+      {showCta && ctaKey && (
+        <div className="px-4 pt-3">
+          <CtaCard
+            variant="threads"
+            fieldKey={ctaKey}
+            value={ctaValue}
+            editable={editable}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+            author={data.author}
+            itemId={itemId}
+            onRegenerated={onDraftMutated}
+          />
+        </div>
+      )}
 
       {data.publishedLink ? (
         <div className="flex items-center justify-end px-4 pt-3 pb-4">

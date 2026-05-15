@@ -13,14 +13,15 @@ import { PLATFORM_FONT } from "./platform-tokens";
 
 // The secondary post that lives under a draft on platforms with a native
 // CTA slot — reply tweet (X), first comment (LinkedIn), pinned comment
-// (YouTube Community). It edits a single longtext draft field via the same
-// blur-commit machinery the main caption uses; no new API surface.
+// (YouTube Community), reply thread (Threads). It edits a single longtext
+// draft field via the same blur-commit machinery the main caption uses;
+// no new API surface.
 //
 // Each platform has its own visual chrome. The shared shape (avatar +
 // header + editable body + char counter) is rendered by this component;
 // per-platform layout differences are inlined per `variant` rather than
 // hidden behind extra abstraction.
-export type CtaVariant = "x" | "linkedin" | "youtube_community";
+export type CtaVariant = "x" | "linkedin" | "youtube_community" | "threads";
 
 interface Props {
   variant: CtaVariant;
@@ -53,6 +54,10 @@ export function CtaCard({
 }: Props) {
   if (variant === "x") return <XCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }} />;
   if (variant === "linkedin") return <LinkedInCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }} />;
+  // Threads' reply-thread shape is closer to X (chained reply chrome) than
+  // YouTube Community (comment chrome). Reuse XCta visually until we ship
+  // a dedicated Threads-styled variant.
+  if (variant === "threads") return <XCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }} />;
   return <YouTubeCommunityCta {...{ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLength, itemId, onRegenerated }} />;
 }
 

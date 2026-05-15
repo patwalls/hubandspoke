@@ -158,16 +158,17 @@ export const DRAFT_ALGORITHM_VERSION = "1.7";
 export const GENERATED_BY = `draft-algo:v${DRAFT_ALGORITHM_VERSION}:${AGENT_GENERATED_BY}`;
 
 // v1.7: which `utm_source` value to paste into the auto-drafted CTA reply
-// for each post type. Only the three post types with a `cta` field
-// in PLATFORM_FIELD_SCHEMAS are mapped here — instagram_*, tiktok,
-// threads, youtube_long/shorts don't carry a CTA slot. A post type not
-// present in this map means "no CTA auto-draft" and the algorithm passes
-// the v1.6 single-shot args (no cta context, no web_search tool). Add a
-// row here when a new post type gains a cta field in the platform schema.
+// for each post type. Only post types with a `cta` field in
+// PLATFORM_FIELD_SCHEMAS are mapped here — instagram_*, tiktok,
+// youtube_long/shorts don't carry a CTA slot. A post type not present
+// in this map means "no CTA auto-draft" and the algorithm passes the
+// v1.6 single-shot args (no cta context, no web_search tool). Add a row
+// here when a new post type gains a cta field in the platform schema.
 const CTA_CHANNEL_BY_POST_TYPE: Partial<Record<PostType, string>> = {
   x: "x",
   linkedin: "linkedin",
   youtube_community: "ytcommunity",
+  threads: "threads",
 };
 
 // Translate the agent's MediaAction into a concrete file payload for
