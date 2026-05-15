@@ -19,6 +19,7 @@
 // 9am-Eastern-wall-clock cadence becomes important, switch to 14:00 UTC and
 // accept 10am EDT in summer instead.
 export const CRONTAB = `
+* * * * * worker-heartbeat
 0 * * * * performance-decay
 15 * * * * threshold-monitor-sweep
 30 * * * * notion-sync

@@ -16,6 +16,7 @@ If you're new to this codebase, read in this order:
 
 ```
 CRON ENTRIES (src/jobs/crontab.ts, UTC)
+  * * * * *  worker-heartbeat     → bumps worker_heartbeat.last_seen_at. Read by GET /api/health/worker to detect silent worker wedges.
   *:00  performance-decay         → SC API. Writes views/likes/comments. Decay-tier-gated.
   *:15  threshold-monitor-sweep   → in-place scan. Auto-creates repurposed Idea items when views cross format thresholds.
   *:20  enrichment-sweep          → fan-out → enrich-item (per item) → maybe transcribe-whisper
@@ -1068,6 +1069,40 @@ which Next.js inlines at build time. Without these gates, a local crash with
 is Sentry's fallback default — see HUBANDSPOKE-M for the incident that
 prompted this. Override locally by setting `DYNO=local` if you need to test
 Sentry capture.
+
+### Worker liveness (2026-05-15)
+
+The worker dyno can silently wedge: the Node process stays alive (Heroku
+healthcheck happy) but its connection to Postgres stops polling for jobs,
+so backed-up cron work never runs. We hit this 2026-05-15 — `performance-decay`
+queued up 5 hourly ticks and one user's `refresh-item-metrics` sat for ~10h
+before Pat noticed views weren't syncing.
+
+Detection mechanism:
+
+- **Heartbeat table:** `worker_heartbeat` (singleton row, `id="singleton"`).
+- **Cron task:** `worker-heartbeat` runs every minute via `* * * * *` in
+  `src/jobs/crontab.ts`; the task body upserts `last_seen_at = NOW()` and
+  records the current `DYNO` name. A wedged worker stops firing this, so
+  staleness is the signal — by design, the worker can't lie about being
+  alive.
+- **Public endpoint:** `GET /api/health/worker` reads the row and returns
+  503 when `NOW() - last_seen_at > 180s`, otherwise 200 with the age in
+  seconds. Unauthenticated (middleware bypass on `/api/health/*`); body
+  contains no sensitive data.
+- **External monitor:** point UptimeRobot (or equivalent) at
+  `https://hubandspoke.starterstory.com/api/health/worker` on a 3–5 min
+  cadence with paging on non-200. That's the actual "page Pat" trigger.
+
+Threshold rationale: cron fires every 60s, so 180s tolerates one missed
+tick (deploy restart, brief blip) without paging. Anything longer than
+~3 min of silence is the wedge.
+
+Fix-on-page: `heroku ps:restart worker --app hubandspoke`. No locked
+jobs to interrupt during a wedge (the worker isn't running anything —
+that's the whole problem) and all queued tasks are designed idempotent.
+
+---
 
 **User context on web errors:** every authed Sentry event carries
 `{ id, email, username }` so the issue page's "Affected users" panel and

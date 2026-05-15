@@ -21,7 +21,11 @@ export default auth((req) => {
   const isInviteApi =
     pathname === "/api/invites/validate" ||
     pathname === "/api/invites/accept";
-  if (isAuthApi || isCronApi || isWebhookApi || isInviteApi)
+  // Public health/liveness routes — UptimeRobot et al. need to hit these
+  // without a session cookie. Returns 200/503 based on observed state;
+  // there's no sensitive data in the response.
+  const isHealthApi = pathname.startsWith("/api/health");
+  if (isAuthApi || isCronApi || isWebhookApi || isInviteApi || isHealthApi)
     return NextResponse.next();
 
   const isPublic = PUBLIC_PAGES.has(pathname);

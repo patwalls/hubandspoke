@@ -97,6 +97,7 @@ import {
   canvaExportPageVideoTask,
   type CanvaExportPageVideoPayload,
 } from "./canva-export-page-video";
+import { workerHeartbeatTask } from "./worker-heartbeat";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -139,6 +140,7 @@ export interface TaskPayloads {
   "threshold-monitor-sweep": Record<string, never>;
   "daily-scorecard-email": Record<string, never>;
   "sc-credits-watch": Record<string, never>;
+  "worker-heartbeat": Record<string, never>;
 }
 
 const helloTask: Task = async (payload, helpers) => {
@@ -186,4 +188,5 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "threshold-monitor-sweep": thresholdMonitorSweepTask,
   "daily-scorecard-email": dailyScorecardEmailTask,
   "sc-credits-watch": scCreditsWatchTask,
+  "worker-heartbeat": workerHeartbeatTask,
 };

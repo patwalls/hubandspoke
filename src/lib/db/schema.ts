@@ -1591,3 +1591,18 @@ export const canvaOauth = pgTable("canva_oauth", {
     .notNull(),
 });
 
+// Worker-dyno liveness heartbeat. Singleton row (id="singleton") bumped
+// by the per-minute `worker-heartbeat` cron task. Read by the public
+// `GET /api/health/worker` endpoint — UptimeRobot (or any external
+// uptime monitor) polls that route every few minutes; when
+// `last_seen_at` falls behind, the endpoint returns 503 and the monitor
+// pages us. Catches silent worker wedges (process alive, polling dead)
+// that Heroku's healthchecks miss.
+export const workerHeartbeat = pgTable("worker_heartbeat", {
+  id: text("id").primaryKey(), // always "singleton"
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  workerDyno: text("worker_dyno"), // e.g. "worker.1" — informational
+});
+

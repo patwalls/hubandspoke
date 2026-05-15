@@ -152,6 +152,7 @@ removing, or deprecating anything.
 | **`/api/cron/tick`** | **Active (debug)** | `GET /api/cron/tick?name=<task>` | — | Manual enqueue. Bare hit is a 200 noop. CRON_SECRET-gated. |
 | **`/api/cron/notion-sync`, `/performance-sync`** | **Active (manual)** | These routes still run their underlying sync inline | `syncLogs` etc. | Used for manual re-runs; the cron path now lives in `src/jobs/crontab.ts`. (`/api/cron/youtube-sync` and `/api/sync/youtube` were removed when the MATG-only cron was folded into `account-content-sync-sweep`.) |
 | Image proxy (CORS / caching) | Active | `GET /api/image-proxy?url=…` | — | Server-side proxy for external images |
+| Worker liveness healthcheck | Active | `GET /api/health/worker` | `worker_heartbeat` | Public (no auth). Reads the singleton heartbeat row and returns 503 when `last_seen_at` > 180s stale. UptimeRobot polls this to catch silent worker wedges. See docs/automation.md → Worker liveness. |
 
 ---
 
