@@ -575,6 +575,13 @@
       "when": 1778856021831,
       "tag": "0081_sturdy_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1778878385963,
+      "tag": "0082_fancy_slapstick",
+      "breakpoints": true
     }
   ]
 }

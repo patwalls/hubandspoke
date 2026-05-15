@@ -158,6 +158,14 @@ export interface ProductionItem {
   /** Slug in the StarterStory short-link pool attached to this post's
    *  auto-DM. NULL = no keyword wired up. */
   shortLinkSlug?: string | null;
+  /** Newsletter (Klaviyo) fields. Set only on `post_type='newsletter'`
+   *  rows; written by the Klaviyo enricher (preview text, body html) and
+   *  the Klaviyo discovery sync (list id) / metrics refresh (recipients).
+   *  Surfaced in the Enrichment dialog's Newsletter section. */
+  newsletterPreviewText?: string | null;
+  newsletterBodyHtml?: string | null;
+  newsletterRecipients?: number | null;
+  klaviyoListId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

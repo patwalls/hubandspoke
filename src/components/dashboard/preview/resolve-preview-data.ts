@@ -39,6 +39,13 @@ export type PreviewData = {
   };
   caption: string;
   secondaryText: string | null;
+  /** Tertiary text slot — used by newsletter for the inbox preheader
+   *  (`preview_text` in the v3 schema). Null on platforms that don't
+   *  have a third editable text field. Falls back to
+   *  `item.newsletterPreviewText` when no draft has been opened yet, so
+   *  Klaviyo-synced newsletters surface the preheader the enricher
+   *  pulled. */
+  previewText: string | null;
   slides: PreviewSlide[];
   publishedLink: string | null;
   publishedAt: string | null;
@@ -97,6 +104,18 @@ export function resolvePreviewData(
   const secondary =
     secondaryFromDraft ??
     (fieldMap.secondary ? pickString(item.title) : null);
+
+  // Newsletter-only tertiary slot: the inbox preheader (preview_text in
+  // the v3 schema). Reads draft first, then falls back to the column the
+  // Klaviyo enricher writes. Other platforms always get null here.
+  const previewTextFromDraft =
+    draftContent && typeof draftContent.preview_text === "string"
+      ? pickString(draftContent.preview_text)
+      : null;
+  const previewText =
+    platform === "newsletter"
+      ? previewTextFromDraft ?? pickString(item.newsletterPreviewText ?? null)
+      : null;
 
   // Slide resolution: explicit draft slides (if any field in the schema is
   // typed "slides"), then archived carousel media, then the cover image.
@@ -161,6 +180,7 @@ export function resolvePreviewData(
     author,
     caption,
     secondaryText: secondary,
+    previewText,
     slides,
     publishedLink: item.publishedLink ?? null,
     publishedAt: item.publishedDate ?? null,

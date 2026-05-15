@@ -41,3 +41,16 @@ export async function enqueue<K extends keyof TaskPayloads>(
   // merely placates TS's inference on graphile-worker's conditional type.
   await utils.addJob(name, payload as never, opts);
 }
+
+/**
+ * Tear down the WorkerUtils pg pool. Long-running web/worker processes
+ * never need this — they keep the pool open for the lifetime of the
+ * dyno. Short-lived scripts call this before `process.exit(0)` so the
+ * pool's idle connections don't keep node alive past the script's work.
+ */
+export async function workerUtilsEnd(): Promise<void> {
+  if (!utilsPromise) return;
+  const utils = await utilsPromise;
+  utilsPromise = null;
+  await utils.release();
+}

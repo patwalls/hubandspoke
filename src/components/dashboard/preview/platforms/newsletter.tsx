@@ -14,6 +14,13 @@ export function NewsletterSimulator({
 }: SimulatorProps) {
   const subject = readLive(liveContent, fieldMap.secondary, data.secondaryText ?? "");
   const body = readLive(liveContent, fieldMap.caption, data.caption);
+  // Preview text is the v3 schema's `preview_text` field — the inbox
+  // preheader. Not in PLATFORM_FIELD_MAP because it isn't caption/secondary
+  // /cta. Read directly by key, falling back to `data.previewText` (which
+  // resolve-preview-data fills from `productionItems.newsletterPreviewText`
+  // for Klaviyo-synced rows). Legacy v1/v2 drafts without the field hit
+  // the same fallback so they still render the enricher's value.
+  const previewText = readLive(liveContent, "preview_text", data.previewText ?? "");
   const displayName = data.author.displayName ?? data.author.handle ?? "You";
 
   return (
@@ -23,16 +30,30 @@ export function NewsletterSimulator({
         <div className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
           Inbox · from {displayName}
         </div>
-        <EditableField
-          fieldKey={fieldMap.secondary}
-          editable={editable}
-          onLocalEdit={onLocalEdit}
-          onCommit={onCommit}
-          value={subject}
-          placeholder="Subject line…"
-          multiline={false}
-          className="text-base font-semibold leading-snug"
-        />
+        <div className="block">
+          <EditableField
+            fieldKey={fieldMap.secondary}
+            editable={editable}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+            value={subject}
+            placeholder="Subject line…"
+            multiline={false}
+            className="text-base font-semibold leading-snug"
+          />
+        </div>
+        <div className="mt-1 block">
+          <EditableField
+            fieldKey="preview_text"
+            editable={editable}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+            value={previewText}
+            placeholder="Preview text…"
+            multiline={false}
+            className="text-xs text-muted-foreground leading-snug"
+          />
+        </div>
       </div>
 
       <div className="flex items-start gap-3 px-4 pt-3">

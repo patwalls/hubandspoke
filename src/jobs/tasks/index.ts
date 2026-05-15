@@ -102,6 +102,11 @@ import {
   type CanvaExportPageVideoPayload,
 } from "./canva-export-page-video";
 import { workerHeartbeatTask } from "./worker-heartbeat";
+import {
+  klaviyoSyncAccountTask,
+  type KlaviyoSyncAccountPayload,
+} from "./klaviyo-sync-account";
+import { klaviyoSyncSweepTask } from "./klaviyo-sync-sweep";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -129,6 +134,7 @@ export interface TaskPayloads {
   "canva-create-copy": CanvaCreateCopyPayload;
   "canva-export-design": CanvaExportDesignPayload;
   "canva-export-page-video": CanvaExportPageVideoPayload;
+  "klaviyo-sync-account": KlaviyoSyncAccountPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
@@ -146,6 +152,7 @@ export interface TaskPayloads {
   "daily-scorecard-email": Record<string, never>;
   "sc-credits-watch": Record<string, never>;
   "worker-heartbeat": Record<string, never>;
+  "klaviyo-sync-sweep": Record<string, never>;
 }
 
 const helloTask: Task = async (payload, helpers) => {
@@ -179,6 +186,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "canva-create-copy": canvaCreateCopyTask,
   "canva-export-design": canvaExportDesignTask,
   "canva-export-page-video": canvaExportPageVideoTask,
+  "klaviyo-sync-account": klaviyoSyncAccountTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "enrichment-sweep": enrichmentSweepTask,
@@ -195,4 +203,5 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "daily-scorecard-email": dailyScorecardEmailTask,
   "sc-credits-watch": scCreditsWatchTask,
   "worker-heartbeat": workerHeartbeatTask,
+  "klaviyo-sync-sweep": klaviyoSyncSweepTask,
 };

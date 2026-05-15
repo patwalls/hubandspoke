@@ -340,6 +340,28 @@ export const productionItems = pgTable(
     // `reply_to_author` / parent-pk fields). Defaults to false; sync skips
     // inserting fresh replies and the cleanup script deletes legacy ones.
     isReply: boolean("is_reply").default(false).notNull(),
+    // ── Newsletter (Klaviyo) fields ──────────────────────────────────────
+    // Subject lives on `title`, plaintext body on `contentBody`, opens on
+    // `views`, sent timestamp on `publishedAt` — same column reuse pattern
+    // every other channel uses. The columns below are the bits that don't
+    // map onto an existing slot.
+    // Preheader / inbox preview text. Maps to the newsletter schema's
+    // `preview_text` field. Klaviyo's campaign-message `preview_text`.
+    newsletterPreviewText: text("newsletter_preview_text"),
+    // Raw HTML of the rendered email. Kept alongside the plaintext in
+    // `contentBody` so we can re-extract or re-render later (theme change,
+    // better stripper, click-through analysis). Klaviyo's
+    // campaign-message `definition.content.body`.
+    newsletterBodyHtml: text("newsletter_body_html"),
+    // List size at send time — denominator for the open-rate metric.
+    // From Klaviyo's `campaign-values-reports` `recipients` statistic.
+    newsletterRecipients: integer("newsletter_recipients"),
+    // Klaviyo list id this campaign targeted (e.g. "KBDbDN" for the main
+    // Starter Story list). Captured per-item for audit even though it
+    // mirrors the parent account's `external_id` — campaigns can target
+    // segments / multiple lists, and we may want to filter mixed-list
+    // accounts later.
+    klaviyoListId: text("klaviyo_list_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -356,12 +378,13 @@ export const productionItems = pgTable(
     // site so SELECTs can audit "where did all these tagged-with-X items
     // come from?" without crawling logs. Standard values: 'api:create',
     // 'api:repost', 'api:cross-post', 'api:repurpose', 'api:duplicate',
-    // 'sync:account-content', 'sync:notion', 'cron:threshold-monitor-sweep',
-    // 'service:clip-promote', 'service:clip-promote-full',
-    // 'service:clip-idea-generate', 'legacy:descript-clip-out'. Null on
-    // rows created before 2026-05-11. Paired with a content_events row
-    // (eventType='item_created') that carries the full {actor_user_id,
-    // format, source_type, post_type} payload for the Activity tab.
+    // 'sync:account-content', 'sync:notion', 'sync:klaviyo',
+    // 'cron:threshold-monitor-sweep', 'service:clip-promote',
+    // 'service:clip-promote-full', 'service:clip-idea-generate',
+    // 'legacy:descript-clip-out'. Null on rows created before 2026-05-11.
+    // Paired with a content_events row (eventType='item_created') that
+    // carries the full {actor_user_id, format, source_type, post_type}
+    // payload for the Activity tab.
     createdVia: text("created_via"),
   },
   (table) => [

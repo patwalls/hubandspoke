@@ -26,7 +26,10 @@ export type PlatformKey = PostType;
 // youtube_community — the secondary post (reply tweet, comment, pinned
 // community comment) that carries the actual link + UTM. Older drafts keep
 // their v1 snapshot and don't get a CTA editor until they're redrafted.
-const SCHEMA_VERSION = 2;
+// v3 (2026-05-15): added optional `preview_text` (preheader) field to
+// newsletter — the inbox preview line shown next to the subject. Older
+// newsletter drafts keep their v2 snapshot.
+const SCHEMA_VERSION = 3;
 
 // Field schemas are keyed by *platform* (where the post lives), not by
 // format (the editorial template). A Reel-format item that gets cross-posted
@@ -225,6 +228,15 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         required: true,
         prompt:
           "Email subject line. Concrete and curious. Specific over clever. Under 60 chars lands best on mobile.",
+      },
+      {
+        key: "preview_text",
+        label: "Preview text",
+        type: "text",
+        maxLength: 150,
+        required: false,
+        prompt:
+          "Inbox preview / preheader — the line shown next to the subject in most email clients. 30–80 chars. Sells the open without repeating the subject.",
       },
       {
         key: "body",
