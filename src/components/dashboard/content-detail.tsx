@@ -99,6 +99,7 @@ export interface DraftRow {
 
 export type FieldSaveState = "idle" | "saving" | "saved" | "error";
 import { KillIdeaDialog } from "./kill-idea-dialog";
+import { PublishScheduleDialog } from "./publish-schedule-dialog";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
@@ -357,10 +358,18 @@ type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
 export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses, isAdmin }: ContentDetailProps) {
   // Sorted dropdown order; palette map for quick chip-color lookup.
-  const statusOptions = (statuses && statuses.length > 0 ? statuses : FALLBACK_STATUS_OPTIONS)
+  // Published / Scheduled are filtered OUT of the dropdown — those two
+  // transitions are reachable only through the PublishScheduleDialog
+  // (header-strip button). The palette map still includes them so the
+  // current-state chip renders the right color when an item is already
+  // in one of those states.
+  const allStatusOptions = (statuses && statuses.length > 0 ? statuses : FALLBACK_STATUS_OPTIONS)
     .slice()
     .sort((a, b) => a.position - b.position);
-  const statusPalette = new Map(statusOptions.map((s) => [s.name, s.color] as const));
+  const statusOptions = allStatusOptions.filter(
+    (s) => s.name !== "Published" && s.name !== "Scheduled",
+  );
+  const statusPalette = new Map(allStatusOptions.map((s) => [s.name, s.color] as const));
 
   const router = useRouter();
   const pathname = usePathname();
@@ -1112,6 +1121,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const [pendingKill, setPendingKill] = useState<{ previousStatus: string } | null>(
     null,
   );
+  // Publish-or-Schedule modal. Single source of truth for transitioning
+  // an item to status='Published' or 'Scheduled' (the generic PUT route
+  // rejects those status values directly so editors can't half-publish).
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   // "More fields" toggle: hides Account, Pillar, Source type, Reposted from
   // by default so the metadata card surfaces only the fields a clip operator
@@ -2224,6 +2237,30 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             hasMedia={!!item.mediaS3Key}
             hasTranscript={data.transcript != null}
           />
+          {/* Single path to status='Published'/'Scheduled'. Button label
+           *  flips based on current state — pre-publish items see the
+           *  "Publish or Schedule" call-to-action; already-published items
+           *  see "Edit publish info" which re-opens the modal pre-filled.
+           *  The modal's onSuccess calls `load()` to refetch the row. */}
+          {(item.status === "Published" || item.status === "Scheduled") ? (
+            <button
+              type="button"
+              onClick={() => setPublishDialogOpen(true)}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              title="Edit the published link or date for this post"
+            >
+              <PencilIcon className="size-3.5" /> Edit publish info
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPublishDialogOpen(true)}
+              className={buttonVariants({ variant: "default", size: "sm" })}
+              title="Mark this post as published (paste the live link) or schedule it for later"
+            >
+              <UploadIcon className="size-3.5" /> Publish or Schedule
+            </button>
+          )}
           {(() => {
             const alreadyCrossPostedAccountIds = new Set(
               (data.crossPosts ?? [])
@@ -2855,28 +2892,21 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </>
         )}
 
-        {/* Published link + Published date are stamps that exist only after
-         * the post is live. Hiding them pre-publish keeps the drafting
-         * surface uncluttered (the user explicitly asked for this). They
-         * reappear automatically once status flips to Published. */}
+        {/* Published link + Published date used to be editable inputs here,
+         *  but that surface let editors flip status without filling in the
+         *  link (or vice-versa). Both values now flow exclusively through
+         *  the PublishScheduleDialog (Publish or Schedule button in the
+         *  header strip), so this block is read-only — visible only after
+         *  publish, identical chrome to the rest of the metadata sidebar. */}
         {!isPrePublish && (
           <PropertyRowGroup single={showLeftPane}>
             <PropertyRow label="Published link">
-              <div className="flex flex-col gap-1 min-w-0">
-                <div className="flex items-center gap-1 min-w-0">
-                  <Input
-                    value={publishedLink}
-                    onChange={(e) => setPublishedLink(e.target.value)}
-                    onBlur={() => {
-                      if ((item.publishedLink ?? "") !== publishedLink)
-                        void persistField({ publishedLink: publishedLink || null });
-                    }}
-                    placeholder="https://…"
-                    disabled={isYouTube}
-                    aria-label="Published link"
-                    className={cn(PROPERTY_INPUT_CLASS, "flex-1 min-w-0")}
-                  />
-                  {publishedLink && (
+              <div className="flex w-full items-center gap-1 min-w-0">
+                {publishedLink ? (
+                  <>
+                    <span className="flex-1 truncate text-sm text-foreground">
+                      {publishedLink}
+                    </span>
                     <a
                       href={publishedLink}
                       target="_blank"
@@ -2886,36 +2916,21 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     >
                       <ExternalLinkIcon className="h-3.5 w-3.5" />
                     </a>
-                  )}
-                </div>
-                {(() => {
-                  const mismatch = validatePublishedLinkPlatform(
-                    publishedLink || null,
-                    item.postType,
-                  );
-                  return mismatch ? (
-                    <span className="text-[11px] text-amber-700">
-                      {mismatch}
-                    </span>
-                  ) : null;
-                })()}
+                  </>
+                ) : (
+                  <span className="text-sm text-muted-foreground italic">
+                    (not set)
+                  </span>
+                )}
               </div>
             </PropertyRow>
 
             <PropertyRow label="Published date">
-              <Input
-                type="date"
-                value={publishedDate}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setPublishedDate(next);
-                  if ((item.publishedDate ?? "") !== next)
-                    void persistField({ publishedDate: next });
-                }}
-                disabled={isYouTube}
-                aria-label="Published date"
-                className={PROPERTY_INPUT_CLASS}
-              />
+              <span className="text-sm text-foreground">
+                {publishedDate || (
+                  <span className="text-muted-foreground italic">(not set)</span>
+                )}
+              </span>
             </PropertyRow>
           </PropertyRowGroup>
         )}
@@ -3940,6 +3955,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         title={title || item.title || ""}
         saving={saveState.kind === "saving"}
         onConfirm={confirmKill}
+      />
+
+      <PublishScheduleDialog
+        open={publishDialogOpen}
+        onOpenChange={setPublishDialogOpen}
+        itemId={item.id}
+        initialLink={item.publishedLink ?? null}
+        initialPublishedDate={item.publishedDate ?? null}
+        currentStatus={item.status ?? null}
+        onSuccess={() => {
+          void load();
+        }}
       />
 
       <AttachDmKeywordDialog

@@ -443,6 +443,24 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    // status='Published' and status='Scheduled' are reachable only through
+    // POST /api/production-items/[id]/publish, which enforces invariants
+    // (Published REQUIRES a non-empty link; both modes emit the same
+    // status_change + content_changed events in one transaction). Letting
+    // the generic PUT accept those values reopens the half-publish bug
+    // class — status flipped to Published with no link, or link pasted
+    // without status flipping. Reject loudly so any caller (UI button,
+    // curl, future external integration) is forced through the right
+    // door.
+    if (status === "Published" || status === "Scheduled") {
+      return NextResponse.json(
+        {
+          error: `Use POST /api/production-items/${id}/publish to change status to ${status}.`,
+        },
+        { status: 400 },
+      );
+    }
+
     // Validate format references a real row in the brand's formats list
     // before doing anything else. Resolves the row's brand once for the
     // lookup; the cost is one extra SELECT only when the caller is
