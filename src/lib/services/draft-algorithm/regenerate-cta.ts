@@ -90,10 +90,14 @@ export interface RegenerateCtaResult {
   ctaPreview?: string;
 }
 
+// Mirror of CTA_CHANNEL_BY_POST_TYPE in `./run.ts`. Keep in sync — both
+// gate "this post type supports a CTA reply". When adding a new post
+// type to one, add it to the other.
 const CTA_CHANNEL_BY_POST_TYPE: Partial<Record<PostType, string>> = {
   x: "x",
   linkedin: "linkedin",
   youtube_community: "ytcommunity",
+  threads: "threads",
 };
 
 export async function regenerateCtaForItem(

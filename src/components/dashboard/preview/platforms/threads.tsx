@@ -45,6 +45,7 @@ export function ThreadsSimulator({
         <MonogramAvatar
           displayName={data.author.displayName}
           handle={data.author.handle}
+          avatarUrl={data.author.avatarUrl}
           size="md"
         />
 
