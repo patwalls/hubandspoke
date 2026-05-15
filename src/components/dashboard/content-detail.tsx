@@ -1730,6 +1730,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     "tiktok",
     "youtube_community",
     "youtube_shorts",
+    // Threads (2026-05-15) — ThreadsSimulator was wired in
+    // content-preview.tsx; the post type was just missed in this set,
+    // so Threads kept falling back to the form-left/Instructions-right
+    // layout. Pat shouldn't see editorial Instructions on a draftable
+    // post.
+    "threads",
   ]);
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
