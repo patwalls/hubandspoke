@@ -25,7 +25,7 @@ import {
   recordContentChanges,
   type ContentChange,
 } from "@/lib/services/content-revisions";
-import { extractCrossPostCaptionRulesSection } from "@/lib/format-skill";
+import { extractCrossPostRulesSection } from "@/lib/format-skill";
 import { buildCompositionName } from "@/lib/services/descript-composition";
 import { getTopPerformingCaptions } from "./exemplars";
 import {
@@ -609,14 +609,16 @@ export async function runDraftAlgorithm(
     itemAlreadyHasMedia,
   };
 
-  // Cross-post caption rules: only honor this on the cross_post path. For
-  // other sourceTypes the section is irrelevant (it's specifically about
-  // adapting THIS format to a different platform's caption shape). Falls
-  // back to null when the Skill has no `### Cross Post Caption Rules`
-  // section — the exemplar pool then drives caption shape as before.
+  // Cross-post rules: only honor on the cross_post path. The same
+  // `### Cross Post Rules` section is also read by Descript Underlord
+  // (`descript-derivative-create` task) for framing rules — the section
+  // is the shared source of truth and each consumer picks the bullets
+  // relevant to it (caption-shape rules here, framing rules over there).
+  // Falls back to null when the Skill has no such section — exemplars
+  // then drive caption shape as before.
   const crossPostCaptionRules =
     item.sourceType === "cross_post" && formatInstructions
-      ? extractCrossPostCaptionRulesSection(formatInstructions)
+      ? extractCrossPostRulesSection(formatInstructions)
       : null;
 
   const result = await generateDraft({

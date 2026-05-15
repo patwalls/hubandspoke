@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  extractCrossPostCaptionRulesSection,
   extractCrossPostRulesSection,
   extractDescriptSection,
 } from "./format-skill";
@@ -161,51 +160,23 @@ Should not leak.`;
   });
 });
 
-describe("extractCrossPostCaptionRulesSection", () => {
-  it("returns just the caption rules body", () => {
-    const skill = `## Hook
-Hook guidance for Claude.
-
-### Cross Post Caption Rules
-For X: use the on-screen hook verbatim as the body. No thread, no CTA, no bullets.
-
-### Cross Post Rules
-- Twitter should be horizontal
-`;
-    const out = extractCrossPostCaptionRulesSection(skill);
-    expect(out).toBe(
-      "For X: use the on-screen hook verbatim as the body. No thread, no CTA, no bullets.",
-    );
-    // Sibling sections must not leak through.
-    expect(out).not.toContain("Hook guidance");
-    expect(out).not.toContain("Twitter should be horizontal");
-  });
-
-  it("returns null when the section is absent", () => {
-    expect(
-      extractCrossPostCaptionRulesSection("## Hook\nDo the thing."),
-    ).toBeNull();
-  });
-
-  it("returns null on empty section", () => {
-    expect(
-      extractCrossPostCaptionRulesSection("### Cross Post Caption Rules\n\n"),
-    ).toBeNull();
-  });
-
-  it("does NOT pick up the framing rules section by accident", () => {
+describe("extractCrossPostRulesSection — multi-consumer behavior", () => {
+  // The same `### Cross Post Rules` section is read by both Descript
+  // Underlord (framing bullets) and the Draft Algorithm (caption-shape
+  // bullets). One source of truth, two consumers — confirmed via the
+  // user's actual Skill which puts framing + caption rules side-by-side.
+  it("returns mixed framing + caption bullets together", () => {
     const skill = `### Cross Post Rules
-- Twitter should be horizontal
+- Instagram, TikTok and YT Shorts should be vertical
+- X and LinkedIn should be horizontal so make sure you apply these changes to Descript underlord etc
+- For X cross-posts: use the source's on-screen hook as the tweet body, verbatim. No thread, no bullet points, no CTA, no link. One line, that's it.
 `;
-    expect(extractCrossPostCaptionRulesSection(skill)).toBeNull();
-  });
-
-  it("matches case-insensitively and accepts h2", () => {
-    const skill = `## cross post caption rules
-- short hook only
-`;
-    expect(extractCrossPostCaptionRulesSection(skill)).toBe(
-      "- short hook only",
+    const out = extractCrossPostRulesSection(skill);
+    expect(out).not.toBeNull();
+    expect(out).toContain("Instagram, TikTok and YT Shorts should be vertical");
+    expect(out).toContain("X and LinkedIn should be horizontal");
+    expect(out).toContain(
+      "use the source's on-screen hook as the tweet body, verbatim",
     );
   });
 });

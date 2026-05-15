@@ -552,8 +552,10 @@ export async function generateDraft(
       : null,
     args.crossPostCaptionRules
       ? [
-          `## CROSS-POST CAPTION RULES (HARD OVERRIDE)`,
-          `These rules are AUTHORITATIVE — they override anything you'd otherwise infer from the past captions / exemplars block below. The exemplar pool is ranked by views, but the top performer can teach the wrong shape for this specific cross-post; these team-authored rules trump it. Follow them exactly.`,
+          `## CROSS-POST RULES (HARD OVERRIDE — read carefully)`,
+          `These team-authored rules are AUTHORITATIVE and OVERRIDE anything you'd otherwise infer from the past captions / exemplars block below. The exemplar pool is ranked by views, but the top performer can teach the wrong shape for this specific cross-post; these rules trump it.`,
+          ``,
+          `The section is shared with the Descript framing pipeline (which reads bullets about aspect ratio / orientation) — bullets that talk about CAPTION SHAPE / BODY / HOOK are for you; bullets that talk about VIDEO FRAMING / ASPECT / ORIENTATION are for the framing pipeline and you can ignore them. If a bullet is unclear, prefer following it over ignoring it.`,
           ``,
           args.crossPostCaptionRules,
           ``,

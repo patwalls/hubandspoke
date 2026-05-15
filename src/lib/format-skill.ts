@@ -50,7 +50,6 @@ export function applyStarterTemplate(existing: string): string {
 
 const DESCRIPT_SECTION_HEADING = /^[ \t]*##{1,2}[ \t]+Descript Clip & Pack Info[ \t]*$/im;
 const CROSS_POST_RULES_HEADING = /^[ \t]*##{1,2}[ \t]+Cross Post Rules[ \t]*$/im;
-const CROSS_POST_CAPTION_RULES_HEADING = /^[ \t]*##{1,2}[ \t]+Cross Post Caption Rules[ \t]*$/im;
 const ANY_HEADING_AT_LEVEL_OR_HIGHER = /^[ \t]*##{0,2}[ \t]+\S/m;
 
 /**
@@ -80,41 +79,31 @@ export function extractDescriptSection(skill: string): string {
 }
 
 /**
- * Pull the operational Cross Post Rules section out of a format Skill.
- * Used by the cross-post / repost Descript composition copy flow to tell
- * Underlord how to adapt the duplicate for the target platform (e.g.
- * "Twitter and LinkedIn should be horizontal, IG / TikTok / YT Shorts
- * vertical"). Returns null when the Skill has no such section — the
- * derivative-create task then falls back to a vanilla byte-identical
- * duplicate.
+ * Pull the `### Cross Post Rules` section out of a format Skill. The
+ * section is the shared source of truth for cross-post / repost behavior;
+ * BOTH consumers read it and apply the rules relevant to them:
+ *
+ *   - Descript Underlord (`descript-derivative-create` task) reads it for
+ *     framing rules — "Twitter and LinkedIn should be horizontal, IG /
+ *     TikTok / YT Shorts vertical." Bullets that don't mention framing
+ *     are ignored.
+ *
+ *   - The Draft Algorithm (`run.ts` → `generateDraft`) reads it for
+ *     caption-shape rules — "For X cross-posts: use the on-screen hook
+ *     as the tweet body, verbatim. No thread, no CTA, no link." Bullets
+ *     that don't mention captions are ignored.
+ *
+ * Both consumers are agentic and can identify the bullets that apply.
+ * One section keeps the user's authoring mental model intact ("here are
+ * the rules for cross-posting from this format") and avoids forcing them
+ * to split content into parallel headings.
+ *
+ * Returns null when the section is missing — both consumers then fall
+ * back to their default behavior (Underlord: byte-identical duplicate;
+ * Draft Algorithm: exemplar-driven generation).
  */
 export function extractCrossPostRulesSection(skill: string): string | null {
   const match = CROSS_POST_RULES_HEADING.exec(skill);
-  if (!match) return null;
-  const afterHeadingStart = match.index + match[0].length;
-  const remainder = skill.slice(afterHeadingStart);
-  const nextHeading = ANY_HEADING_AT_LEVEL_OR_HIGHER.exec(remainder);
-  const section = nextHeading
-    ? remainder.slice(0, nextHeading.index)
-    : remainder;
-  const trimmed = section.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-/**
- * Pull the operational Cross Post Caption Rules section out of a format
- * Skill. This is the EDITORIAL counterpart to `### Cross Post Rules` —
- * the latter steers Descript Underlord on framing/aspect; this one steers
- * the Draft Algorithm on caption shape (e.g. "for X, use the on-screen
- * hook verbatim as the body, no thread, no CTA"). Returns null when
- * missing — the draft algorithm then falls back to exemplar-driven
- * generation (which can blow up captions when the format's top performer
- * is a long thread, see the 231K-view "phone until noon" exemplar).
- */
-export function extractCrossPostCaptionRulesSection(
-  skill: string,
-): string | null {
-  const match = CROSS_POST_CAPTION_RULES_HEADING.exec(skill);
   if (!match) return null;
   const afterHeadingStart = match.index + match[0].length;
   const remainder = skill.slice(afterHeadingStart);
