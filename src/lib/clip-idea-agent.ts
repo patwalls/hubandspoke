@@ -387,7 +387,7 @@ function findContiguousMatch(
 //   - The audio at startSec is the start of a sentence, not mid-cue.
 //   - `buildExcerpt` slicing segments by [start, end] now shows exactly
 //     what plays, with no leading/trailing partial segments.
-function alignRangeToCues(args: {
+export function alignRangeToCues(args: {
   intendedStartSec: number;
   intendedEndSec: number;
   anchorStartSec: number;
@@ -421,6 +421,24 @@ function alignRangeToCues(args: {
 
   const anchorMid = (args.anchorStartSec + args.anchorEndSec) / 2;
 
+  // Target anchor position within the snapped clip = wherever the LLM put it
+  // within its own intended window. Previously hardcoded to 0.7, which baked
+  // in the assumption that the anchor is always the punchline near the end —
+  // wrong for "demo body" anchors (early in the clip, with the rest of the
+  // demo playing out after), where the 0.7 target dragged the snapped window
+  // ~30s earlier into unrelated pre-content. Symptom: clip-ideas where the
+  // window covered the host's setup banter and cut off the demo mid-sentence
+  // (2026-05-15 Journable regression). Clamped to [0, 1] for safety against
+  // degenerate LLM ranges where the anchor falls outside.
+  const intendedSpan = args.intendedEndSec - args.intendedStartSec;
+  const targetAnchorPosition =
+    intendedSpan > 0
+      ? Math.max(
+          0,
+          Math.min(1, (anchorMid - args.intendedStartSec) / intendedSpan),
+        )
+      : 0.5;
+
   let best: {
     startSec: number;
     endSec: number;
@@ -434,11 +452,13 @@ function alignRangeToCues(args: {
       if (end > args.durationSec + 0.5) continue;
       // Score components:
       //   - durationDelta: how far from the LLM's intended duration
-      //   - placementDelta: how far the anchor lands from the 70% mark
+      //   - placementDelta: how far the anchor lands from the LLM's
+      //     intended anchor position (computed above from intendedStart/End)
       //   - durationGravity: tiny pull toward 60s (sweet spot per prompt)
       const durationDelta = Math.abs(duration - intendedDuration);
       const anchorPosition = (anchorMid - start) / duration; // 0..1
-      const placementDelta = Math.abs(anchorPosition - 0.7) * duration;
+      const placementDelta =
+        Math.abs(anchorPosition - targetAnchorPosition) * duration;
       const durationGravity = Math.abs(duration - 60) * 0.1;
       const score = durationDelta + placementDelta + durationGravity;
       if (best === null || score < best.score) {
