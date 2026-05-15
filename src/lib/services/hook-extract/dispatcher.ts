@@ -247,18 +247,28 @@ async function callLLM(signals: ItemSignals): Promise<DispatchResult> {
       continue;
     }
     const source = (input.source ?? "none") as DispatcherSource;
-    const rawHook = typeof input.hook === "string" ? input.hook.trim() : null;
+    // LLM tool-call outputs occasionally contain literal ` ` (null byte)
+    // — a model artifact that survives JSON.parse but is rejected by
+    // Postgres text columns ("invalid byte sequence for encoding UTF8: 0x00",
+    // 22021). Worse, when graphile-worker's failJob tries to write the
+    // resulting error into `jobs.last_error`, the SAME byte trips THAT
+    // write too and crashes the worker dyno — every other queued task
+    // (descript-clip-resolve, descript-publish-and-archive, etc.) starves
+    // while the dyno keeps restarting. Strip null bytes here at the
+    // earliest write site so they never reach the DB.
+    const stripNullBytes = (s: string): string => s.replace(/\u0000/g, "");
+    const rawHook = typeof input.hook === "string" ? stripNullBytes(input.hook).trim() : null;
     const hook =
       source === "none" || !rawHook
         ? null
         : rawHook.slice(0, MAX_HOOK_CHARS);
     const coverDescription =
       typeof input.cover_description === "string"
-        ? input.cover_description.trim().slice(0, MAX_DESCRIPTION_CHARS) ||
+        ? stripNullBytes(input.cover_description).trim().slice(0, MAX_DESCRIPTION_CHARS) ||
           null
         : null;
     const reasoning =
-      typeof input.reasoning === "string" ? input.reasoning.trim() : "";
+      typeof input.reasoning === "string" ? stripNullBytes(input.reasoning).trim() : "";
 
     return {
       status: hook ? "ok" : "skipped",
