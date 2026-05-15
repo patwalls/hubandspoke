@@ -61,7 +61,7 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         maxLength: 25000,
         required: false,
         prompt:
-          "Reply tweet that lands the call-to-action. Apply the CTA RULES: only fill this in if the FORMAT REFERENCES & EDITORIAL NOTES specify a CTA pattern (link template, UTM, copy guidance, 'add a reply with X'). If the notes say nothing about a CTA, return an empty string — do not invent one. Same length guidance as the main tweet: match the exemplar reply lengths, don't hard-cap to 280.",
+          "Reply tweet that lands the call-to-action. Follow the CTA BASELINE TEMPLATE in the system prompt — this field should ALWAYS be filled. Default shape is 'If you want more stuff like this, check out\\n\\n<link>' with utm_source and utm_campaign pasted from CTA CONTEXT. If FORMAT REFERENCES & EDITORIAL NOTES specify a different CTA pattern, follow the Skill instead. Don't hard-cap to 280 chars.",
       },
     ],
   },
@@ -187,7 +187,7 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         maxLength: 10000,
         required: false,
         prompt:
-          "Pinned comment under the Community post that lands the call-to-action. Apply the CTA RULES: only fill this in if the FORMAT REFERENCES & EDITORIAL NOTES specify a CTA pattern (link template, UTM, copy guidance). If the notes say nothing about a CTA, return an empty string — do not invent one.",
+          "Pinned comment under the Community post that lands the call-to-action. Follow the CTA BASELINE TEMPLATE in the system prompt — this field should ALWAYS be filled. Default shape is 'If you want more stuff like this, check out\\n\\n<link>' with utm_source and utm_campaign pasted from CTA CONTEXT. If FORMAT REFERENCES & EDITORIAL NOTES specify a different CTA pattern, follow the Skill instead.",
       },
     ],
   },
@@ -210,7 +210,7 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
         maxLength: 1250,
         required: false,
         prompt:
-          "First comment under the LinkedIn post that lands the call-to-action. Apply the CTA RULES: only fill this in if the FORMAT REFERENCES & EDITORIAL NOTES specify a CTA pattern (link template, UTM, copy guidance). If the notes say nothing about a CTA, return an empty string — do not invent one.",
+          "First comment under the LinkedIn post that lands the call-to-action. Follow the CTA BASELINE TEMPLATE in the system prompt — this field should ALWAYS be filled. Default shape is 'If you want more stuff like this, check out\\n\\n<link>' with utm_source and utm_campaign pasted from CTA CONTEXT. If FORMAT REFERENCES & EDITORIAL NOTES specify a different CTA pattern, follow the Skill instead.",
       },
     ],
   },

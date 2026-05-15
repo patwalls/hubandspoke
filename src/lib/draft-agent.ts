@@ -66,7 +66,19 @@ const MODEL = "claude-opus-4-7";
 // new cross-post to expand, even when the format's other winners are
 // hook-only. Section is opt-in per format — empty/missing falls through to
 // pure exemplar-driven inference.
-export const PROMPT_VERSION = 11;
+// v12 (2026-05-15): CTA reply is now always-on for platforms with a `cta`
+// field (x, linkedin, youtube_community). Previous CTA RULES required the
+// format Skill to spell out a pattern — agents returned "" otherwise,
+// shipping every X / LinkedIn / YT Community draft with an empty "Add a
+// reply with the CTA..." placeholder. CTA RULES replaced with CTA BASELINE
+// TEMPLATE: fixed "If you want more stuff like this, check out\n\n<link>"
+// shape, with `utm_source` + `utm_campaign` paste-from-context UTMs. Format
+// Skill still wins when it specifies an explicit CTA pattern. Anthropic
+// native `web_search_20250305` server tool registered (max_uses: 2) so the
+// agent can find a published starterstory.com episode URL when the format
+// calls for the episode rather than a lead magnet. CTA context (channel +
+// utmCampaign) rendered as a per-call payload block; no schema changes.
+export const PROMPT_VERSION = 12;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -93,12 +105,26 @@ Pick exactly one media_action value:
 
 If the MEDIA CONTEXT shows the post already has media rows attached (cross-posts mirror their source's media on creation), pick "none" — the post will publish with those images/videos, you do not need to attach pillar media on top. Compose the caption assuming those attached items will be visible.
 
-CTA RULES
-Some target platforms include a "cta" field (X reply tweet, LinkedIn first comment, YouTube Community pinned comment) — the secondary post that carries the actual call-to-action.
-- Look in FORMAT REFERENCES & EDITORIAL NOTES for CTA guidance: a link template, a UTM scheme, copy patterns like "always reply with the full episode link" or "pin a comment with starterstory.com/<handle>".
-- If the notes specify a CTA pattern, write the cta field following that pattern. Reuse any literal links / UTM templates verbatim. Keep it short and factual — no hard sell.
-- If the notes say NOTHING about a CTA, return an empty string for the cta field. Do not invent a CTA. An empty cta is the correct, expected output when the skill is silent.
-- The cta is independent of media_action — a post can have a CTA reply with no media, or media on the main post with no CTA reply.
+CTA BASELINE TEMPLATE
+For platforms with a "cta" field (X reply tweet, LinkedIn first comment, YouTube Community pinned comment), you must ALWAYS write a reply CTA. The cta is independent of media_action — a post can have a CTA reply with no media, or media on the main post with no CTA reply.
+
+Default shape — exactly two lines of copy with a blank line between (a literal "\\n\\n" separator):
+
+  If you want more stuff like this, check out
+
+  <link>
+
+Where <link> is chosen in this order of preference:
+1. If FORMAT REFERENCES & EDITORIAL NOTES specify a URL (a lead-magnet path like starterstory.com/<slug>, or an explicit episode-link directive), use that URL.
+2. If the editorial notes say to link to "the actual episode" — or the pillar is clearly a Starter Story podcast / interview episode and the format calls for the episode URL — call the web_search tool with the pillar title to find the published starterstory.com episode URL, then use that URL. Don't invent episode URLs; if web_search returns nothing usable, fall back to the lead-magnet default in step 3.
+3. Otherwise default to https://starterstory.com/micro.
+
+Append UTM params to the chosen link, using the values in the CTA CONTEXT block verbatim:
+- utm_source={channel}
+- utm_campaign={utmCampaign}    (drop this param entirely when CTA CONTEXT shows utmCampaign as "(none)")
+- Use "?" for the first param. If the URL already carries a "?" query string (rare for our links), join with "&" instead.
+
+OVERRIDE: if FORMAT REFERENCES & EDITORIAL NOTES specify a different CTA copy, link shape, or template, follow the Skill — Skill wins over the baseline. The baseline applies when the Skill is silent on CTAs.
 
 STRUCTURE RULE
 When the prompt includes a "TOP-PERFORMING EXAMPLES IN THIS FORMAT" block and a recurring structural pattern shows up across those examples (e.g. opening hook + bulleted timestamp breakdown like "(2:46)", listicle with em-dashes, two-line setup + punchline, "Here's the top 1% of our chat:" + list, etc.), mirror that structure in your draft. Don't invent a structure that isn't repeated across the format examples; the platform-only examples are voice/tone reference, not structural.
@@ -193,6 +219,17 @@ export interface GenerateDraftArgs {
   /** What pillar media exists and what the target platform's rule allows.
    *  Drives the `media_action` field on the tool output. */
   mediaContext: MediaContext;
+  /** v12: CTA reply context. Set only when the target post type carries a
+   *  `cta` field (x / linkedin / youtube_community). When present, the agent
+   *  is told to always write a reply CTA following the CTA BASELINE TEMPLATE
+   *  (system prompt) and is given the literal channel + utmCampaign values
+   *  to paste into the link's UTMs. Also gates registration of the
+   *  Anthropic `web_search_20250305` server tool — the agent can look up the
+   *  pillar's published episode URL when the Skill calls for the episode
+   *  rather than a lead magnet. Absent when the post type has no CTA slot
+   *  (instagram_*, tiktok, threads, youtube_long/shorts) — same single-shot
+   *  shape as v11 for those. */
+  cta?: { channel: string; utmCampaign: string | null };
 }
 
 /** The action the agent picks for media attachment on this draft. The
@@ -484,6 +521,21 @@ export async function generateDraft(
     },
   ];
 
+  // v12: register Anthropic's native web_search server tool when this draft
+  // has a CTA slot. The CTA BASELINE TEMPLATE tells the agent to call it
+  // ONLY when the format Skill or context implies "link to the actual
+  // episode" — most drafts will skip the call and pay nothing for the tool.
+  // max_uses caps the worst case at 2 searches per draft (one primary +
+  // one refinement). Cast through unknown because the SDK's `Tool` type may
+  // not yet cover server-tool variants in all versions; the API accepts it.
+  if (args.cta) {
+    tools.push({
+      type: "web_search_20250305",
+      name: "web_search",
+      max_uses: 2,
+    } as unknown as Anthropic.Tool);
+  }
+
   // v1.5: register find_interesting_timestamps only when we actually have
   // transcript segments to query. Cross-posts using source-body substrate
   // have no timestamps to find — exposing the tool would just waste an
@@ -618,7 +670,22 @@ export async function generateDraft(
       ? `Already attached on this post (mirrored from the source, will publish as-is): ${alreadyAttached.count} ${alreadyAttached.kinds.join("/") || "media"} ${alreadyAttached.count === 1 ? "item" : "items"} — pick media_action="none" and compose the caption assuming these are visible.`
       : `Already attached on this post: none.`;
 
+  // v12: CTA CONTEXT block. Only rendered when this post type has a `cta`
+  // field. Carries the channel + utm_campaign values for the agent to
+  // paste verbatim — keeps the agent from inventing UTM strings or
+  // copying placeholders into the live draft.
+  const ctaContextBlock = args.cta
+    ? [
+        `## CTA CONTEXT`,
+        `Use these literal values when constructing the CTA reply's link UTMs (CTA BASELINE TEMPLATE in the system prompt explains the rules):`,
+        `- channel: ${args.cta.channel}`,
+        `- utmCampaign: ${args.cta.utmCampaign ?? "(none)"}`,
+        ``,
+      ].join("\n")
+    : null;
+
   const perCallPayload = [
+    ctaContextBlock,
     substrateBlock,
     ``,
     `## MEDIA CONTEXT`,
@@ -636,7 +703,9 @@ export async function generateDraft(
         ? " AND to the past-caption exemplars"
         : ""
     }.`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   // v1.5: multi-turn agentic loop. The agent picks tool calls itself
   // (tool_choice: "auto"); we run any non-final tools (currently
