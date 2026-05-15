@@ -6,6 +6,7 @@ import {
   buildDescriptCompositionUrl,
   fetchDescriptJob,
   extractCompositionIdFromAgentResponse,
+  invokeDescriptAgent,
 } from "@/lib/descript";
 import { assertCompositionUnique } from "@/lib/services/descript-composition";
 import { recordToolAction } from "@/lib/services/content-events";
@@ -22,6 +23,15 @@ export interface DescriptClipResolvePayload {
    *  unset for `agent` jobs (composition duplicate or AI clip). Switches how
    *  we parse the new compositionId from the job result. */
   importMode?: boolean;
+  /** Set by the Draft Algorithm's cold-import path
+   *  (`runDescriptStepForDerivative` in
+   *  `src/lib/services/draft-algorithm/descript-step.ts`). When the import
+   *  job stops, we invoke Underlord against the now-warm project with this
+   *  prompt instead of writing the imported composition straight onto the
+   *  derivative. Carries the full Skill-built prompt so the resolver doesn't
+   *  need to re-derive it from the trigger / format Skill across queue
+   *  serialization. */
+  postImportAgentPrompt?: string;
   /** Epoch ms. Set on the first invocation; carried forward across re-enqueues. */
   deadlineAt?: number;
 }
@@ -68,6 +78,67 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
     const compositionId = importMode
       ? job.result?.created_compositions?.[0]?.id ?? null
       : extractCompositionIdFromAgentResponse(job.result?.agent_response);
+
+    // Cold-import + chained-agent path (Draft Algorithm V1.7 cold branch).
+    // The import has produced the pillar's seed composition; instead of
+    // stamping the derivative with it, we now invoke Underlord against the
+    // freshly-warm project to produce the Skill-driven cut. The same
+    // trigger row gets repointed at the agent jobId; the resolver re-enters
+    // with no `importMode` + no `postImportAgentPrompt` and the existing
+    // non-import branch below writes the derivative composition + chains
+    // publish-and-archive on the *next* stop.
+    if (importMode && payload.postImportAgentPrompt && compositionId) {
+      if (payload.pillarItemId) {
+        await db
+          .update(productionItems)
+          .set({ descriptSeedCompositionId: compositionId })
+          .where(eq(productionItems.id, payload.pillarItemId));
+      }
+      // Need the project_id to invoke the agent. The pillar was stamped
+      // with it back in `runDescriptStepForDerivative` before we got here.
+      const [pillar] = await db
+        .select({
+          descriptProjectId: productionItems.descriptProjectId,
+        })
+        .from(productionItems)
+        .where(eq(productionItems.id, payload.pillarItemId ?? ""))
+        .limit(1);
+      if (!pillar?.descriptProjectId) {
+        throw new Error(
+          `descript-clip-resolve cold-chain: pillar ${payload.pillarItemId} has no descriptProjectId after import; cannot invoke agent`,
+        );
+      }
+      const agent = await invokeDescriptAgent({
+        projectId: pillar.descriptProjectId,
+        prompt: payload.postImportAgentPrompt,
+      });
+      // Repoint the trigger at the agent job. Compositin_id will be
+      // overwritten by the next stop's existing non-import path.
+      await db
+        .update(repurposeTriggers)
+        .set({
+          descriptJobId: agent.jobId,
+          descriptImportPath: "agent",
+          descriptCompositionId: null,
+        })
+        .where(eq(repurposeTriggers.id, payload.triggerId));
+      helpers.logger.info(
+        `descript-clip-resolve cold-chain trigger=${payload.triggerId} pillar=${payload.pillarItemId} seed=${compositionId} agent_job=${agent.jobId}`,
+      );
+      await helpers.addJob(
+        "descript-clip-resolve",
+        {
+          triggerId: payload.triggerId,
+          jobId: agent.jobId,
+          derivativeItemId: payload.derivativeItemId,
+          pillarItemId: payload.pillarItemId,
+          deadlineAt: Date.now() + DEADLINE_MS,
+        },
+        { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+      );
+      return;
+    }
+
     await db
       .update(repurposeTriggers)
       .set({ descriptCompositionId: compositionId })

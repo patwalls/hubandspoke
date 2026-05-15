@@ -88,7 +88,10 @@ async function main() {
   });
 
   console.log("Result:", JSON.stringify(result));
-  process.exit(result.status === "triggered" ? 0 : 3);
+  const ok =
+    result.status === "triggered_warm" ||
+    result.status === "triggered_cold_import";
+  process.exit(ok ? 0 : 3);
 }
 
 main().catch((err) => {

@@ -7,6 +7,7 @@ import {
   createTestProductionItem,
 } from "@/test/factories";
 import * as descriptApi from "@/lib/descript";
+import * as s3Mod from "@/lib/s3";
 import * as enqueueMod from "@/jobs/enqueue";
 import {
   buildDerivativeDescriptPrompt,
@@ -81,7 +82,7 @@ describe("runDescriptStepForDerivative", () => {
       force: false,
     });
 
-    expect(result.status).toBe("triggered");
+    expect(result.status).toBe("triggered_warm");
     expect(result.jobId).toBe("job-warm-1");
     expect(result.triggerId).toBeDefined();
     if (result.triggerId) createdTriggerIds.push(result.triggerId);
@@ -121,14 +122,24 @@ describe("runDescriptStepForDerivative", () => {
     expect(updated.descriptCompositionId).toBeNull();
   });
 
-  it("skips when pillar has media but is not in Descript yet", async () => {
-    const agentSpy = vi
-      .spyOn(descriptApi, "invokeDescriptAgent")
+  it("cold-imports the pillar to Descript when it has media but no project", async () => {
+    // The agent invocation does NOT happen synchronously on the cold
+    // path — it's deferred to descript-clip-resolve's post-import chain.
+    // So the helper should only call createDescriptProjectFromUrl here.
+    const agentSpy = vi.spyOn(descriptApi, "invokeDescriptAgent");
+    const importSpy = vi
+      .spyOn(descriptApi, "createDescriptProjectFromUrl")
       .mockResolvedValue({
-        jobId: "should-not-fire",
-        projectId: "x",
-        projectUrl: "x",
+        job_id: "import-job-1",
+        project_id: "proj-cold-1",
+        project_url: "https://web.descript.com/proj-cold-1",
       });
+    vi.spyOn(s3Mod, "getPresignedGetUrl").mockResolvedValue(
+      "https://s3.example/presigned.mp4",
+    );
+    const enqueueSpy = vi
+      .spyOn(enqueueMod, "enqueue")
+      .mockResolvedValue(undefined);
 
     const format = await createTestFormat({
       isClipDescriptFormat: true,
@@ -154,8 +165,49 @@ describe("runDescriptStepForDerivative", () => {
       force: false,
     });
 
-    expect(result.status).toBe("skipped_pillar_not_in_descript");
+    expect(result.status).toBe("triggered_cold_import");
+    expect(result.jobId).toBe("import-job-1");
+    if (result.triggerId) createdTriggerIds.push(result.triggerId);
+
+    // Underlord is NOT invoked yet — that happens in the resolver after
+    // the import finishes.
     expect(agentSpy).not.toHaveBeenCalled();
+
+    // Import call used the pillar's presigned S3 URL.
+    expect(importSpy).toHaveBeenCalledTimes(1);
+    expect(importSpy.mock.calls[0][0].mediaUrl).toBe(
+      "https://s3.example/presigned.mp4",
+    );
+
+    // Pillar stamped with the new project so concurrent / future
+    // derivatives go through the warm path.
+    const [pillarUpdated] = await db
+      .select({
+        descriptProjectId: productionItems.descriptProjectId,
+        descriptProjectUrl: productionItems.descriptProjectUrl,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, pillar.id))
+      .limit(1);
+    expect(pillarUpdated.descriptProjectId).toBe("proj-cold-1");
+    expect(pillarUpdated.descriptProjectUrl).toBe(
+      "https://web.descript.com/proj-cold-1",
+    );
+
+    // Resolver got the post-import agent prompt so it can fire Underlord
+    // when the import stops.
+    expect(enqueueSpy).toHaveBeenCalledWith(
+      "descript-clip-resolve",
+      expect.objectContaining({
+        jobId: "import-job-1",
+        importMode: true,
+        pillarItemId: pillar.id,
+        derivativeItemId: derivative.id,
+        postImportAgentPrompt: expect.stringContaining(
+          "clip out the intro and only the intro",
+        ),
+      }),
+    );
   });
 
   it("skips silently for text-only pillar (no media, no project)", async () => {
@@ -288,7 +340,7 @@ describe("runDescriptStepForDerivative", () => {
       force: true,
     });
 
-    expect(result.status).toBe("triggered");
+    expect(result.status).toBe("triggered_warm");
     expect(agentSpy).toHaveBeenCalledTimes(1);
     if (result.triggerId) createdTriggerIds.push(result.triggerId);
 

@@ -1,14 +1,18 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, repurposeTriggers } from "@/lib/db/schema";
-import { invokeDescriptAgent } from "@/lib/descript";
+import {
+  createDescriptProjectFromUrl,
+  invokeDescriptAgent,
+} from "@/lib/descript";
 import { extractDescriptSection } from "@/lib/format-skill";
+import { getPresignedGetUrl } from "@/lib/s3";
 import { enqueue } from "@/jobs/enqueue";
 
 export type DescriptStepStatus =
-  | "triggered"
+  | "triggered_warm"
+  | "triggered_cold_import"
   | "skipped_no_skill"
-  | "skipped_pillar_not_in_descript"
   | "skipped_no_video_source"
   | "skipped_already_done";
 
@@ -31,34 +35,64 @@ interface RunDescriptStepArgs {
 }
 
 /**
- * Optional Descript branch of the Draft Algorithm. Fires when the target
- * format is flagged `is_clip_descript_format` (see `runDraftAlgorithm`).
+ * Descript branch of the Draft Algorithm. Fires when the target format is
+ * flagged `is_clip_descript_format` (see `runDraftAlgorithm`).
  *
- * What it does in the warm case (pillar already has a Descript project):
- *   1. Builds an Underlord prompt from the format Skill's
- *      `### Descript Clip & Pack Info` section. The Skill itself dictates
- *      what to cut (e.g. "clip out the intro and only the intro") and
- *      what treatment to apply (filler-word marking, layout pack). No
- *      hook / timestamp substitution — the agent reads the transcript
- *      inside Descript and figures out the range.
- *   2. Invokes the Descript `/jobs/agent` endpoint on the pillar's project.
- *   3. Inserts a `repurpose_triggers` row and stamps `descriptProjectId`
- *      + `descriptProjectUrl` on the derivative so the editor's detail
- *      page can link out to Descript while the job runs.
- *   4. Enqueues `descript-clip-resolve` which polls the job, writes the
- *      new `descriptCompositionId` back on the derivative, and auto-chains
- *      into `descript-publish-and-archive` to render and archive an MP4.
+ * Two paths, picked by pillar state:
  *
- * Cold case (pillar has media but isn't in Descript yet): skipped with
- * `pillar_not_in_descript`. Promoting the pillar to Descript is currently a
- * separate manual / clip-idea flow; once the pillar is warm, the next
- * derivative for this format picks up Descript automatically. (Adding an
- * auto-import here is a fast-follow — would slot in via an extension to
- * `descript-clip-resolve` that chains an agent invocation after the import
- * job stops.)
+ * **Warm (`triggered_warm`)** — pillar already has a `descriptProjectId`:
+ *   1. Build an Underlord prompt from the format Skill's
+ *      `### Descript Clip & Pack Info` section. No `{{hook}}` /
+ *      `{{startTimestamp}}` substitution — the Skill is self-contained
+ *      (e.g. "clip out the intro and only the intro"); Underlord reads the
+ *      pillar's transcript inside Descript and picks the range.
+ *   2. Invoke Descript's `/jobs/agent` against the pillar's project.
+ *   3. Stamp `descriptProjectId/Url` on the derivative, clear any stale
+ *      composition + publish state so the UI shows "Rendering…" until the
+ *      poller updates.
+ *   4. Insert a `repurpose_triggers` row (`descriptImportPath="agent"`),
+ *      enqueue `descript-clip-resolve` to poll. The resolver writes the
+ *      new composition_id back and auto-chains `descript-publish-and-archive`.
+ *
+ * **Cold (`triggered_cold_import`)** — pillar has `mediaS3Key` but no
+ * `descriptProjectId` yet:
+ *   1. Get a presigned GET URL for the pillar's S3 video.
+ *   2. POST to Descript's import endpoint — creates a new project + an
+ *      "imported" composition holding the full pillar video. Returns
+ *      immediately with a job_id; the actual import runs ~30–60s on
+ *      Descript's side.
+ *   3. Stamp the pillar with the new `descriptProjectId / descriptProjectUrl
+ *      / descriptImportedAt` IMMEDIATELY. Concurrent derivative requests for
+ *      the same pillar will see it as "warm" and take the agent path.
+ *      (Yes, there's a tiny window between presign + stamp where two
+ *      requests could both upload — first writer wins on the stamp and the
+ *      loser's project becomes an orphan. Tolerated for now; cheap to
+ *      revisit if pillar-cold-imports ever pile up.)
+ *   4. Stamp the derivative with the same project_id/url.
+ *   5. Build the same Skill-driven agent prompt as the warm path; save it
+ *      on the trigger via `descriptPrompt` so it round-trips with the
+ *      payload across queue dequeue.
+ *   6. Insert a `repurpose_triggers` row with the IMPORT job_id (not yet an
+ *      agent job_id) and `descriptImportPath="agent-cold-import"`.
+ *   7. Enqueue `descript-clip-resolve` with `importMode=true` AND
+ *      `postImportAgentPrompt=<the prompt>`. The resolver: (a) stamps the
+ *      imported composition_id on the pillar — warming it for future
+ *      derivatives' duplicate-via-agent path; (b) skips writing the
+ *      derivative's composition_id and publish-and-archive; (c) invokes the
+ *      Descript agent with the saved prompt; (d) re-enqueues itself with
+ *      the agent's new job_id (no importMode, no prompt). On the next
+ *      stop, the resolver's existing non-import branch writes the
+ *      derivative's final composition_id and chains the publish.
+ *
+ * **Skip cases:**
+ *   - `skipped_no_skill` — format isn't flagged or has no Descript section.
+ *   - `skipped_no_video_source` — pillar is text-only (no video, no S3
+ *     media, no Descript project).
+ *   - `skipped_already_done` — derivative already has a composition AND
+ *     `force=false`. Redraft (`force=true`) bypasses this.
  *
  * Errors don't fail the draft. The caller swallows + logs so the caption
- * still saves even when Descript / Underlord misbehaves.
+ * still saves even when Descript misbehaves.
  */
 export async function runDescriptStepForDerivative(
   args: RunDescriptStepArgs,
@@ -86,6 +120,8 @@ export async function runDescriptStepForDerivative(
 
   const [pillar] = await db
     .select({
+      id: productionItems.id,
+      title: productionItems.title,
       descriptProjectId: productionItems.descriptProjectId,
       descriptProjectUrl: productionItems.descriptProjectUrl,
       mediaS3Key: productionItems.mediaS3Key,
@@ -93,20 +129,85 @@ export async function runDescriptStepForDerivative(
     .from(productionItems)
     .where(eq(productionItems.id, args.pillarItemId))
     .limit(1);
-  if (!pillar?.descriptProjectId) {
-    return {
-      status: pillar?.mediaS3Key
-        ? "skipped_pillar_not_in_descript"
-        : "skipped_no_video_source",
-    };
+
+  // Pillar with no Descript project AND no S3 media → nothing to clip.
+  if (!pillar || (!pillar.descriptProjectId && !pillar.mediaS3Key)) {
+    return { status: "skipped_no_video_source" };
   }
 
   const prompt = buildDerivativeDescriptPrompt({
     skill: descriptSkill,
     compositionName: args.compositionName,
   });
+
+  // COLD PATH: pillar has media but isn't in Descript. Upload it (one
+  // round-trip to Descript's import endpoint, returns a job_id), stamp
+  // the pillar early so a concurrent second derivative for the same
+  // pillar sees it as warm, then enqueue the resolver with the
+  // post-import agent prompt so Underlord runs once the import finishes.
+  if (!pillar.descriptProjectId && pillar.mediaS3Key) {
+    const presigned = await getPresignedGetUrl(pillar.mediaS3Key, 3600);
+    const projectName = pillar.title ?? `Pillar ${pillar.id.slice(0, 8)}`;
+    const importRes = await createDescriptProjectFromUrl({
+      projectName,
+      mediaUrl: presigned,
+    });
+
+    await db
+      .update(productionItems)
+      .set({
+        descriptProjectId: importRes.project_id,
+        descriptProjectUrl: importRes.project_url,
+        descriptImportedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, pillar.id));
+
+    await db
+      .update(productionItems)
+      .set({
+        descriptProjectId: importRes.project_id,
+        descriptProjectUrl: importRes.project_url,
+        descriptCompositionId: null,
+        descriptPublishJobId: null,
+        descriptPublishedAt: null,
+        descriptPublishError: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, args.derivativeItemId));
+
+    const [trigger] = await db
+      .insert(repurposeTriggers)
+      .values({
+        productionItemId: args.pillarItemId,
+        targetFormatId: args.formatId,
+        descriptJobId: importRes.job_id,
+        descriptProjectUrl: importRes.project_url,
+        descriptPrompt: prompt,
+        compositionName: args.compositionName,
+        descriptImportPath: "agent-cold-import",
+      })
+      .returning({ id: repurposeTriggers.id });
+
+    await enqueue("descript-clip-resolve", {
+      triggerId: trigger.id,
+      jobId: importRes.job_id,
+      derivativeItemId: args.derivativeItemId,
+      pillarItemId: pillar.id,
+      importMode: true,
+      postImportAgentPrompt: prompt,
+    });
+
+    return {
+      status: "triggered_cold_import",
+      jobId: importRes.job_id,
+      triggerId: trigger.id,
+    };
+  }
+
+  // WARM PATH: pillar already in Descript — invoke the agent directly.
   const agent = await invokeDescriptAgent({
-    projectId: pillar.descriptProjectId,
+    projectId: pillar.descriptProjectId!,
     prompt,
   });
 
@@ -145,7 +246,11 @@ export async function runDescriptStepForDerivative(
     derivativeItemId: args.derivativeItemId,
   });
 
-  return { status: "triggered", jobId: agent.jobId, triggerId: trigger.id };
+  return {
+    status: "triggered_warm",
+    jobId: agent.jobId,
+    triggerId: trigger.id,
+  };
 }
 
 /**
