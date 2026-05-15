@@ -293,55 +293,34 @@ export async function selectCrossPostCandidates(opts: {
 
   const candidateIds = rawCandidates.map((c) => c.id);
 
-  // Existing cross-posts in each candidate's LINEAGE — drives the dialog's
-  // "Already posted · Xd ago" hint + sort-to-bottom + disabled state.
+  // Existing cross-posts in each candidate's DOWNSTREAM tree — drives the
+  // dialog's "Already posted · Xd ago" hint + sort-to-bottom + disabled
+  // state.
   //
-  // The candidate may itself be a `repost` (same content, same platform,
-  // different time) whose parent — the lineage root — has already been
-  // cross-posted to other accounts. We want those siblings to surface too,
-  // not just the direct children of the candidate. Two CTEs:
+  // We walk DOWN from the candidate only — through `reposted_from_item_id`
+  // edges — and collect every descendant with `source_type='cross_post'`.
+  // Earlier versions also walked UP to the lineage root and then back down
+  // through every sibling branch (2026-05-08 cb88669), which surfaced
+  // cross-posts the candidate's ancestor made before the candidate even
+  // existed. Symptom: a freshly created repost showed its original's
+  // months-old cross-posts as "Already posted" and the editor couldn't
+  // cross-post the repost as fresh content (2026-05-15). A repost is its
+  // own content event for cross-posting purposes; the ancestor's history
+  // shouldn't gate it.
   //
-  //   1. `lineage`: walk UP from each candidate via `reposted_from_item_id`
-  //      until the parent is null. The terminal node is the lineage root
-  //      (the `original` or `repurposed` row the candidate descends from
-  //      via repost/cross_post edges). Tag every walked row with the
-  //      candidate id it came from.
-  //   2. `descendants`: walk DOWN from each lineage root through every
-  //      `reposted_from_item_id` edge, regardless of `source_type`. This
-  //      catches siblings on the other side of the tree (cross_posts of
-  //      the original we walked up through, cross_posts of OTHER reposts
-  //      of the same original, etc.). Carry the `candidate_id` through.
-  //
-  // Then filter the descendants to `source_type='cross_post'` (only those
-  // are sibling-cross-posts the editor cares about) and exclude the
-  // candidate itself. Depth bound at 8 — actual lineages are 1-2 deep, but
-  // we want a clear ceiling in case of a cycle bug elsewhere.
+  // Depth bound at 8 — actual chains are 1–2 deep, but the ceiling guards
+  // against a cycle bug elsewhere.
   const existingCrossPostRows =
     candidateIds.length === 0
       ? []
       : ((await db.execute(sql`
-        WITH RECURSIVE lineage(candidate_id, node_id, parent_id, depth) AS (
-          SELECT pi.id, pi.id, pi.reposted_from_item_id, 0
+        WITH RECURSIVE descendants(candidate_id, node_id, depth) AS (
+          SELECT pi.id, pi.id, 0
           FROM production_items pi
           WHERE pi.id IN ${sql.raw(`(${candidateIds.map((id) => `'${id}'`).join(",")})`)}
             AND pi.deleted_at IS NULL
           UNION ALL
-          SELECT l.candidate_id, pi.id, pi.reposted_from_item_id, l.depth + 1
-          FROM lineage l
-          JOIN production_items pi ON pi.id = l.parent_id
-          WHERE l.depth < 8
-            AND pi.deleted_at IS NULL
-        ),
-        roots(candidate_id, root_id) AS (
-          SELECT candidate_id, node_id
-          FROM lineage
-          WHERE parent_id IS NULL
-        ),
-        descendants(candidate_id, root_id, node_id, depth) AS (
-          SELECT candidate_id, root_id, root_id, 0
-          FROM roots
-          UNION ALL
-          SELECT d.candidate_id, d.root_id, pi.id, d.depth + 1
+          SELECT d.candidate_id, pi.id, d.depth + 1
           FROM descendants d
           JOIN production_items pi ON pi.reposted_from_item_id = d.node_id
           WHERE d.depth < 8
