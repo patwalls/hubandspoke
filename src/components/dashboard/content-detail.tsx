@@ -2508,6 +2508,166 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 onSynced={load}
               />
             )}
+            {/* CTA UTM chip — Pattern B. Click opens a small popover
+             *  with the same Input + Generate-button wiring the sidebar
+             *  CTA UTM row used to mount. Removes the dedicated sidebar
+             *  row so the right column can become the activity feed. */}
+            <Popover>
+              <PopoverTrigger
+                className={cn(CHIP_B_BASE, CHIP_B_CLICKABLE)}
+                title="CTA UTM campaign — appended to every link in this post's CTAs / reply"
+              >
+                <LinkIcon className="size-3" />
+                {utmCampaign.trim() ? (
+                  <span className="font-mono">{utmCampaign.trim()}</span>
+                ) : (
+                  <span className="italic">No CTA UTM</span>
+                )}
+              </PopoverTrigger>
+              <PopoverContent className="w-80 space-y-2" align="start">
+                <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                  CTA UTM
+                </p>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Appended as <code>utm_campaign</code> on every link in
+                  this post&apos;s reply CTA. Auto-generated from the
+                  title; you can override.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={utmCampaign}
+                    onChange={(e) => setUtmCampaign(e.target.value)}
+                    onBlur={() => {
+                      const next = utmCampaign.trim();
+                      if ((item.utmCampaign ?? "") !== next) {
+                        void persistField({ utmCampaign: next }).then((ok) => {
+                          if (!ok) setUtmCampaign(item.utmCampaign ?? "");
+                        });
+                      }
+                    }}
+                    aria-label="CTA UTM campaign"
+                    className="h-8 text-xs font-mono flex-1"
+                    placeholder="e.g. angus-warner-42"
+                  />
+                  {!utmCampaign.trim() && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2 text-xs shrink-0"
+                      disabled={generatingUtm}
+                      onClick={async () => {
+                        if (generatingUtm) return;
+                        setGeneratingUtm(true);
+                        try {
+                          const res = await fetch(
+                            "/api/production-items/generate-utm",
+                            {
+                              method: "POST",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({ title: item.title ?? "" }),
+                            },
+                          );
+                          const json = await res.json().catch(() => ({}));
+                          if (!res.ok || typeof json?.utmCampaign !== "string") {
+                            toast.error(json?.error || "Couldn't generate CTA UTM");
+                            return;
+                          }
+                          const slug = json.utmCampaign as string;
+                          const ok = await persistField({ utmCampaign: slug });
+                          if (ok) setUtmCampaign(slug);
+                        } finally {
+                          setGeneratingUtm(false);
+                        }
+                      }}
+                    >
+                      {generatingUtm ? "Generating…" : "Generate"}
+                    </Button>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+            {/* DM keyword chip — Instagram-only. Click opens a popover
+             *  with the existing slug → short-link → destination chain;
+             *  Edit button opens AttachDmKeywordDialog (unchanged). */}
+            {postType?.startsWith("instagram_") && (
+              <Popover>
+                <PopoverTrigger
+                  className={cn(CHIP_B_BASE, CHIP_B_CLICKABLE)}
+                  title="ManyChat DM keyword for this post's auto-reply flow"
+                >
+                  <LinkIcon className="size-3" />
+                  {item.shortLinkSlug ? (
+                    <span className="font-mono">{item.shortLinkSlug}</span>
+                  ) : (
+                    <span className="italic">No DM keyword</span>
+                  )}
+                </PopoverTrigger>
+                <PopoverContent className="w-[26rem] space-y-2" align="start">
+                  <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    DM keyword
+                  </p>
+                  {item.shortLinkSlug ? (
+                    <>
+                      <div className="flex items-center gap-2 flex-wrap text-xs">
+                        <code className="px-1.5 py-0.5 rounded bg-muted text-foreground">
+                          {item.shortLinkSlug}
+                        </code>
+                        <span className="text-muted-foreground">→</span>
+                        <a
+                          href={`${shortLinksBaseUrl}/${item.shortLinkSlug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-muted-foreground hover:text-foreground hover:underline truncate"
+                        >
+                          {shortLinksBaseUrl.replace(/^https?:\/\//, "")}/{item.shortLinkSlug}
+                        </a>
+                      </div>
+                      {dmDestinationUrl && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-muted-foreground">→</span>
+                          <a
+                            href={dmDestinationUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-mono text-foreground/80 hover:text-foreground hover:underline truncate min-w-0 flex-1"
+                            title={dmDestinationUrl}
+                          >
+                            {dmDestinationUrl.replace(/^https?:\/\//, "")}
+                          </a>
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs"
+                        onClick={() => setDmKeywordDialogOpen(true)}
+                      >
+                        Edit
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Wires this post into the ManyChat auto-DM flow.
+                        When attached, viewers who comment the keyword
+                        get a DM with the short link.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs"
+                        onClick={() => setDmKeywordDialogOpen(true)}
+                      >
+                        + Attach DM keyword
+                      </Button>
+                    </>
+                  )}
+                </PopoverContent>
+              </Popover>
+            )}
             {item.publishedDate && (
               <span className={CHIP_B_BASE}>
                 Published {formatDate(item.publishedDate)}
@@ -2992,199 +3152,28 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       ) : isPublished ? (
         <PublishedEmbed item={item} />
       ) : null}
-      <div className="rounded-lg border border-border bg-card overflow-hidden">
-        {isYouTube && (
-          <div className="flex items-center justify-end gap-2 px-3 py-1.5 border-b border-border/60">
-            <span className="text-[11px] text-muted-foreground">
-              Auto-synced from YouTube — fields are read-only.
-            </span>
-          </div>
-        )}
-
-        {/* Editor / Status / Format rows used to live here as a sidebar
-         *  PropertyRowGroup with three Selects. As of 2026-05-15 they
-         *  moved into the title-area identity chip row above so the
-         *  sidebar can hold only rare-edit / advanced fields. The
-         *  pickers are identical — just relocated triggers. */}
-
-        {/* Account row removed 2026-05-15 — the Account chip in the
-         *  title row IS the editing surface now. Pillar content +
-         *  Reposted from rows removed 2026-05-15 too — both pickers
-         *  live inside the source-type chip's popover (title-area
-         *  state row). The sidebar now only carries CTA UTM / DM
-         *  keyword and the read-only published metadata. */}
-
-        {/* Published link + Published date used to be editable inputs here,
-         *  but that surface let editors flip status without filling in the
-         *  link (or vice-versa). Both values now flow exclusively through
-         *  the PublishScheduleDialog (Publish or Schedule button in the
-         *  header strip), so this block is read-only — visible only after
-         *  publish, identical chrome to the rest of the metadata sidebar. */}
-        {!isPrePublish && (
-          <PropertyRowGroup single={showLeftPane}>
-            <PropertyRow label="Published link">
-              <div className="flex w-full items-center gap-1 min-w-0">
-                {publishedLink ? (
-                  <>
-                    <span className="flex-1 truncate text-sm text-foreground">
-                      {publishedLink}
-                    </span>
-                    <a
-                      href={publishedLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="shrink-0 p-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                      aria-label="Open published link"
-                    >
-                      <ExternalLinkIcon className="h-3.5 w-3.5" />
-                    </a>
-                  </>
-                ) : (
-                  <span className="text-sm text-muted-foreground italic">
-                    (not set)
-                  </span>
-                )}
-              </div>
-            </PropertyRow>
-
-            <PropertyRow label="Published date">
-              <span className="text-sm text-foreground">
-                {publishedDate || (
-                  <span className="text-muted-foreground italic">(not set)</span>
-                )}
-              </span>
-            </PropertyRow>
-          </PropertyRowGroup>
-        )}
-
-        <PropertyRowSolo>
-            <PropertyRow label="CTA UTM">
-              <div className="flex items-center gap-2 w-full">
-                <Input
-                  value={utmCampaign}
-                  onChange={(e) => setUtmCampaign(e.target.value)}
-                  onBlur={() => {
-                    const next = utmCampaign.trim();
-                    if ((item.utmCampaign ?? "") !== next) {
-                      void persistField({ utmCampaign: next }).then((ok) => {
-                        if (!ok) setUtmCampaign(item.utmCampaign ?? "");
-                      });
-                    }
-                  }}
-                  aria-label="CTA UTM campaign"
-                  className={cn(PROPERTY_INPUT_CLASS, "font-mono flex-1")}
-                  placeholder="e.g. angus-warner-42"
-                />
-                {!utmCampaign.trim() && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2 text-xs shrink-0"
-                    disabled={generatingUtm}
-                    onClick={async () => {
-                      if (generatingUtm) return;
-                      setGeneratingUtm(true);
-                      try {
-                        const res = await fetch(
-                          "/api/production-items/generate-utm",
-                          {
-                            method: "POST",
-                            headers: { "content-type": "application/json" },
-                            body: JSON.stringify({ title: item.title ?? "" }),
-                          },
-                        );
-                        const json = await res.json().catch(() => ({}));
-                        if (!res.ok || typeof json?.utmCampaign !== "string") {
-                          toast.error(
-                            json?.error || "Couldn't generate CTA UTM",
-                          );
-                          return;
-                        }
-                        const slug = json.utmCampaign as string;
-                        const ok = await persistField({ utmCampaign: slug });
-                        if (ok) setUtmCampaign(slug);
-                      } finally {
-                        setGeneratingUtm(false);
-                      }
-                    }}
-                  >
-                    {generatingUtm ? "Generating…" : "Generate"}
-                  </Button>
-                )}
-              </div>
-            </PropertyRow>
-          </PropertyRowSolo>
-
-        {postType?.startsWith("instagram_") && (
-          <PropertyRowSolo>
-            <PropertyRow label="DM keyword">
-              {item.shortLinkSlug ? (
-                <div className="flex items-center gap-2 px-2 py-1 min-w-0 w-full flex-wrap">
-                  <code className="text-xs px-1.5 py-0.5 rounded bg-muted text-foreground shrink-0">
-                    {item.shortLinkSlug}
-                  </code>
-                  <span className="text-xs text-muted-foreground shrink-0">→</span>
-                  <a
-                    href={`${shortLinksBaseUrl}/${item.shortLinkSlug}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate font-mono"
-                  >
-                    {shortLinksBaseUrl.replace(/^https?:\/\//, "")}/{item.shortLinkSlug}
-                  </a>
-                  {dmDestinationUrl && (
-                    <>
-                      <span className="text-xs text-muted-foreground shrink-0">→</span>
-                      <a
-                        href={dmDestinationUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-foreground/80 hover:text-foreground hover:underline truncate min-w-0 flex-1 font-mono"
-                        title={dmDestinationUrl}
-                      >
-                        {dmDestinationUrl.replace(/^https?:\/\//, "")}
-                      </a>
-                    </>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs shrink-0 ml-auto"
-                    onClick={() => setDmKeywordDialogOpen(true)}
-                  >
-                    Edit
-                  </Button>
-                </div>
-              ) : (
-                <div className="px-2 py-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => setDmKeywordDialogOpen(true)}
-                  >
-                    + Attach DM keyword
-                  </Button>
-                </div>
-              )}
-            </PropertyRow>
-          </PropertyRowSolo>
-        )}
-
-        {/* "See more fields" toggle removed 2026-05-15. All remaining
-         *  sidebar fields are now always-visible; the Editor / Status /
-         *  Format dropdowns moved to title-area chips so there's no
-         *  longer enough sidebar content to justify hiding any of it. */}
-
-        {deleteError && (
-          <div className="text-sm px-3 py-2 bg-red-50 text-red-700 border-t border-red-200">
-            {deleteError}
-          </div>
-        )}
-      </div>
+      {/* RIGHT column. Used to be the metadata sidebar
+       *  (PropertyRowGroups for Published link/date + CTA UTM + DM
+       *  keyword). As of 2026-05-15 every one of those rows moved into
+       *  title-area chips or the Publish-or-Schedule modal, so the
+       *  right column is now the Activity feed itself — cleaner
+       *  preview-on-left / activity-on-right layout Pat asked for.
+       *  Only renders when there's a left pane; form-only states
+       *  (pre-publish non-inline) still get the standalone Activity
+       *  below the form. */}
+      {showLeftPane && (
+        <ContentActivity
+          contentId={item.id}
+          brand={brand}
+          refreshKey={activityRefreshKey}
+          statusPalette={statusPalette}
+        />
+      )}
+      {deleteError && (
+        <div className="text-sm px-3 py-2 bg-red-50 text-red-700 border border-red-200 rounded-md">
+          {deleteError}
+        </div>
+      )}
 
       {/* Instructions panel: pre-publish only, and not for post types
        * with inline drafting (which already occupy the right-side real
@@ -3285,12 +3274,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       )}
       </div>
 
-      <ContentActivity
-        contentId={item.id}
-        brand={brand}
-        refreshKey={activityRefreshKey}
-        statusPalette={statusPalette}
-      />
+      {/* Standalone Activity feed — renders below the form for the
+       *  form-only states (pre-publish non-inline post types like
+       *  Newsletter). Two-column states (inline drafting + published)
+       *  already render Activity in the right column above. */}
+      {!showLeftPane && (
+        <ContentActivity
+          contentId={item.id}
+          brand={brand}
+          refreshKey={activityRefreshKey}
+          statusPalette={statusPalette}
+        />
+      )}
         </TabsContent>
 
         {/* Match the tab-trigger gate: only render the Preview tab body
