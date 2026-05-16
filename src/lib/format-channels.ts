@@ -1,6 +1,11 @@
 import { db } from "@/lib/db";
-import { accounts, brands, formatChannels } from "@/lib/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import {
+  accounts,
+  brands,
+  formatChannels,
+  productionItems,
+} from "@/lib/db/schema";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { PostType } from "@/lib/platform-field-schemas";
 
 // One persisted publishing target on a format: which social account, in what
@@ -68,6 +73,59 @@ export async function getChannelsForFormats(
     out.set(r.formatId, arr);
   }
   return out;
+}
+
+/**
+ * Pick the best-fit account for repurposing into a given format, based
+ * on the brand's published history. Rationale: a format like "Daily
+ * Seinfeld" may have multiple `format_channels` rows (e.g., one for the
+ * X account, one for the newsletter); when a user repurposes a pillar
+ * into that format the route has been picking the first row arbitrarily,
+ * landing the derivative on the wrong account. Real production_items
+ * carry the actual history — which account has actually published the
+ * most of this format, with the highest views.
+ *
+ * Returns null when nothing in the format has been published yet, so
+ * the caller can fall back to the format_channels first-row behavior.
+ */
+export async function pickBestAccountForFormat(args: {
+  brand: string;
+  format: string;
+  postType?: PostType | null;
+}): Promise<{ accountId: string; totalViews: number; itemCount: number } | null> {
+  const conditions = [
+    eq(productionItems.brand, args.brand),
+    sql`lower(${productionItems.format}) = lower(${args.format})`,
+    eq(productionItems.status, "Published"),
+    isNotNull(productionItems.accountId),
+  ];
+  if (args.postType) {
+    conditions.push(eq(productionItems.postType, args.postType));
+  }
+  const [row] = await db
+    .select({
+      accountId: productionItems.accountId,
+      totalViews: sql<number>`coalesce(sum(${productionItems.views}), 0)`.as(
+        "total_views",
+      ),
+      itemCount: sql<number>`count(*)`.as("item_count"),
+      mostRecent: sql`max(${productionItems.publishedAt})`.as("most_recent"),
+    })
+    .from(productionItems)
+    .where(and(...conditions))
+    .groupBy(productionItems.accountId)
+    .orderBy(
+      sql`coalesce(sum(${productionItems.views}), 0) desc`,
+      sql`max(${productionItems.publishedAt}) desc nulls last`,
+      desc(sql`count(*)`),
+    )
+    .limit(1);
+  if (!row || !row.accountId) return null;
+  return {
+    accountId: row.accountId,
+    totalViews: Number(row.totalViews ?? 0),
+    itemCount: Number(row.itemCount ?? 0),
+  };
 }
 
 // Replace a format's channels with `inputs`. Idempotent: deletes existing

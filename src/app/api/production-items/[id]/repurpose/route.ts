@@ -4,7 +4,10 @@ import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
 import { recordItemCreated } from "@/lib/services/item-created";
-import { getChannelsForFormats } from "@/lib/format-channels";
+import {
+  getChannelsForFormats,
+  pickBestAccountForFormat,
+} from "@/lib/format-channels";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { enqueue } from "@/jobs/enqueue";
@@ -93,6 +96,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const channelMap = await getChannelsForFormats([target.id]);
   const firstChannel = channelMap.get(target.id)?.[0] ?? null;
 
+  // Multi-channel formats (e.g. "Daily Seinfeld" → both X and Newsletter)
+  // produce multiple format_channels rows; `firstChannel` arbitrarily
+  // picks one by insert order. Prefer "what account this format has
+  // actually been published on most" so the new derivative lands on the
+  // right destination. Falls back to firstChannel when nothing in this
+  // format has shipped yet.
+  const bestAccount = await pickBestAccountForFormat({
+    brand: source.brand,
+    format: target.name,
+    postType: firstChannel?.postType ?? null,
+  });
+  const resolvedAccountId =
+    bestAccount?.accountId ?? firstChannel?.accountId ?? null;
+  if (bestAccount) {
+    console.info(
+      `repurpose-create: format="${target.name}" picked account=${bestAccount.accountId} by-history (views=${bestAccount.totalViews}, items=${bestAccount.itemCount})`,
+    );
+  }
+
   // Editor is the clicker — they're spawning the derivative for themselves.
   // Format validation is belt-and-braces — `target` is a row in the
   // formats table by construction, so this should always succeed and
@@ -107,7 +129,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       title: source.title,
       thumbnail: source.thumbnail,
       status: "Assigned",
-      accountId: firstChannel?.accountId ?? null,
+      accountId: resolvedAccountId,
       postType: firstChannel?.postType ?? null,
       format: canonicalFormat,
       sourceType: "repurposed",

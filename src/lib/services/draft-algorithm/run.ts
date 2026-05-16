@@ -227,9 +227,13 @@ function resolveAttachment(
   return null;
 }
 
-// Platforms the algorithm drafts for in V1. Newsletter + youtube_long are
-// out of scope — editors hand-write those today and the leverage isn't
-// there yet.
+// Platforms the algorithm drafts for. youtube_long is still out of
+// scope — pillar videos are hand-edited. Newsletter joined the set
+// 2026-05-15: the field schema already carries subject / preview_text
+// / body prompts, exemplars query is platform-aware (handles the
+// newsletter_body_html-vs-content_body column split, see
+// exemplars.ts), and the pillar-transcript substrate path works
+// generically.
 const SUPPORTED_POST_TYPES: ReadonlySet<PostType> = new Set<PostType>([
   "x",
   "linkedin",
@@ -240,6 +244,7 @@ const SUPPORTED_POST_TYPES: ReadonlySet<PostType> = new Set<PostType>([
   "youtube_community",
   "youtube_shorts",
   "threads",
+  "newsletter",
 ]);
 
 export type DraftAlgorithmSkipReason =

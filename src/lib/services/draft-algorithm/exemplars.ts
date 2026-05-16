@@ -77,11 +77,16 @@ export async function getTopPerformingCaptions(
   ];
 
   // Platform-scoped path: when there's no format on the item, behave like
-  // v1.5 — top by views with the contentBody filter, no enrichment hop.
+  // v1.5 — top by views with the body filter, no enrichment hop. Body
+  // can live in either `content_body` (most platforms) or
+  // `newsletter_body_html` (newsletters store the raw HTML there and
+  // may leave content_body null). pickExemplarBody handles the
+  // projection.
   if (!format) {
     const rows = await db
       .select({
         caption: productionItems.contentBody,
+        newsletterBodyHtml: productionItems.newsletterBodyHtml,
         publishedAt: productionItems.publishedAt,
         publishedLink: productionItems.publishedLink,
         views: productionItems.views,
@@ -90,8 +95,11 @@ export async function getTopPerformingCaptions(
       .where(
         and(
           ...sharedFilters,
-          isNotNull(productionItems.contentBody),
-          sql`length(trim(${productionItems.contentBody})) > 0`,
+          sql`(
+            (${productionItems.contentBody} IS NOT NULL AND length(trim(${productionItems.contentBody})) > 0)
+            OR
+            (${productionItems.newsletterBodyHtml} IS NOT NULL AND length(trim(${productionItems.newsletterBodyHtml})) > 0)
+          )`,
         ),
       )
       .orderBy(
@@ -99,13 +107,15 @@ export async function getTopPerformingCaptions(
         desc(productionItems.publishedAt),
       )
       .limit(MAX_PAST_CAPTIONS);
-    return rows.map((row) => ({
-      caption: row.caption ?? "",
-      publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
-      publishedLink: row.publishedLink ?? null,
-      views: row.views ?? null,
-      source: "platform",
-    }));
+    return rows
+      .map((row) => ({
+        caption: pickExemplarBody(row.caption, row.newsletterBodyHtml),
+        publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
+        publishedLink: row.publishedLink ?? null,
+        views: row.views ?? null,
+        source: "platform" as const,
+      }))
+      .filter((e) => e.caption.length > 0);
   }
 
   // Format-scoped path: top N by views regardless of body state. Case-
@@ -114,6 +124,7 @@ export async function getTopPerformingCaptions(
     .select({
       id: productionItems.id,
       caption: productionItems.contentBody,
+      newsletterBodyHtml: productionItems.newsletterBodyHtml,
       publishedAt: productionItems.publishedAt,
       publishedLink: productionItems.publishedLink,
       views: productionItems.views,
@@ -144,6 +155,7 @@ export async function getTopPerformingCaptions(
           .select({
             id: productionItems.id,
             caption: productionItems.contentBody,
+            newsletterBodyHtml: productionItems.newsletterBodyHtml,
             publishedAt: productionItems.publishedAt,
             publishedLink: productionItems.publishedLink,
             views: productionItems.views,
@@ -157,7 +169,7 @@ export async function getTopPerformingCaptions(
   const droppedIds: string[] = [];
   for (const raw of formatRowsRaw) {
     const row = refreshedById.get(raw.id) ?? raw;
-    const body = row.caption?.trim();
+    const body = pickExemplarBody(row.caption, row.newsletterBodyHtml);
     if (!body || body.length === 0) {
       droppedIds.push(raw.id);
       continue;
@@ -180,12 +192,15 @@ export async function getTopPerformingCaptions(
     return formatExamples;
   }
 
-  // Top-up with platform-scoped (keep contentBody filter — no enrichment).
+  // Top-up with platform-scoped — same body filter as the no-format path
+  // (accepts content_body OR newsletter_body_html), no on-demand
+  // enrichment.
   const remainingSlots = MAX_PAST_CAPTIONS - formatExamples.length;
   const excludedIds = formatRowsRaw.map((r) => r.id);
   const platformRows = await db
     .select({
       caption: productionItems.contentBody,
+      newsletterBodyHtml: productionItems.newsletterBodyHtml,
       publishedAt: productionItems.publishedAt,
       publishedLink: productionItems.publishedLink,
       views: productionItems.views,
@@ -194,8 +209,11 @@ export async function getTopPerformingCaptions(
     .where(
       and(
         ...sharedFilters,
-        isNotNull(productionItems.contentBody),
-        sql`length(trim(${productionItems.contentBody})) > 0`,
+        sql`(
+          (${productionItems.contentBody} IS NOT NULL AND length(trim(${productionItems.contentBody})) > 0)
+          OR
+          (${productionItems.newsletterBodyHtml} IS NOT NULL AND length(trim(${productionItems.newsletterBodyHtml})) > 0)
+        )`,
         excludedIds.length > 0
           ? notInArray(productionItems.id, excludedIds)
           : sql`true`,
@@ -206,14 +224,41 @@ export async function getTopPerformingCaptions(
       desc(productionItems.publishedAt),
     )
     .limit(remainingSlots);
-  const platformExamples: PastCaptionExample[] = platformRows.map((row) => ({
-    caption: row.caption ?? "",
-    publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
-    publishedLink: row.publishedLink ?? null,
-    views: row.views ?? null,
-    source: "platform",
-  }));
+  const platformExamples: PastCaptionExample[] = platformRows
+    .map((row) => ({
+      caption: pickExemplarBody(row.caption, row.newsletterBodyHtml),
+      publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
+      publishedLink: row.publishedLink ?? null,
+      views: row.views ?? null,
+      source: "platform" as const,
+    }))
+    .filter((e) => e.caption.length > 0);
   return [...formatExamples, ...platformExamples];
+}
+
+/** Pick the best body text for an exemplar prompt block. Prefers
+ *  `content_body` (plaintext, the normal path) and falls back to a
+ *  cheap HTML-strip of `newsletter_body_html` — newsletter rows store
+ *  the raw HTML in that column and may leave content_body null. The
+ *  agent reads exemplars for tone/structure, not formatted markup, so
+ *  a tag-stripped projection is sufficient. */
+function pickExemplarBody(
+  contentBody: string | null,
+  newsletterBodyHtml: string | null,
+): string {
+  const plain = contentBody?.trim();
+  if (plain && plain.length > 0) return plain;
+  const html = newsletterBodyHtml?.trim();
+  if (!html) return "";
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
