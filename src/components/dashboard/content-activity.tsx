@@ -41,6 +41,60 @@ import { CommentEditor, isEditorEmpty } from "@/components/dashboard/comment-edi
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { cn } from "@/lib/utils";
 
+// Activity-feed display helpers. Used by the per-event rendering to
+// keep rows scannable when the underlying payload would otherwise dump
+// an unreadable UUID, a multi-line URL, or a YYYY-MM-DD string into the
+// flow. Pure functions — no React, no state, no formatting opinions
+// beyond what's needed to make a single line of activity legible.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuidValue(v: unknown): v is string {
+  return typeof v === "string" && UUID_RE.test(v);
+}
+
+function isUrlish(v: unknown): v is string {
+  return typeof v === "string" && /^https?:\/\//i.test(v);
+}
+
+function isIsoDate(v: unknown): v is string {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v);
+}
+
+// Squash a URL into "host/short-path" form so the activity row stays a
+// single readable line. Preserves the host (which carries the platform
+// signal) and the first 18 path chars so distinct posts on the same
+// host don't all collapse to the same string. Falls back to the raw
+// string when URL parsing fails.
+function truncateUrl(s: string): string {
+  try {
+    const u = new URL(s);
+    const path = u.pathname.length > 20
+      ? u.pathname.slice(0, 18) + "…"
+      : u.pathname;
+    return u.host + path;
+  } catch {
+    return s;
+  }
+}
+
+// "2026-05-15" → "May 15, 2026". Strict — only fires when isIsoDate
+// returned true. Anything else passes through untouched.
+function formatIsoDate(s: string): string {
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return s;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const date = new Date(Date.UTC(y, mo, d));
+  if (isNaN(date.getTime())) return s;
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 interface ActivityUser {
   id: string;
   name: string | null;
@@ -239,6 +293,74 @@ interface EventItem {
 }
 
 type ActivityItem = CommentItem | EventItem;
+
+/** A run of events fired by the same actor inside ~60 seconds.
+ *  Rendered as one row in the feed: avatar + primary event header,
+ *  plus indented secondary lines for the rest. Picked by `groupItems`
+ *  below — only fires when at least one `content_changed` /
+ *  `status_change` event is in the run (item-creation / kill / repost-
+ *  created stand alone). */
+interface EventGroup {
+  kind: "group";
+  /** The headline event — palette-colored status_change wins; otherwise
+   *  the first event in the run. */
+  primary: EventItem;
+  /** Everything else in the run, in their original chronological order.
+   *  Renders as a small indented list below the primary. */
+  rest: EventItem[];
+}
+
+type FeedItem = ActivityItem | EventGroup;
+
+/** Walk the chronologically-ordered visibleItems and produce a feed
+ *  where bursts of related events (publish action → status + link +
+ *  date all in one tx) render as one row. Single events that don't fit
+ *  any group pass through untouched. */
+function groupItems(items: ActivityItem[]): FeedItem[] {
+  const STAND_ALONE: ReadonlySet<string> = new Set([
+    "item_created",
+    "repost_created",
+    "cross_post_created",
+    "killed",
+  ]);
+  const result: FeedItem[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const current = items[i];
+    if (current.kind !== "event" || STAND_ALONE.has(current.payload.type)) {
+      result.push(current);
+      i++;
+      continue;
+    }
+    const group: EventItem[] = [current];
+    let j = i + 1;
+    while (j < items.length) {
+      const next = items[j];
+      if (next.kind !== "event") break;
+      if (STAND_ALONE.has(next.payload.type)) break;
+      if ((next.user?.id ?? null) !== (current.user?.id ?? null)) break;
+      const dtMs = Math.abs(
+        new Date(next.createdAt).getTime() -
+          new Date(current.createdAt).getTime(),
+      );
+      if (dtMs > 60_000) break;
+      group.push(next);
+      j++;
+    }
+    if (group.length > 1) {
+      const primary =
+        group.find((g) => g.payload.type === "status_change") ??
+        group.find((g) => g.payload.type === "editor_change") ??
+        group[0];
+      const rest = group.filter((g) => g !== primary);
+      result.push({ kind: "group", primary, rest });
+    } else {
+      result.push(current);
+    }
+    i = j;
+  }
+  return result;
+}
 
 interface ContentActivityProps {
   contentId: string;
@@ -659,19 +781,35 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
       return next;
     });
   };
+  // Dedupe filter: any `content_changed` event that targets the
+  // `status` field is redundant — the publish flow / PUT route writes
+  // BOTH a content_changed[status] row AND a dedicated status_change
+  // event in the same tx. The status_change one renders the
+  // palette-colored chips (the visual Pat likes); the content_changed
+  // one is plain text. Dropping the duplicate here means both publish
+  // routes can keep their dual-emission for downstream consumers
+  // without polluting the feed.
+  const dedupedItems: ActivityItem[] = items.filter(
+    (item) =>
+      item.kind !== "event" ||
+      item.payload.type !== "content_changed" ||
+      item.payload.target.kind !== "production_item_field" ||
+      item.payload.target.field !== "status",
+  );
+
   // Filter only `content_changed` events whose source.kind is non-user.
   // All other event variants (status_change, item_created, tool_action,
   // killed, repost_created, …) stay visible regardless — they're already
   // editorially meaningful by their existence.
-  const hiddenSystemCount = items.filter(
+  const hiddenSystemCount = dedupedItems.filter(
     (item) =>
       item.kind === "event" &&
       item.payload.type === "content_changed" &&
       item.payload.source.kind !== "user",
   ).length;
   const visibleItems = showSystem
-    ? items
-    : items.filter(
+    ? dedupedItems
+    : dedupedItems.filter(
         (item) =>
           item.kind !== "event" ||
           item.payload.type !== "content_changed" ||
@@ -715,24 +853,43 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
             No activity yet. Start the discussion.
           </p>
         ) : (
-          visibleItems.map((item) =>
-            item.kind === "comment" ? (
-              <CommentRow
-                key={item.id}
-                comment={item}
-                editingId={editingId}
-                editDraft={editDraft}
-                setEditDraft={setEditDraft}
-                savingEdit={savingEdit}
-                onStartEdit={startEdit}
-                onCancelEdit={cancelEdit}
-                onSaveEdit={saveEdit}
-                onRemove={remove}
+          groupItems(visibleItems).map((item) => {
+            if (item.kind === "comment") {
+              return (
+                <CommentRow
+                  key={item.id}
+                  comment={item}
+                  editingId={editingId}
+                  editDraft={editDraft}
+                  setEditDraft={setEditDraft}
+                  savingEdit={savingEdit}
+                  onStartEdit={startEdit}
+                  onCancelEdit={cancelEdit}
+                  onSaveEdit={saveEdit}
+                  onRemove={remove}
+                />
+              );
+            }
+            if (item.kind === "event") {
+              return (
+                <EventRow
+                  key={item.id}
+                  event={item}
+                  brand={brand}
+                  statusPalette={statusPalette}
+                />
+              );
+            }
+            // Grouped events (publish action, batch field edit, …)
+            return (
+              <GroupedEventRow
+                key={item.primary.id}
+                group={item}
+                brand={brand}
+                statusPalette={statusPalette}
               />
-            ) : (
-              <EventRow key={item.id} event={item} brand={brand} statusPalette={statusPalette} />
-            ),
-          )
+            );
+          })
         )}
       </div>
 
@@ -928,6 +1085,48 @@ function EventRow({
         <EventBody actorName={actorName} event={event} brand={brand} statusPalette={statusPalette} />{" "}
         <span className="text-xs">· {timeAgo(event.createdAt)}</span>
       </div>
+    </div>
+  );
+}
+
+/** Render a burst of related events (e.g. a publish action that
+ *  emitted status_change + content_changed[publishedLink] +
+ *  content_changed[publishedDate] in one tx) as a single row with the
+ *  headline event up top and the rest indented below.
+ *
+ *  Visually: standard EventRow for the primary (carries the avatar +
+ *  timestamp), then a small left-bordered list of EventBody renders
+ *  for each secondary event. Secondary lines still mention the actor
+ *  name, which is mildly redundant — Pat can ask for a `compactInGroup`
+ *  EventBody variant later if it reads noisy. */
+function GroupedEventRow({
+  group,
+  brand,
+  statusPalette,
+}: {
+  group: EventGroup;
+  brand: string;
+  statusPalette?: ReadonlyMap<string, string>;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <EventRow
+        event={group.primary}
+        brand={brand}
+        statusPalette={statusPalette}
+      />
+      <ul className="ml-11 space-y-1 border-l border-border/60 pl-3 text-xs text-muted-foreground">
+        {group.rest.map((ev) => (
+          <li key={ev.id} className="leading-snug">
+            <EventBody
+              actorName={userDisplayName(ev.user, "Someone")}
+              event={ev}
+              brand={brand}
+              statusPalette={statusPalette}
+            />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -1293,8 +1492,26 @@ function EditValueDiff({
   truncated: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const f = formatValue(from);
-  const t = formatValue(to);
+
+  // Hide diff entirely when either side is an unreadable UUID. The verb
+  // ("X changed Account") tells the editor what happened; the UUIDs
+  // would just be noise. The full payload is still recoverable from
+  // the events table for support / audit.
+  if (isUuidValue(from) || isUuidValue(to)) {
+    return <span>{header}</span>;
+  }
+
+  // Smarter value rendering: shorten URLs to host+short-path, format
+  // ISO dates into "May 15, 2026". Keeps the inline-eligibility check
+  // operating on the already-shortened values.
+  const renderValue = (v: string | number | boolean | null): string => {
+    const raw = formatValue(v);
+    if (isUrlish(raw)) return truncateUrl(raw);
+    if (isIsoDate(raw)) return formatIsoDate(raw);
+    return raw;
+  };
+  const f = renderValue(from);
+  const t = renderValue(to);
   const hasNewline = f.includes("\n") || t.includes("\n");
   const inlineEligible =
     !truncated &&
