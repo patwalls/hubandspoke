@@ -274,32 +274,89 @@ export function EnrichmentButton(props: Props) {
   const isVideo = mediaContentType?.startsWith("video/");
   const isImage = mediaContentType?.startsWith("image/");
 
-  // Per-signal enrichment readiness — lets the chip show a percent
-  // instead of binary "Enriched / Not enriched". Items often have most
-  // signals populated (title, hook, cover description, media) but a
-  // missed body or transcript leaves the global `enrichmentCompletedAt`
-  // null, making the chip read "Not enriched" even though 4/6 of the
-  // work is done. Percent reflects reality at a glance.
-  const signals = [
-    { key: "title", present: !!title?.trim() },
-    { key: "hook", present: !!hook?.trim() },
-    { key: "cover_description", present: !!coverDescription?.trim() },
-    { key: "content_body", present: !!contentBody?.trim() },
-    { key: "author", present: !!authorHandle?.trim() || !!authorDisplayName?.trim() },
-    { key: "media", present: !!mediaS3Key || !!posterS3Key },
-    // Transcript expected only on items we'd bother transcribing (video
-    // posts). Count it as present when missing on non-video posts so the
-    // chip doesn't ding text-only newsletters as 83%.
-    {
-      key: "transcript",
-      present: isVideo ? !!transcriptDurationSec : true,
-    },
-  ];
-  const totalSignals = signals.length;
-  const presentSignals = signals.filter((s) => s.present).length;
-  const enrichmentPercent = Math.round((presentSignals / totalSignals) * 100);
+  // Per-postType enrichment expectations. Different platforms produce
+  // different artifacts:
+  //   - X / LinkedIn / Threads / YT Community: text-primary. No
+  //     transcript (no audio), no cover_description (no cover image).
+  //   - Instagram Reel / TikTok / YouTube Shorts: video clips with hook
+  //     overlay, transcript, cover thumb. All seven core signals.
+  //   - YouTube Long: full pillar; same as a Reel but counts a real
+  //     `title` too (Reels don't surface title separately).
+  //   - Instagram Post: carousel — has hook + cover desc + caption +
+  //     author + media (slides), but no transcript.
+  //   - Instagram Story: 24h ephemeral — text + media, that's it.
+  //   - Newsletter: an entirely different shape — preview text + body
+  //     html + recipients + Klaviyo list id; the social signals don't
+  //     apply.
+  // The chip's percent is computed over the signals listed for the
+  // item's postType, so a text-only LinkedIn post with hook + body +
+  // author shows 100%, not 43% (which would be the case if we counted
+  // it as missing media, transcript, cover_description, and title).
+  type Signal =
+    | "title"
+    | "hook"
+    | "cover_description"
+    | "content_body"
+    | "author"
+    | "media"
+    | "transcript"
+    | "newsletter_preview"
+    | "newsletter_body"
+    | "newsletter_recipients";
+  const EXPECTED: Partial<Record<string, Signal[]>> = {
+    x: ["hook", "content_body", "author"],
+    linkedin: ["hook", "content_body", "author"],
+    threads: ["hook", "content_body", "author"],
+    youtube_community: ["hook", "content_body", "author"],
+    instagram_story: ["content_body", "author", "media"],
+    instagram_post: ["hook", "cover_description", "content_body", "author", "media"],
+    instagram_reel: ["hook", "cover_description", "content_body", "author", "media", "transcript"],
+    tiktok: ["hook", "cover_description", "content_body", "author", "media", "transcript"],
+    youtube_shorts: ["title", "hook", "cover_description", "content_body", "author", "media", "transcript"],
+    youtube_long: ["title", "hook", "cover_description", "content_body", "author", "media", "transcript"],
+    newsletter: ["title", "newsletter_preview", "newsletter_body", "author"],
+  };
+  // Default for unknown post types: the conservative core that the
+  // generic enricher writes. Better to under-expect than over-ding.
+  const expectedSignals: Signal[] =
+    (postType && EXPECTED[postType]) || ["hook", "content_body", "author"];
+
+  const signalPresent = (s: Signal): boolean => {
+    switch (s) {
+      case "title":
+        return !!title?.trim();
+      case "hook":
+        return !!hook?.trim();
+      case "cover_description":
+        return !!coverDescription?.trim();
+      case "content_body":
+        return !!contentBody?.trim();
+      case "author":
+        return (
+          !!authorHandle?.trim() || !!authorDisplayName?.trim()
+        );
+      case "media":
+        return !!mediaS3Key || !!posterS3Key;
+      case "transcript":
+        return !!transcriptDurationSec;
+      case "newsletter_preview":
+        return !!newsletterPreviewText?.trim();
+      case "newsletter_body":
+        return !!newsletterBodyHtml?.trim();
+      case "newsletter_recipients":
+        return (newsletterRecipients ?? 0) > 0;
+    }
+  };
+
+  const totalSignals = expectedSignals.length;
+  const presentSignals = expectedSignals.filter(signalPresent).length;
+  const enrichmentPercent =
+    totalSignals === 0
+      ? 100
+      : Math.round((presentSignals / totalSignals) * 100);
   const isFullyEnriched =
-    presentSignals === totalSignals || !!enrichmentCompletedAt;
+    (totalSignals > 0 && presentSignals === totalSignals) ||
+    !!enrichmentCompletedAt;
   const chipLabel = enrichmentError
     ? "Enrichment failed"
     : isFullyEnriched
