@@ -274,6 +274,47 @@ export function EnrichmentButton(props: Props) {
   const isVideo = mediaContentType?.startsWith("video/");
   const isImage = mediaContentType?.startsWith("image/");
 
+  // Per-signal enrichment readiness — lets the chip show a percent
+  // instead of binary "Enriched / Not enriched". Items often have most
+  // signals populated (title, hook, cover description, media) but a
+  // missed body or transcript leaves the global `enrichmentCompletedAt`
+  // null, making the chip read "Not enriched" even though 4/6 of the
+  // work is done. Percent reflects reality at a glance.
+  const signals = [
+    { key: "title", present: !!title?.trim() },
+    { key: "hook", present: !!hook?.trim() },
+    { key: "cover_description", present: !!coverDescription?.trim() },
+    { key: "content_body", present: !!contentBody?.trim() },
+    { key: "author", present: !!authorHandle?.trim() || !!authorDisplayName?.trim() },
+    { key: "media", present: !!mediaS3Key || !!posterS3Key },
+    // Transcript expected only on items we'd bother transcribing (video
+    // posts). Count it as present when missing on non-video posts so the
+    // chip doesn't ding text-only newsletters as 83%.
+    {
+      key: "transcript",
+      present: isVideo ? !!transcriptDurationSec : true,
+    },
+  ];
+  const totalSignals = signals.length;
+  const presentSignals = signals.filter((s) => s.present).length;
+  const enrichmentPercent = Math.round((presentSignals / totalSignals) * 100);
+  const isFullyEnriched =
+    presentSignals === totalSignals || !!enrichmentCompletedAt;
+  const chipLabel = enrichmentError
+    ? "Enrichment failed"
+    : isFullyEnriched
+      ? "Enriched"
+      : presentSignals === 0
+        ? "Not enriched"
+        : `${enrichmentPercent}% enriched`;
+  const chipDotColor = enrichmentError
+    ? "bg-rose-500"
+    : isFullyEnriched
+      ? "bg-emerald-500"
+      : presentSignals === 0
+        ? "bg-muted-foreground/40"
+        : "bg-amber-500";
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
@@ -296,21 +337,10 @@ export function EnrichmentButton(props: Props) {
         {variant === "chip" ? (
           <>
             <span
-              className={cn(
-                "size-1.5 rounded-full",
-                enrichmentCompletedAt
-                  ? "bg-emerald-500"
-                  : enrichmentError
-                    ? "bg-rose-500"
-                    : "bg-muted-foreground/40",
-              )}
+              className={cn("size-1.5 rounded-full", chipDotColor)}
               aria-hidden
             />
-            {enrichmentCompletedAt
-              ? "Enriched"
-              : enrichmentError
-                ? "Enrichment failed"
-                : "Not enriched"}
+            {chipLabel}
           </>
         ) : (
           <>

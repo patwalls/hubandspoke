@@ -88,6 +88,7 @@ export async function enrichNewsletterItem(
       title: productionItems.title,
       contentBody: productionItems.contentBody,
       authorHandle: productionItems.authorHandle,
+      publishedLink: productionItems.publishedLink,
     })
     .from(productionItems)
     .where(eq(productionItems.id, itemId))
@@ -101,12 +102,25 @@ export async function enrichNewsletterItem(
     fields: {},
   };
 
-  // Legacy newsletters predate Klaviyo sync — they were created via Notion
-  // import or manual entry and have no Klaviyo campaign id. Return a
-  // successful empty result so the orchestrator stamps
-  // enrichment_completed_at and stops re-trying them. Same outcome as a
-  // platform with no enricher: nothing to do, don't burn retries.
-  if (!item.platformContentId || !item.accountId) {
+  // Klaviyo campaign URLs carry the campaign id. Notion-imported rows
+  // predate the sync and never got platform_content_id stamped, so fall
+  // back to deriving it from the link. Stamp it onto the row so the next
+  // run skips this step (and the partial unique index on
+  // (account_id, platform_content_id) starts catching dupes again).
+  let platformContentId = item.platformContentId;
+  if (!platformContentId && item.publishedLink) {
+    const derived = extractKlaviyoCampaignId(item.publishedLink);
+    if (derived) {
+      platformContentId = derived;
+      result.updates.platformContentId = derived;
+    }
+  }
+
+  // Truly legacy newsletters — no Klaviyo URL, no campaign id reachable
+  // any other way. Return a successful empty result so the orchestrator
+  // stamps enrichment_completed_at and stops re-trying. Same outcome as
+  // a platform with no enricher: nothing to do, don't burn retries.
+  if (!platformContentId || !item.accountId) {
     return result;
   }
 
@@ -131,14 +145,14 @@ export async function enrichNewsletterItem(
   //      only carries headers (subject, preheader, from). The template is
   //      where the actual email lives.
   //   3. (no third fetch — we have everything.)
-  const listPath = `/campaigns/${item.platformContentId}/campaign-messages`;
+  const listPath = `/campaigns/${platformContentId}/campaign-messages`;
   const list = await fetchKlaviyo<CampaignMessagesListResponse>(
     { handle: account.handle },
     listPath,
   );
   if (!list || list.data.length === 0) {
     throw new KlaviyoError(
-      `No campaign-messages for campaign ${item.platformContentId}`,
+      `No campaign-messages for campaign ${platformContentId}`,
       404,
       listPath,
     );
@@ -211,6 +225,28 @@ export async function enrichNewsletterItem(
   result.fields.authorFetched = !!(fromEmail || fromLabel);
 
   return result;
+}
+
+/**
+ * Pull the campaign id out of a Klaviyo dashboard URL. Klaviyo campaign IDs
+ * are 26-char Crockford-base32 ULIDs starting with `01`, and they land in
+ * a fixed slot after `/campaign/` in every URL the dashboard generates
+ * (overview, reports, edit). Returns null for anything that doesn't match
+ * — including non-Klaviyo hosts and legacy newsletter viewer links.
+ */
+export function extractKlaviyoCampaignId(url: string | null): string | null {
+  if (!url) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname !== "www.klaviyo.com" && parsed.hostname !== "klaviyo.com") {
+    return null;
+  }
+  const m = parsed.pathname.match(/^\/campaign\/(01[0-9A-Z]{24})(?:\/|$)/);
+  return m ? m[1] : null;
 }
 
 /**
