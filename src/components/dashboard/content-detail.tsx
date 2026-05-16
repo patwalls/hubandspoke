@@ -1118,6 +1118,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const [format, setFormat] = useState("");
   const [formatPickerOpen, setFormatPickerOpen] = useState(false);
   const [formatSearch, setFormatSearch] = useState("");
+  // Separate state for the Repurpose tab's "any format" picker (distinct
+  // from the Format chip picker above so opening one doesn't close the
+  // other). On select, it fires `createDerivative` and redirects — no
+  // local format state to track.
+  const [repurposeAnyOpen, setRepurposeAnyOpen] = useState(false);
+  const [repurposeAnySearch, setRepurposeAnySearch] = useState("");
   const [status, setStatus] = useState("");
   const [pillar, setPillar] = useState<PillarOption | null>(null);
   const [repostedFromOption, setRepostedFromOption] =
@@ -3624,6 +3630,90 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             )}
           </div>
         </div>
+
+        {/* Ad-hoc "create in any format" picker. Shows brand formats
+         *  that AREN'T in the mapped repurposeTargets table below (those
+         *  already have a per-row Create button — surfacing them twice
+         *  would be noise). Selecting a format fires the same
+         *  createDerivative handler as the mapped rows — same backend
+         *  route, same toast, same redirect. Lets the editor try a
+         *  one-off repurpose (e.g. → Newsletter) without first adding a
+         *  permanent mapping. */}
+        {(() => {
+          const mappedIds = new Set(repurposeTargets.map((f) => f.id));
+          const candidates = (data.formats ?? []).filter(
+            (f) => !mappedIds.has(f.id),
+          );
+          if (candidates.length === 0) return null;
+          return (
+            <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 flex items-center gap-3 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">
+                  Create in any format
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Pick any brand format to repurpose this pillar into —
+                  same flow as the mapped rows below, but ad-hoc.
+                </p>
+              </div>
+              <Popover
+                open={repurposeAnyOpen}
+                onOpenChange={(open) => {
+                  setRepurposeAnyOpen(open);
+                  if (!open) setRepurposeAnySearch("");
+                }}
+              >
+                <PopoverTrigger
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "sm" }),
+                    "gap-2",
+                  )}
+                  disabled={creatingAll}
+                >
+                  <span>Pick a format…</span>
+                  <ChevronDownIcon className="size-3 opacity-50" />
+                </PopoverTrigger>
+                <PopoverContent className="w-96 p-0" align="end">
+                  <Command>
+                    <CommandInput
+                      placeholder="Search formats…"
+                      value={repurposeAnySearch}
+                      onValueChange={setRepurposeAnySearch}
+                    />
+                    <CommandList>
+                      <CommandEmpty>No matching format.</CommandEmpty>
+                      <CommandGroup>
+                        {candidates.map((f) => {
+                          const busy = createStatus[f.id] === "creating";
+                          return (
+                            <CommandItem
+                              key={f.id}
+                              value={f.name}
+                              disabled={busy}
+                              onSelect={() => {
+                                setRepurposeAnyOpen(false);
+                                void createDerivative(f.id, f.name);
+                              }}
+                            >
+                              <span className="text-sm truncate">
+                                {f.name}
+                              </span>
+                              {busy && (
+                                <span className="ml-auto text-[10px] text-muted-foreground">
+                                  creating…
+                                </span>
+                              )}
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+          );
+        })()}
 
         {repurposeTargets.length === 0 ? (
           <p className="text-sm text-muted-foreground">
