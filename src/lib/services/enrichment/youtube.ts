@@ -86,16 +86,23 @@ export async function enrichYouTubeItem(
     .limit(1);
 
   if (!item) throw new Error(`Production item ${itemId} not found`);
-  const url = item.youtubeUrl || item.publishedLink;
-  if (!url || !isYouTubeUrl(url)) {
-    throw new Error(`Item ${itemId} is not a YouTube URL: ${url ?? "(none)"}`);
-  }
 
   const result: EnrichmentResult = {
     updates: {},
     creditsSpent: 0,
     fields: {},
   };
+
+  // Item was routed to the YouTube enricher (postType is youtube-shaped)
+  // but the URL hasn't been backfilled yet. Return a successful empty
+  // result so the orchestrator stamps `enrichment_completed_at` and the
+  // 25-retry loop stops. Same shape as the newsletter enricher's legacy-
+  // row no-op. Force re-runs (`enrichSingleItem(id, { force: true })`)
+  // pick the row up again once the URL is set. See HUBANDSPOKE-X.
+  const url = item.youtubeUrl || item.publishedLink;
+  if (!url || !isYouTubeUrl(url)) {
+    return result;
+  }
 
   const [existingTranscript] = await db
     .select({ id: transcripts.id })

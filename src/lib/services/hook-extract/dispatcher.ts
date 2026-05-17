@@ -26,6 +26,7 @@
  */
 
 import { and, eq, isNull, not, or, sql } from "drizzle-orm";
+import { BadRequestError } from "openai";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
@@ -210,25 +211,54 @@ function buildUserMessage(signals: ItemSignals): string {
 async function callLLM(signals: ItemSignals): Promise<DispatchResult> {
   const userText = buildUserMessage(signals);
 
-  const content: ChatCompletionContentPart[] = [];
-  if (signals.posterImageUrl) {
-    content.push({
-      type: "image_url",
-      image_url: { url: signals.posterImageUrl },
-    });
-  }
-  content.push({ type: "text", text: userText });
+  const buildContent = (withImage: boolean): ChatCompletionContentPart[] => {
+    const c: ChatCompletionContentPart[] = [];
+    if (withImage && signals.posterImageUrl) {
+      c.push({
+        type: "image_url",
+        image_url: { url: signals.posterImageUrl },
+      });
+    }
+    c.push({ type: "text", text: userText });
+    return c;
+  };
 
-  const response = await openai().chat.completions.create({
-    model: MODEL,
-    max_tokens: 512,
-    tools,
-    tool_choice: { type: "function", function: { name: "return_hook" } },
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content },
-    ],
-  });
+  // First attempt: send the poster image when we have one. OpenAI
+  // occasionally rejects on bytes-level format even when the S3 key's
+  // extension passed `isLikelyImageKey` — e.g. a `.jpg` key whose
+  // contents are actually HEIC, or a poster-extract output that landed
+  // truncated. On 400, retry once without the image so text signals can
+  // still drive a hook and `hookExtractedAt` gets stamped — otherwise
+  // every sweep re-tries the same item and we burn the queue. See
+  // HUBANDSPOKE-V (237 events, 2026-05-15).
+  let response;
+  try {
+    response = await openai().chat.completions.create({
+      model: MODEL,
+      max_tokens: 512,
+      tools,
+      tool_choice: { type: "function", function: { name: "return_hook" } },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: buildContent(true) },
+      ],
+    });
+  } catch (err) {
+    if (err instanceof BadRequestError && signals.posterImageUrl) {
+      response = await openai().chat.completions.create({
+        model: MODEL,
+        max_tokens: 512,
+        tools,
+        tool_choice: { type: "function", function: { name: "return_hook" } },
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: buildContent(false) },
+        ],
+      });
+    } else {
+      throw err;
+    }
+  }
 
   const inputTokens = response.usage?.prompt_tokens ?? 0;
   const outputTokens = response.usage?.completion_tokens ?? 0;
