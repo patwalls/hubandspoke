@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  checkRepostReadiness,
   hasDescriptableMedia,
+  hasDescriptableMediaForRepost,
   loadPillarForSource,
   resolveImportTarget,
+  resolveImportTargetForRepost,
 } from "./descript-derivative";
 import { createTestProductionItem } from "@/test/factories";
 
@@ -174,6 +177,121 @@ describe("resolveImportTarget", () => {
       pillarContentItemId: "pillar",
     };
     expect(resolveImportTarget(source, null)).toBeNull();
+  });
+});
+
+describe("checkRepostReadiness", () => {
+  it("OK when source has its own composition (case 1 path)", () => {
+    expect(
+      checkRepostReadiness({
+        id: "s",
+        descriptProjectId: "p",
+        descriptCompositionId: "c",
+        mediaS3Key: null,
+        pillarContentItemId: null,
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("OK when source has its own mediaS3Key (cold-import path)", () => {
+    expect(
+      checkRepostReadiness({
+        id: "s",
+        descriptProjectId: null,
+        descriptCompositionId: null,
+        mediaS3Key: "reel.mp4",
+        pillarContentItemId: null,
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("OK on a Reel derivative when source has its own media even though pillar has nothing — the case Pat hit", () => {
+    // Source is a Reel clipped from a long-form pillar. Pillar has no
+    // archived media and no Descript project. Cross-post would refuse,
+    // but repost is same-aspect so the Reel's own cropped media is the
+    // exact thing we want to re-air.
+    expect(
+      checkRepostReadiness({
+        id: "reel",
+        descriptProjectId: null,
+        descriptCompositionId: null,
+        mediaS3Key: "final-reel-9-16.mp4",
+        pillarContentItemId: "pillar-with-no-media",
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("refuses with needs_source_media when source has neither composition nor media", () => {
+    const result = checkRepostReadiness({
+      id: "s",
+      descriptProjectId: null,
+      descriptCompositionId: null,
+      mediaS3Key: null,
+      pillarContentItemId: "pillar",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("needs_source_media");
+    }
+  });
+});
+
+describe("hasDescriptableMediaForRepost", () => {
+  it("true with own composition", () => {
+    expect(
+      hasDescriptableMediaForRepost({
+        id: "s",
+        descriptProjectId: "p",
+        descriptCompositionId: "c",
+        mediaS3Key: null,
+        pillarContentItemId: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("true with own mediaS3Key", () => {
+    expect(
+      hasDescriptableMediaForRepost({
+        id: "s",
+        descriptProjectId: null,
+        descriptCompositionId: null,
+        mediaS3Key: "reel.mp4",
+        pillarContentItemId: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("false with neither — pillar state is irrelevant", () => {
+    expect(
+      hasDescriptableMediaForRepost({
+        id: "s",
+        descriptProjectId: null,
+        descriptCompositionId: null,
+        mediaS3Key: null,
+        pillarContentItemId: "pillar",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resolveImportTargetForRepost", () => {
+  it("returns source-as-pillar even when an upstream pillar exists", () => {
+    // Cross-post resolveImportTarget would return the pillar here. Repost
+    // intentionally ignores the pillar — the Reel's own pixels are the
+    // right material.
+    const target = resolveImportTargetForRepost({
+      id: "reel",
+      descriptProjectId: "p1",
+      descriptCompositionId: null,
+      descriptSeedCompositionId: "seed1",
+      mediaS3Key: "reel.mp4",
+      pillarContentItemId: "pillar-irrelevant",
+    });
+    expect(target.kind).toBe("source-as-pillar");
+    expect(target.row.id).toBe("reel");
+    expect(target.row.mediaS3Key).toBe("reel.mp4");
+    expect(target.row.descriptProjectId).toBe("p1");
+    expect(target.row.descriptSeedCompositionId).toBe("seed1");
   });
 });
 

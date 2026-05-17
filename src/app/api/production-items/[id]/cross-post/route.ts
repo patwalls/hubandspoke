@@ -363,6 +363,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   await enqueue("descript-derivative-create", {
     derivativeItemId: created.id,
     sourceItemId: source.id,
+    mode: "cross-post",
   });
 
   return NextResponse.json({ id: created.id }, { status: 201 });

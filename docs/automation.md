@@ -42,8 +42,8 @@ USER / API ENTRY POINTS
   POST /api/production-items/[id]/repurpose               → draft-algorithm-run (auto-fire after insert)
   POST /api/production-items/[id]/repurpose               → canva-create-copy   (auto-fire when target.is_canva_format AND Skill has brand-template URL)
   POST /api/production-items/[id]/cross-post              → draft-algorithm-run (auto-fire after seed, any seeded target)
-  POST /api/production-items/[id]/cross-post              → descript-derivative-create (composition copy; mandatory after the route gated on hasDescriptableMedia)
-  POST /api/production-items/[id]/repost                  → descript-derivative-create (composition copy; mandatory after the route gated on hasDescriptableMedia)
+  POST /api/production-items/[id]/cross-post              → descript-derivative-create mode=cross-post (composition copy; route gated on hasDescriptableMedia — pillar's uncropped media required)
+  POST /api/production-items/[id]/repost                  → descript-derivative-create mode=repost      (composition copy; route gated on checkRepostReadiness — only the source's own composition or media is required, pillar ignored)
   POST /api/descript/clip-out                             → descript-clip-resolve  (format-detail quick-clip only as of 2026-05-02)
   POST /api/clip-ideas/[id]/triage (action=assign)        → draft-algorithm-run (auto-fire after promote)
   POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve + draft-algorithm-run (auto-fire)
@@ -836,18 +836,25 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - **Cost:** ~$0.03 per Opus call. Caching takes a chunk off the input tokens on Regenerate.
 
 ### `descript-derivative-create` — copy a composition for cross-post / repost
-- **Trigger:** enqueued by `POST /api/production-items/[id]/cross-post` and `POST /api/production-items/[id]/repost` after the new derivative row is inserted. Both routes hard-gate on `hasDescriptableMedia(source, pillar)` and reject with 400 if no path to a composition exists — so reaching this task means the source has either (a) its own composition, (b) a pillar with a seed composition, or (c) a pillar with media we can cold-import.
-- **Files:** `src/jobs/tasks/descript-derivative-create.ts`, `src/lib/services/descript-derivative.ts` (helpers: `hasDescriptableMedia`, `loadPillarForSource`, `coldImportPillar`)
-- **Inputs:** `{ derivativeItemId, sourceItemId, attempt? }`
+- **Trigger:** enqueued by `POST /api/production-items/[id]/cross-post` (mode=`cross-post`) and `POST /api/production-items/[id]/repost` (mode=`repost`) after the new derivative row is inserted. Each route hard-gates upfront — cross-post on `checkCrossPostReadiness(source, pillar)`, repost on `checkRepostReadiness(source)` — so reaching this task means a viable path to a composition exists.
+- **Files:** `src/jobs/tasks/descript-derivative-create.ts`, `src/lib/services/descript-derivative.ts` (helpers: `hasDescriptableMedia` / `hasDescriptableMediaForRepost`, `resolveImportTarget` / `resolveImportTargetForRepost`, `loadPillarForSource`, `coldImportPillar`)
+- **Inputs:** `{ derivativeItemId, sourceItemId, mode?: "repost" | "cross-post", attempt? }` — `mode` defaults to `cross-post` for back-compat with jobs enqueued before the field was added.
 - **Outputs:** Inserts a `repurpose_triggers` row tagged `descript_import_path='derivative-copy'`, enqueues `descript-clip-resolve` to poll the duplicate-composition job. The new composition_id is written to the derivative when the resolver fires.
 - **Downstream:** `descript-clip-resolve` → `descript-publish-and-archive`
 - **Rules:**
-  - Decision tree for "what composition do we duplicate from?":
-    1. Source has own composition (`source.descriptCompositionId`) → duplicate that.
-    2. Pillar has seed (`pillar.descriptSeedCompositionId`) → duplicate the seed (warm path).
-    3. Pillar has only `mediaS3Key` → call `coldImportPillar` (shared with the clip-promotion full-video cold path), enqueue `descript-clip-resolve` for the pillar import, then re-enqueue ourselves with a 60s delay; the next pass picks up the freshly-stamped seed.
+  - **Cross-post mode** — pillar-aware. Target = pillar (or source-as-pillar when source has no upstream). Decision tree:
+    1. Source has own composition → duplicate it via `invokeRulesAwareDuplicate` (applies Cross Post Rules from the source's format so Underlord re-aspects for the target platform).
+    2. Pillar has seed → transcript-anchored cut via `findAnchorInWords` + `cutSegmentWithRules`. Both source and target need word-level Whisper transcripts.
+    3. Pillar has only `mediaS3Key` → `coldImportPillar(pillar.id)` + `descript-clip-resolve` for the pillar import + 60s self re-enqueue. Next pass picks up the freshly-stamped seed.
+    4. Otherwise → `blocked:needs_pillar_media`.
+  - **Repost mode (added 2026-05-16)** — same-platform / same-aspect. Pillar IGNORED even when present; target is always source-as-pillar via `resolveImportTargetForRepost`. Decision tree:
+    1. Source has own composition → plain `invokeRulesAwareDuplicate` with `crossPostRules=null` (no re-aspect prompt).
+    2. Source has own seed → plain `duplicateDescriptComposition` of the seed. No anchor search (cut range is "full duration"), no transcript required.
+    3. Source has only `mediaS3Key` → `coldImportPillar(source.id)` (stamps source's own row) + `descript-clip-resolve` + 60s self re-enqueue. Next pass picks up the seed on the source.
+    4. Otherwise → `blocked:needs_pillar_media` (same error code; details say "repost source has no own composition and no archived media").
+  - Repost mode never consults `pillarContentItemId` because a Reel's already-cropped pixels ARE the correct material to re-air. The repost route's pre-gate enrichment (`enrichSingleItem(..., { withMedia: true })`) usually backfills `source.mediaS3Key` for video-bearing posts before this task ever runs, so case 3 is the common path for legacy derivatives.
   - Idempotent: returns early if a `repurpose_triggers` row already exists for the derivative with `descript_import_path='derivative-copy'`. Repeated enqueues are no-ops.
-  - `coldImportPillar` uses `SELECT … FOR UPDATE` on the pillar to serialize parallel cold-imports; the second caller sees `descript_project_id` set and returns `imported:false` from the helper.
+  - `coldImportPillar` uses `SELECT … FOR UPDATE` on the import-target row (pillar in cross-post mode, source in repost mode) to serialize parallel cold-imports; the second caller sees `descript_project_id` set and returns `imported:false`.
   - 10 attempts max; throws after that so the failure shows up in `graphile_worker.jobs.last_error` instead of looping forever.
 
 ### `descript-clip-resolve` — poll Descript clip-out

@@ -14,6 +14,12 @@ export interface DescriptableSource {
   pillarContentItemId: string | null;
 }
 
+/** Repost mode also needs to know the source's own seed composition (when
+ *  the source's media has already been cold-imported in a prior run). */
+export interface RepostableSource extends DescriptableSource {
+  descriptSeedCompositionId: string | null;
+}
+
 export interface DescriptablePillar {
   id: string;
   title: string | null;
@@ -79,6 +85,32 @@ export function resolveImportTarget(
 }
 
 /**
+ * Repost-mode analog of `resolveImportTarget`. A repost is same-platform,
+ * same-aspect: we never need the pillar's uncropped pixels because we're
+ * not re-aspecting. The source's own (already-cropped) media IS the
+ * material we want to re-air. Target is always source-as-pillar, even
+ * when an upstream pillar exists.
+ *
+ * Cross-post still goes through `resolveImportTarget` because re-aspecting
+ * needs the pillar's higher-resolution / uncropped material.
+ */
+export function resolveImportTargetForRepost(
+  source: RepostableSource,
+): ImportTarget {
+  return {
+    row: {
+      id: source.id,
+      title: null,
+      descriptProjectId: source.descriptProjectId,
+      descriptProjectUrl: null,
+      descriptSeedCompositionId: source.descriptSeedCompositionId,
+      mediaS3Key: source.mediaS3Key,
+    },
+    kind: "source-as-pillar",
+  };
+}
+
+/**
  * Returns true when the derivative-create task has a viable path to a
  * unique Descript composition for this source. Two ways:
  *
@@ -104,6 +136,23 @@ export function hasDescriptableMedia(
   if (target.row.descriptProjectId && target.row.descriptSeedCompositionId)
     return true;
   if (target.row.mediaS3Key) return true;
+  return false;
+}
+
+/**
+ * Repost-side defense-in-depth: a same-platform repost only needs one of
+ *   - source's own Descript composition (duplicate in-place), OR
+ *   - source's own archived media (cold-import + duplicate the seed).
+ *
+ * No pillar involvement, ever. The route's pre-gate calls
+ * `checkRepostReadiness` first; this is the equivalent of
+ * `hasDescriptableMedia` for the task's defensive check.
+ */
+export function hasDescriptableMediaForRepost(
+  source: DescriptableSource,
+): boolean {
+  if (source.descriptCompositionId) return true;
+  if (source.mediaS3Key) return true;
   return false;
 }
 
@@ -199,6 +248,41 @@ export async function checkCrossPostReadiness(
     };
   }
   return { ok: true };
+}
+
+/** Why a repost is blocked. Distinct from CrossPostReadinessReason because
+ *  repost never depends on the pillar — there's no transcript-anchoring
+ *  step, so `needs_transcript` doesn't apply. */
+export type RepostReadinessReason = "needs_source_media";
+
+export type RepostReadiness =
+  | { ok: true }
+  | { ok: false; reason: RepostReadinessReason; detail: string };
+
+/**
+ * Repost gate — relaxed analog of `checkCrossPostReadiness`. A same-platform
+ * repost only needs the source's own material:
+ *   - Source has its own composition → OK (duplicate in-place).
+ *   - Source has its own `mediaS3Key` → OK (cold-import + duplicate the seed
+ *     on retry; no anchor search because cut range is "full duration").
+ *   - Neither → refuse with `needs_source_media`.
+ *
+ * The pillar is intentionally never consulted: a Reel's already-cropped
+ * pixels ARE the correct repost material when the target aspect is the
+ * same. The repost route's existing pre-gate enrichment step
+ * (`enrichSingleItem(..., { withMedia: true })`) usually backfills
+ * `mediaS3Key` before this is even called.
+ */
+export function checkRepostReadiness(
+  source: DescriptableSource,
+): RepostReadiness {
+  if (source.descriptCompositionId) return { ok: true };
+  if (source.mediaS3Key) return { ok: true };
+  return {
+    ok: false,
+    reason: "needs_source_media",
+    detail: `source ${source.id} has no own Descript composition and no archived media to cold-import`,
+  };
 }
 
 /**

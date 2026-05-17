@@ -14,8 +14,10 @@ import { buildCompositionName } from "@/lib/services/descript-composition";
 import {
   coldImportPillar,
   hasDescriptableMedia,
+  hasDescriptableMediaForRepost,
   loadPillarForSource,
   resolveImportTarget,
+  resolveImportTargetForRepost,
 } from "@/lib/services/descript-derivative";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import { enqueue } from "@/jobs/enqueue";
@@ -23,6 +25,17 @@ import { enqueue } from "@/jobs/enqueue";
 export interface DescriptDerivativeCreatePayload {
   derivativeItemId: string;
   sourceItemId: string;
+  /** Which gate / target-resolution to apply.
+   *   - "cross-post" (default): pillar-aware. Target = pillar (or source-as-
+   *     pillar when no upstream). Anchor search + re-aspect via Cross Post
+   *     Rules. Needs pillar's uncropped media.
+   *   - "repost": same-platform / same-aspect. Target = source itself.
+   *     No anchor search (full duration), no Cross Post Rules. Pillar
+   *     ignored even when present — the Reel's own cropped media IS the
+   *     correct material to re-air.
+   *  Defaults to "cross-post" so any job still in-queue from before this
+   *  payload field was added keeps its prior behavior. */
+  mode?: "repost" | "cross-post";
   /** Set on re-enqueue after a cold-import to give the resolver time to
    *  stamp the pillar's `descript_seed_composition_id`. */
   attempt?: number;
@@ -86,6 +99,8 @@ export const descriptDerivativeCreateTask: Task = async (
 ) => {
   const payload = rawPayload as DescriptDerivativeCreatePayload;
   const attempt = payload.attempt ?? 0;
+  const mode: "repost" | "cross-post" = payload.mode ?? "cross-post";
+  const isRepost = mode === "repost";
 
   if (attempt >= MAX_ATTEMPTS) {
     throw new Error(
@@ -167,13 +182,26 @@ export const descriptDerivativeCreateTask: Task = async (
     }
   }
 
-  const pillar = await loadPillarForSource(source);
-  if (!hasDescriptableMedia(source, pillar)) {
+  // Repost ignores the pillar entirely (same-platform, same-aspect — the
+  // source's own cropped media IS the correct material). Cross-post still
+  // loads the pillar because it needs uncropped pixels for re-aspecting.
+  const pillar = isRepost ? null : await loadPillarForSource(source);
+  const mediaOk = isRepost
+    ? hasDescriptableMediaForRepost(source)
+    : hasDescriptableMedia(source, pillar);
+  if (!mediaOk) {
     throw blockedError(
       "needs_pillar_media",
-      `source ${source.id} has no Descript-able media (no own composition; import target has no project/seed and no media)`,
+      isRepost
+        ? `repost source ${source.id} has no own Descript composition and no archived media to cold-import`
+        : `source ${source.id} has no Descript-able media (no own composition; import target has no project/seed and no media)`,
     );
   }
+
+  // Same-aspect duplicates don't go through the Cross Post Rules prompt —
+  // there's no platform-shape adjustment to apply. Repost always uses the
+  // plain `duplicateDescriptComposition` path.
+  const effectiveCrossPostRules = isRepost ? null : crossPostRules;
 
   const newCompositionName = buildCompositionName({
     title: derivative.title,
@@ -183,13 +211,14 @@ export const descriptDerivativeCreateTask: Task = async (
 
   // CASE 1 — Source has its own composition. Duplicate it in-place
   // (re-aspect is safe; the new comp lives in the source's project with
-  // its high-res media). Cross Post Rules drive any framing changes.
+  // its high-res media). Cross Post Rules drive any framing changes
+  // (skipped in repost mode — same aspect).
   if (source.descriptProjectId && source.descriptCompositionId) {
     const dup = await invokeRulesAwareDuplicate({
       projectId: source.descriptProjectId,
       sourceCompositionId: source.descriptCompositionId,
       newCompositionName,
-      crossPostRules,
+      crossPostRules: effectiveCrossPostRules,
       targetPostType,
     });
     await finishStamp({
@@ -200,13 +229,17 @@ export const descriptDerivativeCreateTask: Task = async (
       newCompositionName,
     });
     helpers.logger.info(
-      `descript-derivative-create ok (case 1: source-composition): derivative=${derivative.id} source=${source.id} composition_job=${dup.jobId}`,
+      `descript-derivative-create ok (case 1: source-composition, mode=${mode}): derivative=${derivative.id} source=${source.id} composition_job=${dup.jobId}`,
     );
     return;
   }
 
-  // CASE 2 — Import target has project + seed: transcript-anchored cut.
-  const target = resolveImportTarget(source, pillar);
+  // CASE 2 — Import target has project + seed. Cross-post does a
+  // transcript-anchored cut against the pillar; repost just duplicates the
+  // (source's own) seed composition full-duration.
+  const target = isRepost
+    ? resolveImportTargetForRepost(source)
+    : resolveImportTarget(source, pillar);
   if (!target) {
     throw blockedError(
       "needs_pillar_media",
@@ -215,6 +248,27 @@ export const descriptDerivativeCreateTask: Task = async (
   }
 
   if (target.row.descriptProjectId && target.row.descriptSeedCompositionId) {
+    if (isRepost) {
+      // Repost: full-duration plain duplicate of the source's own seed.
+      // No anchor search (source IS target, cut range = full file); no
+      // Cross Post Rules (same platform, same aspect).
+      const dup = await duplicateDescriptComposition({
+        projectId: target.row.descriptProjectId,
+        sourceCompositionId: target.row.descriptSeedCompositionId,
+        newCompositionName,
+      });
+      await finishStamp({
+        derivativeId: derivative.id,
+        dupProjectId: target.row.descriptProjectId,
+        projectUrl: target.row.descriptProjectUrl ?? dup.projectUrl ?? null,
+        dup,
+        newCompositionName,
+      });
+      helpers.logger.info(
+        `descript-derivative-create ok (case 2 repost: seed-duplicate): derivative=${derivative.id} source=${source.id} composition_job=${dup.jobId}`,
+      );
+      return;
+    }
     const sourceTranscript = await getTranscriptForPrompt(source.id);
     if (!sourceTranscript || sourceTranscript.words.length === 0) {
       throw blockedError(
@@ -249,7 +303,7 @@ export const descriptDerivativeCreateTask: Task = async (
       newCompositionName,
       startSec: anchor.startSec,
       endSec: anchor.endSec,
-      crossPostRules,
+      crossPostRules: effectiveCrossPostRules,
       targetPostType,
     });
     await finishStamp({

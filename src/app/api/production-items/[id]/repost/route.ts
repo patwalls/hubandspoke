@@ -12,10 +12,7 @@ import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
-import {
-  checkCrossPostReadiness,
-  loadPillarForSource,
-} from "@/lib/services/descript-derivative";
+import { checkRepostReadiness } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
 import type { PostType } from "@/lib/platform-field-schemas";
 
@@ -141,19 +138,21 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  // Hard gate: repost requires Descript-able media AND, when source has
-  // no own composition, word-level transcripts on both the source and the
-  // import target. Mirrors cross-post — same readiness check, same
-  // surfaced reason in the 400.
-  const sourcePillar = await loadPillarForSource(source);
-  const readiness = await checkCrossPostReadiness(source, sourcePillar);
+  // Hard gate: repost is same-platform / same-aspect, so it never needs
+  // the pillar's uncropped pixels — the source's own (already-cropped)
+  // media is the right material to re-air. The pre-gate enrichment step
+  // above force-archives `mediaS3Key` for video-bearing posts, so this
+  // gate is almost always already-OK by the time it runs; the refusal
+  // path only fires when even the source can't be archived.
+  const readiness = checkRepostReadiness(source);
   if (!readiness.ok) {
-    const message =
-      readiness.reason === "needs_transcript"
-        ? "Repost needs a Whisper transcript on both the source and the pillar (the new flow anchors the source's spoken segment in the pillar's transcript before re-aspecting). Run transcription on the missing one, then retry."
-        : "No Descript-able media available. Repost needs the pillar's source video (or, when there's no upstream pillar, the source's own video). The Reel's exported media isn't usable — it's already cropped to its final aspect.";
     return NextResponse.json(
-      { error: message, reason: readiness.reason, detail: readiness.detail },
+      {
+        error:
+          "No Descript-able media available. Repost needs the source's own video — either its existing Descript composition or an archived media file. Run enrichment (withMedia=true) on the source and retry.",
+        reason: readiness.reason,
+        detail: readiness.detail,
+      },
       { status: 400 },
     );
   }
@@ -278,6 +277,7 @@ export async function POST(request: Request, context: RouteContext) {
   await enqueue("descript-derivative-create", {
     derivativeItemId: created.id,
     sourceItemId: source.id,
+    mode: "repost",
   });
 
   return NextResponse.json({ id: created.id }, { status: 201 });
