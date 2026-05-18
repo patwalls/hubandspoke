@@ -3,7 +3,31 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { createDescriptProjectFromUrl } from "@/lib/descript";
+import { PLATFORM_MEDIA_RULES } from "@/lib/platform-media-rules";
+import type { PostType } from "@/lib/platform-field-schemas";
 import { getPresignedGetUrl } from "@/lib/s3";
+
+/**
+ * True when source and target post types have the same fixed simulator
+ * aspect ratio (e.g. instagram_reel + tiktok + instagram_story are all 9:16).
+ * Drives the "skip the Descript anchor-in-pillar dance" shortcut on
+ * cross-post: when nothing has to be re-aspected, the source's already-
+ * cropped media IS the correct material — exactly the repost path.
+ *
+ * Conservative: when either side has `aspectClass: null` (no fixed
+ * simulator aspect — x, linkedin, youtube_*, newsletter, threads) we
+ * return false so the legacy pillar-anchored flow runs. Two nulls do NOT
+ * count as a match; that would shortcut cross-aspect pairs.
+ */
+export function aspectMatchesTarget(
+  sourcePostType: string | null,
+  targetPostType: string | null,
+): boolean {
+  if (!sourcePostType || !targetPostType) return false;
+  const src = PLATFORM_MEDIA_RULES[sourcePostType as PostType]?.aspectClass;
+  const tgt = PLATFORM_MEDIA_RULES[targetPostType as PostType]?.aspectClass;
+  return src !== null && tgt !== null && src === tgt;
+}
 
 /** Minimal shape of the fields hasDescriptableMedia / coldImportPillar inspect. */
 export interface DescriptableSource {

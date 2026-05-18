@@ -106,6 +106,21 @@ function platformSortIndex(platform: string): number {
   return i === -1 ? order.length : i;
 }
 
+/** Per-target gate failure that survives in dialog state so we can render
+ *  the "I'll do it manually" affordance inline (instead of a toast that
+ *  drops the user back at the dialog with no recoverable action). */
+interface GateFailure {
+  key: string;
+  accountHandle: string;
+  postType: PostType;
+  /** Stable identifier from the route's 400 response — `needs_transcript`,
+   *  `needs_pillar_media`, `needs_source_media`. Used to decide whether to
+   *  offer manual-handoff (true for all gateable reasons, since the row
+   *  itself is still creatable). */
+  reason: string | null;
+  message: string;
+}
+
 export function CrossPostTriageDialog({
   open,
   onOpenChange,
@@ -118,8 +133,10 @@ export function CrossPostTriageDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [dismissing, setDismissing] = useState(false);
+  const [manualSubmitting, setManualSubmitting] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [assigneeUserId, setAssigneeUserId] = useState<string>("");
+  const [gateFailures, setGateFailures] = useState<GateFailure[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<
     Array<{ id: string; name: string | null; email: string; avatarUrl: string | null }>
   >([]);
@@ -130,6 +147,7 @@ export function CrossPostTriageDialog({
       setSelected(new Set());
       setShowAll(false);
       setAssigneeUserId("");
+      setGateFailures([]);
     }
   }, [open, candidate.id]);
 
@@ -275,94 +293,144 @@ export function CrossPostTriageDialog({
     });
   }
 
+  /** Inner per-target submitter shared by the primary "Cross-post N
+   *  selected" handler and the "I'll do it manually" retry. When `manual`
+   *  is true the route skips the readiness gate AND skips the
+   *  descript-derivative-create enqueue — the row is created empty for the
+   *  operator to attach media to themselves. */
+  async function submitTargets(
+    keys: string[],
+    opts: { manual: boolean },
+  ): Promise<{
+    created: Array<{ productionItemId: string; accountHandle: string }>;
+    skipped: number;
+    gateFailures: GateFailure[];
+    hardErrors: string[];
+  }> {
+    const created: Array<{ productionItemId: string; accountHandle: string }> = [];
+    let skipped = 0;
+    const gateFails: GateFailure[] = [];
+    const hardErrors: string[] = [];
+    const results = await Promise.allSettled(
+      keys.map(async (key) => {
+        const [accountId, postType] = key.split(":");
+        const handle =
+          targets.find((t) => pairKey(t) === key)?.account.handle ??
+          "unknown";
+        const res = await fetch(
+          `/api/production-items/${candidate.id}/cross-post`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              targetAccountId: accountId,
+              targetPostType: postType,
+              assign: true,
+              editorUserId: assigneeUserId,
+              manual: opts.manual,
+            }),
+          }
+        );
+        if (!res.ok) {
+          // 409 = already exists for this pair → silently treat as
+          // "already done" so the operator's intent ("I'm done with
+          // this candidate") still completes.
+          if (res.status === 409) return { kind: "skipped" as const, key };
+          const err = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            reason?: string;
+          };
+          // 400 with a `reason` is a known readiness failure — the operator
+          // can still recover via "I'll do it manually". Surface it
+          // separately from hard errors so the UI knows to offer that
+          // affordance instead of just a toast dead-end.
+          if (res.status === 400 && err.reason) {
+            return {
+              kind: "gate" as const,
+              key,
+              gate: {
+                key,
+                accountHandle: handle,
+                postType: postType as PostType,
+                reason: err.reason,
+                message: err.error ?? "Cross-post refused by readiness gate.",
+              },
+            };
+          }
+          throw new Error(err.error ?? `HTTP ${res.status}`);
+        }
+        const json = (await res.json().catch(() => ({}))) as {
+          id?: string;
+        };
+        return {
+          kind: "ok" as const,
+          key,
+          productionItemId: json.id ?? "",
+          accountHandle: handle,
+        };
+      })
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        if (r.value.kind === "ok") {
+          created.push({
+            productionItemId: r.value.productionItemId,
+            accountHandle: r.value.accountHandle,
+          });
+        } else if (r.value.kind === "skipped") {
+          skipped++;
+        } else {
+          gateFails.push(r.value.gate);
+        }
+      } else {
+        const message =
+          r.reason instanceof Error ? r.reason.message : String(r.reason);
+        if (message && !hardErrors.includes(message)) hardErrors.push(message);
+      }
+    }
+    return { created, skipped, gateFailures: gateFails, hardErrors };
+  }
+
   async function handleSubmit() {
     const keys = Array.from(selected);
     setSubmitting(true);
+    setGateFailures([]);
     try {
-      // Per-target outcome rolls up into the toast: created IDs go to the
-      // success copy + link; 409s are treated as "already done" (no link
-      // needed); thrown errors bubble as failures.
-      const created: Array<{
-        productionItemId: string;
-        accountHandle: string;
-      }> = [];
-      let skipped = 0;
-      let failed = 0;
-      if (keys.length > 0) {
-        const results = await Promise.allSettled(
-          keys.map(async (key) => {
-            const [accountId, postType] = key.split(":");
-            const handle =
-              targets.find((t) => pairKey(t) === key)?.account.handle ??
-              "unknown";
-            const res = await fetch(
-              `/api/production-items/${candidate.id}/cross-post`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  targetAccountId: accountId,
-                  targetPostType: postType,
-                  assign: true,
-                  editorUserId: assigneeUserId,
-                }),
-              }
-            );
-            if (!res.ok) {
-              // 409 = already exists for this pair → silently treat as
-              // "already done" so the operator's intent ("I'm done with
-              // this candidate") still completes.
-              if (res.status === 409) return { kind: "skipped" as const };
-              const err = (await res.json().catch(() => ({}))) as {
-                error?: string;
-              };
-              throw new Error(err.error ?? `HTTP ${res.status}`);
-            }
-            const json = (await res.json().catch(() => ({}))) as {
-              id?: string;
-            };
-            return {
-              kind: "ok" as const,
-              productionItemId: json.id ?? "",
-              accountHandle: handle,
-            };
-          })
-        );
-        const failureReasons: string[] = [];
-        for (const r of results) {
-          if (r.status === "fulfilled") {
-            if (r.value.kind === "ok") created.push(r.value);
-            else skipped++;
-          } else {
-            failed++;
-            // Preserve the per-target reason from the throw in the inner
-            // map (line ~319 — `throw new Error(err.error ?? \`HTTP …\`)`).
-            // Without this the all-failed toast loses the route's actual
-            // 400 message (e.g. "No Descript-able media available — pillar
-            // has no archived video") and just says "Failed to cross-post."
-            const reason =
-              r.reason instanceof Error ? r.reason.message : String(r.reason);
-            if (reason && !failureReasons.includes(reason)) {
-              failureReasons.push(reason);
-            }
-          }
+      if (keys.length === 0) return;
+      const {
+        created,
+        skipped,
+        gateFailures: gateFails,
+        hardErrors,
+      } = await submitTargets(keys, { manual: false });
+      const failed = gateFails.length + hardErrors.length;
+
+      // Anything refused by the readiness gate stays in the dialog with an
+      // inline banner + "I'll do it manually" button. The operator can
+      // either run transcription and retry, or click manual to create the
+      // rows anyway and upload by hand. Hard errors (route 500, network,
+      // 401) still toast — they're not actionable in-dialog.
+      if (gateFails.length > 0) {
+        setGateFailures(gateFails);
+        if (created.length > 0 || skipped > 0) {
+          showSubmitToast({ created, skipped, failed, brand });
         }
-        if (failed > 0 && created.length === 0) {
-          // Dedup'd reasons so 2-target / same-cause failures don't
-          // double-print. Keep the description concise (≤2 distinct
-          // reasons surface fully; more than that we summarize).
-          const description =
-            failureReasons.length > 0
-              ? failureReasons.slice(0, 2).join("\n\n")
-              : undefined;
-          toast.error(
-            `Failed to cross-post (${failed} target${failed === 1 ? "" : "s"}).`,
-            description ? { description, duration: 12_000 } : undefined,
-          );
-          return;
+        if (hardErrors.length > 0) {
+          toast.error(hardErrors.slice(0, 2).join("\n\n"), {
+            duration: 10_000,
+          });
         }
-        showSubmitToast({ created, skipped, failed, brand });
+        return;
       }
+
+      if (created.length === 0 && hardErrors.length > 0) {
+        toast.error(
+          `Failed to cross-post (${hardErrors.length} target${hardErrors.length === 1 ? "" : "s"}).`,
+          { description: hardErrors.slice(0, 2).join("\n\n"), duration: 12_000 },
+        );
+        return;
+      }
+      showSubmitToast({ created, skipped, failed, brand });
 
       // Always dismiss after a successful submit — the queue is a triage
       // surface, not a long-lived list. If the operator wants to revisit
@@ -387,6 +455,51 @@ export function CrossPostTriageDialog({
       );
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  /** Retry just the gate-failed targets with `manual: true`. The route
+   *  bypasses the readiness gate AND skips enqueuing Descript work — the
+   *  row is created so it shows up in the workflow, and the operator
+   *  attaches media themselves. */
+  async function handleManualSubmit() {
+    const keys = gateFailures.map((f) => f.key);
+    if (keys.length === 0) return;
+    setManualSubmitting(true);
+    try {
+      const { created, skipped, hardErrors } = await submitTargets(keys, {
+        manual: true,
+      });
+      if (hardErrors.length > 0 && created.length === 0) {
+        toast.error(hardErrors.slice(0, 2).join("\n\n"), { duration: 10_000 });
+        return;
+      }
+      if (created.length > 0) {
+        toast.success(
+          created.length === 1
+            ? `Manual cross-post row created on @${created[0].accountHandle}.`
+            : `Created ${created.length} manual cross-post rows.`,
+          {
+            description: "No Descript prep — upload the media yourself when ready.",
+            duration: 6000,
+          },
+        );
+      }
+      setGateFailures([]);
+      // Dismiss + close, same as the happy path.
+      await fetch(
+        `/api/production-items/${candidate.id}/cross-post-dismiss`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }
+      ).catch(() => {});
+      onOpenChange(false);
+      onActioned();
+      void skipped;
+    } finally {
+      setManualSubmitting(false);
     }
   }
 
@@ -423,7 +536,7 @@ export function CrossPostTriageDialog({
   const allVisibleSelected =
     visibleSelectableKeys.length > 0 &&
     visibleSelectableKeys.every((k) => selected.has(k));
-  const busy = submitting || dismissing;
+  const busy = submitting || dismissing || manualSubmitting;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -645,6 +758,49 @@ export function CrossPostTriageDialog({
             </SelectContent>
           </Select>
         </section>
+
+        {gateFailures.length > 0 && (
+          <section className="rounded-md border border-amber-300 bg-amber-50/60 p-3 space-y-2">
+            <div className="text-sm font-semibold text-amber-900">
+              Can&apos;t auto-prep {gateFailures.length === 1 ? "this cross-post" : `${gateFailures.length} cross-posts`}.
+            </div>
+            <ul className="text-[12px] text-amber-900/90 space-y-1.5 list-disc pl-5">
+              {gateFailures.slice(0, 3).map((f) => (
+                <li key={f.key}>
+                  <span className="font-medium">
+                    @{f.accountHandle} · {POST_TYPE_SHORT_LABEL[f.postType] ?? f.postType}
+                  </span>
+                  {" — "}
+                  {f.message}
+                </li>
+              ))}
+              {gateFailures.length > 3 && (
+                <li className="text-amber-900/70">
+                  …and {gateFailures.length - 3} more with the same reason.
+                </li>
+              )}
+            </ul>
+            <p className="text-[12px] text-amber-900/80">
+              Two options: run transcription / enrichment and retry, or skip
+              the automation and upload manually.
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleManualSubmit()}
+              disabled={busy}
+              className={cn(
+                "h-9 w-full rounded-md text-sm font-medium transition-colors",
+                "bg-amber-600 text-white hover:bg-amber-700",
+                "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
+              )}
+              title="Create the cross-post rows without Descript prep. You'll attach media manually."
+            >
+              {manualSubmitting
+                ? "Creating manual rows…"
+                : `I'll do it manually (${gateFailures.length})`}
+            </button>
+          </section>
+        )}
 
         <button
           type="button"

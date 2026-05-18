@@ -11,7 +11,9 @@ import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { seedRepostContent } from "@/lib/services/repost-seed";
 import { recordItemCreated } from "@/lib/services/item-created";
 import {
+  aspectMatchesTarget,
   checkCrossPostReadiness,
+  checkRepostReadiness,
   loadPillarForSource,
 } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
@@ -97,6 +99,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
       ? editorUserIdRaw.trim()
       : null;
   const assign = (body as { assign?: unknown }).assign === true;
+  // Operator escape: create the cross-post row but skip the readiness gate
+  // and the descript-derivative-create enqueue. Surfaced via the "I'll do
+  // it manually" button when the gate would otherwise refuse. The row is
+  // still persisted so it shows up in the workflow board for upload.
+  const manual = (body as { manual?: unknown }).manual === true;
 
   if (!targetAccountId) {
     return NextResponse.json(
@@ -177,24 +184,32 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // Hard gate: cross-post requires Descript-able media AND, when source
-  // has no own composition, word-level transcripts on both the source
-  // and the import target. Without this, we'd silently create a row +
-  // queue a derivative-create that throws blocked:needs_transcript: on
-  // its second pass — the user wouldn't know until they refreshed the
-  // detail page much later. Returning 400 here puts the actionable
-  // reason in the operator's toast at click time.
-  const sourcePillar = await loadPillarForSource(source);
-  const readiness = await checkCrossPostReadiness(source, sourcePillar);
-  if (!readiness.ok) {
-    const message =
-      readiness.reason === "needs_transcript"
-        ? "Cross-post needs a Whisper transcript on both the source and the pillar (the new flow anchors the source's spoken segment in the pillar's transcript before re-aspecting). Run transcription on the missing one, then retry."
-        : "No Descript-able media available. Cross-post needs the pillar's source video (or, when there's no upstream pillar, the source's own video). The Reel's exported media isn't usable — it's already cropped to its final aspect.";
-    return NextResponse.json(
-      { error: message, reason: readiness.reason, detail: readiness.detail },
-      { status: 400 },
-    );
+  // Same-aspect cross-post (e.g. IG Reel → TikTok, both 9:16) is the
+  // repost path in disguise: no re-aspecting, no anchor-in-pillar search,
+  // no transcript requirement. The source's already-cropped media IS the
+  // correct material to re-air on the new channel. When aspects differ
+  // (e.g. IG Reel → IG Post square) the legacy pillar-anchored flow runs.
+  const sameAspect = aspectMatchesTarget(source.postType, targetPostType);
+
+  // Hard gate: refuse upfront with an actionable reason rather than
+  // queuing a job that throws blocked:* two passes later. Skipped when
+  // `manual: true` — the operator has opted to bypass the automation.
+  if (!manual) {
+    const readiness = sameAspect
+      ? checkRepostReadiness(source)
+      : await checkCrossPostReadiness(source, await loadPillarForSource(source));
+    if (!readiness.ok) {
+      const message =
+        readiness.reason === "needs_transcript"
+          ? "Cross-post needs a Whisper transcript on both the source and the pillar (the new flow anchors the source's spoken segment in the pillar's transcript before re-aspecting). Run transcription on the missing one, then retry."
+          : readiness.reason === "needs_source_media"
+            ? "Cross-post needs the source's archived video — enrichment couldn't find or download it. Re-run enrichment, or use \"I'll do it manually\" to upload yourself."
+            : "No Descript-able media available. Cross-post needs the pillar's source video (or, when there's no upstream pillar, the source's own video). The Reel's exported media isn't usable — it's already cropped to its final aspect.";
+      return NextResponse.json(
+        { error: message, reason: readiness.reason, detail: readiness.detail },
+        { status: 400 },
+      );
+    }
   }
 
   const [existing] = await db
@@ -360,11 +375,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // the user picked this cross-post because the source has Descript-able
   // media (we gated above), so they expect Descript work to happen. If the
   // queue is down we surface that rather than silently dropping it.
-  await enqueue("descript-derivative-create", {
-    derivativeItemId: created.id,
-    sourceItemId: source.id,
-    mode: "cross-post",
-  });
+  //
+  // Skipped when `manual: true` — operator is taking the upload over
+  // themselves and doesn't want a Descript composition prepped. The row
+  // exists in the workflow board for them to attach media to manually.
+  //
+  // Same-aspect cross-posts use mode="repost" so the task takes the
+  // source-as-pillar / no-anchor / no-cross-post-rules branch — exactly
+  // the same machinery that drives a same-platform repost.
+  if (!manual) {
+    await enqueue("descript-derivative-create", {
+      derivativeItemId: created.id,
+      sourceItemId: source.id,
+      mode: sameAspect ? "repost" : "cross-post",
+    });
+  }
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

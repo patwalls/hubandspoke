@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  aspectMatchesTarget,
   checkRepostReadiness,
   hasDescriptableMedia,
   hasDescriptableMediaForRepost,
@@ -9,6 +10,41 @@ import {
   resolveImportTargetForRepost,
 } from "./descript-derivative";
 import { createTestProductionItem } from "@/test/factories";
+
+describe("aspectMatchesTarget", () => {
+  // The whole point of this helper: a Reel → TikTok cross-post should skip
+  // the pillar-anchor + re-aspect dance because both targets are 9:16. The
+  // legacy flow demanded a Whisper transcript on source + pillar before it
+  // would let the cross-post through; aspectMatchesTarget is the early-exit
+  // signal that lets the route route to checkRepostReadiness instead.
+  it("true for same-aspect 9:16 video pairs (Reel ↔ TikTok ↔ Story)", () => {
+    expect(aspectMatchesTarget("instagram_reel", "tiktok")).toBe(true);
+    expect(aspectMatchesTarget("tiktok", "instagram_reel")).toBe(true);
+    expect(aspectMatchesTarget("instagram_reel", "instagram_story")).toBe(true);
+    expect(aspectMatchesTarget("tiktok", "instagram_story")).toBe(true);
+  });
+
+  it("false for cross-aspect pairs (Reel vs square IG Post)", () => {
+    expect(aspectMatchesTarget("instagram_reel", "instagram_post")).toBe(false);
+    expect(aspectMatchesTarget("instagram_post", "tiktok")).toBe(false);
+  });
+
+  it("false when either side has no fixed simulator aspect (null aspectClass)", () => {
+    // x / linkedin / youtube_long / newsletter / threads have aspectClass: null
+    // because the simulator picks its own. Treat as "unknown" — fall through to
+    // the legacy pillar-anchored flow rather than risk a same-aspect shortcut
+    // on a pair that isn't actually same-aspect.
+    expect(aspectMatchesTarget("instagram_reel", "x")).toBe(false);
+    expect(aspectMatchesTarget("youtube_long", "instagram_reel")).toBe(false);
+    expect(aspectMatchesTarget("x", "linkedin")).toBe(false);
+  });
+
+  it("false on null / unknown post types", () => {
+    expect(aspectMatchesTarget(null, "tiktok")).toBe(false);
+    expect(aspectMatchesTarget("instagram_reel", null)).toBe(false);
+    expect(aspectMatchesTarget("not_a_real_type", "tiktok")).toBe(false);
+  });
+});
 
 describe("hasDescriptableMedia", () => {
   it("true when the source has its own composition", () => {
