@@ -25,7 +25,10 @@ import {
   recordContentChanges,
   type ContentChange,
 } from "@/lib/services/content-revisions";
-import { extractCrossPostRulesSection } from "@/lib/format-skill";
+import {
+  extractCrossPostRulesSection,
+  extractDescriptSection,
+} from "@/lib/format-skill";
 import { buildCompositionName } from "@/lib/services/descript-composition";
 import { getTopPerformingCaptions } from "./exemplars";
 import {
@@ -513,28 +516,23 @@ export async function runDraftAlgorithm(
   if (!substrate) return { status: "skipped", reason: "no_substrate" };
 
   // Format instructions (editorial voice / style guide). Optional.
-  // Also pull the format id + descript-flag so the Descript branch below
-  // can attribute its `repurpose_triggers` row and gate on the flag without
-  // a second lookup.
+  // Also pull the format id so the Descript branch below can attribute its
+  // `repurpose_triggers` row without a second lookup.
   let formatInstructions: string | null = null;
   let formatRow: {
     id: string;
-    isClipDescriptFormat: boolean;
   } | null = null;
   if (item.format) {
     const [fmt] = await db
       .select({
         id: formats.id,
         instructions: formats.instructions,
-        isClipDescriptFormat: formats.isClipDescriptFormat,
       })
       .from(formats)
       .where(and(eq(formats.brand, item.brand), eq(formats.name, item.format)))
       .limit(1);
     formatInstructions = fmt?.instructions ?? null;
-    formatRow = fmt
-      ? { id: fmt.id, isClipDescriptFormat: fmt.isClipDescriptFormat }
-      : null;
+    formatRow = fmt ? { id: fmt.id } : null;
   }
 
   // v1.6 diagnostic: surface what the agent will see. Pat can grep
@@ -805,13 +803,35 @@ export async function runDraftAlgorithm(
 
   const generatedCaption = (result.content as Record<string, unknown>)[captionFieldKey];
 
-  // Descript branch — fires only when the target format is flagged as a
-  // Clip Descript format. Editing in Descript is now part of the Draft
-  // Algorithm: clicking Create on a derivative (auto-fire) and clicking
-  // Redraft (force=true) both land here. Errors are swallowed so a flaky
-  // Descript / Underlord call never blocks a saved caption.
+  // Descript branch — fires whenever the format's Skill carries a
+  // `### Descript Clip & Pack Info` section. Editing in Descript is part
+  // of the Draft Algorithm: clicking Create on a derivative (auto-fire)
+  // and clicking Redraft (force=true) both land here. Errors are
+  // swallowed so a flaky Descript / Underlord call never blocks a saved
+  // caption.
+  //
+  // Why NOT gate on `formats.is_clip_descript_format`: that flag means
+  // "this is the destination format for clip-idea promotion" and is
+  // expected to be set on exactly one format per brand (the
+  // `loadPromotedClipFormat` query is `LIMIT 1` with no ORDER BY). When
+  // V1.7 originally gated the Descript step on the same flag, editors
+  // who wanted to fire Descript on a SECOND format ticked the box on
+  // that format too — which silently broke clip-idea routing because the
+  // promoted-format lookup started returning whichever row Postgres
+  // happened to emit first. The Skill section is the right signal: it's
+  // per-format, explicit, and means "the Skill knows what to clip."
+  const formatHasDescriptSection =
+    extractDescriptSection(formatInstructions ?? "").trim().length > 0 &&
+    // `extractDescriptSection` falls back to the WHOLE skill when no
+    // `### Descript Clip & Pack Info` heading exists (back-compat for
+    // legacy unsectioned skills). We don't want to fire on every format
+    // that has any Skill text — only when the section heading is
+    // actually present.
+    /^[ \t]*##{1,2}[ \t]+Descript Clip & Pack Info[ \t]*$/im.test(
+      formatInstructions ?? "",
+    );
   let descriptStep: DescriptStepStatus | undefined;
-  if (formatRow?.isClipDescriptFormat) {
+  if (formatRow && formatHasDescriptSection) {
     try {
       const compositionName = buildCompositionName({
         title: item.hook?.trim() || item.title?.trim() || null,

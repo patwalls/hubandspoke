@@ -1407,9 +1407,9 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                   className="mt-0.5"
                 />
                 <span className="text-sm">
-                  <span className="font-medium">Clip Descript format</span>
+                  <span className="font-medium">Clip-idea promotion target</span>
                   <span className="block text-xs text-muted-foreground mt-0.5">
-                    Items in this format are short-form clips edited in Descript. Clip-idea generation spawns rows into this format, and the four &quot;Create in Descript&quot; flows are wired to it. Exactly one format per brand should carry this flag.
+                    Marks this format as the destination for clip-idea generation and the four &quot;Create in Descript&quot; flows on clip triage. Exactly one format per brand should carry this flag — the lookup picks whichever flagged row Postgres returns first, so a second tick on a different format silently breaks routing. To fire Descript on derivatives of a DIFFERENT format, leave this unchecked and add a <code className="font-mono">### Descript Clip &amp; Pack Info</code> section to that format&apos;s Skill instead.
                   </span>
                 </span>
               </label>
