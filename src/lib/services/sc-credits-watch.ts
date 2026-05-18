@@ -1,7 +1,8 @@
 import { and, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { scCallLog, syncLogs, users } from "@/lib/db/schema";
+import { scCallLog, syncLogs } from "@/lib/db/schema";
 import { sendScCreditsExhaustedEmail } from "@/lib/email";
+import { ALERT_RECIPIENTS } from "@/lib/services/alert-recipients";
 
 const LOOKBACK_MINUTES = 60;
 const ALERT_DEDUPE_HOURS = 4;
@@ -111,12 +112,13 @@ export async function getScCreditsExhaustionState(): Promise<ScCreditsExhaustion
  *
  * Dedupe state lives in `sync_logs` with `sync_type='sc-credits-alert'`.
  * Each successful send writes one row; the next tick reads the latest
- * row and skips if it's recent. Recipients = users opted into the daily
- * scorecard email (existing admin notification list).
+ * row and skips if it's recent. Recipients are the explicit operator
+ * list (`ALERT_RECIPIENTS`) — credit exhaustion blocks the workflow and
+ * needs to land regardless of any per-user opt-in.
  */
 export async function maybeAlertScCreditsExhausted(): Promise<{
   sent: number;
-  reason: "no_alert_needed" | "deduped" | "no_recipients" | "sent";
+  reason: "no_alert_needed" | "deduped" | "sent";
   state: ScCreditsExhaustionState;
 }> {
   const state = await getScCreditsExhaustionState();
@@ -139,19 +141,11 @@ export async function maybeAlertScCreditsExhausted(): Promise<{
     return { sent: 0, reason: "deduped", state };
   }
 
-  const recipients = await db
-    .select({ email: users.email })
-    .from(users)
-    .where(eq(users.dailyScorecardEmailEnabled, true));
-  if (recipients.length === 0) {
-    return { sent: 0, reason: "no_recipients", state };
-  }
-
   let sent = 0;
-  for (const r of recipients) {
+  for (const to of ALERT_RECIPIENTS) {
     try {
       await sendScCreditsExhaustedEmail({
-        to: r.email,
+        to,
         failedCount: state.failedCount,
         since: state.sinceIso ? new Date(state.sinceIso) : null,
         sampleError: state.sampleError ?? "Out of credits",

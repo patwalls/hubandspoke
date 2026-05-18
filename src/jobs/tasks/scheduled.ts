@@ -15,6 +15,7 @@ import { selectDispatcherCandidates } from "@/lib/services/hook-extract/dispatch
 import { selectExtractPosterCandidates } from "./extract-poster";
 import type { ExtractPosterPayload } from "./extract-poster";
 import { maybeAlertScCreditsExhausted } from "@/lib/services/sc-credits-watch";
+import { maybeAlertDescriptCreditsExhausted } from "@/lib/services/descript-credits-watch";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
 import { sendDailyScorecardEmail } from "@/lib/email";
@@ -286,6 +287,31 @@ export const scCreditsWatchTask: Task = async (_payload, helpers) => {
   } catch (err) {
     helpers.logger.error(
       `sc-credits-watch failed (${Date.now() - start}ms): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    throw err;
+  }
+};
+
+/**
+ * Watchdog for Descript AI-credit exhaustion. Mirrors the SC watcher
+ * but scans `graphile_worker.jobs.last_error` for "Insufficient AI
+ * credits" on the descript-* task family. Same 4h email dedupe via
+ * `sync_logs.sync_type='descript-credits-alert'`. Drives the dashboard
+ * banner indirectly via the shared detection helper.
+ */
+export const descriptCreditsWatchTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("descript-credits-watch start");
+  try {
+    const result = await maybeAlertDescriptCreditsExhausted();
+    helpers.logger.info(
+      `descript-credits-watch ${result.reason} sent=${result.sent} failedCount=${result.state.failedCount} (${Date.now() - start}ms)`,
+    );
+  } catch (err) {
+    helpers.logger.error(
+      `descript-credits-watch failed (${Date.now() - start}ms): ${
         err instanceof Error ? err.message : String(err)
       }`,
     );

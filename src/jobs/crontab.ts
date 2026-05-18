@@ -34,4 +34,5 @@ export const CRONTAB = `
 0 17 * * 1 account-refresh-sweep
 0 13 * * * daily-scorecard-email
 */15 * * * * sc-credits-watch
+*/15 * * * * descript-credits-watch
 `.trim();

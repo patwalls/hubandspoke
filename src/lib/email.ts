@@ -247,6 +247,46 @@ export async function sendDailyScorecardEmail(opts: {
   });
 }
 
+export async function sendDescriptCreditsExhaustedEmail(opts: {
+  to: string;
+  failedCount: number;
+  since: Date | null;
+  sampleError: string;
+}) {
+  const sinceText = opts.since
+    ? `since ${opts.since.toLocaleString()} UTC`
+    : "in the last hour";
+  const subject = "[Hub & Spoke] Descript AI credits exhausted";
+  const lines = [
+    "Heads up — Descript is rejecting our agent calls because the AI credit budget is out:",
+    "",
+    `> ${opts.sampleError}`,
+    "",
+    `${opts.failedCount} Descript job attempt${opts.failedCount === 1 ? "" : "s"} ${sinceText}. Until you top up, every cross-post, repost, and clip-promotion that needs a new Descript composition will sit stuck in the queue — and the affected detail pages will show "Insufficient AI credits" in the Descript Status popover.`,
+    "",
+    "Top up here: https://web.descript.com/settings/billing",
+    "",
+    "Once credits are back the queued jobs retry automatically — graphile-worker's exponential backoff caps at 60 min, so the longest-stuck job clears within an hour with no manual rerun needed.",
+    "",
+    "— Hub & Spoke",
+  ];
+  return getClient().sendEmail({
+    From: from,
+    To: opts.to,
+    Subject: subject,
+    TextBody: lines.join("\n"),
+    HtmlBody: `
+      <p>Heads up — Descript is rejecting our agent calls because the AI credit budget is out:</p>
+      <blockquote style="margin:0 0 12px;padding:8px 12px;border-left:3px solid #dc2626;background:#fef2f2;color:#991b1b;font-family:ui-monospace,Menlo,monospace;font-size:12px;">${opts.sampleError.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</blockquote>
+      <p><strong>${opts.failedCount}</strong> Descript job attempt${opts.failedCount === 1 ? "" : "s"} ${sinceText}. Until you top up, every cross-post, repost, and clip-promotion that needs a new Descript composition will sit stuck in the queue — and the affected detail pages will show "Insufficient AI credits" in the Descript Status popover.</p>
+      <p><a href="https://web.descript.com/settings/billing" style="background:#dc2626;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Top up Descript</a></p>
+      <p style="color:#666;font-size:12px;">Once credits are back the queued jobs retry automatically — graphile-worker's exponential backoff caps at 60 min, so the longest-stuck job clears within an hour with no manual rerun needed.</p>
+      <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
+    `,
+    MessageStream: "outbound",
+  });
+}
+
 export async function sendScCreditsExhaustedEmail(opts: {
   to: string;
   failedCount: number;

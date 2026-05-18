@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { eq } from "drizzle-orm";
 import { DashboardNav, SectionTabs } from "@/components/dashboard/nav";
 import { ScCreditsBanner } from "@/components/dashboard/sc-credits-banner";
+import { DescriptCreditsBanner } from "@/components/dashboard/descript-credits-banner";
 import { SentryUser } from "@/components/sentry-user";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
@@ -77,6 +78,7 @@ export default async function DashboardLayout({
           <SectionTabs brands={brands} defaultBrand={defaultBrand} />
         </div>
         <ScCreditsBanner />
+        <DescriptCreditsBanner />
         {children}
       </main>
       <Toaster position="bottom-right" richColors closeButton />

@@ -31,7 +31,8 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   (live)     cross-post candidate queue → GET /api/cross-post-queue, no scheduled job — runs on every page load of /[brand]/queue Cross-post tab
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
   13:00      daily-scorecard-email → Postmark (per opted-in user). 9am EDT / 8am EST in winter.
-  */15 min   sc-credits-watch → email opted-in users when SC returns HTTP 402 (deduped 4h)
+  */15 min   sc-credits-watch       → email Pat + Sam when SC returns HTTP 402 (deduped 4h)
+  */15 min   descript-credits-watch → email Pat + Sam when Descript jobs hit "Insufficient AI credits" (deduped 4h)
 
 USER / API ENTRY POINTS
   POST /api/accounts/[id]/refresh?mode=async              → account-refresh
@@ -636,12 +637,15 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Trigger:** cron `*/15 * * * *` (every 15 minutes).
 - **Files:** `src/jobs/tasks/scheduled.ts` (`scCreditsWatchTask`),
   `src/lib/services/sc-credits-watch.ts` (detection + dedupe),
-  `src/lib/email.ts` (`sendScCreditsExhaustedEmail`)
+  `src/lib/email.ts` (`sendScCreditsExhaustedEmail`),
+  `src/lib/services/alert-recipients.ts` (`ALERT_RECIPIENTS`)
 - **Inputs:** `sc_call_log` rows in the last hour where `ok=false` and
   notes match `%out of credits%` or `%(402)%`.
 - **Outputs:**
-  - Email to every `daily_scorecard_email_enabled` user (same admin
-    notification list as the daily scorecard).
+  - Email to every address in `ALERT_RECIPIENTS` (Pat + Sam). Updated
+    2026-05-18 from the prior `daily_scorecard_email_enabled` opt-in
+    list — credit-exhaustion blocks the workflow and needs to reach the
+    operators who can act on it regardless of any per-user opt-in.
   - One `sync_logs` row with `sync_type='sc-credits-alert'` per send for
     dedupe — the next 4 hours of ticks read this and skip emailing.
   - Drives the dashboard banner indirectly: `/api/sc-credits-status`
@@ -653,6 +657,34 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   the user-facing surface (instant visibility); the cron's only job is
   to send one Postmark on state transition, where 15-min granularity is
   fine and avoids hammering Postmark on flapping.
+
+### `descript-credits-watch` — Descript AI-credit exhaustion alert
+- **Trigger:** cron `*/15 * * * *` (every 15 minutes). Added 2026-05-18.
+- **Files:** `src/jobs/tasks/scheduled.ts` (`descriptCreditsWatchTask`),
+  `src/lib/services/descript-credits-watch.ts` (detection + dedupe),
+  `src/lib/email.ts` (`sendDescriptCreditsExhaustedEmail`),
+  `src/lib/services/alert-recipients.ts`
+- **Inputs:** `graphile_worker.jobs` rows updated in the last hour where
+  `task_identifier` is one of `descript-clip-resolve`,
+  `descript-derivative-create`, `descript-publish-and-archive`, or
+  `clip-idea-precise-cut`, AND `last_error` matches
+  `%Insufficient AI credits%` or `%Out of AI credits%`.
+- **Outputs:**
+  - Email to `ALERT_RECIPIENTS` (Pat + Sam) — same fixed list the SC
+    watcher uses.
+  - One `sync_logs` row with `sync_type='descript-credits-alert'` per
+    send for dedupe — the next 4 hours of ticks skip emailing.
+  - Drives the dashboard banner indirectly: `/api/descript-credits-status`
+    reads the same detection helper and `<DescriptCreditsBanner>`
+    polls it every 60s on every dashboard page.
+- **Downstream:** none. The banner auto-clears within ~1 minute of the
+  first Descript job retrying successfully (a successful job leaves the
+  queue → row disappears from the view → count drops to zero).
+- **Why graphile_worker.jobs and not a dedicated descript_call_log:**
+  there's no Descript-side call log table today and standing one up
+  just for this alarm would be over-engineered. The queue view already
+  carries the upstream's verbatim error in `last_error` and tracks
+  `updated_at` on every retry, which is the auto-resolve signal.
 
 ---
 
