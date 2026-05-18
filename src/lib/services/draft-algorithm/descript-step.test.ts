@@ -75,4 +75,39 @@ describe("buildDerivativeDescriptPrompt", () => {
     expect(out).toMatch(/Create a NEW composition/);
     expect(out).toMatch(/do not modify the source composition/);
   });
+
+  it("forbids mid-sentence cuts and silent no-ops", () => {
+    // Two real failure modes observed on prod runs:
+    //   1. Underlord ending the clip mid-sentence ("…and that's why we"); the
+    //      prompt now demands the trim end on sentence-ending punctuation.
+    //   2. Underlord silently returning the source composition's id when the
+    //      Skill's segment description is vague — applying only the
+    //      filler/silence cleanup. The prompt now demands a one-line error
+    //      reply instead of a no-op copy.
+    // If these guarantees ever get loosened the regression is invisible
+    // until a clip ships looking wrong, so freeze them here.
+    const out = buildDerivativeDescriptPrompt({
+      skill: "clip the intro.",
+      compositionName: "x",
+    });
+    expect(out).toMatch(/sentence-ending punctuation/i);
+    expect(out).toMatch(/Do NOT begin mid-sentence/i);
+    expect(out).toMatch(/strict subset/i);
+    expect(out).toMatch(/Do NOT copy the source as a fallback/i);
+  });
+
+  it("tells the agent the composition name is internal — not a title overlay", () => {
+    // Composition names include the production_item_id in brackets for
+    // editor lookup. A layout pack that picks up the composition name as
+    // the title-card text would render `[5b94...]` into the MP4. The
+    // prompt now explicitly tells Underlord the name is internal-only
+    // and title text should come from the Skill (typically a hook
+    // placeholder the Skill author sets).
+    const out = buildDerivativeDescriptPrompt({
+      skill: "Anything.",
+      compositionName: "Some title [5b94633a-e1bf-49da-926e-9d53d1e8c208]",
+    });
+    expect(out).toMatch(/internal lookup key/i);
+    expect(out).toMatch(/do NOT render it as a visible title overlay/i);
+  });
 });

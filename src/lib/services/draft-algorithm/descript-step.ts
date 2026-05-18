@@ -319,12 +319,28 @@ export function buildDerivativeDescriptPrompt(args: {
     args.hook != null
       ? substituteFormatPrompt(args.skill, { hook: args.hook })
       : args.skill;
+  // The prompt is opinionated for a reason: Underlord otherwise tends to
+  // (a) silently no-op when the Skill's segment description is vague —
+  // returning the source composition's id and applying only the
+  // filler/silence cleanup — and (b) end clips mid-sentence because
+  // there's no explicit "land on punctuation" rule. The numbered steps
+  // and the bolded boundary rules below are belt-and-suspenders against
+  // both failure modes, observed on real prod runs.
   return [
-    "You are producing a short-form vertical clip from this video. Follow these instructions exactly.",
+    "You are producing a short-form vertical clip from a long-form source video. Follow these instructions exactly.",
     "",
-    `1. Create a NEW composition named "${safeName}" — do not modify the source composition. Read the transcript to identify the segment described in the instructions below.`,
+    "1. Create a NEW composition — do not modify the source composition. Do not return the source composition's id.",
+    `   Name the new composition exactly: "${safeName}". This name is an internal lookup key for editors; do NOT render it as a visible title overlay or title-card text. Title / hook overlays (if the layout pack uses one) should come from the format-specific instructions below.`,
     "",
-    "2. Apply the following format-specific instructions to the new composition:",
+    "2. Read the source composition's transcript end-to-end, then identify the contiguous segment described in the format-specific instructions.",
+    "",
+    "3. Trim the new composition to that segment. The trim MUST satisfy all of these:",
+    "   - STRICT SUBSET: the new composition is strictly shorter than the source, with both endpoints inside the source's timeline.",
+    "   - CLEAN START: begin on the FIRST word of a natural sentence boundary (a sentence-starting cap or a speaker turn). Do NOT begin mid-sentence.",
+    "   - CLEAN END: end on the LAST word of a sentence-ending punctuation mark (period, question mark, or exclamation point). Do NOT end mid-sentence, mid-clause, or on a trailing filler word.",
+    "   - NO-OP REFUSAL: if you cannot confidently identify the requested segment, REPLY with a one-line error explanation. Do NOT copy the source as a fallback.",
+    "",
+    "4. Apply the following format-specific instructions to the trimmed composition:",
     "",
     renderedSkill,
     "",
