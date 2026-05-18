@@ -10,12 +10,7 @@ import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
 import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { seedRepostContent } from "@/lib/services/repost-seed";
 import { recordItemCreated } from "@/lib/services/item-created";
-import {
-  aspectMatchesTarget,
-  checkCrossPostReadiness,
-  checkRepostReadiness,
-  loadPillarForSource,
-} from "@/lib/services/descript-derivative";
+import { checkRepostReadiness } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { isNotionAuthoritative } from "@/lib/platform";
@@ -184,29 +179,26 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // Same-aspect cross-post (e.g. IG Reel → TikTok, both 9:16) is the
-  // repost path in disguise: no re-aspecting, no anchor-in-pillar search,
-  // no transcript requirement. The source's already-cropped media IS the
-  // correct material to re-air on the new channel. When aspects differ
-  // (e.g. IG Reel → IG Post square) the legacy pillar-anchored flow runs.
-  const sameAspect = aspectMatchesTarget(source.postType, targetPostType);
-
-  // Hard gate: refuse upfront with an actionable reason rather than
-  // queuing a job that throws blocked:* two passes later. Skipped when
+  // Cross-post = "post this same content on another channel." The source's
+  // own media (or own Descript composition) IS the cross-post material —
+  // re-aspecting from a pillar transcript was over-engineering for a niche
+  // re-clip workflow that almost no one runs. Same gate as the repost
+  // route: needs source's own composition OR own archived media. The
+  // pre-enrichment step above (`enrichSingleItem(..., { withMedia: true,
+  // force: true })`) usually backfills mediaS3Key for video-bearing posts
+  // before this fires — `needs_source_media` is the residual case where
+  // enrichment genuinely couldn't find the video. Skipped when
   // `manual: true` — the operator has opted to bypass the automation.
   if (!manual) {
-    const readiness = sameAspect
-      ? checkRepostReadiness(source)
-      : await checkCrossPostReadiness(source, await loadPillarForSource(source));
+    const readiness = checkRepostReadiness(source);
     if (!readiness.ok) {
-      const message =
-        readiness.reason === "needs_transcript"
-          ? "Cross-post needs a Whisper transcript on both the source and the pillar (the new flow anchors the source's spoken segment in the pillar's transcript before re-aspecting). Run transcription on the missing one, then retry."
-          : readiness.reason === "needs_source_media"
-            ? "Cross-post needs the source's archived video — enrichment couldn't find or download it. Re-run enrichment, or use \"I'll do it manually\" to upload yourself."
-            : "No Descript-able media available. Cross-post needs the pillar's source video (or, when there's no upstream pillar, the source's own video). The Reel's exported media isn't usable — it's already cropped to its final aspect.";
       return NextResponse.json(
-        { error: message, reason: readiness.reason, detail: readiness.detail },
+        {
+          error:
+            "Cross-post needs the source's archived video — enrichment couldn't find or download it. Re-run enrichment, or use \"I'll do it manually\" to upload yourself.",
+          reason: readiness.reason,
+          detail: readiness.detail,
+        },
         { status: 400 },
       );
     }
@@ -371,23 +363,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
-  // Kick off the Descript composition copy. This is NOT fire-and-forget:
-  // the user picked this cross-post because the source has Descript-able
-  // media (we gated above), so they expect Descript work to happen. If the
-  // queue is down we surface that rather than silently dropping it.
+  // Kick off the Descript composition copy. NOT fire-and-forget: we just
+  // gated on the source having Descript-able media, so the user expects
+  // Descript work to happen — if the queue is down we surface it.
   //
-  // Skipped when `manual: true` — operator is taking the upload over
-  // themselves and doesn't want a Descript composition prepped. The row
-  // exists in the workflow board for them to attach media to manually.
+  // Always `mode: "repost"` — same machinery as the same-platform repost
+  // route. Task duplicates from the source's own composition (or cold-
+  // imports the source's archived media + duplicates that seed). No anchor
+  // search, no Cross Post Rules, pillar ignored even when present. The
+  // task's `mode: "cross-post"` (pillar-anchor + re-aspect) branch stays
+  // in the code for legacy in-queue jobs predating the mode field, but no
+  // live route enqueues it anymore.
   //
-  // Same-aspect cross-posts use mode="repost" so the task takes the
-  // source-as-pillar / no-anchor / no-cross-post-rules branch — exactly
-  // the same machinery that drives a same-platform repost.
+  // Skipped when `manual: true` — operator is taking the upload over and
+  // doesn't want a Descript composition prepped.
   if (!manual) {
     await enqueue("descript-derivative-create", {
       derivativeItemId: created.id,
       sourceItemId: source.id,
-      mode: sameAspect ? "repost" : "cross-post",
+      mode: "repost",
     });
   }
 

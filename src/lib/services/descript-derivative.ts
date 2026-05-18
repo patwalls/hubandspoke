@@ -3,31 +3,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { createDescriptProjectFromUrl } from "@/lib/descript";
-import { PLATFORM_MEDIA_RULES } from "@/lib/platform-media-rules";
-import type { PostType } from "@/lib/platform-field-schemas";
 import { getPresignedGetUrl } from "@/lib/s3";
-
-/**
- * True when source and target post types have the same fixed simulator
- * aspect ratio (e.g. instagram_reel + tiktok + instagram_story are all 9:16).
- * Drives the "skip the Descript anchor-in-pillar dance" shortcut on
- * cross-post: when nothing has to be re-aspected, the source's already-
- * cropped media IS the correct material — exactly the repost path.
- *
- * Conservative: when either side has `aspectClass: null` (no fixed
- * simulator aspect — x, linkedin, youtube_*, newsletter, threads) we
- * return false so the legacy pillar-anchored flow runs. Two nulls do NOT
- * count as a match; that would shortcut cross-aspect pairs.
- */
-export function aspectMatchesTarget(
-  sourcePostType: string | null,
-  targetPostType: string | null,
-): boolean {
-  if (!sourcePostType || !targetPostType) return false;
-  const src = PLATFORM_MEDIA_RULES[sourcePostType as PostType]?.aspectClass;
-  const tgt = PLATFORM_MEDIA_RULES[targetPostType as PostType]?.aspectClass;
-  return src !== null && tgt !== null && src === tgt;
-}
 
 /** Minimal shape of the fields hasDescriptableMedia / coldImportPillar inspect. */
 export interface DescriptableSource {
@@ -195,9 +171,16 @@ export type CrossPostReadiness =
 /**
  * Stronger gate than `hasDescriptableMedia` — also requires word-level
  * Whisper transcripts on both ends when the task would have to anchor
- * the source's segment in the target's transcript. Used by the cross-post
- * and repost routes to refuse upfront instead of creating a row + queuing
- * a job that will throw `blocked:needs_transcript:` two passes later.
+ * the source's segment in the target's transcript.
+ *
+ * **No live route calls this as of the cross-post algorithm rework
+ * (2026-05-18).** Cross-post and repost both gate on `checkRepostReadiness`
+ * (source's own media is the cross-post material — re-aspecting from a
+ * pillar transcript was over-engineering for a niche re-clip workflow).
+ * Kept exported as the implementation behind `descript-derivative-create`'s
+ * legacy `mode: "cross-post"` branch (which still runs for in-queue jobs
+ * predating the `mode` field) and a possible future "Re-clip from pillar"
+ * action that would actually need the pillar-anchored cut.
  *
  * Decisions:
  *   - Source has its own composition (Case 1 in derivative-create) → OK,

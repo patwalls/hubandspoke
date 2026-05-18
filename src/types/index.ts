@@ -112,18 +112,16 @@ export interface ProductionItem {
   /** Presigned GET URL for the primary archived media (`mediaS3Key`). */
   mediaUrl?: string | null;
   /** Server-computed: whether the cross-post action is available. False
-   *  when there's nothing Descript-able to copy (no own composition, no
-   *  own media, no pillar seed, no pillar media). UI uses this to disable
-   *  the cross-post button. */
+   *  when the source has neither its own Descript composition nor its own
+   *  archived media. UI uses this to disable the cross-post button. */
   canCrossPost?: boolean;
   /** Server-computed: whether the repost action is available. Same gate
-   *  as `canCrossPost` — both flows duplicate a Descript composition. */
+   *  as `canCrossPost` — both duplicate from the source's own material. */
   canRepost?: boolean;
-  /** When `canCrossPost === false`, the specific reason: needs the
-   *  pillar's archived video, or needs Whisper word-level transcripts.
-   *  Powers the dropdown tooltip's per-reason copy. Null when canCrossPost
-   *  is true. */
-  crossPostBlockedReason?: "needs_pillar_media" | "needs_transcript" | null;
+  /** When `canCrossPost === false`, the specific reason. Today only one
+   *  value: the source has no own composition and no archived media,
+   *  usually because enrichment couldn't find or download the original. */
+  crossPostBlockedReason?: "needs_source_media" | null;
   description?: string | null;
   contentBody?: string | null;
   contentBodyFetchedAt?: string | null;

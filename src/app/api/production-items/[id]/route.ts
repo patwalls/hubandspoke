@@ -21,10 +21,7 @@ import {
 import { resolveSchemaForPlatforms } from "@/lib/platform-field-schemas";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { getChannelsForFormats } from "@/lib/format-channels";
-import {
-  checkCrossPostReadiness,
-  loadPillarForSource,
-} from "@/lib/services/descript-derivative";
+import { checkRepostReadiness } from "@/lib/services/descript-derivative";
 
 const POSTER_URL_TTL_SECONDS = 60 * 60;
 
@@ -630,13 +627,12 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       joinedAccount = row ?? null;
     }
 
-    // Whether cross-post / repost can run for this item. Same readiness
-    // check the routes use — covers media AND word-level transcripts on
-    // both ends. Mirroring it here lets the UI disable the buttons (and
-    // surface the specific reason in the tooltip) instead of letting the
-    // user click and get rejected.
-    const descriptablePillar = await loadPillarForSource(item);
-    const readiness = await checkCrossPostReadiness(item, descriptablePillar);
+    // Whether cross-post / repost can run for this item. Same gate both
+    // routes now use — needs the source's own composition or own archived
+    // media. Mirroring it here lets the UI disable the buttons (and
+    // surface the reason in the tooltip) instead of letting the user
+    // click through and get rejected.
+    const readiness = checkRepostReadiness(item);
     const canDuplicate = readiness.ok;
     const blockedReason = readiness.ok ? null : readiness.reason;
 

@@ -781,8 +781,8 @@ export function CrossPostTriageDialog({
               )}
             </ul>
             <p className="text-[12px] text-amber-900/80">
-              Two options: run transcription / enrichment and retry, or skip
-              the automation and upload manually.
+              Two options: re-run enrichment on the source so it has an
+              archived video, or skip the automation and upload manually.
             </p>
             <button
               type="button"
