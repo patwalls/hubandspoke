@@ -557,17 +557,17 @@ function ShortsPreview({
       className="relative mx-auto w-full max-w-[320px] rounded-xl bg-black text-white overflow-hidden flex flex-col shadow-lg"
       style={{ aspectRatio: "9 / 16" }}
     >
-      {/* Hook pinned to top. Video fills the middle (flex-1 + items-center).
-          Caption and reaction rail sit absolute at the bottom so they overlay
-          the video like a real Reel. Parent is `relative` so the absolute
-          children anchor inside the canvas, not the dialog. */}
-      <div className="px-8 pt-3 z-10">
-        <p className="text-[15px] font-extrabold leading-tight line-clamp-3 text-center">
+      {/* Mirrors the final ReelsLayout: hook bar at top → video at its
+          natural 16:9 ratio → caption directly under it. The remaining
+          black space below is intentional — that's where the reaction
+          rail sits, matching how a published Short looks. */}
+      <div className="px-4 pt-4 pb-3">
+        <p className="text-[17px] font-extrabold leading-[1.15] line-clamp-3 text-center">
           {hook}
         </p>
       </div>
 
-      <div className="flex-1 flex items-center justify-center min-h-0">
+      <div className="w-full bg-black">
         {preview?.videoUrl ? (
           isAudio ? (
             <audio
@@ -584,18 +584,21 @@ function ShortsPreview({
               controls
               preload="metadata"
               playsInline
-              className="h-full w-full bg-black object-contain"
+              className="block w-full bg-black"
             />
           )
         ) : (
-          <div className="text-[11px] text-white/50">
+          <div
+            className="flex w-full items-center justify-center text-[11px] text-white/50"
+            style={{ aspectRatio: "16 / 9" }}
+          >
             {preview === null ? "Loading preview…" : "No preview available"}
           </div>
         )}
       </div>
 
       {captionText && (
-        <div className="absolute inset-x-0 bottom-14 px-8 text-center pointer-events-none">
+        <div className="px-4 pt-3 text-center">
           <p className="text-[13px] font-semibold leading-snug line-clamp-3 drop-shadow-lg">
             {captionText}
           </p>
