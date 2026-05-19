@@ -124,12 +124,17 @@ export const PLATFORM_MEDIA_RULES: Record<PostType, PlatformMediaRule> = {
     aspectClass: null,
   },
   youtube_community: {
-    mode: "none",
-    maxCount: 0,
-    allowedKinds: [],
-    accept: "",
-    addLabel: "",
-    replaceLabel: "",
+    // YT Community supports text + image posts (up to 4 photos in a
+    // multi-image post on web; mobile shows a single hero with swipe).
+    // Video is NOT supported on Community posts — those land as Shorts
+    // or full uploads. The simulator carries a defensive warning when
+    // a video slide slips through from a cross-post seed.
+    mode: "photos-or-video",
+    maxCount: 4,
+    allowedKinds: ["image"],
+    accept: "image/jpeg,image/png,image/gif,image/webp",
+    addLabel: "Add photo",
+    replaceLabel: "Replace photo",
     aspectClass: null,
   },
   newsletter: {
