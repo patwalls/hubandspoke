@@ -1558,6 +1558,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         }
         setDraft(json.draft as DraftRow);
         setFieldSaves((prev) => ({ ...prev, [fieldKey]: "saved" }));
+        // Surface the edit in the activity feed without a page reload.
+        // The PUT route's transaction writes a `content_changed` event in
+        // the same tx as the draft update, so by the time we get here the
+        // event row exists — a refetch picks it up immediately. Mirrors
+        // the bump in `persistField` for top-level production_item edits.
+        setActivityRefreshKey((k) => k + 1);
       } catch (err) {
         setFieldSaves((prev) => ({ ...prev, [fieldKey]: "error" }));
         setFieldErrors((prev) => ({
