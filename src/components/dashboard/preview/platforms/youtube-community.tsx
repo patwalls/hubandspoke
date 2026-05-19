@@ -57,6 +57,9 @@ export function YouTubeCommunitySimulator({
       {({ slides: enrichedSlides, placeholders, openPicker, canAddMore }) => {
         const enriched = enrichedSlides[0];
         const totalSlides = enrichedSlides.length + placeholders.length;
+        // Render the media slot whenever a slide OR an in-flight upload
+        // exists — placeholders should be visible during first upload.
+        const showMediaSlot = hasMedia || placeholders.length > 0;
         return (
           <div
             className="mx-auto w-full max-w-[640px] rounded-xl border border-[#e5e5e5] bg-white px-4 py-4 text-[#0f0f0f]"
@@ -91,7 +94,7 @@ export function YouTubeCommunitySimulator({
               />
             </div>
 
-            {hasMedia && totalSlides > 1 ? (
+            {showMediaSlot && totalSlides > 1 ? (
               // 2-4 photos. Multi-image Community posts swipe horizontally
               // on web/mobile; the shared carousel mirrors that shape. We
               // bias to 16:9 (YT's house aspect) so photos crop the same
@@ -104,7 +107,7 @@ export function YouTubeCommunitySimulator({
                   emptyState="Drop photos to add"
                 />
               </div>
-            ) : hasMedia ? (
+            ) : showMediaSlot ? (
               // Single image - keep the freeform `max-h-[520px]` look the
               // existing simulator used, so a tall portrait crop still
               // renders the way YT's feed does.

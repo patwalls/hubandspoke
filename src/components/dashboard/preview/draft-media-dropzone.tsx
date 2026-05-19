@@ -42,6 +42,57 @@ export interface PlaceholderSlide {
   id: string;
   kind: "image" | "video";
   state: "uploading" | "error";
+  /** Original file name — shown in the placeholder so the user can
+   *  recognize what they're uploading (especially useful for big videos
+   *  where the upload takes a while). */
+  fileName?: string;
+  /** Pretty-printed file size, e.g. "12.4 MB". Set at upload start. */
+  fileSizeLabel?: string;
+  /** Upload progress 0–100. `undefined` while we're still in the
+   *  presign / pre-PUT phase or after the PUT completes. */
+  progress?: number;
+  /** Error message when state==='error'. Shown under the file name. */
+  errorMessage?: string;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+/** PUT a file to a presigned S3 URL with progress reporting. fetch() can't
+ *  observe upload progress (only download), so we drop to XHR here. Resolves
+ *  on 2xx; rejects on network error or non-2xx HTTP. */
+function putToS3WithProgress(args: {
+  url: string;
+  file: File;
+  onProgress: (percent: number) => void;
+}): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", args.url, true);
+    xhr.setRequestHeader("Content-Type", args.file.type);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        args.onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        args.onProgress(100);
+        resolve();
+      } else {
+        reject(new Error(`S3 upload failed (HTTP ${xhr.status})`));
+      }
+    };
+    xhr.onerror = () =>
+      reject(new Error(`S3 upload failed (network error) for ${args.file.name}`));
+    xhr.onabort = () =>
+      reject(new Error(`S3 upload aborted for ${args.file.name}`));
+    xhr.send(args.file);
+  });
 }
 
 export interface SlideWithRemoveButton {
@@ -127,10 +178,11 @@ export function DraftMediaDropZone({
         }
       }
 
-      // Optimistic placeholders — one per file. Replaced on success.
+      // Optimistic placeholders — one per file. Carry the file name + size
+      // so the simulator's render slot is recognizable even before the S3
+      // URL exists (especially for big videos where the upload takes 30s+).
       const ids = accepted.map(
         () =>
-          // crypto.randomUUID exists in modern browsers; fall back just in case
           (typeof crypto !== "undefined" && "randomUUID" in crypto
             ? crypto.randomUUID()
             : `tmp-${Math.random().toString(36).slice(2)}`),
@@ -143,8 +195,24 @@ export function DraftMediaDropZone({
             | "image"
             | "video",
           state: "uploading" as const,
+          fileName: f.name,
+          fileSizeLabel: formatBytes(f.size),
+          progress: 0,
         })),
       ]);
+
+      // Top-level toast — guaranteed feedback even if a simulator forgets
+      // to render the placeholder slot. Updated as progress comes in,
+      // dismissed on completion / replaced with success or error.
+      const totalBytes = accepted.reduce((sum, f) => sum + f.size, 0);
+      const toastSubject =
+        accepted.length === 1
+          ? accepted[0].name
+          : `${accepted.length} files (${formatBytes(totalBytes)})`;
+      const toastId = toast.loading(`Uploading ${toastSubject}…`, {
+        description: "Don't close this tab — we'll let you know when it's done.",
+        duration: Infinity,
+      });
 
       try {
         // Step 1: presign
@@ -177,22 +245,44 @@ export function DraftMediaDropZone({
           throw new Error(presignJson.error || "Failed to start upload");
         }
 
-        // Step 2: PUT each file directly to S3
+        // Step 2: PUT each file directly to S3 with XHR-based progress.
+        // Per-file progress updates the placeholder; aggregate progress
+        // updates the toast description.
+        const perFileBytesUploaded = new Array(accepted.length).fill(0);
         await Promise.all(
-          accepted.map(async (file, i) => {
+          accepted.map((file, i) => {
             const slot = presignJson.files![i];
-            const putRes = await fetch(slot.uploadUrl, {
-              method: "PUT",
-              body: file,
-              headers: { "Content-Type": file.type },
+            return putToS3WithProgress({
+              url: slot.uploadUrl,
+              file,
+              onProgress: (percent) => {
+                perFileBytesUploaded[i] = Math.round((percent / 100) * file.size);
+                setPlaceholders((prev) =>
+                  prev.map((p) =>
+                    p.id === ids[i] ? { ...p, progress: percent } : p,
+                  ),
+                );
+                const uploadedTotal = perFileBytesUploaded.reduce(
+                  (a, b) => a + b,
+                  0,
+                );
+                const overall = Math.round((uploadedTotal / totalBytes) * 100);
+                toast.loading(`Uploading ${toastSubject}…`, {
+                  id: toastId,
+                  description: `${overall}% • ${formatBytes(uploadedTotal)} of ${formatBytes(totalBytes)}`,
+                  duration: Infinity,
+                });
+              },
             });
-            if (!putRes.ok) {
-              throw new Error(`S3 upload failed for ${file.name}`);
-            }
           }),
         );
 
         // Step 3: confirm + write rows
+        toast.loading(`Saving ${toastSubject}…`, {
+          id: toastId,
+          description: "Almost done — recording the upload.",
+          duration: Infinity,
+        });
         const confirmRes = await fetch(
           `/api/production-items/${itemId}/media`,
           {
@@ -218,13 +308,24 @@ export function DraftMediaDropZone({
 
         // Drop placeholders; refetch reseeds the simulator with the real rows.
         setPlaceholders((prev) => prev.filter((p) => !ids.includes(p.id)));
+        toast.success(
+          accepted.length === 1
+            ? `Uploaded ${accepted[0].name}`
+            : `Uploaded ${accepted.length} files`,
+          { id: toastId, duration: 4000 },
+        );
         onMediaMutated?.();
       } catch (err) {
         const message = err instanceof Error ? err.message : "Upload failed";
-        toast.error(message);
+        toast.error(`Upload failed: ${message}`, {
+          id: toastId,
+          duration: 10_000,
+        });
         setPlaceholders((prev) =>
           prev.map((p) =>
-            ids.includes(p.id) ? { ...p, state: "error" as const } : p,
+            ids.includes(p.id)
+              ? { ...p, state: "error" as const, errorMessage: message }
+              : p,
           ),
         );
         // Leave error placeholders in place so the user sees what failed;
@@ -415,19 +516,57 @@ export function DraftMediaDropZone({
 
 /**
  * Renderer for an in-flight or errored upload placeholder. Exported so the
- * simulator can drop these into its grid alongside real slides.
+ * simulator can drop these into its grid alongside real slides. Shows the
+ * file name, size, and live upload progress so large videos don't feel
+ * like a frozen UI.
  */
 export function PlaceholderSlideRender({
   placeholder,
 }: {
   placeholder: PlaceholderSlide;
 }) {
+  const isUploading = placeholder.state === "uploading";
+  const progress = placeholder.progress ?? 0;
   return (
-    <div className="relative flex h-full w-full items-center justify-center bg-muted/60">
-      {placeholder.state === "uploading" ? (
-        <Loader2Icon className="h-5 w-5 animate-spin text-muted-foreground" />
+    <div className="relative flex h-full w-full flex-col items-center justify-center gap-2 bg-muted/60 px-4 text-center">
+      {isUploading ? (
+        <>
+          <Loader2Icon className="h-6 w-6 animate-spin text-muted-foreground" />
+          {placeholder.fileName && (
+            <div className="flex flex-col gap-0.5">
+              <span className="line-clamp-1 text-xs font-medium text-foreground">
+                {placeholder.fileName}
+              </span>
+              {placeholder.fileSizeLabel && (
+                <span className="text-[10px] text-muted-foreground tabular-nums">
+                  {progress}% • {placeholder.fileSizeLabel}
+                </span>
+              )}
+            </div>
+          )}
+          <div className="h-1 w-full max-w-[160px] overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-[width] duration-200"
+              style={{ width: `${Math.max(2, progress)}%` }}
+            />
+          </div>
+        </>
       ) : (
-        <span className="text-xs font-medium text-destructive">Failed</span>
+        <>
+          <span className="text-xs font-semibold text-destructive">
+            Upload failed
+          </span>
+          {placeholder.fileName && (
+            <span className="line-clamp-1 text-[11px] text-muted-foreground">
+              {placeholder.fileName}
+            </span>
+          )}
+          {placeholder.errorMessage && (
+            <span className="line-clamp-2 text-[10px] text-destructive/80">
+              {placeholder.errorMessage}
+            </span>
+          )}
+        </>
       )}
     </div>
   );

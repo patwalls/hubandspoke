@@ -65,6 +65,11 @@ export function XSimulator({
       {({ slides: enrichedSlides, placeholders, openPicker, canAddMore }) => {
         const enriched = enrichedSlides[0];
         const totalSlides = enrichedSlides.length + placeholders.length;
+        // Render the media slot whenever a slide OR an in-flight upload
+        // exists. Gating only on `hasMedia` (slides.length) makes a
+        // first-time upload invisible until the row lands — for a 30s+
+        // video this looks like the click did nothing.
+        const showMediaSlot = hasMedia || placeholders.length > 0;
         return (
           <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3">
             <SocialEmbedHeader
@@ -93,7 +98,7 @@ export function XSimulator({
               placeholder="What's happening?"
             />
 
-            {hasMedia && totalSlides > 1 ? (
+            {showMediaSlot && totalSlides > 1 ? (
               // 2–4 photos. 16:9 wrapper so all slides crop the same way
               // x.com itself shows multi-photo as a 2/3/4-up grid; we use
               // a swipeable carousel here as a fidelity-vs-build tradeoff.
@@ -105,7 +110,7 @@ export function XSimulator({
                   emptyState="Drop photos to add"
                 />
               </div>
-            ) : hasMedia ? (
+            ) : showMediaSlot ? (
               <div className="group relative aspect-video w-full overflow-hidden rounded-lg border border-border bg-black">
                 {enriched?.slide.kind === "video" && enriched.slide.url ? (
                   <>

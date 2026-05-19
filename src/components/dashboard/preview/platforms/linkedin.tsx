@@ -63,6 +63,10 @@ export function LinkedInSimulator({
     >
       {({ slides: enrichedSlides, placeholders, openPicker, canAddMore }) => {
         const totalSlides = enrichedSlides.length + placeholders.length;
+        // Render the media slot whenever a slide OR an in-flight upload
+        // exists. Gating only on `hasMedia` (slides.length) makes a
+        // first-time upload invisible until the row lands.
+        const showMediaSlot = hasMedia || placeholders.length > 0;
         // Single-slide path renders inline so we can let `object-contain`
         // size the wrapper to the media's real aspect — `aspect-square`
         // would crop a portrait image. The shared carousel needs a
@@ -93,7 +97,7 @@ export function LinkedInSimulator({
               placeholder="What do you want to talk about?"
             />
 
-            {hasMedia && totalSlides > 1 ? (
+            {showMediaSlot && totalSlides > 1 ? (
               <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-black">
                 <MultiSlideCarousel
                   enrichedSlides={enrichedSlides}
@@ -102,7 +106,7 @@ export function LinkedInSimulator({
                   emptyState="Drop photos to add"
                 />
               </div>
-            ) : hasMedia ? (
+            ) : showMediaSlot ? (
               <div className="group relative w-full overflow-hidden rounded-lg border border-border bg-black">
                 {enriched?.slide.kind === "video" && enriched.slide.url ? (
                   <>

@@ -1594,11 +1594,19 @@ function MediaThumb({
   kind: "image" | "video";
   fallbackIcon: LucideIcon;
 }) {
-  const key = posterS3Key ?? s3Key;
-  if (!key) {
+  // Videos without a poster show the fallback icon — `<img src=…mp4>` is
+  // a broken-image icon in every browser. Posters are generated later by
+  // Descript publish / ffmpeg thumbnail flows; until then the s3Key is an
+  // MP4 we can't render as an image. Only images and videos-with-poster
+  // get the real thumb.
+  const imageKey = kind === "video" ? posterS3Key : (posterS3Key ?? s3Key);
+  if (!imageKey) {
     return (
-      <span className="inline-flex size-8 items-center justify-center rounded border border-border bg-muted text-muted-foreground">
+      <span className="relative inline-flex size-8 items-center justify-center rounded border border-border bg-muted text-muted-foreground">
         <FallbackIcon className="size-4" />
+        {kind === "video" && (
+          <VideoIcon className="absolute right-0 bottom-0 size-3 rounded-tl bg-black/60 p-0.5 text-white" />
+        )}
       </span>
     );
   }
@@ -1606,7 +1614,7 @@ function MediaThumb({
     <span className="relative inline-flex size-8 overflow-hidden rounded border border-border bg-muted">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={`/api/files/${encodeURIComponent(key)}`}
+        src={`/api/files/${encodeURIComponent(imageKey)}`}
         alt=""
         className="h-full w-full object-cover"
         loading="lazy"
