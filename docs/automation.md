@@ -43,9 +43,13 @@ USER / API ENTRY POINTS
   POST /api/production-items/[id]/repurpose               → draft-algorithm-run (auto-fire after insert)
   POST /api/production-items/[id]/repurpose               → canva-create-copy   (auto-fire when target.is_canva_format AND Skill has brand-template URL)
   POST /api/production-items/[id]/cross-post              → draft-algorithm-run (auto-fire after seed, any seeded target)
-  POST /api/production-items/[id]/cross-post              → descript-derivative-create mode=repost (composition copy; ALWAYS — source's own composition/media is the cross-post material, regardless of aspect. Gated on checkRepostReadiness; no transcript, no pillar anchor)
-  POST /api/production-items/[id]/cross-post  manual=true → (no job — operator opted to bypass automation; row created empty for manual upload)
-  POST /api/production-items/[id]/repost                  → descript-derivative-create mode=repost (composition copy; same gate as cross-post — both routes now share checkRepostReadiness)
+  POST /api/production-items/[id]/cross-post  manual=true → (no job — operator opted to bypass gate + automation; row created for manual upload)
+  POST /api/production-items/[id]/repost                  → (no Underlord job — see "Underlord usage tracking" below. Row inherits source media via seedRepostContent.)
+  # Removed 2026-05-18: cross-post + repost used to enqueue
+  # `descript-derivative-create`, which fires Underlord ($3.50/call) to
+  # duplicate the source composition. Burned $35 in 30 min from a short
+  # test session. Policy now: Underlord only fires on explicit clip-idea
+  # promote buttons (see /api/clip-ideas/[id]/create-in-descript*).
   POST /api/descript/clip-out                             → descript-clip-resolve  (format-detail quick-clip only as of 2026-05-02)
   POST /api/clip-ideas/[id]/triage (action=assign)        → draft-algorithm-run (auto-fire after promote)
   POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve + draft-algorithm-run (auto-fire)
@@ -869,8 +873,48 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - **Prompt caching:** `cache_control: { type: "ephemeral" }` markers on the system prompt and the format-stable preamble (target platform + field schema + `formatInstructions` + past captions). Transcript stays uncached because it's per-item. Regenerate within 5 minutes reads the cached prefix.
   - **Cost:** ~$0.03 per Opus call. Caching takes a chunk off the input tokens on Regenerate.
 
-### `descript-derivative-create` — copy a composition for cross-post / repost
-- **Trigger:** enqueued by `POST /api/production-items/[id]/cross-post` and `POST /api/production-items/[id]/repost` after the new derivative row is inserted. **Both routes always send `mode=repost`** (2026-05-18 rework): the source's own composition/media is the correct material to re-air on any target channel, regardless of aspect — re-aspecting from a pillar transcript was over-engineering for a niche re-clip workflow nobody actually runs. Each route hard-gates upfront on `checkRepostReadiness(source)` so reaching this task means the source has at least its own media. The task's `mode=cross-post` branch (pillar-anchored cut + Cross Post Rules re-aspect) remains in the code for any in-queue jobs predating the `mode` field and as the implementation for a possible future "Re-clip from pillar" action; no live route enqueues it. **Manual escape:** cross-post accepts `{ manual: true }` which bypasses the readiness gate AND skips this enqueue entirely; the row is created empty for the operator to attach media themselves. Surfaced in `cross-post-triage-dialog.tsx` as the "I'll do it manually" button on the inline gate-failure banner.
+### Underlord usage tracking (added 2026-05-18)
+
+Every `invokeDescriptAgent` call writes a row to `descript_agent_calls` BEFORE hitting Descript's API — so even calls that throw or get killed mid-flight leave a trace. Columns: `caller` (string tag, required), `project_id`, `production_item_id` (nullable), `prompt`, `descript_job_id`, `status` (`started` / `ok` / `failed`), `error_message`, `created_at`, `completed_at`. Indexed on `created_at` and `caller`.
+
+Diagnostic queries:
+
+```sql
+-- Who's firing right now?
+SELECT caller, count(*) FROM descript_agent_calls
+WHERE created_at > now() - interval '30 minutes'
+GROUP BY caller ORDER BY count DESC;
+
+-- Anything stuck in "started" longer than a minute? = process crash or hung call
+SELECT id, caller, project_id, created_at FROM descript_agent_calls
+WHERE status = 'started' AND created_at < now() - interval '1 minute';
+
+-- Recent failures
+SELECT caller, error_message, count(*) FROM descript_agent_calls
+WHERE status = 'failed' AND created_at > now() - interval '24 hours'
+GROUP BY caller, error_message ORDER BY count DESC;
+```
+
+**Global rate limit:** `assertUnderlordBudget` runs before every call; refuses with a thrown error when there are ≥10 calls in the last 10 minutes (override via `UNDERLORD_RATE_LIMIT_PER_10MIN`). Sized to cap worst-case burn around $35 — the spike that motivated this instrumentation. Raise it deliberately when you have a legitimate burst workflow.
+
+**Live callers** (all explicit user-action paths):
+
+- `clip-idea-promote-agent` — `POST /api/clip-ideas/[id]/create-in-descript`
+- `clip-idea-promote-full-video` — `POST /api/clip-ideas/[id]/create-in-descript-full`
+- `clip-idea-promote-precise-layout` — `POST /api/clip-ideas/[id]/create-in-descript-precise?ai=1` (post-import layout-pack phase only)
+- `legacy-descript-clip-out` — `POST /api/descript/clip-out`
+
+**Disabled callers** (kept in-tree behind kill switches for easy re-enable):
+
+- `draft-algorithm-descript-step` — gated off by `UNDERLORD_AUTO_FIRE_ENABLED = false` in `src/lib/services/draft-algorithm/descript-step.ts`. Used to fire on every derivative whose format Skill had `### Descript Clip & Pack Info`.
+- `descript-derivative-create-*` — task itself isn't enqueued by any live route, but the helper still lives in `src/jobs/tasks/descript-derivative-create.ts` for in-queue jobs predating commit `e61a6d9`.
+- `descript-clip-resolve-post-import` — the cold-chain post-import agent invoke. Removed from `src/jobs/tasks/descript-clip-resolve.ts`; the cold path now just stamps `descript_seed_composition_id` on the pillar and returns.
+
+Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` greps the relevant source files and fails CI if `enqueue("descript-derivative-create", …)` or `invokeDescriptAgent` is reintroduced in any of the disabled call sites.
+
+### `descript-derivative-create` — copy a composition for cross-post / repost (DISABLED 2026-05-18)
+- **Status:** No live route enqueues this task as of 2026-05-18. Kept in-tree for in-queue jobs predating commit `e61a6d9` and as the implementation for a possible future "Re-clip from pillar" action. Reading the rules below is only useful when re-enabling.
+- **Trigger (historical):** enqueued by `POST /api/production-items/[id]/cross-post` and `POST /api/production-items/[id]/repost` after the new derivative row is inserted. Each route hard-gated upfront on `checkRepostReadiness(source)`. **Manual escape (still live on cross-post):** `{ manual: true }` bypasses the readiness gate; the row is created empty for the operator to attach media themselves. Surfaced in `cross-post-triage-dialog.tsx` as the "I'll do it manually" button on the inline gate-failure banner.
 - **Files:** `src/jobs/tasks/descript-derivative-create.ts`, `src/lib/services/descript-derivative.ts` (helpers: `hasDescriptableMedia` / `hasDescriptableMediaForRepost`, `resolveImportTarget` / `resolveImportTargetForRepost`, `loadPillarForSource`, `coldImportPillar`)
 - **Inputs:** `{ derivativeItemId, sourceItemId, mode?: "repost" | "cross-post", attempt? }` — `mode` defaults to `cross-post` for back-compat with jobs enqueued before the field was added.
 - **Outputs:** Inserts a `repurpose_triggers` row tagged `descript_import_path='derivative-copy'`, enqueues `descript-clip-resolve` to poll the duplicate-composition job. The new composition_id is written to the derivative when the resolver fires.

@@ -582,6 +582,13 @@
       "when": 1778878385963,
       "tag": "0082_fancy_slapstick",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1779148832707,
+      "tag": "0083_unique_senator_kelly",
+      "breakpoints": true
     }
   ]
 }

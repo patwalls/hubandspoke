@@ -322,6 +322,8 @@ async function pollUploadOnce(
     const agent = await invokeDescriptAgent({
       projectId: row.descriptProjectId,
       prompt,
+      caller: "clip-idea-promote-precise-layout",
+      productionItemId: payload.derivativeItemId,
     });
     await db
       .update(repurposeTriggers)

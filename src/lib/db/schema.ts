@@ -835,6 +835,57 @@ export const repurposeTriggers = pgTable(
   ]
 );
 
+// One row per Descript Underlord agent call. Every `invokeDescriptAgent`
+// site MUST write a row here (the function is the only entry point, so
+// instrumenting it once covers everything). Underlord costs ~$1.50–$3.50
+// per call billed by Descript, so a runaway loop can burn dozens of
+// dollars in minutes. Added 2026-05-18 after a $35-in-30-minutes spike
+// caused by the cross-post / repost auto-fire we just disabled.
+//
+// `caller` is a string tag that identifies WHICH code path fired the
+// call — required, so the next spike can be triaged in one SQL query.
+// The pre-fetch INSERT is what makes that work: even if Descript times
+// out and the call throws, we still have a row.
+//
+// Use cases:
+//   - SELECT caller, count(*) FROM descript_agent_calls WHERE created_at > now() - interval '30 minutes' GROUP BY caller ORDER BY count DESC;
+//   - WHO is firing right now, and at what rate?
+//   - assertUnderlordBudget() reads this table for the in-process rate limit guard.
+export const descriptAgentCalls = pgTable(
+  "descript_agent_calls",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** Tag identifying the code path that fired this call. Required.
+     *  Examples: "clip-idea-promote-agent",
+     *  "clip-idea-promote-full-video", "legacy-descript-clip-out". */
+    caller: text("caller").notNull(),
+    projectId: text("project_id").notNull(),
+    /** Set when the call ties to a specific derivative. Nullable because
+     *  the legacy /api/descript/clip-out path operates on a source item
+     *  and doesn't always know the derivative id at call time. */
+    productionItemId: uuid("production_item_id").references(
+      () => productionItems.id,
+      { onDelete: "set null" },
+    ),
+    prompt: text("prompt").notNull(),
+    /** Descript's response job_id. Stamped on success; null if the call
+     *  threw before Descript returned. */
+    descriptJobId: text("descript_job_id"),
+    /** "started" | "ok" | "failed". `started` rows that never flip to
+     *  ok/failed indicate the process crashed mid-call. */
+    status: text("status").notNull().default("started"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_descript_agent_calls_created_at").on(table.createdAt),
+    index("idx_descript_agent_calls_caller").on(table.caller),
+  ],
+);
+
 // Rules driving the cross-post scanner: "when a published item on
 // `sourcePlatform` passes `viewThreshold` views, queue a cross-post idea
 // targeting `targetPlatform`." One row per (source → target) pair per brand.

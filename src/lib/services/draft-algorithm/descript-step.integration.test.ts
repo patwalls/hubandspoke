@@ -46,7 +46,62 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe("runDescriptStepForDerivative", () => {
+describe("runDescriptStepForDerivative — Underlord auto-fire disabled (2026-05-18)", () => {
+  it("returns skipped_underlord_disabled without invoking Underlord or enqueuing", async () => {
+    const agentSpy = vi
+      .spyOn(descriptApi, "invokeDescriptAgent")
+      .mockResolvedValue({
+        jobId: "should-not-fire",
+        projectId: "should-not-fire",
+        projectUrl: "should-not-fire",
+      });
+    const enqueueSpy = vi
+      .spyOn(enqueueMod, "enqueue")
+      .mockResolvedValue(undefined);
+
+    const format = await createTestFormat({
+      isClipDescriptFormat: true,
+      instructions: CLIP_INTRO_SKILL,
+    });
+    const pillar = await createTestProductionItem({
+      title: "Pillar with Descript",
+      format: "Business Breakdown",
+      sourceType: "original",
+      descriptProjectId: "proj-pillar-1",
+      descriptCompositionId: "comp-pillar-1",
+      mediaS3Bucket: "test-bucket",
+      mediaS3Key: "test/pillar.mp4",
+    });
+    const derivative = await createTestProductionItem({
+      title: "Share The BIG IDEA derivative",
+      format: format.name,
+      sourceType: "repurposed",
+      pillarContentItemId: pillar.id,
+    });
+
+    const result = await runDescriptStepForDerivative({
+      derivativeItemId: derivative.id,
+      pillarItemId: pillar.id,
+      formatId: format.id,
+      formatName: format.name,
+      formatSkill: CLIP_INTRO_SKILL,
+      compositionName: derivative.title!,
+      force: false,
+    });
+
+    expect(result.status).toBe("skipped_underlord_disabled");
+    expect(agentSpy).not.toHaveBeenCalled();
+    expect(enqueueSpy).not.toHaveBeenCalled();
+  });
+});
+
+// Legacy tests for the enabled behavior. The Descript step is currently
+// gated off by the `UNDERLORD_AUTO_FIRE_ENABLED` constant in
+// `descript-step.ts` (added 2026-05-18 after a $35-in-30-min burn). If
+// you flip the kill switch back on, also remove the `.skip` here to
+// validate the existing prompt-building / cold-import / re-trigger
+// behavior is unchanged.
+describe.skip("runDescriptStepForDerivative (enabled-path tests, skipped while kill switch is on)", () => {
   it("invokes Underlord and enqueues poller when pillar is in Descript", async () => {
     const agentSpy = vi
       .spyOn(descriptApi, "invokeDescriptAgent")
@@ -382,7 +437,7 @@ describe("buildDerivativeDescriptPrompt", () => {
   });
 });
 
-describe("runDescriptStepForDerivative — {{hook}} substitution", () => {
+describe.skip("runDescriptStepForDerivative — {{hook}} substitution (enabled-path, skipped while kill switch is on)", () => {
   it("generates a hook, persists it, and substitutes into the Descript prompt", async () => {
     const agentSpy = vi
       .spyOn(descriptApi, "invokeDescriptAgent")

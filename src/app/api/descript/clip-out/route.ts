@@ -101,6 +101,8 @@ export async function POST(request: NextRequest) {
       const result = await invokeDescriptAgent({
         projectId: item.descriptProjectId!,
         prompt: action.descriptPrompt,
+        caller: "legacy-descript-clip-out",
+        productionItemId: item.id,
       });
 
       let derivativeItemId: string | undefined;

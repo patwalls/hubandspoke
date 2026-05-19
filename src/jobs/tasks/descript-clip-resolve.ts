@@ -6,7 +6,6 @@ import {
   buildDescriptCompositionUrl,
   fetchDescriptJob,
   extractCompositionIdFromAgentResponse,
-  invokeDescriptAgent,
 } from "@/lib/descript";
 import { assertCompositionUnique } from "@/lib/services/descript-composition";
 import { recordToolAction } from "@/lib/services/content-events";
@@ -88,53 +87,22 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
     // non-import branch below writes the derivative composition + chains
     // publish-and-archive on the *next* stop.
     if (importMode && payload.postImportAgentPrompt && compositionId) {
+      // 2026-05-18: Underlord auto-fire kill switch. This branch fires
+      // Underlord automatically after a cold-import completes — it was
+      // the second half of the Draft Algorithm's Descript step. With the
+      // Descript step itself disabled in descript-step.ts, no live caller
+      // sets `postImportAgentPrompt` anymore, but the safety net belongs
+      // here too in case a stale in-queue job still carries one. Log +
+      // stamp the seed (so the pillar isn't wasted) and exit; the Underlord
+      // call does not happen.
       if (payload.pillarItemId) {
         await db
           .update(productionItems)
           .set({ descriptSeedCompositionId: compositionId })
           .where(eq(productionItems.id, payload.pillarItemId));
       }
-      // Need the project_id to invoke the agent. The pillar was stamped
-      // with it back in `runDescriptStepForDerivative` before we got here.
-      const [pillar] = await db
-        .select({
-          descriptProjectId: productionItems.descriptProjectId,
-        })
-        .from(productionItems)
-        .where(eq(productionItems.id, payload.pillarItemId ?? ""))
-        .limit(1);
-      if (!pillar?.descriptProjectId) {
-        throw new Error(
-          `descript-clip-resolve cold-chain: pillar ${payload.pillarItemId} has no descriptProjectId after import; cannot invoke agent`,
-        );
-      }
-      const agent = await invokeDescriptAgent({
-        projectId: pillar.descriptProjectId,
-        prompt: payload.postImportAgentPrompt,
-      });
-      // Repoint the trigger at the agent job. Compositin_id will be
-      // overwritten by the next stop's existing non-import path.
-      await db
-        .update(repurposeTriggers)
-        .set({
-          descriptJobId: agent.jobId,
-          descriptImportPath: "agent",
-          descriptCompositionId: null,
-        })
-        .where(eq(repurposeTriggers.id, payload.triggerId));
       helpers.logger.info(
-        `descript-clip-resolve cold-chain trigger=${payload.triggerId} pillar=${payload.pillarItemId} seed=${compositionId} agent_job=${agent.jobId}`,
-      );
-      await helpers.addJob(
-        "descript-clip-resolve",
-        {
-          triggerId: payload.triggerId,
-          jobId: agent.jobId,
-          derivativeItemId: payload.derivativeItemId,
-          pillarItemId: payload.pillarItemId,
-          deadlineAt: Date.now() + DEADLINE_MS,
-        },
-        { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+        `descript-clip-resolve cold-chain skipped post-import agent (Underlord auto-fire disabled) trigger=${payload.triggerId} pillar=${payload.pillarItemId} seed=${compositionId}`,
       );
       return;
     }

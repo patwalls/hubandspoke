@@ -1,6 +1,24 @@
+import { eq, gte, sql } from "drizzle-orm";
+
+import { db } from "@/lib/db";
+import { descriptAgentCalls } from "@/lib/db/schema";
 import { extractDescriptSection } from "@/lib/format-skill";
 
 const BASE_URL = "https://descriptapi.com/v1";
+
+/** Hard ceiling on Underlord calls per rolling 10-minute window across the
+ *  whole app. Override via `UNDERLORD_RATE_LIMIT_PER_10MIN` env. Default 10
+ *  caps worst-case burn around $35 (matches the spike that triggered this
+ *  instrumentation); raise it deliberately when you genuinely need bursty
+ *  workflows.
+ *
+ *  Why a global window rather than per-caller: the burn pattern we care
+ *  about is "everything fires at once" (cross-post loop, threshold-sweep
+ *  cascade). A per-caller limit lets a single misbehaving caller stay
+ *  under its own ceiling while collectively the system blows out. */
+const UNDERLORD_RATE_LIMIT_PER_10MIN = Number(
+  process.env.UNDERLORD_RATE_LIMIT_PER_10MIN ?? "10",
+);
 
 export const DEFAULT_CLIP_PROMPT = [
   "Create a short-form clip from this long-form video.",
@@ -280,6 +298,8 @@ export async function cutSegmentWithRules(args: {
   endSec: number;
   crossPostRules: string | null;
   targetPostType: string;
+  caller: string;
+  productionItemId?: string | null;
 }): Promise<{
   jobId: string;
   projectUrl: string;
@@ -313,6 +333,8 @@ export async function cutSegmentWithRules(args: {
   const result = await invokeDescriptAgent({
     projectId: args.projectId,
     prompt,
+    caller: args.caller,
+    productionItemId: args.productionItemId ?? null,
   });
   return { ...result, prompt };
 }
@@ -321,6 +343,8 @@ export async function duplicateDescriptComposition(args: {
   projectId: string;
   sourceCompositionId: string;
   newCompositionName: string;
+  caller: string;
+  productionItemId?: string | null;
 }): Promise<{ jobId: string; projectUrl: string; projectId: string; prompt: string }> {
   const safeName = args.newCompositionName.replace(/"/g, '\\"');
   const prompt = [
@@ -332,37 +356,108 @@ export async function duplicateDescriptComposition(args: {
     "for the name. Reply with the new compositionId in the form",
     'compositionId="<uuid>".',
   ].join(" ");
-  const result = await invokeDescriptAgent({ projectId: args.projectId, prompt });
+  const result = await invokeDescriptAgent({
+    projectId: args.projectId,
+    prompt,
+    caller: args.caller,
+    productionItemId: args.productionItemId ?? null,
+  });
   return { ...result, prompt };
+}
+
+/**
+ * Hard global rate limit on Underlord calls. Reads `descript_agent_calls`
+ * for the last 10 minutes and refuses if we're at the cap. Cheap query
+ * (indexed on created_at), runs before every agent call.
+ *
+ * The check is best-effort consistency, not strict — two simultaneous
+ * callers can race past the cap by 1. That's fine; the point is to stop
+ * a runaway loop fast, not to enforce exact accounting.
+ */
+async function assertUnderlordBudget(caller: string): Promise<void> {
+  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000);
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(descriptAgentCalls)
+    .where(gte(descriptAgentCalls.createdAt, tenMinAgo));
+  const recent = row?.count ?? 0;
+  if (recent >= UNDERLORD_RATE_LIMIT_PER_10MIN) {
+    throw new Error(
+      `Underlord rate limit hit: ${recent} calls in the last 10 minutes (cap ${UNDERLORD_RATE_LIMIT_PER_10MIN}). Caller "${caller}" refused. Raise UNDERLORD_RATE_LIMIT_PER_10MIN if this is legitimate, or check descript_agent_calls for the runaway caller.`,
+    );
+  }
 }
 
 export async function invokeDescriptAgent(args: {
   projectId: string;
   prompt: string;
+  /** Tag identifying the code path firing this call. Required so a future
+   *  spike is one SQL query away from a culprit. Examples:
+   *  "clip-idea-promote-agent", "clip-idea-promote-full-video",
+   *  "legacy-descript-clip-out". */
+  caller: string;
+  /** Set when the call ties to a specific derivative production item. */
+  productionItemId?: string | null;
 }): Promise<{ jobId: string; projectUrl: string; projectId: string }> {
-  const res = await fetch(`${BASE_URL}/jobs/agent`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: authHeader(),
-    },
-    body: JSON.stringify({
-      project_id: args.projectId,
+  await assertUnderlordBudget(args.caller);
+
+  // INSERT before the fetch so we have a row even if Descript times out
+  // or the process crashes mid-call. The status flip below records the
+  // outcome.
+  const [logged] = await db
+    .insert(descriptAgentCalls)
+    .values({
+      caller: args.caller,
+      projectId: args.projectId,
+      productionItemId: args.productionItemId ?? null,
       prompt: args.prompt,
-    }),
-  });
-  const json = await res.json();
-  if (!res.ok) {
-    const msg =
-      (json && (json.message || json.error)) || `HTTP ${res.status}`;
-    throw new Error(`Descript agent failed: ${msg}`);
+      status: "started",
+    })
+    .returning({ id: descriptAgentCalls.id });
+
+  try {
+    const res = await fetch(`${BASE_URL}/jobs/agent`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: authHeader(),
+      },
+      body: JSON.stringify({
+        project_id: args.projectId,
+        prompt: args.prompt,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      const msg =
+        (json && (json.message || json.error)) || `HTTP ${res.status}`;
+      throw new Error(`Descript agent failed: ${msg}`);
+    }
+    const body = json as AgentResponse;
+    await db
+      .update(descriptAgentCalls)
+      .set({
+        status: "ok",
+        descriptJobId: body.job_id,
+        completedAt: new Date(),
+      })
+      .where(eq(descriptAgentCalls.id, logged.id));
+    return {
+      jobId: body.job_id,
+      projectUrl: body.project_url,
+      projectId: body.project_id,
+    };
+  } catch (err) {
+    await db
+      .update(descriptAgentCalls)
+      .set({
+        status: "failed",
+        errorMessage: err instanceof Error ? err.message : String(err),
+        completedAt: new Date(),
+      })
+      .where(eq(descriptAgentCalls.id, logged.id));
+    throw err;
   }
-  const body = json as AgentResponse;
-  return {
-    jobId: body.job_id,
-    projectUrl: body.project_url,
-    projectId: body.project_id,
-  };
 }
 
 // Descript's web editor routes a composition as

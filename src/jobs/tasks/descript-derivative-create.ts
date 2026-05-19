@@ -220,6 +220,7 @@ export const descriptDerivativeCreateTask: Task = async (
       newCompositionName,
       crossPostRules: effectiveCrossPostRules,
       targetPostType,
+      derivativeItemId: derivative.id,
     });
     await finishStamp({
       derivativeId: derivative.id,
@@ -256,6 +257,8 @@ export const descriptDerivativeCreateTask: Task = async (
         projectId: target.row.descriptProjectId,
         sourceCompositionId: target.row.descriptSeedCompositionId,
         newCompositionName,
+        caller: "descript-derivative-create-repost-duplicate",
+        productionItemId: derivative.id,
       });
       await finishStamp({
         derivativeId: derivative.id,
@@ -305,6 +308,8 @@ export const descriptDerivativeCreateTask: Task = async (
       endSec: anchor.endSec,
       crossPostRules: effectiveCrossPostRules,
       targetPostType,
+      caller: "descript-derivative-create-cross-aspect-cut",
+      productionItemId: derivative.id,
     });
     await finishStamp({
       derivativeId: derivative.id,
@@ -367,6 +372,7 @@ async function invokeRulesAwareDuplicate(args: {
   newCompositionName: string;
   crossPostRules: string | null;
   targetPostType: string;
+  derivativeItemId: string;
 }): Promise<{
   jobId: string;
   projectUrl: string;
@@ -378,6 +384,8 @@ async function invokeRulesAwareDuplicate(args: {
       projectId: args.projectId,
       sourceCompositionId: args.sourceCompositionId,
       newCompositionName: args.newCompositionName,
+      caller: "descript-derivative-create-rules-aware-duplicate",
+      productionItemId: args.derivativeItemId,
     });
   }
   const safeName = args.newCompositionName.replace(/"/g, '\\"');
@@ -399,6 +407,8 @@ async function invokeRulesAwareDuplicate(args: {
   const result = await invokeDescriptAgent({
     projectId: args.projectId,
     prompt,
+    caller: "descript-derivative-create-rules-aware-duplicate",
+    productionItemId: args.derivativeItemId,
   });
   return { ...result, prompt };
 }

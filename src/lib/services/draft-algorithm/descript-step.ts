@@ -19,7 +19,15 @@ export type DescriptStepStatus =
   | "triggered_cold_import"
   | "skipped_no_skill"
   | "skipped_no_video_source"
-  | "skipped_already_done";
+  | "skipped_already_done"
+  /** 2026-05-18: Underlord auto-fire disabled. The Descript step used to
+   *  invoke the agent on every derivative create whose format Skill
+   *  carried `### Descript Clip & Pack Info`. After a $35/30min burn from
+   *  background Underlord calls, the step now short-circuits and the
+   *  Underlord call only happens when an operator explicitly clicks a
+   *  clip-idea promote button. The early-return preserves the surrounding
+   *  gate logic so re-enabling is a one-line revert. */
+  | "skipped_underlord_disabled";
 
 export interface DescriptStepResult {
   status: DescriptStepStatus;
@@ -103,9 +111,23 @@ interface RunDescriptStepArgs {
  * Errors don't fail the draft. The caller swallows + logs so the caption
  * still saves even when Descript misbehaves.
  */
+/** 2026-05-18: Underlord auto-fire kill switch. Flip to `true` to re-enable
+ *  the Draft Algorithm's Descript step (one Underlord call per derivative
+ *  whose format Skill has `### Descript Clip & Pack Info`). Off because Pat
+ *  burned $35 in 30 minutes from background calls; the policy is now
+ *  "Underlord only fires on explicit clip-idea promote buttons." */
+const UNDERLORD_AUTO_FIRE_ENABLED = false;
+
 export async function runDescriptStepForDerivative(
   args: RunDescriptStepArgs,
 ): Promise<DescriptStepResult> {
+  if (!UNDERLORD_AUTO_FIRE_ENABLED) {
+    console.info(
+      `descript-step item=${args.derivativeItemId} skipped (Underlord auto-fire disabled — promote via /api/clip-ideas/[id]/create-in-descript* to invoke explicitly)`,
+    );
+    return { status: "skipped_underlord_disabled" };
+  }
+
   if (!args.pillarItemId) {
     return { status: "skipped_no_video_source" };
   }
@@ -250,6 +272,8 @@ export async function runDescriptStepForDerivative(
   const agent = await invokeDescriptAgent({
     projectId: pillar.descriptProjectId!,
     prompt,
+    caller: "draft-algorithm-descript-step",
+    productionItemId: args.derivativeItemId,
   });
 
   await db

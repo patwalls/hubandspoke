@@ -573,6 +573,8 @@ export async function createClipIdeaInDescript(args: {
   const agent = await invokeDescriptAgent({
     projectId: row.descriptProjectId,
     prompt,
+    caller: "clip-idea-promote-agent",
+    productionItemId,
   });
 
   // Promote the pre-created draft production_item (the row that
@@ -838,6 +840,8 @@ export async function createClipIdeaInDescriptFullVideo(args: {
         title: row.hook,
         productionItemId,
       }),
+      caller: "clip-idea-promote-full-video",
+      productionItemId,
     });
     jobId = dup.jobId;
     projectId = dup.projectId;

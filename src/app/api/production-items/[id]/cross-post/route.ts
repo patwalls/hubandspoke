@@ -363,27 +363,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
-  // Kick off the Descript composition copy. NOT fire-and-forget: we just
-  // gated on the source having Descript-able media, so the user expects
-  // Descript work to happen — if the queue is down we surface it.
-  //
-  // Always `mode: "repost"` — same machinery as the same-platform repost
-  // route. Task duplicates from the source's own composition (or cold-
-  // imports the source's archived media + duplicates that seed). No anchor
-  // search, no Cross Post Rules, pillar ignored even when present. The
-  // task's `mode: "cross-post"` (pillar-anchor + re-aspect) branch stays
-  // in the code for legacy in-queue jobs predating the mode field, but no
-  // live route enqueues it anymore.
-  //
-  // Skipped when `manual: true` — operator is taking the upload over and
-  // doesn't want a Descript composition prepped.
-  if (!manual) {
-    await enqueue("descript-derivative-create", {
-      derivativeItemId: created.id,
-      sourceItemId: source.id,
-      mode: "repost",
-    });
-  }
+  // Underlord auto-fire intentionally removed (2026-05-18). Cross-posting
+  // used to enqueue `descript-derivative-create`, which invokes Underlord
+  // (Descript's paid AI agent) via `duplicateDescriptComposition` to copy
+  // the source composition — burning ~$3.50 per call. A short test session
+  // burned $35 in 30 minutes. Operators now get a row with the source's
+  // MP4 mirrored via `seedRepostContent` above and click "Open in Descript"
+  // on the new row's detail page if they want Underlord work done. The
+  // legacy `descript-derivative-create` task still exists for in-queue
+  // jobs predating commit `e61a6d9`; no live route enqueues it.
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

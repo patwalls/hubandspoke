@@ -270,15 +270,12 @@ export async function POST(request: Request, context: RouteContext) {
     }
   }
 
-  // Kick off the Descript composition copy. Not fire-and-forget: the user
-  // picked this repost because the source has Descript-able media (gated
-  // above), so they expect Descript work to happen. If the queue is down,
-  // surface that rather than silently dropping it.
-  await enqueue("descript-derivative-create", {
-    derivativeItemId: created.id,
-    sourceItemId: source.id,
-    mode: "repost",
-  });
+  // Underlord auto-fire intentionally removed (2026-05-18). Same change as
+  // the cross-post route: repost used to enqueue `descript-derivative-create`
+  // which fires Underlord ($3.50/call). The operator gets a row with the
+  // source's MP4 mirrored via `seedRepostContent` and can invoke Underlord
+  // explicitly from the new row's detail page if they want a fresh Descript
+  // composition.
 
   return NextResponse.json({ id: created.id }, { status: 201 });
 }
