@@ -28,10 +28,7 @@ import {
 import { isNotionAuthoritative } from "@/lib/platform";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { cn } from "@/lib/utils";
-import type {
-  BrandAccount,
-  CrossPostCandidate,
-} from "@/lib/services/cross-post-candidates";
+import type { BrandAccount } from "@/lib/services/cross-post-candidates";
 
 /** "3d ago", "2h ago", "just now" — short relative-time helper for the
  *  "Already posted · Xd ago" hint on a cross-post target row. Same shape
@@ -55,20 +52,94 @@ function timeAgo(iso: string | null): string {
   return `${mo}mo ago`;
 }
 
-interface CrossPostTriageDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  candidate: CrossPostCandidate;
+/** Subset of `CrossPostCandidate` the dialog actually consumes. The queue
+ *  passes a full candidate (with hotness signals + dismiss-after-submit
+ *  behavior); the content-detail page synthesizes a minimal one for the
+ *  "Cross-post to…" action menu. Optional fields suppress queue-only UI
+ *  (the "Hot" badge, the "Why this is hot" stats block) so the dialog
+ *  works for both callers without two implementations. */
+export interface CrossPostTriageDialogCandidate {
+  id: string;
+  brand: string;
+  title: string | null;
+  postType: string;
+  format: string | null;
+  account: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+  existingCrossPosts: Array<{
+    productionItemId: string;
+    accountId: string;
+    postType: string | null;
+    status: string | null;
+    publishedAt: string | null;
+  }>;
+  publishedLink?: string | null;
+  /** Queue-only: views at the time the candidate was scored. */
+  views?: number | null;
+  /** Queue-only: top hotness signal, drives the "1.4× 2h" badge. */
+  topSignal?: { ratio: number; kind: string } | null;
+  /** Queue-only: every signal we could compute. Empty / undefined hides
+   *  the signal breakdown disclosure. */
+  hotnessSignals?: Array<{
+    kind: string;
+    label: string;
+    ratio: number;
+    views: number;
+    bar: number;
+    percentile: number;
+    cohortLabel: string;
+    cohortSize: number;
+    cohortKind: string;
+  }>;
+  /** Queue-only: "Above average — 1.4× the typical pace …" copy. When
+   *  undefined the "Hot" badge + Why-this-is-hot block are hidden. */
+  whyHot?: string;
+}
+
+interface CrossPostTriagePanelProps {
+  candidate: CrossPostTriageDialogCandidate;
   brandAccounts: BrandAccount[];
   brand: string;
   /** Per-source-format ranking of (target accountId, postType) pairs by
-   *  historical cross-post count. The modal uses this to surface the most
+   *  historical cross-post count. The panel uses this to surface the most
    *  common targets first. Empty for formats with no cross-post history. */
   targetCommonality?: Record<
     string,
     Array<{ accountId: string; postType: string; count: number }>
   >;
+  /** Default true — queue triage dismisses the candidate from the queue
+   *  after a successful submit so it doesn't reappear tomorrow. Pass
+   *  `false` when the panel is rendered from a non-queue surface (e.g.
+   *  the per-item content-detail tab); cross-posting from there shouldn't
+   *  hide the source from the hot queue. */
+  dismissAfterSubmit?: boolean;
+  /** Whether to show the source title + Hot pill + AccountBadge header.
+   *  Dialogs include their own DialogTitle so they hide this; the tab
+   *  embed shows it (above the content-detail page title would be
+   *  redundant, so we drop the visual heading too — only the metadata
+   *  pill row stays). */
+  showSourceHeader?: boolean;
+  /** Whether to show the "Not interested" + "Open full page" / "See
+   *  source post" footer row. Dialogs need it (the user might want to
+   *  open the source page); inline tabs hide it (they're already on the
+   *  source page). */
+  showSecondaryFooter?: boolean;
+  /** Called after a successful submit. Dialogs pass
+   *  `() => onOpenChange(false)`; tabs pass nothing — the panel just
+   *  clears its own selection state and stays mounted. */
+  onSubmitted?: () => void;
   onActioned: () => void;
+}
+
+interface CrossPostTriageDialogProps
+  extends Omit<CrossPostTriagePanelProps, "showSourceHeader" | "showSecondaryFooter" | "onSubmitted"> {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 const VISIBLE_LIMIT = 8;
@@ -121,15 +192,17 @@ interface GateFailure {
   message: string;
 }
 
-export function CrossPostTriageDialog({
-  open,
-  onOpenChange,
+export function CrossPostTriagePanel({
   candidate,
   brandAccounts,
   brand,
   targetCommonality,
+  dismissAfterSubmit = true,
+  showSourceHeader = true,
+  showSecondaryFooter = true,
+  onSubmitted,
   onActioned,
-}: CrossPostTriageDialogProps) {
+}: CrossPostTriagePanelProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [dismissing, setDismissing] = useState(false);
@@ -141,20 +214,31 @@ export function CrossPostTriageDialog({
     Array<{ id: string; name: string | null; email: string; avatarUrl: string | null }>
   >([]);
 
-  // Reset selection + collapse list when the candidate changes (or modal reopens).
+  // Reset selection when the candidate changes. The panel stays mounted in
+  // tab mode so we can't rely on the dialog's open/close lifecycle; the
+  // candidate id is the source-of-truth boundary instead.
   useEffect(() => {
-    if (open) {
-      setSelected(new Set());
-      setShowAll(false);
-      setAssigneeUserId("");
-      setGateFailures([]);
-    }
-  }, [open, candidate.id]);
+    setSelected(new Set());
+    setShowAll(false);
+    setAssigneeUserId("");
+    setGateFailures([]);
+  }, [candidate.id]);
 
-  // Fetch assignable users on first open. List rarely changes during a
-  // triage session, so we keep the result mounted across candidate flips.
+  /** Common cleanup after a successful submit / dismiss: clear in-flight
+   *  selection so the panel returns to a clean state, then signal the
+   *  parent to close the wrapping dialog (if any). Tab embeds pass no
+   *  `onSubmitted` and just stay mounted with cleared state. */
+  function clearAndClose() {
+    setSelected(new Set());
+    setAssigneeUserId("");
+    setGateFailures([]);
+    onSubmitted?.();
+  }
+
+  // Fetch assignable users once. List rarely changes during a triage
+  // session, so the result stays cached across candidate flips.
   useEffect(() => {
-    if (!open || assignableUsers.length > 0) return;
+    if (assignableUsers.length > 0) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -177,7 +261,7 @@ export function CrossPostTriageDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, assignableUsers.length]);
+  }, [assignableUsers.length]);
 
   const targets: TargetPair[] = useMemo(() => {
     const existingByPair = new Map(
@@ -432,22 +516,25 @@ export function CrossPostTriageDialog({
       }
       showSubmitToast({ created, skipped, failed, brand });
 
-      // Always dismiss after a successful submit — the queue is a triage
-      // surface, not a long-lived list. If the operator wants to revisit
-      // this post later, they can find it via the content view.
-      const dismissRes = await fetch(
-        `/api/production-items/${candidate.id}/cross-post-dismiss`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+      // Dismiss the source from the hot queue after a successful submit —
+      // the queue is a triage surface, not a long-lived list. Suppressed
+      // when the dialog is fired from a non-queue surface (per-item
+      // Actions menu) since dismissing would silently hide the source
+      // from a list the operator never saw.
+      if (dismissAfterSubmit) {
+        const dismissRes = await fetch(
+          `/api/production-items/${candidate.id}/cross-post-dismiss`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          }
+        );
+        if (!dismissRes.ok) {
+          toast.warning("Cross-posts created, but failed to remove from queue.");
         }
-      );
-      if (!dismissRes.ok) {
-        // Non-fatal — the cross-posts already happened. Just warn.
-        toast.warning("Cross-posts created, but failed to remove from queue.");
       }
-      onOpenChange(false);
+      clearAndClose();
       onActioned();
     } catch (err) {
       toast.error(
@@ -486,16 +573,20 @@ export function CrossPostTriageDialog({
         );
       }
       setGateFailures([]);
-      // Dismiss + close, same as the happy path.
-      await fetch(
-        `/api/production-items/${candidate.id}/cross-post-dismiss`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        }
-      ).catch(() => {});
-      onOpenChange(false);
+      // Dismiss + close, same as the happy path. Skipped when the dialog
+      // is fired from a non-queue surface — see the rationale in
+      // handleSubmit above.
+      if (dismissAfterSubmit) {
+        await fetch(
+          `/api/production-items/${candidate.id}/cross-post-dismiss`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          }
+        ).catch(() => {});
+      }
+      clearAndClose();
       onActioned();
       void skipped;
     } finally {
@@ -523,7 +614,7 @@ export function CrossPostTriageDialog({
         description: "Won't reappear for 30 days.",
         duration: 4000,
       });
-      onOpenChange(false);
+      clearAndClose();
       onActioned();
     } finally {
       setDismissing(false);
@@ -537,18 +628,24 @@ export function CrossPostTriageDialog({
     visibleSelectableKeys.length > 0 &&
     visibleSelectableKeys.every((k) => selected.has(k));
   const busy = submitting || dismissing || manualSubmitting;
+  // Queue-only "Hot" badge + stats block. Hidden when the dialog is fired
+  // from a non-queue surface (per-item Actions menu) where there's no
+  // hotness scoring to show.
+  const showHotnessSection = !!candidate.whyHot;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto gap-5">
-        <DialogHeader>
+    <div className="flex flex-col gap-5">
+      {showSourceHeader && (
+        <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span
-              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-900 border border-emerald-200"
-              title="High-performing source content — pick where to cross-post it"
-            >
-              Hot
-            </span>
+            {showHotnessSection && (
+              <span
+                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-900 border border-emerald-200"
+                title="High-performing source content — pick where to cross-post it"
+              >
+                Hot
+              </span>
+            )}
             <AccountBadge
               account={candidate.account}
               postType={candidate.postType}
@@ -560,16 +657,18 @@ export function CrossPostTriageDialog({
               </span>
             )}
           </div>
-          <DialogTitle className="text-lg font-semibold pr-8">
+          <h2 className="text-lg font-semibold pr-8">
             {candidate.title || "(Untitled)"}
-          </DialogTitle>
-        </DialogHeader>
+          </h2>
+        </div>
+      )}
 
+        {showHotnessSection && (
         <section className="rounded-md border border-border bg-emerald-50/40 p-3 space-y-2">
           <div className="flex items-baseline justify-between flex-wrap gap-x-4 gap-y-1">
             <div className="text-sm text-foreground">
               <span className="font-semibold tabular-nums">
-                {formatCompact(candidate.views)}
+                {formatCompact(candidate.views ?? null)}
               </span>{" "}
               views ·{" "}
               <span className="font-medium text-foreground">
@@ -586,13 +685,13 @@ export function CrossPostTriageDialog({
             <span className="font-semibold text-foreground">Why this is hot:</span>{" "}
             {candidate.whyHot}
           </p>
-          {candidate.hotnessSignals.length > 1 && (
+          {(candidate.hotnessSignals?.length ?? 0) > 1 && (
             <details className="text-[11px] text-muted-foreground">
               <summary className="cursor-pointer hover:text-foreground">
-                Signal breakdown ({candidate.hotnessSignals.length})
+                Signal breakdown ({candidate.hotnessSignals!.length})
               </summary>
               <ul className="mt-1 space-y-0.5 pl-3 tabular-nums">
-                {candidate.hotnessSignals.map((s) => (
+                {candidate.hotnessSignals!.map((s) => (
                   <li key={s.kind}>
                     <span className="font-medium text-foreground">
                       {s.label}:
@@ -615,6 +714,7 @@ export function CrossPostTriageDialog({
             </details>
           )}
         </section>
+        )}
 
         <section className="space-y-2">
           <div className="flex items-center justify-between">
@@ -828,37 +928,66 @@ export function CrossPostTriageDialog({
             : `Cross-post ${selected.size} selected`}
         </button>
 
-        <div className="flex items-center justify-between border-t border-border pt-3">
-          <button
-            type="button"
-            onClick={() => void handleDismissOnly()}
-            disabled={busy}
-            className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
-          >
-            Not interested
-          </button>
-          <div className="flex items-center gap-3">
-            {candidate.publishedLink && (
-              <a
-                href={candidate.publishedLink}
+        {showSecondaryFooter && (
+          <div className="flex items-center justify-between border-t border-border pt-3">
+            <button
+              type="button"
+              onClick={() => void handleDismissOnly()}
+              disabled={busy}
+              className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              Not interested
+            </button>
+            <div className="flex items-center gap-3">
+              {candidate.publishedLink && (
+                <a
+                  href={candidate.publishedLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                >
+                  See source post
+                  <ExternalLinkIcon className="size-3" />
+                </a>
+              )}
+              <Link
+                href={`/${brand}/content/${candidate.id}`}
                 target="_blank"
-                rel="noopener noreferrer"
                 className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
               >
-                See source post
+                Open full page
                 <ExternalLinkIcon className="size-3" />
-              </a>
-            )}
-            <Link
-              href={`/${brand}/content/${candidate.id}`}
-              target="_blank"
-              className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-            >
-              Open full page
-              <ExternalLinkIcon className="size-3" />
-            </Link>
+              </Link>
+            </div>
           </div>
-        </div>
+        )}
+    </div>
+  );
+}
+
+/** Thin Dialog wrapper around `CrossPostTriagePanel`. Use this from
+ *  surfaces that want the modal behavior (the hot queue table). For
+ *  inline embedding (a content-detail tab), render the panel directly. */
+export function CrossPostTriageDialog({
+  open,
+  onOpenChange,
+  ...panelProps
+}: CrossPostTriageDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto gap-5">
+        {/* The panel renders its own visual title block; the DialogTitle
+         *  here is sr-only so Radix's a11y contract is satisfied without
+         *  duplicating the heading. */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>
+            {panelProps.candidate.title || "Cross-post"}
+          </DialogTitle>
+        </DialogHeader>
+        <CrossPostTriagePanel
+          {...panelProps}
+          onSubmitted={() => onOpenChange(false)}
+        />
       </DialogContent>
     </Dialog>
   );

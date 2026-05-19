@@ -21,23 +21,91 @@ import { AccountBadge } from "@/components/ui/account-badge";
 import { UserChip } from "./user-chip";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { cn } from "@/lib/utils";
-import type { RepostCandidate } from "@/lib/services/repost-candidates";
+/** Subset of `RepostCandidate` the dialog actually consumes. The queue
+ *  triage path passes a full candidate (with hotness signals + evergreen
+ *  reasoning + prior reposts); the content-detail Actions menu synthesizes
+ *  a minimal one. Optional fields suppress queue-only UI sections. */
+export interface RepostTriageDialogCandidate {
+  id: string;
+  title: string | null;
+  postType: string;
+  format: string | null;
+  account: {
+    id: string;
+    platform: string;
+    handle: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+  publishedLink?: string | null;
+  views?: number | null;
+  /** Queue-only: drives the "1.4× this account" badge. */
+  topSignal?: {
+    ratio: number;
+    cohortKind: "account" | "brand" | "format";
+  } | null;
+  /** Queue-only: "Above average — 1.4× the typical pace …" copy. When
+   *  undefined the "Hot" badge + Why-this-is-hot block are hidden. */
+  whyHot?: string;
+  /** Queue-only: every signal we could compute. */
+  hotnessSignals?: Array<{
+    kind: string;
+    label: string;
+    ratio: number;
+    views: number;
+    bar: number;
+    percentile: number;
+    cohortLabel: string;
+    cohortSize: number;
+    cohortKind: string;
+  }>;
+  /** Queue-only: evergreen scoring reasoning. */
+  evergreenReasoning?: string | null;
+  /** Queue-only: sibling reposts list. */
+  priorReposts?: Array<{
+    productionItemId: string;
+    status: string | null;
+    publishedAt: string | null;
+  }>;
+}
 
-interface RepostTriageDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  candidate: RepostCandidate;
+interface RepostTriagePanelProps {
+  candidate: RepostTriageDialogCandidate;
   brand: string;
+  /** Default true — show "Not interested" + "Kill" dismiss controls.
+   *  Pass `false` when the panel is rendered from a non-queue surface
+   *  (content-detail tab): there's no queue entry to dismiss, and
+   *  killing an idea you opened intentionally is nonsense. */
+  showDismissControls?: boolean;
+  /** Default true — show the source title + Hot pill block. Inline tabs
+   *  hide it because the content-detail page already shows the title
+   *  right above. */
+  showSourceHeader?: boolean;
+  /** Default true — show the "See source post" / "Open full page"
+   *  footer row. Inline tabs hide it (we're already on the source). */
+  showSecondaryFooter?: boolean;
+  /** Called after a successful submit. Dialogs pass
+   *  `() => onOpenChange(false)`; tabs pass nothing — the panel stays
+   *  mounted with cleared state. */
+  onSubmitted?: () => void;
   onActioned: () => void;
 }
 
-export function RepostTriageDialog({
-  open,
-  onOpenChange,
+interface RepostTriageDialogProps
+  extends Omit<RepostTriagePanelProps, "showSourceHeader" | "showSecondaryFooter" | "onSubmitted"> {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function RepostTriagePanel({
   candidate,
   brand,
+  showDismissControls = true,
+  showSourceHeader = true,
+  showSecondaryFooter = true,
+  onSubmitted,
   onActioned,
-}: RepostTriageDialogProps) {
+}: RepostTriagePanelProps) {
   const [submitting, setSubmitting] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
@@ -46,14 +114,15 @@ export function RepostTriageDialog({
     Array<{ id: string; name: string | null; email: string; avatarUrl: string | null }>
   >([]);
 
+  // Reset the assignee picker when the candidate changes. Panel stays
+  // mounted in tab mode, so we hang the reset off candidate.id (not the
+  // dialog's open/close).
   useEffect(() => {
-    if (open) {
-      setAssigneeUserId("");
-    }
-  }, [open, candidate.id]);
+    setAssigneeUserId("");
+  }, [candidate.id]);
 
   useEffect(() => {
-    if (!open || assignableUsers.length > 0) return;
+    if (assignableUsers.length > 0) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -75,7 +144,15 @@ export function RepostTriageDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, assignableUsers.length]);
+  }, [assignableUsers.length]);
+
+  /** Cleanup after a successful submit — clear selection, then signal the
+   *  parent to close the dialog (if any). Tab embeds stay mounted with
+   *  cleared state. */
+  function clearAndClose() {
+    setAssigneeUserId("");
+    onSubmitted?.();
+  }
 
   async function handleRepost() {
     if (!assigneeUserId) return;
@@ -116,7 +193,7 @@ export function RepostTriageDialog({
           : undefined,
         duration: 7000,
       });
-      onOpenChange(false);
+      clearAndClose();
       onActioned();
     } finally {
       setSubmitting(false);
@@ -143,7 +220,7 @@ export function RepostTriageDialog({
         description: "Won't reappear for 30 days.",
         duration: 4000,
       });
-      onOpenChange(false);
+      clearAndClose();
       onActioned();
     } finally {
       setDismissing(false);
@@ -177,7 +254,7 @@ export function RepostTriageDialog({
         duration: 4000,
       });
       setKillOpen(false);
-      onOpenChange(false);
+      clearAndClose();
       onActioned();
     } finally {
       setDismissing(false);
@@ -185,20 +262,26 @@ export function RepostTriageDialog({
   }
 
   const busy = submitting || dismissing;
-  const top = candidate.topSignal!;
+  // Queue-only "Hot" badge + stats / evergreen / prior-reposts sections.
+  // Suppressed when the dialog is fired from the per-item Actions menu
+  // where there's no hotness scoring to display.
+  const showHotnessSection = !!candidate.whyHot;
+  const top = candidate.topSignal ?? null;
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto gap-5">
-          <DialogHeader>
+      <div className="flex flex-col gap-5">
+          {showSourceHeader && (
+          <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span
-                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-900 border border-emerald-200"
-                title="Elite evergreen — clears the format×account top quartile by 1.5×+"
-              >
-                Hot
-              </span>
+              {showHotnessSection && (
+                <span
+                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-900 border border-emerald-200"
+                  title="Elite evergreen — clears the format×account top quartile by 1.5×+"
+                >
+                  Hot
+                </span>
+              )}
               <AccountBadge
                 account={candidate.account}
                 postType={candidate.postType}
@@ -210,22 +293,25 @@ export function RepostTriageDialog({
                 </span>
               )}
             </div>
-            <DialogTitle className="text-lg font-semibold pr-8">
+            <h2 className="text-lg font-semibold pr-8">
               {candidate.title || "(Untitled)"}
-            </DialogTitle>
-          </DialogHeader>
+            </h2>
+          </div>
+          )}
 
+          {showHotnessSection && (
           <section className="rounded-md border border-border bg-emerald-50/40 p-3 space-y-2">
             <div className="flex items-baseline justify-between flex-wrap gap-x-4 gap-y-1">
               <div className="text-sm text-foreground">
                 <span className="font-semibold tabular-nums">
-                  {formatCompact(candidate.views)}
+                  {formatCompact(candidate.views ?? null)}
                 </span>{" "}
                 views ·{" "}
                 <span className="font-medium text-foreground">
                   {candidate.format}
                 </span>
               </div>
+              {top && (
               <div className="text-[11px] text-muted-foreground tabular-nums">
                 {top.ratio.toFixed(1)}× {top.cohortKind === "account"
                   ? "this account"
@@ -233,18 +319,19 @@ export function RepostTriageDialog({
                     ? "this brand"
                     : "format-wide"}
               </div>
+              )}
             </div>
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               <span className="font-semibold text-foreground">Why this is hot:</span>{" "}
               {candidate.whyHot}
             </p>
-            {candidate.hotnessSignals.length > 1 && (
+            {(candidate.hotnessSignals?.length ?? 0) > 1 && (
               <details className="text-[11px] text-muted-foreground">
                 <summary className="cursor-pointer hover:text-foreground">
-                  Signal breakdown ({candidate.hotnessSignals.length})
+                  Signal breakdown ({candidate.hotnessSignals!.length})
                 </summary>
                 <ul className="mt-1 space-y-0.5 pl-3 tabular-nums">
-                  {candidate.hotnessSignals.map((s) => (
+                  {candidate.hotnessSignals!.map((s) => (
                     <li key={s.kind}>
                       <span className="font-medium text-foreground">
                         {s.label}:
@@ -271,6 +358,7 @@ export function RepostTriageDialog({
               </details>
             )}
           </section>
+          )}
 
           {candidate.evergreenReasoning && (
             <section className="rounded-md border border-amber-200 bg-amber-50/50 p-3">
@@ -283,12 +371,12 @@ export function RepostTriageDialog({
             </section>
           )}
 
-          {candidate.priorReposts.length > 0 && (
+          {(candidate.priorReposts?.length ?? 0) > 0 && (
             <section className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
               <div className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                Prior reposts ({candidate.priorReposts.length})
+                Prior reposts ({candidate.priorReposts!.length})
               </div>
-              {candidate.priorReposts.slice(0, 4).map((r) => (
+              {candidate.priorReposts!.slice(0, 4).map((r) => (
                 <div key={r.productionItemId} className="text-muted-foreground">
                   <Link
                     href={`/${brand}/content/${r.productionItemId}`}
@@ -363,25 +451,31 @@ export function RepostTriageDialog({
                 : "Repost it"}
           </button>
 
+          {(showDismissControls || showSecondaryFooter) && (
           <div className="flex items-center justify-between border-t border-border pt-3">
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => void handleDismissOnly()}
-                disabled={busy}
-                className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >
-                Not interested
-              </button>
-              <button
-                type="button"
-                onClick={() => setKillOpen(true)}
-                disabled={busy}
-                className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
-              >
-                Kill this idea
-              </button>
+              {showDismissControls && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handleDismissOnly()}
+                    disabled={busy}
+                    className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  >
+                    Not interested
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKillOpen(true)}
+                    disabled={busy}
+                    className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+                  >
+                    Kill this idea
+                  </button>
+                </>
+              )}
             </div>
+            {showSecondaryFooter && (
             <div className="flex items-center gap-3">
               {candidate.publishedLink && (
                 <a
@@ -403,9 +497,10 @@ export function RepostTriageDialog({
                 <ExternalLinkIcon className="size-3" />
               </Link>
             </div>
+            )}
           </div>
-        </DialogContent>
-      </Dialog>
+          )}
+      </div>
 
       <KillIdeaDialog
         open={killOpen}
@@ -414,6 +509,31 @@ export function RepostTriageDialog({
         onConfirm={handleKill}
       />
     </>
+  );
+}
+
+/** Thin Dialog wrapper around `RepostTriagePanel`. Use from surfaces that
+ *  want modal behavior (the hot queue table). For inline embedding (a
+ *  content-detail tab), render the panel directly. */
+export function RepostTriageDialog({
+  open,
+  onOpenChange,
+  ...panelProps
+}: RepostTriageDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto gap-5">
+        <DialogHeader className="sr-only">
+          <DialogTitle>
+            {panelProps.candidate.title || "Repost"}
+          </DialogTitle>
+        </DialogHeader>
+        <RepostTriagePanel
+          {...panelProps}
+          onSubmitted={() => onOpenChange(false)}
+        />
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -38,9 +38,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -54,6 +51,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
+import { CrossPostTriagePanel } from "./cross-post-triage-dialog";
+import { RepostTriagePanel } from "./repost-triage-dialog";
+import type { BrandAccount } from "@/lib/services/cross-post-candidates";
 import { TranscriptButton } from "./transcript-dialog";
 import { EnrichmentButton, type EnrichmentMedia } from "./enrichment-dialog";
 import { coverImageUrl } from "@/lib/cover-image";
@@ -369,6 +369,8 @@ const DETAIL_TAB_VALUES = [
   "details",
   "preview",
   "derivatives",
+  "cross-post",
+  "repost",
   "clip-ideas",
   "repurpose",
 ] as const;
@@ -1160,72 +1162,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   // with autoFocus so it receives focus immediately on mount.
   const [editingTitle, setEditingTitle] = useState(false);
 
-  const handleCrossPost = useCallback(
-    async (target: {
-      accountId: string;
-      postType: string | null;
-      label: string;
-    }) => {
-      if (actionPending) return;
-      setActionPending(true);
-      try {
-        const res = await fetch(
-          `/api/production-items/${contentId}/cross-post`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              targetAccountId: target.accountId,
-              targetPostType: target.postType,
-            }),
-          },
-        );
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          if (res.status === 409 && json?.existingId) {
-            toast.info(`Already cross-posted to ${target.label} — opening it.`);
-            router.push(`/${brand}/content/${json.existingId}`);
-            return;
-          }
-          toast.error(json?.error || "Failed to create cross-post");
-          return;
-        }
-        toast.success(`Cross-post idea created for ${target.label}`);
-        router.push(`/${brand}/content/${json.id}`);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to create cross-post");
-      } finally {
-        setActionPending(false);
-      }
-    },
-    [actionPending, brand, contentId, router],
-  );
-
-  const handleRepost = useCallback(async () => {
-    if (actionPending) return;
-    setActionPending(true);
-    try {
-      // Mirror the queue-triage path: land in "Ready To Publish" and emit
-      // the `repost_created` activity event. Editor defaults via
-      // `resolveEditor` server-side (no picker on this surface).
-      const res = await fetch(`/api/production-items/${contentId}/repost`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "Ready To Publish" }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(json?.error || "Failed to create repost");
-        return;
-      }
-      toast.success("Repost created");
-      router.push(`/${brand}/content/${json.id}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create repost");
-    } finally {
-      setActionPending(false);
-    }
-  }, [actionPending, brand, contentId, router]);
+  // handleCrossPost / handleRepost removed 2026-05-19 — the per-target
+  // submenu was replaced with CrossPostTriageDialog / RepostTriageDialog
+  // (same components the hot queue uses). The dialogs own their own
+  // submit handlers and assignee picker.
 
   const handleDuplicate = useCallback(async () => {
     if (actionPending) return;
@@ -1296,29 +1236,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     };
   }, []);
 
-  // Cross-post target candidates: every active account on this brand, except
-  // the source's own account and any Notion-authoritative account (long-form
-  // YouTube). The submenu in the Actions dropdown filters out targets the
-  // source has already been cross-posted to.
-  const crossPostCandidates = useMemo(() => {
-    return accounts
-      .filter(
-        (a) =>
-          a.brandSlug === brand &&
-          a.isActive &&
-          !a.syncedFromNotion &&
-          a.id !== data?.item.accountId,
-      )
-      .map((a) => {
-        const postType = PLATFORM_META[toPlatform(a.platform)].defaultPostType;
-        return {
-          accountId: a.id,
-          postType: postType ?? null,
-          label: `@${a.handle}`,
-          account: a,
-        };
-      });
-  }, [accounts, brand, data?.item.accountId]);
+  // crossPostCandidates memo removed 2026-05-19 — the dialog builds its
+  // own target list from `brandAccounts` (with the dedup / Notion-auth /
+  // already-done logic in one place rather than mirrored across surfaces).
 
   const applyItem = useCallback(
     (
@@ -1862,6 +1782,31 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           },
         ] as const)
       : []),
+    // Cross-post / Repost tabs — embed the same triage UI the hot queue
+    // uses, so picking targets / assigning happens inline instead of in a
+    // modal. Surfaced whenever the underlying actions are eligible
+    // (`canCrossPost` / `canRepost` mirror the same gate the Actions menu
+    // checks; same disabledReason copy).
+    {
+      value: "cross-post",
+      label: "Cross-post",
+      count: data.crossPosts.length || null,
+      disabled: data.item.canCrossPost === false,
+      disabledReason:
+        data.item.canCrossPost === false
+          ? "Source has no archived video yet — re-run enrichment or upload manually."
+          : undefined,
+    },
+    {
+      value: "repost",
+      label: "Repost",
+      count: data.reposts.length || null,
+      disabled: data.item.canRepost === false,
+      disabledReason:
+        data.item.canRepost === false
+          ? "Source has no archived video yet — re-run enrichment or upload manually."
+          : undefined,
+    },
     {
       value: "clip-ideas",
       label: "Clip Ideas",
@@ -2754,11 +2699,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             </button>
           )}
           {(() => {
-            const alreadyCrossPostedAccountIds = new Set(
-              (data.crossPosts ?? [])
-                .map((cp) => cp.account?.id)
-                .filter((id): id is string => !!id),
-            );
             const isSyncing = syncState.kind === "syncing";
             return (
               <DropdownMenu>
@@ -2770,56 +2710,24 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   <MoreHorizontalIcon className="size-3.5" /> Actions
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger
-                      disabled={item.canCrossPost === false}
-                      title={
-                        item.canCrossPost === false
-                          ? "Source has no archived video yet — re-run enrichment or upload manually."
-                          : undefined
-                      }
-                    >
-                      <Share2Icon className="size-3.5" /> Cross-post to…
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
-                      {crossPostCandidates.length === 0 ? (
-                        <DropdownMenuItem disabled>
-                          No eligible accounts
-                        </DropdownMenuItem>
-                      ) : (
-                        crossPostCandidates.map((c) => {
-                          const alreadyDone = alreadyCrossPostedAccountIds.has(
-                            c.accountId,
-                          );
-                          return (
-                            <DropdownMenuItem
-                              key={c.accountId}
-                              disabled={alreadyDone || actionPending}
-                              onClick={() => void handleCrossPost(c)}
-                            >
-                              <AccountBadge
-                                account={c.account}
-                                postType={c.postType}
-                                variant="compact"
-                              />
-                              {alreadyDone && (
-                                <span className="ml-auto text-[10px] text-muted-foreground">
-                                  done
-                                </span>
-                              )}
-                            </DropdownMenuItem>
-                          );
-                        })
-                      )}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
+                  <DropdownMenuItem
+                    disabled={item.canCrossPost === false}
+                    onClick={() => setActiveTab("cross-post")}
+                    title={
+                      item.canCrossPost === false
+                        ? "Source has no archived video yet — re-run enrichment or upload manually."
+                        : "Open the Cross-post tab"
+                    }
+                  >
+                    <Share2Icon className="size-3.5" /> Cross-post to…
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={actionPending || item.canRepost === false}
-                    onClick={() => void handleRepost()}
+                    onClick={() => setActiveTab("repost")}
                     title={
                       item.canRepost === false
                         ? "Source has no archived video yet — re-run enrichment or upload manually."
-                        : undefined
+                        : "Open the Repost tab"
                     }
                   >
                     <RepeatIcon className="size-3.5" /> Repost
@@ -3594,6 +3502,109 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
       </TabsContent>
       )}
+
+      <TabsContent value="cross-post" className="pt-4">
+        {(() => {
+          // Inline panel — same component the hot-queue dialog uses, just
+          // dropped straight into the tab body. The candidate is synthesized
+          // from the loaded item + brand accounts; hot-queue-only fields
+          // (whyHot / hotnessSignals / topSignal) stay undefined so the
+          // panel hides the Hot pill + Why-this-is-hot block on this surface.
+          const sourceAccount = accounts.find((a) => a.id === item.accountId);
+          if (!sourceAccount) {
+            return (
+              <div className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+                Set an account on this item to cross-post.
+              </div>
+            );
+          }
+          const candidateAccount = {
+            id: sourceAccount.id,
+            platform: sourceAccount.platform,
+            handle: sourceAccount.handle,
+            displayName: sourceAccount.displayName ?? null,
+            avatarUrl: sourceAccount.avatarUrl ?? null,
+          };
+          const existingCrossPosts = (data.crossPosts ?? []).map((cp) => ({
+            productionItemId: cp.id,
+            accountId: cp.account?.id ?? "",
+            postType: cp.postType ?? null,
+            status: cp.status ?? null,
+            publishedAt: null,
+          }));
+          const brandAccountsForPanel: BrandAccount[] = accounts
+            .filter((a) => a.brandSlug === brand && a.isActive)
+            .map((a) => ({
+              id: a.id,
+              platform: a.platform,
+              handle: a.handle,
+              displayName: a.displayName ?? null,
+              avatarUrl: a.avatarUrl ?? null,
+              syncedFromNotion: a.syncedFromNotion,
+            }));
+          return (
+            <div className="rounded-lg border border-border bg-card p-5">
+              <CrossPostTriagePanel
+                candidate={{
+                  id: item.id,
+                  brand,
+                  title: item.title ?? null,
+                  postType: item.postType ?? "",
+                  format: item.format ?? null,
+                  account: candidateAccount,
+                  existingCrossPosts,
+                  publishedLink: item.publishedLink ?? null,
+                }}
+                brandAccounts={brandAccountsForPanel}
+                brand={brand}
+                dismissAfterSubmit={false}
+                showSourceHeader={false}
+                showSecondaryFooter={false}
+                onActioned={() => void load()}
+              />
+            </div>
+          );
+        })()}
+      </TabsContent>
+
+      <TabsContent value="repost" className="pt-4">
+        {(() => {
+          const sourceAccount = accounts.find((a) => a.id === item.accountId);
+          if (!sourceAccount) {
+            return (
+              <div className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+                Set an account on this item to repost.
+              </div>
+            );
+          }
+          const candidateAccount = {
+            id: sourceAccount.id,
+            platform: sourceAccount.platform,
+            handle: sourceAccount.handle,
+            displayName: sourceAccount.displayName ?? null,
+            avatarUrl: sourceAccount.avatarUrl ?? null,
+          };
+          return (
+            <div className="rounded-lg border border-border bg-card p-5">
+              <RepostTriagePanel
+                candidate={{
+                  id: item.id,
+                  title: item.title ?? null,
+                  postType: item.postType ?? "",
+                  format: item.format ?? null,
+                  account: candidateAccount,
+                  publishedLink: item.publishedLink ?? null,
+                }}
+                brand={brand}
+                showDismissControls={false}
+                showSourceHeader={false}
+                showSecondaryFooter={false}
+                onActioned={() => void load()}
+              />
+            </div>
+          );
+        })()}
+      </TabsContent>
 
       <TabsContent value="clip-ideas" className="pt-4">
         <ClipIdeasPanel itemId={item.id} brand={brand} isAdmin={isAdmin} />
