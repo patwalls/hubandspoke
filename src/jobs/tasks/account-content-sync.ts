@@ -55,7 +55,19 @@ export const accountContentSyncTask: Task = async (rawPayload, helpers) => {
     });
   }
   if (result.errorMessage) {
-    // Surface as a task failure so graphile-worker retries with backoff.
+    if (result.errorKind === "permanent") {
+      // Account is deactivated / private / misconfigured — `syncAccountContent`
+      // already flipped `is_active=false` so the daily cron stops trying.
+      // Log a warning and exit cleanly: no Sentry page, no graphile-worker
+      // retry. Operator sees the account on the list as inactive with the
+      // reason on `lastContentSyncError`.
+      helpers.logger.warn(
+        `account-content-sync permanent failure (account disabled) account=${accountId} platform=${result.platform}: ${result.errorMessage}`,
+      );
+      return;
+    }
+    // Transient — surface as a task failure so graphile-worker retries with
+    // backoff and the failure pages Sentry if it persists.
     throw new Error(result.errorMessage);
   }
 };

@@ -96,6 +96,34 @@ export interface SyncResult {
   // Surfaced via lastContentSyncError so operators notice.
   skippedDuplicates: number;
   errorMessage?: string;
+  /** "permanent" when the account is deactivated, private, or wrong-typed —
+   *  retrying daily can never recover. Caller should disable the account
+   *  rather than re-throw to Sentry. "transient" for everything else (rate
+   *  limits, upstream blips, our bugs). */
+  errorKind?: "permanent" | "transient";
+}
+
+/**
+ * Detect Scrape Creators / config failures that can never recover by
+ * retrying — the user account is gone, private, or misconfigured. The
+ * daily cron will hit the same 404 forever otherwise, paging Sentry each
+ * time.
+ *
+ * Match on the exact substrings SC emits + our own validation messages.
+ * Conservative on purpose: anything not on this list is treated as
+ * transient and surfaces normally.
+ */
+function isPermanentSyncFailure(message: string): boolean {
+  return (
+    // TikTok: SC returns 404 + `account_deactivated:true`
+    /account_deactivated/i.test(message) ||
+    /"message":"Account deactivated"/i.test(message) ||
+    // Threads: SC returns 404 + "Shoot looks like the user is not found, or
+    // is private and needs to be accessed by a logged in account"
+    /Shoot looks like the user is not found/i.test(message) ||
+    // LinkedIn: our own validation when an operator sets a personal-profile URL
+    /LinkedIn content sync requires a company page URL/i.test(message)
+  );
 }
 
 interface NormalizedItem {
@@ -1057,15 +1085,24 @@ export async function syncAccountContent(
       .where(eq(accounts.id, accountId));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const kind: "permanent" | "transient" = isPermanentSyncFailure(msg)
+      ? "permanent"
+      : "transient";
+    // Permanent failures (deactivated TikTok, private Threads, wrong-typed
+    // LinkedIn) — flip the account inactive so the daily cron stops trying.
+    // Operator sees it on the account list as `isActive=false` with the
+    // reason in `lastContentSyncError`.
     await db
       .update(accounts)
       .set({
         lastContentSyncAt: new Date(),
         lastContentSyncError: msg,
+        ...(kind === "permanent" ? { isActive: false } : {}),
         updatedAt: new Date(),
       })
       .where(eq(accounts.id, accountId));
     result.errorMessage = msg;
+    result.errorKind = kind;
     result.errors++;
   }
 
