@@ -16,6 +16,15 @@
 //   --brands=a,b       comma-separated brand list (required)
 //   --since=YYYY-MM-DD only items with published_date >= this (required)
 //   --limit=N          cap candidates (default: 500)
+//   --post-types=a,b   restrict to specific post types (e.g. `youtube_long`).
+//                      Default: no filter (any post type with a youtube_id).
+//                      Use `youtube_long` when you want long-form archives only
+//                      and don't want to spend the bandwidth on Shorts.
+//   --whisper-brands=a,b  restrict the auto-enqueue of `transcribe-whisper` to
+//                      these brands. Default: same as `--brands` (auto-enqueue
+//                      for every downloaded item). Set to a subset when you
+//                      want media archived for every brand but transcripts
+//                      only for some (Whisper has real OpenAI cost per minute).
 //   --max-height=N     yt-dlp resolution cap (default: 1080 — Twitter caps at 1920×1200)
 //   --ids=uuid1,uuid2  specific IDs to re-try (overrides filter query)
 //
@@ -48,6 +57,11 @@ function arg(name: string): string | undefined {
 const BRANDS = (arg("brands") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const SINCE = arg("since");
 const LIMIT = Number(arg("limit") ?? "500");
+const POST_TYPES = (arg("post-types") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const WHISPER_BRANDS_ARG = arg("whisper-brands");
+const WHISPER_BRANDS = WHISPER_BRANDS_ARG !== undefined
+  ? WHISPER_BRANDS_ARG.split(",").map((s) => s.trim()).filter(Boolean)
+  : null; // null = no filter (every brand auto-enqueues, legacy behavior)
 const MAX_HEIGHT = Number(arg("max-height") ?? "1080");
 const ID_LIST = (arg("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 // `--cookies-from-browser=chrome` (or firefox/safari/...) defeats YouTube's
@@ -195,7 +209,7 @@ function runYtDlp(url: string, outputPath: string, clients: string): Promise<voi
 
 async function archiveOne(
   pool: pg.Pool,
-  item: { id: string; youtube_id: string | null; youtube_url: string; title: string | null },
+  item: { id: string; youtube_id: string | null; youtube_url: string; title: string | null; brand: string | null },
   tmpDir: string,
 ): Promise<{ ok: true; bytes: number } | { ok: false; err: string }> {
   const tmpPath = join(tmpDir, `${item.id}.mp4`);
@@ -261,7 +275,15 @@ async function archiveOne(
     // queue using the same pool that just wrote the UPDATE. Can't import
     // maybeEnqueueWhisperTranscribe() because it pulls in @/lib/db, which
     // would bake DATABASE_URL — see the standalone-script header above.
-    if (process.env.WHISPER_TRANSCRIBE_LIVE !== "false") {
+    //
+    // `--whisper-brands` lets the operator archive media for every brand
+    // (cheap, just S3 storage) but only spend OpenAI Whisper minutes on a
+    // subset. When the flag is unset, every brand auto-enqueues (legacy).
+    const whisperBrandAllowed =
+      WHISPER_BRANDS === null
+        ? true
+        : item.brand !== null && WHISPER_BRANDS.includes(item.brand);
+    if (process.env.WHISPER_TRANSCRIBE_LIVE !== "false" && whisperBrandAllowed) {
       try {
         const existing = await pool.query<{ has_text: boolean }>(
           `SELECT length(full_text) > 0 AS has_text
@@ -332,11 +354,11 @@ async function main() {
     console.warn(`[pool] backend conn error (will reconnect): ${err.message}`);
   });
 
-  let items: Array<{ id: string; youtube_id: string | null; youtube_url: string; title: string | null }>;
+  let items: Array<{ id: string; youtube_id: string | null; youtube_url: string; title: string | null; brand: string | null }>;
 
   if (ID_LIST.length > 0) {
     const r = await pool.query(
-      `SELECT id, youtube_id, youtube_url, title FROM production_items WHERE id = ANY($1::uuid[]) AND youtube_url IS NOT NULL`,
+      `SELECT id, youtube_id, youtube_url, title, brand FROM production_items WHERE id = ANY($1::uuid[]) AND youtube_url IS NOT NULL`,
       [ID_LIST],
     );
     items = r.rows;
@@ -345,8 +367,13 @@ async function main() {
     // always videos deleted/privatized on YouTube — retrying just stalls
     // the batch behind the same dead URLs. Operators can re-run with
     // `--ids=…` to force a specific item.
+    // `--post-types` is optional. When unset we keep the legacy behavior
+    // (any post type with a youtube_id). When set we filter to the named
+    // types so a backfill targeting just long-form doesn't burn bandwidth
+    // on Shorts.
+    const usePostTypeFilter = POST_TYPES.length > 0;
     const r = await pool.query(
-      `SELECT id, youtube_id, youtube_url, title
+      `SELECT id, youtube_id, youtube_url, title, brand
          FROM production_items
         WHERE status = 'Published'
           AND youtube_id IS NOT NULL
@@ -354,9 +381,10 @@ async function main() {
           AND published_date >= $1::date
           AND brand = ANY($2::text[])
           AND COALESCE(youtube_download_attempts, 0) < 3
+          ${usePostTypeFilter ? `AND post_type = ANY($4::text[])` : ``}
         ORDER BY published_date DESC NULLS LAST
         LIMIT $3`,
-      [SINCE, BRANDS, LIMIT],
+      usePostTypeFilter ? [SINCE, BRANDS, LIMIT, POST_TYPES] : [SINCE, BRANDS, LIMIT],
     );
     items = r.rows;
   }
