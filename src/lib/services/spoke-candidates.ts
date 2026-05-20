@@ -141,6 +141,8 @@ export interface SpokeCandidatesResult {
     percentile: number;
     minFormatHistory: number;
     spokeThreshold: number;
+    freshnessHalfLifeDays: number;
+    freshnessFloor: number;
   };
 }
 
@@ -677,6 +679,8 @@ function configBlock() {
     percentile: PERCENTILE,
     minFormatHistory: MIN_FORMAT_HISTORY,
     spokeThreshold: SPOKE_THRESHOLD,
+    freshnessHalfLifeDays: FRESHNESS_HALF_LIFE_DAYS,
+    freshnessFloor: FRESHNESS_FLOOR,
   };
 }
 
