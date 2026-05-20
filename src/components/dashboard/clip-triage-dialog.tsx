@@ -554,23 +554,25 @@ function ShortsPreview({
 
   return (
     <div
-      className="relative mx-auto w-full max-w-[320px] rounded-xl bg-black text-white overflow-hidden flex flex-col shadow-lg"
+      className="relative mx-auto w-full max-w-[320px] rounded-xl bg-black text-white overflow-hidden flex flex-col justify-center shadow-lg"
       style={{ aspectRatio: "9 / 16" }}
     >
-      {/* Mirrors the final ReelsLayout: hook bar at top → video filling the
-          middle (cropped square-ish via object-cover so the 16:9 source fills
-          the available vertical space — the speaker is centered, so side
-          cropping is fine) → caption directly under it. */}
-      <div className="px-4 pt-4 pb-3 shrink-0">
+      {/* Mirrors the published ReelsLayout: hook + video (natural aspect,
+          NEVER cropped — `object-contain` matters for split-screen podcast
+          sources where `object-cover` would chop both speakers in half) +
+          caption are stacked as one block and centered vertically inside
+          the 9:16 frame. The black space above and below is intentional —
+          that's exactly how the final Short looks. */}
+      <div className="px-4 pb-3 shrink-0">
         <p className="text-[20px] font-extrabold leading-[1.15] line-clamp-3 text-center">
           {hook}
         </p>
       </div>
 
-      <div className="relative flex-1 min-h-0 w-full bg-black">
+      <div className="w-full bg-black shrink-0">
         {preview?.videoUrl ? (
           isAudio ? (
-            <div className="flex h-full w-full items-center justify-center">
+            <div className="flex w-full items-center justify-center py-3">
               <audio
                 key={`${preview.videoUrl}-audio`}
                 src={`${preview.videoUrl}#t=${startSec},${endSec}`}
@@ -586,18 +588,21 @@ function ShortsPreview({
               controls
               preload="metadata"
               playsInline
-              className="block h-full w-full bg-black object-cover"
+              className="block h-auto w-full bg-black object-contain"
             />
           )
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-[11px] text-white/50">
+          <div
+            className="flex w-full items-center justify-center text-[11px] text-white/50"
+            style={{ aspectRatio: "16 / 9" }}
+          >
             {preview === null ? "Loading preview…" : "No preview available"}
           </div>
         )}
       </div>
 
       {captionText && (
-        <div className="px-4 py-3 shrink-0 text-center">
+        <div className="px-4 pt-4 shrink-0 text-center">
           <p className="text-[13px] font-semibold leading-snug line-clamp-3 drop-shadow-lg">
             {captionText}
           </p>

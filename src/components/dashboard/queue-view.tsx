@@ -8,17 +8,20 @@ import { isNotionAuthoritative } from "@/lib/platform";
 import { IdeaQueueTable } from "./idea-queue-table";
 import { CrossPostQueueTable } from "./cross-post-queue-table";
 import { RepostQueueTable } from "./repost-queue-table";
+import { SpokeQueueTable } from "./spoke-queue-table";
 import { HistoryQueueTable } from "./history-queue-table";
 import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 import type { CrossPostCandidatesResult } from "@/lib/services/cross-post-candidates";
 import type { RepostCandidatesResult } from "@/lib/services/repost-candidates";
+import type { SpokeCandidatesResult } from "@/lib/services/spoke-candidates";
 import type { QueueHistoryEvent } from "@/app/api/queue/history/route";
 
 export type QueueSource =
   | "all"
   | "repurposed"
+  | "spoke"
   | "clip_ideas"
   | "cross_post"
   | "repost"
@@ -34,6 +37,7 @@ interface QueueViewProps {
 
 const SOURCE_TABS = [
   { value: "all", label: "All", slug: "" },
+  { value: "spoke", label: "Repurposed", slug: "repurposed" },
   { value: "repurposed", label: "Triggered", slug: "triggered" },
   { value: "clip_ideas", label: "Clip Ideas", slug: "clip-ideas" },
   { value: "cross_post", label: "Cross-post", slug: "cross-post" },
@@ -56,6 +60,8 @@ export function QueueView({
     null
   );
   const [repostLoading, setRepostLoading] = useState(true);
+  const [spokeData, setSpokeData] = useState<SpokeCandidatesResult | null>(null);
+  const [spokeLoading, setSpokeLoading] = useState(true);
   const [historyEvents, setHistoryEvents] = useState<QueueHistoryEvent[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -180,6 +186,53 @@ export function QueueView({
   useEffect(() => {
     fetchRepostQueue();
   }, [fetchRepostQueue]);
+
+  const fetchSpokeQueue = useCallback(async () => {
+    setSpokeLoading(true);
+    try {
+      const res = await fetch(
+        `/api/spoke-queue?brand=${encodeURIComponent(brand)}`
+      );
+      if (!res.ok) {
+        console.error(`Spoke queue API returned HTTP ${res.status}`);
+        setSpokeData({
+          items: [],
+          stats: {
+            rawPillars: 0,
+            rawFormats: 0,
+            rawPairs: 0,
+            droppedNoChannelCohort: 0,
+            droppedNoFormatCohort: 0,
+            droppedInFlight: 0,
+            droppedCooldown: 0,
+            droppedBelowThreshold: 0,
+          },
+          config: {
+            pillarWindowDays: 730,
+            channelCohortWindowDays: 365,
+            formatCohortWindowDays: 90,
+            pairSourceCohortWindowDays: 180,
+            pairPubCooldownDays: 14,
+            percentile: 0.6,
+            minFormatHistory: 3,
+            spokeThreshold: 1.0,
+          },
+        });
+        return;
+      }
+      const json = (await res.json()) as SpokeCandidatesResult;
+      setSpokeData(json);
+    } catch (err) {
+      console.error("Failed to fetch spoke queue:", err);
+      setSpokeData(null);
+    } finally {
+      setSpokeLoading(false);
+    }
+  }, [brand]);
+
+  useEffect(() => {
+    fetchSpokeQueue();
+  }, [fetchSpokeQueue]);
 
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -310,10 +363,46 @@ export function QueueView({
     });
   }, [repostData, selectedPlatform, selectedFormat, query]);
 
+  // SPOKE (pillar × format) candidates — filtered by channel (the pillar's
+  // YouTube account), format, and free-text search across pillar title +
+  // format + channel handle.
+  const spokeFiltered = useMemo(() => {
+    const candidates = spokeData?.items ?? [];
+    return candidates.filter((c) => {
+      if (
+        !matchesChannel(
+          {
+            accountId: c.pillar.account.id,
+            postType: "youtube_long",
+            account: c.pillar.account,
+          },
+          selectedPlatform
+        )
+      )
+        return false;
+      if (selectedFormat !== "all" && c.format.name !== selectedFormat) {
+        return false;
+      }
+      if (query) {
+        const haystack = [
+          c.pillar.title,
+          c.format.name,
+          c.pillar.account.handle,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+      return true;
+    });
+  }, [spokeData, selectedPlatform, selectedFormat, query]);
+
   const sourceCounts = useMemo(() => {
     const counts = {
       all: 0,
       repurposed: 0,
+      spoke: 0,
       clip_ideas: 0,
       cross_post: 0,
       repost: 0,
@@ -333,9 +422,16 @@ export function QueueView({
     }
     counts.cross_post = crossPostFiltered.length;
     counts.repost = repostFiltered.length;
+    counts.spoke = spokeFiltered.length;
     counts.history = historyEvents.length;
     return counts;
-  }, [baseFiltered, crossPostFiltered, repostFiltered, historyEvents]);
+  }, [
+    baseFiltered,
+    crossPostFiltered,
+    repostFiltered,
+    spokeFiltered,
+    historyEvents,
+  ]);
 
   const filtered = baseFiltered.filter((item) => {
     if (selectedSource === "all") return true;
@@ -354,6 +450,7 @@ export function QueueView({
   const isCrossPostTab = selectedSource === "cross_post";
   const isHistoryTab = selectedSource === "history";
   const isRepostTab = selectedSource === "repost";
+  const isSpokeTab = selectedSource === "spoke";
 
   return (
     <div className="space-y-6">
@@ -368,7 +465,9 @@ export function QueueView({
                   ? crossPostFiltered.length
                   : isRepostTab
                     ? repostFiltered.length
-                    : filtered.length}
+                    : isSpokeTab
+                      ? spokeFiltered.length
+                      : filtered.length}
             </span>
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
@@ -378,7 +477,9 @@ export function QueueView({
                 ? "High-performing posts from the last 21 days — pick where to cross-post."
                 : isRepostTab
                   ? "Elite evergreen — past hits that beat their format on this channel by ≥1.5× the top quartile."
-                  : "Triage new ideas — assign an editor or kill."}
+                  : isSpokeTab
+                    ? "SPOKE algorithm — top (pillar × format) pairs scored by performance, freshness, and pair history."
+                    : "Triage new ideas — assign an editor or kill."}
           </p>
         </div>
         <Input
@@ -495,6 +596,23 @@ export function QueueView({
                 : "No elite evergreen right now. The bar is high — give it time as more cohort data lands."
             }
             onMutate={fetchRepostQueue}
+          />
+        )
+      ) : isSpokeTab ? (
+        spokeLoading ? (
+          <LoadingPanel label="Running SPOKE algorithm…" />
+        ) : (
+          <SpokeQueueTable
+            items={spokeFiltered}
+            brand={brand}
+            emptyMessage={
+              query ||
+              selectedPlatform !== "all" ||
+              selectedFormat !== "all"
+                ? "No SPOKE candidates match the current filters."
+                : "No SPOKE candidates above the bar right now. Pillars need to clear their channel's typical performance to surface."
+            }
+            onMutate={fetchSpokeQueue}
           />
         )
       ) : loading ? (

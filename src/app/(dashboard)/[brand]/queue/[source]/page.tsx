@@ -14,6 +14,7 @@ interface BrandQueueSourcePageProps {
 
 const SLUG_TO_SOURCE: Record<string, QueueSource> = {
   triggered: "repurposed",
+  repurposed: "spoke",
   "clip-ideas": "clip_ideas",
   "cross-post": "cross_post",
   repost: "repost",
@@ -23,6 +24,7 @@ const SLUG_TO_SOURCE: Record<string, QueueSource> = {
 const SOURCE_LABEL: Record<QueueSource, string> = {
   all: "All",
   repurposed: "Triggered",
+  spoke: "Repurposed",
   clip_ideas: "Clip Ideas",
   cross_post: "Cross-post",
   repost: "Repost",
