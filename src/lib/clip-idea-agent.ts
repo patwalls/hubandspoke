@@ -1,13 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// Sonnet 4.6. Prompt V7: require each idea to cite a verbatim transcriptAnchor-
-// Quote — the line that DELIVERS the hook's payoff — and validate in code that
-// the citation actually falls inside startSec/endSec, snapping the range when
-// the model picks timestamps adjacent to (rather than over) the delivery line.
-// Fixes the V6 failure mode where the agent landed on a host's recap of the
-// guest's point instead of the guest making it.
+// Sonnet 4.6. Prompt V8 (2026-05-20): cap pre-anchor lead-in so the hook's
+// payoff lands inside the first ~15s of the clip. Closes the failure mode
+// where the agent picked a 90s window with 60s of unrelated setup before
+// the anchor (e.g. a "TikTok strategy" hook anchored at 5:27 but starting
+// at 4:26, opening on the speaker's React internship and A/B testing
+// tangents). V7 introduced the verbatim transcriptAnchorQuote gate; V8
+// adds a hard MAX_LEAD_IN_SEC=15 constraint in alignRangeToCues plus a
+// tighter RUNTIME prompt that asks for shorter clips with up-front payoff.
 const MODEL = "claude-sonnet-4-6";
-export const PROMPT_VERSION = 7;
+export const PROMPT_VERSION = 8;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 // Friendly name for the clip-idea algorithm. Versioned alongside PROMPT_VERSION.
@@ -65,7 +67,7 @@ OTHER CLIP CONSTRAINTS
 =====================================================
 
 - SELF-CONTAINED. Setup → payoff inside the clip. Watchable with no prior context.
-- RUNTIME. 30–75 seconds is the sweet spot. Prefer 45–70s. Under 25s usually has no payoff; over 90s loses retention.
+- RUNTIME. 30–60 seconds is the sweet spot. Prefer 30–45s for snappy list-tease hooks ("Stupid simple X that did Y:"), 50–60s for narrative beats. Over 75s usually means you front-loaded too much setup — the anchor (the payoff line) should land within the FIRST 15 SECONDS of the clip. Pre-anchor content is at most one short sentence of context; never include "before I cracked this, I tried X, then Y, then Z" tangents about unrelated parts of the speaker's life.
 - NATURAL BOUNDARIES. The transcript is pre-segmented with [MM:SS] cue timestamps. Start/end on cue boundaries — never mid-cue.
 - VARIETY. The 10 ideas must cover distinctly different moments. No repeated story beats.
 
@@ -403,15 +405,36 @@ export function alignRangeToCues(args: {
   );
 
   // Candidate boundaries for the start: any segment start at or before the
-  // anchor (so the anchor stays inside). Treat 0 as a candidate too (some
-  // pillars have content from the very first segment that should be
-  // includable). Likewise candidate ends are segment ends at or after the
-  // anchor end.
+  // anchor (so the anchor stays inside) AND no earlier than
+  // (anchorStartSec - MAX_LEAD_IN_SEC) — the v8 lead-in cap. Without it
+  // the LLM could (and did) front-load 60+ seconds of unrelated setup
+  // before the hook's payoff actually landed. Treat 0 as a candidate too
+  // (some pillars have content from the very first segment that should
+  // be includable). Likewise candidate ends are segment ends at or after
+  // the anchor end.
+  const MAX_LEAD_IN_SEC = 15;
+  const minStart = args.anchorStartSec - MAX_LEAD_IN_SEC;
   const candidateStarts = new Set<number>();
   const candidateEnds = new Set<number>();
   for (const s of args.segments) {
-    if (s.startSec <= args.anchorStartSec) candidateStarts.add(s.startSec);
+    if (s.startSec <= args.anchorStartSec && s.startSec >= minStart) {
+      candidateStarts.add(s.startSec);
+    }
     if (s.endSec >= args.anchorEndSec) candidateEnds.add(s.endSec);
+  }
+  // Fallback: if the lead-in cap leaves zero start candidates (happens
+  // when the only segment boundary before the anchor is >15s back —
+  // long monologues, sparse cues), drop the cap and try again so we
+  // don't fail the entire idea over what's a soft preference.
+  if (candidateStarts.size === 0) {
+    for (const s of args.segments) {
+      if (s.startSec <= args.anchorStartSec) candidateStarts.add(s.startSec);
+    }
+    if (candidateStarts.size > 0) {
+      console.warn(
+        `clip-idea-agent: lead-in cap (${MAX_LEAD_IN_SEC}s) left no start candidates for anchor at ${args.anchorStartSec.toFixed(1)}s — falling back to unconstrained candidates`,
+      );
+    }
   }
   if (candidateStarts.size === 0 || candidateEnds.size === 0) {
     return {

@@ -66,10 +66,15 @@ describe("alignRangeToCues", () => {
     expect(result.endSec).toBeGreaterThanOrEqual(1066);
   });
 
-  it("respects an LLM window that puts the anchor near the end (punchline anchor)", () => {
-    // Same transcript, but a hypothetical hook where the punchline IS the
-    // "very simple, type in what you ate" anchor — the LLM would put it at
-    // ~85% of the window, with the build-up before.
+  it("caps lead-in even when the LLM wanted a long buildup to a punchline (v8)", () => {
+    // Same transcript as above. The LLM proposed a 65s window with 55s
+    // of buildup leading to the "very simple, type in what you ate"
+    // anchor at the end (~85% of the LLM's window). V7 honored that
+    // intent. V8 overrides it: the lead-in cap forces the snap to start
+    // within 15s of the anchor, so the anchor lands EARLY in the clip
+    // and the payoff explanation plays out after. This is the right
+    // tradeoff — the unrelated "Android markets" banter the LLM tried
+    // to include is exactly the kind of lead-in v8 strips.
     const result = alignRangeToCues({
       intendedStartSec: 955,
       intendedEndSec: 1020,
@@ -80,10 +85,61 @@ describe("alignRangeToCues", () => {
     });
     expect("error" in result).toBe(false);
     if ("error" in result) return;
-    // Window should keep the anchor near the end of the clip — within ~15s
-    // of `endSec`, mirroring the LLM's 85%-ish placement.
-    const anchorMid = (1010.5 + 1018.1) / 2;
-    expect(result.endSec - anchorMid).toBeLessThan(15);
+    expect(1010.5 - result.startSec).toBeLessThanOrEqual(15);
+    expect(result.endSec - result.startSec).toBeGreaterThanOrEqual(25);
+  });
+
+  it("caps pre-anchor lead-in to ~15s when the LLM intended a long setup (v8)", () => {
+    // Reproduces the 2026-05-20 TikTok-strategy bug. The LLM put the
+    // payoff "I made three TikTok accounts…" anchor at 327.42s but
+    // chose intendedStart=275 (52s of unrelated React/AI/design tangents
+    // before the payoff). V7 honored that intent and snapped to 266-357.
+    // V8's MAX_LEAD_IN_SEC=15 cap forces the start to be no earlier than
+    // anchorStart - 15s, regardless of LLM intent.
+    const segments: TranscriptSegment[] = [];
+    // Sparse cues throughout the unrelated lead-in.
+    for (let t = 260; t <= 330; t += 5) {
+      segments.push({ startSec: t, endSec: t + 5, text: `seg @ ${t}` });
+    }
+    // Post-anchor segments — the payoff explanation continues.
+    for (let t = 335; t <= 400; t += 5) {
+      segments.push({ startSec: t, endSec: t + 5, text: `seg @ ${t}` });
+    }
+    const result = alignRangeToCues({
+      intendedStartSec: 275,
+      intendedEndSec: 355,
+      anchorStartSec: 327.42,
+      anchorEndSec: 340,
+      durationSec: 979,
+      segments,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    // Lead-in (anchorStart - chosenStart) must be ≤ MAX_LEAD_IN_SEC.
+    expect(327.42 - result.startSec).toBeLessThanOrEqual(15);
+    // And the window must still be at least the minimum-duration length.
+    expect(result.endSec - result.startSec).toBeGreaterThanOrEqual(25);
+  });
+
+  it("falls back past the lead-in cap when no near-anchor cue exists", () => {
+    // If the only segment boundary before the anchor is way back (e.g.,
+    // long monologue), the cap silently relaxes so we still produce a
+    // clip rather than failing the entire idea.
+    const result = alignRangeToCues({
+      intendedStartSec: 950,
+      intendedEndSec: 1080,
+      anchorStartSec: 1010.5,
+      anchorEndSec: 1018.1,
+      durationSec: 1500,
+      segments: [
+        // Only segment start before the anchor is 921 — 89s back, way
+        // beyond the 15s cap. Fallback must kick in.
+        { startSec: 921, endSec: 1010, text: "long monologue" },
+        { startSec: 1010, endSec: 1019, text: "anchor inside here" },
+        { startSec: 1019, endSec: 1080, text: "tail" },
+      ],
+    });
+    expect("error" in result).toBe(false);
   });
 
   it("returns an error when no cue-aligned window can contain the anchor", () => {
