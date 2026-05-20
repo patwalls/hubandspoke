@@ -273,6 +273,14 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [updateFormatSearch, setUpdateFormatSearch] = useState("");
   const [updateFormatSaving, setUpdateFormatSaving] = useState(false);
 
+  // Bulk-clear selection state for the All content table. Used to fix
+  // mass-misapplied formats — tick the rows that don't belong here,
+  // hit "Clear format" once, every selected item's format becomes null.
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkClearing, setBulkClearing] = useState(false);
+
   // New-derivative dialog state.
   const [addChildOpen, setAddChildOpen] = useState(false);
   const [childName, setChildName] = useState("");
@@ -805,6 +813,66 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
       .filter((f) => !q || f.name.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [allFormats, formatId, updateFormatSearch]);
+
+  // Bulk-clear the format on every checked row in the All content table.
+  // Hits PUT /api/production-items with `format: null` once per item in
+  // parallel; reports the count in the toast and surfaces failures
+  // individually so a few row-level errors don't masquerade as a total
+  // failure. Optimistically removes succeeded rows from the local view
+  // so the editor sees their fix without waiting on a refetch.
+  async function bulkClearFormat() {
+    const ids = Array.from(selectedItemIds);
+    if (ids.length === 0 || bulkClearing) return;
+    setBulkClearing(true);
+    try {
+      const results = await Promise.allSettled(
+        ids.map(async (id) => {
+          const res = await fetch("/api/production-items", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, format: null }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${res.status}`);
+          }
+          return id;
+        }),
+      );
+      const succeeded = new Set<string>();
+      const failures: string[] = [];
+      for (const r of results) {
+        if (r.status === "fulfilled") succeeded.add(r.value);
+        else failures.push(r.reason instanceof Error ? r.reason.message : String(r.reason));
+      }
+      if (succeeded.size > 0) {
+        setData((prev) =>
+          prev
+            ? { ...prev, items: prev.items.filter((it) => !succeeded.has(it.id)) }
+            : prev,
+        );
+      }
+      setSelectedItemIds((prev) => {
+        const next = new Set(prev);
+        for (const id of succeeded) next.delete(id);
+        return next;
+      });
+      if (failures.length === 0) {
+        toast.success(
+          succeeded.size === 1
+            ? "Format cleared on 1 item."
+            : `Format cleared on ${succeeded.size} items.`,
+        );
+      } else {
+        toast.error(
+          `Cleared ${succeeded.size} of ${ids.length}. ${failures.length} failed.`,
+          { description: failures.slice(0, 2).join("\n\n"), duration: 10_000 },
+        );
+      }
+    } finally {
+      setBulkClearing(false);
+    }
+  }
 
   async function changeItemFormat(
     itemId: string,
@@ -1598,13 +1666,42 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
         <TabsContent value="content" className="pt-5">
       {/* Content list */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-base font-semibold text-foreground">
-            All content
-          </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            All posts in this format. Click a column header to sort.
-          </p>
+        <div className="px-5 py-4 border-b border-border flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">
+              All content
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              All posts in this format. Click a column header to sort.
+              Tick rows + Clear format to fix mis-categorized posts in bulk.
+            </p>
+          </div>
+          {selectedItemIds.size > 0 && (
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {selectedItemIds.size} selected
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedItemIds(new Set())}
+                disabled={bulkClearing}
+                className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                Clear selection
+              </button>
+              <button
+                type="button"
+                onClick={() => void bulkClearFormat()}
+                disabled={bulkClearing}
+                className="inline-flex h-8 items-center rounded-md bg-red-600 px-3 text-xs font-medium text-white hover:bg-red-700 disabled:bg-muted disabled:text-muted-foreground"
+                title="Set format = null on every selected item. Removes them from this view."
+              >
+                {bulkClearing
+                  ? `Clearing ${selectedItemIds.size}…`
+                  : `Clear format (${selectedItemIds.size})`}
+              </button>
+            </div>
+          )}
         </div>
         {items.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-muted-foreground">
@@ -1615,7 +1712,40 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30 text-left">
-                  <ContentSortHeader label="Title" sortKeyName="title" sort={contentSort} onToggle={toggleContentSort} className="px-5" />
+                  <th className="px-5 py-2 w-10">
+                    {(() => {
+                      // Header checkbox toggles every visible row. Indeterminate
+                      // visual cue (input.indeterminate is set via ref-callback)
+                      // when some-but-not-all are checked.
+                      const allChecked =
+                        sortedItems.length > 0 &&
+                        sortedItems.every((it) => selectedItemIds.has(it.id));
+                      const someChecked =
+                        !allChecked &&
+                        sortedItems.some((it) => selectedItemIds.has(it.id));
+                      return (
+                        <input
+                          type="checkbox"
+                          aria-label={allChecked ? "Deselect all" : "Select all"}
+                          checked={allChecked}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someChecked;
+                          }}
+                          onChange={() => {
+                            setSelectedItemIds((prev) => {
+                              if (allChecked) return new Set();
+                              const next = new Set(prev);
+                              for (const it of sortedItems) next.add(it.id);
+                              return next;
+                            });
+                          }}
+                          disabled={bulkClearing}
+                          className="size-4 cursor-pointer rounded border-input accent-red-600 disabled:cursor-not-allowed"
+                        />
+                      );
+                    })()}
+                  </th>
+                  <ContentSortHeader label="Title" sortKeyName="title" sort={contentSort} onToggle={toggleContentSort} />
                   <ContentSortHeader label="Account" sortKeyName="account" sort={contentSort} onToggle={toggleContentSort} />
                   <ContentSortHeader label="Published" sortKeyName="publishedDate" sort={contentSort} onToggle={toggleContentSort} />
                   <ContentSortHeader label="Views" sortKeyName="views" sort={contentSort} onToggle={toggleContentSort} align="right" />
@@ -1626,8 +1756,32 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               </thead>
               <tbody>
                 {sortedItems.map((item) => (
-                  <tr key={item.id} className="border-b border-border/50 last:border-b-0 hover:bg-accent/30">
+                  <tr
+                    key={item.id}
+                    className={cn(
+                      "border-b border-border/50 last:border-b-0 hover:bg-accent/30",
+                      selectedItemIds.has(item.id) && "bg-red-50/40",
+                    )}
+                  >
                     <td className="px-5 py-2.5">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${item.title ?? "row"}`}
+                        checked={selectedItemIds.has(item.id)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setSelectedItemIds((prev) => {
+                            const next = new Set(prev);
+                            if (checked) next.add(item.id);
+                            else next.delete(item.id);
+                            return next;
+                          });
+                        }}
+                        disabled={bulkClearing}
+                        className="size-4 cursor-pointer rounded border-input accent-red-600 disabled:cursor-not-allowed"
+                      />
+                    </td>
+                    <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2 min-w-0">
                         <CoverImg
                           src={coverImageUrl(item)}
