@@ -5,6 +5,7 @@ import { and, eq, gte, lte, isNotNull, isNull, sql } from "drizzle-orm";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
 import { getBrandSettings } from "@/lib/db/queries";
 import { format, subDays } from "date-fns";
+import { todayInclusiveOfUtc } from "@/lib/dates";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
 
 /**
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
 
   const today = new Date();
   const defaultStart = format(subDays(today, 90), "yyyy-MM-dd");
-  const defaultEnd = format(today, "yyyy-MM-dd");
+  const defaultEnd = todayInclusiveOfUtc();
 
   const startDate = searchParams.get("startDate") || defaultStart;
   const endDate = searchParams.get("endDate") || defaultEnd;

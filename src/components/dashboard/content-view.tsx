@@ -7,6 +7,7 @@ import { FilterPills } from "./filter-pills";
 import { PerformanceTable } from "./performance-table";
 import type { ContentReportData } from "@/types";
 import type { PickerAccount } from "@/components/ui/account-post-type-picker";
+import { todayInclusiveOfUtc } from "@/lib/dates";
 
 interface ContentViewProps {
   brand: string;
@@ -26,7 +27,7 @@ export function ContentView({ brand }: ContentViewProps) {
 
   const today = new Date();
   const defaultStart = format(subDays(today, 90), "yyyy-MM-dd");
-  const defaultEnd = format(today, "yyyy-MM-dd");
+  const defaultEnd = todayInclusiveOfUtc();
 
   const [startDate, setStartDate] = useState(searchParams.get("startDate") || defaultStart);
   const [endDate, setEndDate] = useState(searchParams.get("endDate") || defaultEnd);

@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getContentReport } from "@/lib/db/queries";
 import { format, subDays } from "date-fns";
+import { todayInclusiveOfUtc } from "@/lib/dates";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
 
   const today = new Date();
   const defaultStart = format(subDays(today, 90), "yyyy-MM-dd");
-  const defaultEnd = format(today, "yyyy-MM-dd");
+  const defaultEnd = todayInclusiveOfUtc();
 
   const params = {
     brand: searchParams.get("brand") || "starter-story",

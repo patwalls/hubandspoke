@@ -7,6 +7,7 @@ import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable } from "./period-table";
 import type { ContentReportData } from "@/types";
+import { todayInclusiveOfUtc } from "@/lib/dates";
 
 const PLATFORM_TABS = [
   { key: "production" as const, label: "Production" },
@@ -21,7 +22,7 @@ export function ContentReport({ brand }: { brand: string }) {
 
   const today = new Date();
   const defaultStart = format(subDays(today, 90), "yyyy-MM-dd");
-  const defaultEnd = format(today, "yyyy-MM-dd");
+  const defaultEnd = todayInclusiveOfUtc();
 
   const [startDate, setStartDate] = useState(
     searchParams.get("startDate") || defaultStart
