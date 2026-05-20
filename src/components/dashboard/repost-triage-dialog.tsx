@@ -71,6 +71,9 @@ export interface RepostTriageDialogCandidate {
     productionItemId: string;
     status: string | null;
     publishedAt: string | null;
+    publishedDate?: string | null;
+    views?: number | null;
+    likes?: number | null;
   }>;
 }
 
@@ -381,20 +384,33 @@ export function RepostTriagePanel({
               <div className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                 Prior reposts ({candidate.priorReposts!.length})
               </div>
-              {candidate.priorReposts!.slice(0, 4).map((r) => (
-                <div key={r.productionItemId} className="text-muted-foreground">
-                  <Link
-                    href={`/${brand}/content/${r.productionItemId}`}
-                    target="_blank"
-                    className="hover:underline"
-                  >
-                    {r.status}
-                  </Link>
-                  {r.publishedAt && (
-                    <span> · {new Date(r.publishedAt).toLocaleDateString()}</span>
-                  )}
-                </div>
-              ))}
+              {candidate.priorReposts!.slice(0, 4).map((r) => {
+                // Date fallback: prefer the precise publishedAt timestamp,
+                // fall back to publishedDate (date column) which older synced
+                // rows often have when publishedAt is null.
+                const dateIso = r.publishedAt ?? r.publishedDate ?? null;
+                const dateLabel = dateIso
+                  ? new Date(dateIso).toLocaleDateString()
+                  : null;
+                return (
+                  <div key={r.productionItemId} className="text-muted-foreground">
+                    <Link
+                      href={`/${brand}/content/${r.productionItemId}`}
+                      target="_blank"
+                      className="hover:underline"
+                    >
+                      {r.status}
+                    </Link>
+                    {dateLabel && <span> · {dateLabel}</span>}
+                    {r.views != null && r.views > 0 && (
+                      <span> · {formatCompact(r.views)} views</span>
+                    )}
+                    {r.likes != null && r.likes > 0 && (
+                      <span> · {formatCompact(r.likes)} likes</span>
+                    )}
+                  </div>
+                );
+              })}
             </section>
           )}
 

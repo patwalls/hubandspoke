@@ -112,6 +112,12 @@ export interface PriorRepost {
   productionItemId: string;
   status: string | null;
   publishedAt: string | null;
+  /** `published_date` (date) fallback — older synced items often have this
+   *  set but no `published_at` timestamp, so the modal can still surface a
+   *  date for them. */
+  publishedDate: string | null;
+  views: number | null;
+  likes: number | null;
   killReason: string | null;
 }
 
@@ -338,6 +344,9 @@ export async function selectRepostCandidates(opts: {
       productionItemId: productionItems.id,
       status: productionItems.status,
       publishedAt: productionItems.publishedAt,
+      publishedDate: productionItems.publishedDate,
+      views: productionItems.views,
+      likes: productionItems.likes,
     })
     .from(productionItems)
     .where(
@@ -502,6 +511,9 @@ export async function selectRepostCandidates(opts: {
       productionItemId: r.productionItemId,
       status: r.status,
       publishedAt: r.publishedAt ? r.publishedAt.toISOString() : null,
+      publishedDate: r.publishedDate ?? null,
+      views: r.views,
+      likes: r.likes,
       killReason: killReasonsByRepost.get(r.productionItemId) ?? null,
     }));
 
