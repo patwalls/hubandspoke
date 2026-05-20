@@ -27,7 +27,10 @@ export function InstagramReelSimulator({
   onMediaMutated,
   onDraftMutated,
   descriptRenderState,
+  descriptProcessingLabel,
+  descriptProcessingDetail,
   descriptProjectUrl,
+  draftAlgorithmRunning,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   // Show the render-state placeholder whenever Descript work isn't done.
@@ -55,6 +58,8 @@ export function InstagramReelSimulator({
           <ReelStatePlaceholder
             state={descriptRenderState!}
             itemId={itemId}
+            processingLabel={descriptProcessingLabel ?? null}
+            processingDetail={descriptProcessingDetail ?? null}
           />
         ) : (
           <DraftMediaDropZone
@@ -138,6 +143,7 @@ export function InstagramReelSimulator({
         variant="ig-embed"
         author={data.author}
         subtitle="Original audio"
+        draftAlgorithmRunning={draftAlgorithmRunning}
       />
     </div>
   );
@@ -179,9 +185,15 @@ async function triggerResync(itemId: string): Promise<void> {
 function ReelStatePlaceholder({
   state,
   itemId,
+  processingLabel,
+  processingDetail,
 }: {
-  state: "rendering" | "awaiting" | "failed";
+  state: "processing" | "rendering" | "awaiting" | "failed";
   itemId: string;
+  /** Phase-specific label for the "processing" state. Falls back to
+   *  generic "Working on something…" when omitted. */
+  processingLabel?: string | null;
+  processingDetail?: string | null;
 }) {
   const [retrying, setRetrying] = useState(false);
 
@@ -210,6 +222,24 @@ function ReelStatePlaceholder({
     }
   }
 
+  if (state === "processing") {
+    // Same spinner UI as "rendering" — the visual treatment that already
+    // works well per the user. Copy is phase-specific (parent computes it
+    // from the descript-status response: "import", "Underlord layout-pack",
+    // "queued"). Falls back to generic copy when the parent passes nothing.
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-white/80">
+        <Loader2Icon className="h-7 w-7 animate-spin text-white/90" />
+        <span className="text-sm font-semibold leading-tight">
+          {processingLabel ?? "Working on your clip in Descript…"}
+        </span>
+        <span className="text-xs leading-snug text-white/55">
+          {processingDetail ??
+            "Hang tight — the video will appear here automatically when it's ready."}
+        </span>
+      </div>
+    );
+  }
   if (state === "rendering") {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center text-white/80">

@@ -74,7 +74,20 @@ interface ContentPreviewProps {
   /** Descript-render state. Forwarded to the per-platform simulator so
    *  it can render an Instagram-embed-style placeholder in place of the
    *  drag-to-add empty state. See `SimulatorProps.descriptRenderState`. */
-  descriptRenderState?: "rendering" | "awaiting" | "failed" | null;
+  descriptRenderState?:
+    | "processing"
+    | "rendering"
+    | "awaiting"
+    | "failed"
+    | null;
+  /** Phase-specific copy for the `processing` placeholder. See
+   *  `SimulatorProps.descriptProcessingLabel`. */
+  descriptProcessingLabel?: string | null;
+  descriptProcessingDetail?: string | null;
+  /** True while the Draft Algorithm is running for this item — locks the
+   *  caption editor so editors don't type into a draft about to be
+   *  overwritten. See `SimulatorProps.draftAlgorithmRunning`. */
+  draftAlgorithmRunning?: boolean;
 }
 
 export function ContentPreview({
@@ -87,6 +100,9 @@ export function ContentPreview({
   onMediaMutated,
   onDraftMutated,
   descriptRenderState,
+  descriptProcessingLabel,
+  descriptProcessingDetail,
+  draftAlgorithmRunning,
 }: ContentPreviewProps) {
   // Prefer the canonical `postType` ("x", "instagram_reel", …) — it's the
   // accounts-rollout key and matches the simulator map directly. Fall back
@@ -137,7 +153,10 @@ export function ContentPreview({
           onMediaMutated={onMediaMutated}
           onDraftMutated={onDraftMutated}
           descriptRenderState={descriptRenderState}
+          descriptProcessingLabel={descriptProcessingLabel}
+          descriptProcessingDetail={descriptProcessingDetail}
           descriptProjectUrl={item.descriptProjectUrl ?? null}
+          draftAlgorithmRunning={draftAlgorithmRunning}
         />
       </div>
     </div>

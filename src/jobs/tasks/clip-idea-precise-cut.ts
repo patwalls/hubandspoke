@@ -53,6 +53,22 @@ const POLL_INTERVAL_MS = 5000;
 const DEADLINE_MS = 30 * 60 * 1000;
 
 /**
+ * Settle delay between the Underlord agent job stopping and kicking off
+ * the MP4 publish. Descript marks the agent job `stopped` as soon as it
+ * has parsed and dispatched the layout-pack instructions, but the
+ * actual composition mutations (caption track, frame layout, filler
+ * trims) can still be writing for a few seconds after that. Publishing
+ * immediately renders a slightly-stale MP4 that misses the layout pack.
+ *
+ * Override via `DESCRIPT_UNDERLORD_SETTLE_MS` if Descript ever changes
+ * its consistency model — 60s is the conservative default Pat asked
+ * for after observing pre-Underlord MP4s landing in the simulator.
+ */
+const UNDERLORD_SETTLE_MS = Number(
+  process.env.DESCRIPT_UNDERLORD_SETTLE_MS ?? "60000",
+);
+
+/**
  * Precise-cut flow, split across phases so each task invocation stays short
  * enough to survive a deploy:
  *
@@ -392,11 +408,18 @@ async function pollLayoutOnce(
       meta: { layoutJobId },
     });
     // Auto-chain into publish-and-archive so the rendered MP4 lands in
-    // S3 and the simulator on the detail page picks it up. Mirrors the
-    // chain we wired in `descript-clip-resolve` for the agent flow.
-    await helpers.addJob("descript-publish-and-archive", {
-      productionItemId: payload.derivativeItemId,
-    });
+    // S3 and the simulator on the detail page picks it up. Wait
+    // UNDERLORD_SETTLE_MS before firing — Descript flips the agent job
+    // to `stopped` as soon as instructions are dispatched, but the
+    // composition mutations (layout pack, captions, filler trims) can
+    // still be applying. Publishing immediately renders a pre-layout
+    // MP4. Mirrors the chain we wired in `descript-clip-resolve` for
+    // the agent flow.
+    await helpers.addJob(
+      "descript-publish-and-archive",
+      { productionItemId: payload.derivativeItemId },
+      { runAt: new Date(Date.now() + UNDERLORD_SETTLE_MS) },
+    );
     return;
   }
 

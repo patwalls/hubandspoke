@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { SparklesIcon } from "lucide-react";
+import { Loader2Icon, SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { EditableField } from "./editable-field";
@@ -37,6 +37,10 @@ interface Props {
    *  but each platform should pass its own — LinkedIn isn't a "caption",
    *  X says "What's happening?", etc. */
   placeholder?: string;
+  /** When true, the Draft Algorithm is queued/running for this item.
+   *  Force the editor read-only and render a small overlay so the editor
+   *  doesn't type into a draft that's about to be auto-written. */
+  draftAlgorithmRunning?: boolean;
 }
 
 /**
@@ -65,14 +69,21 @@ export function CaptionPanel({
   author,
   subtitle,
   placeholder,
+  draftAlgorithmRunning,
 }: Props) {
+  // When the Draft Algorithm is running, force the editor read-only so the
+  // user can't type into a field the algorithm is about to overwrite. The
+  // algorithm's own idempotency guard handles the race past this lock, but
+  // the lock is the friendlier UX: visible "we're drafting this for you,
+  // hold on" instead of "we just nuked your text."
+  const effectiveEditable = editable && !draftAlgorithmRunning;
   if (variant === "ig-embed" && author) {
     return (
       <IgEmbedCaption
         itemId={itemId}
         fieldKey={fieldKey}
         value={value}
-        editable={editable}
+        editable={effectiveEditable}
         onLocalEdit={onLocalEdit}
         onCommit={onCommit}
         showRegenerate={showRegenerate}
@@ -80,6 +91,7 @@ export function CaptionPanel({
         author={author}
         subtitle={subtitle ?? null}
         placeholder={placeholder ?? "Write a caption…"}
+        draftAlgorithmRunning={!!draftAlgorithmRunning}
       />
     );
   }
@@ -99,16 +111,35 @@ export function CaptionPanel({
           />
         </div>
       )}
+      {draftAlgorithmRunning && <DraftingIndicator />}
       <EditableField
         fieldKey={fieldKey}
-        editable={editable}
+        editable={effectiveEditable}
         onLocalEdit={onLocalEdit}
         onCommit={onCommit}
         value={value}
         placeholder={placeholder ?? "Write something…"}
         multiline
-        className="whitespace-pre-wrap text-sm leading-snug text-foreground"
+        className={cn(
+          "whitespace-pre-wrap text-sm leading-snug text-foreground",
+          draftAlgorithmRunning && "opacity-60",
+        )}
       />
+    </div>
+  );
+}
+
+/**
+ * "Drafting caption…" banner shown above the caption editor while the
+ * Draft Algorithm job is running. Same spinner + amber-on-cream palette
+ * as the descript-processing chip so the in-flight signal looks
+ * consistent across the page.
+ */
+function DraftingIndicator() {
+  return (
+    <div className="mb-2 inline-flex items-center gap-1.5 self-start rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-900">
+      <Loader2Icon className="h-3 w-3 animate-spin" />
+      Drafting caption — hold off on typing.
     </div>
   );
 }
@@ -125,6 +156,7 @@ function IgEmbedCaption({
   author,
   subtitle,
   placeholder,
+  draftAlgorithmRunning,
 }: {
   itemId: string;
   fieldKey: string | null;
@@ -137,6 +169,7 @@ function IgEmbedCaption({
   author: PreviewData["author"];
   subtitle: string | null;
   placeholder: string;
+  draftAlgorithmRunning: boolean;
 }) {
   const handle = author.handle ?? "your_handle";
   return (
@@ -159,6 +192,7 @@ function IgEmbedCaption({
           ) : null
         }
       />
+      {draftAlgorithmRunning && <DraftingIndicator />}
       {/* Cap the caption block at ~slide height so a long Canva-generated
        *  draft doesn't push the right column to 2000+ px (which was also
        *  forcing the left-column carousel to stretch into a portrait
@@ -173,7 +207,10 @@ function IgEmbedCaption({
           value={value}
           placeholder={placeholder}
           multiline
-          className="whitespace-pre-wrap text-sm leading-snug text-foreground"
+          className={cn(
+            "whitespace-pre-wrap text-sm leading-snug text-foreground",
+            draftAlgorithmRunning && "opacity-60",
+          )}
         />
       </div>
     </div>

@@ -431,6 +431,95 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
+  // Live Descript status — separate from the production_item columns so
+  // we can surface in-flight queue jobs (clip-idea-precise-cut /
+  // descript-clip-resolve / publish-and-archive) that haven't yet stamped
+  // their results back. Polled lightly when work is in flight; idle
+  // otherwise. Drives the simulator's "processing" placeholder so editors
+  // see "Cutting clip in Descript…" the second the job lands in the
+  // queue, instead of staring at the empty drag-to-add zone.
+  const [descriptStatusLive, setDescriptStatusLive] =
+    useState<DescriptStatusResponse | null>(null);
+  // Draft Algorithm running state — locks the caption editor while a
+  // `draft-algorithm-run` job is queued/in-flight for this item. Without
+  // this, an editor who opens the page right after a clip-promote
+  // (which auto-fires the algorithm) can start typing — only to have
+  // their text obliterated when the algorithm writes its draft a few
+  // seconds later. Polled at the same cadence as descript-status.
+  const [draftAlgorithmRunning, setDraftAlgorithmRunning] =
+    useState<boolean>(false);
+  useEffect(() => {
+    if (!data?.item?.id) return;
+    const itemId = data.item.id;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch(
+          `/api/production-items/${itemId}/descript-status`,
+        );
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as DescriptStatusResponse;
+        if (!cancelled) setDescriptStatusLive(json);
+      } catch {
+        // Best-effort; transient fetch errors just leave stale data.
+      }
+    };
+    void fetchStatus();
+    // Poll while work is in flight — same trigger as DescriptStatusPill.
+    timer = setInterval(() => {
+      if (cancelled) return;
+      const s = descriptStatusLive;
+      const inFlight =
+        !s ||
+        s.status === "processing" ||
+        s.status === "stalled" ||
+        s.publish.state === "rendering";
+      if (inFlight) void fetchStatus();
+    }, 10_000);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+    // descriptStatusLive intentionally omitted from deps — the interval
+    // reads the latest via closure-over-ref-style isn't possible here, so
+    // we accept that the "inFlight" check uses the value at effect-setup
+    // time. The 10s cadence is cheap enough that staying-on after work
+    // finishes for one extra tick is fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.item?.id]);
+
+  // Draft-algorithm poller — separate from descript-status so the two
+  // signals stay decoupled. Polls every 5s while running so the lock
+  // releases quickly once the draft commits, then idles. Stops polling
+  // once it sees `idle` (no further wakeups needed until the user
+  // triggers a regenerate, at which point the user-side action can
+  // refetch).
+  useEffect(() => {
+    if (!data?.item?.id) return;
+    const itemId = data.item.id;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch(
+          `/api/production-items/${itemId}/draft-algorithm-status`,
+        );
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as { state: "idle" | "running" };
+        if (!cancelled) setDraftAlgorithmRunning(json.state === "running");
+      } catch {
+        // Non-fatal; leave the lock state stale.
+      }
+    };
+    void fetchStatus();
+    timer = setInterval(() => void fetchStatus(), 5_000);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [data?.item?.id]);
+
   useEffect(() => {
     const item = data?.item;
     if (!item) return;
@@ -1723,7 +1812,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   //   - "awaiting":  composition exists, no publish job (stuck or fresh)
   //   - "failed":    last publish attempt errored — show retry button
   //   - null:        no Descript context, OR MP4 already archived
-  let descriptRenderState: "rendering" | "awaiting" | "failed" | null = null;
+  let descriptRenderState:
+    | "processing"
+    | "rendering"
+    | "awaiting"
+    | "failed"
+    | null = null;
   if (item.descriptPublishError) {
     descriptRenderState = "failed";
   } else if (item.descriptPublishedAt) {
@@ -1732,6 +1826,68 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     descriptRenderState = "rendering";
   } else if (item.descriptCompositionId) {
     descriptRenderState = "awaiting";
+  }
+  // Live-status overlay: the column-derived states above only flip after
+  // results land back on the production_item row. The window between
+  // "click" and "compositionId stamped" (precise-cut import +
+  // descript-clip-resolve poll) is invisible to those columns, and the
+  // Underlord layout-pack phase (compositionId set, no publishJobId yet)
+  // would otherwise render as "Awaiting render" with a misleading
+  // "Render now" button. Drive a unified "processing" state from the
+  // descript-status poll for every in-flight phase except the MP4 render
+  // itself (which has its own "rendering" copy + the existing
+  // descript_publish_job_id signal).
+  let descriptProcessingLabel: string | null = null;
+  let descriptProcessingDetail: string | null = null;
+  const liveStatus = descriptStatusLive?.status ?? null;
+  const liveTaskId =
+    descriptStatusLive?.queueJob?.taskIdentifier ?? null;
+  const liveLockedAt = descriptStatusLive?.queueJob?.lockedAt ?? null;
+  // Promote to "processing" when descript-status says work is in flight,
+  // AS LONG AS the MP4 render hasn't started (the column-derived
+  // "rendering" state owns that window — its copy is more accurate). The
+  // "stalled" status (project_id set, no composition_id yet) is also
+  // surfaced here so users see an in-flight pill instead of a misleading
+  // "Awaiting render" button.
+  const isPublishRender =
+    descriptRenderState === "rendering" || descriptRenderState === "failed";
+  if (
+    !isPublishRender &&
+    (liveStatus === "processing" || liveStatus === "stalled")
+  ) {
+    descriptRenderState = "processing";
+    if (liveTaskId === "clip-idea-precise-cut") {
+      // Two sub-phases: import (no compositionId yet) vs Underlord
+      // layout-pack (compositionId set, layoutJobId in payload). The
+      // queueJob doesn't expose layoutJobId here, but `compositionId`
+      // presence is a perfect proxy.
+      if (descriptStatusLive?.compositionId) {
+        descriptProcessingLabel = "Underlord is applying the layout pack…";
+        descriptProcessingDetail =
+          "Usually 30–90 seconds. The video will appear here automatically.";
+      } else {
+        descriptProcessingLabel = liveLockedAt
+          ? "Trimming clip locally + uploading to Descript…"
+          : "Trimming clip queued — about to start.";
+        descriptProcessingDetail =
+          "Underlord layout pack will follow once Descript finishes the import.";
+      }
+    } else if (liveTaskId === "descript-clip-resolve") {
+      descriptProcessingLabel = "Cutting clip in Descript (Underlord)…";
+      descriptProcessingDetail =
+        "Usually 30–90 seconds. The video will appear here automatically.";
+    } else if (liveTaskId === "descript-publish-and-archive") {
+      // Publish-and-archive is queued (typically with a small settle
+      // delay after Underlord finishes) but no descript_publish_job_id
+      // is stamped on the item yet. Render the placeholder as
+      // "rendering" so the user doesn't see the "Awaiting render" button
+      // pop in for a few seconds during the settle window.
+      descriptRenderState = "rendering";
+    } else {
+      descriptProcessingLabel = "Working on your clip in Descript…";
+      descriptProcessingDetail =
+        "Hang tight — the video will appear here automatically when it's ready.";
+    }
   }
   const hideDerivativeSections =
     derivatives.length === 0 && repurposeTargets.length === 0;
@@ -3064,6 +3220,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           onMediaMutated={() => void load()}
           onDraftMutated={() => void load()}
           descriptRenderState={descriptRenderState}
+          descriptProcessingLabel={descriptProcessingLabel}
+          descriptProcessingDetail={descriptProcessingDetail}
+          draftAlgorithmRunning={draftAlgorithmRunning}
         />
       ) : isPublished ? (
         <PublishedEmbed item={item} />
@@ -3220,6 +3379,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               onMediaMutated={() => void load()}
               onDraftMutated={() => void load()}
               descriptRenderState={descriptRenderState}
+              descriptProcessingLabel={descriptProcessingLabel}
+              descriptProcessingDetail={descriptProcessingDetail}
+              draftAlgorithmRunning={draftAlgorithmRunning}
             />
           </TabsContent>
         )}

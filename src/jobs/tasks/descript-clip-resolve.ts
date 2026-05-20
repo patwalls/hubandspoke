@@ -155,9 +155,23 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
       // simulator on its detail page can render it. The task is
       // idempotent (no-op if descript_published_at is already set), so
       // double-firing is harmless.
-      await helpers.addJob("descript-publish-and-archive", {
-        productionItemId: payload.derivativeItemId,
-      });
+      //
+      // For the agent path (importMode=false), the agent job stopping
+      // means Underlord just finished, and Descript may still be
+      // settling composition mutations for ~30-60s afterwards.
+      // Publishing immediately renders a pre-layout MP4 — delay long
+      // enough for the mutations to land. Cold-import (importMode=true)
+      // has no agent involved, so no settle delay needed.
+      const settleMs = importMode
+        ? 0
+        : Number(process.env.DESCRIPT_UNDERLORD_SETTLE_MS ?? "60000");
+      await helpers.addJob(
+        "descript-publish-and-archive",
+        { productionItemId: payload.derivativeItemId },
+        settleMs > 0
+          ? { runAt: new Date(Date.now() + settleMs) }
+          : undefined,
+      );
     }
     // Cold full-video import: stamp the pillar's seed_composition_id (NOT
     // its composition_id) so the next clip on this pillar takes the warm
