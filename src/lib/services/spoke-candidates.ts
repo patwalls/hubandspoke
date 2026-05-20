@@ -1,16 +1,23 @@
 import { and, eq, gte, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { accounts, productionItems } from "@/lib/db/schema";
+import {
+  accounts,
+  formats as formatsTable,
+  productionItems,
+} from "@/lib/db/schema";
 
 // SPOKE algorithm — live (pillar × format) candidate finder for the
 // "Repurposed" queue tab. Successor to the dumb threshold-monitor-sweep
 // rule (views > formats.viewThreshold → auto-insert one repurposed row),
 // which had no concept of pair history, format fit, or freshness.
 //
-// Pillar = a Published YouTube long-form video synced from Notion
-// (post_type='youtube_long'). Format = any format in the same brand with
-// at least MIN_FORMAT_HISTORY prior productions (so we don't surface
-// formats with no track record).
+// Pillar = a Published YouTube long-form video (post_type='youtube_long')
+// whose assigned format exists in the brand's formats table.
+// Target formats = the **children** of the pillar's format in the
+// `formats.parentFormatId` hierarchy (v1.2). A "Business Breakdown"
+// pillar can only target its declared derivative formats, not the
+// brand's entire format menu. Pillars whose format has no children are
+// skipped (the operator never declared what to repurpose them into).
 //
 // Score (per pair):
 //
@@ -127,7 +134,7 @@ export interface SpokeCandidatesResult {
     rawFormats: number;
     rawPairs: number;
     droppedNoChannelCohort: number;
-    droppedNoFormatCohort: number;
+    droppedNoChildFormats: number;
     droppedInFlight: number;
     droppedCooldown: number;
     droppedBelowThreshold: number;
@@ -156,7 +163,7 @@ export async function selectSpokeCandidates(opts: {
     rawFormats: 0,
     rawPairs: 0,
     droppedNoChannelCohort: 0,
-    droppedNoFormatCohort: 0,
+    droppedNoChildFormats: 0,
     droppedInFlight: 0,
     droppedCooldown: 0,
     droppedBelowThreshold: 0,
@@ -175,6 +182,7 @@ export async function selectSpokeCandidates(opts: {
       views: productionItems.views,
       likes: productionItems.likes,
       comments: productionItems.comments,
+      format: productionItems.format,
       lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
       accountId: productionItems.accountId,
       accountPlatform: accounts.platform,
@@ -213,31 +221,38 @@ export async function selectSpokeCandidates(opts: {
     return { items: [], stats, config: configBlock() };
   }
 
-  // 2. Eligible formats: brand-scoped, ≥ MIN_FORMAT_HISTORY past productions.
-  //    Single query joins formats with their production_items use count.
-  const formatRows = await db.execute<{
-    id: string;
-    name: string;
-    history: string;
-  }>(sql`
-    SELECT f.id::text AS id, f.name AS name, count(pi.id)::text AS history
-    FROM formats f
-    LEFT JOIN production_items pi
-      ON lower(trim(pi.format)) = lower(trim(f.name))
-      AND pi.brand = ${brand}
-      AND pi.deleted_at IS NULL
-    WHERE f.brand = ${brand}
-    GROUP BY f.id, f.name
-    HAVING count(pi.id) >= ${MIN_FORMAT_HISTORY}
-  `);
+  // 2. Brand format catalog + parent→children map. v1.2 narrows candidate
+  //    formats per-pillar to the children of the pillar's own format
+  //    (formats.parentFormatId), not the brand-wide format menu. Pillars
+  //    whose format has no children get skipped.
+  const allFormats = await db
+    .select({
+      id: formatsTable.id,
+      name: formatsTable.name,
+      parentFormatId: formatsTable.parentFormatId,
+    })
+    .from(formatsTable)
+    .where(eq(formatsTable.brand, brand));
 
-  const eligibleFormats = formatRows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    history: Number(r.history),
-  }));
-  stats.rawFormats = eligibleFormats.length;
-  if (eligibleFormats.length === 0) {
+  const formatByLowerName = new Map<
+    string,
+    { id: string; name: string; parentFormatId: string | null }
+  >();
+  for (const f of allFormats) {
+    formatByLowerName.set(f.name.toLowerCase().trim(), f);
+  }
+  const childrenByParentId = new Map<
+    string,
+    Array<{ id: string; name: string }>
+  >();
+  for (const f of allFormats) {
+    if (!f.parentFormatId) continue;
+    const arr = childrenByParentId.get(f.parentFormatId) ?? [];
+    arr.push({ id: f.id, name: f.name });
+    childrenByParentId.set(f.parentFormatId, arr);
+  }
+  stats.rawFormats = allFormats.length;
+  if (allFormats.length === 0) {
     return { items: [], stats, config: configBlock() };
   }
 
@@ -250,7 +265,7 @@ export async function selectSpokeCandidates(opts: {
     SELECT DISTINCT ON (fc.format_id) fc.format_id::text AS format_id, fc.post_type
     FROM format_channels fc
     WHERE fc.format_id = ANY(${sql.raw(
-      `ARRAY[${eligibleFormats.map((f) => `'${f.id}'`).join(",")}]::uuid[]`,
+      `ARRAY[${allFormats.map((f) => `'${f.id}'`).join(",")}]::uuid[]`,
     )})
     ORDER BY fc.format_id, fc.created_at ASC
   `);
@@ -325,9 +340,11 @@ export async function selectSpokeCandidates(opts: {
         String(FORMAT_COHORT_WINDOW_DAYS),
       )} days')
     GROUP BY lower(trim(format)), post_type
-    HAVING count(*) >= ${MIN_FORMAT_HISTORY}
   `);
   // Pick the largest-cohort post_type per format as the representative bar.
+  // No MIN_FORMAT_HISTORY filter at fetch time anymore (v1.2) — child
+  // formats with thin cohorts get a neutral formatFit=1.0 in scoring so
+  // newly-declared derivatives don't fall out of the candidate list.
   const formatBarByName = new Map<
     string,
     { p: number; cohortSize: number; postType: string }
@@ -402,8 +419,10 @@ export async function selectSpokeCandidates(opts: {
 
   // 5. Prior-attempt history for every (pillar, format) pair we'll score.
   //    One batched query, then indexed by pillarId|formatNameLower.
+  //    Format scope: any brand format (a pair's history is tied to the
+  //    target format name, which is some child in the hierarchy).
   const pillarIds = pillarRows.map((p) => p.id);
-  const eligibleFormatNamesLower = eligibleFormats.map((f) =>
+  const allFormatNamesLower = allFormats.map((f) =>
     f.name.toLowerCase().trim(),
   );
   // killed_at: no dedicated column today. Approximate with updated_at when
@@ -434,7 +453,7 @@ export async function selectSpokeCandidates(opts: {
       `ARRAY[${pillarIds.map((id) => `'${id}'`).join(",")}]::uuid[]`,
     )})
       AND lower(trim(format)) = ANY(${sql.raw(
-        `ARRAY[${eligibleFormatNamesLower.map((n) => `'${n.replace(/'/g, "''")}'`).join(",")}]::text[]`,
+        `ARRAY[${allFormatNamesLower.map((n) => `'${n.replace(/'/g, "''")}'`).join(",")}]::text[]`,
       )})
       AND deleted_at IS NULL
   `);
@@ -462,16 +481,32 @@ export async function selectSpokeCandidates(opts: {
     priorByPair.set(key, list);
   }
 
-  // 6. Cross-join + score.
+  // 6. Per-pillar scoring. For each pillar, resolve its assigned format,
+  //    look up that format's children via `parentFormatId`, and score
+  //    only (pillar × child) pairs.
   const items: SpokeCandidate[] = [];
   const now = Date.now();
 
   for (const pillar of pillarRows) {
     if (!pillar.accountId || pillar.views == null || !pillar.publishedAt) continue;
 
+    // Resolve pillar's format row → its children.
+    if (!pillar.format) continue;
+    const pillarFormatRow = formatByLowerName.get(
+      pillar.format.toLowerCase().trim(),
+    );
+    if (!pillarFormatRow) continue; // shouldn't happen given v1.1 SQL gate
+    const candidateFormats = childrenByParentId.get(pillarFormatRow.id) ?? [];
+    if (candidateFormats.length === 0) {
+      // Pillar's format has no declared children → operator never said
+      // what to repurpose it into. Skip the entire pillar.
+      stats.droppedNoChildFormats++;
+      continue;
+    }
+
     const channelBar = channelP60ByAccount.get(pillar.accountId);
     if (!channelBar || channelBar.p <= 0) {
-      stats.droppedNoChannelCohort += eligibleFormats.length;
+      stats.droppedNoChannelCohort += candidateFormats.length;
       continue;
     }
     const pillarStrength = pillar.views / channelBar.p;
@@ -481,19 +516,24 @@ export async function selectSpokeCandidates(opts: {
       Math.exp(-ageDays / FRESHNESS_HALF_LIFE_DAYS),
     );
 
-    for (const fmt of eligibleFormats) {
+    for (const fmt of candidateFormats) {
       stats.rawPairs++;
       const fmtKey = fmt.name.toLowerCase().trim();
       const formatBar = formatBarByName.get(fmtKey);
-      if (!formatBar || formatBar.p <= 0 || brandAllFormatsP60 <= 0) {
-        stats.droppedNoFormatCohort++;
-        continue;
-      }
-      const formatLiftRatio = formatBar.p / brandAllFormatsP60;
-      const pairSource = pairSourceByKey.get(`${fmtKey}|${pillar.accountId}`);
-      const pairSourceLift = pairSource
-        ? Math.max(0.5, Math.min(2.5, pairSource.p / formatBar.p))
+      // v1.2: missing format cohort → formatFit collapses to neutral 1.0.
+      // Operator explicitly mapped this child format in the hierarchy;
+      // we surface it for human review even without prior performance
+      // data, rather than dropping the pair entirely.
+      const haveFormatBar =
+        !!formatBar && formatBar.p > 0 && brandAllFormatsP60 > 0;
+      const formatLiftRatio = haveFormatBar
+        ? formatBar!.p / brandAllFormatsP60
         : 1.0;
+      const pairSource = pairSourceByKey.get(`${fmtKey}|${pillar.accountId}`);
+      const pairSourceLift =
+        pairSource && haveFormatBar
+          ? Math.max(0.5, Math.min(2.5, pairSource.p / formatBar!.p))
+          : 1.0;
       const formatFit = formatLiftRatio * pairSourceLift;
 
       const priors = priorByPair.get(`${pillar.id}|${fmtKey}`) ?? [];
@@ -518,9 +558,16 @@ export async function selectSpokeCandidates(opts: {
         continue;
       }
 
+      // pairHistoryMultiplier needs SOMETHING to compare prior pair views
+      // against. When the format has no brand cohort, fall back to the
+      // brand-all-formats bar (less precise but better than 0, which would
+      // collapse the multiplier to 1.0 via the divide-by-zero guard).
+      const pairHistoryBar = haveFormatBar
+        ? formatBar!.p
+        : brandAllFormatsP60;
       const pairHistoryMultiplier = computePairHistoryMultiplier(
         priors,
-        formatBar.p,
+        pairHistoryBar,
         now,
       );
 
@@ -538,8 +585,8 @@ export async function selectSpokeCandidates(opts: {
         pairHistoryMultiplier,
         pillarChannelP60: channelBar.p,
         pillarChannelCohortSize: channelBar.cohortSize,
-        formatBrandP60: formatBar.p,
-        formatBrandCohortSize: formatBar.cohortSize,
+        formatBrandP60: haveFormatBar ? formatBar!.p : 0,
+        formatBrandCohortSize: haveFormatBar ? formatBar!.cohortSize : 0,
         brandAllFormatsP60,
         pairSourceP50: pairSource?.p ?? 0,
         pairSourceCohortSize: pairSource?.cohortSize ?? 0,

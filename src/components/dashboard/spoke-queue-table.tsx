@@ -152,10 +152,16 @@ export function SpokeQueueTable({
                   "                     for YouTube long-form (last 365 days).\n" +
                   "  · formatFit      : (format P60 ÷ brand-all P60) × pair lift\n" +
                   "                     for repurposes from this channel.\n" +
+                  "                     Falls back to 1.0 when the format has no\n" +
+                  "                     cohort yet (v1.2).\n" +
                   "  · freshness      : exp(-ageDays/45), floored at 0.15.\n" +
                   "  · pairHistory    : boost if this exact (pillar × format)\n" +
                   "                     pair has shipped well before; dampen if\n" +
                   "                     killed or under-performed. 1.0 = no history.\n\n" +
+                  "Candidate scope (v1.2): pairs are restricted to (pillar ×\n" +
+                  "child format) where the child is declared in the pillar's\n" +
+                  "format hierarchy (formats.parentFormatId). Pillars with no\n" +
+                  "children in the hierarchy are skipped.\n\n" +
                   "Admit when SPOKE ≥ 1.0. Sort: highest first."
                 }
               />

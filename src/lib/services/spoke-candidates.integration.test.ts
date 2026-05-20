@@ -17,7 +17,7 @@ describe("selectSpokeCandidates (integration smoke)", () => {
         rawFormats: expect.any(Number),
         rawPairs: expect.any(Number),
         droppedNoChannelCohort: expect.any(Number),
-        droppedNoFormatCohort: expect.any(Number),
+        droppedNoChildFormats: expect.any(Number),
         droppedInFlight: expect.any(Number),
         droppedCooldown: expect.any(Number),
         droppedBelowThreshold: expect.any(Number),

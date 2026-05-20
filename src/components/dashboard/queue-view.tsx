@@ -202,7 +202,7 @@ export function QueueView({
             rawFormats: 0,
             rawPairs: 0,
             droppedNoChannelCohort: 0,
-            droppedNoFormatCohort: 0,
+            droppedNoChildFormats: 0,
             droppedInFlight: 0,
             droppedCooldown: 0,
             droppedBelowThreshold: 0,
