@@ -42,9 +42,9 @@ USER / API ENTRY POINTS
   POST /api/uploads/confirm                               → transcribe-whisper
   POST /api/production-items/[id]/repurpose               → draft-algorithm-run (auto-fire after insert)
   POST /api/production-items/[id]/repurpose               → canva-create-copy   (auto-fire when target.is_canva_format AND Skill has brand-template URL)
-  POST /api/production-items/[id]/cross-post              → draft-algorithm-run (auto-fire after seed, any seeded target)
+  POST /api/production-items/[id]/cross-post              → draft-algorithm-run (auto-fire after seed, any seeded target). Source body is run through stripDateOpenerWithLLM (Haiku, fail-soft) before seedRepostContent — strips stale "X years ago today:" leads on aged sources.
   POST /api/production-items/[id]/cross-post  manual=true → (no job — operator opted to bypass gate + automation; row created for manual upload)
-  POST /api/production-items/[id]/repost                  → (no Underlord job — see "Underlord usage tracking" below. Row inherits source media via seedRepostContent.)
+  POST /api/production-items/[id]/repost                  → (no Underlord job — see "Underlord usage tracking" below. Row inherits source media via seedRepostContent.) Source body is run through stripDateOpenerWithLLM (Haiku, fail-soft) before seedRepostContent — strips stale "X years ago today:" leads on repost-of-repost.
   # Removed 2026-05-18: cross-post + repost used to enqueue
   # `descript-derivative-create`, which fires Underlord ($3.50/call) to
   # duplicate the source composition. Burned $35 in 30 min from a short

@@ -7,6 +7,7 @@ import { resolveEditor } from "@/lib/services/assignees";
 import { buildRepostValues } from "@/lib/services/repost-values";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { seedRepostContent } from "@/lib/services/repost-seed";
+import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
 import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
@@ -194,6 +195,15 @@ export async function POST(request: Request, context: RouteContext) {
     }
   );
 
+  // Clean the source body BEFORE opening the transaction — the LLM call
+  // takes a few hundred ms and we don't want to hold a Postgres
+  // transaction open across a network round-trip. Strips a leading date-
+  // anchored opener ("8 years ago today:" etc.) so reposted-from-repost
+  // bodies don't carry stale dated leads. Fail-soft.
+  const seededBody = SEEDED_POST_TYPES.has(source.postType as PostType)
+    ? await stripDateOpenerWithLLM(source.contentBody)
+    : source.contentBody;
+
   // One transaction so we never leave a half-seeded repost. The seed step
   // is sub-50ms (≤4 small INSERTs), invisible next to the redirect.
   const created = await db.transaction(async (tx) => {
@@ -219,7 +229,7 @@ export async function POST(request: Request, context: RouteContext) {
         sourceId: source.id,
         repostId: row.id,
         postType: source.postType as PostType,
-        sourceContentBody: source.contentBody,
+        sourceContentBody: seededBody,
         sourceLegacyMedia: source.mediaS3Key
           ? {
               s3Bucket: source.mediaS3Bucket,

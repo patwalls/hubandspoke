@@ -9,6 +9,7 @@ import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
 import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { seedRepostContent } from "@/lib/services/repost-seed";
+import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { checkRepostReadiness } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
@@ -244,6 +245,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const isQueueDriven = assign || !!editorUserIdOverride;
   const status = isQueueDriven ? "Ready To Publish" : "Idea";
 
+  // Clean the source body BEFORE the transaction — Anthropic round-trip
+  // shouldn't hold a Postgres tx open. Strips a leading date-anchored
+  // opener (e.g. "8 years ago today:") so a cross-post of an aged repost
+  // doesn't carry the stale lead-in. Fail-soft (returns input on error).
+  const seededBody = CROSS_POST_SEEDED_TARGETS.has(targetPostType as PostType)
+    ? await stripDateOpenerWithLLM(source.contentBody)
+    : source.contentBody;
+
   // Wrap the insert + seed in a transaction so a partial failure (e.g.
   // mid-mirror media insert) doesn't leave a half-created cross-post.
   const utm = await generateUtmCampaign(source.title);
@@ -286,7 +295,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         sourceId: source.id,
         repostId: row.id,
         postType: targetPostType as PostType,
-        sourceContentBody: source.contentBody,
+        sourceContentBody: seededBody,
         sourceLegacyMedia: source.mediaS3Key
           ? {
               s3Bucket: source.mediaS3Bucket,

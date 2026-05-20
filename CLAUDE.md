@@ -313,6 +313,12 @@ wrappers.
 - Syncs content production items with metrics
 - Format relation requires separate page fetch (cached)
 
+## Text analysis — use LLMs, not regex
+
+Do not write regex (or other brittle pattern-matching) to classify or transform free-form user-generated content — post bodies, captions, transcripts, hooks, anything an editor wrote. Use an LLM. The cheapest model that handles the task — typically `claude-haiku-4-5-20251001` — is fine for one-shot text→text or text→classification calls. Template to mirror: `src/lib/services/draft-algorithm/derivative-hook.ts` (Haiku + single pinned tool + fail-soft `{ ok: false, failure }` return shape).
+
+Regex is fine for **structural** string handling — URLs, slugs, identifiers, placeholders like `{{hook}}`, file extensions, host parsing. The rule is about **content meaning**, not string shape.
+
 ## Critical Rules
 - NEVER commit or push without explicit user permission
 - NEVER expose API keys or secrets
