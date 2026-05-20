@@ -557,26 +557,28 @@ function ShortsPreview({
       className="relative mx-auto w-full max-w-[320px] rounded-xl bg-black text-white overflow-hidden flex flex-col shadow-lg"
       style={{ aspectRatio: "9 / 16" }}
     >
-      {/* Mirrors the final ReelsLayout: hook bar at top → video at its
-          natural 16:9 ratio → caption directly under it. The remaining
-          black space below is intentional — that's where the reaction
-          rail sits, matching how a published Short looks. */}
-      <div className="px-4 pt-4 pb-3">
-        <p className="text-[17px] font-extrabold leading-[1.15] line-clamp-3 text-center">
+      {/* Mirrors the final ReelsLayout: hook bar at top → video filling the
+          middle (cropped square-ish via object-cover so the 16:9 source fills
+          the available vertical space — the speaker is centered, so side
+          cropping is fine) → caption directly under it. */}
+      <div className="px-4 pt-4 pb-3 shrink-0">
+        <p className="text-[20px] font-extrabold leading-[1.15] line-clamp-3 text-center">
           {hook}
         </p>
       </div>
 
-      <div className="w-full bg-black">
+      <div className="relative flex-1 min-h-0 w-full bg-black">
         {preview?.videoUrl ? (
           isAudio ? (
-            <audio
-              key={`${preview.videoUrl}-audio`}
-              src={`${preview.videoUrl}#t=${startSec},${endSec}`}
-              controls
-              preload="metadata"
-              className="w-full px-3"
-            />
+            <div className="flex h-full w-full items-center justify-center">
+              <audio
+                key={`${preview.videoUrl}-audio`}
+                src={`${preview.videoUrl}#t=${startSec},${endSec}`}
+                controls
+                preload="metadata"
+                className="w-full px-3"
+              />
+            </div>
           ) : (
             <video
               key={`${preview.videoUrl}-video`}
@@ -584,21 +586,18 @@ function ShortsPreview({
               controls
               preload="metadata"
               playsInline
-              className="block w-full bg-black"
+              className="block h-full w-full bg-black object-cover"
             />
           )
         ) : (
-          <div
-            className="flex w-full items-center justify-center text-[11px] text-white/50"
-            style={{ aspectRatio: "16 / 9" }}
-          >
+          <div className="flex h-full w-full items-center justify-center text-[11px] text-white/50">
             {preview === null ? "Loading preview…" : "No preview available"}
           </div>
         )}
       </div>
 
       {captionText && (
-        <div className="px-4 pt-3 text-center">
+        <div className="px-4 py-3 shrink-0 text-center">
           <p className="text-[13px] font-semibold leading-snug line-clamp-3 drop-shadow-lg">
             {captionText}
           </p>
