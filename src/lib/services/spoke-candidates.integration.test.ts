@@ -35,7 +35,7 @@ describe("selectSpokeCandidates (integration smoke)", () => {
       expect(item.whySpoke).toBeTruthy();
       expect(item.breakdown.pillarStrength).toBeGreaterThan(0);
       expect(item.breakdown.formatFit).toBeGreaterThan(0);
-      expect(item.breakdown.freshnessFactor).toBeGreaterThanOrEqual(0.3);
+      expect(item.breakdown.freshnessFactor).toBeGreaterThanOrEqual(0.15);
     }
     // Items are sorted by SPOKE desc.
     for (let i = 1; i < result.items.length; i++) {

@@ -48,8 +48,11 @@ const PERCENTILE = 0.6;
 const PAIR_SOURCE_PERCENTILE = 0.5;
 const MIN_FORMAT_HISTORY = 3;
 const MIN_PAIR_SOURCE_COHORT = 3;
-const FRESHNESS_HALF_LIFE_DAYS = 90;
-const FRESHNESS_FLOOR = 0.3;
+// Half-life + floor tuned 2026-05-19 (v1.1) after Pat reviewed live output:
+// 90d / 0.3 let 1+ year old pillars rank near the top. 45d / 0.15 makes
+// old crushing hits clear a higher bar before surfacing.
+const FRESHNESS_HALF_LIFE_DAYS = 45;
+const FRESHNESS_FLOOR = 0.15;
 const SPOKE_THRESHOLD = 1.0;
 const MAX_CANDIDATES = 200;
 const PILLAR_POST_TYPE = "youtube_long";
@@ -187,6 +190,15 @@ export async function selectSpokeCandidates(opts: {
         isNull(productionItems.deletedAt),
         sql`${productionItems.views} IS NOT NULL AND ${productionItems.views} > 0`,
         sql`${productionItems.publishedAt} IS NOT NULL`,
+        // v1.1 gate: pillar must have a format assigned AND that format must
+        // exist as a row in the brand's formats table. Free-form legacy
+        // format strings (anything not in the formats table) get filtered.
+        sql`${productionItems.format} IS NOT NULL`,
+        sql`EXISTS (
+          SELECT 1 FROM formats f
+          WHERE f.brand = ${brand}
+            AND lower(trim(f.name)) = lower(trim(${productionItems.format}))
+        )`,
         gte(
           productionItems.publishedAt,
           sql`(now() - interval '${sql.raw(String(PILLAR_WINDOW_DAYS))} days')`,

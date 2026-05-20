@@ -216,6 +216,11 @@ export function QueueView({
             percentile: 0.6,
             minFormatHistory: 3,
             spokeThreshold: 1.0,
+            // Match the v1.1 constants in spoke-candidates.ts. Only
+            // relevant if the error-state config block is ever read, but
+            // keeps the fallback honest.
+            freshnessHalfLifeDays: 45,
+            freshnessFloor: 0.15,
           },
         });
         return;

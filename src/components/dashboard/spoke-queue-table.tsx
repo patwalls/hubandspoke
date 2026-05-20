@@ -152,7 +152,7 @@ export function SpokeQueueTable({
                   "                     for YouTube long-form (last 365 days).\n" +
                   "  · formatFit      : (format P60 ÷ brand-all P60) × pair lift\n" +
                   "                     for repurposes from this channel.\n" +
-                  "  · freshness      : exp(-ageDays/90), floored at 0.3.\n" +
+                  "  · freshness      : exp(-ageDays/45), floored at 0.15.\n" +
                   "  · pairHistory    : boost if this exact (pillar × format)\n" +
                   "                     pair has shipped well before; dampen if\n" +
                   "                     killed or under-performed. 1.0 = no history.\n\n" +
