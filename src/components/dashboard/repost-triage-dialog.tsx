@@ -21,6 +21,11 @@ import { AccountBadge } from "@/components/ui/account-badge";
 import { UserChip } from "./user-chip";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { cn } from "@/lib/utils";
+import {
+  PLATFORM_FIELD_SCHEMAS,
+  type PlatformKey,
+} from "@/lib/platform-field-schemas";
+import { PreviewEmbed } from "./preview/embed";
 /** Subset of `RepostCandidate` the dialog actually consumes. The queue
  *  triage path passes a full candidate (with hotness signals + evergreen
  *  reasoning + prior reposts); the content-detail Actions menu synthesizes
@@ -520,18 +525,53 @@ export function RepostTriageDialog({
   onOpenChange,
   ...panelProps
 }: RepostTriageDialogProps) {
+  // Mirror the cross-post dialog: show a Live-post column on the left when
+  // the source has a publishedLink AND a recognized platform key.
+  const livePlatform: PlatformKey | null =
+    panelProps.candidate.postType &&
+    panelProps.candidate.postType in PLATFORM_FIELD_SCHEMAS
+      ? (panelProps.candidate.postType as PlatformKey)
+      : null;
+  const showLivePreview =
+    !!panelProps.candidate.publishedLink && livePlatform !== null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto gap-5">
+      <DialogContent
+        className={cn(
+          "max-h-[90vh] overflow-y-auto gap-5",
+          showLivePreview ? "sm:max-w-5xl" : "sm:max-w-2xl",
+        )}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>
             {panelProps.candidate.title || "Repost"}
           </DialogTitle>
         </DialogHeader>
-        <RepostTriagePanel
-          {...panelProps}
-          onSubmitted={() => onOpenChange(false)}
-        />
+        {showLivePreview && livePlatform ? (
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-6">
+            <aside className="min-w-0">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground mb-2">
+                Live post
+              </div>
+              <PreviewEmbed
+                platform={livePlatform}
+                publishedLink={panelProps.candidate.publishedLink ?? null}
+                newsletterBodyHtml={null}
+              />
+            </aside>
+            <div className="min-w-0">
+              <RepostTriagePanel
+                {...panelProps}
+                onSubmitted={() => onOpenChange(false)}
+              />
+            </div>
+          </div>
+        ) : (
+          <RepostTriagePanel
+            {...panelProps}
+            onSubmitted={() => onOpenChange(false)}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

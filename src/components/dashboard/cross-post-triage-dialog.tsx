@@ -26,9 +26,14 @@ import {
   toPlatform,
 } from "@/lib/platforms";
 import { isNotionAuthoritative } from "@/lib/platform";
-import type { PostType } from "@/lib/platform-field-schemas";
+import {
+  PLATFORM_FIELD_SCHEMAS,
+  type PlatformKey,
+  type PostType,
+} from "@/lib/platform-field-schemas";
 import { cn } from "@/lib/utils";
 import type { BrandAccount } from "@/lib/services/cross-post-candidates";
+import { PreviewEmbed } from "./preview/embed";
 
 /** "3d ago", "2h ago", "just now" — short relative-time helper for the
  *  "Already posted · Xd ago" hint on a cross-post target row. Same shape
@@ -973,9 +978,25 @@ export function CrossPostTriageDialog({
   onOpenChange,
   ...panelProps
 }: CrossPostTriageDialogProps) {
+  // Show a Live-post column on the left whenever the source has a
+  // publishedLink AND a recognized platform key. Skip when either is
+  // missing — falls back to the original single-column layout so the
+  // dialog doesn't grow uselessly wide for unembed-able sources.
+  const livePlatform: PlatformKey | null =
+    panelProps.candidate.postType &&
+    panelProps.candidate.postType in PLATFORM_FIELD_SCHEMAS
+      ? (panelProps.candidate.postType as PlatformKey)
+      : null;
+  const showLivePreview =
+    !!panelProps.candidate.publishedLink && livePlatform !== null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto gap-5">
+      <DialogContent
+        className={cn(
+          "max-h-[90vh] overflow-y-auto gap-5",
+          showLivePreview ? "sm:max-w-5xl" : "sm:max-w-3xl",
+        )}
+      >
         {/* The panel renders its own visual title block; the DialogTitle
          *  here is sr-only so Radix's a11y contract is satisfied without
          *  duplicating the heading. */}
@@ -984,10 +1005,31 @@ export function CrossPostTriageDialog({
             {panelProps.candidate.title || "Cross-post"}
           </DialogTitle>
         </DialogHeader>
-        <CrossPostTriagePanel
-          {...panelProps}
-          onSubmitted={() => onOpenChange(false)}
-        />
+        {showLivePreview && livePlatform ? (
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-6">
+            <aside className="min-w-0">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground mb-2">
+                Live post
+              </div>
+              <PreviewEmbed
+                platform={livePlatform}
+                publishedLink={panelProps.candidate.publishedLink ?? null}
+                newsletterBodyHtml={null}
+              />
+            </aside>
+            <div className="min-w-0">
+              <CrossPostTriagePanel
+                {...panelProps}
+                onSubmitted={() => onOpenChange(false)}
+              />
+            </div>
+          </div>
+        ) : (
+          <CrossPostTriagePanel
+            {...panelProps}
+            onSubmitted={() => onOpenChange(false)}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
