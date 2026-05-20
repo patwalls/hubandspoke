@@ -417,7 +417,8 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     };
   }
 
-  // --- Threads (SC usually returns view_counts; fall back to estimator) ---
+  // --- Threads (SC returns view_counts but it's unreliable on fresh posts;
+  //     always estimate from likes — same pattern as LinkedIn) ---
   if (kinds.has("threads") && url) {
     const post = await fetchThreadsPostByUrl(url);
     if (!post) {
@@ -435,7 +436,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       };
     }
     const { likes, comments } = post;
-    const derived = deriveViews(post.views, likes);
+    const derived = deriveViews(null, likes);
     await db
       .update(productionItems)
       .set({

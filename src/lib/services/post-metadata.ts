@@ -367,7 +367,10 @@ async function fetchThreads(url: string, base: LinkMetadata): Promise<LinkMetada
     title: truncateTitle(caption),
     publishedDate: unixToYmd(publishedTs),
     publishedAt: unixToIso(publishedTs),
-    views: post.view_counts ?? null,
+    // Intentionally do not propagate SC's view_counts for Threads — it
+    // under-reports on fresh posts. Caller estimates views from likes
+    // via the shouldEstimate() branch in the create-item route.
+    views: null,
     likes: post.like_count ?? null,
     comments: post.text_post_app_info?.direct_reply_count ?? null,
     thumbnail: post.image_versions2?.candidates?.[0]?.url ?? null,

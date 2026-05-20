@@ -9,7 +9,11 @@
  * Post types that use estimation:
  *   instagram_post     → 137x  (based on 5 posts, avg 137)
  *   linkedin           → 163x  (based on 12 posts, avg 163)
- *   threads            → 150x  (clamped to dampen outliers, median 165, avg 182)
+ *   threads            → 150x  (clamped from median 165 / avg 182). SC
+ *                              returns view_counts for Threads but it's
+ *                              wrong on fresh posts — observed 2.5x and
+ *                              11.9x like/view ratios that don't match
+ *                              the Threads UI. Always estimate.
  *   youtube_community  → 194x  (based on 12 posts, avg 194)
  *
  * Post types with real view data (no estimation):

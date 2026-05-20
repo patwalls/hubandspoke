@@ -119,6 +119,12 @@ export async function fetchTweetByUrl(
 /**
  * Fetch a Threads post by URL. 1 SC credit. Normalized to
  * { views, likes, comments } at the boundary.
+ *
+ * `views` is intentionally always null. SC's `post.view_counts` field for
+ * Threads is unreliable — it under-reports fresh posts (we've seen 342
+ * views on a post with 137 likes, while the actual Threads UI showed
+ * thousands). The caller estimates views from likes via the 150× Threads
+ * multiplier in view-estimator.ts — same pattern as LinkedIn.
  */
 export async function fetchThreadsPostByUrl(
   postUrl: string,
@@ -132,7 +138,7 @@ export async function fetchThreadsPostByUrl(
   const post = data?.post;
   if (!post) return null;
   return {
-    views: post.view_counts ?? null,
+    views: null,
     likes: post.like_count ?? null,
     comments: post.text_post_app_info?.direct_reply_count ?? null,
     publishedAt: unixToIso(post.taken_at),
