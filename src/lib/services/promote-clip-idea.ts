@@ -19,6 +19,7 @@ import { coldImportPillar } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { recordItemCreated } from "@/lib/services/item-created";
+import { recordToolAction } from "@/lib/services/content-events";
 import { extractDescriptSection } from "@/lib/format-skill";
 
 /**
@@ -613,6 +614,22 @@ export async function createClipIdeaInDescript(args: {
     })
     .returning({ id: repurposeTriggers.id });
 
+  // Pre-emit the in-progress activity event so the new content detail page
+  // shows "Cutting clip in Descript…" instantly on navigation, instead of
+  // sitting blank for ~60-90s until the worker writes the first
+  // `clip_created` event. The dot palette renders status:"info" as a
+  // neutral grey, matching the "still happening" semantics.
+  await recordToolAction({
+    contentItemId: productionItemId,
+    userId: args.actorUserId,
+    tool: "descript",
+    action: "kicking_off",
+    status: "info",
+    label: "Cutting clip in Descript (Underlord)… composition incoming.",
+    url: agent.projectUrl,
+    meta: { importPath: "agent" },
+  });
+
   await enqueue("descript-clip-resolve", {
     triggerId: trigger.id,
     jobId: agent.jobId,
@@ -715,6 +732,21 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
       descriptImportPath: "precise-cut",
     })
     .returning({ id: repurposeTriggers.id });
+
+  await recordToolAction({
+    contentItemId: productionItemId,
+    userId: args.actorUserId,
+    tool: "descript",
+    action: "kicking_off",
+    status: "info",
+    label: args.applyLayoutPack
+      ? "Trimming clip locally + uploading to Descript… Underlord layout pack will follow."
+      : "Trimming clip locally + uploading to Descript… new composition incoming.",
+    meta: {
+      importPath: "precise-cut",
+      applyLayoutPack: args.applyLayoutPack ? 1 : 0,
+    },
+  });
 
   await enqueue("clip-idea-precise-cut", {
     clipIdeaId: args.clipIdeaId,
@@ -903,6 +935,20 @@ export async function createClipIdeaInDescriptFullVideo(args: {
       descriptImportPath: "full-video",
     })
     .returning({ id: repurposeTriggers.id });
+
+  await recordToolAction({
+    contentItemId: productionItemId,
+    userId: args.actorUserId,
+    tool: "descript",
+    action: "kicking_off",
+    status: "info",
+    label:
+      mode === "cold"
+        ? "Uploading the full pillar to Descript… composition incoming."
+        : "Duplicating the pillar composition in Descript… composition incoming.",
+    url: projectUrl,
+    meta: { importPath: "full-video", mode },
+  });
 
   await enqueue("descript-clip-resolve", {
     triggerId: trigger.id,

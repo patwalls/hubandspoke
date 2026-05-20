@@ -82,7 +82,26 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     item.descriptPublishJobId !== null ||
     item.descriptPublishedAt !== null ||
     item.descriptPublishError !== null;
+  // Precise-cut sits in a gap right after enqueue: the trigger row exists,
+  // the clip-idea-precise-cut job is queued, but no descript_* column on
+  // the production_item has been stamped yet (the worker writes
+  // descriptProjectId only after the import call returns). Treat a queued
+  // clip-promotion job keyed by THIS derivative as enough Descript context
+  // to keep the lookup going — otherwise the chip flashes "not_started"
+  // for the first ~5-30s after the user clicks Create.
+  let hasQueuedClipPromoteJob = false;
   if (!itemHasDescriptContext) {
+    const probe = (await db.execute(sql`
+      SELECT 1
+      FROM graphile_worker._private_jobs j
+      JOIN graphile_worker._private_tasks t ON t.id = j.task_id
+      WHERE t.identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
+        AND j.payload->>'derivativeItemId' = ${id}
+      LIMIT 1
+    `)) as unknown as Array<unknown>;
+    hasQueuedClipPromoteJob = probe.length > 0;
+  }
+  if (!itemHasDescriptContext && !hasQueuedClipPromoteJob) {
     return NextResponse.json({
       status: "not_started" as const,
       detail: "Not a Descript clip.",
@@ -171,6 +190,20 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       (
         t.identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
         AND ${trigger ? sql`j.payload->>'triggerId' = ${trigger.id}` : sql`FALSE`}
+      )
+      OR (
+        -- Same task families, but matched by the derivative's id directly.
+        -- The trigger lookup above filters out triggers that don't yet
+        -- carry a descriptJobId OR descriptCompositionId (to keep the pill
+        -- from leaking onto non-Descript repurpose paths). The precise-cut
+        -- path inserts a trigger WITHOUT a descriptJobId — the worker only
+        -- stamps it after the import call returns — so during that
+        -- ~5-30s gap the trigger is invisible to the filter and the chip
+        -- shows "not_started" even though a job is queued. Looking up by
+        -- derivativeItemId lights the chip up the second the row is
+        -- enqueued, so editors see "Trimming clip…" immediately.
+        t.identifier IN ('clip-idea-precise-cut', 'descript-clip-resolve')
+        AND j.payload->>'derivativeItemId' = ${id}
       )
       OR (
         t.identifier = 'descript-publish-and-archive'
