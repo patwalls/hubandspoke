@@ -5,6 +5,15 @@ import type {
   ContentDraftSlide,
   FormatFieldSchema,
 } from "@/lib/db/schema";
+import type { PostType } from "@/lib/platform-field-schemas";
+import {
+  getPlatformProximity,
+  proximityDirective,
+} from "@/lib/services/draft-algorithm/platform-proximity";
+import {
+  renderPriorCrossPostExamples,
+  type PriorCrossPostExample,
+} from "@/lib/services/draft-algorithm/prior-cross-post-examples";
 import { findInterestingTimestamps } from "@/lib/services/draft-algorithm/timestamp-finder";
 
 // Opus for copywriting judgment. Short-form copy rewards nuance more than
@@ -78,7 +87,23 @@ const MODEL = "claude-opus-4-7";
 // agent can find a published starterstory.com episode URL when the format
 // calls for the episode rather than a lead magnet. CTA context (channel +
 // utmCampaign) rendered as a per-call payload block; no schema changes.
-export const PROMPT_VERSION = 12;
+// v13 (2026-05-20): platform-proximity rewrite directive. The v7 "rich vs
+// soft" SOURCE POST BODY directive keyed off source body length (≥120 chars
+// or multiline → "pull every concrete element"), which had no awareness of
+// the *target* platform. Threads → X cross-posts got rewritten as if they
+// were Threads → YouTube Community, even though X and Threads are
+// near-identical surfaces. Replaced with three tiers driven by
+// (sourcePostType, targetPostType): same_surface (x ↔ threads) → preserve
+// verbatim; same_family (text-primary triad crossings, visual-primary
+// caption family) → preserve spine, tighten/expand at edges; cross_family
+// (everything else) → legacy "pull every concrete element." Logic lives in
+// src/lib/services/draft-algorithm/platform-proximity.ts. New PROXIMITY
+// RULE section in the system prompt pairs with the existing STRUCTURE
+// RULE. args.item now carries postType; the per-call payload renders the
+// proximity directive in the SOURCE POST BODY block when the substrate is
+// a source body (transcript substrates ignore proximity — they always
+// adapt cross-family).
+export const PROMPT_VERSION = 13;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -136,6 +161,13 @@ OVERRIDE: if FORMAT REFERENCES & EDITORIAL NOTES specify a different CTA copy, l
 
 STRUCTURE RULE
 When the prompt includes a "TOP-PERFORMING EXAMPLES IN THIS FORMAT" block and a recurring structural pattern shows up across those examples (e.g. opening hook + bulleted timestamp breakdown like "(2:46)", listicle with em-dashes, two-line setup + punchline, "Here's the top 1% of our chat:" + list, etc.), mirror that structure in your draft. Don't invent a structure that isn't repeated across the format examples; the platform-only examples are voice/tone reference, not structural.
+
+PROXIMITY RULE
+Cross-post drafts (## SOURCE POST BODY substrate) include a PROXIMITY line that classifies the source-vs-target platform pair as same_surface, same_family, or cross_family. The directive on that line HARD-OVERRIDES the past-caption exemplars on the question of *how much rewriting to do*. Exemplars still teach voice and structure, but not aggressiveness. Specifically:
+- same_surface (e.g. x ↔ threads): the source post and the target draft should be near-identical. Preserve the hook, the wording, the line breaks, the closing. Only adjust if the target platform's character cap forces a trim, or a token like a handle or URL must swap. Do not paraphrase, do not reorder, do not add or remove substance — even if the past-caption exemplars show longer or more elaborate posts.
+- same_family (e.g. threads → linkedin, instagram_post ↔ tiktok): preserve the spine — same hook idea, same structure, same named specifics. Tighten or expand at the edges only as the past-caption exemplars demand for the target platform's length norms. Do not invent new content or restructure.
+- cross_family (everything else): the legacy "pull every concrete element" behavior applies. Past-caption exemplars drive structure; the source post grounds the substance.
+Transcript substrates (## PILLAR TRANSCRIPT) do not carry a PROXIMITY line — they're always cross_family by definition (long-form video → short post).
 
 TOOLS
 You have specialized tools available in this conversation. Treat them as capabilities you should USE rather than guess at. Tool calls are cheap; hallucinations are expensive.
@@ -201,6 +233,12 @@ export interface GenerateDraftArgs {
     format: string | null;
     platform: string[] | null;
     brand: string;
+    /** Target post type (where the draft is being generated for). Used by
+     *  the v13 proximity rule to pick the SOURCE POST BODY directive
+     *  (same_surface vs same_family vs cross_family). May be null on
+     *  legacy callers (smoke tests, unsupported platforms); the proximity
+     *  helper falls back to cross_family in that case. */
+    postType: PostType | string | null;
   };
   fieldSchema: FormatFieldSchema;
   formatInstructions: string | null;
@@ -238,6 +276,14 @@ export interface GenerateDraftArgs {
    *  (instagram_*, tiktok, threads, youtube_long/shorts) — same single-shot
    *  shape as v11 for those. */
   cta?: { channel: string; utmCampaign: string | null };
+  /** v13: real prior cross-post pairs from the team's publishing history,
+   *  scoped to the same (accountId, sourcePostType → targetPostType)
+   *  direction. The agent treats these as the canonical answer to "how
+   *  much rewriting is appropriate" for this direction — they HARD-OVERRIDE
+   *  the past-caption exemplars on aggressiveness (exemplars still teach
+   *  voice and structure). Pre-trimmed to ≤3 by the caller; absent when
+   *  no pairs exist yet (then the proximity rule is the only signal). */
+  priorCrossPostExamples?: PriorCrossPostExample[];
 }
 
 /** The action the agent picks for media attachment on this draft. The
@@ -267,6 +313,29 @@ export interface MediaContext {
     count: number;
     kinds: ReadonlyArray<"image" | "video">;
   };
+}
+
+/**
+ * v13: structured error thrown by `generateDraft` when the agent returns
+ * an invalid draft after the one-shot retry. The worker task catches
+ * this and records it as a failed run instead of writing an empty draft
+ * to `content_drafts`. `code` is the machine-readable failure category;
+ * `details` carries the offending field keys so the worker can surface
+ * "YouTube Community body came back empty" in operator logs.
+ */
+export class DraftGenerationError extends Error {
+  readonly code: "empty_required_field";
+  readonly details: { emptyFields: string[] };
+  constructor(
+    code: "empty_required_field",
+    message: string,
+    details: { emptyFields: string[] },
+  ) {
+    super(message);
+    this.name = "DraftGenerationError";
+    this.code = code;
+    this.details = details;
+  }
 }
 
 export interface GenerateDraftResult {
@@ -421,6 +490,38 @@ function normalizeMediaAction(raw: unknown): MediaAction {
     return value;
   }
   return "none";
+}
+
+/**
+ * v13: post-call required-field validation. After the agent's
+ * propose_draft call, walk the platform's field schema and report any
+ * field marked `required: true` whose value normalizes to empty (empty
+ * string for text/longtext, empty array for tags/slides). The agent loop
+ * uses this to decide whether to ask for one corrective retry.
+ *
+ * Why this exists: YouTube Community has `body: required: true` (see
+ * platform-field-schemas.ts) but the propose_draft tool's JSON Schema
+ * doesn't enforce minLength, so the agent can return `body: ""` and the
+ * draft lands in the DB with a blank placeholder. This catches that.
+ */
+export function findEmptyRequiredFields(
+  raw: unknown,
+  fieldSchema: FormatFieldSchema,
+): string[] {
+  const content = normalizeContent(raw, fieldSchema);
+  const empty: string[] = [];
+  for (const field of fieldSchema.fields) {
+    if (!field.required) continue;
+    const value = content[field.key];
+    if (typeof value === "string") {
+      if (value.trim().length === 0) empty.push(field.key);
+    } else if (Array.isArray(value)) {
+      if (value.length === 0) empty.push(field.key);
+    } else if (value == null) {
+      empty.push(field.key);
+    }
+  }
+  return empty;
 }
 
 // Validate + normalize the model's tool output. Unknown-shape values fall
@@ -646,18 +747,26 @@ export async function generateDraft(
   // derivatives) or the source post body (text-primary cross-posts).
   const mc = args.mediaContext;
   const substrate = args.substrate;
-  // v1.4: detect "rich" source bodies — multi-paragraph (newlines) or
-  // long enough to carry real structure. With <120 chars and one line,
-  // the agent gets the softer "adapt this" directive (sometimes there
-  // genuinely isn't more to say). At ≥120 chars or multiline we know
-  // there's a real post to fully ingest, so the directive turns into
-  // "pull every concrete element."
-  const isRichSourceBody =
-    substrate.kind === "source_body" &&
-    (substrate.text.length >= 120 || substrate.text.includes("\n"));
-  const sourceBodyDirective = isRichSourceBody
-    ? `This is the FULL source post text. Adapt it for the target platform — pull EVERY concrete element into the new post: every list item, every numbered example, every named person, the hook AND the closing. The output should feel like the same idea retold for the target platform's voice and field schema, not a one-line summary of the opener. Keep facts, numbers, and direct quotes verbatim where possible.`
-    : `The original post text from the source platform. This IS the substance — there's no long-form video to transcribe; the post itself is what the team wants adapted to the target platform. Keep its concrete ideas, facts/numbers/named people, and angle. Change the format and voice to match the target platform's field schema and the past captions in this format. Don't paraphrase generically.`;
+  // v13: source body directive is driven by platform proximity, not by
+  // source body length. The (sourcePostType, targetPostType) pair maps to
+  // same_surface / same_family / cross_family, and each tier carries its
+  // own rewrite-aggressiveness directive. Replaces the v7 rich/soft
+  // length-based heuristic.
+  const proximity =
+    substrate.kind === "source_body"
+      ? getPlatformProximity(
+          (substrate.sourcePostType ?? null) as PostType | null,
+          (args.item.postType ?? null) as PostType | null,
+        )
+      : null;
+  const sourceBodyDirective =
+    substrate.kind === "source_body" && proximity
+      ? proximityDirective(
+          proximity,
+          (substrate.sourcePostType ?? null) as PostType | null,
+          (args.item.postType ?? null) as PostType | null,
+        )
+      : null;
   const substrateBlock =
     substrate.kind === "transcript"
       ? [
@@ -704,8 +813,27 @@ export async function generateDraft(
       ].join("\n")
     : null;
 
+  // v13: PRIOR CROSS-POST EXAMPLES block. Real (source → target) pairs
+  // from this account's publishing history, in the same direction as the
+  // current draft. Strongest signal for "how much rewriting" — the agent's
+  // PROXIMITY RULE in the system prompt tells it to hard-override the
+  // past-caption exemplars on aggressiveness when these are present.
+  // Sits above the substrate so it lands inside the cache breakpoint
+  // boundary alongside the static-per-format past-captions; it's
+  // per-direction state, not per-item, so the cache benefit holds when
+  // multiple drafts of the same item are kicked off.
+  const priorPairsBlock =
+    substrate.kind === "source_body" && args.priorCrossPostExamples
+      ? renderPriorCrossPostExamples(
+          args.priorCrossPostExamples,
+          substrate.sourcePostType ?? null,
+          (args.item.postType as string | null) ?? null,
+        )
+      : null;
+
   const perCallPayload = [
     ctaContextBlock,
+    priorPairsBlock,
     substrateBlock,
     ``,
     `## MEDIA CONTEXT`,
@@ -757,6 +885,12 @@ export async function generateDraft(
   let cacheReadTokens = 0;
 
   let proposeDraftInput: unknown = null;
+  // v13: one-shot retry when the agent returns a propose_draft input that
+  // leaves a required field empty. Tracks whether we've already issued the
+  // corrective message so the loop can throw a DraftGenerationError after
+  // the second strike rather than burning all 5 iterations on the same
+  // failure mode.
+  let emptyRequiredFieldRetried = false;
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const response = await createMessagesWithOverloadRetry(client, {
@@ -801,8 +935,55 @@ export async function generateDraft(
     );
     const proposeBlock = toolUses.find((b) => b.name === "propose_draft");
     if (proposeBlock) {
-      proposeDraftInput = proposeBlock.input;
-      break;
+      // v13: validate required fields before accepting the draft. If any
+      // field marked `required: true` in the platform's field schema is
+      // empty, ask the agent to try again ONCE with a pointed correction
+      // message. After that, throw — silently writing an empty
+      // youtube_community body is the original bug we're fixing here.
+      const emptyFields = findEmptyRequiredFields(
+        proposeBlock.input,
+        args.fieldSchema,
+      );
+      if (emptyFields.length === 0 || emptyRequiredFieldRetried) {
+        if (emptyFields.length > 0) {
+          throw new DraftGenerationError(
+            "empty_required_field",
+            `propose_draft returned empty required field(s) after retry: ${emptyFields.join(", ")}`,
+            { emptyFields },
+          );
+        }
+        proposeDraftInput = proposeBlock.input;
+        break;
+      }
+      // Build the corrective tool_result + user message. Every tool_use
+      // block must have a matching tool_result before the next API call,
+      // including the propose_draft block we're rejecting — Anthropic
+      // 400s otherwise.
+      emptyRequiredFieldRetried = true;
+      const fieldDetails = emptyFields
+        .map((key) => {
+          const fieldDef = args.fieldSchema.fields.find((f) => f.key === key);
+          const label = fieldDef?.label ?? key;
+          const desc = fieldDef?.prompt ?? "(no per-field directive)";
+          return `- "${key}" (${label}): ${desc}`;
+        })
+        .join("\n");
+      const correctiveText = `Your previous propose_draft call left these required fields empty:\n${fieldDetails}\n\nCall propose_draft again with non-empty values for all of those fields, grounded in the source post / transcript. Keep your previous values for the other fields unless they were also wrong.`;
+      console.warn(
+        `draft-agent v13: empty required field(s) ${emptyFields.join(", ")} — issuing one corrective retry`,
+      );
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: proposeBlock.id,
+            content: correctiveText,
+            is_error: true,
+          },
+        ],
+      });
+      continue;
     }
 
     if (toolUses.length === 0) {

@@ -31,6 +31,7 @@ import {
 } from "@/lib/format-skill";
 import { buildCompositionName } from "@/lib/services/descript-composition";
 import { getTopPerformingCaptions } from "./exemplars";
+import { loadPriorCrossPostExamples } from "./prior-cross-post-examples";
 import {
   runDescriptStepForDerivative,
   type DescriptStepStatus,
@@ -668,6 +669,19 @@ export async function runDraftAlgorithm(
       ? { channel: ctaChannel, utmCampaign: item.utmCampaign ?? null }
       : undefined;
 
+  // v13: prior cross-post pairs for the (sourcePostType → targetPostType)
+  // direction on this account. Only loaded for source_body substrates
+  // (the only path where proximity matters); transcript substrates always
+  // get the cross_family directive and don't benefit from pairs.
+  const priorCrossPostExamples =
+    substrate.kind === "source_body" && item.accountId && item.postType
+      ? await loadPriorCrossPostExamples({
+          accountId: item.accountId,
+          sourcePostType: substrate.sourcePostType ?? null,
+          targetPostType: item.postType,
+        })
+      : [];
+
   const result = await generateDraft({
     item: {
       id: item.id,
@@ -675,6 +689,7 @@ export async function runDraftAlgorithm(
       format: item.format,
       platform: platformArr,
       brand: item.brand,
+      postType: item.postType,
     },
     fieldSchema,
     formatInstructions,
@@ -684,6 +699,7 @@ export async function runDraftAlgorithm(
     pastCaptions,
     mediaContext,
     cta: ctaArg,
+    priorCrossPostExamples,
   });
 
   // Demote previous current + insert new current as version+1 in a tx —

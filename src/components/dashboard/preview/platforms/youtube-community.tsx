@@ -7,6 +7,7 @@ import { readLive, type SimulatorProps } from "../simulator-types";
 import { formatFeedTime } from "../resolve-preview-data";
 import { PLATFORM_FONT } from "../platform-tokens";
 import { CtaCard } from "../cta-card";
+import { VerifiedBadge } from "../verified-badge";
 import {
   DraftMediaDropZone,
   PlaceholderSlideRender,
@@ -66,14 +67,20 @@ export function YouTubeCommunitySimulator({
             style={{ fontFamily: PLATFORM_FONT.youtube_community }}
           >
             <div className="flex items-center gap-3">
+              {/* Use the account's real avatar when present; MonogramAvatar
+               *  falls back to the deterministic monogram on null / load
+               *  failure. Previously this was always a monogram, which made
+               *  every YouTube Community draft look like a placeholder. */}
               <MonogramAvatar
                 displayName={data.author.displayName}
                 handle={data.author.handle}
+                avatarUrl={data.author.avatarUrl}
                 size="md"
               />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[14px] font-medium leading-tight text-[#0f0f0f]">
-                  {displayName}
+                <div className="flex items-center gap-1 truncate text-[14px] font-medium leading-tight text-[#0f0f0f]">
+                  <span className="truncate">{displayName}</span>
+                  {data.author.verified && <VerifiedBadge />}
                 </div>
                 <div className="mt-0.5 text-[12px] leading-tight text-[#606060]">
                   {time}

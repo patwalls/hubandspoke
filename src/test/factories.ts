@@ -201,6 +201,7 @@ export interface CreateTestProductionItemOptions {
   descriptSeedCompositionId?: string | null;
   mediaS3Bucket?: string | null;
   mediaS3Key?: string | null;
+  contentBody?: string | null;
 }
 
 /**
@@ -242,6 +243,7 @@ export async function createTestProductionItem(
       descriptSeedCompositionId: opts.descriptSeedCompositionId ?? null,
       mediaS3Bucket: opts.mediaS3Bucket ?? null,
       mediaS3Key: opts.mediaS3Key ?? null,
+      contentBody: opts.contentBody ?? null,
     })
     .returning();
   trackCleanup("productionItems", row.id);

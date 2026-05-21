@@ -84,6 +84,7 @@ async function main() {
       format: item.format,
       platform: item.platform as string[] | null,
       brand: item.brand,
+      postType: item.post_type ?? null,
     },
     fieldSchema,
     formatInstructions: format.instructions,
