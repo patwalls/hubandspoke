@@ -424,6 +424,12 @@ export interface RunDraftAlgorithmOpts {
    *  explicitly clicks Regenerate on a draft that already has content. */
   force?: boolean;
   actorUserId?: string | null;
+  /** True when an editor explicitly clicked Redraft (vs an auto-fire from
+   *  cross-post / repurpose / job retry). When true + actorUserId is set,
+   *  the per-field change events are attributed to the user — they show up
+   *  in the activity feed by default instead of being bucketed under the
+   *  "Show system changes" toggle. */
+  userInitiated?: boolean;
 }
 
 /**
@@ -562,7 +568,11 @@ export async function runDraftAlgorithm(
   productionItemId: string,
   opts: RunDraftAlgorithmOpts = {},
 ): Promise<RunDraftAlgorithmResult> {
-  const { force = false, actorUserId = null } = opts;
+  const {
+    force = false,
+    actorUserId = null,
+    userInitiated = false,
+  } = opts;
 
   const [item] = await db
     .select()
@@ -902,11 +912,16 @@ export async function runDraftAlgorithm(
       .returning();
 
     // Emit one `content_changed` event per content key that the algorithm
-    // actually moved. Surfaces "Draft Algorithm rewrote the caption" in
-    // the activity feed under the Algorithm-source filter. Skipping
-    // first-time inserts where prevCurrent is null avoids a useless
-    // "(empty) → ..." row on item creation. userId is null — the
-    // ALGORITHM_REGISTRY entry renders an icon/badge for it.
+    // actually moved. Skipping first-time inserts where prevCurrent is null
+    // avoids a useless "(empty) → ..." row on item creation.
+    //
+    // Attribution: when the editor explicitly clicked Redraft
+    // (`userInitiated && actorUserId`), record as a USER change so it lands
+    // in the default activity feed — the editor took deliberate action and
+    // expects to see what changed. Auto-fires (cross-post seed, repurpose,
+    // job retry) keep the algorithm attribution so they stay bucketed under
+    // "Show system changes" and don't clutter the timeline with every
+    // pipeline-driven rewrite.
     if (prevCurrent) {
       const prevContent = (prevCurrent.content ?? {}) as Record<string, unknown>;
       const nextContent = result.content as unknown as Record<string, unknown>;
@@ -927,11 +942,14 @@ export async function runDraftAlgorithm(
           to: coerceForEvent(nextContent[key]),
         });
       }
+      const userTriggered = userInitiated && !!actorUserId;
       await recordContentChanges({
         tx,
         contentItemId: productionItemId,
-        userId: null,
-        source: { kind: "algorithm", name: "draft-algorithm" },
+        userId: userTriggered ? actorUserId : null,
+        source: userTriggered
+          ? { kind: "user" }
+          : { kind: "algorithm", name: "draft-algorithm" },
         changes: draftChanges,
       });
     }

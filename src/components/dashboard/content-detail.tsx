@@ -1422,7 +1422,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       const res = await fetch(`/api/production-items/${contentId}/draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force: true }),
+        // userInitiated=true → per-field change events get attributed to the
+        // editor and land in the main activity feed (not under "Show system
+        // changes"). Distinguishes this deliberate click from auto-fires.
+        body: JSON.stringify({ force: true, userInitiated: true }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {

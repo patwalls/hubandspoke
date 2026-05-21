@@ -84,7 +84,7 @@ CONTENT VERSIONING (2026-05-13)
   Instrumented write sites:
     PUT /api/production-items                       → user
     PUT /api/production-items/[id]/drafts/[draftId] → user (clone-on-write)
-    POST /api/production-items/[id]/draft (regen)   → algorithm:draft-algorithm
+    POST /api/production-items/[id]/draft (regen)   → user (when body.userInitiated=true, e.g. Redraft button), else algorithm:draft-algorithm. User-attributed changes show in the default activity feed; algorithm-attributed go behind "Show system changes" so auto-fires from cross-post/repurpose don't clutter the timeline.
     POST/DELETE /api/production-items/[id]/media    → user
     canva-create-copy / canva-export-design /
       canva-export-page-video tasks                 → tool:canva

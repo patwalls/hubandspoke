@@ -15,9 +15,12 @@ export const maxDuration = 60;
  * Manual entry point for the Draft Algorithm. Regenerate buttons across
  * the simulator panels POST here.
  *
- * - Body: `{ force?: boolean }`. `force=true` overrides the
- *   "already-filled" guard — needed when an editor clicks Regenerate on a
- *   draft that's already been touched.
+ * - Body: `{ force?: boolean, userInitiated?: boolean }`. `force=true`
+ *   overrides the "already-filled" guard — needed when an editor clicks
+ *   Regenerate on a draft that's already been touched. `userInitiated=true`
+ *   attributes the resulting per-field change events to the actor so they
+ *   show up in the main activity feed (not behind "Show system changes").
+ *   The Redraft button passes both; future programmatic callers can omit.
  * - 200 with `{ status, draftId?, captionPreview? }` on success.
  * - 400 with `{ error }` for the user-actionable cases (no transcript,
  *   unsupported post type) so the caller can surface a friendly toast.
@@ -30,12 +33,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as {
     force?: boolean;
+    userInitiated?: boolean;
   };
 
   try {
     const result = await runDraftAlgorithm(id, {
       force: !!body.force,
       actorUserId,
+      userInitiated: !!body.userInitiated,
     });
     if (result.status === "skipped") {
       const userActionable =
