@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { findEmptyRequiredFields } from "./draft-agent";
+import {
+  findEmptyRequiredFields,
+  renderEditorialContextBlock,
+  type EditorialContext,
+} from "./draft-agent";
 import type { FormatFieldSchema } from "@/lib/db/schema";
 
 // Mirrors the youtube_community schema shape — body is required, cta is
@@ -94,5 +98,164 @@ describe("findEmptyRequiredFields", () => {
     expect(findEmptyRequiredFields("nonsense", YT_COMMUNITY_SCHEMA)).toEqual([
       "body",
     ]);
+  });
+});
+
+const EMPTY_EC: EditorialContext = {
+  itemHook: null,
+  itemOverlay: null,
+  itemCoverDescription: null,
+  clipIdea: null,
+  pillar: null,
+};
+
+describe("renderEditorialContextBlock (v14)", () => {
+  it("returns null when the context is missing entirely", () => {
+    expect(renderEditorialContextBlock(null)).toBeNull();
+    expect(renderEditorialContextBlock(undefined)).toBeNull();
+  });
+
+  it("returns null when every field is null/blank", () => {
+    expect(renderEditorialContextBlock(EMPTY_EC)).toBeNull();
+    // Whitespace-only fields are treated as blank too.
+    expect(
+      renderEditorialContextBlock({
+        ...EMPTY_EC,
+        itemHook: "   ",
+        clipIdea: {
+          hook: "",
+          angle: "  \n",
+          rationale: null,
+          anchorQuote: null,
+          anchorStartSec: null,
+          blueprintAnchorHook: null,
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("renders the item hook with the operator-edit primacy label", () => {
+    const out = renderEditorialContextBlock({
+      ...EMPTY_EC,
+      itemHook: "He shipped 300 features and 6 apps in 3 months. Same boring setup every time:",
+    });
+    expect(out).not.toBeNull();
+    expect(out).toMatch(/## EDITORIAL CONTEXT/);
+    expect(out).toMatch(/operator's most recent edit/i);
+    expect(out).toContain("He shipped 300 features and 6 apps in 3 months");
+  });
+
+  it("item hook wins over clipIdea hook when both are present", () => {
+    const out = renderEditorialContextBlock({
+      ...EMPTY_EC,
+      itemHook: "Operator's edited hook",
+      clipIdea: {
+        hook: "Original clip-idea hook",
+        angle: null,
+        rationale: null,
+        anchorQuote: null,
+        anchorStartSec: null,
+        blueprintAnchorHook: null,
+      },
+    });
+    expect(out).toContain("Operator's edited hook");
+    // The "fallback to clip-idea hook" branch must NOT fire when itemHook
+    // is present — that block would render "no operator override yet".
+    expect(out).not.toMatch(/no operator override yet/);
+  });
+
+  it("falls back to clipIdea.hook when itemHook is missing", () => {
+    const out = renderEditorialContextBlock({
+      ...EMPTY_EC,
+      itemHook: null,
+      clipIdea: {
+        hook: "Original clip-idea hook",
+        angle: null,
+        rationale: null,
+        anchorQuote: null,
+        anchorStartSec: null,
+        blueprintAnchorHook: null,
+      },
+    });
+    expect(out).toMatch(/no operator override yet/);
+    expect(out).toContain("Original clip-idea hook");
+  });
+
+  it("formats the anchor timestamp as MM:SS", () => {
+    const out = renderEditorialContextBlock({
+      ...EMPTY_EC,
+      clipIdea: {
+        hook: null,
+        angle: null,
+        rationale: null,
+        anchorQuote: "I made three TikTok accounts and posted three times a day",
+        anchorStartSec: 327.42,
+        blueprintAnchorHook: null,
+      },
+    });
+    expect(out).toContain('"I made three TikTok accounts and posted three times a day" @ 5:27');
+  });
+
+  it("omits the anchor timestamp when anchorStartSec is null", () => {
+    const out = renderEditorialContextBlock({
+      ...EMPTY_EC,
+      clipIdea: {
+        hook: null,
+        angle: null,
+        rationale: null,
+        anchorQuote: "some quote",
+        anchorStartSec: null,
+        blueprintAnchorHook: null,
+      },
+    });
+    expect(out).toContain('"some quote"');
+    expect(out).not.toContain(" @ ");
+  });
+
+  it("truncates pillar.description over 500 chars", () => {
+    const longDesc = "A".repeat(800);
+    const out = renderEditorialContextBlock({
+      ...EMPTY_EC,
+      pillar: {
+        title: null,
+        hook: null,
+        description: longDesc,
+        overlay: null,
+      },
+    });
+    expect(out).not.toBeNull();
+    expect(out!.length).toBeLessThan(longDesc.length + 200);
+    expect(out).toMatch(/A{500}…/);
+  });
+
+  it("renders all sections together for a fully-populated item", () => {
+    const out = renderEditorialContextBlock({
+      itemHook: "Hook line",
+      itemOverlay: "BURN-IN TEXT",
+      itemCoverDescription: "Cover description",
+      clipIdea: {
+        hook: "Clip hook",
+        angle: "The angle",
+        rationale: "Why this works",
+        anchorQuote: "the verbatim line",
+        anchorStartSec: 65,
+        blueprintAnchorHook: "Reference library hook",
+      },
+      pillar: {
+        title: "Pillar title",
+        hook: "Pillar hook",
+        description: "Pillar description",
+        overlay: "Pillar overlay",
+      },
+    });
+    expect(out).toContain("Hook line");
+    expect(out).toContain("The angle");
+    expect(out).toContain("the verbatim line");
+    expect(out).toContain("Why this works");
+    expect(out).toContain("BURN-IN TEXT");
+    expect(out).toContain("Cover description");
+    expect(out).toContain("Pillar title");
+    expect(out).toContain("Pillar hook");
+    expect(out).toContain("Pillar description");
   });
 });

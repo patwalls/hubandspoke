@@ -103,7 +103,16 @@ const MODEL = "claude-opus-4-7";
 // proximity directive in the SOURCE POST BODY block when the substrate is
 // a source body (transcript substrates ignore proximity — they always
 // adapt cross-family).
-export const PROMPT_VERSION = 13;
+// v14 (2026-05-20): editorial-context block. Pat's hand-edits to the item's
+// `hook` field were being ignored — the agent only saw the pillar transcript
+// + past captions + format Skill, never the operator's most recent editorial
+// thinking. v14 adds a new EDITORIAL CONTEXT section to the system prompt
+// and a per-call payload block carrying item.hook, item.overlay,
+// item.coverDescription, the source clip_idea (angle/rationale/anchor),
+// and the pillar's own hook/description/overlay. Operator's hand-edit to
+// hook now biases the caption; clip-idea-spawned rows reuse the angle the
+// LLM already discovered for them rather than re-deriving it.
+export const PROMPT_VERSION = 14;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -169,6 +178,15 @@ Cross-post drafts (## SOURCE POST BODY substrate) include a PROXIMITY line that 
 - cross_family (everything else): the legacy "pull every concrete element" behavior applies. Past-caption exemplars drive structure; the source post grounds the substance.
 Transcript substrates (## PILLAR TRANSCRIPT) do not carry a PROXIMITY line — they're always cross_family by definition (long-form video → short post).
 
+EDITORIAL CONTEXT
+A per-call ## EDITORIAL CONTEXT block (when present) carries the operator's most recent editorial thinking about this specific clip — the on-screen hook they wrote, the angle the clip is built around, the verbatim transcript line that delivers the payoff, the visual context (burn-in overlay, cover image description), and the source pillar's own hook/description. Weight these signals HEAVILY:
+- If a HOOK is present, the caption must land what the hook promises. The hook is what scrolls past on-screen; the caption must elaborate on the same idea, not pivot to a different moment.
+- If an ANCHOR QUOTE is present, focus the caption on what THAT line delivers, not adjacent setup. The anchor is the operator-vetted moment of payoff.
+- If an ANGLE is present, treat it as the editorial thesis — the caption is a longer-form expression of that thesis.
+- HOOK is the operator's most recent intent. If both item.hook and clipIdea.hook exist, item.hook is the hand-edit and wins.
+- The pillar's own HOOK / DESCRIPTION ground tone and brand voice — they're what worked for the source video.
+The exemplar pool still drives structure (length, list shape, format conventions); editorial context drives substance (what to say).
+
 TOOLS
 You have specialized tools available in this conversation. Treat them as capabilities you should USE rather than guess at. Tool calls are cheap; hallucinations are expensive.
 
@@ -206,6 +224,40 @@ export type DraftSubstrate =
       }>;
     }
   | { kind: "source_body"; text: string; sourcePostType: string | null };
+
+/** v14: operator-authored editorial signal that the loader (`run.ts`)
+ *  pulls together from the production_items row, its source clip_idea
+ *  (when set), and its pillar (when set). Renders as a per-call ##
+ *  EDITORIAL CONTEXT block before the substrate. All fields are
+ *  optional — the renderer drops missing lines so slim items don't pay
+ *  for empty placeholders. */
+export interface EditorialContext {
+  /** Operator's hand-edited on-screen hook. The most recent editorial
+   *  signal — wins over `clipIdea.hook` when both are present. */
+  itemHook: string | null;
+  /** Burn-in / on-screen text rendered onto the clip itself. */
+  itemOverlay: string | null;
+  /** LLM-extracted description of the cover/poster image. */
+  itemCoverDescription: string | null;
+  /** Set when this item was spawned from a clip_idea row. */
+  clipIdea: {
+    hook: string | null;
+    angle: string | null;
+    rationale: string | null;
+    anchorQuote: string | null;
+    /** Seconds into the pillar where the anchor lands; rendered MM:SS. */
+    anchorStartSec: number | null;
+    /** The brand-library hook this clip's structure mirrors. */
+    blueprintAnchorHook: string | null;
+  } | null;
+  /** Set when this item has a pillar (most derivatives do). */
+  pillar: {
+    title: string | null;
+    hook: string | null;
+    description: string | null;
+    overlay: string | null;
+  } | null;
+}
 
 export interface PastCaptionExample {
   /** Original post URL when known; helps the model see real published copy. */
@@ -284,6 +336,13 @@ export interface GenerateDraftArgs {
    *  voice and structure). Pre-trimmed to ≤3 by the caller; absent when
    *  no pairs exist yet (then the proximity rule is the only signal). */
   priorCrossPostExamples?: PriorCrossPostExample[];
+  /** v14: editorial signals the operator already wrote down — the item's
+   *  hook (hand-editable in the UI), overlay, cover description, the
+   *  source clip_idea's angle/rationale/anchor, and the pillar's own
+   *  hook/description. Rendered as a per-call ## EDITORIAL CONTEXT block
+   *  before the substrate. Loader at `src/lib/services/draft-algorithm/run.ts`
+   *  builds this from the production_items + clip_ideas + pillar rows. */
+  editorialContext?: EditorialContext | null;
 }
 
 /** The action the agent picks for media attachment on this draft. The
@@ -347,6 +406,103 @@ export interface GenerateDraftResult {
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
   };
+}
+
+// v14: render the per-call EDITORIAL CONTEXT block. The block is a flat
+// key-value list of every editorial signal the operator has authored —
+// item.hook (hand-edited), the item's overlay / cover description, the
+// source clip_idea's angle/rationale/anchor, and the pillar's own
+// hook/description. Missing fields are dropped (not rendered as "—") so
+// slim items pay only for what they have. Returns null when there's no
+// editorial signal at all (all fields null) — caller filters out.
+export function renderEditorialContextBlock(
+  ec: EditorialContext | null | undefined,
+): string | null {
+  if (!ec) return null;
+  const lines: string[] = [];
+  const formatTimestamp = (sec: number | null): string | null => {
+    if (sec == null || !Number.isFinite(sec)) return null;
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  if (ec.itemHook && ec.itemHook.trim()) {
+    lines.push(`HOOK (on-screen overlay; operator's most recent edit — bias the caption to land what THIS promises):`);
+    lines.push(ec.itemHook.trim());
+    lines.push("");
+  }
+  if (ec.clipIdea?.angle && ec.clipIdea.angle.trim()) {
+    lines.push(`ANGLE (one-sentence editorial thesis):`);
+    lines.push(ec.clipIdea.angle.trim());
+    lines.push("");
+  }
+  if (ec.clipIdea?.anchorQuote && ec.clipIdea.anchorQuote.trim()) {
+    const tsLabel = formatTimestamp(ec.clipIdea.anchorStartSec);
+    lines.push(
+      `ANCHOR QUOTE (the transcript line the clip is built around — focus your caption on what THIS line delivers, not adjacent setup):`,
+    );
+    lines.push(
+      tsLabel
+        ? `"${ec.clipIdea.anchorQuote.trim()}" @ ${tsLabel}`
+        : `"${ec.clipIdea.anchorQuote.trim()}"`,
+    );
+    lines.push("");
+  }
+  if (ec.clipIdea?.rationale && ec.clipIdea.rationale.trim()) {
+    lines.push(`WHY THIS CLIP WORKS (the clip-idea agent's rationale):`);
+    lines.push(ec.clipIdea.rationale.trim());
+    lines.push("");
+  }
+  // Fallback: if no item hook was authored, surface the clip_idea's
+  // original hook for grounding. Item hook always wins when both exist.
+  if (!ec.itemHook?.trim() && ec.clipIdea?.hook && ec.clipIdea.hook.trim()) {
+    lines.push(`HOOK (from the source clip_idea, no operator override yet):`);
+    lines.push(ec.clipIdea.hook.trim());
+    lines.push("");
+  }
+  if (
+    (ec.itemOverlay && ec.itemOverlay.trim()) ||
+    (ec.itemCoverDescription && ec.itemCoverDescription.trim())
+  ) {
+    lines.push(`VISUAL CONTEXT (what's on-screen):`);
+    if (ec.itemOverlay && ec.itemOverlay.trim()) {
+      lines.push(`- Burn-in overlay: ${ec.itemOverlay.trim()}`);
+    }
+    if (ec.itemCoverDescription && ec.itemCoverDescription.trim()) {
+      lines.push(`- Cover image: ${ec.itemCoverDescription.trim()}`);
+    }
+    lines.push("");
+  }
+  if (
+    ec.pillar &&
+    (ec.pillar.hook?.trim() ||
+      ec.pillar.description?.trim() ||
+      ec.pillar.overlay?.trim() ||
+      ec.pillar.title?.trim())
+  ) {
+    lines.push(`PILLAR CONTEXT (the source video — for grounding and brand voice):`);
+    if (ec.pillar.title?.trim()) {
+      lines.push(`- Title: ${ec.pillar.title.trim()}`);
+    }
+    if (ec.pillar.hook?.trim()) {
+      lines.push(`- Pillar's hook: ${ec.pillar.hook.trim()}`);
+    }
+    if (ec.pillar.overlay?.trim()) {
+      lines.push(`- Pillar overlay: ${ec.pillar.overlay.trim()}`);
+    }
+    if (ec.pillar.description?.trim()) {
+      const desc = ec.pillar.description.trim();
+      const trimmed = desc.length > 500 ? desc.slice(0, 500) + "…" : desc;
+      lines.push(`- Pillar description: ${trimmed}`);
+    }
+    lines.push("");
+  }
+
+  if (lines.length === 0) return null;
+  // Trailing blank from the last section is intentional — keeps spacing
+  // consistent when this block is joined with the substrate below.
+  return `## EDITORIAL CONTEXT\n${lines.join("\n").trimEnd()}`;
 }
 
 // Render the past-captions section of the prompt. v1.2: format-scoped and
@@ -831,9 +987,12 @@ export async function generateDraft(
         )
       : null;
 
+  const editorialContextBlock = renderEditorialContextBlock(args.editorialContext);
+
   const perCallPayload = [
     ctaContextBlock,
     priorPairsBlock,
+    editorialContextBlock,
     substrateBlock,
     ``,
     `## MEDIA CONTEXT`,

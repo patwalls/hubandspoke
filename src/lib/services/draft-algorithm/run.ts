@@ -1,6 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  clipIdeas,
   contentDrafts,
   formats,
   productionItemMedia,
@@ -11,6 +12,7 @@ import {
   generateDraft,
   GENERATED_BY as AGENT_GENERATED_BY,
   PROMPT_VERSION,
+  type EditorialContext,
   type MediaAction,
   type MediaContext,
 } from "@/lib/draft-agent";
@@ -743,6 +745,8 @@ export async function runDraftAlgorithm(
   // Pillar title + media for context when this is a derivative. The media
   // metadata (S3 keys + poster) drives the V1.1 MediaContext: the agent
   // sees what's available, picks an action, and we attach in the tx below.
+  // v14 widens this SELECT to pull pillar.hook / description / overlay too,
+  // which feed the EditorialContext block in the agent prompt.
   let pillarTitle: string | null = item.title;
   let pillar: {
     id: string;
@@ -750,6 +754,9 @@ export async function runDraftAlgorithm(
     mediaS3Key: string | null;
     mediaContentType: string | null;
     posterS3Key: string | null;
+    hook: string | null;
+    description: string | null;
+    overlay: string | null;
   } | null = null;
   if (item.pillarContentItemId) {
     const [row] = await db
@@ -760,6 +767,9 @@ export async function runDraftAlgorithm(
         mediaS3Key: productionItems.mediaS3Key,
         mediaContentType: productionItems.mediaContentType,
         posterS3Key: productionItems.posterS3Key,
+        hook: productionItems.hook,
+        description: productionItems.description,
+        overlay: productionItems.overlay,
       })
       .from(productionItems)
       .where(eq(productionItems.id, item.pillarContentItemId))
@@ -772,9 +782,69 @@ export async function runDraftAlgorithm(
         mediaS3Key: row.mediaS3Key,
         mediaContentType: row.mediaContentType,
         posterS3Key: row.posterS3Key,
+        hook: row.hook,
+        description: row.description,
+        overlay: row.overlay,
       };
     }
   }
+
+  // v14: editorial context. Surfaces the operator's most recent thinking
+  // (item.hook, overlay, coverDescription) PLUS the clip_idea's angle /
+  // rationale / anchor quote when this item was spawned from one. The
+  // pre-v14 prompt only knew about the pillar transcript + past captions,
+  // so Pat's hand-edits to the hook field were ignored by the agent.
+  let sourceClipIdea: {
+    hook: string | null;
+    angle: string | null;
+    rationale: string | null;
+    anchorQuote: string | null;
+    anchorStartSec: number | null;
+    blueprintAnchorHook: string | null;
+  } | null = null;
+  if (item.sourceClipIdeaId) {
+    const [row] = await db
+      .select({
+        hook: clipIdeas.hook,
+        angle: clipIdeas.angle,
+        rationale: clipIdeas.rationale,
+        anchorQuote: clipIdeas.transcriptAnchorQuote,
+        anchorStartSec: clipIdeas.transcriptAnchorStartSec,
+        blueprintAnchorHook: clipIdeas.blueprintAnchorHook,
+      })
+      .from(clipIdeas)
+      .where(eq(clipIdeas.id, item.sourceClipIdeaId))
+      .limit(1);
+    if (row) {
+      sourceClipIdea = {
+        hook: row.hook,
+        angle: row.angle,
+        rationale: row.rationale,
+        anchorQuote: row.anchorQuote,
+        // transcript_anchor_start_sec is decimal in pg → string in JS;
+        // coerce so the prompt block can format MM:SS.
+        anchorStartSec:
+          row.anchorStartSec == null ? null : Number(row.anchorStartSec),
+        blueprintAnchorHook: row.blueprintAnchorHook,
+      };
+    }
+  }
+  const editorialContext: EditorialContext = {
+    itemHook: item.hook ?? null,
+    itemOverlay: item.overlay ?? null,
+    itemCoverDescription: item.coverDescription ?? null,
+    clipIdea: sourceClipIdea,
+    pillar:
+      pillar &&
+      (pillar.hook || pillar.description || pillar.overlay || pillarTitle)
+        ? {
+            title: pillarTitle,
+            hook: pillar.hook,
+            description: pillar.description,
+            overlay: pillar.overlay,
+          }
+        : null,
+  };
 
   const platformArr = (item.platform as string[] | null) ?? [item.postType];
 
@@ -869,6 +939,7 @@ export async function runDraftAlgorithm(
     mediaContext,
     cta: ctaArg,
     priorCrossPostExamples,
+    editorialContext,
   });
 
   // Demote previous current + insert new current as version+1 in a tx —
