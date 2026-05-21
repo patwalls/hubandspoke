@@ -145,12 +145,18 @@ export async function POST(request: Request, context: RouteContext) {
   // above force-archives `mediaS3Key` for video-bearing posts, so this
   // gate is almost always already-OK by the time it runs; the refusal
   // path only fires when even the source can't be archived.
-  const readiness = checkRepostReadiness(source);
+  //
+  // Re-query carousel state post-enrichment so image-only sources (X
+  // tweet with 2 photos, IG carousel) pass the gate — those store all
+  // their media in production_item_media rows, not on the legacy
+  // mediaS3Key column, and seedRepostContent mirrors carousels natively.
+  const hasCarouselMedia = await hasAnyCarouselRow(source.id);
+  const readiness = checkRepostReadiness(source, hasCarouselMedia);
   if (!readiness.ok) {
     return NextResponse.json(
       {
         error:
-          "No Descript-able media available. Repost needs the source's own video — either its existing Descript composition or an archived media file. Run enrichment (withMedia=true) on the source and retry.",
+          "No source media available. Repost needs the source's own video or archived photos — run enrichment (withMedia=true) on the source and retry, or use \"I'll do it manually\" to upload yourself.",
         reason: readiness.reason,
         detail: readiness.detail,
       },

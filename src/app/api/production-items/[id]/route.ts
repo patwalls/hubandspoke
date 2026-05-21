@@ -22,6 +22,7 @@ import { resolveSchemaForPlatforms } from "@/lib/platform-field-schemas";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { getChannelsForFormats } from "@/lib/format-channels";
 import { checkRepostReadiness } from "@/lib/services/descript-derivative";
+import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
 
 const POSTER_URL_TTL_SECONDS = 60 * 60;
 
@@ -628,11 +629,15 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     }
 
     // Whether cross-post / repost can run for this item. Same gate both
-    // routes now use — needs the source's own composition or own archived
-    // media. Mirroring it here lets the UI disable the buttons (and
-    // surface the reason in the tooltip) instead of letting the user
-    // click through and get rejected.
-    const readiness = checkRepostReadiness(item);
+    // routes now use — needs the source's own composition, own archived
+    // video, or carousel image rows. Mirroring it here lets the UI
+    // disable the buttons (and surface the reason in the tooltip)
+    // instead of letting the user click through and get rejected.
+    // `hasAnyCarouselRow` is what lets image-only sources (X carousels,
+    // IG photos) pass the gate — without it `mediaS3Key === null` looks
+    // like "no media" even though seedRepostContent handles carousels.
+    const hasCarouselMedia = await hasAnyCarouselRow(item.id);
+    const readiness = checkRepostReadiness(item, hasCarouselMedia);
     const canDuplicate = readiness.ok;
     const blockedReason = readiness.ok ? null : readiness.reason;
 

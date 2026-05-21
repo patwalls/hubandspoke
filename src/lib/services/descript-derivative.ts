@@ -141,18 +141,29 @@ export function hasDescriptableMedia(
 
 /**
  * Repost-side defense-in-depth: a same-platform repost only needs one of
- *   - source's own Descript composition (duplicate in-place), OR
- *   - source's own archived media (cold-import + duplicate the seed).
+ *   - source's own Descript composition (duplicate in-place),
+ *   - source's own archived video (`mediaS3Key`, cold-import + duplicate
+ *     the seed), OR
+ *   - source's own archived carousel images (`production_item_media`
+ *     rows — mirrored to the repost by `seedRepostContent`, no Descript
+ *     work needed).
  *
  * No pillar involvement, ever. The route's pre-gate calls
  * `checkRepostReadiness` first; this is the equivalent of
  * `hasDescriptableMedia` for the task's defensive check.
+ *
+ * `hasCarouselMedia` MUST be passed by the caller (Drizzle is async,
+ * this is sync). The two routes that call this already invoke
+ * `hasAnyCarouselRow(source.id)` for their pre-enrichment branch — pass
+ * the same boolean through.
  */
 export function hasDescriptableMediaForRepost(
   source: DescriptableSource,
+  hasCarouselMedia = false,
 ): boolean {
   if (source.descriptCompositionId) return true;
   if (source.mediaS3Key) return true;
+  if (hasCarouselMedia) return true;
   return false;
 }
 
@@ -267,28 +278,41 @@ export type RepostReadiness =
   | { ok: false; reason: RepostReadinessReason; detail: string };
 
 /**
- * Repost gate — relaxed analog of `checkCrossPostReadiness`. A same-platform
- * repost only needs the source's own material:
+ * Repost / cross-post readiness gate. A same-platform repost or a
+ * different-platform cross-post only needs the source's own material:
  *   - Source has its own composition → OK (duplicate in-place).
- *   - Source has its own `mediaS3Key` → OK (cold-import + duplicate the seed
- *     on retry; no anchor search because cut range is "full duration").
- *   - Neither → refuse with `needs_source_media`.
+ *   - Source has its own `mediaS3Key` (legacy single-video column) → OK
+ *     (cold-import + duplicate the seed on retry; cut range is "full
+ *     duration", no anchor search).
+ *   - Source has carousel image rows in `production_item_media`
+ *     (`hasCarouselMedia=true`) → OK (`seedRepostContent` mirrors the
+ *     rows onto the new item, no Descript step required for images).
+ *   - None of the above → refuse with `needs_source_media`.
  *
  * The pillar is intentionally never consulted: a Reel's already-cropped
  * pixels ARE the correct repost material when the target aspect is the
- * same. The repost route's existing pre-gate enrichment step
+ * same. The repost/cross-post routes' pre-gate enrichment step
  * (`enrichSingleItem(..., { withMedia: true })`) usually backfills
- * `mediaS3Key` before this is even called.
+ * `mediaS3Key` for video-bearing sources before this is called.
+ *
+ * `hasCarouselMedia` MUST be passed by the caller — Drizzle is async,
+ * this is sync. Both routes already call `hasAnyCarouselRow(source.id)`
+ * for the pre-enrichment branch; thread the same value through here.
+ * Image-only sources (carousels of photos with no video) failed this
+ * gate before 2026-05-21 even though the cross-post flow handled them
+ * natively via `seedRepostContent`.
  */
 export function checkRepostReadiness(
   source: DescriptableSource,
+  hasCarouselMedia = false,
 ): RepostReadiness {
   if (source.descriptCompositionId) return { ok: true };
   if (source.mediaS3Key) return { ok: true };
+  if (hasCarouselMedia) return { ok: true };
   return {
     ok: false,
     reason: "needs_source_media",
-    detail: `source ${source.id} has no own Descript composition and no archived media to cold-import`,
+    detail: `source ${source.id} has no Descript composition, no archived video, and no carousel image rows to mirror`,
   };
 }
 

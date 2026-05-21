@@ -1953,7 +1953,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       disabled: data.item.canCrossPost === false,
       disabledReason:
         data.item.canCrossPost === false
-          ? "Source has no archived video yet — re-run enrichment or upload manually."
+          ? "Source has no archived media yet — re-run enrichment or upload manually."
           : undefined,
     },
     {
@@ -1963,7 +1963,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       disabled: data.item.canRepost === false,
       disabledReason:
         data.item.canRepost === false
-          ? "Source has no archived video yet — re-run enrichment or upload manually."
+          ? "Source has no archived media yet — re-run enrichment or upload manually."
           : undefined,
     },
     {
@@ -2874,7 +2874,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     onClick={() => setActiveTab("cross-post")}
                     title={
                       item.canCrossPost === false
-                        ? "Source has no archived video yet — re-run enrichment or upload manually."
+                        ? "Source has no archived media yet — re-run enrichment or upload manually."
                         : "Open the Cross-post tab"
                     }
                   >
@@ -2885,7 +2885,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     onClick={() => setActiveTab("repost")}
                     title={
                       item.canRepost === false
-                        ? "Source has no archived video yet — re-run enrichment or upload manually."
+                        ? "Source has no archived media yet — re-run enrichment or upload manually."
                         : "Open the Repost tab"
                     }
                   >

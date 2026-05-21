@@ -886,8 +886,9 @@ export function CrossPostTriagePanel({
               )}
             </ul>
             <p className="text-[12px] text-amber-900/80">
-              Two options: re-run enrichment on the source so it has an
-              archived video, or skip the automation and upload manually.
+              Two options: re-run enrichment on the source so its media
+              lands in our storage, or skip the automation and upload
+              manually.
             </p>
             <button
               type="button"

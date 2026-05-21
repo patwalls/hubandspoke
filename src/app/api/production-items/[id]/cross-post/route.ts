@@ -197,12 +197,20 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // enrichment genuinely couldn't find the video. Skipped when
   // `manual: true` — the operator has opted to bypass the automation.
   if (!manual) {
-    const readiness = checkRepostReadiness(source);
+    // Re-query carousel state after the pre-enrichment branch above —
+    // enrichSingleItem may have archived photo carousels into
+    // production_item_media that weren't there at the start of the
+    // request. Image-only X tweets / Threads / IG carousels live entirely
+    // in carousel rows; without this check, the gate refused them as
+    // "needs_source_media" even though seedRepostContent handles
+    // carousel mirroring natively. Cheap LIMIT 1 query.
+    const hasCarouselMedia = await hasAnyCarouselRow(source.id);
+    const readiness = checkRepostReadiness(source, hasCarouselMedia);
     if (!readiness.ok) {
       return NextResponse.json(
         {
           error:
-            "Cross-post needs the source's archived video — enrichment couldn't find or download it. Re-run enrichment, or use \"I'll do it manually\" to upload yourself.",
+            "Cross-post needs the source's media — enrichment couldn't find archived video or photos. Re-run enrichment, or use \"I'll do it manually\" to upload yourself.",
           reason: readiness.reason,
           detail: readiness.detail,
         },

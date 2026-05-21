@@ -234,6 +234,37 @@ describe("checkRepostReadiness", () => {
       expect(result.reason).toBe("needs_source_media");
     }
   });
+
+  it("OK when source has carousel image rows (no video, no composition) — 2026-05-21 fix", () => {
+    // The case Pat hit on the magicians PSA tweet (X carousel of 2
+    // photos). Pre-fix, image-only sources stored their media in
+    // production_item_media rows but had mediaS3Key=null, so the gate
+    // refused even though seedRepostContent natively mirrors carousels.
+    const result = checkRepostReadiness(
+      {
+        id: "carousel-source",
+        descriptProjectId: null,
+        descriptCompositionId: null,
+        mediaS3Key: null,
+        pillarContentItemId: null,
+      },
+      true, // hasCarouselMedia
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("still refuses when hasCarouselMedia=false AND no composition/mediaS3Key", () => {
+    // Defensive: the new arg defaults to false, so callers that haven't
+    // been updated yet keep the old behavior (no false positives).
+    const result = checkRepostReadiness({
+      id: "no-media",
+      descriptProjectId: null,
+      descriptCompositionId: null,
+      mediaS3Key: null,
+      pillarContentItemId: null,
+    });
+    expect(result.ok).toBe(false);
+  });
 });
 
 describe("hasDescriptableMediaForRepost", () => {
