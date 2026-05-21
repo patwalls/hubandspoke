@@ -55,9 +55,30 @@ export function MediaActions({
   const [error, setError] = useState<string | null>(null);
 
   const fetchBlob = async (): Promise<Blob> => {
-    const res = await fetch(src);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.blob();
+    // Try the direct presigned S3 URL first. If the browser's fetch fails
+    // (CORS mismatch on the bucket, or networks that block direct
+    // s3.amazonaws.com — hotel/airport WiFi, some corp proxies), fall
+    // back to /api/media-proxy which streams the bytes through the app's
+    // own origin. The page itself loaded over that origin, so this hop
+    // is guaranteed-reachable wherever the rest of the UI works.
+    try {
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.blob();
+    } catch (directErr) {
+      const key = extractS3Key(src);
+      if (!key) throw directErr;
+      const proxyUrl = `/api/media-proxy?key=${encodeURIComponent(key)}`;
+      const res = await fetch(proxyUrl);
+      if (!res.ok) {
+        throw new Error(
+          `Proxy fallback failed: HTTP ${res.status}${
+            directErr instanceof Error ? ` (direct: ${directErr.message})` : ""
+          }`,
+        );
+      }
+      return res.blob();
+    }
   };
 
   const onDownload = async (e: React.MouseEvent) => {
@@ -190,6 +211,35 @@ export function MediaActions({
       )}
     </div>
   );
+}
+
+/** Parse the bucket-relative S3 key out of a presigned GetObject URL. Used
+ *  by the proxy fallback so MediaActions can route around CORS / blocked-
+ *  S3 networks without each call site needing to thread the key as a
+ *  separate prop. Returns null when the URL isn't a recognized S3 shape
+ *  (in which case the caller surfaces the original error). Exported for
+ *  unit testing. */
+export function extractS3Key(presignedUrl: string): string | null {
+  try {
+    const u = new URL(presignedUrl);
+    if (!u.hostname.endsWith("amazonaws.com")) return null;
+    const path = u.pathname.replace(/^\/+/, "");
+    if (!path) return null;
+    // Two URL styles to handle:
+    //   - Path-style:        s3.<region>.amazonaws.com/<bucket>/<key...>
+    //   - Virtual-hosted:    <bucket>.s3.<region>.amazonaws.com/<key...>
+    // Path-style starts with `s3.` (or just `s3-`); virtual-hosted has
+    // the bucket as the leftmost host label.
+    const isPathStyle = u.hostname.startsWith("s3.") || u.hostname.startsWith("s3-");
+    if (isPathStyle) {
+      const slash = path.indexOf("/");
+      if (slash === -1) return null;
+      return path.slice(slash + 1);
+    }
+    return path;
+  } catch {
+    return null;
+  }
 }
 
 async function blobToPng(blob: Blob): Promise<Blob> {
