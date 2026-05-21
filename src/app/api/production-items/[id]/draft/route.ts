@@ -42,7 +42,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
         result.reason === "no_substrate" ||
         result.reason === "unsupported_post_type" ||
         result.reason === "no_platform_schema" ||
-        result.reason === "no_caption_field";
+        result.reason === "no_caption_field" ||
+        result.reason === "source_body_empty" ||
+        result.reason === "no_source_for_reseed";
       if (userActionable) {
         return NextResponse.json(
           {
@@ -81,6 +83,10 @@ function friendlyReason(reason: string | undefined): string {
       return "This item has no platform schema — pick a post type before generating.";
     case "no_caption_field":
       return "This post type has no caption field configured.";
+    case "source_body_empty":
+      return "The source post has no body text yet — wait for enrichment to fetch it, or hand-write the body.";
+    case "no_source_for_reseed":
+      return "This repost has no source row to pull from. Open the source manually and copy its body.";
     default:
       return reason ?? "Unable to generate draft.";
   }

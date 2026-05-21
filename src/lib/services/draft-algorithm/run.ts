@@ -30,6 +30,7 @@ import {
   extractDescriptSection,
 } from "@/lib/format-skill";
 import { buildCompositionName } from "@/lib/services/descript-composition";
+import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
 import { getTopPerformingCaptions } from "./exemplars";
 import { loadPriorCrossPostExamples } from "./prior-cross-post-examples";
 import {
@@ -231,6 +232,136 @@ function resolveAttachment(
   return null;
 }
 
+/**
+ * Repost manual-Regenerate path. Re-seeds the current draft from the
+ * source row's `contentBody`, running it through `stripDateOpenerWithLLM`
+ * (same Haiku cleanup the creation route uses) and writing a new draft
+ * version. Does NOT call the draft-agent — repost is same-content
+ * same-platform, no rewrite is wanted; the only point of Regenerate is
+ * to pick up changes (or initial enrichment) on the source body.
+ *
+ * Returns `{ status: "skipped", reason }` for the unhappy cases the
+ * route surfaces as friendly toasts: no source row, no caption field,
+ * empty source body even after the strip.
+ *
+ * `generatedBy="copy:source:reseed"` distinguishes this row from the
+ * initial `copy:source` seed in the activity feed.
+ */
+async function reseedRepostDraft(args: {
+  productionItemId: string;
+  repostedFromItemId: string | null;
+  postType: string | null;
+  actorUserId: string | null;
+}): Promise<RunDraftAlgorithmResult> {
+  const { productionItemId, repostedFromItemId, postType, actorUserId } = args;
+
+  if (!repostedFromItemId) {
+    return { status: "skipped", reason: "no_source_for_reseed" };
+  }
+  if (!postType) {
+    return { status: "skipped", reason: "unsupported_post_type" };
+  }
+  const captionFieldKey = PLATFORM_FIELD_MAP[postType as PostType]?.caption;
+  if (!captionFieldKey) {
+    return { status: "skipped", reason: "no_caption_field" };
+  }
+  const fieldSchema = getSchemaForPostType(postType);
+  if (!fieldSchema) {
+    return { status: "skipped", reason: "no_platform_schema" };
+  }
+
+  const [source] = await db
+    .select({ contentBody: productionItems.contentBody })
+    .from(productionItems)
+    .where(eq(productionItems.id, repostedFromItemId))
+    .limit(1);
+  if (!source) {
+    return { status: "skipped", reason: "no_source_for_reseed" };
+  }
+  const rawBody = source.contentBody?.trim() ?? "";
+  if (rawBody.length === 0) {
+    return { status: "skipped", reason: "source_body_empty" };
+  }
+
+  // Run the Haiku cleanup outside the transaction — LLM round-trip is
+  // ~hundreds of ms and we don't want to hold a Postgres tx across it.
+  // Fail-soft inside the helper returns the original body unchanged.
+  const cleanedBody = (await stripDateOpenerWithLLM(rawBody)) ?? rawBody;
+
+  const inserted = await db.transaction(async (tx) => {
+    const [prevCurrent] = await tx
+      .select({
+        version: contentDrafts.version,
+        content: contentDrafts.content,
+        id: contentDrafts.id,
+      })
+      .from(contentDrafts)
+      .where(eq(contentDrafts.productionItemId, productionItemId))
+      .orderBy(desc(contentDrafts.version))
+      .limit(1);
+    const nextVersion = (prevCurrent?.version ?? 0) + 1;
+
+    await tx
+      .update(contentDrafts)
+      .set({ isCurrent: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(contentDrafts.productionItemId, productionItemId),
+          eq(contentDrafts.isCurrent, true),
+        ),
+      );
+
+    const newContent: Record<string, string> = {
+      [captionFieldKey]: cleanedBody,
+    };
+    const [row] = await tx
+      .insert(contentDrafts)
+      .values({
+        productionItemId,
+        version: nextVersion,
+        isCurrent: true,
+        content: newContent,
+        fieldSchemaSnapshot: fieldSchema,
+        generatedBy: "copy:source:reseed",
+        createdByUserId: actorUserId,
+      })
+      .returning();
+
+    // Record one draft_field change so the activity feed shows the
+    // re-seed under the import source (matches the initial seed's
+    // recording in `seedRepostContent`).
+    if (prevCurrent) {
+      const prevContent = (prevCurrent.content ?? {}) as Record<string, unknown>;
+      const prevValue = prevContent[captionFieldKey];
+      await recordContentChanges({
+        tx,
+        contentItemId: productionItemId,
+        userId: actorUserId,
+        source: { kind: "import" },
+        changes: [
+          {
+            target: {
+              kind: "draft_field",
+              draftId: row.id,
+              version: row.version,
+              field: captionFieldKey,
+            },
+            from: coerceForEvent(prevValue),
+            to: coerceForEvent(cleanedBody),
+          },
+        ],
+      });
+    }
+    return row;
+  });
+
+  return {
+    status: "generated",
+    draftId: inserted.id,
+    captionPreview: cleanedBody.slice(0, 280),
+  };
+}
+
 // Platforms the algorithm drafts for. youtube_long is still out of
 // scope — pillar videos are hand-edited. Newsletter joined the set
 // 2026-05-15: the field schema already carries subject / preview_text
@@ -262,7 +393,16 @@ export type DraftAlgorithmSkipReason =
   // No transcript AND no source body/title to draft from. Renamed in v1.3
   // from `no_transcript` — the algorithm now also accepts source post text
   // as a substrate, so a missing transcript alone no longer skips.
-  | "no_substrate";
+  | "no_substrate"
+  // Repost manual Regenerate: the source row exists but its contentBody is
+  // empty (enrichment may not have run yet, or the source genuinely has no
+  // text). Surfaced as a friendly toast on the /draft route so the editor
+  // knows to wait for enrichment or hand-write the body.
+  | "source_body_empty"
+  // Repost manual Regenerate: the row's `repostedFromItemId` is null or
+  // points at a missing row. Defensive — repost-creation enforces this FK,
+  // but a hand-edited row could land here.
+  | "no_source_for_reseed";
 
 export interface RunDraftAlgorithmResult {
   status: "generated" | "skipped";
@@ -444,7 +584,26 @@ export async function runDraftAlgorithm(
   // `pillarContentItemId`, the cron writes `repurposed` explicitly.
   switch (item.sourceType) {
     case "repost":
-      return { status: "skipped", reason: "repost_kept_verbatim" };
+      // Auto-fire (no explicit Regenerate click) skips — the repost route
+      // already seeded the v1 draft verbatim from source.contentBody, and
+      // same-content same-platform doesn't need an LLM rewrite.
+      //
+      // Manual Regenerate (`force=true`) takes the re-seed path instead.
+      // The original seed runs once during repost creation; if the source
+      // was unenriched at that moment (contentBody null) or got edited
+      // since, the only way to "pull it all in" was to delete + recreate.
+      // Re-seed fetches the source's current body, runs it through the
+      // same date-opener strip the creation route uses, and writes a new
+      // draft version — no LLM rewrite, just a fresh copy.
+      if (!force) {
+        return { status: "skipped", reason: "repost_kept_verbatim" };
+      }
+      return await reseedRepostDraft({
+        productionItemId,
+        repostedFromItemId: item.repostedFromItemId,
+        postType: item.postType,
+        actorUserId,
+      });
     case "original":
       // `original` is two cases:
       //   - Pillar items (no parent) — these ARE the source. Long-form,
