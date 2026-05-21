@@ -1,8 +1,23 @@
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import type { PostType } from "@/lib/platform-field-schemas";
+
+/** v1.9 (2026-05-21): how far back to look for prior pairs.
+ *
+ *  All-time lookback (the v13 default) bled stale editorial standards into
+ *  the prompt — Pat saw an IG Reel → X draft rewrite a punchy hook into a
+ *  list-tease tweet because the team's older X cross-posts (months back)
+ *  followed that pattern. A 45-day window keeps the agent's training pool
+ *  close to the team's CURRENT editorial standard, so manual edits today
+ *  start influencing auto-drafts within ~2 weeks.
+ *
+ *  When the window is empty (sparse direction, new account), we fall back
+ *  to the all-time top-3 — better to feed the agent stale examples than
+ *  nothing, since the latter leaves only the proximity directive (which
+ *  is exactly the failure mode the v13 examples block was meant to fix). */
+const WINDOW_DAYS = 45;
 
 /**
  * A real (source → target) cross-post pair pulled from the team's
@@ -68,30 +83,49 @@ export async function loadPriorCrossPostExamples(
   // pattern for this in the repo — see `cross-post-feed-data.ts` for the
   // same shape (sourceItems vs target productionItems).
   const sourceItems = alias(productionItems, "source_items");
-  const rows = await db
-    .select({
-      sourceText: sourceItems.contentBody,
-      targetText: productionItems.contentBody,
-      targetPublishedAt: productionItems.publishedAt,
-    })
-    .from(productionItems)
-    .innerJoin(
-      sourceItems,
-      eq(sourceItems.id, productionItems.repostedFromItemId),
-    )
-    .where(
-      and(
-        eq(productionItems.sourceType, "cross_post"),
-        eq(productionItems.status, "Published"),
-        eq(productionItems.accountId, opts.accountId),
-        eq(productionItems.postType, opts.targetPostType),
-        eq(sourceItems.postType, opts.sourcePostType),
-        isNotNull(productionItems.contentBody),
-        isNotNull(sourceItems.contentBody),
-      ),
-    )
-    .orderBy(desc(productionItems.publishedAt))
-    .limit(limit);
+
+  const runQuery = async (windowDays: number | null) => {
+    const conditions = [
+      eq(productionItems.sourceType, "cross_post"),
+      eq(productionItems.status, "Published"),
+      eq(productionItems.accountId, opts.accountId),
+      eq(productionItems.postType, opts.targetPostType!),
+      eq(sourceItems.postType, opts.sourcePostType!),
+      isNotNull(productionItems.contentBody),
+      isNotNull(sourceItems.contentBody),
+    ];
+    if (windowDays != null) {
+      conditions.push(
+        gte(
+          productionItems.publishedAt,
+          sql`(now() - interval '${sql.raw(String(windowDays))} days')`,
+        ),
+      );
+    }
+    return db
+      .select({
+        sourceText: sourceItems.contentBody,
+        targetText: productionItems.contentBody,
+        targetPublishedAt: productionItems.publishedAt,
+      })
+      .from(productionItems)
+      .innerJoin(
+        sourceItems,
+        eq(sourceItems.id, productionItems.repostedFromItemId),
+      )
+      .where(and(...conditions))
+      .orderBy(desc(productionItems.publishedAt))
+      .limit(limit);
+  };
+
+  // Recency window first; fall back to all-time if the window is empty
+  // (sparse direction or brand-new account). The agent prefers stale
+  // examples over none — without any examples the proximity directive
+  // alone takes over, which is the v13 failure mode.
+  let rows = await runQuery(WINDOW_DAYS);
+  if (rows.length === 0) {
+    rows = await runQuery(null);
+  }
 
   return rows
     .filter(

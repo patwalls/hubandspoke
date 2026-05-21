@@ -29,6 +29,12 @@ const CROSS_POST_SEEDED_TARGETS: ReadonlySet<PostType> = new Set<PostType>([
   "instagram_story",
   "linkedin",
   "tiktok",
+  // v1.9 (2026-05-21): YT Shorts gets the same media-mirror treatment so
+  // IG Reel → YT Short auto-attaches the source MP4. The IG Reel video is
+  // already 9:16 vertical — exactly what Shorts needs, no transcoding.
+  // Before v1.9 the new Short row landed with no media and Pat had to
+  // manually re-upload.
+  "youtube_shorts",
   "threads",
 ]);
 
