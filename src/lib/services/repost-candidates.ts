@@ -52,9 +52,21 @@ const ELIGIBLE_SOURCE_TYPES = [
   "repurposed",
 ] as const;
 
-/** A repost can't be in flight on the same source. These statuses count
- *  as "in flight" — Killed and Published-but-old don't. */
-const PENDING_REPOST_STATUSES = ["Idea", "Assigned", "Ready To Publish"] as const;
+/** A repost can't be in flight on the same source. These are every
+ *  default pipeline-column status (isPipelineColumn=true in
+ *  brand-statuses.ts). Killed and Published are terminal — they don't
+ *  block. Review / Final Review were missing pre-2026-05-21, which let
+ *  sources with a repost in Review re-surface in the queue (Pat's
+ *  $30k/year-side-project case). Brands that customize their pipeline
+ *  with new statuses should add them here — or we move this to a
+ *  dynamic getInFlightStatusNames(brand) lookup. */
+const PENDING_REPOST_STATUSES = [
+  "Idea",
+  "Assigned",
+  "Review",
+  "Final Review",
+  "Ready To Publish",
+] as const;
 
 /** Minimum age before an item is even considered for repost. The
  *  "evergreen months/years later" intent means we want the original to
