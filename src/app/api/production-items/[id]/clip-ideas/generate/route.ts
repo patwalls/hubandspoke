@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
-import { generateClipIdeasForItem } from "@/lib/services/clip-idea-generate";
+import { enqueue } from "@/jobs/enqueue";
 import { getClippableFormats } from "@/lib/db/formats";
 
 interface RouteContext {
@@ -90,30 +90,29 @@ export async function POST(request: NextRequest, context: RouteContext) {
     targetFormatIds = clippable.map((f) => f.id);
   }
 
-  // Each format gets its own background run. Sonnet calls can exceed
-  // Heroku's 30s router limit (H12), so return 202 immediately and run
-  // generation in background tasks. Mirrors the pattern in
-  // /transcript/fetch/route.ts.
+  // Enqueue one `generate-clip-ideas` graphile-worker job per format.
+  // The worker dyno has its own connection budget — running this work
+  // inline on the web dyno held web's postgres-js pool open through
+  // ~30s Sonnet+Haiku calls per format, which exhausted the web pool
+  // and 502'd concurrent UI requests (see Splice v10 incident,
+  // 2026-05-22). The job key dedupes concurrent enqueues for the same
+  // (pillar, format) pair.
   for (const targetFormatId of targetFormatIds) {
-    (async () => {
-      await generateClipIdeasForItem(id, {
+    try {
+      await enqueue("generate-clip-ideas", {
+        productionItemId: id,
         targetFormatId,
         actorUserId,
-        // Manual route: operator already chose the pillar, bypass the
-        // post_type gate the cron path enforces.
         skipPostTypeGate: true,
-        // Manual Regenerate is explicit operator intent — overwrite the
-        // existing batch for this (pillar, format) pair instead of
-        // bailing on idempotency.
         force: true,
         forceSections: body.forceSections === true,
       });
-    })().catch((err) => {
+    } catch (err) {
       console.error(
-        `[clip-ideas] background generation failed for item=${id} format=${targetFormatId}:`,
+        `[clip-ideas] enqueue failed for item=${id} format=${targetFormatId}:`,
         err,
       );
-    });
+    }
   }
 
   return NextResponse.json(

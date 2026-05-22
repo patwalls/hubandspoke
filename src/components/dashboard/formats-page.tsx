@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { useUrlState } from "@/lib/hooks/use-url-state";
+import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -75,7 +77,23 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
-  const [channelFilter, setChannelFilter] = useState<string>("all");
+
+  // Filter + sort state in the URL — keeps the filtered Formats view
+  // shareable and restores it via the detail-page back-link.
+  const urlFilters = useUrlState({
+    channel: { default: "all" },
+    sortKey: { default: "name" },
+    sortDir: { default: "asc" },
+  });
+  const {
+    channel: channelFilter,
+    sortKey: sortKeyValue,
+    sortDir: sortDirValue,
+  } = urlFilters.values;
+  const sortKey = sortKeyValue as SortKey;
+  const sortDir: "asc" | "desc" = sortDirValue === "desc" ? "desc" : "asc";
+
+  useRememberListUrl({ brand, listKey: "formats" });
 
   const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
@@ -178,15 +196,14 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setEditorPopoverOpen(false);
   }
 
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-
   function handleSort(key: SortKey) {
     if (sortKey === key) {
-      setSortDir(sortDir === "asc" ? "desc" : "asc");
+      urlFilters.set("sortDir", sortDir === "asc" ? "desc" : "asc");
     } else {
-      setSortKey(key);
-      setSortDir(key === "name" ? "asc" : "desc");
+      urlFilters.setMany({
+        sortKey: key,
+        sortDir: key === "name" ? "asc" : "desc",
+      });
     }
   }
 
@@ -591,7 +608,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           label="Channel"
           value={channelFilter}
           options={channelOptions}
-          onChange={setChannelFilter}
+          onChange={(v) => urlFilters.set("channel", v)}
         />
       </div>
 

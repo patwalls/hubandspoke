@@ -17,6 +17,8 @@ import type { CrossPostCandidatesResult } from "@/lib/services/cross-post-candid
 import type { RepostCandidatesResult } from "@/lib/services/repost-candidates";
 import type { SpokeCandidatesResult } from "@/lib/services/spoke-candidates";
 import type { QueueHistoryEvent } from "@/app/api/queue/history/route";
+import { useUrlState } from "@/lib/hooks/use-url-state";
+import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 
 /** Queue tab discriminator.
  *
@@ -124,9 +126,19 @@ export function QueueView({
   const [historyEvents, setHistoryEvents] = useState<QueueHistoryEvent[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
-  const [search, setSearch] = useState("");
-  const [selectedPlatform, setSelectedPlatform] = useState("all");
-  const [selectedFormat, setSelectedFormat] = useState("all");
+  // Filter state lives in the URL so back-nav + shareable links work.
+  // The active queue tab (`selectedSource`) is already URL-driven via the
+  // route segment `[source]` — only the within-tab filters need lifting.
+  const filters = useUrlState({
+    q: { default: "", debounceMs: 250 },
+    platform: { default: "all" },
+    format: { default: "all" },
+  });
+  const {
+    q: search,
+    platform: selectedPlatform,
+    format: selectedFormat,
+  } = filters.values;
   const [selectedSource, setSelectedSource] = useState<QueueSource>(
     initialSource
   );
@@ -134,6 +146,8 @@ export function QueueView({
   useEffect(() => {
     setSelectedSource(initialSource);
   }, [initialSource]);
+
+  useRememberListUrl({ brand, listKey: "queue" });
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -573,7 +587,7 @@ export function QueueView({
         <Input
           type="search"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => filters.set("q", e.target.value)}
           placeholder="Search title, format, channel…"
           className="h-8 w-48 sm:w-72 text-xs"
         />
@@ -632,13 +646,13 @@ export function QueueView({
             label="Channel"
             value={selectedPlatform}
             options={platformOptions}
-            onChange={setSelectedPlatform}
+            onChange={(v) => filters.set("platform", v)}
           />
           <SelectPill
             label="Format"
             value={selectedFormat}
             options={formatOptions}
-            onChange={setSelectedFormat}
+            onChange={(v) => filters.set("format", v)}
           />
         </div>
       )}

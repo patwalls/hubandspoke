@@ -18,6 +18,11 @@ export interface GenerateClipIdeasPayload {
    *  existing live batch + cascade-deletes derived clip_ideas across
    *  every format, then re-detects. Implies `force`. */
   forceSections?: boolean;
+  /** The operator who triggered this run (set by the manual route). Used
+   *  for the producer/editor stamp on the resulting prod_items rows.
+   *  Cron/backfill path leaves this null and falls through to
+   *  `resolveEditor`. */
+  actorUserId?: string;
 }
 
 /**
@@ -44,6 +49,7 @@ export const generateClipIdeasTask: Task = async (rawPayload, helpers) => {
     force: payload.force,
     skipPostTypeGate: payload.skipPostTypeGate,
     forceSections: payload.forceSections,
+    actorUserId: payload.actorUserId,
   });
   if (outcome.status === "ok") {
     helpers.logger.info(

@@ -14,20 +14,6 @@ import {
   SECTION_PROMPT_VERSION,
 } from "@/lib/clip-section-agent";
 
-// Hash the pillarId into a stable 32-bit signed integer for use with
-// pg_advisory_xact_lock(integer). FNV-1a — cheap, deterministic, fine
-// distribution for our use case (serializing concurrent section-detect
-// jobs that race on the same pillar).
-function pillarLockKey(pillarId: string): number {
-  let hash = 0x811c9dc5; // FNV offset basis
-  for (let i = 0; i < pillarId.length; i++) {
-    hash ^= pillarId.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  // Map to 32-bit signed range
-  return hash | 0;
-}
-
 export type DetectSectionsOutcome =
   | {
       status: "ok";
@@ -53,10 +39,20 @@ export interface DetectSectionsOptions {
  * batch exists, returns it as-is. Force=true marks the existing batch
  * killed and re-runs detection.
  *
- * Concurrency: two workers racing on the same fresh pillar are serialized
- * via a Postgres advisory lock keyed on the pillar id, then re-check
- * inside the transaction. The first caller pays the Sonnet call; the
- * second finds the batch already there and returns it.
+ * Concurrency: optimistic re-check. Two workers racing on the same fresh
+ * pillar both check before AND after the Sonnet call; only the one that
+ * arrives at the INSERT first wins. The other re-reads, finds the
+ * winner's batch, and returns it (sub-optimal: the loser's Sonnet call
+ * was wasted ~$0.10, but the race window is small in practice — the
+ * route's fan-out enqueues all formats simultaneously so they share the
+ * same first batch). No held DB connections during the Sonnet call.
+ *
+ * Previously held a transaction + advisory lock around the Sonnet call;
+ * that held a postgres-js connection for ~10s and exhausted the web
+ * dyno's pool when multiple format jobs ran in parallel from the
+ * inline-on-web route path. See Splice v10 incident, 2026-05-22 — now
+ * the route enqueues to graphile-worker (worker dyno's separate pool)
+ * AND this service no longer holds a connection during the agent call.
  */
 export async function detectClipSectionsForPillar(
   pillarId: string,
@@ -130,39 +126,53 @@ export async function detectClipSectionsForPillar(
     .orderBy(sql`${productionItems.views} DESC NULLS LAST`)
     .limit(20);
 
-  // Acquire the advisory lock + re-check inside a transaction so two
-  // concurrent jobs can't double-insert.
-  const lockKey = pillarLockKey(pillarId);
-  const result = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
+  // Run the Sonnet call WITHOUT holding any DB transaction. This is
+  // critical for connection-pool health — see the doc comment above.
+  const agentResult = await generateClipSections({
+    pillarTitle: pillar.title,
+    pillarFormat: pillar.format,
+    transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
+    transcriptWords: transcript.words,
+    transcriptSegments: transcript.segments,
+    durationSec: transcript.durationSec,
+    benchHooks: benchRows.map((r) => ({
+      hook: r.hook,
+      title: r.title,
+      views: r.views,
+      format: r.format,
+      platform: r.platform as string[] | null,
+    })),
+  });
 
-    // Recheck after acquiring the lock.
-    if (!opts.force) {
-      const [existing] = await tx
-        .select({ batchId: clipSections.batchId })
+  // Short transaction: re-check live batch (someone else may have won
+  // the race while we were calling Sonnet), then either return their
+  // batch + drop ours or kill the prior batch (force path) + insert.
+  const result = await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ batchId: clipSections.batchId })
+      .from(clipSections)
+      .where(
+        and(eq(clipSections.pillarId, pillarId), isNull(clipSections.killedAt)),
+      )
+      .limit(1);
+
+    if (existing && !opts.force) {
+      // Lost the race. Return the winner's batch (we discard our agent
+      // output — rare in practice).
+      const counted = await tx
+        .select({ n: sql<number>`COUNT(*)::int` })
         .from(clipSections)
-        .where(
-          and(
-            eq(clipSections.pillarId, pillarId),
-            isNull(clipSections.killedAt),
-          ),
-        )
-        .limit(1);
-      if (existing) {
-        const counted = await tx
-          .select({ n: sql<number>`COUNT(*)::int` })
-          .from(clipSections)
-          .where(eq(clipSections.batchId, existing.batchId));
-        return {
-          status: "ok" as const,
-          sectionsCreated: counted[0]?.n ?? 0,
-          batchId: existing.batchId,
-          reusedExisting: true,
-        };
-      }
-    } else {
-      // Force re-detect: mark the existing batch's sections as killed
-      // (cascade-deletes their derived clip_ideas variants).
+        .where(eq(clipSections.batchId, existing.batchId));
+      return {
+        status: "ok" as const,
+        sectionsCreated: counted[0]?.n ?? 0,
+        batchId: existing.batchId,
+        reusedExisting: true,
+      };
+    }
+
+    if (opts.force) {
+      // Mark prior batch killed (cascade-deletes derived clip_ideas).
       await tx
         .update(clipSections)
         .set({
@@ -176,26 +186,6 @@ export async function detectClipSectionsForPillar(
           ),
         );
     }
-
-    // Run the agent OUTSIDE the transaction would be ideal, but
-    // graphile-worker tasks are already serialized per-job and the lock
-    // here is short-lived (Sonnet call ~10s). Hold it so concurrent jobs
-    // don't double-spend.
-    const agentResult = await generateClipSections({
-      pillarTitle: pillar.title,
-      pillarFormat: pillar.format,
-      transcriptSegmentsMarkdown: transcript.segmentsMarkdown,
-      transcriptWords: transcript.words,
-      transcriptSegments: transcript.segments,
-      durationSec: transcript.durationSec,
-      benchHooks: benchRows.map((r) => ({
-        hook: r.hook,
-        title: r.title,
-        views: r.views,
-        format: r.format,
-        platform: r.platform as string[] | null,
-      })),
-    });
 
     const batchId = randomUUID();
     const inserted = await tx
