@@ -79,29 +79,58 @@ try {
 
   console.log(`Found ${candidates.length} pillar(s) eligible for clip-idea backfill`);
 
+  // 2026-05-21 multi-format split: every clip-idea job is keyed on a
+  // (pillar, target_format) pair. Look up the clippable formats per
+  // brand once, then fan out one enqueue per format per pillar.
+  const clippableByBrand = new Map();
   for (const row of candidates) {
-    console.log(
-      `  ${DRY_RUN ? "WOULD ENQUEUE" : "ENQUEUE"}  ${row.production_item_id}  brand=${row.brand}  pub=${row.published_date}  "${(row.title ?? "").slice(0, 60)}"  transcript=${row.transcript_chars}c`,
-    );
-    if (!DRY_RUN) {
-      await sql`
-        SELECT graphile_worker.add_job(
-          'generate-clip-ideas',
-          payload   => ${JSON.stringify({ productionItemId: row.production_item_id })}::json,
-          job_key   => ${`generate-clip-ideas-${row.production_item_id}`},
-          job_key_mode => 'unsafe_dedupe'
-        )
-      `;
+    if (clippableByBrand.has(row.brand)) continue;
+    const rows = await sql`
+      SELECT id, name FROM formats
+      WHERE brand = ${row.brand} AND is_clippable_format = true
+      ORDER BY created_at ASC
+    `;
+    clippableByBrand.set(row.brand, rows);
+  }
+
+  let enqueued = 0;
+  for (const row of candidates) {
+    const targets = clippableByBrand.get(row.brand) ?? [];
+    if (targets.length === 0) {
+      console.log(
+        `  SKIP (no clippable formats on brand=${row.brand})  ${row.production_item_id}  "${(row.title ?? "").slice(0, 60)}"`,
+      );
+      continue;
+    }
+    for (const fmt of targets) {
+      console.log(
+        `  ${DRY_RUN ? "WOULD ENQUEUE" : "ENQUEUE"}  ${row.production_item_id}  brand=${row.brand}  format=${fmt.name}  pub=${row.published_date}  "${(row.title ?? "").slice(0, 60)}"`,
+      );
+      if (!DRY_RUN) {
+        await sql`
+          SELECT graphile_worker.add_job(
+            'generate-clip-ideas',
+            payload   => ${JSON.stringify({ productionItemId: row.production_item_id, targetFormatId: fmt.id })}::json,
+            job_key   => ${`generate-clip-ideas-${row.production_item_id}-${fmt.id}`},
+            job_key_mode => 'unsafe_dedupe'
+          )
+        `;
+        enqueued += 1;
+      } else {
+        enqueued += 1;
+      }
     }
   }
 
   console.log("");
-  console.log(`Summary: candidates=${candidates.length}`);
+  console.log(
+    `Summary: candidates=${candidates.length} jobs=${enqueued}${DRY_RUN ? " (dry run)" : ""}`,
+  );
   if (DRY_RUN) {
     console.log("Re-run with --apply to enqueue.");
   } else {
     console.log(
-      `Enqueued ${candidates.length} job(s). Watch progress: heroku logs --app hubandspoke --dyno worker --tail | grep generate-clip-ideas`,
+      `Enqueued ${enqueued} job(s). Watch progress: heroku logs --app hubandspoke --dyno worker --tail | grep generate-clip-ideas`,
     );
   }
 } finally {

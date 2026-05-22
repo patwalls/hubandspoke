@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
-import { clipIdeas, productionItems, users } from "@/lib/db/schema";
+import {
+  accounts,
+  clipIdeas,
+  productionItems,
+  users,
+} from "@/lib/db/schema";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -14,6 +20,15 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
 
+  // Join twice on production_items:
+  //   - `pillar` = the pillar this clip was derived from (via
+  //     clipIdeas.sourceProductionItemId)
+  //   - `sibling` = the queue-side production_item created at generation
+  //     time (via productionItems.sourceClipIdeaId === clipIdeas.id)
+  // The sibling carries the target post_type + accountId — both are needed
+  // to render the per-format preview in the triage dialog (e.g. an X-post
+  // simulator for X Quotables ideas).
+  const sibling = alias(productionItems, "sibling");
   const [row] = await db
     .select({
       id: clipIdeas.id,
@@ -24,9 +39,17 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       endSec: clipIdeas.endSec,
       estimatedViews: clipIdeas.estimatedViews,
       status: clipIdeas.status,
+      targetFormat: clipIdeas.targetFormat,
+      extras: clipIdeas.extras,
       acceptedProductionItemId: clipIdeas.acceptedProductionItemId,
       sourceProductionItemId: clipIdeas.sourceProductionItemId,
       sourceBrand: productionItems.brand,
+      siblingPostType: sibling.postType,
+      siblingAccountHandle: accounts.handle,
+      siblingAccountDisplayName: accounts.displayName,
+      siblingAccountAvatarUrl: accounts.avatarUrl,
+      siblingAccountPlatform: accounts.platform,
+      siblingAccountVerified: accounts.verified,
       editorName: users.name,
       editorEmail: users.email,
     })
@@ -35,6 +58,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       productionItems,
       eq(productionItems.id, clipIdeas.sourceProductionItemId),
     )
+    .leftJoin(sibling, eq(sibling.sourceClipIdeaId, clipIdeas.id))
+    .leftJoin(accounts, eq(accounts.id, sibling.accountId))
     .leftJoin(users, eq(users.id, clipIdeas.acceptedEditorUserId))
     .where(eq(clipIdeas.id, id))
     .limit(1);
@@ -52,10 +77,22 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     endSec: Number(row.endSec),
     estimatedViews: row.estimatedViews,
     status: row.status,
+    targetFormat: row.targetFormat,
+    extras: row.extras,
     acceptedEditorName: row.editorName ?? row.editorEmail ?? null,
     acceptedProductionItemId: row.acceptedProductionItemId,
     sourceProductionItemId: row.sourceProductionItemId,
     sourceBrand: row.sourceBrand,
+    targetPostType: row.siblingPostType,
+    targetAccount: row.siblingAccountHandle
+      ? {
+          handle: row.siblingAccountHandle,
+          displayName: row.siblingAccountDisplayName,
+          avatarUrl: row.siblingAccountAvatarUrl,
+          platform: row.siblingAccountPlatform,
+          verified: row.siblingAccountVerified,
+        }
+      : null,
   });
 }
 

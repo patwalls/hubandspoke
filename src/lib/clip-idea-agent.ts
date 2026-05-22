@@ -1,15 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// Sonnet 4.6. Prompt V8 (2026-05-20): cap pre-anchor lead-in so the hook's
-// payoff lands inside the first ~15s of the clip. Closes the failure mode
-// where the agent picked a 90s window with 60s of unrelated setup before
-// the anchor (e.g. a "TikTok strategy" hook anchored at 5:27 but starting
-// at 4:26, opening on the speaker's React internship and A/B testing
-// tangents). V7 introduced the verbatim transcriptAnchorQuote gate; V8
-// adds a hard MAX_LEAD_IN_SEC=15 constraint in alignRangeToCues plus a
-// tighter RUNTIME prompt that asks for shorter clips with up-front payoff.
+// Sonnet 4.6. Prompt V9 (2026-05-21): split the monolithic prompt into a
+// format-agnostic SECTION_SELECTION_PROMPT_BASE plus a per-format FORMAT
+// block pulled from each format's `## Clip Idea Generation` skill section.
+// Tool schema is also format-driven — declarations of `extras` (e.g.
+// `quotables: string[3]` for X Quotables) come from the same skill section's
+// fenced extras-schema block. Backwards-compatible: when no skill section
+// exists, the agent uses the V8 Reels-style block and an extras-less tool
+// schema, so the original Repackage Section w/ Hook format keeps working
+// without any skill edits. V8 added MAX_LEAD_IN_SEC=15; V7 introduced the
+// verbatim transcriptAnchorQuote gate; V6 the blueprintAnchorHook gate.
 const MODEL = "claude-sonnet-4-6";
-export const PROMPT_VERSION = 8;
+export const PROMPT_VERSION = 9;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 // Friendly name for the clip-idea algorithm. Versioned alongside PROMPT_VERSION.
@@ -26,25 +28,13 @@ export function algorithmLabel(promptVersion: number | null | undefined): string
   return `${ALGORITHM_NAME} v${promptVersion}`;
 }
 
-const SYSTEM_PROMPT_BASE = `You are a short-form video editor for a brand whose viral reels you have studied. Your job: read a long-form transcript and propose 10 standalone short-form clips (Reels, TikToks, YouTube Shorts) that will perform like the brand's existing top hits.
-
-=====================================================
-THE HOOK — narrator overlay, NOT a transcript quote
-=====================================================
-
-The hook is the line viewers see and/or hear in the first 1–2 seconds. In this brand's primary clip format ("Repackage Section w/ Hook"), the hook is a NARRATOR OVERLAY — written in the brand's voice, painted on screen above the speaker, often voiced over the cold open. It is NOT a verbatim quote from the founder being interviewed.
-
-The hook references what the viewer is about to hear, but it is editorial framing, not transcription. The transcript clip plays UNDER the hook to deliver the payoff.
-
-THE REFERENCE LIBRARY below shows the brand's actual top-performing hooks. Every hook you write must structurally mirror one of those — same point of view, same compression, same energy. If your hook doesn't sound like one of them, rewrite it.
-
-ANTI-PATTERNS — never propose a hook that:
-
-- Begins with first-person introduction: "My name is…", "Hi I'm…", "I'm a founder who…"
-- Begins with founder setup or framing: "Let me tell you…", "So basically…", "Going into this…", "What I did was…"
-- Is a verbatim transcript quote in the founder's voice (the transcript belongs UNDER the hook, not as the hook)
-- Is generic context or wisdom ("You should focus on…", "The key is…")
-- Reads like episode 3 of a story rather than a standalone moment
+// Format-agnostic invariants for clip-idea generation. Section selection,
+// anchor-quote rules, cue alignment, runtime ranges, output discipline —
+// none of these change per format. Per-format detail (what the hook IS for
+// this format, output extras like quotables, target runtime tuning) is
+// injected via the `formatPromptBlock` builder below from the format's
+// `## Clip Idea Generation` skill section.
+const SECTION_SELECTION_PROMPT_BASE = `You are a short-form clip editor for a brand whose top-performing clips you have studied. Your job: read a long-form transcript and propose 10 distinct clips that will perform like the brand's existing hits in the target format described below.
 
 =====================================================
 ANGLE
@@ -53,7 +43,7 @@ ANGLE
 Angle is the one-sentence payoff. If the hook stops the scroll, the angle is what the viewer walks away understanding. Each clip has exactly one angle.
 
 =====================================================
-RATIONALE — WHY THIS CLIP WILL GO VIRAL
+RATIONALE — WHY THIS CLIP WILL PERFORM
 =====================================================
 
 2–4 sentences. Tight. Frame it around:
@@ -63,19 +53,21 @@ RATIONALE — WHY THIS CLIP WILL GO VIRAL
 3. The brand-proof calibration — your hook must STRUCTURALLY MIRROR the blueprintAnchorHook you've selected. Name the shared pattern explicitly: "Same third-person 'Bro built X' frame as 'Bro built a $1M business in 6-7 hours' (108K views)" beats a vague "fits the brand."
 
 =====================================================
-OTHER CLIP CONSTRAINTS
+CORE CLIP CONSTRAINTS
 =====================================================
 
 - SELF-CONTAINED. Setup → payoff inside the clip. Watchable with no prior context.
-- RUNTIME. 30–60 seconds is the sweet spot. Prefer 30–45s for snappy list-tease hooks ("Stupid simple X that did Y:"), 50–60s for narrative beats. Over 75s usually means you front-loaded too much setup — the anchor (the payoff line) should land within the FIRST 15 SECONDS of the clip. Pre-anchor content is at most one short sentence of context; never include "before I cracked this, I tried X, then Y, then Z" tangents about unrelated parts of the speaker's life.
 - NATURAL BOUNDARIES. The transcript is pre-segmented with [MM:SS] cue timestamps. Start/end on cue boundaries — never mid-cue.
 - VARIETY. The 10 ideas must cover distinctly different moments. No repeated story beats.
+- LEAD-IN. The anchor (the payoff line) should land within the FIRST 15 SECONDS of the clip. Pre-anchor content is at most one short sentence of context; never include "before I cracked this, I tried X, then Y, then Z" tangents about unrelated parts of the speaker's life.
+
+(Specific target runtime per format is described in the FORMAT block below.)
 
 =====================================================
 ANCHOR QUOTE — ground the clip in a real transcript line
 =====================================================
 
-The single biggest failure mode of this format is picking timestamps that land on someone DISCUSSING a topic instead of someone DELIVERING it. The host recapping the guest's point ("That's great advice, Evan") is not the same as the guest making the point. Both will surface the same keywords; only one is the moment a viewer needs to see.
+The single biggest failure mode in this work is picking timestamps that land on someone DISCUSSING a topic instead of someone DELIVERING it. The host recapping the guest's point ("That's great advice, Evan") is not the same as the guest making the point. Both will surface the same keywords; only one is the moment a viewer needs to see.
 
 For each clip, you must cite a transcriptAnchorQuote: a verbatim line copied from the transcript above that IS the climactic moment your clip is built around — the line that, by itself, justifies the hook.
 
@@ -100,14 +92,61 @@ Call propose_clip_ideas exactly once with 10 distinct ideas, sorted by estimated
 
 Each idea:
 - startSec / endSec: SECONDS (not MM:SS). Cue-aligned. Must encompass the transcriptAnchorQuote.
-- hook: the narrator overlay line in brand voice. Mirrors a REFERENCE LIBRARY pattern.
+- hook: the framing line in this brand's voice, as defined in the FORMAT block. Mirrors a REFERENCE LIBRARY pattern.
 - angle: one sentence on the payoff.
 - rationale: 2–4 sentences. Scroll-stopping move + emotional payoff + structural mirror to your blueprintAnchorHook.
 - estimatedViews: integer.
 - blueprintAnchorHook: the EXACT verbatim hook from the REFERENCE LIBRARY whose structure your hook is mirroring. Copy-paste the line.
 - transcriptAnchorQuote: ≥ 8 words copied verbatim from the FULL TRANSCRIPT block. The delivery line your clip is built around. Must fall inside startSec/endSec.
+- extras (when the FORMAT block declares extra fields): conform to the schema in the FORMAT block.
 
 Never respond with plain text. Always call the tool.`;
+
+/**
+ * Default per-format prompt block. Used when a format's skill has no
+ * `## Clip Idea Generation` section — preserves the original Reels-style
+ * hook framing exactly, so the Repackage Section w/ Hook format keeps
+ * working until/unless its skill is extended.
+ */
+const DEFAULT_FORMAT_BLOCK = `=====================================================
+FORMAT BLOCK — narrator-overlay hook, 30–60s clip
+=====================================================
+
+This brand's primary clip format is a vertical 30–60s Reel / TikTok / YouTube Short. The hook is a NARRATOR OVERLAY — written in the brand's voice, painted on screen above the speaker, often voiced over the cold open. It is NOT a verbatim quote from the founder being interviewed.
+
+The hook references what the viewer is about to hear, but it is editorial framing, not transcription. The transcript clip plays UNDER the hook to deliver the payoff.
+
+ANTI-PATTERNS — never propose a hook that:
+
+- Begins with first-person introduction: "My name is…", "Hi I'm…", "I'm a founder who…"
+- Begins with founder setup or framing: "Let me tell you…", "So basically…", "Going into this…", "What I did was…"
+- Is a verbatim transcript quote in the founder's voice (the transcript belongs UNDER the hook, not as the hook)
+- Is generic context or wisdom ("You should focus on…", "The key is…")
+- Reads like episode 3 of a story rather than a standalone moment
+
+RUNTIME. 30–60 seconds is the sweet spot. Prefer 30–45s for snappy list-tease hooks ("Stupid simple X that did Y:"), 50–60s for narrative beats. Over 75s usually means you front-loaded too much setup.`;
+
+/**
+ * Wrap a format's `## Clip Idea Generation` skill section (extracted via
+ * `extractClipIdeaSection`) as the prompt's FORMAT block. The section may
+ * include a fenced \`extras-schema\` block — we leave it inline so the LLM
+ * sees the schema commentary; the tool's actual JSON Schema is built
+ * separately by `buildExtrasToolSchema` from the same parsed source.
+ */
+function formatPromptBlock(
+  skillSection: string | null,
+  formatName: string | null
+): string {
+  if (!skillSection) return DEFAULT_FORMAT_BLOCK;
+  const heading = formatName
+    ? `FORMAT BLOCK — ${formatName} (from format Skill)`
+    : `FORMAT BLOCK (from format Skill)`;
+  return `=====================================================
+${heading}
+=====================================================
+
+${skillSection.trim()}`;
+}
 
 export interface ClipIdea {
   startSec: number;
@@ -127,6 +166,10 @@ export interface ClipIdea {
   // failed for some reason (kept for forensics; an idea that lacks a match
   // never makes it past validation).
   transcriptAnchorStartSec: number | null;
+  // V9: format-specific output payload declared by the target format's
+  // skill (e.g. `{ quotables: ["…", "…", "…"] }` for X Quotables). Null
+  // when the format declared no extras-schema.
+  extras: Record<string, unknown> | null;
 }
 
 export interface GenerationResult {
@@ -144,57 +187,87 @@ export interface GenerationResult {
   diagnostics: AnchorResolution["diagnostics"];
 }
 
-const tools: Anthropic.Tool[] = [
-  {
-    name: "propose_clip_ideas",
-    description:
-      "Submit exactly 10 short-form clip ideas derived from the transcript. Sort highest to lowest estimated views. Pass `ideas` as a real JSON array of objects — never a JSON-encoded string.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        ideas: {
-          type: "array",
-          description:
-            "Array of 10 idea objects. Must be a real JSON array, not a string containing JSON.",
-          minItems: 10,
-          maxItems: 10,
-          items: {
-            type: "object",
-            properties: {
-              startSec: { type: "number" },
-              endSec: { type: "number" },
-              hook: { type: "string" },
-              angle: { type: "string" },
-              rationale: { type: "string" },
-              estimatedViews: { type: "integer", minimum: 0 },
-              blueprintAnchorHook: {
-                type: "string",
-                description:
-                  "Verbatim hook from the REFERENCE LIBRARY whose structural pattern this idea is mirroring. Copy the line as shown.",
-              },
-              transcriptAnchorQuote: {
-                type: "string",
-                description:
-                  "Verbatim quote (≥ 8 words) copied from the FULL TRANSCRIPT block above that IS the payoff moment of this clip. Must fall inside startSec/endSec. Pick the delivery line, not a recap.",
-              },
+/**
+ * Build the propose_clip_ideas tool. When `extrasSchema` is provided (parsed
+ * from a format's `## Clip Idea Generation` → `extras-schema` fenced block),
+ * each idea must include a matching `extras` object. When null, no extras
+ * are required and the field is omitted from the schema entirely so the
+ * model isn't tempted to send an empty object.
+ *
+ * Building the tool dynamically per call keeps the static analyzer happy
+ * with strict schemas (Sonnet validates against required fields) and lets
+ * different formats declare different output shapes without forking the
+ * agent into per-format files.
+ */
+function buildTools(
+  extrasSchema: Record<string, unknown> | null
+): Anthropic.Tool[] {
+  const baseProperties: Record<string, unknown> = {
+    startSec: { type: "number" },
+    endSec: { type: "number" },
+    hook: { type: "string" },
+    angle: { type: "string" },
+    rationale: { type: "string" },
+    estimatedViews: { type: "integer", minimum: 0 },
+    blueprintAnchorHook: {
+      type: "string",
+      description:
+        "Verbatim hook from the REFERENCE LIBRARY whose structural pattern this idea is mirroring. Copy the line as shown.",
+    },
+    transcriptAnchorQuote: {
+      type: "string",
+      description:
+        "Verbatim quote (≥ 8 words) copied from the FULL TRANSCRIPT block above that IS the payoff moment of this clip. Must fall inside startSec/endSec. Pick the delivery line, not a recap.",
+    },
+  };
+  const baseRequired = [
+    "startSec",
+    "endSec",
+    "hook",
+    "angle",
+    "rationale",
+    "estimatedViews",
+    "blueprintAnchorHook",
+    "transcriptAnchorQuote",
+  ];
+
+  if (extrasSchema && Object.keys(extrasSchema).length > 0) {
+    baseProperties.extras = {
+      type: "object",
+      description:
+        "Format-specific output payload declared by the target format's `## Clip Idea Generation` skill. Each property below is required for every idea.",
+      properties: extrasSchema,
+      required: Object.keys(extrasSchema),
+    };
+    baseRequired.push("extras");
+  }
+
+  return [
+    {
+      name: "propose_clip_ideas",
+      description:
+        "Submit exactly 10 clip ideas derived from the transcript. Sort highest to lowest estimated views. Pass `ideas` as a real JSON array of objects — never a JSON-encoded string.",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          ideas: {
+            type: "array",
+            description:
+              "Array of 10 idea objects. Must be a real JSON array, not a string containing JSON.",
+            minItems: 10,
+            maxItems: 10,
+            items: {
+              type: "object",
+              properties: baseProperties,
+              required: baseRequired,
             },
-            required: [
-              "startSec",
-              "endSec",
-              "hook",
-              "angle",
-              "rationale",
-              "estimatedViews",
-              "blueprintAnchorHook",
-              "transcriptAnchorQuote",
-            ],
           },
         },
+        required: ["ideas"],
       },
-      required: ["ideas"],
     },
-  },
-];
+  ];
+}
 
 function normalizeForMatch(s: string): string {
   return s.toLowerCase().replace(/\s+/g, " ").trim();
@@ -220,10 +293,15 @@ function tokenize(s: string): string[] {
 function validateShape(
   ideas: unknown,
   durationSec: number,
-  referenceHooks: string[]
+  referenceHooks: string[],
+  extrasSchema: Record<string, unknown> | null
 ): { ideas: ClipIdea[]; failures: string[] } | null {
   if (!Array.isArray(ideas)) return null;
   const refSet = new Set(referenceHooks.map(normalizeForMatch));
+  const requiredExtras =
+    extrasSchema && Object.keys(extrasSchema).length > 0
+      ? Object.keys(extrasSchema)
+      : null;
   const out: ClipIdea[] = [];
   const failures: string[] = [];
   for (let i = 0; i < ideas.length; i++) {
@@ -283,6 +361,32 @@ function validateShape(
         `Idea #${i + 1} ("${hook}") has a transcriptAnchorQuote shorter than 8 words: "${transcriptAnchorRaw}". Extend it into the next sentence.`
       );
     }
+    // Extras (format-specific output). When the format declares an
+    // extras-schema, every idea must include an `extras` object containing
+    // each declared key. We do a presence + non-empty check here; deeper
+    // schema validation would mean dragging in a JSON Schema validator
+    // and the tool's own schema enforcement covers most of it.
+    let extras: Record<string, unknown> | null = null;
+    if (requiredExtras) {
+      const rawExtras = r.extras;
+      if (
+        typeof rawExtras !== "object" ||
+        rawExtras === null ||
+        Array.isArray(rawExtras)
+      ) {
+        return null;
+      }
+      extras = rawExtras as Record<string, unknown>;
+      for (const key of requiredExtras) {
+        const v = extras[key];
+        if (v === undefined || v === null) return null;
+        // Arrays must be non-empty; strings must be non-blank. Numbers /
+        // booleans / nested objects pass through (their tool schema gates
+        // them).
+        if (Array.isArray(v) && v.length === 0) return null;
+        if (typeof v === "string" && v.trim() === "") return null;
+      }
+    }
     out.push({
       startSec: start,
       endSec: end,
@@ -293,6 +397,7 @@ function validateShape(
       blueprintAnchorHook: blueprintAnchor,
       transcriptAnchorQuote: transcriptAnchorRaw,
       transcriptAnchorStartSec: null,
+      extras,
     });
   }
   if (out.length !== 10) return null;
@@ -669,6 +774,20 @@ export interface GenerateArgs {
   derivatives: PerfRow[];     // short-form derivatives of THIS pillar
   blueprint: BlueprintRow[];  // top in-format performers — full anatomy (V5)
   bench: PerfRow[];           // broader short-form winners — light single-line
+  // V9: name of the target format this run is generating clip ideas for
+  // (e.g. "Repackage Section w/ Hook", "X Quotables"). Surfaced in the
+  // prompt's FORMAT block header so the LLM knows which format it's
+  // producing for; also stamped into the persisted clip_ideas row.
+  targetFormat: string | null;
+  // V9: extracted `## Clip Idea Generation` section from the target
+  // format's skill markdown. Drives the prompt's FORMAT block + the
+  // tool's `extras` schema. Null falls back to DEFAULT_FORMAT_BLOCK so
+  // the original Repackage Section w/ Hook format keeps working without
+  // editing its skill.
+  targetFormatSkillSection: string | null;
+  // V9: parsed extras-schema JSON (from a fenced \`extras-schema\` block
+  // inside the skill section). Null = no extras required for this format.
+  extrasSchema: Record<string, unknown> | null;
 }
 
 const SHORT_PLATFORMS_LABELS = ["YouTube Shorts", "Instagram Reel", "TikTok"];
@@ -828,7 +947,14 @@ export async function generateClipIdeas(
 
   const { block: refLibraryBlock, hooks: referenceHooks } =
     buildReferenceLibrary(args.blueprint);
-  const systemPrompt = `${refLibraryBlock}\n\n${SYSTEM_PROMPT_BASE}`;
+  const formatBlock = formatPromptBlock(
+    args.targetFormatSkillSection,
+    args.targetFormat
+  );
+  const systemPrompt = `${refLibraryBlock}\n\n${formatBlock}\n\n${SECTION_SELECTION_PROMPT_BASE}`;
+  const tools = buildTools(args.extrasSchema);
+
+  const formatLabel = args.targetFormat ?? "the brand's primary clip format";
 
   const derivativesBlock =
     args.derivatives.length > 0
@@ -836,12 +962,12 @@ export async function generateClipIdeas(
           `DERIVATIVES OF THIS PILLAR (clips already made from this same long-form video, with actual view counts). Lines prefixed HOOK: show the verbatim opening line of each short; lines prefixed TITLE: fall back to the post title because no hook is on file — treat those as weaker signal.`,
           args.derivatives.map(formatPerfRow).join("\n"),
         ].join("\n")
-      : `DERIVATIVES OF THIS PILLAR: (none yet — this is the first short-form pass.)`;
+      : `DERIVATIVES OF THIS PILLAR: (none yet — this is the first pass on this pillar.)`;
 
   const blueprintBlock =
     args.blueprint.length > 0
       ? [
-          `BLUEPRINT — top performers in this brand's primary clip format, with full anatomy. The hooks here are the ones in the REFERENCE LIBRARY above; the additional fields (overlay, caption, opening transcript, cover, engagement) show you HOW the hook is supported. Pattern-match against them — what makes the hook land, how the caption frames the payoff, how the opening builds momentum.`,
+          `BLUEPRINT — top performers in ${formatLabel}, with full anatomy. The hooks here are the ones in the REFERENCE LIBRARY above; the additional fields (overlay, caption, opening transcript, cover, engagement) show you HOW the hook is supported. Pattern-match against them — what makes the hook land, how the caption frames the payoff, how the opening builds momentum.`,
           args.blueprint.map(formatBlueprintRow).join("\n"),
         ].join("\n")
       : `BLUEPRINT: (no in-format top performers on file yet — fall back to BENCH below for calibration.)`;
@@ -849,7 +975,7 @@ export async function generateClipIdeas(
   const benchBlock =
     args.bench.length > 0
       ? [
-          `BENCH — broader short-form winners across formats, lighter detail. Use these for view-count CALIBRATION ONLY (what's a realistic top-end on this brand?), not for hook pattern-matching. Lines prefixed HOOK: are verbatim openings; TITLE: rows are promotional titles where the hook isn't on file (weaker signal).`,
+          `BENCH — broader top performers across formats, lighter detail. Use these for view-count CALIBRATION ONLY (what's a realistic top-end on this brand?), not for hook pattern-matching. Lines prefixed HOOK: are verbatim openings; TITLE: rows are promotional titles where the hook isn't on file (weaker signal).`,
           args.bench.map(formatPerfRow).join("\n"),
         ].join("\n")
       : `BENCH: (none available.)`;
@@ -860,6 +986,7 @@ export async function generateClipIdeas(
     args.pillarChannels?.length
       ? `Original channels: ${args.pillarChannels.join(", ")}`
       : null,
+    args.targetFormat ? `Target format for this generation: ${args.targetFormat}` : null,
     `Total duration: ${Math.round(args.durationSec)}s`,
     ``,
     `======================== PERFORMANCE CONTEXT ========================`,
@@ -875,7 +1002,7 @@ export async function generateClipIdeas(
     args.transcriptSegmentsMarkdown,
     ``,
     `======================== TASK ========================`,
-    `Propose exactly 10 distinct clip ideas via the propose_clip_ideas tool. Each hook must be a narrator overlay line in this brand's voice — STRUCTURALLY MIRROR a hook from the REFERENCE LIBRARY (set blueprintAnchorHook to the exact verbatim line you're mirroring). Avoid first-person founder intros and verbatim transcript quotes — those belong UNDER the hook, not as the hook. Sort by estimatedViews descending; calibrate against the BLUEPRINT and BENCH numbers above.`,
+    `Propose exactly 10 distinct clip ideas via the propose_clip_ideas tool. Each hook follows the FORMAT block above — STRUCTURALLY MIRROR a hook from the REFERENCE LIBRARY (set blueprintAnchorHook to the exact verbatim line you're mirroring). Sort by estimatedViews descending; calibrate against the BLUEPRINT and BENCH numbers above.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -937,6 +1064,7 @@ export async function generateClipIdeas(
           ideasInput,
           args.durationSec,
           referenceHooks,
+          args.extrasSchema,
         );
         if (shape) failureModeRef.current = "ok";
         if (!shape) {

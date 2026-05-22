@@ -3,7 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { SparklesIcon, RefreshCwIcon, ExternalLinkIcon } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  ChevronDownIcon,
+  SparklesIcon,
+  RefreshCwIcon,
+  ExternalLinkIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ClipTriageDialog } from "./clip-triage-dialog";
 
@@ -113,13 +124,19 @@ export function ClipIdeasPanel({
     load();
   }, [load]);
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(async (
+    opts: { forceSections?: boolean } = {},
+  ) => {
     setGenState({ kind: "generating" });
     const priorBatchCreatedAt = batchCreatedAt;
     try {
       const res = await fetch(
         `/api/production-items/${itemId}/clip-ideas/generate`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ forceSections: opts.forceSections === true }),
+        }
       );
       // Tolerate non-JSON bodies — Heroku's 502 error page is HTML, for
       // example, and res.json() would throw "Unexpected token '<'".
@@ -199,29 +216,68 @@ export function ClipIdeasPanel({
           )}
         </div>
         {isAdmin && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleGenerate}
-            disabled={genState.kind === "generating"}
-            className="h-7 text-xs gap-1.5"
-            title={
-              ideas.length > 0
-                ? "Re-run the agent against this transcript — replaces the panel with a fresh batch"
-                : "Run the agent against this transcript and propose 10 clip ideas"
-            }
-          >
-            {genState.kind === "generating" ? (
-              <RefreshCwIcon className="size-3.5 animate-spin" />
-            ) : (
-              <SparklesIcon className="size-3.5" />
-            )}
-            {genState.kind === "generating"
-              ? "Generating…"
-              : ideas.length > 0
-                ? "Regenerate"
-                : "Generate 10 ideas"}
-          </Button>
+          <div className="flex items-center gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleGenerate({ forceSections: false })}
+              disabled={genState.kind === "generating"}
+              className="h-7 text-xs gap-1.5 rounded-r-none border-r-0"
+              title={
+                ideas.length > 0
+                  ? "Re-run only the per-format hook writer — reuses the existing detected sections."
+                  : "Run the two-pass agent (detect sections + write hooks) against this transcript."
+              }
+            >
+              {genState.kind === "generating" ? (
+                <RefreshCwIcon className="size-3.5 animate-spin" />
+              ) : (
+                <SparklesIcon className="size-3.5" />
+              )}
+              {genState.kind === "generating"
+                ? "Generating…"
+                : ideas.length > 0
+                  ? "Regenerate hooks"
+                  : "Generate clip ideas"}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={genState.kind === "generating"}
+                className="h-7 w-7 p-0 rounded-r-md rounded-l-none border border-l-0 border-input bg-background hover:bg-accent inline-flex items-center justify-center disabled:opacity-50"
+                aria-label="More generation options"
+              >
+                <ChevronDownIcon className="size-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuItem
+                  onClick={() => void handleGenerate({ forceSections: false })}
+                  className="flex flex-col items-start gap-0.5 py-2"
+                >
+                  <span className="font-medium text-xs">
+                    Regenerate hooks only
+                  </span>
+                  <span className="text-[11px] text-muted-foreground leading-snug">
+                    Reuse the detected sections. Re-runs the per-format hook
+                    writer (Haiku) across every clippable format on this brand.
+                    Cheap, ~$0.04/format.
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => void handleGenerate({ forceSections: true })}
+                  className="flex flex-col items-start gap-0.5 py-2"
+                >
+                  <span className="font-medium text-xs">
+                    Regenerate sections + hooks (full)
+                  </span>
+                  <span className="text-[11px] text-muted-foreground leading-snug">
+                    Re-detect sections (Sonnet, ~$0.10) then re-write hooks for
+                    every format. Kills the prior section batch + its derived
+                    ideas across every format.
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         )}
       </div>
 

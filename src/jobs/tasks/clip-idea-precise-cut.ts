@@ -25,6 +25,7 @@ import {
   assertCompositionUnique,
   buildCompositionName,
 } from "@/lib/services/descript-composition";
+import { resolveClipAspectRatio } from "@/lib/db/formats";
 import { downloadToFile, safeUnlink } from "./descript-upload-helpers";
 
 export interface ClipIdeaPreciseCutPayload {
@@ -304,6 +305,9 @@ async function pollUploadOnce(
         compositionName: repurposeTriggers.compositionName,
         formatSkill: formats.instructions,
         formatName: formats.name,
+        clipAspectRatio: formats.clipAspectRatio,
+        clipTargetPostType: formats.clipTargetPostType,
+        clipIdeaExtras: clipIdeas.extras,
       })
       .from(repurposeTriggers)
       .leftJoin(formats, eq(repurposeTriggers.targetFormatId, formats.id))
@@ -311,6 +315,7 @@ async function pollUploadOnce(
         productionItems,
         eq(productionItems.id, payload.derivativeItemId),
       )
+      .leftJoin(clipIdeas, eq(clipIdeas.id, payload.clipIdeaId))
       .where(eq(repurposeTriggers.id, payload.triggerId))
       .limit(1);
     if (!row?.descriptProjectId) {
@@ -330,10 +335,23 @@ async function pollUploadOnce(
     // composition_name on the trigger is the same value. Either is fine.
     const hookText = row.hook ?? row.compositionName ?? "";
 
+    const aspectRatio = resolveClipAspectRatio({
+      clipAspectRatio: row.clipAspectRatio,
+      clipTargetPostType: row.clipTargetPostType,
+    });
+    const extras = row.clipIdeaExtras as Record<string, unknown> | null;
+    const quotables =
+      extras && Array.isArray(extras.quotables)
+        ? extras.quotables.filter(
+            (v): v is string => typeof v === "string" && v.trim() !== "",
+          )
+        : [];
     const prompt = buildLayoutPackPrompt({
       skill: row.formatSkill,
       compositionId,
       hookText,
+      aspectRatio,
+      quotables,
     });
     const agent = await invokeDescriptAgent({
       projectId: row.descriptProjectId,

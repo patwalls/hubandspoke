@@ -60,7 +60,7 @@ describe("runDescriptStepForDerivative — Underlord auto-fire disabled (2026-05
       .mockResolvedValue(undefined);
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: CLIP_INTRO_SKILL,
     });
     const pillar = await createTestProductionItem({
@@ -115,7 +115,7 @@ describe.skip("runDescriptStepForDerivative (enabled-path tests, skipped while k
       .mockResolvedValue(undefined);
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: CLIP_INTRO_SKILL,
     });
     const pillar = await createTestProductionItem({
@@ -205,7 +205,7 @@ describe.skip("runDescriptStepForDerivative (enabled-path tests, skipped while k
       .mockResolvedValue(undefined);
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: CLIP_INTRO_SKILL,
     });
     const pillar = await createTestProductionItem({
@@ -278,7 +278,7 @@ describe.skip("runDescriptStepForDerivative (enabled-path tests, skipped while k
     const agentSpy = vi.spyOn(descriptApi, "invokeDescriptAgent");
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: CLIP_INTRO_SKILL,
     });
     const pillar = await createTestProductionItem({
@@ -308,7 +308,7 @@ describe.skip("runDescriptStepForDerivative (enabled-path tests, skipped while k
     const agentSpy = vi.spyOn(descriptApi, "invokeDescriptAgent");
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: "## What this format is\n\nA short clip.",
     });
     // Even with a warm pillar — no skill, no fire. extractDescriptSection
@@ -344,7 +344,7 @@ describe.skip("runDescriptStepForDerivative (enabled-path tests, skipped while k
     const agentSpy = vi.spyOn(descriptApi, "invokeDescriptAgent");
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: CLIP_INTRO_SKILL,
     });
     const pillar = await createTestProductionItem({
@@ -383,7 +383,7 @@ describe.skip("runDescriptStepForDerivative (enabled-path tests, skipped while k
     vi.spyOn(enqueueMod, "enqueue").mockResolvedValue(undefined);
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: CLIP_INTRO_SKILL,
     });
     const pillar = await createTestProductionItem({
@@ -460,7 +460,7 @@ describe.skip("runDescriptStepForDerivative — {{hook}} substitution (enabled-p
       });
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: SKILL_WITH_HOOK_PLACEHOLDER,
     });
     const pillar = await createTestProductionItem({
@@ -536,7 +536,7 @@ describe.skip("runDescriptStepForDerivative — {{hook}} substitution (enabled-p
     });
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: SKILL_WITH_HOOK_PLACEHOLDER,
     });
     const pillar = await createTestProductionItem({
@@ -591,7 +591,7 @@ describe.skip("runDescriptStepForDerivative — {{hook}} substitution (enabled-p
     const hookSpy = vi.spyOn(derivativeHookMod, "generateDerivativeHook");
 
     const format = await createTestFormat({
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
       instructions: CLIP_INTRO_SKILL,
     });
     const pillar = await createTestProductionItem({

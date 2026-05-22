@@ -41,6 +41,7 @@ import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, channelKey } from "@/lib/channel-options";
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
 import { applyStarterTemplate } from "@/lib/format-skill";
+import { QuickAddFormatDialog } from "./quick-add-format-dialog";
 
 interface AsanaMember {
   gid: string;
@@ -73,6 +74,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [formats, setFormats] = useState<FormatRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [channelFilter, setChannelFilter] = useState<string>("all");
 
   const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
@@ -343,6 +345,24 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             Manage content format templates and repurpose chains.
           </p>
         </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setQuickAddOpen(true)}
+            className="w-full sm:w-auto"
+          >
+            ✨ Quick add (AI)
+          </Button>
+          <QuickAddFormatDialog
+            brand={brand}
+            open={quickAddOpen}
+            onOpenChange={setQuickAddOpen}
+            onCreated={() => {
+              // Refetch the list so the new format shows up immediately.
+              void fetchFormats();
+            }}
+          />
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger>
             <Button onClick={openCreate} className="w-full sm:w-auto">
@@ -563,6 +583,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">

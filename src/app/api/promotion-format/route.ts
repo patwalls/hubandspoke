@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     })
     .from(formats)
     .where(
-      and(eq(formats.brand, brand), eq(formats.isClipDescriptFormat, true)),
+      and(eq(formats.brand, brand), eq(formats.isClippableFormat, true)),
     )
     .limit(1);
 

@@ -58,6 +58,12 @@ function formatTimestamp(seconds: number): string {
  *   {{compositionId}}     — composition UUID (precise-cut path; empty for
  *                           the agent path where the composition doesn't
  *                           exist yet)
+ *   {{aspectRatio}}       — "9:16" or "16:9". Resolved from the format's
+ *                           clip_aspect_ratio column with a post_type-based
+ *                           fallback by `resolveClipAspectRatio`.
+ *   {{quotables}}         — newline-separated quotables array from
+ *                           clip_ideas.extras.quotables (X Quotables
+ *                           format). Empty when the clip has no quotables.
  */
 export function substituteFormatPrompt(
   template: string,
@@ -66,6 +72,8 @@ export function substituteFormatPrompt(
     startSec?: number;
     endSec?: number;
     compositionId?: string;
+    aspectRatio?: string;
+    quotables?: string[];
   },
 ): string {
   const safeHook = vars.hook.replace(/"/g, '\\"');
@@ -73,6 +81,10 @@ export function substituteFormatPrompt(
   const end = vars.endSec ?? null;
   const duration =
     start !== null && end !== null ? Math.max(0, Math.round(end - start)) : null;
+  const quotablesBlock =
+    vars.quotables && vars.quotables.length > 0
+      ? vars.quotables.map((q) => `- ${q}`).join("\n")
+      : "";
   const replacements: Record<string, string> = {
     hook: safeHook,
     startTimestamp: start !== null ? formatTimestamp(start) : "",
@@ -81,6 +93,8 @@ export function substituteFormatPrompt(
     endSec: end !== null ? String(end) : "",
     durationSec: duration !== null ? String(duration) : "",
     compositionId: vars.compositionId ?? "",
+    aspectRatio: vars.aspectRatio ?? "",
+    quotables: quotablesBlock,
   };
   return template.replace(/\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}/g, (match, key: string) => {
     return Object.prototype.hasOwnProperty.call(replacements, key)
@@ -104,14 +118,22 @@ export function buildLayoutPackPrompt(args: {
   skill: string;
   compositionId: string;
   hookText: string;
+  aspectRatio?: "9:16" | "16:9";
+  quotables?: string[];
 }): string {
   const descriptOnly = extractDescriptSection(args.skill);
   const inner = substituteFormatPrompt(descriptOnly, {
     hook: args.hookText,
     compositionId: args.compositionId,
+    aspectRatio: args.aspectRatio,
+    quotables: args.quotables,
   });
+  const orientationLine =
+    args.aspectRatio === "16:9"
+      ? `Apply the following format-specific instructions to the horizontal 16:9 composition with compositionId="${args.compositionId}":`
+      : `Apply the following format-specific instructions to the composition with compositionId="${args.compositionId}":`;
   return [
-    `Apply the following format-specific instructions to the composition with compositionId="${args.compositionId}":`,
+    orientationLine,
     "",
     inner,
     "",

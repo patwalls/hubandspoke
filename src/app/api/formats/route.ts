@@ -109,6 +109,10 @@ export async function POST(request: NextRequest) {
       editor,
       instructions,
       parentFormatId,
+      isClippableFormat,
+      clipTargetPostType,
+      clipTargetPlatform,
+      clipAspectRatio,
     } = body as {
       name: string;
       accountChannels?: FormatChannelInput[];
@@ -117,6 +121,10 @@ export async function POST(request: NextRequest) {
       editor?: string | null;
       instructions?: string | null;
       parentFormatId?: string | null;
+      isClippableFormat?: boolean;
+      clipTargetPostType?: string | null;
+      clipTargetPlatform?: string[] | null;
+      clipAspectRatio?: string | null;
     };
 
     const resolvedBrand = brand || "starter-story";
@@ -146,6 +154,13 @@ export async function POST(request: NextRequest) {
         editor: editor || null,
         instructions: instructions || null,
         parentFormatId: parentFormatId || null,
+        isClippableFormat: isClippableFormat === true,
+        clipTargetPostType: clipTargetPostType || null,
+        clipTargetPlatform:
+          Array.isArray(clipTargetPlatform) && clipTargetPlatform.length > 0
+            ? clipTargetPlatform
+            : null,
+        clipAspectRatio: clipAspectRatio || null,
       })
       .returning();
 
@@ -173,9 +188,12 @@ export async function PUT(request: NextRequest) {
       editor?: string | null;
       instructions?: string | null;
       parentFormatId?: string | null;
-      isClipDescriptFormat?: boolean;
+      isClippableFormat?: boolean;
       isCanvaFormat?: boolean;
       labelsAsOriginal?: boolean;
+      clipTargetPostType?: string | null;
+      clipTargetPlatform?: string[] | null;
+      clipAspectRatio?: string | null;
     };
     const { id, accountChannels, parentFormatId } = body;
 
@@ -229,12 +247,22 @@ export async function PUT(request: NextRequest) {
       updateData.instructions = body.instructions || null;
     if (parentFormatId !== undefined)
       updateData.parentFormatId = parentFormatId || null;
-    if (body.isClipDescriptFormat !== undefined)
-      updateData.isClipDescriptFormat = body.isClipDescriptFormat;
+    if (body.isClippableFormat !== undefined)
+      updateData.isClippableFormat = body.isClippableFormat;
     if (body.isCanvaFormat !== undefined)
       updateData.isCanvaFormat = body.isCanvaFormat;
     if (body.labelsAsOriginal !== undefined)
       updateData.labelsAsOriginal = body.labelsAsOriginal;
+    if (body.clipTargetPostType !== undefined)
+      updateData.clipTargetPostType = body.clipTargetPostType || null;
+    if (body.clipTargetPlatform !== undefined)
+      updateData.clipTargetPlatform =
+        Array.isArray(body.clipTargetPlatform) &&
+        body.clipTargetPlatform.length > 0
+          ? body.clipTargetPlatform
+          : null;
+    if (body.clipAspectRatio !== undefined)
+      updateData.clipAspectRatio = body.clipAspectRatio || null;
 
     const [updated] = await db
       .update(formats)

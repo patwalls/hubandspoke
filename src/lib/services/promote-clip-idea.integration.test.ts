@@ -18,7 +18,7 @@ describe("getPromotedClipFormat", () => {
   it("returns the format name when exactly one format on the brand is flagged", async () => {
     const fmt = await createTestFormat({
       brand: `vitest-brand-${Date.now()}`,
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
     });
     expect(await getPromotedClipFormat(fmt.brand)).toBe(fmt.name);
   });
@@ -28,7 +28,7 @@ describe("getPromotedClipFormat", () => {
     const brand = `vitest-empty-${Date.now().toString(36)}`;
     // Sanity: create an unflagged format on this brand so we're sure the
     // lookup isn't matching by brand alone.
-    await createTestFormat({ brand, isClipDescriptFormat: false });
+    await createTestFormat({ brand, isClippableFormat: false });
     expect(await getPromotedClipFormat(brand)).toBeNull();
   });
 
@@ -37,7 +37,7 @@ describe("getPromotedClipFormat", () => {
     const ssBrand = `vitest-ss-${Date.now().toString(36)}`;
     await createTestFormat({
       brand: matgBrand,
-      isClipDescriptFormat: true,
+      isClippableFormat: true,
     });
     // ssBrand has no flagged format → null
     expect(await getPromotedClipFormat(ssBrand)).toBeNull();

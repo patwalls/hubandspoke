@@ -902,16 +902,20 @@ export interface TopShortFormPerformers {
 }
 
 /**
- * Top-performing short-form clips for a brand. Used by the clip-idea agent
- * as ground-truth examples of what works for this audience.
+ * Top-performing clips for a brand in (or related to) a specific format.
+ * Used by the clip-idea agent as ground-truth examples of what works for
+ * this audience. Originally short-form-only; generalized 2026-05-21 to
+ * support non-short-form clip formats (e.g. X Quotables) — the
+ * `restrictPlatforms` param controls the platform filter at runtime.
  *
  * Returns a tiered shape (since 2026-05-01 / prompt V5):
- *   - `blueprint`: top N where format = `preferredFormat` (the brand's
- *     dominant clip format) and the row has a non-null hook. SELECT pulls
- *     caption, cover description, engagement, and the first ~1200 chars of
- *     the reel's own transcript via a left join on `transcripts`.
- *   - `bench`: top N short-form regardless of format, excluding anything
- *     already in `blueprint` (by id). Same shape as `TopShortFormRow`.
+ *   - `blueprint`: top N where format = `preferredFormat` AND the row has
+ *     a non-null hook. SELECT pulls caption, cover description, engagement,
+ *     and the first ~1200 chars of the post's own transcript via a left
+ *     join on `transcripts`.
+ *   - `bench`: top N matching the `restrictPlatforms` filter regardless of
+ *     format, excluding anything already in `blueprint` (by id). Same
+ *     shape as `TopShortFormRow`.
  *
  * Optionally excludes direct children of a given pillar so the brand-wide
  * sample doesn't overlap with the pillar's own derivatives block.
@@ -922,6 +926,13 @@ export async function topShortFormPerformers(params: {
   preferredFormat?: string;
   blueprintLimit?: number;
   benchLimit?: number;
+  /** Restrict blueprint + bench to rows whose `platform` JSONB contains
+   *  ANY of these labels. Pass e.g. `["Instagram Reel", "TikTok",
+   *  "YouTube Shorts"]` for short-form Reels-style formats, `["X"]` for
+   *  X Quotables. Defaults to the legacy short-form set when omitted so
+   *  Repackage Section w/ Hook keeps its existing behavior. Pass an
+   *  empty array to disable the platform filter entirely. */
+  restrictPlatforms?: string[];
 }): Promise<TopShortFormPerformers> {
   const {
     brand,
@@ -929,25 +940,33 @@ export async function topShortFormPerformers(params: {
     preferredFormat,
     blueprintLimit = 10,
     benchLimit = 20,
+    restrictPlatforms,
   } = params;
 
-  // JSONB containment — "any of these platforms" via OR over containment for
-  // each short-form platform string. Mirrors the pattern at queries.ts:116-120.
-  const platformOr = sql.join(
-    SHORT_FORM_PLATFORMS.map(
-      (p) =>
-        sql`${productionItems.platform}::jsonb @> ${JSON.stringify([p])}::jsonb`
-    ),
-    sql` OR `
-  );
+  const platformFilter =
+    restrictPlatforms === undefined
+      ? SHORT_FORM_PLATFORMS
+      : restrictPlatforms;
 
   const baseConditions = [
     eq(productionItems.brand, brand),
     eq(productionItems.status, "Published"),
     isNotNull(productionItems.views),
-    sql`(${platformOr})`,
     isNull(productionItems.deletedAt),
   ];
+
+  if (platformFilter.length > 0) {
+    // JSONB containment — "any of these platforms" via OR over containment
+    // for each label. Mirrors the pattern at queries.ts:116-120.
+    const platformOr = sql.join(
+      platformFilter.map(
+        (p) =>
+          sql`${productionItems.platform}::jsonb @> ${JSON.stringify([p])}::jsonb`
+      ),
+      sql` OR `
+    );
+    baseConditions.push(sql`(${platformOr})`);
+  }
 
   if (excludeDerivativesOfPillarId) {
     // Exclude direct children of the pillar. Grandchildren etc. stay — for the

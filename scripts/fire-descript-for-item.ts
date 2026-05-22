@@ -52,7 +52,7 @@ async function main() {
       id: formats.id,
       name: formats.name,
       instructions: formats.instructions,
-      isClipDescriptFormat: formats.isClipDescriptFormat,
+      isClippableFormat: formats.isClippableFormat,
     })
     .from(formats)
     .where(and(eq(formats.brand, item.brand), eq(formats.name, item.format)))
@@ -62,9 +62,9 @@ async function main() {
     console.error(`Format not found for brand=${item.brand} name=${item.format}`);
     process.exit(2);
   }
-  if (!fmt.isClipDescriptFormat) {
+  if (!fmt.isClippableFormat) {
     console.error(
-      `Format "${fmt.name}" (id=${fmt.id}) is NOT flagged is_clip_descript_format — refusing to fire.`,
+      `Format "${fmt.name}" (id=${fmt.id}) is NOT flagged is_clippable_format — refusing to fire.`,
     );
     process.exit(2);
   }

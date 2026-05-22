@@ -96,9 +96,12 @@ interface FormatRow {
   editorAsanaGid: string | null;
   instructions: string | null;
   parentFormatId: string | null;
-  isClipDescriptFormat: boolean;
+  isClippableFormat: boolean;
   isCanvaFormat: boolean;
   labelsAsOriginal: boolean;
+  clipTargetPlatform: string[] | null;
+  clipTargetPostType: string | null;
+  clipAspectRatio: string | null;
 }
 
 interface ContentItem {
@@ -249,9 +252,12 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [editorAsanaGid, setEditorAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
-  const [isClipDescriptFormat, setIsClipDescriptFormat] = useState(false);
+  const [isClippableFormat, setIsClippableFormat] = useState(false);
   const [isCanvaFormat, setIsCanvaFormat] = useState(false);
   const [labelsAsOriginal, setLabelsAsOriginal] = useState(false);
+  const [clipTargetPostType, setClipTargetPostType] = useState<string>("");
+  const [clipTargetPlatform, setClipTargetPlatform] = useState<string[]>([]);
+  const [clipAspectRatio, setClipAspectRatio] = useState<string>("");
 
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
   const [channelsPopoverOpen, setChannelsPopoverOpen] = useState(false);
@@ -638,7 +644,12 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     setEditorAsanaGid(f.editorAsanaGid || "");
     setInstructions(f.instructions || "");
     setParentFormatId(f.parentFormatId ?? null);
-    setIsClipDescriptFormat(f.isClipDescriptFormat ?? false);
+    setIsClippableFormat(f.isClippableFormat ?? false);
+    setClipTargetPostType(f.clipTargetPostType ?? "");
+    setClipTargetPlatform(
+      Array.isArray(f.clipTargetPlatform) ? f.clipTargetPlatform : [],
+    );
+    setClipAspectRatio(f.clipAspectRatio ?? "");
     setIsCanvaFormat(f.isCanvaFormat ?? false);
     setLabelsAsOriginal(f.labelsAsOriginal ?? false);
   }
@@ -1466,21 +1477,104 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               <label className="flex items-start gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={isClipDescriptFormat}
+                  checked={isClippableFormat}
                   onChange={(e) => {
                     const next = e.target.checked;
-                    setIsClipDescriptFormat(next);
-                    void persistField({ isClipDescriptFormat: next });
+                    setIsClippableFormat(next);
+                    void persistField({ isClippableFormat: next });
                   }}
                   className="mt-0.5"
                 />
                 <span className="text-sm">
-                  <span className="font-medium">Clip-idea promotion target</span>
+                  <span className="font-medium">Clippable format</span>
                   <span className="block text-xs text-muted-foreground mt-0.5">
-                    Marks this format as the destination for clip-idea generation and the four &quot;Create in Descript&quot; flows on clip triage. Exactly one format per brand should carry this flag — the lookup picks whichever flagged row Postgres returns first, so a second tick on a different format silently breaks routing. To fire Descript on derivatives of a DIFFERENT format, leave this unchecked and add a <code className="font-mono">### Descript Clip &amp; Pack Info</code> section to that format&apos;s Skill instead.
+                    When ticked, this format gets its own Queue tab and the clip-idea agent (Splice) can target it. Multiple formats per brand can be clippable — each gets its own per-format hook style, output extras, and platform target from the format Skill&apos;s <code className="font-mono">## Clip Idea Generation</code> section. The four &quot;Create in Descript&quot; flows on clip triage also work for any clippable format.
                   </span>
                 </span>
               </label>
+              {isClippableFormat && (
+                <div className="ml-6 mt-3 space-y-3 border-l border-border pl-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="clip-target-post-type" className="text-xs">
+                      Target post type
+                    </Label>
+                    <select
+                      id="clip-target-post-type"
+                      value={clipTargetPostType}
+                      onChange={(e) => {
+                        const next = e.target.value || null;
+                        setClipTargetPostType(next ?? "");
+                        void persistField({ clipTargetPostType: next });
+                      }}
+                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                    >
+                      <option value="">— pick one —</option>
+                      <option value="instagram_reel">instagram_reel</option>
+                      <option value="tiktok">tiktok</option>
+                      <option value="youtube_shorts">youtube_shorts</option>
+                      <option value="x">x</option>
+                      <option value="instagram_post">instagram_post</option>
+                      <option value="linkedin">linkedin</option>
+                      <option value="threads">threads</option>
+                    </select>
+                    <p className="text-[11px] text-muted-foreground">
+                      Sets <code className="font-mono">production_items.post_type</code> on each generated clip idea.
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="clip-target-platform" className="text-xs">
+                      Target platform(s)
+                    </Label>
+                    <Input
+                      id="clip-target-platform"
+                      type="text"
+                      value={clipTargetPlatform.join(", ")}
+                      onChange={(e) => {
+                        const next = e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter((s) => s.length > 0);
+                        setClipTargetPlatform(next);
+                      }}
+                      onBlur={() => {
+                        void persistField({
+                          clipTargetPlatform:
+                            clipTargetPlatform.length > 0
+                              ? clipTargetPlatform
+                              : null,
+                        });
+                      }}
+                      placeholder='Instagram Reel, X, YouTube Shorts'
+                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Comma-separated. Stored on each generated clip&apos;s <code className="font-mono">production_items.platform</code> JSONB array.
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="clip-aspect-ratio" className="text-xs">
+                      Clip aspect ratio
+                    </Label>
+                    <select
+                      id="clip-aspect-ratio"
+                      value={clipAspectRatio}
+                      onChange={(e) => {
+                        const next = e.target.value || null;
+                        setClipAspectRatio(next ?? "");
+                        void persistField({ clipAspectRatio: next });
+                      }}
+                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                    >
+                      <option value="">— derive from post type —</option>
+                      <option value="9:16">9:16 (vertical)</option>
+                      <option value="16:9">16:9 (horizontal)</option>
+                    </select>
+                    <p className="text-[11px] text-muted-foreground">
+                      Drives the Descript composition layout for clips in this format. Blank = 9:16 for Reel/Shorts/TikTok, 16:9 for X / YouTube long.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </PropertyRowSolo>
 

@@ -11,20 +11,21 @@ interface AllQueueSourcePageProps {
   params: Promise<{ source: string }>;
 }
 
+// /all/queue/* spans all brands, so it doesn't show per-brand clip-format
+// tabs. The legacy `clip-ideas` slug 404s — operators looking for clip
+// triage should pick a brand view, where per-format tabs apply.
 const SLUG_TO_SOURCE: Record<string, QueueSource> = {
   triggered: "repurposed",
   repurposed: "spoke",
-  "clip-ideas": "clip_ideas",
   "cross-post": "cross_post",
   repost: "repost",
   history: "history",
 };
 
-const SOURCE_LABEL: Record<QueueSource, string> = {
+const SOURCE_LABEL: Record<string, string> = {
   all: "All",
   repurposed: "Triggered",
   spoke: "Repurposed",
-  clip_ideas: "Clip Ideas",
   cross_post: "Cross-post",
   repost: "Repost",
   history: "History",
@@ -60,6 +61,7 @@ export default async function AllQueueSourcePage({
       <QueueView
         brand="all"
         initialSource={internalSource}
+        clippableFormats={[]}
         isAdmin={session?.user?.role === "admin"}
       />
     </Suspense>

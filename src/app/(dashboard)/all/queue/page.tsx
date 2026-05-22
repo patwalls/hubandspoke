@@ -18,6 +18,7 @@ export default async function AllQueuePage() {
       <QueueView
         brand="all"
         initialSource="all"
+        clippableFormats={[]}
         isAdmin={session?.user?.role === "admin"}
       />
     </Suspense>

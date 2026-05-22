@@ -144,6 +144,12 @@ async function evalPillar(pillarId: string): Promise<PillarEvalResult | null> {
     derivatives,
     blueprint,
     bench,
+    // Eval harness runs against the V8 default behavior — no per-format
+    // skill section, no extras. Pass nulls so the agent uses the fallback
+    // DEFAULT_FORMAT_BLOCK (current Reels-style prompt) for a fair compare.
+    targetFormat: null,
+    targetFormatSkillSection: null,
+    extrasSchema: null,
   });
 
   return {

@@ -17,13 +17,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  BarChart2Icon,
+  BookmarkIcon,
   ChevronDownIcon,
+  HeartIcon,
   MessageCircleIcon,
+  RepeatIcon,
   Share2Icon,
   ThumbsDownIcon,
   ThumbsUpIcon,
+  UploadIcon,
 } from "lucide-react";
 import { KillIdeaDialog } from "./kill-idea-dialog";
+import { SocialEmbedHeader } from "./preview/social-embed-header";
 
 interface ClipIdeaSummary {
   id: string;
@@ -36,6 +42,24 @@ interface ClipIdeaSummary {
   status?: string;
   acceptedEditorName?: string | null;
   acceptedProductionItemId?: string | null;
+  /** Target format name this idea was generated for. Surfaced in the
+   *  triage header so the operator knows which format routing this idea
+   *  will follow when promoted. */
+  targetFormat?: string | null;
+  /** Post type of the queue-side production_item created at generation
+   *  time (`x`, `instagram_reel`, `tiktok`, …). Drives the choice of
+   *  preview simulator on the right side of the dialog. */
+  targetPostType?: string | null;
+  /** Brand account that will publish this clip (resolved from the
+   *  queue-side production_item's accountId at generation time). Drives
+   *  the per-platform preview's header — display name, @handle, avatar. */
+  targetAccount?: {
+    handle: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+    platform: string;
+    verified: boolean | null;
+  } | null;
 }
 
 interface PreviewSegment {
@@ -385,13 +409,23 @@ export function ClipTriageDialog({
                 {error && <p className="text-xs text-red-600">{error}</p>}
               </div>
 
-              <div className="self-center">
-                <ShortsPreview
-                  hook={hookDraft || idea.hook}
-                  startSec={idea.startSec}
-                  endSec={idea.endSec}
-                  preview={preview}
-                />
+              <div className="self-center w-full">
+                {idea.targetPostType === "x" ? (
+                  <XPostPreview
+                    body={hookDraft || idea.hook}
+                    startSec={idea.startSec}
+                    endSec={idea.endSec}
+                    preview={preview}
+                    account={idea.targetAccount ?? null}
+                  />
+                ) : (
+                  <ShortsPreview
+                    hook={hookDraft || idea.hook}
+                    startSec={idea.startSec}
+                    endSec={idea.endSec}
+                    preview={preview}
+                  />
+                )}
               </div>
             </div>
 
@@ -531,6 +565,107 @@ export function ClipTriageDialog({
         onConfirm={handleKill}
       />
     </>
+  );
+}
+
+/**
+ * Read-only X-post simulator for the triage dialog. Renders the clip as it
+ * will appear on the brand's X timeline — header (avatar + name + verified
+ * + @handle), hook as the tweet body, the source video clipped to the
+ * `[startSec, endSec]` range below it, and a muted reactions row beneath.
+ *
+ * Conceptually mirrors the full `<XSimulator>` used inside `<ContentPreview>`
+ * on the content detail page, but pared down to a non-editable preview: no
+ * draft-media drop zone, no CTA card, no inline editing. The triage view's
+ * job is "show what this would look like as an X post" so the operator can
+ * decide to promote or kill — the full editing surface lives on the detail
+ * page that opens after acceptance.
+ */
+function XPostPreview({
+  body,
+  startSec,
+  endSec,
+  preview,
+  account,
+}: {
+  body: string;
+  startSec: number;
+  endSec: number;
+  preview: Preview | null;
+  account: {
+    handle: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+    platform: string;
+    verified: boolean | null;
+  } | null;
+}) {
+  const displayName =
+    account?.displayName?.trim() || account?.handle || "Your account";
+  const handle = account?.handle ?? "you";
+  const isAudio = preview?.videoContentType?.startsWith("audio/");
+  return (
+    <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <SocialEmbedHeader
+        name={displayName}
+        subtitle={`@${handle} · now`}
+        avatarUrl={account?.avatarUrl ?? null}
+        verified={account?.verified ?? false}
+        monogramSeed={{
+          displayName: account?.displayName ?? null,
+          handle: account?.handle ?? null,
+        }}
+      />
+      <p className="whitespace-pre-wrap break-words text-[15px] leading-snug text-foreground">
+        {body}
+      </p>
+      {preview?.videoUrl ? (
+        <div className="overflow-hidden rounded-2xl border border-border bg-black">
+          {isAudio ? (
+            <div className="flex w-full items-center justify-center py-3">
+              <audio
+                key={`${preview.videoUrl}-x-audio`}
+                src={`${preview.videoUrl}#t=${startSec},${endSec}`}
+                controls
+                preload="metadata"
+                className="w-full px-3"
+              />
+            </div>
+          ) : (
+            <video
+              key={`${preview.videoUrl}-x-video`}
+              src={`${preview.videoUrl}#t=${startSec},${endSec}`}
+              controls
+              preload="metadata"
+              playsInline
+              className="block aspect-video h-auto w-full bg-black object-contain"
+            />
+          )}
+        </div>
+      ) : (
+        <div className="flex aspect-video items-center justify-center rounded-2xl border border-border bg-muted text-[12px] text-muted-foreground">
+          {preview === null ? "Loading preview…" : "No preview available"}
+        </div>
+      )}
+      <div className="flex items-center justify-between pt-1 text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-[12px]">
+          <MessageCircleIcon className="h-4 w-4" strokeWidth={1.6} />
+        </div>
+        <div className="flex items-center gap-1.5 text-[12px]">
+          <RepeatIcon className="h-4 w-4" strokeWidth={1.6} />
+        </div>
+        <div className="flex items-center gap-1.5 text-[12px]">
+          <HeartIcon className="h-4 w-4" strokeWidth={1.6} />
+        </div>
+        <div className="flex items-center gap-1.5 text-[12px]">
+          <BarChart2Icon className="h-4 w-4" strokeWidth={1.6} />
+        </div>
+        <div className="flex items-center gap-3">
+          <BookmarkIcon className="h-4 w-4" strokeWidth={1.6} />
+          <UploadIcon className="h-4 w-4" strokeWidth={1.6} />
+        </div>
+      </div>
+    </div>
   );
 }
 

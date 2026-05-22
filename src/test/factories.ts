@@ -148,7 +148,7 @@ export async function getTestAccountId(opts: {
 export interface CreateTestFormatOptions {
   brand?: string;
   name?: string;
-  isClipDescriptFormat?: boolean;
+  isClippableFormat?: boolean;
   labelsAsOriginal?: boolean;
   parentFormatId?: string | null;
   instructions?: string | null;
@@ -169,7 +169,7 @@ export async function createTestFormat(
     .values({
       name,
       brand: opts.brand ?? "starter-story",
-      isClipDescriptFormat: opts.isClipDescriptFormat ?? false,
+      isClippableFormat: opts.isClippableFormat ?? false,
       labelsAsOriginal: opts.labelsAsOriginal ?? false,
       parentFormatId: opts.parentFormatId ?? null,
       instructions: opts.instructions ?? null,

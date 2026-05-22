@@ -120,7 +120,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     })
     .from(formats)
     .where(
-      and(eq(formats.brand, brand), eq(formats.isClipDescriptFormat, true)),
+      and(eq(formats.brand, brand), eq(formats.isClippableFormat, true)),
     )
     .limit(1);
   // The shape exposes `pack` for back-compat with the existing

@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  extractClipIdeaSection,
   extractCrossPostRulesSection,
   extractDescriptSection,
+  extractExtrasSchema,
 } from "./format-skill";
 
 // `formats.instructions` (the Skill) is structured for two audiences:
@@ -157,6 +159,126 @@ Apply the layout pack at https://example.com.
 Should not leak.`;
     const out = extractCrossPostRulesSection(skill);
     expect(out).toBe("- vertical for IG");
+  });
+});
+
+describe("extractClipIdeaSection", () => {
+  const X_QUOTABLES_SKILL = `## What this format is
+Tweet with framing line + 3 quotables + 25s 16:9 clip.
+
+## Clip Idea Generation
+Hook = framing line in third person about the speaker.
+
+\`\`\`extras-schema
+{
+  "quotables": {
+    "type": "array",
+    "items": { "type": "string" },
+    "minItems": 3,
+    "maxItems": 3
+  }
+}
+\`\`\`
+
+Anti-patterns: first-person hooks; paraphrased quotables.
+
+## Avoid
+Generic wisdom.
+`;
+
+  it("returns the section body and stops at the next heading", () => {
+    const out = extractClipIdeaSection(X_QUOTABLES_SKILL);
+    expect(out).not.toBeNull();
+    expect(out).toContain("Hook = framing line in third person");
+    expect(out).toContain("extras-schema");
+    expect(out).toContain("Anti-patterns:");
+    // Adjacent sections do not leak.
+    expect(out).not.toContain("## What this format is");
+    expect(out).not.toContain("Tweet with framing line");
+    expect(out).not.toContain("Generic wisdom");
+  });
+
+  it("returns null when the section is absent (agent falls back to default block)", () => {
+    const skill = `## What this format is
+Reels.
+
+## Avoid
+Filler.`;
+    expect(extractClipIdeaSection(skill)).toBeNull();
+  });
+
+  it("returns null when the section is empty", () => {
+    const skill = `## Clip Idea Generation
+
+## Avoid
+Filler.`;
+    expect(extractClipIdeaSection(skill)).toBeNull();
+  });
+
+  it("matches case-insensitively", () => {
+    const skill = `## clip idea generation
+Hook style guidance.`;
+    expect(extractClipIdeaSection(skill)).toBe("Hook style guidance.");
+  });
+
+  it("accepts both h2 and h3", () => {
+    const h3 = `### Clip Idea Generation
+H3 body.`;
+    expect(extractClipIdeaSection(h3)).toBe("H3 body.");
+  });
+});
+
+describe("extractExtrasSchema", () => {
+  it("parses a valid extras-schema fenced block", () => {
+    const section = `Hook style: framing line.
+
+\`\`\`extras-schema
+{
+  "quotables": {
+    "type": "array",
+    "items": { "type": "string" },
+    "minItems": 3,
+    "maxItems": 3
+  }
+}
+\`\`\`
+
+Anti-patterns: x, y, z.`;
+    const out = extractExtrasSchema(section);
+    expect(out).not.toBeNull();
+    expect(out).toHaveProperty("quotables");
+    const q = (out as Record<string, { type: string; minItems: number }>)
+      .quotables;
+    expect(q.type).toBe("array");
+    expect(q.minItems).toBe(3);
+  });
+
+  it("returns null when no extras-schema block is present", () => {
+    expect(extractExtrasSchema("Hook style only, no extras.")).toBeNull();
+  });
+
+  it("returns null and reports parse error for invalid JSON (fail-soft)", () => {
+    const section = `\`\`\`extras-schema
+{ this is not json }
+\`\`\``;
+    let errMsg = "";
+    const out = extractExtrasSchema(section, (m) => {
+      errMsg = m;
+    });
+    expect(out).toBeNull();
+    expect(errMsg).toContain("extras-schema JSON parse failed");
+  });
+
+  it("returns null when the parsed JSON is not an object (fail-soft)", () => {
+    const section = `\`\`\`extras-schema
+["not", "an", "object"]
+\`\`\``;
+    let errMsg = "";
+    const out = extractExtrasSchema(section, (m) => {
+      errMsg = m;
+    });
+    expect(out).toBeNull();
+    expect(errMsg).toContain("JSON object");
   });
 });
 

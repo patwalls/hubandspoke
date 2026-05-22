@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { fetchBrandBySlug } from "@/lib/db/brands";
 import { QueueView } from "@/components/dashboard/queue-view";
+import { getClippableFormats, getFormatNameToIdMap } from "@/lib/db/formats";
 import { auth } from "@/lib/auth";
 
 interface BrandQueuePageProps {
@@ -23,10 +24,13 @@ export default async function BrandQueuePage({
   params,
 }: BrandQueuePageProps) {
   const { brand } = await params;
-  const [brandConfig, session] = await Promise.all([
-    fetchBrandBySlug(brand),
-    auth(),
-  ]);
+  const [brandConfig, session, clippableFormats, formatNameToId] =
+    await Promise.all([
+      fetchBrandBySlug(brand),
+      auth(),
+      getClippableFormats(brand),
+      getFormatNameToIdMap(brand),
+    ]);
 
   if (!brandConfig) {
     notFound();
@@ -43,6 +47,12 @@ export default async function BrandQueuePage({
       <QueueView
         brand={brand}
         initialSource="all"
+        clippableFormats={clippableFormats.map((f) => ({
+          id: f.id,
+          name: f.name,
+          slug: f.slug,
+        }))}
+        formatNameToId={formatNameToId}
         isAdmin={session?.user?.role === "admin"}
       />
     </Suspense>

@@ -39,6 +39,10 @@ interface IdeaQueueTableProps {
   brand: string;
   emptyMessage: string;
   onMutate: () => void;
+  /** Format-name → format-id map. When the current row's format name
+   *  matches a key, the Format cell renders as a link to the format
+   *  detail page. Missing key → plain text. */
+  formatNameToId?: Record<string, string>;
 }
 
 function formatCompact(n: number | null | undefined): string {
@@ -60,6 +64,7 @@ export function IdeaQueueTable({
   brand,
   emptyMessage,
   onMutate,
+  formatNameToId,
 }: IdeaQueueTableProps) {
   const [users, setUsers] = useState<AssignableUser[]>([]);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -337,6 +342,11 @@ export function IdeaQueueTable({
                   onDone={onMutate}
                   isSelected={selected.has(item.id)}
                   onToggleSelected={(checked) => toggleOne(item.id, checked)}
+                  formatId={
+                    item.format
+                      ? (formatNameToId?.[item.format] ?? null)
+                      : null
+                  }
                 />
               ))}
             </tbody>
@@ -489,6 +499,7 @@ function IdeaQueueRow({
   onDone,
   isSelected,
   onToggleSelected,
+  formatId,
 }: {
   item: ProductionItem;
   brand: string;
@@ -496,6 +507,7 @@ function IdeaQueueRow({
   onDone: () => void;
   isSelected: boolean;
   onToggleSelected: (checked: boolean) => void;
+  formatId: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const isClip = !!item.sourceClipIdeaId;
@@ -590,9 +602,20 @@ function IdeaQueueRow({
         )}
       </td>
       <td className="px-3 py-2 text-sm text-muted-foreground max-w-[220px]">
-        <div className="truncate" title={item.format || ""}>
-          {item.format || "—"}
-        </div>
+        {item.format && formatId ? (
+          <Link
+            href={`/${brand}/formats/${formatId}`}
+            className="truncate block hover:text-foreground hover:underline"
+            title={`Open format "${item.format}"`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {item.format}
+          </Link>
+        ) : (
+          <div className="truncate" title={item.format || ""}>
+            {item.format || "—"}
+          </div>
+        )}
       </td>
       <td className="px-3 py-2 text-xs">
         {item.clipAlgorithmLabel ? (

@@ -18,38 +18,97 @@ import type { RepostCandidatesResult } from "@/lib/services/repost-candidates";
 import type { SpokeCandidatesResult } from "@/lib/services/spoke-candidates";
 import type { QueueHistoryEvent } from "@/app/api/queue/history/route";
 
+/** Queue tab discriminator.
+ *
+ *   - Static slots: "all" | "repurposed" | "spoke" | "cross_post" | "repost"
+ *     | "history" — fixed Queue tabs that map 1:1 to a known sub-route.
+ *   - Dynamic per-clippable-format slot: a string of the form
+ *     `clip:<formatId>` — one for each `formats.is_clippable_format=true`
+ *     row on the brand. Rendered as a tab labeled with the format's name
+ *     (e.g. "Repackage Section w/ Hook", "X Quotables"). Replaces the
+ *     legacy single "clip_ideas" tab.
+ */
 export type QueueSource =
   | "all"
   | "repurposed"
   | "spoke"
-  | "clip_ideas"
   | "cross_post"
   | "repost"
-  | "history";
+  | "history"
+  | `clip:${string}`;
+
+export interface ClippableFormatTab {
+  id: string;
+  name: string;
+  slug: string;
+}
 
 interface QueueViewProps {
   brand: string;
   initialSource: QueueSource;
+  /** When initialSource is a `clip:<formatId>` value, this is the human-
+   *  readable format name to filter rows by (matches `production_items.format`).
+   *  Resolved server-side from the URL slug. */
+  initialClipFormatFilter?: string | null;
+  clippableFormats: ClippableFormatTab[];
+  /** Format-name → format-id lookup for every format on the brand
+   *  (clippable + non-clippable). Used by the Queue table to render the
+   *  Format cell as a link to the format detail page. */
+  formatNameToId?: Record<string, string>;
   /** Retained for back-compat with the page route; v2 doesn't expose any
    *  admin-only controls, so this is currently a no-op. */
   isAdmin?: boolean;
 }
 
-const SOURCE_TABS = [
-  { value: "all", label: "All", slug: "" },
-  { value: "spoke", label: "Repurposed", slug: "repurposed" },
-  { value: "repurposed", label: "Triggered", slug: "triggered" },
-  { value: "clip_ideas", label: "Clip Ideas", slug: "clip-ideas" },
-  { value: "cross_post", label: "Cross-post", slug: "cross-post" },
-  { value: "repost", label: "Repost", slug: "repost" },
-  { value: "history", label: "History", slug: "history" },
-] as const;
+const STATIC_SOURCE_TABS = [
+  { value: "all" as const, label: "All", slug: "" },
+  { value: "spoke" as const, label: "Repurposed", slug: "repurposed" },
+  { value: "repurposed" as const, label: "Triggered", slug: "triggered" },
+  // Per-clippable-format tabs get spliced in here at render time.
+  { value: "cross_post" as const, label: "Cross-post", slug: "cross-post" },
+  { value: "repost" as const, label: "Repost", slug: "repost" },
+  { value: "history" as const, label: "History", slug: "history" },
+];
 
 export function QueueView({
   brand,
   initialSource,
+  initialClipFormatFilter = null,
+  clippableFormats = [],
+  formatNameToId = {},
   isAdmin: _isAdmin = false,
 }: QueueViewProps) {
+  // Per-format tabs spliced into the static set at the legacy "clip_ideas"
+  // position. One entry per `is_clippable_format=true` format on the brand,
+  // labeled by format name and routed under `/queue/<format-slug>`.
+  const sourceTabs = useMemo(() => {
+    const formatTabs = clippableFormats.map((f) => ({
+      value: `clip:${f.id}` as QueueSource,
+      label: f.name,
+      slug: f.slug,
+    }));
+    // Splice after "Triggered" (index 2) and before "Cross-post".
+    return [
+      ...STATIC_SOURCE_TABS.slice(0, 3),
+      ...formatTabs,
+      ...STATIC_SOURCE_TABS.slice(3),
+    ];
+  }, [clippableFormats]);
+
+  // Lookup table: source value → the production_items.format string that
+  // rows must match to belong in that tab. Only populated for clip-format
+  // tabs; null for static tabs.
+  const clipFormatNameBySource = useMemo(() => {
+    const map = new Map<QueueSource, string>();
+    for (const f of clippableFormats) {
+      map.set(`clip:${f.id}` as QueueSource, f.name);
+    }
+    return map;
+  }, [clippableFormats]);
+
+  const currentClipFormatName = (selectedSource: QueueSource): string | null =>
+    clipFormatNameBySource.get(selectedSource) ?? null;
+  void initialClipFormatFilter;
   const router = useRouter();
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -404,25 +463,43 @@ export function QueueView({
   }, [spokeData, selectedPlatform, selectedFormat, query]);
 
   const sourceCounts = useMemo(() => {
-    const counts = {
+    const counts: Record<string, number> = {
       all: 0,
       repurposed: 0,
       spoke: 0,
-      clip_ideas: 0,
       cross_post: 0,
       repost: 0,
       history: 0,
     };
+    // One counter slot per dynamic clip-format tab.
+    for (const f of clippableFormats) {
+      counts[`clip:${f.id}`] = 0;
+    }
+    // Build a quick format-name → source-key map so we can bucket rows
+    // into their per-format tab in one pass.
+    const formatNameToSource = new Map<string, string>();
+    for (const f of clippableFormats) {
+      formatNameToSource.set(f.name, `clip:${f.id}`);
+    }
     for (const item of baseFiltered) {
       counts.all += 1;
       const source = item.sourceType ?? "original";
       if (source === "cross_post" || source === "repost") continue;
-      // Split repurposed rows by whether they came from a clip-idea: those
-      // with sourceClipIdeaId set belong under "Clip Ideas"; the rest are
-      // threshold-monitor-sweep / manual-repurpose triggered.
+      // Repurposed rows fork on whether a clip-idea is attached:
+      //   - With sourceClipIdeaId → belongs in the row's format-specific
+      //     clip tab (matched by format name). Falls into nothing visible
+      //     if the row's format isn't currently clippable (rare — drift
+      //     between clip generation time and the current flag).
+      //   - Without → "Triggered" tab.
       if (source === "repurposed") {
-        if (item.sourceClipIdeaId) counts.clip_ideas += 1;
-        else counts.repurposed += 1;
+        if (item.sourceClipIdeaId) {
+          const key = item.format
+            ? formatNameToSource.get(item.format)
+            : undefined;
+          if (key) counts[key] = (counts[key] ?? 0) + 1;
+        } else {
+          counts.repurposed += 1;
+        }
       }
     }
     counts.cross_post = crossPostFiltered.length;
@@ -436,18 +513,24 @@ export function QueueView({
     repostFiltered,
     spokeFiltered,
     historyEvents,
+    clippableFormats,
   ]);
 
   const filtered = baseFiltered.filter((item) => {
     if (selectedSource === "all") return true;
     const source = item.sourceType ?? "original";
-    // Triggered tab: repurposed rows without a clip-idea attached. Clip
-    // Ideas tab: repurposed rows WITH a clip-idea attached.
+    // Triggered tab: repurposed rows without a clip-idea attached.
     if (selectedSource === "repurposed") {
       return source === "repurposed" && !item.sourceClipIdeaId;
     }
-    if (selectedSource === "clip_ideas") {
-      return source === "repurposed" && !!item.sourceClipIdeaId;
+    // Per-format clip tabs: filter by clip-idea presence AND format name.
+    const formatNameForTab = currentClipFormatName(selectedSource);
+    if (formatNameForTab) {
+      return (
+        source === "repurposed" &&
+        !!item.sourceClipIdeaId &&
+        item.format === formatNameForTab
+      );
     }
     return source === selectedSource;
   });
@@ -497,9 +580,9 @@ export function QueueView({
       </div>
 
       <div className="flex flex-wrap items-center gap-1 border-b border-border">
-        {SOURCE_TABS.map((tab) => {
+        {sourceTabs.map((tab) => {
           const active = selectedSource === tab.value;
-          const count = sourceCounts[tab.value as keyof typeof sourceCounts];
+          const count = sourceCounts[tab.value] ?? 0;
           const href = tab.slug
             ? `/${brand}/queue/${tab.slug}`
             : `/${brand}/queue`;
@@ -626,6 +709,7 @@ export function QueueView({
         <IdeaQueueTable
           items={filtered}
           brand={brand}
+          formatNameToId={formatNameToId}
           emptyMessage={
             query ||
             selectedPlatform !== "all" ||

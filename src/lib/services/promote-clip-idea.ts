@@ -21,6 +21,23 @@ import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { recordToolAction } from "@/lib/services/content-events";
 import { extractDescriptSection } from "@/lib/format-skill";
+import { resolveClipAspectRatio } from "@/lib/db/formats";
+
+/**
+ * Pull the optional `quotables` array out of a clip_idea's extras payload.
+ * Used by the Descript prompt builder to substitute `{{quotables}}` for X
+ * Quotables-style formats. Defensive: returns an empty array for any
+ * shape that isn't `string[]` (legacy rows pre-extras, or future formats
+ * whose extras schema doesn't include quotables).
+ */
+function extractQuotablesFromExtras(
+  extras: Record<string, unknown> | null,
+): string[] {
+  if (!extras) return [];
+  const q = extras.quotables;
+  if (!Array.isArray(q)) return [];
+  return q.filter((v): v is string => typeof v === "string" && v.trim() !== "");
+}
 
 /**
  * Check if a caught database error is a unique constraint violation for a
@@ -137,36 +154,50 @@ export class FormatMissingSkillError extends Error {
  */
 export const FormatMissingDescriptPackError = FormatMissingSkillError;
 
-export class NoClipDescriptFormatForBrandError extends Error {
+export class NoClippableFormatForBrandError extends Error {
   constructor(public readonly brand: string) {
     super(
-      `No format on brand "${brand}" has is_clip_descript_format=true. Open /${brand}/formats and tick the "Clip Descript format" checkbox on the format that should receive clip-idea promotions.`,
+      `No format on brand "${brand}" has is_clippable_format=true. Open /${brand}/formats and tick the "Clippable format" checkbox on the format that should receive clip-idea promotions.`,
     );
-    this.name = "NoClipDescriptFormatForBrandError";
+    this.name = "NoClippableFormatForBrandError";
   }
 }
 
+// Note: the error class was renamed from `NoClipDescriptFormatForBrandError`
+// to `NoClippableFormatForBrandError` when the flag was generalized to allow
+// multiple clippable formats per brand (2026-05-21). No back-compat alias —
+// the rename was sweeping enough that callers were updated in the same
+// commit and a stale alias would just rot.
+
 /**
- * Resolve the short-form clip-promotion format for a brand by looking up the
- * single `formats` row with `is_clip_descript_format=true`. Replaces the old
- * hardcoded PROMOTED_CLIP_FORMAT_BY_BRAND map (lived here until 2026-05-11);
- * the seed for existing brands is set by
- * `scripts/migrate-source-type-consolidation.mjs` and afterwards the flag is
- * managed via the format detail page checkbox.
+ * Resolve the "primary" clip-promotion format for a brand — the first row
+ * with `is_clippable_format=true`, ordered by creation date. Used by
+ * legacy default-target callers (Descript Create-in default, the promote
+ * paths). When more than one clippable format exists, callers that
+ * specifically know which format they want (e.g. the manual clip-ideas
+ * generate route after the operator picks a format) should pass the
+ * format id explicitly instead of relying on this helper.
  *
- * Returns `null` when no format on the brand carries the flag — callers that
- * need a hard requirement should `throw new NoClipDescriptFormatForBrandError`.
+ * Returns `null` when no format on the brand is clippable — callers that
+ * need a hard requirement should `throw new NoClippableFormatForBrandError`.
  */
-export async function getPromotedClipFormat(
+export async function getPrimaryClippableFormat(
   brand: string,
 ): Promise<string | null> {
   const [row] = await db
     .select({ name: formats.name })
     .from(formats)
-    .where(and(eq(formats.brand, brand), eq(formats.isClipDescriptFormat, true)))
+    .where(and(eq(formats.brand, brand), eq(formats.isClippableFormat, true)))
+    .orderBy(formats.createdAt)
     .limit(1);
   return row?.name ?? null;
 }
+
+/**
+ * Back-compat alias for callers still on the pre-2026-05-21 name. Returns
+ * the same value as `getPrimaryClippableFormat`.
+ */
+export const getPromotedClipFormat = getPrimaryClippableFormat;
 
 function formatTimestamp(sec: number): string {
   const total = Math.max(0, Math.floor(sec));
@@ -184,6 +215,13 @@ interface ClipIdeaRow {
   startSec: string;
   endSec: string;
   estimatedViews: bigint | null;
+  /** Per-clip-idea target format (since 2026-05-21 multi-format split).
+   *  Null on legacy rows generated before the column existed — the promote
+   *  path then falls back to `getPrimaryClippableFormat(brand)`. */
+  targetFormat: string | null;
+  /** Format-specific output payload (e.g. `{ quotables: ["…"] }` for X
+   *  Quotables). Null when the target format didn't declare extras. */
+  extras: Record<string, unknown> | null;
   sourceProductionItemId: string;
   sourceTitle: string | null;
   sourceBrand: string | null;
@@ -204,6 +242,8 @@ async function loadAndGuardClipIdea(
       startSec: clipIdeas.startSec,
       endSec: clipIdeas.endSec,
       estimatedViews: clipIdeas.estimatedViews,
+      targetFormat: clipIdeas.targetFormat,
+      extras: clipIdeas.extras,
       sourceProductionItemId: clipIdeas.sourceProductionItemId,
       sourceTitle: productionItems.title,
       sourceBrand: productionItems.brand,
@@ -356,8 +396,13 @@ export async function assignClipIdea(args: {
   let created: { id: string } | undefined;
   try {
     const brand = row.sourceBrand ?? "starter-story";
-    const promotedFormat = await getPromotedClipFormat(brand);
-    if (!promotedFormat) throw new NoClipDescriptFormatForBrandError(brand);
+    // Use the clip idea's target_format (set by the multi-format clip-idea
+    // generator) so a promoted X Quotables idea lands in the X Quotables
+    // format, not the brand's first clippable. Legacy rows with null
+    // target_format fall through to the brand default.
+    const promotedFormat =
+      row.targetFormat ?? (await getPrimaryClippableFormat(brand));
+    if (!promotedFormat) throw new NoClippableFormatForBrandError(brand);
     const rows = await db
       .insert(productionItems)
       .values({
@@ -446,29 +491,58 @@ interface PromotedClipFormat {
    *  substituted. Replaces the descript_packs table (rolled into Skill
    *  on 2026-05-11). Throws `FormatMissingSkillError` when empty. */
   skill: string;
+  /** Clip aspect ratio from `formats.clip_aspect_ratio` — drives the
+   *  Descript composition layout. Null = fall back to post-type default
+   *  via `resolveClipAspectRatio`. */
+  clipAspectRatio: string | null;
+  /** Target post type — drives the {@link resolveClipAspectRatio} fallback
+   *  when `clipAspectRatio` is null. */
+  clipTargetPostType: string | null;
 }
 
 /**
- * Resolve the brand's clip-promotion format (the one with
- * `is_clip_descript_format=true`) and load its Skill. Throws
- * `FormatMissingSkillError` when the Skill is empty so the four
- * create-in-descript service functions gate uniformly (Pat's "don't let
- * me generate anything in Descript unless the format has a prompt" rule).
+ * Resolve the format a clip idea is being promoted into and load its Skill.
+ * When `targetFormatName` is provided (post-2026-05-21 multi-format world,
+ * sourced from `clip_ideas.target_format`), use that format — different
+ * clippable formats have different Descript packs, aspect ratios, and
+ * extras shapes. Fall back to the brand's first clippable format ordered
+ * by created_at for legacy rows whose target_format wasn't backfilled.
+ *
+ * Throws `FormatMissingSkillError` when the matched format's Skill is
+ * empty so the four create-in-descript service functions gate uniformly
+ * (Pat's "don't let me generate anything in Descript unless the format
+ * has a prompt" rule).
  */
-async function loadPromotedClipFormat(brand: string): Promise<PromotedClipFormat> {
-  const [row] = await db
+async function loadPromotedClipFormat(args: {
+  brand: string;
+  targetFormatName: string | null;
+}): Promise<PromotedClipFormat> {
+  const rows = await db
     .select({
       id: formats.id,
       name: formats.name,
       brand: formats.brand,
       skill: formats.instructions,
+      clipAspectRatio: formats.clipAspectRatio,
+      clipTargetPostType: formats.clipTargetPostType,
     })
     .from(formats)
     .where(
-      and(eq(formats.brand, brand), eq(formats.isClipDescriptFormat, true)),
+      args.targetFormatName
+        ? and(
+            eq(formats.brand, args.brand),
+            eq(formats.isClippableFormat, true),
+            eq(formats.name, args.targetFormatName),
+          )
+        : and(
+            eq(formats.brand, args.brand),
+            eq(formats.isClippableFormat, true),
+          ),
     )
+    .orderBy(formats.createdAt)
     .limit(1);
-  if (!row) throw new NoClipDescriptFormatForBrandError(brand);
+  const row = rows[0];
+  if (!row) throw new NoClippableFormatForBrandError(args.brand);
   if (!row.skill || !row.skill.trim()) {
     throw new FormatMissingSkillError(row.id, row.name, row.brand);
   }
@@ -477,6 +551,8 @@ async function loadPromotedClipFormat(brand: string): Promise<PromotedClipFormat
     name: row.name,
     brand: row.brand,
     skill: row.skill,
+    clipAspectRatio: row.clipAspectRatio,
+    clipTargetPostType: row.clipTargetPostType,
   };
 }
 
@@ -487,6 +563,8 @@ function buildDescriptPrompt(args: {
   startSec: number;
   endSec: number;
   productionItemId: string;
+  aspectRatio: "9:16" | "16:9";
+  quotables: string[];
 }): string {
   const duration = Math.max(0, Math.round(args.endSec - args.startSec));
   const start = formatTimestamp(args.startSec);
@@ -505,9 +583,15 @@ function buildDescriptPrompt(args: {
     hook: args.hook,
     startSec: args.startSec,
     endSec: args.endSec,
+    aspectRatio: args.aspectRatio,
+    quotables: args.quotables,
   });
+  const orientationLine =
+    args.aspectRatio === "16:9"
+      ? "You are producing a horizontal 16:9 clip. Follow these instructions exactly and do not deviate."
+      : "You are producing a vertical 9:16 clip. Follow these instructions exactly and do not deviate.";
   return [
-    "You are producing a short-form vertical clip. Follow these instructions exactly and do not deviate.",
+    orientationLine,
     "",
     `1. In the main composition, locate the transcript segment between ${start} and ${end} (duration ≈ ${duration}s). The time range is non-negotiable.`,
     `2. Create a NEW composition named "${safeHook}" containing only that segment. Do not include footage outside this range. The start must land on the first spoken word inside the range; the end must land on the last spoken word inside the range.`,
@@ -562,14 +646,24 @@ export async function createClipIdeaInDescript(args: {
   // Load the brand-specific clip-promotion format with its Descript pack.
   // This ensures the format row exists and has a pack attached (guard against
   // the "No Descript pack attached" error the user saw).
-  const format = await loadPromotedClipFormat(brand);
+  const format = await loadPromotedClipFormat({
+    brand,
+    targetFormatName: row.targetFormat,
+  });
 
+  const aspectRatio = resolveClipAspectRatio({
+    clipAspectRatio: format.clipAspectRatio,
+    clipTargetPostType: format.clipTargetPostType,
+  });
+  const quotables = extractQuotablesFromExtras(row.extras);
   const prompt = buildDescriptPrompt({
     skill: format.skill,
     hook: row.hook,
     startSec,
     endSec,
     productionItemId,
+    aspectRatio,
+    quotables,
   });
   const agent = await invokeDescriptAgent({
     projectId: row.descriptProjectId,
@@ -709,7 +803,10 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   // attached, before any side effects. Worker re-loads the pack later
   // (precise-cut layout-apply phase) — keeping the gate here too prevents
   // accidentally enqueuing a job that would no-op.
-  const format = await loadPromotedClipFormat(brand);
+  const format = await loadPromotedClipFormat({
+    brand,
+    targetFormatName: row.targetFormat,
+  });
 
   await db
     .update(productionItems)
@@ -836,7 +933,10 @@ export async function createClipIdeaInDescriptFullVideo(args: {
   // warm path doesn't actually use the pack today — Pat's directive is
   // "don't let me generate anything in Descript unless I have a prompt
   // set at the format level."
-  const format = await loadPromotedClipFormat(brand);
+  const format = await loadPromotedClipFormat({
+    brand,
+    targetFormatName: row.targetFormat,
+  });
 
   // Re-fetch the pillar — `loadAndGuardClipIdea` only returns mediaS3Key /
   // descriptProjectId, but the warm path also needs descriptSeedCompositionId
