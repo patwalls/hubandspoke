@@ -242,6 +242,10 @@ export interface ContentReportData {
     production: { current: number; prior: number | null };
     views: { current: number; prior: number | null };
   };
+  /** Counts of formats by proven-status for this brand in the rolling
+   *  180-day window. Computed independently of the dashboard's date filter
+   *  so the headline tile is a stable cross-period signal. */
+  provenSummary?: { proven: number; testing: number; stale: number };
 }
 
 export interface SyncLog {

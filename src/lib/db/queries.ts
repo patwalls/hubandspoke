@@ -241,6 +241,10 @@ import {
 } from "@/lib/utils/dates";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
 import { fetchFormatViewBars } from "@/lib/services/format-view-bars";
+import {
+  computeProvenStatusForBrand,
+  summarizeProvenStatuses,
+} from "@/lib/services/format-proven";
 
 interface ReportParams {
   brand: string;
@@ -259,6 +263,9 @@ interface ReportParams {
   postType?: string;
   format: string;
   source: string;
+  /** When true, drop items whose format isn't currently "proven" per the
+   *  180-day algorithm in `lib/services/format-proven.ts`. */
+  provenOnly?: boolean;
 }
 
 /**
@@ -413,6 +420,7 @@ export async function getContentReport(
     postType,
     format,
     source,
+    provenOnly,
   } = params;
 
   const { weeklyGoal, weeklyViewsGoal, weekStartDay } = await getBrandSettings(brand);
@@ -477,6 +485,29 @@ export async function getContentReport(
     conditions.push(eq(productionItems.sourceType, "repost"));
   } else if (source === "cross_post") {
     conditions.push(eq(productionItems.sourceType, "cross_post"));
+  }
+
+  // Proven-format status for this brand. Computed off the same 180-day
+  // window regardless of the dashboard's date filter — the headline tile
+  // should not flicker as the user scrubs date ranges. For `brand="all"`
+  // we skip the per-brand computation; the cross-brand view doesn't show
+  // a proven tile.
+  const provenByName = brand === "all"
+    ? null
+    : await computeProvenStatusForBrand(brand);
+  const provenSummary = provenByName
+    ? summarizeProvenStatuses(provenByName.values())
+    : undefined;
+
+  if (provenOnly && provenByName) {
+    const provenNames = Array.from(provenByName.entries())
+      .filter(([, s]) => s.isProven)
+      .map(([name]) => name);
+    if (provenNames.length === 0) {
+      conditions.push(sql`false`);
+    } else {
+      conditions.push(inArray(productionItems.format, provenNames));
+    }
   }
 
   // Join accounts+brands so each item carries a shaped `account` for the
@@ -769,6 +800,7 @@ export async function getContentReport(
     primaryRowMeta,
     formatBars,
     weekOverWeek,
+    provenSummary,
   };
 }
 

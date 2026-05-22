@@ -35,6 +35,9 @@ interface FilterPillsProps {
   selectedPostType: string;
   selectedFormat: string;
   selectedSource: string;
+  /** When true, items whose format isn't currently proven are excluded
+   *  from the report aggregations. Defaults to false. */
+  provenOnly?: boolean;
   /** Picker options fetched from the server. Accounts drive the "Account"
    *  dropdown; post types are a static canonical set. */
   accounts: FilterAccount[];
@@ -50,6 +53,7 @@ interface FilterPillsProps {
   onPostTypeChange: (v: string) => void;
   onFormatChange: (v: string) => void;
   onSourceChange: (v: string) => void;
+  onProvenOnlyChange?: (v: boolean) => void;
 }
 
 const PRESETS = [
@@ -324,6 +328,7 @@ export function FilterPills({
   selectedPostType,
   selectedFormat,
   selectedSource,
+  provenOnly = false,
   accounts,
   formats,
   showViewType = true,
@@ -335,6 +340,7 @@ export function FilterPills({
   onPostTypeChange,
   onFormatChange,
   onSourceChange,
+  onProvenOnlyChange,
 }: FilterPillsProps) {
   // Canonical platforms — fixed list that the `accounts.platform` column
   // takes values from. Mirrors PLATFORM_META ordering in src/lib/platforms.ts.
@@ -454,6 +460,23 @@ export function FilterPills({
         options={SOURCES}
         onChange={onSourceChange}
       />
+      {onProvenOnlyChange && (
+        <button
+          type="button"
+          onClick={() => onProvenOnlyChange(!provenOnly)}
+          className={cn(
+            "inline-flex h-7 items-center gap-1 rounded-full border px-3 text-xs font-medium transition-colors",
+            provenOnly
+              ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+              : "border-border bg-card text-muted-foreground hover:text-foreground"
+          )}
+          aria-pressed={provenOnly}
+          title="Filter charts to formats that have cleared the proven bar in the last 180 days"
+        >
+          {provenOnly && <CheckIcon className="size-3" />}
+          Proven only
+        </button>
+      )}
     </div>
   );
 }

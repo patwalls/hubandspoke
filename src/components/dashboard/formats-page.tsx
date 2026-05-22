@@ -44,6 +44,8 @@ import { buildChannelOptions, channelKey } from "@/lib/channel-options";
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
 import { applyStarterTemplate } from "@/lib/format-skill";
 import { QuickAddFormatDialog } from "./quick-add-format-dialog";
+import { FormatStatusBadge } from "./format-status-badge";
+import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
 
 interface AsanaMember {
   gid: string;
@@ -68,9 +70,11 @@ interface FormatRow {
   instructions: string | null;
   parentFormatId: string | null;
   totalViews: number;
+  proven?: boolean;
+  provenStatus?: FormatProvenStatus | null;
 }
 
-type SortKey = "name" | "viewThreshold" | "totalViews";
+type SortKey = "name" | "viewThreshold" | "totalViews" | "proven";
 
 export function FormatsPageContent({ brand }: { brand: string }) {
   const [formats, setFormats] = useState<FormatRow[]>([]);
@@ -300,7 +304,13 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           return f.viewThreshold;
         case "totalViews":
           return f.totalViews;
+        case "proven":
+          // Proven=2, testing=1, stale=0 → sortable ranking
+          if (f.proven) return 2;
+          if (f.provenStatus?.reason === "testing") return 1;
+          return 0;
       }
+      return null;
     };
     return [...filtered].sort((a, b) => {
       const aVal = getVal(a);
@@ -629,6 +639,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 sortKeyName="totalViews"
                 align="right"
               />
+              <SortHeader label="Status" sortKeyName="proven" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -703,13 +714,16 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                   <TableCell className="text-right tabular-nums text-foreground">
                     {f.totalViews > 0 ? f.totalViews.toLocaleString() : "—"}
                   </TableCell>
+                  <TableCell>
+                    <FormatStatusBadge status={f.provenStatus ?? null} />
+                  </TableCell>
                 </TableRow>
               );
             })}
             {sorted.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={6}
                   className="text-center text-muted-foreground text-xs py-8"
                 >
                   {formats.length === 0

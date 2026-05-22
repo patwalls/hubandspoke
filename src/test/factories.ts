@@ -194,6 +194,8 @@ export interface CreateTestProductionItemOptions {
   platform?: string[];
   editorUserId?: string;
   publishedAt?: Date | null;
+  /** date-only column; defaults to the calendar date of publishedAt. */
+  publishedDate?: string | null;
   views?: number;
   descriptProjectId?: string | null;
   descriptProjectUrl?: string | null;
@@ -220,6 +222,14 @@ export async function createTestProductionItem(
     opts.accountId === undefined
       ? await getTestAccountId({ brand: opts.brand ?? "starter-story" })
       : opts.accountId;
+  const publishedAt =
+    opts.publishedAt === undefined ? new Date() : opts.publishedAt;
+  const publishedDate =
+    opts.publishedDate !== undefined
+      ? opts.publishedDate
+      : publishedAt
+        ? publishedAt.toISOString().slice(0, 10)
+        : null;
   const [row] = await db
     .insert(productionItems)
     .values({
@@ -234,7 +244,8 @@ export async function createTestProductionItem(
       postType: opts.postType ?? "x",
       accountId,
       platform: opts.platform ?? ["X"],
-      publishedAt: opts.publishedAt === undefined ? new Date() : opts.publishedAt,
+      publishedAt,
+      publishedDate,
       editorUserId: userId,
       views: opts.views ?? 0,
       descriptProjectId: opts.descriptProjectId ?? null,

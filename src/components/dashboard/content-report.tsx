@@ -33,6 +33,7 @@ export function ContentReport({ brand }: { brand: string }) {
     postType: { default: "all" },
     format: { default: "all" },
     source: { default: "all" },
+    provenOnly: { default: "0" },
     startDate: { default: defaultStart },
     endDate: { default: defaultEnd },
     viewType: { default: "weekly" },
@@ -43,10 +44,12 @@ export function ContentReport({ brand }: { brand: string }) {
     postType: selectedPostType,
     format: selectedFormat,
     source: selectedSource,
+    provenOnly: provenOnlyFlag,
     startDate,
     endDate,
     viewType,
   } = filters.values;
+  const provenOnly = provenOnlyFlag === "1";
 
   useRememberListUrl({ brand, listKey: "dashboard" });
 
@@ -104,6 +107,7 @@ export function ContentReport({ brand }: { brand: string }) {
         postType: selectedPostType,
         format: selectedFormat,
         source: selectedSource,
+        provenOnly: provenOnly ? "1" : "0",
       });
       const res = await fetch(`/api/reports/content?${params}`);
       const text = await res.text();
@@ -141,7 +145,7 @@ export function ContentReport({ brand }: { brand: string }) {
     } finally {
       setLoading(false);
     }
-  }, [brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource]);
+  }, [brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, provenOnly]);
 
   useEffect(() => {
     fetchReport();
@@ -190,6 +194,7 @@ export function ContentReport({ brand }: { brand: string }) {
           weeklyViewsGoal={data.weeklyViewsGoal}
           brand={brand}
           weekOverWeek={data.weekOverWeek}
+          provenSummary={data.provenSummary}
         />
       ) : !fetchError ? (
         <div className="flex items-center justify-center py-12">
@@ -212,6 +217,7 @@ export function ContentReport({ brand }: { brand: string }) {
         selectedPostType={selectedPostType}
         selectedFormat={selectedFormat}
         selectedSource={selectedSource}
+        provenOnly={provenOnly}
         accounts={accounts}
         formats={data?.formats ?? []}
         onStartDateChange={(v) => filters.set("startDate", v)}
@@ -222,6 +228,7 @@ export function ContentReport({ brand }: { brand: string }) {
         onPostTypeChange={(v) => filters.set("postType", v)}
         onFormatChange={(v) => filters.set("format", v)}
         onSourceChange={(v) => filters.set("source", v)}
+        onProvenOnlyChange={(v) => filters.set("provenOnly", v ? "1" : "0")}
       />
 
       {/* By-platform table */}

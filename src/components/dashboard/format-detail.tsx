@@ -54,6 +54,8 @@ import {
 import type { PostType } from "@/lib/platform-field-schemas";
 import { applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
+import { FormatStatusBadge } from "./format-status-badge";
+import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
 import {
   PropertyRow,
   PropertyRowGroup,
@@ -104,6 +106,8 @@ interface FormatRow {
   clipTargetPlatform: string[] | null;
   clipTargetPostType: string | null;
   clipAspectRatio: string | null;
+  proven?: boolean;
+  provenStatus?: FormatProvenStatus | null;
 }
 
 interface ContentItem {
@@ -1138,6 +1142,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
           >
             {isPillar ? "Pillar" : "Derivative"}
           </Badge>
+          <FormatStatusBadge status={data.format.provenStatus ?? null} />
         </div>
         <p className="text-sm text-muted-foreground px-2">
           {metrics.totalPosts} published post{metrics.totalPosts === 1 ? "" : "s"}

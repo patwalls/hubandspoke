@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { productionItems, formats, accounts, brands } from "@/lib/db/schema";
-import { and, eq, gte, lte, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, isNotNull, isNull, sql } from "drizzle-orm";
+import {
+  computeProvenStatusForBrand,
+  summarizeProvenStatuses,
+} from "@/lib/services/format-proven";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
 import { getBrandSettings } from "@/lib/db/queries";
 import { format, subDays } from "date-fns";
@@ -56,6 +60,7 @@ export async function GET(request: NextRequest) {
   const postTypeFilter = searchParams.get("postType") || "all";
   const formatFilter = searchParams.get("format") || "all";
   const sourceFilter = searchParams.get("source") || "all";
+  const provenOnly = searchParams.get("provenOnly") === "1";
 
   try {
     const { weeklyGoal, weeklyViewsGoal, weekStartDay } = await getBrandSettings("matg");
@@ -95,6 +100,22 @@ export async function GET(request: NextRequest) {
 
     if (formatFilter !== "all") {
       conditions.push(eq(productionItems.format, formatFilter));
+    }
+
+    // Proven-format gate. Computed brand-wide on a 180-day window so the
+    // headline tile and the chart filter share a definition. Skipping the
+    // filter when nothing qualifies short-circuits the query to empty.
+    const provenByName = await computeProvenStatusForBrand("matg");
+    const provenSummary = summarizeProvenStatuses(provenByName.values());
+    if (provenOnly) {
+      const provenNames = Array.from(provenByName.entries())
+        .filter(([, s]) => s.isProven)
+        .map(([name]) => name);
+      if (provenNames.length === 0) {
+        conditions.push(sql`false`);
+      } else {
+        conditions.push(inArray(productionItems.format, provenNames));
+      }
     }
 
     // Source filter classifies by sourceType (original / repurposed /
@@ -390,6 +411,7 @@ export async function GET(request: NextRequest) {
       weeklyGoal,
       weeklyViewsGoal,
       primaryRowMeta,
+      provenSummary,
     };
 
     return NextResponse.json(data);

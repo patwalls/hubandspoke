@@ -30,6 +30,10 @@ interface MetricTilesProps {
     production: { current: number; prior: number | null };
     views: { current: number; prior: number | null };
   };
+  /** Counts of formats by proven-status — see `format-proven.ts`. Brand-
+   *  wide and date-range-independent so the headline tile is stable as
+   *  the user scrubs filters. */
+  provenSummary?: { proven: number; testing: number; stale: number };
 }
 
 function formatCompact(n: number): string {
@@ -132,6 +136,7 @@ export function MetricTiles({
   weeklyViewsGoal,
   brand,
   weekOverWeek,
+  provenSummary,
 }: MetricTilesProps) {
   // Recompute on the client so the fractional day/hour reflects the user's
   // local wall clock (the server runs in UTC). Re-tick every 5 min so the card
@@ -179,7 +184,12 @@ export function MetricTiles({
     ? "border-primary/30 bg-primary/5"
     : "border-amber-300 bg-amber-50";
 
-  const activeFormats = Object.keys(formatData).filter((k) =>
+  // Fallback to the legacy "active in date range" count when the API
+  // hasn't returned a proven summary yet (loading state on first paint,
+  // or the brand-all view where per-brand proven isn't computed).
+  const provenFormats = provenSummary?.proven ?? null;
+  const testingFormats = provenSummary?.testing ?? 0;
+  const activeFormatsFallback = Object.keys(formatData).filter((k) =>
     Object.values(formatData[k]).some((v) => v > 0)
   ).length;
 
@@ -314,19 +324,26 @@ export function MetricTiles({
         )}
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-4">
+      <Link
+        href={`/${brand}/formats`}
+        className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/40"
+      >
         <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-          Active Formats
+          {provenFormats !== null ? "Proven Formats" : "Active Formats"}
         </p>
         <div className="mt-2">
           <span className="text-3xl font-semibold text-foreground tabular-nums">
-            {activeFormats}
+            {provenFormats !== null ? provenFormats : activeFormatsFallback}
           </span>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          Distinct formats in date range
+          {provenFormats !== null
+            ? testingFormats > 0
+              ? `+${testingFormats} in testing · last 180 days`
+              : `Last 180 days`
+            : "Distinct formats in date range"}
         </p>
-      </div>
+      </Link>
     </div>
   );
 }

@@ -9,6 +9,10 @@ import {
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { getChannelsForFormats } from "@/lib/format-channels";
+import {
+  computeProvenStatusForBrand,
+  staleProvenStatus,
+} from "@/lib/services/format-proven";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -135,10 +139,16 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     // the only client was the format-detail page and it stopped reading
     // the field in the same release.
 
+    const provenByName = await computeProvenStatusForBrand(format.brand);
+    const formatProvenStatus =
+      provenByName.get(format.name) ?? staleProvenStatus();
+
     return NextResponse.json({
       format: {
         ...format,
         accountChannels: channelsByFormat.get(format.id) ?? [],
+        proven: formatProvenStatus.isProven,
+        provenStatus: formatProvenStatus,
       },
       children: children.map((c) => ({
         ...c,

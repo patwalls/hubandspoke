@@ -7,6 +7,10 @@ import {
   setFormatChannels,
   type FormatChannelInput,
 } from "@/lib/format-channels";
+import {
+  computeProvenStatusForBrand,
+  staleProvenStatus,
+} from "@/lib/services/format-proven";
 
 async function isAncestor(candidateAncestorId: string, descendantId: string): Promise<boolean> {
   // Walk up from candidateAncestorId. Return true if we reach descendantId.
@@ -82,11 +86,18 @@ export async function GET(request: NextRequest) {
 
     const channelsByFormat = await getChannelsForFormats(allFormats.map((f) => f.id));
 
-    const enriched = allFormats.map((f) => ({
-      ...f,
-      totalViews: rollupFor(f.id),
-      accountChannels: channelsByFormat.get(f.id) ?? [],
-    }));
+    const provenByName = await computeProvenStatusForBrand(brand);
+
+    const enriched = allFormats.map((f) => {
+      const provenStatus = provenByName.get(f.name) ?? staleProvenStatus();
+      return {
+        ...f,
+        totalViews: rollupFor(f.id),
+        accountChannels: channelsByFormat.get(f.id) ?? [],
+        proven: provenStatus.isProven,
+        provenStatus,
+      };
+    });
 
     return NextResponse.json(enriched);
   } catch (error) {

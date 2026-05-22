@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
     postType: searchParams.get("postType") || "all",
     format: searchParams.get("format") || "all",
     source: searchParams.get("source") || "all",
+    provenOnly: searchParams.get("provenOnly") === "1",
   };
 
   try {
