@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { format, subDays } from "date-fns";
 import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable } from "./period-table";
 import type { ContentReportData } from "@/types";
+import { useUrlState } from "@/lib/hooks/use-url-state";
+import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 
 const PLATFORM_TABS = [
   { key: "production" as const, label: "Production" },
@@ -21,21 +22,38 @@ const PLATFORM_TABS = [
 /* ------------------------------------------------------------------ */
 
 export function MATGDashboard() {
-  const searchParams = useSearchParams();
+  // Rolling 90-day default; memoized so the hook's default-pruning sees a
+  // stable string per render.
+  const { defaultStart, defaultEnd } = useMemo(() => {
+    const today = new Date();
+    return {
+      defaultStart: format(subDays(today, 90), "yyyy-MM-dd"),
+      defaultEnd: format(today, "yyyy-MM-dd"),
+    };
+  }, []);
 
-  const today = new Date();
-  const defaultStart = format(subDays(today, 90), "yyyy-MM-dd");
-  const defaultEnd = format(today, "yyyy-MM-dd");
+  const filters = useUrlState({
+    platform: { default: "all" },
+    accountId: { default: "all" },
+    postType: { default: "all" },
+    format: { default: "all" },
+    source: { default: "all" },
+    startDate: { default: defaultStart },
+    endDate: { default: defaultEnd },
+    viewType: { default: "weekly" },
+  });
+  const {
+    platform: selectedPlatformKey,
+    accountId: selectedAccountId,
+    postType: selectedPostType,
+    format: selectedFormat,
+    source: selectedSource,
+    startDate,
+    endDate,
+    viewType,
+  } = filters.values;
 
-  // Report filter state
-  const [startDate, setStartDate] = useState(searchParams.get("startDate") || defaultStart);
-  const [endDate, setEndDate] = useState(searchParams.get("endDate") || defaultEnd);
-  const [viewType, setViewType] = useState(searchParams.get("viewType") || "weekly");
-  const [selectedPlatformKey, setSelectedPlatformKey] = useState(searchParams.get("platformKey") || "all");
-  const [selectedAccountId, setSelectedAccountId] = useState(searchParams.get("accountId") || "all");
-  const [selectedPostType, setSelectedPostType] = useState(searchParams.get("postType") || "all");
-  const [selectedFormat, setSelectedFormat] = useState(searchParams.get("format") || "all");
-  const [selectedSource, setSelectedSource] = useState(searchParams.get("source") || "all");
+  useRememberListUrl({ brand: "matg", listKey: "dashboard" });
 
   // Data
   const [data, setData] = useState<ContentReportData | null>(null);
@@ -142,14 +160,14 @@ export function MATGDashboard() {
         selectedSource={selectedSource}
         accounts={accounts}
         formats={data?.formats ?? []}
-        onStartDateChange={setStartDate}
-        onEndDateChange={setEndDate}
-        onViewTypeChange={setViewType}
-        onPlatformKeyChange={setSelectedPlatformKey}
-        onAccountChange={setSelectedAccountId}
-        onPostTypeChange={setSelectedPostType}
-        onFormatChange={setSelectedFormat}
-        onSourceChange={setSelectedSource}
+        onStartDateChange={(v) => filters.set("startDate", v)}
+        onEndDateChange={(v) => filters.set("endDate", v)}
+        onViewTypeChange={(v) => filters.set("viewType", v)}
+        onPlatformKeyChange={(v) => filters.set("platform", v)}
+        onAccountChange={(v) => filters.set("accountId", v)}
+        onPostTypeChange={(v) => filters.set("postType", v)}
+        onFormatChange={(v) => filters.set("format", v)}
+        onSourceChange={(v) => filters.set("source", v)}
       />
 
       {/* By-platform table */}

@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { format, subDays } from "date-fns";
 import { FilterPills } from "./filter-pills";
 import { PerformanceTable } from "./performance-table";
 import type { ContentReportData } from "@/types";
 import type { PickerAccount } from "@/components/ui/account-post-type-picker";
 import { todayInclusiveOfUtc } from "@/lib/dates";
+import { useUrlState } from "@/lib/hooks/use-url-state";
+import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 
 interface ContentViewProps {
   brand: string;
@@ -23,24 +24,48 @@ const LEGACY_REPORT_API: Record<string, string> = {
 };
 
 export function ContentView({ brand }: ContentViewProps) {
-  const searchParams = useSearchParams();
+  // Default date range is a rolling 90 days back from "today". Memoize so
+  // the hook's default-pruning sees a stable string per render (the wall
+  // clock only ticks across midnight; pruning a value that matches today's
+  // default but won't match tomorrow's is a fair trade-off — see
+  // use-url-state.ts notes).
+  const { defaultStart, defaultEnd } = useMemo(() => {
+    const today = new Date();
+    return {
+      defaultStart: format(subDays(today, 90), "yyyy-MM-dd"),
+      defaultEnd: todayInclusiveOfUtc(),
+    };
+  }, []);
 
-  const today = new Date();
-  const defaultStart = format(subDays(today, 90), "yyyy-MM-dd");
-  const defaultEnd = todayInclusiveOfUtc();
+  // Dashboard drill-through links build URLs with `?platform=<row-label>`,
+  // which has always been the canonical URL key. The hook reads it
+  // directly. (A legacy alias `?platformKey=` was accepted by the
+  // pre-2026-05-22 hand-rolled seeding; not worth carrying forward — the
+  // alias only fired on first mount and Dashboard always used `platform`.)
+  const filters = useUrlState({
+    platform: { default: "all" },
+    accountId: { default: "all" },
+    postType: { default: "all" },
+    format: { default: "all" },
+    source: { default: "all" },
+    startDate: { default: defaultStart },
+    endDate: { default: defaultEnd },
+    viewType: { default: "weekly" },
+  });
+  const {
+    platform: selectedPlatformKey,
+    accountId: selectedAccountId,
+    postType: selectedPostType,
+    format: selectedFormat,
+    source: selectedSource,
+    startDate,
+    endDate,
+    viewType,
+  } = filters.values;
 
-  const [startDate, setStartDate] = useState(searchParams.get("startDate") || defaultStart);
-  const [endDate, setEndDate] = useState(searchParams.get("endDate") || defaultEnd);
-  const [viewType, setViewType] = useState(searchParams.get("viewType") || "weekly");
-  // Dashboard drill-through links build URLs with `?platform=<row-label>`;
-  // accept that as an alias so the filter survives the round-trip.
-  const [selectedPlatformKey, setSelectedPlatformKey] = useState(
-    searchParams.get("platformKey") || searchParams.get("platform") || "all"
-  );
-  const [selectedAccountId, setSelectedAccountId] = useState(searchParams.get("accountId") || "all");
-  const [selectedPostType, setSelectedPostType] = useState(searchParams.get("postType") || "all");
-  const [selectedFormat, setSelectedFormat] = useState(searchParams.get("format") || "all");
-  const [selectedSource, setSelectedSource] = useState(searchParams.get("source") || "all");
+  // Persist the URL so the detail page's `<BackLink listKey="content">`
+  // can land the user back here with filters intact.
+  useRememberListUrl({ brand, listKey: "content" });
 
   const [data, setData] = useState<ContentReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -152,14 +177,14 @@ export function ContentView({ brand }: ContentViewProps) {
         accounts={accounts}
         formats={data?.formats ?? []}
         showViewType={false}
-        onStartDateChange={setStartDate}
-        onEndDateChange={setEndDate}
-        onViewTypeChange={setViewType}
-        onPlatformKeyChange={setSelectedPlatformKey}
-        onAccountChange={setSelectedAccountId}
-        onPostTypeChange={setSelectedPostType}
-        onFormatChange={setSelectedFormat}
-        onSourceChange={setSelectedSource}
+        onStartDateChange={(v) => filters.set("startDate", v)}
+        onEndDateChange={(v) => filters.set("endDate", v)}
+        onViewTypeChange={(v) => filters.set("viewType", v)}
+        onPlatformKeyChange={(v) => filters.set("platform", v)}
+        onAccountChange={(v) => filters.set("accountId", v)}
+        onPostTypeChange={(v) => filters.set("postType", v)}
+        onFormatChange={(v) => filters.set("format", v)}
+        onSourceChange={(v) => filters.set("source", v)}
       />
 
       {loading ? (

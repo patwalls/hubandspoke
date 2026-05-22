@@ -14,6 +14,8 @@ import { SelectPill } from "./filter-pills";
 import { personDisplay } from "./user-chip";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
+import { useUrlState } from "@/lib/hooks/use-url-state";
+import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 
 interface ProductionViewProps {
   brand: string;
@@ -115,26 +117,46 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     FALLBACK_PIPELINE_STATUSES
   );
   const [users, setUsers] = useState<AssignableUser[]>([]);
-  const [search, setSearch] = useState("");
-  const [selectedPlatform, setSelectedPlatform] = useState("all");
-  const [selectedFormat, setSelectedFormat] = useState("all");
-  const [selectedSource, setSelectedSource] = useState("all");
-  const [selectedEditor, setSelectedEditor] = useState("all");
-  const [sortKey, setSortKey] = useState<SortKey | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const toggleSort = useCallback((key: SortKey) => {
-    setSortKey((prev) => {
-      if (prev === key) {
-        // Same key clicked again → flip direction.
-        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-        return prev;
+  // Filter + sort state lives in the URL so back-navigation + shareable
+  // links work. `q` is debounced so typing in the search box doesn't push
+  // a history entry per keystroke. Sort uses a single encoded "key:dir"
+  // string to keep the URL tidy.
+  const filters = useUrlState({
+    q: { default: "", debounceMs: 250 },
+    platform: { default: "all" },
+    format: { default: "all" },
+    source: { default: "all" },
+    editor: { default: "all" },
+    sort: { default: "default" }, // "default" = no explicit sort
+  });
+  const {
+    q: search,
+    platform: selectedPlatform,
+    format: selectedFormat,
+    source: selectedSource,
+    editor: selectedEditor,
+    sort: sortValue,
+  } = filters.values;
+  const { key: sortKey, dir: sortDir } = decodeSort(sortValue);
+
+  useRememberListUrl({ brand, listKey: "production" });
+
+  const toggleSort = useCallback(
+    (key: SortKey) => {
+      // Default direction for a freshly-clicked column: desc for
+      // numerics (views, created), asc for text. Toggle on repeat clicks.
+      const current = decodeSort(filters.values.sort);
+      let nextDir: SortDir;
+      if (current.key === key) {
+        nextDir = current.dir === "asc" ? "desc" : "asc";
+      } else {
+        nextDir = key === "views" || key === "created" ? "desc" : "asc";
       }
-      // New key → desc by default for numeric/date columns, asc for text.
-      setSortDir(key === "views" || key === "created" ? "desc" : "asc");
-      return key;
-    });
-  }, []);
+      filters.set("sort", encodeSort(key, nextDir));
+    },
+    [filters],
+  );
 
   const fetchPipeline = useCallback(async () => {
     setLoading(true);
@@ -336,7 +358,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
         <Input
           type="search"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => filters.set("q", e.target.value)}
           placeholder="Search title, format, channel…"
           className="h-8 w-48 sm:w-72 text-xs"
         />
@@ -347,35 +369,31 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
           label="Editor"
           value={selectedEditor}
           options={editorOptions}
-          onChange={setSelectedEditor}
+          onChange={(v) => filters.set("editor", v)}
         />
         <SelectPill
           label="Channel"
           value={selectedPlatform}
           options={platformOptions}
-          onChange={setSelectedPlatform}
+          onChange={(v) => filters.set("platform", v)}
         />
         <SelectPill
           label="Format"
           value={selectedFormat}
           options={formatOptions}
-          onChange={setSelectedFormat}
+          onChange={(v) => filters.set("format", v)}
         />
         <SelectPill
           label="Source"
           value={selectedSource}
           options={SOURCES}
-          onChange={setSelectedSource}
+          onChange={(v) => filters.set("source", v)}
         />
         <SelectPill
           label="Sort"
-          value={encodeSort(sortKey, sortDir)}
+          value={sortValue}
           options={SORT_OPTIONS}
-          onChange={(value) => {
-            const { key, dir } = decodeSort(value);
-            setSortKey(key);
-            setSortDir(dir);
-          }}
+          onChange={(v) => filters.set("sort", v)}
         />
       </div>
 
