@@ -36,6 +36,7 @@ import type { PostType } from "@/lib/platform-field-schemas";
 import { SC_BASE, headers } from "@/lib/services/sc-client";
 import type { SCTweet } from "@/lib/services/sc-fetchers";
 import { extractContentId, looseUrlKey } from "@/lib/platform-url";
+import { estimateViewsFromLikes } from "@/lib/services/view-estimator";
 
 // ─── Support matrix ───────────────────────────────────────────────────────
 
@@ -652,7 +653,10 @@ async function fetchThreadsLatest(
         thumbnail: null,
         publishedAt: p.taken_at ? new Date(p.taken_at * 1000) : null,
         publishedDate: unixToDate(p.taken_at ?? 0),
-        views: p.view_counts ?? p.text_post_app_info?.view_counts ?? null,
+        // SC's view_counts for Threads is unreliable on fresh posts — drop
+        // it and let the estimator (likes * 150) drive views at upsert
+        // time. Mirrors the per-post fix in fetchThreadsPostByUrl.
+        views: null,
         likes: p.like_count ?? null,
         comments: p.text_post_app_info?.direct_reply_count ?? null,
         contentBody: body || null,
@@ -786,6 +790,23 @@ async function upsertItems(
         (normalizedIncomingUrl ? byPublishedLink.get(normalizedIncomingUrl) : undefined) ??
         null;
 
+      // Resolve final (views, viewsEstimated) for post types where SC
+      // doesn't return reliable view counts. When the fetcher returned
+      // views=null and the post type has a likes-multiplier (threads,
+      // linkedin, ig_post, yt_community per view-estimator.ts), compute
+      // estimated views from likes here so the row never lands with
+      // views=null when likes>0 are available. Mirrors the deriveViews
+      // logic in performance-decay.ts — keep them in sync or factor out.
+      let finalViews: number | null = item.views;
+      let finalViewsEstimated = false;
+      if (item.views == null && item.likes != null) {
+        const est = estimateViewsFromLikes(item.postType, item.likes);
+        if (est.estimated) {
+          finalViews = est.views;
+          finalViewsEstimated = true;
+        }
+      }
+
       // Per-column policy. Sync used to write the same payload to both
       // INSERT and UPDATE, which let SC clobber editorial/identity fields
       // (title flipping to a stranger's caption, publishedAt thrashing to
@@ -804,7 +825,8 @@ async function upsertItems(
         brand: brandSlug,
         publishedLink: item.publishedLink,
         platformContentId: item.platformContentId,
-        views: item.views ?? undefined,
+        views: finalViews ?? undefined,
+        viewsEstimated: finalViewsEstimated,
         likes: item.likes ?? undefined,
         comments: item.comments ?? undefined,
         contentBody: item.contentBody ?? undefined,
@@ -818,8 +840,13 @@ async function upsertItems(
           : {}),
       };
 
+      // UPDATE only writes views/viewsEstimated when we actually have a
+      // new value to set — preserves whatever's in the DB (including a
+      // real number from refresh-item-metrics) when this sync run had no
+      // basis to compute one (e.g. SC returned null views AND null likes).
       const updatePayload = {
-        views: item.views ?? undefined,
+        views: finalViews ?? undefined,
+        viewsEstimated: finalViews != null ? finalViewsEstimated : undefined,
         likes: item.likes ?? undefined,
         comments: item.comments ?? undefined,
         lastPerformanceSyncAt: new Date(),
