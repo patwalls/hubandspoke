@@ -17,6 +17,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MediaActions } from "./preview/media-actions";
 
 interface EnrichmentFields {
   captionFetched?: boolean;
@@ -728,19 +729,28 @@ export function EnrichmentButton(props: Props) {
                 <div className="grid grid-cols-2 gap-3">
                   {media.map((m) => (
                     <figure key={m.index} className="space-y-1">
-                      {m.kind === "video" && m.url ? (
-                        <video
-                          src={m.url}
-                          poster={m.posterUrl ?? undefined}
-                          controls
-                          className="w-full rounded-md border border-border max-h-[480px] object-contain bg-black"
-                        />
-                      ) : m.url ? (
-                        <img
-                          src={m.url}
-                          alt={`Slide ${m.index + 1}`}
-                          className="w-full rounded-md border border-border max-h-[480px] object-contain"
-                        />
+                      {m.url ? (
+                        <div className="group relative overflow-hidden rounded-md border border-border">
+                          {m.kind === "video" ? (
+                            <video
+                              src={m.url}
+                              poster={m.posterUrl ?? undefined}
+                              controls
+                              className="block w-full max-h-[480px] object-contain bg-black"
+                            />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={m.url}
+                              alt={`Slide ${m.index + 1}`}
+                              className="block w-full max-h-[480px] object-contain"
+                            />
+                          )}
+                          <MediaActions
+                            src={m.url}
+                            kind={m.kind === "video" ? "video" : "image"}
+                          />
+                        </div>
                       ) : null}
                       <figcaption className="text-[11px] text-muted-foreground">
                         Slide {m.index + 1}
@@ -756,11 +766,15 @@ export function EnrichmentButton(props: Props) {
                 <div className="grid grid-cols-2 gap-3">
                   {posterUrl && (
                     <figure className="space-y-1">
-                      <img
-                        src={posterUrl}
-                        alt="Poster"
-                        className="w-full rounded-md border border-border object-cover"
-                      />
+                      <div className="group relative overflow-hidden rounded-md border border-border">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={posterUrl}
+                          alt="Poster"
+                          className="block w-full object-cover"
+                        />
+                        <MediaActions src={posterUrl} kind="image" />
+                      </div>
                       <figcaption className="text-[11px] text-muted-foreground">
                         Poster (archived)
                       </figcaption>
@@ -769,17 +783,24 @@ export function EnrichmentButton(props: Props) {
                   {mediaUrl && (
                     <figure className="space-y-1">
                       {isVideo ? (
-                        <video
-                          src={mediaUrl}
-                          controls
-                          className="w-full rounded-md border border-border"
-                        />
+                        <div className="group relative overflow-hidden rounded-md border border-border">
+                          <video
+                            src={mediaUrl}
+                            controls
+                            className="block w-full"
+                          />
+                          <MediaActions src={mediaUrl} kind="video" />
+                        </div>
                       ) : isImage ? (
-                        <img
-                          src={mediaUrl}
-                          alt="Media"
-                          className="w-full rounded-md border border-border object-cover"
-                        />
+                        <div className="group relative overflow-hidden rounded-md border border-border">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={mediaUrl}
+                            alt="Media"
+                            className="block w-full object-cover"
+                          />
+                          <MediaActions src={mediaUrl} kind="image" />
+                        </div>
                       ) : (
                         <a
                           href={mediaUrl}

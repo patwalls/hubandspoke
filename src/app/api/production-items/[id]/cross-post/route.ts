@@ -35,6 +35,15 @@ const CROSS_POST_SEEDED_TARGETS: ReadonlySet<PostType> = new Set<PostType>([
   // Before v1.9 the new Short row landed with no media and Pat had to
   // manually re-upload.
   "youtube_shorts",
+  // 2026-05-22: YT Community joins the seeded set so an X / IG / Threads
+  // image carousel cross-posted to Community auto-attaches the photos.
+  // `seedRepostContent` filters mirrored media by the target's
+  // platform-media-rules allowed kinds (`["image"]` for YT Community), so
+  // video sources cross-posted here land with no media — same shape as
+  // the long-standing "Community posts don't support video" simulator
+  // warning. Fixes Pat hitting "Add photo" placeholder on a Community
+  // draft whose X source had two real photos.
+  "youtube_community",
   "threads",
 ]);
 

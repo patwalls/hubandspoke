@@ -30,6 +30,7 @@ import {
   PLATFORM_FIELD_SCHEMAS,
   type PostType,
 } from "@/lib/platform-field-schemas";
+import { getMediaRule } from "@/lib/platform-media-rules";
 import type { db as dbClient } from "@/lib/db";
 
 type Tx = Parameters<Parameters<typeof dbClient.transaction>[0]>[0];
@@ -69,7 +70,14 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
   // 1. Mirror carousel media. The (production_item_id, index) unique index
   //    means we insert with the same `index` values; collisions can't happen
   //    because the new repost row has zero existing rows.
-  const sourceMedia = await tx
+  //
+  //    Filter by the TARGET platform's allowed media kinds — without this,
+  //    a video source cross-posted to a target that doesn't accept video
+  //    (YT Community, which is image-only — see platform-media-rules.ts)
+  //    would seed a row the target's simulator rejects with a "doesn't
+  //    support video" warning. For same-kind targets the filter is a no-op.
+  const allowedKinds = new Set(getMediaRule(postType).allowedKinds);
+  const sourceMediaAll = await tx
     .select({
       index: productionItemMedia.index,
       kind: productionItemMedia.kind,
@@ -82,6 +90,9 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
     })
     .from(productionItemMedia)
     .where(eq(productionItemMedia.productionItemId, sourceId));
+  const sourceMedia = sourceMediaAll.filter((m) =>
+    allowedKinds.has(m.kind as "image" | "video"),
+  );
 
   const mediaChanges: ContentChange[] = [];
   if (sourceMedia.length > 0) {
@@ -129,12 +140,16 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
     // row. Synthesize one row on the new repost so the simulator's video
     // path lights up without re-rendering through Descript. Schema
     // requires s3Bucket / s3Key / contentType non-null — skip the row
-    // if any is missing.
+    // if any is missing. Also gate on the target's allowed kinds (see
+    // carousel branch above for the same reasoning) — if the legacy
+    // media's kind isn't accepted, skip the row but still seed the v1
+    // draft below.
     const kind: "image" | "video" = sourceLegacyMedia.contentType.startsWith(
       "video/",
     )
       ? "video"
       : "image";
+    if (allowedKinds.has(kind)) {
     const [inserted] = await tx
       .insert(productionItemMedia)
       .values({
@@ -159,6 +174,7 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
         posterS3Key: sourceLegacyMedia.posterS3Key ?? null,
       },
     });
+    }
   }
 
   // Audit each mirrored slide so the activity feed on the new repost
