@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { BackLink } from "./back-link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ChevronDownIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, GitMerge, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
@@ -1756,12 +1757,14 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   if (!data) {
     return (
       <div className="space-y-4">
-        <Link
-          href={`/${brand}/content`}
+        <BackLink
+          brand={brand}
+          listKey="content"
+          fallbackHref={`/${brand}/content`}
           className="text-sm text-muted-foreground hover:text-foreground"
         >
           ← Back to content
-        </Link>
+        </BackLink>
         <div className="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground">
           Post not found.
         </div>

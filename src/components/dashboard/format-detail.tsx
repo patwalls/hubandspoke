@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useUrlState } from "@/lib/hooks/use-url-state";
+import { BackLink } from "./back-link";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { statusClassWithPalette } from "@/lib/badge-colors";
@@ -364,15 +366,31 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   >(null);
 
   type ContentSortKey = "title" | "account" | "publishedDate" | "views" | "likes" | "leads";
-  const [contentSort, setContentSort] = useState<{ key: ContentSortKey; dir: "asc" | "desc" }>({
-    key: "views",
-    dir: "desc",
+  // All-content tab sort lives in the URL so sort order is shareable and
+  // survives reload. Coexists with the manual `?tab=` handler above —
+  // both write through `router.replace` and preserve unrelated keys.
+  const contentSortState = useUrlState({
+    contentSortKey: { default: "views" },
+    contentSortDir: { default: "desc" },
   });
+  const contentSort = {
+    key: contentSortState.values.contentSortKey as ContentSortKey,
+    dir: (contentSortState.values.contentSortDir === "asc"
+      ? "asc"
+      : "desc") as "asc" | "desc",
+  };
   function toggleContentSort(key: ContentSortKey) {
-    setContentSort((prev) => {
-      if (prev.key === key) return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-      return { key, dir: key === "title" || key === "account" ? "asc" : "desc" };
-    });
+    if (contentSort.key === key) {
+      contentSortState.set(
+        "contentSortDir",
+        contentSort.dir === "asc" ? "desc" : "asc",
+      );
+    } else {
+      contentSortState.setMany({
+        contentSortKey: key,
+        contentSortDir: key === "title" || key === "account" ? "asc" : "desc",
+      });
+    }
   }
 
   function openClipModal(item: ContentItem) {
@@ -967,12 +985,14 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   if (!data) {
     return (
       <div className="space-y-4">
-        <Link
-          href={`/${brand}/formats`}
+        <BackLink
+          brand={brand}
+          listKey="formats"
+          fallbackHref={`/${brand}/formats`}
           className="text-sm text-muted-foreground hover:text-foreground"
         >
           ← Back to formats
-        </Link>
+        </BackLink>
         <div className="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground">
           Format not found.
         </div>
@@ -1047,12 +1067,14 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     <div className="space-y-6">
       {/* Breadcrumb + autosave indicator + actions */}
       <div className="flex items-center justify-between gap-3">
-        <Link
-          href={`/${brand}/formats`}
+        <BackLink
+          brand={brand}
+          listKey="formats"
+          fallbackHref={`/${brand}/formats`}
           className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
         >
           ← Formats
-        </Link>
+        </BackLink>
         <div className="flex items-center gap-3">
           {saveState.kind === "saving" && (
             <span className="text-xs text-muted-foreground">Saving…</span>

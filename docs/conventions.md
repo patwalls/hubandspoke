@@ -87,6 +87,54 @@ string. New brands get the seed via `POST /api/brands`; existing brands are
 re-flagged by re-running `scripts/backfill-brand-statuses.mjs` (idempotent —
 seed pass + re-flag pass).
 
+## Filter state lives in the URL
+
+Every filtered list view in the dashboard (Content, Production, Queue,
+Formats, Dashboard, format-detail "All content" sort) routes its filter
+and sort state through the URL, not `useState`. This gets us three
+things for free:
+
+1. Shareable links — paste a filtered URL and the recipient sees the
+   same view.
+2. Browser back/forward restores the previous filter set.
+3. The detail-page `← Content` / `← Formats` back link lands the user
+   on the exact filtered list they came from (via the
+   `useRememberListUrl` + `<BackLink>` pair).
+
+**Adding a new list view? Use these three primitives:**
+
+- `useUrlState({...})` (`src/lib/hooks/use-url-state.ts`) — round-trips
+  named keys through `useSearchParams` ↔ `router.replace`, prunes
+  default values from the URL, debounces text inputs. Replaces every
+  per-filter `useState`. Pass `{ default: "all" }` for picker filters
+  and `{ default: "", debounceMs: 250 }` for search boxes.
+- `useRememberListUrl({ brand, listKey })`
+  (`src/lib/hooks/use-remember-list-url.ts`) — call once on a list
+  page. Writes the current `pathname + search` to sessionStorage so
+  the corresponding `<BackLink>` on detail pages can restore it.
+- `<BackLink brand={...} listKey="..." fallbackHref="...">`
+  (`src/components/dashboard/back-link.tsx`) — reads the
+  sessionStorage entry; falls back to `fallbackHref` on deep-link /
+  new-tab / cleared session. Already wired into the section-tabs row
+  (`nav.tsx`) for `content` and `formats` detail pages — extend that
+  switch when adding a new detail type.
+
+**Key naming convention.** The URL key is the canonical name; internal
+state can alias it differently if it improves readability. Examples in
+use: `?platform=...`, `?accountId=...`, `?postType=...`, `?format=...`,
+`?source=...`, `?startDate=...`, `?endDate=...`, `?viewType=...`,
+`?q=...` (search), `?sort=...`, `?dir=...` (or a single `?sort=key:dir`
+encoding when a list has more than one sortable axis).
+
+**Don't seed state with `useSearchParams.get(...)` + `useState`.** That
+was the pre-2026-05-22 pattern; it gave you initial-load filters from
+URLs but never wrote back, so back-navigation and reload silently
+discarded everything. The new hook is the only sanctioned way to read
+filter state.
+
+The reference migration is `src/components/dashboard/content-view.tsx`
+— copy that shape for a new list view.
+
 ## Brand routing — the "All content" sentinel
 
 The brand sidebar contains one synthetic entry, `"All content"` (slug

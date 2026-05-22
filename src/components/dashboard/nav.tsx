@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { BackLink } from "@/components/dashboard/back-link";
 
 // Brand shape passed down from the (server) layout — mirrors BrandListEntry
 // from @/lib/db/brands but redeclared locally so this client component
@@ -392,28 +393,49 @@ export function SectionTabs({
           { href: `/${currentBrand}/accounts`, label: "Accounts" },
         ];
 
-  // Surface a "← Content" back link to the LEFT of the tabs when we're on
-  // a content-detail page (`/<brand>/content/<id>`). The detail page used
-  // to render its own breadcrumb row, which ate ~50px of vertical space
-  // for a single link in an otherwise-empty row. The section-tabs row is
-  // already drawn and has plenty of free horizontal space — fold the back
-  // affordance there instead.
+  // Surface a context-aware back link to the LEFT of the tabs when we're
+  // on a detail page (`/<brand>/content/<id>` or `/<brand>/formats/<id>`).
+  // Each detail page used to render its own breadcrumb row that ate ~50px
+  // of vertical space for a single link in an otherwise-empty row; we
+  // fold the back affordance into the already-drawn section-tabs row.
+  //
+  // Restores the exact filtered list URL via `<BackLink>` (reads
+  // sessionStorage written by `useRememberListUrl` on the corresponding
+  // list page). Deep-link / new-tab / cleared-session fall through to
+  // the hardcoded list path.
   const contentDetailMatch = pathname.match(
     /^\/([^/]+)\/content\/[^/]+(?:\/|$)/,
   );
-  const contentBackHref = contentDetailMatch
-    ? `/${contentDetailMatch[1]}/content`
+  const formatDetailMatch = !contentDetailMatch
+    ? pathname.match(/^\/([^/]+)\/formats\/[^/]+(?:\/|$)/)
     : null;
+  const backLink = contentDetailMatch
+    ? {
+        brand: contentDetailMatch[1],
+        listKey: "content",
+        fallbackHref: `/${contentDetailMatch[1]}/content`,
+        label: "← Content",
+      }
+    : formatDetailMatch
+      ? {
+          brand: formatDetailMatch[1],
+          listKey: "formats",
+          fallbackHref: `/${formatDetailMatch[1]}/formats`,
+          label: "← Formats",
+        }
+      : null;
 
   return (
     <div className="flex items-center gap-3">
-      {contentBackHref && (
-        <Link
-          href={contentBackHref}
+      {backLink && (
+        <BackLink
+          brand={backLink.brand}
+          listKey={backLink.listKey}
+          fallbackHref={backLink.fallbackHref}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          ← Content
-        </Link>
+          {backLink.label}
+        </BackLink>
       )}
       <div className="inline-flex items-center gap-1 rounded-lg bg-muted/60 p-1">
         {tabs.map((tab) => {
