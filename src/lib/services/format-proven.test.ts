@@ -5,6 +5,8 @@ import {
   computeProvenStatusForBrand,
   PROVEN_MIN_ITEMS,
   PROVEN_OUTLIER_MULTIPLIER,
+  PROVEN_VOLUME_HIT_MIN_HITS,
+  PROVEN_VOLUME_HIT_MIN_ITEMS,
   summarizeProvenStatuses,
 } from "./format-proven";
 import {
@@ -63,6 +65,71 @@ describe("buildProvenStatusMap", () => {
     expect(map.get("Sparse")?.reason).toBe("testing");
     expect(map.get("Sparse")?.itemCount).toBe(2);
     expect(PROVEN_MIN_ITEMS).toBeGreaterThan(2);
+  });
+
+  it("marks a high-volume clip format proven via the hits path, even when median is below peer", () => {
+    // Real-world shape: 200 clip items, peer cohort is bigger and faster
+    // so the format's median sits just below peer. But the format mints
+    // outliers reliably — 8 hits at >= 3x peer median. This is the
+    // "Repackage Section w/ Hook" case.
+    const peer = Array.from({ length: 200 }, (_, i) => ({
+      format: `OtherClip${i % 10}`,
+      postType: "instagram_reel",
+      views: 21_000 + (i % 5) * 200,
+      publishedDate: daysAgoString(20 + (i % 30)),
+    }));
+    const clips: { format: string; postType: string; views: number; publishedDate: string }[] = [];
+    for (let i = 0; i < 192; i++) {
+      clips.push({
+        format: "Repackage",
+        postType: "instagram_reel",
+        // 192 items at ~20k views (just below peer median) plus the hits.
+        views: 19_500 + (i % 7) * 300,
+        publishedDate: daysAgoString(5 + (i % 90)),
+      });
+    }
+    for (let i = 0; i < 8; i++) {
+      clips.push({
+        format: "Repackage",
+        postType: "instagram_reel",
+        views: 500_000 + i * 50_000,
+        publishedDate: daysAgoString(10 + i * 5),
+      });
+    }
+
+    const map = buildProvenStatusMap([...peer, ...clips]);
+    const repackage = map.get("Repackage");
+    expect(repackage).toBeDefined();
+    expect(repackage!.isProven).toBe(true);
+    expect(repackage!.reason).toBe("proven");
+    expect(repackage!.itemCount).toBeGreaterThanOrEqual(PROVEN_VOLUME_HIT_MIN_ITEMS);
+    expect(repackage!.hitCount).toBeGreaterThanOrEqual(PROVEN_VOLUME_HIT_MIN_HITS);
+    // Median is BELOW peer — proves we got there via the hits path, not
+    // the consistency path.
+    expect(repackage!.formatMedian).toBeLessThan(repackage!.peerMedian);
+  });
+
+  it("does NOT promote via the hits path when there are too few hits", () => {
+    // 20 items, only 1 hit — clear noise, not signal. Without this guard
+    // a single viral fluke would qualify a dead format.
+    const peer = Array.from({ length: 20 }, () => ({
+      format: "Other",
+      postType: "x",
+      views: 1000,
+      publishedDate: daysAgoString(30),
+    }));
+    const fluke = Array.from({ length: 20 }, (_, i) => ({
+      format: "OneHit",
+      postType: "x",
+      views: i === 0 ? 100_000 : 200,
+      publishedDate: daysAgoString(10 + i * 3),
+    }));
+
+    const map = buildProvenStatusMap([...peer, ...fluke]);
+    const oneHit = map.get("OneHit");
+    expect(oneHit?.reason).toBe("testing");
+    expect(oneHit?.hitCount).toBe(1);
+    expect(PROVEN_VOLUME_HIT_MIN_HITS).toBeGreaterThan(1);
   });
 
   it("downgrades to testing when there is no real outlier", () => {

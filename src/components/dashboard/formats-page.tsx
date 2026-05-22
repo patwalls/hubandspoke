@@ -70,11 +70,12 @@ interface FormatRow {
   instructions: string | null;
   parentFormatId: string | null;
   totalViews: number;
+  totalPublished: number;
   proven?: boolean;
   provenStatus?: FormatProvenStatus | null;
 }
 
-type SortKey = "name" | "viewThreshold" | "totalViews" | "proven";
+type SortKey = "name" | "viewThreshold" | "totalViews" | "totalPublished" | "proven";
 
 export function FormatsPageContent({ brand }: { brand: string }) {
   const [formats, setFormats] = useState<FormatRow[]>([]);
@@ -304,6 +305,8 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           return f.viewThreshold;
         case "totalViews":
           return f.totalViews;
+        case "totalPublished":
+          return f.totalPublished;
         case "proven":
           // Proven=2, testing=1, stale=0 → sortable ranking
           if (f.proven) return 2;
@@ -635,6 +638,11 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 align="right"
               />
               <SortHeader
+                label="Published"
+                sortKeyName="totalPublished"
+                align="right"
+              />
+              <SortHeader
                 label="Total Views"
                 sortKeyName="totalViews"
                 align="right"
@@ -711,6 +719,11 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                       ? f.viewThreshold.toLocaleString()
                       : "—"}
                   </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {f.totalPublished > 0
+                      ? f.totalPublished.toLocaleString()
+                      : "—"}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-foreground">
                     {f.totalViews > 0 ? f.totalViews.toLocaleString() : "—"}
                   </TableCell>
@@ -723,7 +736,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
             {sorted.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={7}
                   className="text-center text-muted-foreground text-xs py-8"
                 >
                   {formats.length === 0

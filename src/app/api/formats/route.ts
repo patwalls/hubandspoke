@@ -39,13 +39,14 @@ export async function GET(request: NextRequest) {
       .where(eq(formats.brand, brand))
       .orderBy(formats.name);
 
-    // Sum views for every format name that appears on a production_item, in one
-    // scan. Then roll each format's total up through its descendants so a pillar
+    // Sum views and count published posts for every format name in one
+    // scan. Both columns roll up through descendants below so a pillar
     // row reflects its whole repurpose chain.
     const viewsRows = await db
       .select({
         format: productionItems.format,
         total: sql<string>`COALESCE(SUM(${productionItems.views}), 0)`,
+        published: sql<string>`COALESCE(SUM(CASE WHEN ${productionItems.status} = 'Published' THEN 1 ELSE 0 END), 0)`,
       })
       .from(productionItems)
       .where(
@@ -57,8 +58,12 @@ export async function GET(request: NextRequest) {
       .groupBy(productionItems.format);
 
     const viewsByName = new Map<string, number>();
+    const publishedByName = new Map<string, number>();
     for (const r of viewsRows) {
-      if (r.format) viewsByName.set(r.format, Number(r.total) || 0);
+      if (r.format) {
+        viewsByName.set(r.format, Number(r.total) || 0);
+        publishedByName.set(r.format, Number(r.published) || 0);
+      }
     }
 
     const childrenByParent = new Map<string, string[]>();
@@ -83,6 +88,19 @@ export async function GET(request: NextRequest) {
       rollup.set(id, total);
       return total;
     };
+    const publishedRollup = new Map<string, number>();
+    const rollupPublishedFor = (id: string): number => {
+      const cached = publishedRollup.get(id);
+      if (cached !== undefined) return cached;
+      const f = byId.get(id);
+      if (!f) return 0;
+      let total = publishedByName.get(f.name) ?? 0;
+      for (const childId of childrenByParent.get(id) ?? []) {
+        total += rollupPublishedFor(childId);
+      }
+      publishedRollup.set(id, total);
+      return total;
+    };
 
     const channelsByFormat = await getChannelsForFormats(allFormats.map((f) => f.id));
 
@@ -93,6 +111,7 @@ export async function GET(request: NextRequest) {
       return {
         ...f,
         totalViews: rollupFor(f.id),
+        totalPublished: rollupPublishedFor(f.id),
         accountChannels: channelsByFormat.get(f.id) ?? [],
         proven: provenStatus.isProven,
         provenStatus,

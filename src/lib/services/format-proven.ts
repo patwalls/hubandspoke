@@ -5,6 +5,8 @@ import {
   PROVEN_MIN_ITEMS,
   PROVEN_OUTLIER_MULTIPLIER,
   PROVEN_RECENT_WINDOW_DAYS,
+  PROVEN_VOLUME_HIT_MIN_HITS,
+  PROVEN_VOLUME_HIT_MIN_ITEMS,
   PROVEN_WINDOW_DAYS,
   type FormatProvenStatus,
   type ProvenReason,
@@ -19,6 +21,8 @@ export {
   PROVEN_MIN_ITEMS,
   PROVEN_OUTLIER_MULTIPLIER,
   PROVEN_RECENT_WINDOW_DAYS,
+  PROVEN_VOLUME_HIT_MIN_HITS,
+  PROVEN_VOLUME_HIT_MIN_ITEMS,
   PROVEN_WINDOW_DAYS,
 };
 export type { FormatProvenStatus, ProvenReason, ProvenSummary };
@@ -149,11 +153,20 @@ export function buildProvenStatusMap(
     let reason: ProvenReason;
     if (recentItemCount === 0) {
       reason = "stale";
+    } else if (peerMedian <= 0) {
+      // Degenerate cohort (every peer at 0 views) — algorithm can't say.
+      reason = "testing";
     } else if (
-      itemCount >= PROVEN_MIN_ITEMS &&
-      formatMedian >= peerMedian &&
-      peerMedian > 0 &&
-      hitCount >= 1
+      // Path 1: typical post performs at peer baseline. Right for
+      // evergreen pillar/derivative formats with low variance.
+      (itemCount >= PROVEN_MIN_ITEMS &&
+        formatMedian >= peerMedian &&
+        hitCount >= 1) ||
+      // Path 2: high-volume formats whose distribution is fat-tailed
+      // (clip-style — most posts flop, but the format reliably mints
+      // outliers). Hit rate is the real signal here; median is noise.
+      (itemCount >= PROVEN_VOLUME_HIT_MIN_ITEMS &&
+        hitCount >= PROVEN_VOLUME_HIT_MIN_HITS)
     ) {
       reason = "proven";
     } else {
