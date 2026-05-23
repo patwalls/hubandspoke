@@ -61,17 +61,28 @@ The reliable loop:
    (These live in `.env.local` as `E2E_TEST_USER_EMAIL` / `E2E_TEST_USER_PASSWORD`. On a fresh DB or after `/pulldb` blew the user away, re-seed with `node --env-file=.env.local scripts/seed-user.mjs e2e@local.test change-me-locally 'E2E Test'`.) The MCP profile is persistent (`~/Library/Caches/ms-playwright/mcp-chrome-profile/`), so subsequent navigations in the same session stay logged in.
 4. **See the page** with `mcp__playwright__browser_snapshot` (accessibility tree — usually enough) or `mcp__playwright__browser_take_screenshot` (pixels — for visual layout bugs). Verify the thing you changed actually looks right.
 5. **Save screenshots to `.playwright-mcp/screenshots/`** — always pass `filename: ".playwright-mcp/screenshots/<descriptive-name>.png"` to `mcp__playwright__browser_take_screenshot`. That directory is already gitignored (matches the snapshot/console scratch the MCP server writes there). Without the explicit path, screenshots land in the project root as untracked noise.
+6. **Close the browser when done** with `mcp__playwright__browser_close`. The MCP server spawns a fresh browser per task instead of reusing one, so leaving sessions open piles up Chromium processes on Pat's machine. Always shut it down at the end of a smoke-test loop — even if the test passed. This is also what keeps parallel Claude sessions (across this repo and others on the same machine) from colliding — see the lock case below.
 
-#### When the MCP session is dead
+#### When the MCP session is dead or contested
 
-A `Target page, context or browser has been closed` (or any "browser not running" error) is the most common failure mode here — usually because a previous run or another worktree closed the shared browser. **Do not stop at the first error and ask Pat to restart the server.** Work through this recovery ladder in order:
+Two distinct failure modes — diagnose by the error message and recover differently.
+
+**A. "Target page, context or browser has been closed"** (or any "browser not running" error) — the session itself is dead, usually because a previous run or another worktree closed the shared browser. **Do not stop at the first error and ask Pat to restart the server.** Work through this recovery ladder in order:
 
 1. **Retry `mcp__playwright__browser_navigate` once.** The MCP server frequently spins a fresh browser on the next navigate call after one died.
 2. **Force a clean context:** call `mcp__playwright__browser_close`, then `mcp__playwright__browser_navigate` again. This drops whatever stale context the server was hanging onto.
 3. **If MCP still won't come up, fall back to the Playwright CLI — that path has zero dependency on the MCP server.** Write a throwaway spec at `tests/e2e/_scratch.spec.ts` (gitignored prefix — clean it up when done) that navigates to the route, asserts on the thing you changed, and on failure saves a screenshot to `.playwright-mcp/screenshots/`. Run it with `npx playwright test tests/e2e/_scratch.spec.ts --reporter=line`. The existing `tests/e2e/auth.setup.ts` handles login, so you get an authed session for free.
 4. **Only after 1–3 all fail**, surface it to Pat — and surface it loudly, with the exact commands you ran and their errors. Then ask him to restart the playwright MCP server. Never silently downgrade to "integration tests passed, shipping it."
 
-The goal: a dead MCP session is an obstacle to route around, not a license to skip the visual check.
+**B. "Browser is already in use for ... use --isolated to run multiple instances of the same browser"** — a parallel Claude session (in this repo, another worktree, or another project on the same machine) has the Chromium instance locked. The `--isolated` CLI flag is a Playwright MCP server argument we can't pass through.
+
+This is **not** the session-dead case. Don't try to recover by closing/reopening or by asking Pat to restart — it's normal parallel-session contention with another running session, and recovery steps will just keep failing the same way.
+
+- If you've already verified the change at the data layer (e.g., the DB row reflects what the UI should show, the query feeding the component returns the expected rows, there are no transformations between DB and pixel that could plausibly go wrong), that is usually sufficient. Don't block waiting for the browser.
+- The Playwright CLI fallback from path A above also works here — `npx playwright test` spawns its own Chromium and doesn't go through the MCP server, so the lock doesn't apply.
+- Ask Pat once if a screenshot is critical and the CLI fallback isn't workable. If he says "fine, we'll live with it," accept the data-layer evidence and close out.
+
+The goal: a dead-or-locked MCP session is an obstacle to route around, not a license to skip the visual check.
 
 **When NOT to use Playwright MCP.** Public/unauthed routes or API JSON → `curl` is fine. Pure data verification (row counts, job state, queue contents) → `heroku pg:psql` or a local Drizzle query, not a browser.
 
