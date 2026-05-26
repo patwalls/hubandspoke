@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
     format: searchParams.get("format") || "all",
     source: searchParams.get("source") || "all",
     provenOnly: searchParams.get("provenOnly") === "1",
+    origin: searchParams.get("origin") || "all",
   };
 
   try {

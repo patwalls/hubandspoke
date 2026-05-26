@@ -38,6 +38,11 @@ interface FilterPillsProps {
   /** When true, items whose format isn't currently proven are excluded
    *  from the report aggregations. Defaults to false. */
   provenOnly?: boolean;
+  /** Provenance filter — "all" | "hubandspoke" | "synced". Maps to
+   *  `productionItems.createdVia` ranges on the server. Only rendered when
+   *  both `selectedOrigin` and `onOriginChange` are provided — other pages
+   *  (brand dashboard, content report) don't surface this filter. */
+  selectedOrigin?: string;
   /** Picker options fetched from the server. Accounts drive the "Account"
    *  dropdown; post types are a static canonical set. */
   accounts: FilterAccount[];
@@ -54,6 +59,7 @@ interface FilterPillsProps {
   onFormatChange: (v: string) => void;
   onSourceChange: (v: string) => void;
   onProvenOnlyChange?: (v: boolean) => void;
+  onOriginChange?: (v: string) => void;
 }
 
 const PRESETS = [
@@ -79,6 +85,15 @@ const SOURCES = [
   { value: "repurposed", label: "Repurposed" },
   { value: "cross_post", label: "Cross-post" },
   { value: "repost", label: "Repost" },
+];
+
+// Provenance filter — distinguishes content created/edited inside H&S from
+// items we pulled in from the platform after-the-fact (agency / manual posts).
+// NULL createdVia (pre-2026-05-11 rows) is treated as "synced".
+const ORIGINS = [
+  { value: "all", label: "All origins" },
+  { value: "hubandspoke", label: "Made in Hub & Spoke" },
+  { value: "synced", label: "Synced from platform" },
 ];
 
 function resolvePreset(
@@ -329,6 +344,7 @@ export function FilterPills({
   selectedFormat,
   selectedSource,
   provenOnly = false,
+  selectedOrigin,
   accounts,
   formats,
   showViewType = true,
@@ -341,6 +357,7 @@ export function FilterPills({
   onFormatChange,
   onSourceChange,
   onProvenOnlyChange,
+  onOriginChange,
 }: FilterPillsProps) {
   // Canonical platforms — fixed list that the `accounts.platform` column
   // takes values from. Mirrors PLATFORM_META ordering in src/lib/platforms.ts.
@@ -476,6 +493,14 @@ export function FilterPills({
           {provenOnly && <CheckIcon className="size-3" />}
           Proven only
         </button>
+      )}
+      {onOriginChange && (
+        <SelectPill
+          label="Origin"
+          value={selectedOrigin ?? "all"}
+          options={ORIGINS}
+          onChange={onOriginChange}
+        />
       )}
     </div>
   );

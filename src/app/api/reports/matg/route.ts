@@ -61,6 +61,7 @@ export async function GET(request: NextRequest) {
   const formatFilter = searchParams.get("format") || "all";
   const sourceFilter = searchParams.get("source") || "all";
   const provenOnly = searchParams.get("provenOnly") === "1";
+  const originFilter = searchParams.get("origin") || "all";
 
   try {
     const { weeklyGoal, weeklyViewsGoal, weekStartDay } = await getBrandSettings("matg");
@@ -131,6 +132,29 @@ export async function GET(request: NextRequest) {
       conditions.push(eq(productionItems.sourceType, "repost"));
     } else if (sourceFilter === "cross_post") {
       conditions.push(eq(productionItems.sourceType, "cross_post"));
+    }
+
+    // Origin filter — see getContentReport in src/lib/db/queries.ts for the
+    // canonical comment. Explicit `createdVia` is definitive; the
+    // `sourceType` fallback covers pre-2026-05-11 rows with the
+    // documented small-false-positive risk from retroactive backfills.
+    if (originFilter === "hubandspoke") {
+      conditions.push(
+        sql`(
+          (${productionItems.createdVia} IS NOT NULL AND ${productionItems.createdVia} NOT LIKE 'sync:%')
+          OR ${productionItems.sourceType} IN ('repost', 'cross_post', 'repurposed')
+        )`
+      );
+    } else if (originFilter === "synced") {
+      conditions.push(
+        sql`(
+          ${productionItems.createdVia} LIKE 'sync:%'
+          OR (
+            ${productionItems.createdVia} IS NULL
+            AND (${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')
+          )
+        )`
+      );
     }
 
     // Join accounts+brands so each returned item carries a shaped

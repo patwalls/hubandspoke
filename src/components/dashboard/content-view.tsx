@@ -48,6 +48,7 @@ export function ContentView({ brand }: ContentViewProps) {
     postType: { default: "all" },
     format: { default: "all" },
     source: { default: "all" },
+    origin: { default: "all" },
     startDate: { default: defaultStart },
     endDate: { default: defaultEnd },
     viewType: { default: "weekly" },
@@ -58,6 +59,7 @@ export function ContentView({ brand }: ContentViewProps) {
     postType: selectedPostType,
     format: selectedFormat,
     source: selectedSource,
+    origin: selectedOrigin,
     startDate,
     endDate,
     viewType,
@@ -133,6 +135,7 @@ export function ContentView({ brand }: ContentViewProps) {
         postType: selectedPostType,
         format: selectedFormat,
         source: selectedSource,
+        origin: selectedOrigin,
       });
       const res = await fetch(`${apiBase}?${params}`);
       const text = await res.text();
@@ -150,7 +153,7 @@ export function ContentView({ brand }: ContentViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource]);
+  }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin]);
 
   useEffect(() => {
     fetchReport();
@@ -174,6 +177,7 @@ export function ContentView({ brand }: ContentViewProps) {
         selectedPostType={selectedPostType}
         selectedFormat={selectedFormat}
         selectedSource={selectedSource}
+        selectedOrigin={selectedOrigin}
         accounts={accounts}
         formats={data?.formats ?? []}
         showViewType={false}
@@ -185,6 +189,7 @@ export function ContentView({ brand }: ContentViewProps) {
         onPostTypeChange={(v) => filters.set("postType", v)}
         onFormatChange={(v) => filters.set("format", v)}
         onSourceChange={(v) => filters.set("source", v)}
+        onOriginChange={(v) => filters.set("origin", v)}
       />
 
       {loading ? (

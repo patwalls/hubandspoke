@@ -266,6 +266,10 @@ interface ReportParams {
   /** When true, drop items whose format isn't currently "proven" per the
    *  180-day algorithm in `lib/services/format-proven.ts`. */
   provenOnly?: boolean;
+  /** Provenance filter via `productionItems.createdVia`:
+   *  - "hubandspoke" → anything not stamped `sync:*` (created in this app)
+   *  - "synced"      → `sync:*` or NULL (synced from the platform / pre-2026-05-11) */
+  origin?: string;
 }
 
 /**
@@ -421,6 +425,7 @@ export async function getContentReport(
     format,
     source,
     provenOnly,
+    origin,
   } = params;
 
   const { weeklyGoal, weeklyViewsGoal, weekStartDay } = await getBrandSettings(brand);
@@ -508,6 +513,39 @@ export async function getContentReport(
     } else {
       conditions.push(inArray(productionItems.format, provenNames));
     }
+  }
+
+  // Origin filter — "made in Hub & Spoke" vs "synced from the platform".
+  // Two ORed signals:
+  //   (a) `createdVia` is stamped non-sync — definitive (post-2026-05-11
+  //       every insert site stamps this, so new work is always accurate).
+  //   (b) `sourceType IN ('repost','cross_post','repurposed')` — best-effort
+  //       fallback for pre-2026-05-11 rows where `createdVia` is NULL.
+  //
+  // Known false-positive risk on (b): three retroactive-classification
+  // scripts can stamp those source types on rows that were originally
+  // synced (backfill-repost-classification.mjs, migrate-crosspost-formats.mjs,
+  // migrate-source-type-consolidation.mjs Phase 3). For MATG ≤Feb-May 2026
+  // the affected universe is <10 rows total — accepted as the cost of
+  // surfacing pre-rollout H&S creations until (and if) we backfill
+  // `createdVia` directly.
+  if (origin === "hubandspoke") {
+    conditions.push(
+      sql`(
+        (${productionItems.createdVia} IS NOT NULL AND ${productionItems.createdVia} NOT LIKE 'sync:%')
+        OR ${productionItems.sourceType} IN ('repost', 'cross_post', 'repurposed')
+      )`
+    );
+  } else if (origin === "synced") {
+    conditions.push(
+      sql`(
+        ${productionItems.createdVia} LIKE 'sync:%'
+        OR (
+          ${productionItems.createdVia} IS NULL
+          AND (${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')
+        )
+      )`
+    );
   }
 
   // Join accounts+brands so each item carries a shaped `account` for the
