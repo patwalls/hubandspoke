@@ -52,6 +52,14 @@ interface FilterPillsProps {
   showViewType?: boolean;
   onStartDateChange: (d: string) => void;
   onEndDateChange: (d: string) => void;
+  /** Optional atomic setter — when provided, the date pill calls this instead
+   *  of firing `onStartDateChange` + `onEndDateChange` back-to-back. Avoids a
+   *  race where useUrlState's two consecutive `set()` calls each build off the
+   *  same pre-update URL snapshot, so only the second key sticks. Consumers
+   *  that drive their state through `useUrlState` should pass:
+   *    (s, e) => filters.setMany({ startDate: s, endDate: e })
+   *  to write both URL params in one update. */
+  onDateRangeChange?: (startDate: string, endDate: string) => void;
   onViewTypeChange: (v: string) => void;
   onPlatformKeyChange: (v: string) => void;
   onAccountChange: (v: string) => void;
@@ -199,9 +207,14 @@ function DateRangePill({
   endDate,
   onStartDateChange,
   onEndDateChange,
+  onDateRangeChange,
 }: Pick<
   FilterPillsProps,
-  "startDate" | "endDate" | "onStartDateChange" | "onEndDateChange"
+  | "startDate"
+  | "endDate"
+  | "onStartDateChange"
+  | "onEndDateChange"
+  | "onDateRangeChange"
 >) {
   const [open, setOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(startDate);
@@ -215,19 +228,28 @@ function DateRangePill({
     setOpen(next);
   }
 
+  // Prefer the atomic setter when provided (avoids the
+  // back-to-back-set race documented on FilterPillsProps.onDateRangeChange).
+  function commit(s: string, e: string) {
+    if (onDateRangeChange) {
+      onDateRangeChange(s, e);
+    } else {
+      onStartDateChange(s);
+      onEndDateChange(e);
+    }
+  }
+
   function applyPreset(value: string) {
     const r = resolvePreset(value);
     if (!r) return;
     const s = format(r.startDate, "yyyy-MM-dd");
     const e = format(r.endDate, "yyyy-MM-dd");
-    onStartDateChange(s);
-    onEndDateChange(e);
+    commit(s, e);
     setOpen(false);
   }
 
   function applyCustom() {
-    onStartDateChange(draftStart);
-    onEndDateChange(draftEnd);
+    commit(draftStart, draftEnd);
     setOpen(false);
   }
 
@@ -350,6 +372,7 @@ export function FilterPills({
   showViewType = true,
   onStartDateChange,
   onEndDateChange,
+  onDateRangeChange,
   onViewTypeChange,
   onPlatformKeyChange,
   onAccountChange,
@@ -433,6 +456,7 @@ export function FilterPills({
         endDate={endDate}
         onStartDateChange={onStartDateChange}
         onEndDateChange={onEndDateChange}
+        onDateRangeChange={onDateRangeChange}
       />
       {showViewType && (
         <SelectPill value={viewType} options={INTERVALS} onChange={onViewTypeChange} />

@@ -226,6 +226,7 @@ export function ContentReport({ brand }: { brand: string }) {
         formats={data?.formats ?? []}
         onStartDateChange={(v) => filters.set("startDate", v)}
         onEndDateChange={(v) => filters.set("endDate", v)}
+        onDateRangeChange={(s, e) => filters.setMany({ startDate: s, endDate: e })}
         onViewTypeChange={(v) => filters.set("viewType", v)}
         onPlatformKeyChange={(v) => filters.set("platform", v)}
         onAccountChange={(v) => filters.set("accountId", v)}
