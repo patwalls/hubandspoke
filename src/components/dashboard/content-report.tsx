@@ -33,6 +33,7 @@ export function ContentReport({ brand }: { brand: string }) {
     postType: { default: "all" },
     format: { default: "all" },
     source: { default: "all" },
+    origin: { default: "all" },
     provenOnly: { default: "0" },
     startDate: { default: defaultStart },
     endDate: { default: defaultEnd },
@@ -44,6 +45,7 @@ export function ContentReport({ brand }: { brand: string }) {
     postType: selectedPostType,
     format: selectedFormat,
     source: selectedSource,
+    origin: selectedOrigin,
     provenOnly: provenOnlyFlag,
     startDate,
     endDate,
@@ -107,6 +109,7 @@ export function ContentReport({ brand }: { brand: string }) {
         postType: selectedPostType,
         format: selectedFormat,
         source: selectedSource,
+        origin: selectedOrigin,
         provenOnly: provenOnly ? "1" : "0",
       });
       const res = await fetch(`/api/reports/content?${params}`);
@@ -145,7 +148,7 @@ export function ContentReport({ brand }: { brand: string }) {
     } finally {
       setLoading(false);
     }
-  }, [brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, provenOnly]);
+  }, [brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin, provenOnly]);
 
   useEffect(() => {
     fetchReport();
@@ -217,6 +220,7 @@ export function ContentReport({ brand }: { brand: string }) {
         selectedPostType={selectedPostType}
         selectedFormat={selectedFormat}
         selectedSource={selectedSource}
+        selectedOrigin={selectedOrigin}
         provenOnly={provenOnly}
         accounts={accounts}
         formats={data?.formats ?? []}
@@ -228,6 +232,7 @@ export function ContentReport({ brand }: { brand: string }) {
         onPostTypeChange={(v) => filters.set("postType", v)}
         onFormatChange={(v) => filters.set("format", v)}
         onSourceChange={(v) => filters.set("source", v)}
+        onOriginChange={(v) => filters.set("origin", v)}
         onProvenOnlyChange={(v) => filters.set("provenOnly", v ? "1" : "0")}
       />
 
