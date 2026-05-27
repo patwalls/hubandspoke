@@ -33,7 +33,7 @@ function buildContentUrl(
 ): string {
   const params = new URLSearchParams();
   if (filter?.kind === "platform") {
-    params.set("platformKey", filter.platform);
+    params.set("platform", filter.platform);
   } else if (filter?.kind === "account") {
     params.set("accountId", filter.accountId);
     if (filter.postType) params.set("postType", filter.postType);
