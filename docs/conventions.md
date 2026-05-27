@@ -299,3 +299,36 @@ diagnosing UI bugs that need eyeballs (the "black video player" symptom
 that motivated this scaffold). The MCP keeps a persistent profile in
 `~/Library/Caches/ms-playwright/mcp-chrome-profile/` so logging in once
 sticks across sessions.
+
+## LLM eval tests (gated) — `*.eval.test.ts`
+
+When the thing that can break is a **model's judgment** (an eligibility
+call, a classification, "did the prompt make the right decision"), a mocked
+unit test can't catch the regression — it only asserts the wiring around a
+hardcoded answer. For those cases, write a **gated live eval**: a
+`*.eval.test.ts` that calls the real model against a small fixture table and
+asserts the decision.
+
+**Pattern** (template: `src/lib/clip-hook-agent.eval.test.ts`, which guards
+the Splice hook writer against accepting an app-feature demo for the Tech
+Stack format):
+
+- Gate the whole suite: `describe.skipIf(!process.env.RUN_LLM_EVALS)(…)`.
+- Drive a fixture array of `(input, expectedDecision)` pairs; one `it` per
+  fixture. On failure, surface the model's own reason in the assertion
+  message (`expect(x, \`model reason: \${reason}\`).toBe(…)`) so prompt
+  iteration is fast.
+- Inline the relevant prompt inputs (skill text, etc.) so the eval is
+  hermetic — it validates the prompt+skill *design*, not whatever is in the
+  dev DB.
+- Make the agent accept an injectable `client?: Anthropic` (see
+  `services/draft-algorithm/derivative-hook.ts`) so the *deterministic*
+  wiring tests in the sibling `*.test.ts` can mock responses, while the eval
+  calls the real client.
+
+**Running.** `npm run test:eval` (sets `RUN_LLM_EVALS=1`, needs
+`ANTHROPIC_API_KEY` in `.env.local`). Evals are **excluded** from
+`npm run test` / CI — they cost money and are non-deterministic. The `eval`
+vitest project (`vitest.config.ts`) carries a longer `testTimeout`. Run
+them by hand whenever you touch the prompt they guard, and re-run a couple
+of times to confirm the decision is stable, not a coin-flip.

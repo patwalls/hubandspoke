@@ -17,7 +17,11 @@ import {
 // pipeline is ~36 Haiku calls per pillar (~$0.11 total), parallel via a
 // 5-wide semaphore in the service layer.
 const MODEL = "claude-haiku-4-5-20251001";
-export const HOOK_PROMPT_VERSION = 1;
+// v2 (2026-05-27): subject-strict eligibility. v1 decided fit on framing and
+// would relabel an app-feature demo as a "feature stack" to satisfy the Tech
+// Stack format's name; v2 forbids that reframing and matches on the section's
+// actual subject. See clip-hook-agent.eval.test.ts.
+export const HOOK_PROMPT_VERSION = 2;
 export const HOOK_GENERATED_BY = `${MODEL}:hook-v${HOOK_PROMPT_VERSION}`;
 
 const DEFAULT_FORMAT_BLOCK = `FORMAT — narrator-overlay hook, 30–60s vertical Reel.
@@ -32,7 +36,12 @@ const SYSTEM_PROMPT_BASE = `You are a per-format hook writer for a brand whose t
 
 Your job, in order:
 
-1. DECIDE if THIS format fits THIS section. Many sections will be a great fit for any format ("the founder reveals their $1.7M business" works for Reel and X); some are conditional ("here's our exact tech stack" only fits a tech-stack-focused format). When the section's content doesn't match the format's intended subject matter or shape, return \`eligible: false\` with a one-sentence reason. **Be honest** — a non-fit produces a clip the editor will just kill.
+1. DECIDE if THIS format fits THIS section — judged on the section's ACTUAL SUBJECT, never on how cleverly you could reframe it.
+
+   - Some formats are broad ("the founder reveals their $1.7M business" fits both Reel and X). Others declare a NARROW subject — in the FORMAT block, or implied by the format's name (e.g. a "Tech Stack" format, an "X Quotables" format). Read the FORMAT block to learn what subject and shape this format is actually for.
+   - For a narrow-subject format, default to \`eligible: false\` UNLESS the section's content clearly and literally IS that subject. Do NOT relabel, stretch, or reframe a section to make it fit. Concretely: a product/app-feature DEMO — the founder walking through what their app DOES for its users ("first you open the calculator, then you log a dose, then you pick an injection site") — is NOT a tech-stack reveal, even though you could call it a "feature stack." Naming the engineering tools/services the product is BUILT ON or RUNS ON ("we use Bubble, Framer for the site, Ghost for content, Postgres") IS. If you notice yourself softening the format's own word to make a section fit, that is the signal to return \`eligible: false\`.
+   - The section's \`themeTags\` are a subject hint. When they point away from the format's subject (e.g. \`demo_walkthrough\` or \`revenue_reveal\` against a tech-stack format), scrutinize hard before accepting.
+   - \`reason\` must name the SPECIFIC thing in the section that makes the subject match (or not) — grounded in the section's content, not in the framing you'd write. **Be honest** — a non-fit produces a clip the editor just kills.
 
 2. If eligible, WRITE the hook + any format-specific extras the FORMAT block declares. Mirror a REFERENCE LIBRARY pattern. Keep timestamps cue-aligned (you can narrow within the section via tightStartSec/tightEndSec — never widen beyond the section's bounds).
 
@@ -177,6 +186,10 @@ export interface HookGenerateArgs {
   transcriptWords: TranscriptWord[];
   transcriptSegments: TranscriptSegment[];
   pillarDurationSec: number;
+  /** Test seam: inject a stubbed Anthropic client. Defaults to a real
+   *  `new Anthropic()` (reads ANTHROPIC_API_KEY). Mirrors the template in
+   *  `services/draft-algorithm/derivative-hook.ts`. */
+  client?: Anthropic;
 }
 
 function sanitizeHookText(s: string): string | null {
@@ -375,7 +388,7 @@ function validate(
 export async function writeFormatHookForSection(
   args: HookGenerateArgs,
 ): Promise<HookGenerationResult> {
-  const client = new Anthropic();
+  const client = args.client ?? new Anthropic();
 
   const formatBlock = args.formatSkillSection
     ? `=====================================================

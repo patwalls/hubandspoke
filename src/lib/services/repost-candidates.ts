@@ -94,6 +94,28 @@ const COOLDOWN_DAYS_BY_PLATFORM: Record<string, number> = {
 };
 const COOLDOWN_DAYS_DEFAULT = 60;
 
+/** Platforms where reposting an *original* makes no sense — you don't
+ *  re-upload a long-form YouTube video the way you re-share a banger tweet
+ *  or reel. Their clips and cross-posts (sourceType `repurposed` /
+ *  `cross_post`) stay eligible; only `original` is blocked. (Pat, 2026-05-27.) */
+const NO_ORIGINAL_REPOST_PLATFORMS = new Set<string>(["youtube"]);
+
+/** Whether an item is barred from the repost queue because reposting an
+ *  original on its platform is nonsensical (you don't re-upload a long-form
+ *  YouTube video). Clips and cross-posts on the same platform stay eligible —
+ *  only `sourceType === "original"` is blocked, and only on the platforms in
+ *  {@link NO_ORIGINAL_REPOST_PLATFORMS}. */
+export function isOriginalRepostBlocked(
+  platform: string | null,
+  sourceType: string,
+): boolean {
+  return (
+    sourceType === "original" &&
+    platform != null &&
+    NO_ORIGINAL_REPOST_PLATFORMS.has(platform)
+  );
+}
+
 const CHECKPOINT_LABEL: Record<string, string> = {
   "15m": "15 min after publish",
   "30m": "30 min after publish",
@@ -174,6 +196,7 @@ export interface RepostCandidatesResult {
   items: RepostCandidate[];
   stats: {
     rawCandidates: number;
+    droppedOriginalOnPlatform: number;
     droppedDismissed: number;
     droppedPriorKilled: number;
     droppedCooldown: number;
@@ -187,6 +210,7 @@ export interface RepostCandidatesResult {
     minCohort: number;
     minAgeDaysByPlatform: Record<string, number>;
     minAgeDaysDefault: number;
+    noOriginalRepostPlatforms: string[];
   };
 }
 
@@ -197,6 +221,7 @@ export async function selectRepostCandidates(opts: {
 
   const stats = {
     rawCandidates: 0,
+    droppedOriginalOnPlatform: 0,
     droppedDismissed: 0,
     droppedPriorKilled: 0,
     droppedCooldown: 0,
@@ -268,9 +293,23 @@ export async function selectRepostCandidates(opts: {
     return { items: [], stats, config: configBlock() };
   }
 
+  // Drop originals on platforms where reposting them is nonsensical — you
+  // don't re-upload a long-form YouTube video. Clips and cross-posts on the
+  // same platform stay eligible. Done in code (like the age gate) so the
+  // platform set is the single source of truth. (Pat, 2026-05-27.)
+  const repostable = rawCandidates.filter((c) => {
+    const blocked = isOriginalRepostBlocked(c.accountPlatform, c.sourceType);
+    if (blocked) stats.droppedOriginalOnPlatform++;
+    return !blocked;
+  });
+
+  if (repostable.length === 0) {
+    return { items: [], stats, config: configBlock() };
+  }
+
   // Apply per-platform minimum age. Done in code rather than SQL so the
   // per-platform map is the single source of truth.
-  const ageEligible = rawCandidates.filter((c) => {
+  const ageEligible = repostable.filter((c) => {
     if (!c.publishedAt) return false;
     const minDays =
       MIN_AGE_DAYS_BY_PLATFORM[c.accountPlatform] ?? MIN_AGE_DAYS_DEFAULT;
@@ -575,6 +614,7 @@ function configBlock() {
     minCohort: MIN_COHORT,
     minAgeDaysByPlatform: MIN_AGE_DAYS_BY_PLATFORM,
     minAgeDaysDefault: MIN_AGE_DAYS_DEFAULT,
+    noOriginalRepostPlatforms: [...NO_ORIGINAL_REPOST_PLATFORMS],
   };
 }
 

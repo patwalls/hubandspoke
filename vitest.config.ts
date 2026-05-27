@@ -10,7 +10,14 @@ import { defineConfig } from "vitest/config";
 //   Tests insert disposable fixtures and delete them in `afterEach`;
 //   nothing leaks between runs.
 //
-// `npm run test` runs both. Tests run in a single fork (no parallelism)
+// - `*.eval.test.ts` — gated live-LLM evals. They call a real Anthropic
+//   model to assert a prompt makes the right judgment (e.g. the hook
+//   writer rejecting an app-feature demo for the Tech Stack format). They
+//   are EXCLUDED from `npm run test` (slow, costs money, non-deterministic)
+//   and only run via `npm run test:eval`, which sets RUN_LLM_EVALS=1; each
+//   eval also self-skips when that flag is unset. Needs ANTHROPIC_API_KEY.
+//
+// `npm run test` runs unit + integration. Tests run in a single fork (no parallelism)
 // because graphile-worker's jobs table and the dev DB are global state
 // and parallel tests can step on each other.
 export default defineConfig({
@@ -32,7 +39,9 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["src/**/*.test.ts"],
-          exclude: ["src/**/*.integration.test.ts"],
+          // `*.eval.test.ts` also matches `*.test.ts`; keep it out of the
+          // default suite so `npm run test` stays fast/free/deterministic.
+          exclude: ["src/**/*.integration.test.ts", "src/**/*.eval.test.ts"],
         },
       },
       {
@@ -40,6 +49,15 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["src/**/*.integration.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "eval",
+          include: ["src/**/*.eval.test.ts"],
+          // Live model calls — give them room beyond the 15s default.
+          testTimeout: 60_000,
         },
       },
     ],
