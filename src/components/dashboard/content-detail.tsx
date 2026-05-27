@@ -5,7 +5,7 @@ import Link from "next/link";
 import { BackLink } from "./back-link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronDownIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, GitMerge, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, GitBranchIcon, GitMerge, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import {
@@ -81,6 +81,7 @@ import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ClipIdeasPanel } from "./clip-ideas-panel";
 import { ContentPreview } from "./preview/content-preview";
 import { MergeModal } from "./merge-modal";
+import { ForkFormatDialog } from "./fork-format-dialog";
 import { PublishedEmbed } from "./preview/published-embed";
 import type { ContentDraftContent, FormatFieldSchema } from "@/lib/db/schema";
 
@@ -829,6 +830,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
   // Merge modal for manually merging duplicate items
   const [showMergeModal, setShowMergeModal] = useState(false);
+  const [showForkFormat, setShowForkFormat] = useState(false);
   const [mediaUploadStage, setMediaUploadStage] = useState<
     "idle" | "uploading" | "confirming" | "done"
   >("idle");
@@ -2912,6 +2914,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   >
                     <GitMerge className="size-3.5" /> Merge…
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={actionPending || !currentFormat}
+                    onClick={() => setShowForkFormat(true)}
+                  >
+                    <GitBranchIcon className="size-3.5" /> Fork format…
+                  </DropdownMenuItem>
                   {/* Edit publish info — moved into the Actions menu when
                    *  the post is Published with a link, since "View Live
                    *  Post" took the header CTA spot. Only meaningful for
@@ -4362,6 +4370,22 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           router.refresh();
         }}
       />
+
+      {currentFormat && (
+        <ForkFormatDialog
+          open={showForkFormat}
+          onOpenChange={setShowForkFormat}
+          brand={brand}
+          parentFormatId={currentFormat.id}
+          parentFormatName={currentFormat.name}
+          productionItemId={contentId}
+          onForked={() => {
+            // Re-fetch the detail so the format pill + repurpose targets
+            // reflect the new format the item was just assigned to.
+            void load();
+          }}
+        />
+      )}
 
     </div>
   );

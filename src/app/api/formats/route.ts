@@ -140,6 +140,8 @@ export async function POST(request: NextRequest) {
       instructions,
       parentFormatId,
       isClippableFormat,
+      isCanvaFormat,
+      labelsAsOriginal,
       clipTargetPostType,
       clipTargetPlatform,
       clipAspectRatio,
@@ -152,6 +154,8 @@ export async function POST(request: NextRequest) {
       instructions?: string | null;
       parentFormatId?: string | null;
       isClippableFormat?: boolean;
+      isCanvaFormat?: boolean;
+      labelsAsOriginal?: boolean;
       clipTargetPostType?: string | null;
       clipTargetPlatform?: string[] | null;
       clipAspectRatio?: string | null;
@@ -185,6 +189,8 @@ export async function POST(request: NextRequest) {
         instructions: instructions || null,
         parentFormatId: parentFormatId || null,
         isClippableFormat: isClippableFormat === true,
+        isCanvaFormat: isCanvaFormat === true,
+        labelsAsOriginal: labelsAsOriginal === true,
         clipTargetPostType: clipTargetPostType || null,
         clipTargetPlatform:
           Array.isArray(clipTargetPlatform) && clipTargetPlatform.length > 0
@@ -200,6 +206,20 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
+    // Unique index uniq_formats_brand_name_lower → a format with this name
+    // already exists in the brand. Surface it cleanly so the UI can show the
+    // collision instead of a generic 500.
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: string }).code === "23505"
+    ) {
+      return NextResponse.json(
+        { error: "A format with that name already exists in this brand." },
+        { status: 409 }
+      );
+    }
     console.error("Error creating format:", error);
     return NextResponse.json(
       { error: "Failed to create format" },

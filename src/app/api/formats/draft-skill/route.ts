@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { formats } from "@/lib/db/schema";
+import { formats, productionItems } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
+import { buildForkUserText } from "../draft-skill-prompt";
 
 const MODEL = "claude-haiku-4-5-20251001";
 const MAX_DESCRIPTION_LEN = 800;
@@ -41,6 +42,18 @@ interface DraftSkillBody {
   description: string;
   brand: string;
   parentFormatId?: string | null;
+  /** FORK MODE. When set, the drafter specializes this existing format's
+   *  Skill instead of writing one from scratch: the parent's `instructions`
+   *  become the starting point, `description` is treated as an optional
+   *  steering note (blank allowed), and the result inherits the parent's
+   *  clip settings + is parented under it. */
+  forkFromFormatId?: string | null;
+  /** FORK MODE. The piece of content the fork should specialize for — its
+   *  title / post type / body ground the narrowing. */
+  productionItemId?: string | null;
+  /** FORK MODE. Operator's chosen name for the new format. Fed to the prompt
+   *  and used as the suggested name (takes precedence over the LLM's guess). */
+  name?: string | null;
   /** Optional base64-encoded screenshots of the format. Operator uploads
    *  them in the quick-add dialog when showing-by-example is faster than
    *  describing in words. Each image is passed to Haiku as a vision block
@@ -59,6 +72,11 @@ interface DraftedFormat {
   suggestedPlatform: string[];
   suggestedAspectRatio: "9:16" | "16:9";
   suggestedParentFormatId: string | null;
+  /** Present in fork mode — the parent's clip settings, so the client can
+   *  pass them straight through to POST /api/formats without a refetch. */
+  inheritedIsClippable?: boolean;
+  inheritedIsCanva?: boolean;
+  inheritedLabelsAsOriginal?: boolean;
 }
 
 const tools: Anthropic.Tool[] = [
@@ -162,7 +180,11 @@ export async function POST(request: NextRequest) {
   }
   const description = (body.description ?? "").trim();
   const brand = (body.brand ?? "").trim();
-  if (!description) {
+  const forkFromFormatId = (body.forkFromFormatId ?? "").trim() || null;
+  const isFork = forkFromFormatId !== null;
+  // In fork mode the steering note (description) is optional — the parent
+  // Skill + example content carry the load. Otherwise it's required.
+  if (!isFork && !description) {
     return NextResponse.json(
       { error: "description is required" },
       { status: 400 },
@@ -225,73 +247,134 @@ export async function POST(request: NextRequest) {
     validatedImages.push(img);
   }
 
-  // Validate parentFormatId belongs to the same brand (if provided).
-  if (body.parentFormatId) {
+  // The format the new one descends from. In fork mode this is the format
+  // being specialized (`forkFromFormatId`); in the from-scratch path it's the
+  // optional `parentFormatId` the quick-add dialog may pre-fill.
+  const newParentId = forkFromFormatId ?? body.parentFormatId ?? null;
+
+  // Load the parent (full row in fork mode — we need its Skill + clip
+  // settings; just the brand otherwise for validation).
+  let forkParent: typeof formats.$inferSelect | null = null;
+  if (newParentId) {
     const [parent] = await db
-      .select({ brand: formats.brand })
+      .select()
       .from(formats)
-      .where(eq(formats.id, body.parentFormatId))
+      .where(eq(formats.id, newParentId))
       .limit(1);
     if (!parent) {
       return NextResponse.json(
-        { error: "parentFormatId not found" },
+        { error: `${isFork ? "forkFromFormatId" : "parentFormatId"} not found` },
         { status: 400 },
       );
     }
     if (parent.brand !== brand) {
       return NextResponse.json(
-        { error: "parentFormatId belongs to a different brand" },
+        {
+          error: `${isFork ? "forkFromFormatId" : "parentFormatId"} belongs to a different brand`,
+        },
         { status: 400 },
       );
     }
+    forkParent = parent;
   }
 
-  // Pull up to 3 sibling format Skills for brand-voice grounding. Prefer
-  // clippable formats (they have the Clip Idea Generation section already).
-  const siblings = await db
-    .select({
-      name: formats.name,
-      instructions: formats.instructions,
-    })
-    .from(formats)
-    .where(
-      and(
-        eq(formats.brand, brand),
-        eq(formats.isClippableFormat, true),
-        isNotNull(formats.instructions),
-      ),
-    )
-    .limit(3);
+  let userText: string;
 
-  const brandVoiceBlock =
-    siblings.length > 0
-      ? siblings
-          .map(
-            (s, i) =>
-              `--- Sibling #${i + 1}: "${s.name}" ---\n${(s.instructions ?? "").slice(0, 2000)}`,
-          )
-          .join("\n\n")
-      : `(No sibling clippable formats on this brand yet. Match general voice and use sensible defaults.)`;
+  if (isFork) {
+    // Fork mode: specialize the parent's Skill for a concrete piece of
+    // content. Skip the sibling-voice block — the parent Skill is the
+    // strongest voice anchor we have.
+    let item: {
+      title: string | null;
+      postType: string | null;
+      format: string | null;
+      contentBody: string | null;
+    } | null = null;
+    if (body.productionItemId) {
+      const [row] = await db
+        .select({
+          title: productionItems.title,
+          postType: productionItems.postType,
+          format: productionItems.format,
+          contentBody: productionItems.contentBody,
+          brand: productionItems.brand,
+        })
+        .from(productionItems)
+        .where(eq(productionItems.id, body.productionItemId))
+        .limit(1);
+      if (!row) {
+        return NextResponse.json(
+          { error: "productionItemId not found" },
+          { status: 400 },
+        );
+      }
+      if (row.brand !== brand) {
+        return NextResponse.json(
+          { error: "productionItemId belongs to a different brand" },
+          { status: 400 },
+        );
+      }
+      item = {
+        title: row.title,
+        postType: row.postType,
+        format: row.format,
+        contentBody: row.contentBody,
+      };
+    }
 
-  const userText = [
-    `Brand: ${brand}`,
-    body.parentFormatId
-      ? `Parent format id: ${body.parentFormatId}`
-      : null,
-    ``,
-    `Operator's description of the format they want:`,
-    description,
-    validatedImages.length > 0
-      ? `\n${validatedImages.length} screenshot${validatedImages.length === 1 ? "" : "s"} of the format are attached below — extract the visible text, layout, structure, and any on-screen overlays/captions. Treat the images as authoritative when they disagree with the description.`
-      : null,
-    ``,
-    `Brand-voice grounding (existing clippable formats on this brand):`,
-    brandVoiceBlock,
-    ``,
-    `Draft the full Skill + suggested name + suggested post_type via submit_format_draft.`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+    userText = buildForkUserText({
+      brand,
+      parentFormatName: forkParent!.name,
+      parentInstructions: forkParent!.instructions,
+      newName: (body.name ?? "").trim() || forkParent!.name,
+      steeringNote: description,
+      item,
+    });
+  } else {
+    // From-scratch: ground the draft in up to 3 sibling clippable Skills.
+    const siblings = await db
+      .select({
+        name: formats.name,
+        instructions: formats.instructions,
+      })
+      .from(formats)
+      .where(
+        and(
+          eq(formats.brand, brand),
+          eq(formats.isClippableFormat, true),
+          isNotNull(formats.instructions),
+        ),
+      )
+      .limit(3);
+
+    const brandVoiceBlock =
+      siblings.length > 0
+        ? siblings
+            .map(
+              (s, i) =>
+                `--- Sibling #${i + 1}: "${s.name}" ---\n${(s.instructions ?? "").slice(0, 2000)}`,
+            )
+            .join("\n\n")
+        : `(No sibling clippable formats on this brand yet. Match general voice and use sensible defaults.)`;
+
+    userText = [
+      `Brand: ${brand}`,
+      newParentId ? `Parent format id: ${newParentId}` : null,
+      ``,
+      `Operator's description of the format they want:`,
+      description,
+      validatedImages.length > 0
+        ? `\n${validatedImages.length} screenshot${validatedImages.length === 1 ? "" : "s"} of the format are attached below — extract the visible text, layout, structure, and any on-screen overlays/captions. Treat the images as authoritative when they disagree with the description.`
+        : null,
+      ``,
+      `Brand-voice grounding (existing clippable formats on this brand):`,
+      brandVoiceBlock,
+      ``,
+      `Draft the full Skill + suggested name + suggested post_type via submit_format_draft.`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
 
   type ContentBlock =
     | { type: "text"; text: string }
@@ -366,8 +449,27 @@ export async function POST(request: NextRequest) {
     suggestedPostType: postTypeKey,
     suggestedPlatform: defaults.platform,
     suggestedAspectRatio: defaults.aspect,
-    suggestedParentFormatId: body.parentFormatId ?? null,
+    suggestedParentFormatId: newParentId,
   };
+
+  // Fork mode: a fork is a narrower child of the same kind of format, so
+  // inherit the parent's clip settings rather than the LLM's guess. Fall back
+  // to the from-scratch defaults whenever the parent left a setting null.
+  if (isFork && forkParent) {
+    if (body.name && body.name.trim()) result.name = body.name.trim();
+    if (forkParent.clipTargetPostType) {
+      result.suggestedPostType = forkParent.clipTargetPostType;
+    }
+    if (forkParent.clipTargetPlatform && forkParent.clipTargetPlatform.length > 0) {
+      result.suggestedPlatform = forkParent.clipTargetPlatform;
+    }
+    if (forkParent.clipAspectRatio === "9:16" || forkParent.clipAspectRatio === "16:9") {
+      result.suggestedAspectRatio = forkParent.clipAspectRatio;
+    }
+    result.inheritedIsClippable = forkParent.isClippableFormat;
+    result.inheritedIsCanva = forkParent.isCanvaFormat;
+    result.inheritedLabelsAsOriginal = forkParent.labelsAsOriginal;
+  }
 
   return NextResponse.json(result);
 }
