@@ -230,6 +230,7 @@ export async function selectSpokeCandidates(opts: {
       id: formatsTable.id,
       name: formatsTable.name,
       parentFormatId: formatsTable.parentFormatId,
+      isClippableFormat: formatsTable.isClippableFormat,
     })
     .from(formatsTable)
     .where(eq(formatsTable.brand, brand));
@@ -247,6 +248,10 @@ export async function selectSpokeCandidates(opts: {
   >();
   for (const f of allFormats) {
     if (!f.parentFormatId) continue;
+    // Clippable child formats are produced from the Clip Ideas queue, not the
+    // Repurposed tab — exclude them as repurpose targets so they never surface
+    // as SPOKE candidates (mirrors the threshold-monitor-sweep skip).
+    if (f.isClippableFormat) continue;
     const arr = childrenByParentId.get(f.parentFormatId) ?? [];
     arr.push({ id: f.id, name: f.name });
     childrenByParentId.set(f.parentFormatId, arr);

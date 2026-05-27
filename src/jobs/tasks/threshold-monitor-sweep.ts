@@ -97,6 +97,13 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
       const children = childrenByParent.get(sourceFormat.id) ?? [];
 
       for (const targetFormat of children) {
+        // Clippable formats are produced exclusively from the Clip Ideas
+        // queue (one clip-idea agent run per is_clippable_format row), not
+        // from the threshold/repurpose sweep. Skip them here so a pillar
+        // crossing a clippable child's viewThreshold doesn't double-create a
+        // repurposed Idea alongside the clip-idea-promoted Reel/Short.
+        if (targetFormat.isClippableFormat) continue;
+
         // Skip if no threshold set or views below threshold
         if (!targetFormat.viewThreshold || item.views < targetFormat.viewThreshold) {
           continue;
