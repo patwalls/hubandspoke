@@ -36,24 +36,37 @@ export async function GET(request: NextRequest) {
     const tag = request.nextUrl.searchParams.get("tag") ?? undefined;
     const [links, usageRows] = await Promise.all([
       listShortLinks({ includeArchived, tag }),
+      // Per-slug usage: count + the posts it's attached to (most-recent first)
+      // so the picker can both badge "in use · N" and link out to the actual
+      // content for a spot-check.
       db
         .select({
           slug: productionItems.shortLinkSlug,
           count: sql<number>`count(*)::int`,
+          items: sql<{ id: string; title: string | null }[]>`json_agg(json_build_object('id', ${productionItems.id}, 'title', ${productionItems.title}) order by ${productionItems.publishedAt} desc nulls last)`,
         })
         .from(productionItems)
         .where(isNotNull(productionItems.shortLinkSlug))
         .groupBy(productionItems.shortLinkSlug),
     ]);
 
-    const usageBySlug = new Map<string, number>();
+    const usageBySlug = new Map<
+      string,
+      { count: number; items: { id: string; title: string | null }[] }
+    >();
     for (const row of usageRows) {
-      if (row.slug) usageBySlug.set(row.slug, row.count);
+      if (row.slug) {
+        usageBySlug.set(row.slug, { count: row.count, items: row.items ?? [] });
+      }
     }
-    const augmented = links.map((l) => ({
-      ...l,
-      inUseCount: usageBySlug.get(l.slug) ?? 0,
-    }));
+    const augmented = links.map((l) => {
+      const usage = usageBySlug.get(l.slug);
+      return {
+        ...l,
+        inUseCount: usage?.count ?? 0,
+        inUseItems: usage?.items ?? [],
+      };
+    });
     return NextResponse.json({ shortLinks: augmented });
   } catch (err) {
     return handleApiError(err);

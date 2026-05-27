@@ -26,6 +26,10 @@ interface ShortLink {
   createdAt: string;
   updatedAt: string;
   inUseCount?: number;
+  // Posts this slug is currently attached to (most-recent first), so the
+  // picker can link out to the content for a spot-check. Augmented in by
+  // /api/short-links alongside inUseCount.
+  inUseItems?: { id: string; title: string | null }[];
 }
 
 interface Props {
@@ -329,6 +333,20 @@ export function AttachDmKeywordDialog({
                                 <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-amber-800">
                                   in use{(link.inUseCount ?? 0) > 1 ? ` · ${link.inUseCount}` : ""}
                                 </span>
+                              )}
+                              {inUse && link.inUseItems?.[0] && (
+                                <a
+                                  href={`/all/content/${link.inUseItems[0].id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] text-blue-600 hover:underline"
+                                  title={
+                                    link.inUseItems[0].title ?? "View attached post"
+                                  }
+                                >
+                                  view ↗
+                                </a>
                               )}
                               {link.archived && (
                                 <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700">
