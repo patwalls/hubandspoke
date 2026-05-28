@@ -105,6 +105,15 @@ interface RepostTriageDialogProps
   onOpenChange: (open: boolean) => void;
 }
 
+/** Gate failure that survives in dialog state so we can render the "I'll
+ *  do it manually" affordance inline instead of a toast that drops the
+ *  user back at the dialog with no recoverable action. Mirrors the
+ *  cross-post dialog's GateFailure shape. */
+interface RepostGateFailure {
+  reason: string;
+  message: string;
+}
+
 export function RepostTriagePanel({
   candidate,
   brand,
@@ -115,9 +124,11 @@ export function RepostTriagePanel({
   onActioned,
 }: RepostTriagePanelProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [manualSubmitting, setManualSubmitting] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
   const [assigneeUserId, setAssigneeUserId] = useState<string>("");
+  const [gateFailure, setGateFailure] = useState<RepostGateFailure | null>(null);
   const [assignableUsers, setAssignableUsers] = useState<
     Array<{ id: string; name: string | null; email: string; avatarUrl: string | null }>
   >([]);
@@ -127,6 +138,7 @@ export function RepostTriagePanel({
   // dialog's open/close).
   useEffect(() => {
     setAssigneeUserId("");
+    setGateFailure(null);
   }, [candidate.id]);
 
   useEffect(() => {
@@ -159,7 +171,51 @@ export function RepostTriagePanel({
    *  cleared state. */
   function clearAndClose() {
     setAssigneeUserId("");
+    setGateFailure(null);
     onSubmitted?.();
+  }
+
+  /** Inner submitter shared by the primary "Repost it" handler and the
+   *  "I'll do it manually" retry. When `manual` is true the route skips
+   *  the readiness gate; the row is created empty for the operator to
+   *  attach media to themselves. */
+  async function submitRepost(opts: {
+    manual: boolean;
+  }): Promise<
+    | { kind: "ok"; id: string | null }
+    | { kind: "gate"; failure: RepostGateFailure }
+    | { kind: "error"; message: string }
+  > {
+    const res = await fetch(`/api/production-items/${candidate.id}/repost`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        editorUserId: assigneeUserId,
+        status: "Ready To Publish",
+        manual: opts.manual,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      error?: string;
+      reason?: string;
+    };
+    if (!res.ok) {
+      // 400 with a `reason` is a known readiness failure — recoverable
+      // via "I'll do it manually". Surface inline; everything else
+      // (network, 401, 500) toasts since it's not actionable here.
+      if (res.status === 400 && json.reason) {
+        return {
+          kind: "gate",
+          failure: {
+            reason: json.reason,
+            message: json.error ?? "Repost refused by readiness gate.",
+          },
+        };
+      }
+      return { kind: "error", message: json.error || `HTTP ${res.status}` };
+    }
+    return { kind: "ok", id: json.id ?? null };
   }
 
   async function handleRepost() {
@@ -169,27 +225,18 @@ export function RepostTriagePanel({
     // before React commits the disabled state.
     if (submitting) return;
     setSubmitting(true);
+    setGateFailure(null);
     try {
-      const res = await fetch(
-        `/api/production-items/${candidate.id}/repost`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            editorUserId: assigneeUserId,
-            status: "Ready To Publish",
-          }),
-        }
-      );
-      const json = (await res.json().catch(() => ({}))) as {
-        id?: string;
-        error?: string;
-      };
-      if (!res.ok) {
-        toast.error(json.error || `HTTP ${res.status}`);
+      const result = await submitRepost({ manual: false });
+      if (result.kind === "gate") {
+        setGateFailure(result.failure);
         return;
       }
-      const newId = json.id ?? null;
+      if (result.kind === "error") {
+        toast.error(result.message);
+        return;
+      }
+      const newId = result.id;
       toast.success("Repost queued.", {
         description: "Lands in Ready To Publish for the editor.",
         action: newId
@@ -205,6 +252,43 @@ export function RepostTriagePanel({
       onActioned();
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  /** Retry with `manual: true`. The route bypasses the readiness gate —
+   *  the row is created so it shows up in the workflow, and the editor
+   *  attaches media themselves on the detail page. */
+  async function handleManualRepost() {
+    if (!assigneeUserId) return;
+    if (manualSubmitting) return;
+    setManualSubmitting(true);
+    try {
+      const result = await submitRepost({ manual: true });
+      if (result.kind === "gate") {
+        // Shouldn't happen with manual: true, but handle defensively.
+        setGateFailure(result.failure);
+        return;
+      }
+      if (result.kind === "error") {
+        toast.error(result.message);
+        return;
+      }
+      const newId = result.id;
+      toast.success("Manual repost row created.", {
+        description: "No Descript prep — upload the media yourself when ready.",
+        action: newId
+          ? {
+              label: "Open draft →",
+              onClick: () =>
+                window.open(`/${brand}/content/${newId}`, "_blank", "noopener"),
+            }
+          : undefined,
+        duration: 7000,
+      });
+      clearAndClose();
+      onActioned();
+    } finally {
+      setManualSubmitting(false);
     }
   }
 
@@ -269,7 +353,7 @@ export function RepostTriagePanel({
     }
   }
 
-  const busy = submitting || dismissing;
+  const busy = submitting || dismissing || manualSubmitting;
   // Queue-only "Hot" badge + stats / evergreen / prior-reposts sections.
   // Suppressed when the dialog is fired from the per-item Actions menu
   // where there's no hotness scoring to display.
@@ -450,10 +534,41 @@ export function RepostTriagePanel({
             </Select>
           </section>
 
+          {gateFailure && (
+            <section className="rounded-md border border-amber-300 bg-amber-50/60 p-3 space-y-2">
+              <div className="text-sm font-semibold text-amber-900">
+                Can&apos;t auto-prep this repost.
+              </div>
+              <p className="text-[12px] text-amber-900/90 leading-relaxed">
+                {gateFailure.message}
+              </p>
+              <p className="text-[12px] text-amber-900/80">
+                We&apos;ve flagged the source so we can fix the auto-pull
+                behind the scenes. In the meantime, create the row and
+                upload the media yourself.
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleManualRepost()}
+                disabled={busy || !assigneeUserId}
+                className={cn(
+                  "h-9 w-full rounded-md text-sm font-medium transition-colors",
+                  "bg-amber-600 text-white hover:bg-amber-700",
+                  "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
+                )}
+                title="Create the repost row without Descript prep. You'll attach media manually."
+              >
+                {manualSubmitting
+                  ? "Creating manual row…"
+                  : "I'll do it manually"}
+              </button>
+            </section>
+          )}
+
           <button
             type="button"
             onClick={() => void handleRepost()}
-            disabled={busy || !assigneeUserId}
+            disabled={busy || !assigneeUserId || gateFailure !== null}
             className={cn(
               "h-10 w-full rounded-md text-sm font-medium transition-colors",
               "bg-emerald-600 text-white hover:bg-emerald-700",
@@ -462,14 +577,18 @@ export function RepostTriagePanel({
             title={
               !assigneeUserId
                 ? "Pick an editor first"
-                : "Create a repost draft in Ready To Publish"
+                : gateFailure !== null
+                  ? "Use the manual upload option above"
+                  : "Create a repost draft in Ready To Publish"
             }
           >
             {submitting
               ? "Queueing repost…"
               : !assigneeUserId
                 ? "Pick an editor to continue"
-                : "Repost it"}
+                : gateFailure !== null
+                  ? "Auto-prep unavailable"
+                  : "Repost it"}
           </button>
 
           {(showDismissControls || showSecondaryFooter) && (

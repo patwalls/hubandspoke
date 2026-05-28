@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import * as Sentry from "@sentry/nextjs";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
@@ -67,6 +68,7 @@ export async function POST(request: Request, context: RouteContext) {
   const body = (await request.json().catch(() => ({}))) as {
     editorUserId?: unknown;
     status?: unknown;
+    manual?: unknown;
   };
   const requestedStatus =
     typeof body.status === "string" &&
@@ -77,6 +79,12 @@ export async function POST(request: Request, context: RouteContext) {
     typeof body.editorUserId === "string" && body.editorUserId.length > 0
       ? body.editorUserId
       : null;
+  // Operator escape: create the repost row but skip the readiness gate.
+  // Surfaced via the "I'll do it manually" button when opportunistic
+  // enrichment couldn't recover the source's media. seedRepostContent
+  // handles the no-media case by mirroring whatever is there (often
+  // nothing) — the operator attaches media from the workflow board.
+  const manual = body.manual === true;
 
   let [source] = await db
     .select()
@@ -123,10 +131,22 @@ export async function POST(request: Request, context: RouteContext) {
         .limit(1);
       if (refreshed) source = refreshed;
     } catch (err) {
+      // Silent enrichment failure here is exactly what we want to surface
+      // — the operator falls back to the manual path, but we need to see
+      // why media archiving keeps missing so we can fix the source side.
       console.error(
         `[repost] enrichment failed for source ${source.id}:`,
         err instanceof Error ? err.message : err,
       );
+      Sentry.captureException(err, {
+        tags: { source: "repost-route", phase: "enrichment" },
+        extra: {
+          sourceItemId: source.id,
+          postType: source.postType,
+          accountId: source.accountId,
+          withMedia: sourceNeedsMedia,
+        },
+      });
     }
   }
 
@@ -144,24 +164,45 @@ export async function POST(request: Request, context: RouteContext) {
   // media is the right material to re-air. The pre-gate enrichment step
   // above force-archives `mediaS3Key` for video-bearing posts, so this
   // gate is almost always already-OK by the time it runs; the refusal
-  // path only fires when even the source can't be archived.
+  // path only fires when even the source can't be archived. Skipped when
+  // `manual: true` — the operator has opted to bypass the automation.
   //
   // Re-query carousel state post-enrichment so image-only sources (X
   // tweet with 2 photos, IG carousel) pass the gate — those store all
   // their media in production_item_media rows, not on the legacy
   // mediaS3Key column, and seedRepostContent mirrors carousels natively.
-  const hasCarouselMedia = await hasAnyCarouselRow(source.id);
-  const readiness = checkRepostReadiness(source, hasCarouselMedia);
-  if (!readiness.ok) {
-    return NextResponse.json(
-      {
-        error:
-          "No source media available. Repost needs the source's own video or archived photos — run enrichment (withMedia=true) on the source and retry, or use \"I'll do it manually\" to upload yourself.",
-        reason: readiness.reason,
-        detail: readiness.detail,
-      },
-      { status: 400 },
-    );
+  if (!manual) {
+    const hasCarouselMedia = await hasAnyCarouselRow(source.id);
+    const readiness = checkRepostReadiness(source, hasCarouselMedia);
+    if (!readiness.ok) {
+      // Surface the residual "tried to enrich and still no media" case so
+      // we can fix the silent media-archiving failure behind the scenes.
+      // The operator still gets a recoverable response — the dialog
+      // renders the "I'll do it manually" affordance off `reason`.
+      Sentry.captureMessage(
+        `[repost] readiness gate refused after opportunistic enrichment (${readiness.reason})`,
+        {
+          level: "warning",
+          tags: { source: "repost-route", phase: "gate-refused" },
+          extra: {
+            sourceItemId: source.id,
+            postType: source.postType,
+            accountId: source.accountId,
+            reason: readiness.reason,
+            detail: readiness.detail,
+          },
+        },
+      );
+      return NextResponse.json(
+        {
+          error:
+            "We couldn't auto-pull the source's media. Click \"I'll do it manually\" to create the row and upload it yourself.",
+          reason: readiness.reason,
+          detail: readiness.detail,
+        },
+        { status: 400 },
+      );
+    }
   }
 
   // Don't carry a stale `format` from the source — if it doesn't exist in
