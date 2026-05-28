@@ -7,6 +7,7 @@ import {
   recordContentChanges,
   type ContentChange,
 } from "@/lib/services/content-revisions";
+import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -197,6 +198,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return row;
   });
+
+  // Schedule the 15m / 30m / 1h / 2h / 4h velocity snapshots. Mirrors the
+  // POST + PUT routes (src/app/api/production-items/route.ts:357, :1110).
+  // Without this, items published via this endpoint silently skip every
+  // early checkpoint — the capture task's per-checkpoint window check would
+  // no-op them anyway, but more importantly the jobs are never enqueued.
+  if (mode === "publish" && inserted?.publishedAt) {
+    try {
+      await scheduleVelocitySnapshots(inserted.id, inserted.publishedAt);
+    } catch (err) {
+      console.error("[publish] scheduleVelocitySnapshots failed", err);
+    }
+  }
 
   return NextResponse.json({ status: "ok", item: inserted });
 }

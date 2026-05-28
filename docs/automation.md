@@ -541,7 +541,8 @@ captureVelocitySnapshotTask({ productionItemId, checkpointKey })
 | `src/lib/services/account-content-sync.ts` | INSERT (new post discovered) | SC-reported timestamp |
 | `src/lib/services/account-content-sync.ts` | UPDATE (existing post re-synced) | _no-op since 2026-04-25_ — UPDATE branch does not re-schedule; publishedAt is now insert-only |
 | `src/app/api/production-items/route.ts` | POST (add-from-link) | body `publishedAt` (from SC preview) or `new Date()` |
-| `src/app/api/production-items/route.ts` | PUT (status → Published OR link added on Published) | existing `publishedAt`, or stamped `new Date()` on fresh transition |
+| `src/app/api/production-items/route.ts` | PUT (link added on already-Published) | existing `publishedAt`, or stamped `new Date()` on fresh transition |
+| `src/app/api/production-items/[id]/publish/route.ts` | POST mode=`publish` (Ready→Published transition) | existing `publishedAt`, or stamped `new Date()` on first publish |
 
 #### Testing
 
