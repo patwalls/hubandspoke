@@ -189,10 +189,12 @@ async function persistSlug(productionItemId: string, slug: string): Promise<void
 // ── The LLM target-selection + copy step ───────────────────────────────────
 const SYSTEM_PROMPT = `You write the reply CTA that sits underneath a Starter Story social post (X / LinkedIn / Threads / YouTube Community). Starter Story turns long-form founder interviews into posts and drives readers to our lead magnets (free reports / playbooks) or to the specific episode a post is about.
 
-HOUSE STYLE (match the exemplars):
+HOUSE STYLE (match the exemplars — they are REAL published CTAs, copy their voice):
 - The CTA is ONE short line of copy that ENDS WITH A COLON, then the link on the next line.
 - You write ONLY that one line (the "copyLine"); the link is attached automatically. Do NOT include any URL in copyLine.
-- Punchy, specific, second person. No hashtags, no emoji unless the exemplars show them.
+- Pat's voice: casual and FIRST-PERSON ("i made", "I created this list", "Forgot to say, but…"). Often opens with a throwaway connector like "Btw,", "oh and btw", or "Forgot to say, but".
+- ALWAYS tie the line back to what the post was about ("like this one", "solo devs doing cool stuff like this"). For an episode, name the guest ("…watch the whole episode with Brian here:").
+- No hashtags, no emoji. A lowercase "i" is fine — keep it casual, not corporate.
 
 TARGET SELECTION (episode-first, lead-magnet fallback):
 1. If the post is about a SPECIFIC guest / founder / company, link to THAT episode. Use the find_episode tool with the guest or company name (or the pillar title) to look it up, then use the returned url as target_url with target_type "episode".

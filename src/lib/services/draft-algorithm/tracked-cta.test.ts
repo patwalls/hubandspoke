@@ -47,10 +47,18 @@ describe("buildDestinationUrl", () => {
 });
 
 describe("renderCtaExemplars", () => {
-  it("scopes to a single channel when given one", () => {
-    const block = renderCtaExemplars("x");
-    expect(block).toContain("[x ·");
-    expect(block).not.toContain("[linkedin ·");
+  it("floats the requested channel's exemplars to the top but includes all", () => {
+    const block = renderCtaExemplars("linkedin");
+    expect(block).toContain("[linkedin ·");
+    expect(block).toContain("[x ·"); // all channels still present
+    // the first rendered exemplar is a linkedin one
+    expect(block.indexOf("[linkedin ·")).toBeLessThan(block.indexOf("[x ·"));
+  });
+
+  it("includes an episode exemplar and lead-magnet exemplars", () => {
+    const block = renderCtaExemplars();
+    expect(block).toContain("target: episode");
+    expect(block).toContain("target: lead_magnet");
   });
 
   it("every exemplar copyLine ends with a colon (house style)", () => {
