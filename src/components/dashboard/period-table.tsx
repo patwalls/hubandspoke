@@ -45,7 +45,7 @@ function buildContentUrl(
   return `/${brand}/content?${params.toString()}`;
 }
 
-type MetricKey = "production" | "views" | "leads" | "viewsPerPost" | "sales";
+type MetricKey = "production" | "views" | "clicks" | "leads" | "viewsPerPost";
 
 interface PeriodTableProps {
   title: string;
@@ -66,10 +66,11 @@ interface PeriodTableProps {
 
 function formatValue(value: number, metricKey: MetricKey): string {
   if (value === 0) return "-";
-  if (metricKey === "sales") {
-    return `$${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-  }
-  if (metricKey === "views" || metricKey === "viewsPerPost") {
+  if (
+    metricKey === "views" ||
+    metricKey === "viewsPerPost" ||
+    metricKey === "clicks"
+  ) {
     return value.toLocaleString();
   }
   return value.toString();

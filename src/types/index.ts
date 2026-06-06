@@ -201,6 +201,7 @@ export interface ContentReportData {
   byPlatform: {
     production: MetricData;
     views: MetricData;
+    clicks: MetricData;
     leads: MetricData;
     viewsPerPost: MetricData;
   };

@@ -12,6 +12,7 @@ import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 const PLATFORM_TABS = [
   { key: "production" as const, label: "Production" },
   { key: "views" as const, label: "Views" },
+  { key: "clicks" as const, label: "Clicks" },
   { key: "leads" as const, label: "Leads" },
   { key: "viewsPerPost" as const, label: "Views Per Post" },
 ];

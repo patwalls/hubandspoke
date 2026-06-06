@@ -301,6 +301,7 @@ export async function GET(request: NextRequest) {
     // Primary table metrics
     const primaryProduction = initMetricData(primaryRows);
     const primaryViews = initMetricData(primaryRows);
+    const primaryClicks = initMetricData(primaryRows);
     const primaryLeads = initMetricData(primaryRows);
 
     // Format table metrics
@@ -318,6 +319,7 @@ export async function GET(request: NextRequest) {
       if (!period) return;
 
       const views = item.views || 0;
+      const clicks = item.clicks || 0;
       const leads = item.leads || 0;
 
       if (showingFormats) {
@@ -325,6 +327,7 @@ export async function GET(request: NextRequest) {
         if (primaryProduction[formatKey]) {
           primaryProduction[formatKey][period.label] += 1;
           primaryViews[formatKey][period.label] += views;
+          primaryClicks[formatKey][period.label] += clicks;
           primaryLeads[formatKey][period.label] += leads;
         }
       } else {
@@ -333,6 +336,7 @@ export async function GET(request: NextRequest) {
         if (label && primaryProduction[label]) {
           primaryProduction[label][period.label] += 1;
           primaryViews[label][period.label] += views;
+          primaryClicks[label][period.label] += clicks;
           primaryLeads[label][period.label] += leads;
         }
       }
@@ -410,6 +414,7 @@ export async function GET(request: NextRequest) {
       byPlatform: {
         production: primaryProduction,
         views: primaryViews,
+        clicks: primaryClicks,
         leads: primaryLeads,
         viewsPerPost: primaryViewsPerPost,
       },

@@ -715,6 +715,7 @@ export async function getContentReport(
   // Primary table (by platform or by format when a platform is selected)
   const primaryProduction = initMetricData(primaryRows);
   const primaryViews = initMetricData(primaryRows);
+  const primaryClicks = initMetricData(primaryRows);
   const primaryLeads = initMetricData(primaryRows);
 
   // Format table (always by format)
@@ -732,6 +733,7 @@ export async function getContentReport(
     if (!period) return;
 
     const views = item.views || 0;
+    const clicks = item.clicks || 0;
     const leads = item.leads || 0;
 
     // Primary table aggregation
@@ -740,6 +742,7 @@ export async function getContentReport(
       if (primaryProduction[formatKey]) {
         primaryProduction[formatKey][period.label] += 1;
         primaryViews[formatKey][period.label] += views;
+        primaryClicks[formatKey][period.label] += clicks;
         primaryLeads[formatKey][period.label] += leads;
       }
     } else {
@@ -750,6 +753,7 @@ export async function getContentReport(
       if (label && primaryProduction[label]) {
         primaryProduction[label][period.label] += 1;
         primaryViews[label][period.label] += views;
+        primaryClicks[label][period.label] += clicks;
         primaryLeads[label][period.label] += leads;
       }
     }
@@ -809,6 +813,7 @@ export async function getContentReport(
     byPlatform: {
       production: primaryProduction,
       views: primaryViews,
+      clicks: primaryClicks,
       leads: primaryLeads,
       viewsPerPost: primaryViewsPerPost,
     },
