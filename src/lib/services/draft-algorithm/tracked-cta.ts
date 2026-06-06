@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { productionItems } from "@/lib/db/schema";
+import {
+  contentDrafts,
+  formats,
+  productionItems,
+  type ContentDraftContent,
+} from "@/lib/db/schema";
+import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
 import {
   createShortLink,
   findShortLinksByContent,
@@ -93,6 +99,95 @@ export async function generateTrackedCta(
     targetType: plan.targetType,
     leadMagnetId: plan.leadMagnetId,
   };
+}
+
+// Suggest a destination URL for a post WITHOUT minting anything — used to
+// pre-fill the DM-keyword dialog's Destination field. Runs the same target
+// picker the CTA uses (episode-first / best lead magnet) over the post's body,
+// then appends the channel + the post's utm_campaign. Returns null when there's
+// no usable context (no item / no draft) so callers can fall back to the manual
+// default. Read-only: no short link is created here (the DM-keyword chain
+// endpoint mints/wires the actual links on save).
+export async function suggestCtaDestination(args: {
+  productionItemId: string;
+  channel: string;
+}): Promise<string | null> {
+  const { productionItemId, channel } = args;
+
+  const [item] = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      format: productionItems.format,
+      brand: productionItems.brand,
+      postType: productionItems.postType,
+      utmCampaign: productionItems.utmCampaign,
+      pillarContentItemId: productionItems.pillarContentItemId,
+    })
+    .from(productionItems)
+    .where(eq(productionItems.id, productionItemId))
+    .limit(1);
+  if (!item) return null;
+
+  const postType = item.postType as PostType | null;
+
+  // Post body = the current draft's caption (what the picker reads to choose
+  // an episode vs. a lead magnet).
+  let postBody: string | null = null;
+  const [current] = await db
+    .select({ content: contentDrafts.content })
+    .from(contentDrafts)
+    .where(
+      and(
+        eq(contentDrafts.productionItemId, productionItemId),
+        eq(contentDrafts.isCurrent, true),
+      ),
+    )
+    .limit(1);
+  if (current && postType) {
+    const captionKey = PLATFORM_FIELD_MAP[postType]?.caption ?? null;
+    const raw = captionKey
+      ? (current.content as ContentDraftContent)[captionKey]
+      : null;
+    postBody = Array.isArray(raw)
+      ? raw.join("\n")
+      : typeof raw === "string"
+        ? raw
+        : null;
+  }
+
+  let pillarTitle: string | null = item.title;
+  if (item.pillarContentItemId) {
+    const [pillar] = await db
+      .select({ title: productionItems.title })
+      .from(productionItems)
+      .where(eq(productionItems.id, item.pillarContentItemId))
+      .limit(1);
+    if (pillar?.title) pillarTitle = pillar.title;
+  }
+
+  let formatInstructions: string | null = null;
+  if (item.format) {
+    const [fmt] = await db
+      .select({ instructions: formats.instructions })
+      .from(formats)
+      .where(and(eq(formats.brand, item.brand), eq(formats.name, item.format)))
+      .limit(1);
+    formatInstructions = fmt?.instructions ?? null;
+  }
+
+  const leadMagnets = await listLeadMagnets();
+  const plan = await planCta({
+    productionItemId,
+    channel,
+    utmCampaign: item.utmCampaign ?? null,
+    postBody,
+    pillarTitle,
+    formatInstructions,
+    leadMagnets,
+  });
+
+  return buildDestinationUrl(plan.targetUrl, channel, item.utmCampaign ?? null);
 }
 
 // ── Destination URL construction (pure, unit-tested) ───────────────────────

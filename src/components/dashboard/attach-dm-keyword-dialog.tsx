@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -105,8 +105,44 @@ export function AttachDmKeywordDialog({
   const [newSlug, setNewSlug] = useState("");
   const [newDestination, setNewDestination] = useState("");
 
+  // Smart destination suggestion (the post's CTA target + utm), fetched on open.
+  // Held in a ref too so the link-load / slug-select paths can read the latest
+  // value regardless of fetch ordering.
+  const [suggesting, setSuggesting] = useState(false);
+  const suggestedRef = useRef<string | null>(null);
+
   // List filter
   const [filter, setFilter] = useState("");
+
+  // Apply the smart suggestion only over an empty or bare-homepage default —
+  // never clobber a real, hand-entered destination.
+  const smartDest = useCallback((current: string): string => {
+    return isDefaultDestination(current) && suggestedRef.current
+      ? suggestedRef.current
+      : current;
+  }, []);
+
+  const loadSuggestion = useCallback(async () => {
+    setSuggesting(true);
+    try {
+      const res = await fetch(
+        `/api/production-items/${itemId}/suggested-dm-destination`,
+      );
+      const json = res.ok ? await res.json() : null;
+      const suggestion =
+        json && typeof json.destination === "string" ? json.destination : null;
+      if (suggestion) {
+        suggestedRef.current = suggestion;
+        // Fill any field that's still at its default now that we have it.
+        setNewDestination((prev) => (isDefaultDestination(prev) ? suggestion : prev));
+        setDestination((prev) => (isDefaultDestination(prev) ? suggestion : prev));
+      }
+    } catch {
+      /* fail-soft: keep the manual default */
+    } finally {
+      setSuggesting(false);
+    }
+  }, [itemId]);
 
   const loadLinks = useCallback(async () => {
     setView("loading");
@@ -126,7 +162,7 @@ export function AttachDmKeywordDialog({
         const existing = payload.shortLinks.find((l) => l.slug === currentSlug);
         if (existing) {
           setSelectedSlug(existing.slug);
-          setDestination(existing.destinationUrl);
+          setDestination(smartDest(existing.destinationUrl));
           setView("edit");
           return;
         }
@@ -136,7 +172,7 @@ export function AttachDmKeywordDialog({
       setError(e instanceof Error ? e.message : "Failed to load short links");
       setView("list");
     }
-  }, [currentSlug]);
+  }, [currentSlug, smartDest]);
 
   // Fetch on every open so click counts + last_clicked_at stay fresh.
   useEffect(() => {
@@ -147,8 +183,10 @@ export function AttachDmKeywordDialog({
     setNewDestination("");
     setFilter("");
     setError(null);
+    suggestedRef.current = null;
     void loadLinks();
-  }, [open, loadLinks]);
+    void loadSuggestion();
+  }, [open, loadLinks, loadSuggestion]);
 
   const sortedFiltered = useMemo(() => {
     const filterLower = filter.trim().toLowerCase();
@@ -164,7 +202,7 @@ export function AttachDmKeywordDialog({
 
   function selectSlug(link: ShortLink) {
     setSelectedSlug(link.slug);
-    setDestination(link.destinationUrl);
+    setDestination(smartDest(link.destinationUrl));
     setError(null);
     setView("edit");
   }
@@ -413,12 +451,13 @@ export function AttachDmKeywordDialog({
                 type="url"
                 value={destination}
                 onChange={(e) => setDestination(e.target.value)}
-                placeholder="https://starterstory.com/…"
+                placeholder={suggesting ? "Suggesting…" : "https://starterstory.com/…"}
                 autoFocus
               />
               <p className="text-[11px] text-muted-foreground">
-                This is shared with every other post using the same slug.
-                Changing it here changes it everywhere.
+                Pre-filled with this post&apos;s best CTA target + its UTM. This
+                post gets its own tracked link — the keyword redirects here for
+                this post; other posts using this keyword keep their own.
               </p>
             </div>
             <div className="flex justify-between pt-2">
@@ -493,8 +532,12 @@ export function AttachDmKeywordDialog({
                 type="url"
                 value={newDestination}
                 onChange={(e) => setNewDestination(e.target.value)}
-                placeholder="https://starterstory.com/…"
+                placeholder={suggesting ? "Suggesting…" : "https://starterstory.com/…"}
               />
+              <p className="text-[11px] text-muted-foreground">
+                Pre-filled with this post&apos;s best CTA target + its UTM —
+                edit if you want a different destination.
+              </p>
             </div>
             <div className="flex justify-between pt-2">
               <Button
@@ -529,6 +572,13 @@ export function AttachDmKeywordDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+// A destination we're allowed to auto-replace with the smart suggestion: empty,
+// or the bare Starter Story homepage that the field defaults to.
+function isDefaultDestination(value: string): boolean {
+  const v = value.trim().replace(/\/$/, "");
+  return v === "" || v === "https://www.starterstory.com" || v === "https://starterstory.com";
 }
 
 function isHttpsUrl(value: string): boolean {
