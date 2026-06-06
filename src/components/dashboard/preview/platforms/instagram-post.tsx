@@ -21,7 +21,14 @@ export function InstagramPostSimulator({
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
 
   return (
-    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row sm:items-start">
+    // Container query (not a viewport breakpoint): the preview lives in a
+    // narrow pane (the Details tab is two-column and the whole app is often
+    // split-screen), so a viewport `sm:` would force the media+caption side by
+    // side even when the pane is tiny — squeezing the caption to ~1 char per
+    // line. Only go side-by-side once the PANE itself is wide enough to give
+    // the caption a readable column; otherwise stack (media on top).
+    <div className="@container">
+      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 @[40rem]:flex-row @[40rem]:items-start">
       {/* LEFT: 1:1 carousel — drop in up to 10 photos/videos. The dropzone
        *  handles uploads/deletes per slide; `MultiSlideCarousel` handles
        *  snap-scroll, dots, count badge, and per-slide overlays.
@@ -67,6 +74,7 @@ export function InstagramPostSimulator({
         author={data.author}
         subtitle={null}
       />
+      </div>
     </div>
   );
 }

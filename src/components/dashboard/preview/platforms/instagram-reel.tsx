@@ -45,7 +45,12 @@ export function InstagramReelSimulator({
   const showStatePlaceholder = !!descriptRenderState && !hasArchivedVideo;
 
   return (
-    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">
+    // Container query, not a viewport breakpoint — the preview pane is often
+    // narrow (two-column Details + split-screen), so only place the caption
+    // beside the 9:16 video once the PANE is wide enough; otherwise stack so
+    // the caption keeps a readable, full-width column. See instagram-post.tsx.
+    <div className="@container">
+      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 @[34rem]:flex-row">
       {/* LEFT: 9:16 video player or render-state placeholder. No overlays
        *  on the video itself — the burned-in hook text already lives in
        *  the rendered MP4, and a duplicate simulator overlay just clashes
@@ -145,6 +150,7 @@ export function InstagramReelSimulator({
         subtitle="Original audio"
         draftAlgorithmRunning={draftAlgorithmRunning}
       />
+      </div>
     </div>
   );
 }

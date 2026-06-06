@@ -51,7 +51,8 @@ export function TikTokSimulator({
         const enriched = enrichedSlides[0];
         const placeholder = placeholders[0];
         return (
-          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 sm:flex-row">
+          <div className="@container">
+          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4 @[34rem]:flex-row">
             <div
               className={`group relative ${PLATFORM_MEDIA_RULES.tiktok.aspectClass} w-full max-w-[320px] shrink-0 overflow-hidden rounded-lg bg-black`}
             >
@@ -127,6 +128,7 @@ export function TikTokSimulator({
                 </button>
               )}
             </div>
+          </div>
           </div>
         );
       }}
