@@ -35,6 +35,8 @@ if (!apiUrl || !apiKey)
 const base = apiUrl.replace(/\/$/, "");
 const sql = postgres(databaseUrl, { ssl: process.env.DATABASE_SSL === "off" ? false : { rejectUnauthorized: false } });
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function api(path, init = {}) {
   const res = await fetch(`${base}${path}`, {
     ...init,
@@ -45,6 +47,20 @@ async function api(path, init = {}) {
     },
   });
   return res;
+}
+
+// POST with retry on Cloudflare 429 ("Just a moment…") + 5xx. The endpoint sits
+// behind Cloudflare, which rate-limits a tight loop of writes — back off and
+// retry rather than hammering.
+async function apiWithRetry(path, init, attempts = 5) {
+  let wait = 1000;
+  for (let i = 0; i < attempts; i++) {
+    const res = await api(path, init);
+    if (res.status !== 429 && res.status < 500) return res;
+    if (i === attempts - 1) return res;
+    await sleep(wait);
+    wait = Math.min(wait * 2, 15000);
+  }
 }
 
 async function main() {
@@ -91,7 +107,7 @@ async function main() {
       continue;
     }
 
-    const res = await api("/short_links", {
+    const res = await apiWithRetry("/short_links", {
       method: "POST",
       body: JSON.stringify({
         short_link: {
@@ -115,6 +131,8 @@ async function main() {
       const body = await res.text().catch(() => "");
       console.warn(`  FAILED ${slug} (${res.status}): ${body.slice(0, 120)}`);
     }
+    // Gentle pacing so we don't trip Cloudflare's write rate limit.
+    await sleep(200);
   }
 
   console.log(
