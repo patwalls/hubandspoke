@@ -246,7 +246,12 @@ export function ProductionPipelineTable({
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-xs table-fixed">
+        {/* min-w floors the table so the only flexible column (Content) can't
+            collapse to 0 when the fixed columns (160+240+220+100+90 = 810px)
+            exceed the viewport — without it, Content shrank to width:0 at narrow
+            widths and its contents spilled over the Format column. The wrapper's
+            overflow-x-auto scrolls horizontally instead. */}
+        <table className="w-full min-w-[1024px] text-xs table-fixed">
           <colgroup>
             <col className="w-[160px]" />
             <col className="w-[240px]" />
