@@ -644,7 +644,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({
       item: {
         ...item,
-        salesAmount: item.salesAmount ? parseFloat(item.salesAmount) : null,
         ctrFirstHour: item.ctrFirstHour ? parseFloat(item.ctrFirstHour) : null,
         apvFirst24Hours: item.apvFirst24Hours
           ? parseFloat(item.apvFirst24Hours)
@@ -673,7 +672,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       descendantViewsTotal,
       derivatives: derivatives.map((d) => ({
         ...d,
-        salesAmount: d.salesAmount ? parseFloat(d.salesAmount) : null,
         ctrFirstHour: d.ctrFirstHour ? parseFloat(d.ctrFirstHour) : null,
         apvFirst24Hours: d.apvFirst24Hours
           ? parseFloat(d.apvFirst24Hours)

@@ -169,7 +169,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         likes: i.likes,
         comments: i.comments,
         leads: i.leads,
-        salesAmount: i.salesAmount ? parseFloat(i.salesAmount) : null,
         status: i.status,
         viewsEstimated: i.viewsEstimated ?? false,
         descriptProjectUrl: i.descriptProjectUrl,

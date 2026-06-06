@@ -81,8 +81,6 @@ export const productionItems = pgTable(
     comments: integer("comments"),
     clicks: integer("clicks"),
     leads: integer("leads"),
-    salesNum: integer("sales_num"),
-    salesAmount: decimal("sales_amount", { precision: 12, scale: 2 }),
     ctrFirstHour: decimal("ctr_first_hour"),
     apvFirst24Hours: decimal("apv_first_24_hours"),
     // Cross-post scanner confidence (0-100) captured at Idea creation time.

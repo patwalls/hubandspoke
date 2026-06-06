@@ -98,8 +98,6 @@ function mapProductionItem(
     comments: item.comments,
     clicks: item.clicks,
     leads: item.leads,
-    salesNum: item.salesNum,
-    salesAmount: item.salesAmount ? parseFloat(item.salesAmount) : null,
     ctrFirstHour: item.ctrFirstHour ? parseFloat(item.ctrFirstHour) : null,
     apvFirst24Hours: item.apvFirst24Hours
       ? parseFloat(item.apvFirst24Hours)
@@ -718,7 +716,6 @@ export async function getContentReport(
   const primaryProduction = initMetricData(primaryRows);
   const primaryViews = initMetricData(primaryRows);
   const primaryLeads = initMetricData(primaryRows);
-  const primarySales = initMetricData(primaryRows);
 
   // Format table (always by format)
   const formatRows = [...formatList];
@@ -736,7 +733,6 @@ export async function getContentReport(
 
     const views = item.views || 0;
     const leads = item.leads || 0;
-    const sales = item.salesAmount ? parseFloat(item.salesAmount) : 0;
 
     // Primary table aggregation
     if (showingFormats) {
@@ -745,7 +741,6 @@ export async function getContentReport(
         primaryProduction[formatKey][period.label] += 1;
         primaryViews[formatKey][period.label] += views;
         primaryLeads[formatKey][period.label] += leads;
-        primarySales[formatKey][period.label] += sales;
       }
     } else {
       // Resolve the row label from the item's composite account key.
@@ -756,7 +751,6 @@ export async function getContentReport(
         primaryProduction[label][period.label] += 1;
         primaryViews[label][period.label] += views;
         primaryLeads[label][period.label] += leads;
-        primarySales[label][period.label] += sales;
       }
     }
 
@@ -817,7 +811,6 @@ export async function getContentReport(
       views: primaryViews,
       leads: primaryLeads,
       viewsPerPost: primaryViewsPerPost,
-      sales: primarySales,
     },
     byFormat: {
       production: formatProduction,

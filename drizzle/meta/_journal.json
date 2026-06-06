@@ -603,6 +603,13 @@
       "when": 1779414985490,
       "tag": "0085_flowery_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1780772402274,
+      "tag": "0086_empty_boomerang",
+      "breakpoints": true
     }
   ]
 }

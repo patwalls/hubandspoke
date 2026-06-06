@@ -52,6 +52,7 @@ import {
 import {
   performanceDecayTask,
   notionSyncTask,
+  syncLinkMetricsTask,
   enrichmentSweepTask,
   hookExtractSweepTask,
   hookFallbackSweepTask,
@@ -139,6 +140,7 @@ export interface TaskPayloads {
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
+  "sync-link-metrics": Record<string, never>;
   "enrichment-sweep": Record<string, never>;
   "hook-extract-sweep": Record<string, never>;
   "hook-fallback-sweep": Record<string, never>;
@@ -191,6 +193,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "klaviyo-sync-account": klaviyoSyncAccountTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
+  "sync-link-metrics": syncLinkMetricsTask,
   "enrichment-sweep": enrichmentSweepTask,
   "hook-extract-sweep": hookExtractSweepTask,
   "hook-fallback-sweep": hookFallbackSweepTask,

@@ -71,7 +71,6 @@ type SortKey =
   | "comments"
   | "clicks"
   | "leads"
-  | "salesAmount"
   | "vsP75";
 
 function publishedSortMs(item: ProductionItem): number | null {
@@ -147,9 +146,6 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
   const [formatPopoverOpen, setFormatPopoverOpen] = useState(false);
   const [formLink, setFormLink] = useState("");
   const [formDate, setFormDate] = useState(todayLocalISO());
-  const [formClicks, setFormClicks] = useState("");
-  const [formLeads, setFormLeads] = useState("");
-  const [formSalesAmount, setFormSalesAmount] = useState("");
   // CTA UTM is normally generated server-side at insert time, but the create
   // dialog exposes it here so operators can copy it into the published link
   // before saving. Empty string = let the server generate as today.
@@ -181,9 +177,6 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
     setFormFormat("");
     setFormLink("");
     setFormDate(todayLocalISO());
-    setFormClicks("");
-    setFormLeads("");
-    setFormSalesAmount("");
     setFormUtmCampaign("");
     setUtmCopied(false);
     setPreviewThumbnail(null);
@@ -335,9 +328,6 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
             format: formFormat || null,
             publishedLink: formLink || null,
             publishedDate: formDate,
-            clicks: formClicks ? parseInt(formClicks, 10) : null,
-            leads: formLeads ? parseInt(formLeads, 10) : null,
-            salesAmount: formSalesAmount || null,
           }),
         });
         if (!res.ok) {
@@ -777,48 +767,9 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
               </div>
             )}
 
-            {/* Attribution metrics — only editable on an existing post.
-                Views/likes/comments are never edited by hand; the
-                performance-decay sweep pulls them from the platform API.
-                Clicks/leads/sales have no upstream source so they stay
-                manual. */}
-            {isEditing && (
-              <div className="space-y-3 rounded-lg border border-dashed border-gray-300 p-3">
-                <p className="text-xs text-muted-foreground font-medium">
-                  Attribution
-                </p>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Clicks</Label>
-                    <Input
-                      type="number"
-                      value={formClicks}
-                      onChange={(e) => setFormClicks(e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Leads</Label>
-                    <Input
-                      type="number"
-                      value={formLeads}
-                      onChange={(e) => setFormLeads(e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Sales $</Label>
-                    <Input
-                      type="number"
-                      value={formSalesAmount}
-                      onChange={(e) => setFormSalesAmount(e.target.value)}
-                      placeholder="0"
-                      step="0.01"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Clicks + leads are sourced automatically from the post's
+                go.starterstory.com tracking link (the sync-link-metrics job) —
+                no manual attribution entry. Sales was removed entirely. */}
 
             {saveResult && (
               <div
@@ -900,7 +851,6 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
               <SortHeader label="Comments" sortKeyName="comments" />
               <SortHeader label="Clicks" sortKeyName="clicks" />
               <SortHeader label="Leads" sortKeyName="leads" />
-              <SortHeader label="Sales $" sortKeyName="salesAmount" />
             </tr>
           </thead>
           <tbody>
@@ -1112,14 +1062,11 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
                 <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
                   {item.leads || "-"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                  {item.salesAmount ? `$${item.salesAmount.toLocaleString()}` : "-"}
-                </td>
               </tr>
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={hasPerformanceSync ? 13 : 12} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                <td colSpan={hasPerformanceSync ? 12 : 11} className="px-4 py-12 text-center text-muted-foreground text-sm">
                   {query
                     ? `No content items match “${search}”.`
                     : "No content items found for the selected filters."}

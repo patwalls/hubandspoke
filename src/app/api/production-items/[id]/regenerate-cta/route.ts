@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth-guards";
 import { regenerateCtaForItem } from "@/lib/services/draft-algorithm/regenerate-cta";
+import { syncLinkMetricsForItem } from "@/lib/services/link-metrics-sync";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -56,6 +57,11 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       }
       return NextResponse.json({ status: "skipped", reason: result.reason });
     }
+    // Best-effort: pull the (new) link's clicks/leads into the item's columns so
+    // the table reflects it without waiting for the 30-min sweep. Never blocks
+    // the response.
+    void syncLinkMetricsForItem(id).catch(() => {});
+
     return NextResponse.json({
       status: "generated",
       draftId: result.draftId,

@@ -302,7 +302,6 @@ export async function GET(request: NextRequest) {
     const primaryProduction = initMetricData(primaryRows);
     const primaryViews = initMetricData(primaryRows);
     const primaryLeads = initMetricData(primaryRows);
-    const primarySales = initMetricData(primaryRows);
 
     // Format table metrics
     const formatRows = [...formatList];
@@ -320,7 +319,6 @@ export async function GET(request: NextRequest) {
 
       const views = item.views || 0;
       const leads = item.leads || 0;
-      const sales = item.salesAmount ? parseFloat(item.salesAmount) : 0;
 
       if (showingFormats) {
         const formatKey = item.format || "(No Format)";
@@ -328,7 +326,6 @@ export async function GET(request: NextRequest) {
           primaryProduction[formatKey][period.label] += 1;
           primaryViews[formatKey][period.label] += views;
           primaryLeads[formatKey][period.label] += leads;
-          primarySales[formatKey][period.label] += sales;
         }
       } else {
         const rowKey = itemToRowKey.get(item.id);
@@ -337,7 +334,6 @@ export async function GET(request: NextRequest) {
           primaryProduction[label][period.label] += 1;
           primaryViews[label][period.label] += views;
           primaryLeads[label][period.label] += leads;
-          primarySales[label][period.label] += sales;
         }
       }
 
@@ -397,8 +393,6 @@ export async function GET(request: NextRequest) {
       comments: item.comments,
       clicks: item.clicks,
       leads: item.leads,
-      salesNum: item.salesNum,
-      salesAmount: item.salesAmount ? parseFloat(item.salesAmount) : null,
       ctrFirstHour: item.ctrFirstHour ? parseFloat(item.ctrFirstHour) : null,
       apvFirst24Hours: item.apvFirst24Hours ? parseFloat(item.apvFirst24Hours) : null,
       editorEmail: item.editorEmail,
@@ -418,7 +412,6 @@ export async function GET(request: NextRequest) {
         views: primaryViews,
         leads: primaryLeads,
         viewsPerPost: primaryViewsPerPost,
-        sales: primarySales,
       },
       byFormat: {
         production: formatProduction,

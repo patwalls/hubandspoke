@@ -430,7 +430,6 @@ export async function PUT(request: NextRequest) {
       comments,
       clicks,
       leads,
-      salesAmount,
       killReason,
       utmCampaign,
       shortLinkSlug,
@@ -586,7 +585,6 @@ export async function PUT(request: NextRequest) {
     if (comments !== undefined) updateData.comments = comments === "" || comments === null ? null : Number(comments);
     if (clicks !== undefined) updateData.clicks = clicks === "" || clicks === null ? null : Number(clicks);
     if (leads !== undefined) updateData.leads = leads === "" || leads === null ? null : Number(leads);
-    if (salesAmount !== undefined) updateData.salesAmount = salesAmount === "" || salesAmount === null ? null : String(salesAmount);
 
     // Source type is not user-editable as of 2026-05-11 — it's derived
     // exclusively by system flows (notion-sync, account-content-sync,

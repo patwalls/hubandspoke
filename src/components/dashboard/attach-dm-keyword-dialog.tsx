@@ -35,6 +35,9 @@ interface ShortLink {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The production item this keyword is being attached to. Needed to build
+   *  the go→go chain (keyword link → this post's per-post tracked link). */
+  itemId: string;
   /** Slug currently attached to this post, if any. */
   currentSlug: string | null;
   /** Base host for the redirect, e.g. "https://go.starterstory.com". */
@@ -84,6 +87,7 @@ function staleSort(a: ShortLink, b: ShortLink): number {
 export function AttachDmKeywordDialog({
   open,
   onOpenChange,
+  itemId,
   currentSlug,
   baseUrl,
   onSaved,
@@ -165,6 +169,23 @@ export function AttachDmKeywordDialog({
     setView("edit");
   }
 
+  // POST the keyword + final destination to the server, which builds the
+  // go→go chain (keyword link → per-post tracked link → destination). Throws
+  // on failure so the callers surface the error.
+  async function saveChain(keywordSlug: string, destinationUrl: string) {
+    const res = await fetch(`/api/production-items/${itemId}/dm-keyword`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ keywordSlug, destinationUrl }),
+    });
+    if (!res.ok) {
+      const { error: msg } = await res
+        .json()
+        .catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(msg ?? `HTTP ${res.status}`);
+    }
+  }
+
   async function handleSaveExisting() {
     if (!selectedSlug) return;
     const trimmed = destination.trim();
@@ -175,20 +196,11 @@ export function AttachDmKeywordDialog({
     setSaving(true);
     setError(null);
     try {
-      // 1) Update the destination in the short-link pool (no-op if unchanged).
-      const existing = links.find((l) => l.slug === selectedSlug);
-      if (existing && existing.destinationUrl !== trimmed) {
-        const res = await fetch(`/api/short-links/${encodeURIComponent(selectedSlug)}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ destinationUrl: trimmed }),
-        });
-        if (!res.ok) {
-          const { error: msg } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-          throw new Error(msg ?? `HTTP ${res.status}`);
-        }
-      }
-      // 2) Attach the slug to the post.
+      // Build the go→go chain: keyword link → this post's per-post tracked
+      // link → the destination. `trimmed` is the FINAL destination; the server
+      // points the per-post link at it and the keyword link at the per-post go
+      // URL. Then attach the keyword slug to the post.
+      await saveChain(selectedSlug, trimmed);
       await onSaved(selectedSlug);
       onOpenChange(false);
     } catch (e) {
@@ -216,15 +228,9 @@ export function AttachDmKeywordDialog({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/short-links`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ slug: slugValue, destinationUrl: urlValue, tag: DM_TAG }),
-      });
-      if (!res.ok) {
-        const { error: msg } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(msg ?? `HTTP ${res.status}`);
-      }
+      // Same go→go chain as the existing-slug path; the server creates the
+      // keyword link if it doesn't exist yet.
+      await saveChain(slugValue, urlValue);
       await onSaved(slugValue);
       onOpenChange(false);
     } catch (e) {

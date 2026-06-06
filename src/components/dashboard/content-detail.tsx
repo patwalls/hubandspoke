@@ -2708,6 +2708,17 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 </div>
               </PopoverContent>
             </Popover>
+            {/* Tracking-link chip — Starter Story brand only, and not for
+             *  Instagram (IG uses the DM-keyword chip below, which chains a
+             *  stable ManyChat keyword into the per-post link). */}
+            {brand === "starter-story" &&
+              !postType?.startsWith("instagram_") && (
+                <GoLinkPopover
+                  itemId={item.id}
+                  slug={item.shortLinkSlug ?? null}
+                  baseUrl={shortLinksBaseUrl}
+                />
+              )}
             {/* DM keyword chip — Instagram-only. Click opens a popover
              *  with the existing slug → short-link → destination chain;
              *  Edit button opens AttachDmKeywordDialog (unchanged). */}
@@ -3102,36 +3113,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             {item.viewsEstimated ? "Estimated from likes" : "Reported"}
           </p>
         </div>
-        {(data?.derivatives?.length ?? 0) +
-          (data?.reposts?.length ?? 0) +
-          (data?.crossPosts?.length ?? 0) >
-        0 ? (
-          <div className="rounded-lg border border-border bg-card p-4">
-            <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Total Views
-            </p>
-            <div className="mt-2">
-              <span className="text-3xl font-semibold text-foreground tabular-nums">
-                {formatCompact(data?.descendantViewsTotal ?? 0)}
-              </span>
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Across derivatives, reposts, and cross-posts
-            </p>
-          </div>
-        ) : (
-          <div className="rounded-lg border border-border bg-card p-4">
-            <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Comments
-            </p>
-            <div className="mt-2">
-              <span className="text-3xl font-semibold text-foreground tabular-nums">
-                {formatCompact(item.comments ?? 0)}
-              </span>
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">On this post</p>
-          </div>
-        )}
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             Likes
@@ -3143,21 +3124,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           </div>
           <p className="mt-3 text-xs text-muted-foreground">On this post</p>
         </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Clicks
-          </p>
-          <div className="mt-2">
-            <span className="text-3xl font-semibold text-foreground tabular-nums">
-              {formatCompact(item.clicks)}
-            </span>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            {item.leads != null
-              ? `${item.leads.toLocaleString()} leads`
-              : "Link clicks"}
-          </p>
-        </div>
+        <CtaMetricCards
+          itemId={item.id}
+          fallbackClicks={item.clicks}
+          fallbackLeads={item.leads}
+        />
         {item.predictedViewsSnapshot != null && (
           <PredictedVsActualCard
             predicted={item.predictedViewsSnapshot}
@@ -4351,6 +4322,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       <AttachDmKeywordDialog
         open={dmKeywordDialogOpen}
         onOpenChange={setDmKeywordDialogOpen}
+        itemId={item.id}
         currentSlug={item.shortLinkSlug ?? null}
         baseUrl={shortLinksBaseUrl}
         onSaved={async (nextSlug) => {
@@ -4411,6 +4383,312 @@ const CONFIDENCE_STYLES: Record<
     text: "text-muted-foreground",
   },
 };
+
+// The CLICKS + LEADS stat cards. Both source from the post's go.starterstory.com
+// tracking link: we fetch live values from /api/production-items/[id]/cta-link
+// (cheap, single item) and fall back to the synced columns while loading or
+// when no link exists yet.
+function CtaMetricCards({
+  itemId,
+  fallbackClicks,
+  fallbackLeads,
+}: {
+  itemId: string;
+  fallbackClicks: number | null;
+  fallbackLeads: number | null;
+}) {
+  const [live, setLive] = useState<{ clicks: number; leads: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/production-items/${itemId}/cta-link`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (j: { shortLink?: { clicksCount: number; leadsCount?: number } | null } | null) => {
+          if (!cancelled && j?.shortLink) {
+            setLive({
+              clicks: j.shortLink.clicksCount,
+              leads: j.shortLink.leadsCount ?? 0,
+            });
+          }
+        },
+      )
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [itemId]);
+
+  const clicks = live?.clicks ?? fallbackClicks;
+  const leads = live?.leads ?? fallbackLeads;
+
+  return (
+    <>
+      <div className="rounded-lg border border-border bg-card p-4">
+        <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+          Clicks
+        </p>
+        <div className="mt-2">
+          <span className="text-3xl font-semibold text-foreground tabular-nums">
+            {formatCompact(clicks)}
+          </span>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">Link clicks</p>
+      </div>
+      <div className="rounded-lg border border-border bg-card p-4">
+        <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+          Leads
+        </p>
+        <div className="mt-2">
+          <span className="text-3xl font-semibold text-foreground tabular-nums">
+            {formatCompact(leads)}
+          </span>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">From this link</p>
+      </div>
+    </>
+  );
+}
+
+// Header chip + popover for managing a post's go.starterstory.com tracking
+// link (Starter Story brand only). Shows the unique go link with a copy button,
+// its live clicks + leads, an inline editor for the redirect destination, and a
+// "Regenerate link" action. The DM-keyword chip is the Instagram variant of
+// this; everywhere else this is the per-post CTA link.
+interface GoLinkData {
+  slug: string;
+  clicksCount: number;
+  leadsCount: number;
+  destinationUrl: string;
+}
+
+function GoLinkPopover({
+  itemId,
+  slug,
+  baseUrl,
+}: {
+  itemId: string;
+  slug: string | null;
+  baseUrl: string;
+}) {
+  const [data, setData] = useState<GoLinkData | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [destDraft, setDestDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/production-items/${itemId}/cta-link`);
+      if (!res.ok) return;
+      const j = (await res.json()) as { shortLink?: GoLinkData | null };
+      if (j.shortLink) setData(j.shortLink);
+    } catch {
+      /* leave null */
+    }
+  }, [itemId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const effectiveSlug = data?.slug ?? slug;
+  const goUrl = effectiveSlug ? `${baseUrl}/${effectiveSlug}` : null;
+
+  async function copyLink() {
+    if (!goUrl) return;
+    try {
+      await navigator.clipboard.writeText(goUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Couldn't copy");
+    }
+  }
+
+  async function saveRedirect() {
+    if (!data) return;
+    const next = destDraft.trim();
+    if (!next) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/short-links/${encodeURIComponent(data.slug)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ destinationUrl: next }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error(j?.error || "Couldn't update redirect");
+        return;
+      }
+      setData({ ...data, destinationUrl: next });
+      setEditing(false);
+      toast.success("Redirect updated");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function regenerate() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/production-items/${itemId}/regenerate-cta`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j?.status === "skipped") {
+        toast.message(j?.error || "Couldn't regenerate the link");
+        return;
+      }
+      toast.success("Link regenerated");
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        className={cn(CHIP_B_BASE, CHIP_B_CLICKABLE)}
+        title="go.starterstory.com tracking link for this post"
+      >
+        <LinkIcon className="size-3" />
+        {effectiveSlug ? (
+          <span className="font-mono">{effectiveSlug}</span>
+        ) : (
+          <span className="italic">No link</span>
+        )}
+      </PopoverTrigger>
+      <PopoverContent className="w-[26rem] space-y-2" align="start">
+        <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+          Tracking link
+        </p>
+        {goUrl ? (
+          <>
+            <div className="flex items-center gap-2 text-xs">
+              <a
+                href={goUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-foreground hover:underline truncate min-w-0 flex-1"
+              >
+                {goUrl.replace(/^https?:\/\//, "")}
+              </a>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs shrink-0"
+                onClick={() => void copyLink()}
+              >
+                {copied ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <span>
+                <span className="font-semibold text-foreground tabular-nums">
+                  {(data?.clicksCount ?? 0).toLocaleString()}
+                </span>{" "}
+                clicks
+              </span>
+              <span>
+                <span className="font-semibold text-foreground tabular-nums">
+                  {(data?.leadsCount ?? 0).toLocaleString()}
+                </span>{" "}
+                leads
+              </span>
+            </div>
+            {editing ? (
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">Redirect destination</p>
+                <Input
+                  value={destDraft}
+                  onChange={(e) => setDestDraft(e.target.value)}
+                  className="h-8 text-xs font-mono"
+                  placeholder="https://www.starterstory.com/..."
+                />
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    disabled={busy}
+                    onClick={() => void saveRedirect()}
+                  >
+                    {busy ? "Saving…" : "Save"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setEditing(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">→</span>
+                <span
+                  className="font-mono text-foreground/80 truncate min-w-0 flex-1"
+                  title={data?.destinationUrl}
+                >
+                  {data?.destinationUrl?.replace(/^https?:\/\//, "") ?? "—"}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs shrink-0"
+                  onClick={() => {
+                    setDestDraft(data?.destinationUrl ?? "");
+                    setEditing(true);
+                  }}
+                >
+                  Edit redirect
+                </Button>
+              </div>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs"
+              disabled={busy}
+              onClick={() => void regenerate()}
+            >
+              {busy ? "Working…" : "Regenerate link"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              No tracking link yet. Generate one (also re-writes the CTA copy
+              and picks a target).
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              disabled={busy}
+              onClick={() => void regenerate()}
+            >
+              {busy ? "Generating…" : "Generate link"}
+            </Button>
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function PredictedVsActualCard({
   predicted,

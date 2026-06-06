@@ -20,7 +20,8 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   *:00  performance-decay         → SC API + Klaviyo Reporting API. Writes views/likes/comments (and opens/clicks/recipients for newsletters). Decay-tier-gated.
   *:15  threshold-monitor-sweep   → in-place scan. Auto-creates repurposed Idea items when views cross format thresholds.
   *:20  enrichment-sweep          → fan-out → enrich-item (per item) → maybe transcribe-whisper
-  *:30  notion-sync               → Notion API ⇄ productionItems (YouTube long-form authoritative)
+  *:30  notion-sync               → Notion API ⇄ productionItems (YouTube long-form authoritative). NO LONGER writes clicks/leads/sales (sales removed; clicks/leads owned by sync-link-metrics).
+  */30  sync-link-metrics         → go.starterstory.com short_links API → productionItems.clicks/leads (the go links are the source of truth for clicks + leads)
   *:40  hook-extract-sweep        → fan-out → extract-hook (per item, gpt-4.1-mini)
   *:50  hook-fallback-sweep       → fan-out → hook-fallback (per item, no LLM)
   */20  youtube-download-sweep    → fan-out → youtube-download → transcribe-whisper
@@ -134,6 +135,13 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - **Account pick is deterministic**: when the target format has multiple `formatChannels` rows, picks the oldest-added one (`ORDER BY created_at, id ASC LIMIT 1`). Fan-out-to-all-channels is a deliberate non-feature — one repurposed Idea per (parent, source, target) triple regardless of how many channels the target format publishes to.
   - Resolves the editor for the new item via `resolveEditor()` chain (source item → format `editorNotionUserId` → brand `defaultEditorUserId` → global fallback)
   - This task **replaces the Asana-based `/api/trigger-repurpose` flow** — same intent, different implementation. No external systems.
+
+### `sync-link-metrics` — go links → clicks/leads
+- **Trigger:** cron `*/30 * * * *` (every 30 min); also fired best-effort per item after a CTA regenerate (`/api/production-items/[id]/regenerate-cta` → `syncLinkMetricsForItem`).
+- **Files:** `src/jobs/tasks/scheduled.ts` (`syncLinkMetricsTask`), `src/lib/services/link-metrics-sync.ts`.
+- **Inputs:** StarterStory short-links API (`GET /api/v1/short_links?include_archived=true`) — every hubandspoke-minted link (`content_source='hubandspoke'`), keyed by `content_external_id` (= `productionItems.id`).
+- **Outputs:** writes `productionItems.clicks` (sum of the post's link click counts) + `productionItems.leads` (max of `leads_count`, which the Rails side computes by matching `lead_conversions.content` to the link's `utm_campaign`). Only rows whose values changed are updated.
+- **Why:** the go.starterstory.com short links are the SOURCE OF TRUTH for CLICKS and LEADS. Notion no longer writes these (and SALES was removed entirely). Legacy posts get their historical clicks via the one-time `scripts/backfill-legacy-clicks.mjs`, which seeds archived `legacy`-tagged go links with the old count — this job then reads them back into the column.
 
 ### `notion-sync` — Notion ⇄ DB
 - **Trigger:** cron `30 * * * *` (every hour at :30)

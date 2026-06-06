@@ -6,6 +6,7 @@
 import type { Task } from "graphile-worker";
 import { syncFromNotion } from "@/lib/services/notion-sync";
 import { syncPerformanceData } from "@/lib/services/performance-decay";
+import { syncLinkMetrics } from "@/lib/services/link-metrics-sync";
 import { runEvergreenScan } from "@/lib/services/evergreen-scan";
 import { selectEnrichmentCandidates } from "@/lib/services/enrichment/orchestrator";
 import { selectHookCandidates } from "@/lib/services/hook-extract/orchestrator";
@@ -52,6 +53,9 @@ export const performanceDecayTask: Task = timed("performance-decay", () =>
   syncPerformanceData()
 );
 export const notionSyncTask: Task = timed("notion-sync", () => syncFromNotion());
+export const syncLinkMetricsTask: Task = timed("sync-link-metrics", () =>
+  syncLinkMetrics()
+);
 /**
  * Cron parent task: select pending items and enqueue one `enrich-item` child
  * per item. Returns immediately; children run in parallel up to the worker's

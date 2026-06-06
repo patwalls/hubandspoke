@@ -14,7 +14,6 @@ const PLATFORM_TABS = [
   { key: "views" as const, label: "Views" },
   { key: "leads" as const, label: "Leads" },
   { key: "viewsPerPost" as const, label: "Views Per Post" },
-  { key: "sales" as const, label: "Sales" },
 ];
 
 /* ------------------------------------------------------------------ */

@@ -15,6 +15,7 @@ export interface ShortLink {
   slug: string;
   destinationUrl: string;
   clicksCount: number;
+  leadsCount: number;
   lastClickedAt: string | null;
   tag: string | null;
   archived: boolean;
@@ -43,6 +44,7 @@ type RawShortLink = {
   slug: string;
   destination_url: string;
   clicks_count: number;
+  leads_count?: number;
   last_clicked_at: string | null;
   tag: string | null;
   archived: boolean;
@@ -61,6 +63,7 @@ function normalize(raw: RawShortLink): ShortLink {
     slug: raw.slug,
     destinationUrl: raw.destination_url,
     clicksCount: raw.clicks_count,
+    leadsCount: raw.leads_count ?? 0,
     lastClickedAt: raw.last_clicked_at,
     tag: raw.tag,
     archived: raw.archived,

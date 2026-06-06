@@ -520,10 +520,9 @@ export async function syncFromNotion(): Promise<{
         isExternal: detectExternal(publishedLink, platform),
         // views/likes/comments intentionally NOT written here — Scrape Creators
         // owns those via the performance-decay service. See metric-refresh below.
-        clicks: extractNumber(properties, "Clicks"),
-        leads: extractNumber(properties, "Leads"),
-        salesNum: extractNumber(properties, "Sales Num"),
-        salesAmount: extractNumber(properties, "Sales Amount")?.toString() ?? null,
+        // clicks/leads intentionally NOT written here either — the
+        // `sync-link-metrics` job owns them from the go.starterstory.com short
+        // links (see link-metrics-sync.ts). Sales was removed entirely.
         ctrFirstHour: extractNumber(properties, "CTR (First Hour)")?.toString() ?? null,
         apvFirst24Hours: extractNumber(properties, "APV (First 24 Hours)")?.toString() ?? null,
         pillarContentNotionId: extractPillarContentNotionId(properties),

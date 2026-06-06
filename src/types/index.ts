@@ -53,8 +53,6 @@ export interface ProductionItem {
   comments: number | null;
   clicks: number | null;
   leads: number | null;
-  salesNum: number | null;
-  salesAmount: number | null;
   ctrFirstHour: number | null;
   apvFirst24Hours: number | null;
   editorEmail: string | null;
@@ -205,7 +203,6 @@ export interface ContentReportData {
     views: MetricData;
     leads: MetricData;
     viewsPerPost: MetricData;
-    sales: MetricData;
   };
   byFormat: {
     production: MetricData;

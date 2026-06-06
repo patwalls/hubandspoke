@@ -31,6 +31,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       shortLink: {
         slug: link.slug,
         clicksCount: link.clicksCount,
+        leadsCount: link.leadsCount,
         lastClickedAt: link.lastClickedAt,
         destinationUrl: link.destinationUrl,
         targetType: link.targetType,

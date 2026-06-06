@@ -124,7 +124,6 @@ interface ContentItem {
   likes: number | null;
   comments: number | null;
   leads: number | null;
-  salesAmount: number | null;
   status: string | null;
   viewsEstimated: boolean;
   descriptProjectUrl: string | null;
