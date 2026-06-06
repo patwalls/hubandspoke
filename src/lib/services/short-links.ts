@@ -6,6 +6,11 @@
 // The redirect + click tracking itself lives in the Rails app (the `ShortLink`
 // and `ShortLinkClick` models); hubandspoke is only the control plane.
 
+// Possible CTA targets a tracking link can point at. "lead_magnet" → one of
+// our opt-in offers; "episode" → a specific guest's published episode;
+// "custom" → an explicit URL from the format Skill.
+export type ShortLinkTargetType = "lead_magnet" | "episode" | "custom";
+
 export interface ShortLink {
   slug: string;
   destinationUrl: string;
@@ -13,6 +18,15 @@ export interface ShortLink {
   lastClickedAt: string | null;
   tag: string | null;
   archived: boolean;
+  // Content-association fields (StarterStory side: short_links table). Populated
+  // when hubandspoke mints a per-post CTA link so clicks trace back to the post
+  // and its target. Null for links created the old way (admin UI, Dub seed).
+  contentSource: string | null;
+  contentExternalId: string | null;
+  leadMagnetId: number | null;
+  targetType: ShortLinkTargetType | null;
+  channel: string | null;
+  utmCampaign: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -32,6 +46,12 @@ type RawShortLink = {
   last_clicked_at: string | null;
   tag: string | null;
   archived: boolean;
+  content_source: string | null;
+  content_external_id: string | null;
+  lead_magnet_id: number | null;
+  target_type: ShortLinkTargetType | null;
+  channel: string | null;
+  utm_campaign: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -44,9 +64,42 @@ function normalize(raw: RawShortLink): ShortLink {
     lastClickedAt: raw.last_clicked_at,
     tag: raw.tag,
     archived: raw.archived,
+    contentSource: raw.content_source ?? null,
+    contentExternalId: raw.content_external_id ?? null,
+    leadMagnetId: raw.lead_magnet_id ?? null,
+    targetType: raw.target_type ?? null,
+    channel: raw.channel ?? null,
+    utmCampaign: raw.utm_campaign ?? null,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
   };
+}
+
+// The content-association attributes hubandspoke sets when minting a per-post
+// CTA link. Shared by create + update so the two stay in sync.
+export interface ShortLinkContentAssociation {
+  contentSource?: string;
+  contentExternalId?: string;
+  leadMagnetId?: number | null;
+  targetType?: ShortLinkTargetType;
+  channel?: string;
+  utmCampaign?: string | null;
+}
+
+// Maps the camelCase association fields to the Rails-side snake_case params,
+// omitting anything undefined so we never clobber existing values on update.
+function associationParams(
+  a: ShortLinkContentAssociation,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (a.contentSource !== undefined) out.content_source = a.contentSource;
+  if (a.contentExternalId !== undefined)
+    out.content_external_id = a.contentExternalId;
+  if (a.leadMagnetId !== undefined) out.lead_magnet_id = a.leadMagnetId;
+  if (a.targetType !== undefined) out.target_type = a.targetType;
+  if (a.channel !== undefined) out.channel = a.channel;
+  if (a.utmCampaign !== undefined) out.utm_campaign = a.utmCampaign;
+  return out;
 }
 
 function config() {
@@ -119,11 +172,13 @@ export async function getShortLink(slug: string): Promise<ShortLink | null> {
   }
 }
 
-export async function createShortLink(input: {
-  slug: string;
-  destinationUrl: string;
-  tag?: string | null;
-}): Promise<ShortLink> {
+export async function createShortLink(
+  input: {
+    slug: string;
+    destinationUrl: string;
+    tag?: string | null;
+  } & ShortLinkContentAssociation,
+): Promise<ShortLink> {
   const body = await call<{ short_link: RawShortLink }>(`/short_links`, {
     method: "POST",
     body: JSON.stringify({
@@ -131,6 +186,7 @@ export async function createShortLink(input: {
         slug: input.slug,
         destination_url: input.destinationUrl,
         tag: input.tag ?? null,
+        ...associationParams(input),
       },
     }),
   });
@@ -143,9 +199,9 @@ export async function updateShortLink(
     destinationUrl?: string;
     tag?: string | null;
     archived?: boolean;
-  },
+  } & ShortLinkContentAssociation,
 ): Promise<ShortLink> {
-  const payload: Record<string, unknown> = {};
+  const payload: Record<string, unknown> = associationParams(input);
   if (input.destinationUrl !== undefined) payload.destination_url = input.destinationUrl;
   if (input.tag !== undefined) payload.tag = input.tag;
   if (input.archived !== undefined) payload.archived = input.archived;
@@ -158,6 +214,18 @@ export async function updateShortLink(
     },
   );
   return normalize(body.short_link);
+}
+
+// All tracking links minted for one production item (normally 0 or 1, since we
+// mint one per post). Used to reuse an existing slug on regenerate and to read
+// back the click count for the content-detail analytics surface.
+export async function findShortLinksByContent(
+  contentExternalId: string,
+): Promise<ShortLink[]> {
+  const body = await call<{ short_links: RawShortLink[] }>(
+    `/short_links?content_external_id=${encodeURIComponent(contentExternalId)}&include_archived=true`,
+  );
+  return body.short_links.map(normalize);
 }
 
 export async function deleteShortLink(slug: string): Promise<void> {

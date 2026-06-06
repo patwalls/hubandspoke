@@ -35,6 +35,7 @@ import { buildCompositionName } from "@/lib/services/descript-composition";
 import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
 import { getTopPerformingCaptions } from "./exemplars";
 import { loadPriorCrossPostExamples } from "./prior-cross-post-examples";
+import { generateTrackedCta } from "./tracked-cta";
 import {
   runDescriptStepForDerivative,
   type DescriptStepStatus,
@@ -893,20 +894,16 @@ export async function runDraftAlgorithm(
       ? extractCrossPostRulesSection(formatInstructions)
       : null;
 
-  // v1.7: CTA context. Only set when the post type both has a cta field
-  // in PLATFORM_FIELD_MAP (so the agent can fill it) AND has a mapped
-  // utm_source channel name (so the agent has a literal value to paste
-  // into the link). The two should always agree — both sets cover the
-  // same three post types (x / linkedin / youtube_community) — but we
-  // gate on both as belt-and-braces in case a new cta slot gets added
-  // to PLATFORM_FIELD_MAP before the channel map catches up.
+  // v2 (smart tracked CTA): the reply CTA is no longer drafted inside the body
+  // agent. When a post type has both a cta field AND a mapped utm_source
+  // channel, we draft the cta SEPARATELY after the body via generateTrackedCta
+  // — it picks a real target (guest episode first, else best lead magnet) and
+  // mints a tracked go.starterstory.com link. So we pass `cta: undefined` to
+  // generateDraft (leaving the cta field blank) and fill it below.
   const ctaChannel = CTA_CHANNEL_BY_POST_TYPE[item.postType as PostType];
   const hasCtaField =
     PLATFORM_FIELD_MAP[item.postType as PostType]?.cta != null;
-  const ctaArg =
-    ctaChannel && hasCtaField
-      ? { channel: ctaChannel, utmCampaign: item.utmCampaign ?? null }
-      : undefined;
+  const willTrackCta = Boolean(ctaChannel && hasCtaField);
 
   // v13: prior cross-post pairs for the (sourcePostType → targetPostType)
   // direction on this account. Only loaded for source_body substrates
@@ -937,10 +934,42 @@ export async function runDraftAlgorithm(
     substrate,
     pastCaptions,
     mediaContext,
-    cta: ctaArg,
+    cta: undefined,
     priorCrossPostExamples,
     editorialContext,
   });
+
+  // v2 smart tracked CTA: draft the reply CTA from the freshly-generated body,
+  // pick a real target, and mint a per-post tracking link. Failures here must
+  // not sink the whole draft — leave the cta blank and let the editor hit
+  // Regenerate CTA.
+  if (willTrackCta) {
+    const captionKey = PLATFORM_FIELD_MAP[item.postType as PostType]?.caption;
+    const ctaKey = PLATFORM_FIELD_MAP[item.postType as PostType]?.cta;
+    const captionRaw = captionKey ? result.content[captionKey] : null;
+    const postBody = Array.isArray(captionRaw)
+      ? captionRaw.join("\n")
+      : typeof captionRaw === "string"
+        ? captionRaw
+        : null;
+    try {
+      const tracked = await generateTrackedCta({
+        productionItemId,
+        channel: ctaChannel as string,
+        utmCampaign: item.utmCampaign ?? null,
+        postBody,
+        pillarTitle,
+        formatInstructions,
+      });
+      if (ctaKey) result.content[ctaKey] = tracked.cta;
+    } catch (err) {
+      console.error(
+        `draft-algorithm: tracked CTA generation failed item=${productionItemId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
 
   // Demote previous current + insert new current as version+1 in a tx —
   // keeps the partial unique index on (production_item_id) WHERE is_current

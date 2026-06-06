@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -105,7 +105,7 @@ function XCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLen
             )}
           </div>
           {editable && itemId && (
-            <RegenerateCtaButton itemId={itemId} onRegenerated={onRegenerated} />
+            <CtaActions itemId={itemId} onRegenerated={onRegenerated} />
           )}
         </div>
         <div className="mt-0.5 mb-1 text-[11px] text-muted-foreground">
@@ -158,7 +158,7 @@ function LinkedInCta({ fieldKey, value, editable, onLocalEdit, onCommit, author,
                 </span>
               </div>
               {editable && itemId && (
-                <RegenerateCtaButton itemId={itemId} onRegenerated={onRegenerated} />
+                <CtaActions itemId={itemId} onRegenerated={onRegenerated} />
               )}
             </div>
             {author.bio && (
@@ -204,7 +204,7 @@ function YouTubeCommunityCta({ fieldKey, value, editable, onLocalEdit, onCommit,
           Pinned by {displayName}
         </div>
         {editable && itemId && (
-          <RegenerateCtaButton itemId={itemId} onRegenerated={onRegenerated} />
+          <CtaActions itemId={itemId} onRegenerated={onRegenerated} />
         )}
       </div>
       <div className="flex items-start gap-2.5">
@@ -317,7 +317,7 @@ function RegenerateCtaButton({
       type="button"
       onClick={() => void handleClick()}
       disabled={busy}
-      title="Regenerate the reply CTA from the format Skill (preserves the main post body)"
+      title="Regenerate the reply CTA (picks a target + mints a tracked go.starterstory.com link; preserves the main post body)"
       className={cn(
         "inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50",
       )}
@@ -325,5 +325,77 @@ function RegenerateCtaButton({
       <SparklesIcon className={cn("h-3 w-3", busy && "animate-pulse")} />
       {busy ? "Generating…" : "Regenerate CTA"}
     </button>
+  );
+}
+
+// Clicks indicator + Regenerate button. Owns a refresh key so the click count
+// re-fetches right after a regenerate (the slug/target may have changed).
+function CtaActions({
+  itemId,
+  onRegenerated,
+}: {
+  itemId: string;
+  onRegenerated?: () => void;
+}) {
+  const [refreshKey, setRefreshKey] = useState(0);
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <CtaClicks itemId={itemId} refreshKey={refreshKey} />
+      <RegenerateCtaButton
+        itemId={itemId}
+        onRegenerated={() => {
+          setRefreshKey((k) => k + 1);
+          onRegenerated?.();
+        }}
+      />
+    </div>
+  );
+}
+
+interface CtaLinkStats {
+  slug: string;
+  clicksCount: number;
+}
+
+// Reads this post's tracked-link click count from
+// /api/production-items/[id]/cta-link. Renders nothing until a link exists.
+function CtaClicks({
+  itemId,
+  refreshKey,
+}: {
+  itemId: string;
+  refreshKey: number;
+}) {
+  const [stats, setStats] = useState<CtaLinkStats | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/production-items/${itemId}/cta-link`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { shortLink?: CtaLinkStats | null } | null) => {
+        if (!cancelled && j?.shortLink) {
+          setStats({
+            slug: j.shortLink.slug,
+            clicksCount: j.shortLink.clicksCount,
+          });
+        }
+      })
+      .catch(() => {
+        /* no stats — leave hidden */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [itemId, refreshKey]);
+
+  if (!stats) return null;
+  return (
+    <span
+      className="text-[10px] tabular-nums text-muted-foreground"
+      title={`Tracked link go.starterstory.com/${stats.slug}`}
+    >
+      {stats.clicksCount.toLocaleString()}{" "}
+      {stats.clicksCount === 1 ? "click" : "clicks"}
+    </span>
   );
 }
