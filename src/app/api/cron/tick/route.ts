@@ -18,6 +18,7 @@ export const dynamic = "force-dynamic";
 const SCHEDULED_TASK_NAMES: ReadonlyArray<keyof TaskPayloads> = [
   "performance-decay",
   "notion-sync",
+  "sync-link-metrics",
   "enrichment-sweep",
   "hook-dispatch-sweep",
   "account-content-sync-sweep",
