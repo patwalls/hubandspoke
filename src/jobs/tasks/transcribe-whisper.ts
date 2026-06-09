@@ -1,7 +1,8 @@
-import type { Task } from "graphile-worker";
+import type { JobHelpers, Task } from "graphile-worker";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { transcripts } from "@/lib/db/schema";
+import { selectAutoClipIdeaJobs } from "@/lib/services/clip-ideas-auto";
 import {
   extractAudioToS3,
   transcribeFromS3Audio,
@@ -62,6 +63,7 @@ export const transcribeWhisperTask: Task = async (rawPayload, helpers) => {
       payload.audioChunks ?? null,
       helpers.logger,
     );
+    await maybeAutoEnqueueClipIdeas(productionItemId, helpers);
     return;
   }
 
@@ -76,3 +78,49 @@ export const transcribeWhisperTask: Task = async (rawPayload, helpers) => {
     { runAt: new Date(Date.now() + 1000) },
   );
 };
+
+/**
+ * Auto clip-idea generation for NEW Starter Story long-form (2026-06-09).
+ * Fires once, right after the transcript lands — the only moment the full
+ * (media + transcript) precondition is freshly true. All cost gates live in
+ * `clip-ideas-auto.ts` (brand allowlist, Published + original + youtube_long,
+ * ≤7-day recency so whisper backfills over old videos never fan out).
+ *
+ * Best-effort by design: the transcript row is already committed, and a
+ * worker retry of this task would hit the transcript-exists skip at the top
+ * and never reach this point again — so a throw here would lose the enqueue
+ * AND fail a task that actually succeeded. Log and move on instead; the
+ * manual Generate button remains the fallback.
+ */
+async function maybeAutoEnqueueClipIdeas(
+  productionItemId: string,
+  helpers: JobHelpers,
+): Promise<void> {
+  try {
+    const result = await selectAutoClipIdeaJobs(productionItemId);
+    if (!result.eligible) {
+      helpers.logger.info(
+        `transcribe-whisper auto-clip-ideas skip item=${productionItemId} reason=${result.reason}`,
+      );
+      return;
+    }
+    for (const job of result.jobs) {
+      await helpers.addJob(
+        "generate-clip-ideas",
+        { productionItemId, targetFormatId: job.targetFormatId },
+        { jobKey: `auto-clip-ideas-${productionItemId}-${job.targetFormatId}` },
+      );
+    }
+    helpers.logger.info(
+      `transcribe-whisper auto-clip-ideas enqueued item=${productionItemId} formats=${result.jobs
+        .map((j) => j.formatName)
+        .join(",")}`,
+    );
+  } catch (err) {
+    helpers.logger.error(
+      `transcribe-whisper auto-clip-ideas failed item=${productionItemId}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
