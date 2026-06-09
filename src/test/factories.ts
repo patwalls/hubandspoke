@@ -204,6 +204,9 @@ export interface CreateTestProductionItemOptions {
   mediaS3Bucket?: string | null;
   mediaS3Key?: string | null;
   contentBody?: string | null;
+  /** youtube_id has a unique index — factories randomize when set to "auto". */
+  youtubeId?: string | null;
+  youtubeDownloadAttempts?: number;
 }
 
 /**
@@ -255,6 +258,9 @@ export async function createTestProductionItem(
       mediaS3Bucket: opts.mediaS3Bucket ?? null,
       mediaS3Key: opts.mediaS3Key ?? null,
       contentBody: opts.contentBody ?? null,
+      youtubeId:
+        opts.youtubeId === "auto" ? `vitest-${randomSuffix()}` : (opts.youtubeId ?? null),
+      youtubeDownloadAttempts: opts.youtubeDownloadAttempts ?? 0,
     })
     .returning();
   trackCleanup("productionItems", row.id);

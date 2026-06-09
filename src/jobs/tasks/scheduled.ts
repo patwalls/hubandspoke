@@ -17,6 +17,7 @@ import { selectExtractPosterCandidates } from "./extract-poster";
 import type { ExtractPosterPayload } from "./extract-poster";
 import { maybeAlertScCreditsExhausted } from "@/lib/services/sc-credits-watch";
 import { maybeAlertDescriptCreditsExhausted } from "@/lib/services/descript-credits-watch";
+import { maybeAlertYtArchiveBehind } from "@/lib/services/yt-archive-watch";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
 import { sendDailyScorecardEmail } from "@/lib/email";
@@ -316,6 +317,34 @@ export const descriptCreditsWatchTask: Task = async (_payload, helpers) => {
   } catch (err) {
     helpers.logger.error(
       `descript-credits-watch failed (${Date.now() - start}ms): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    throw err;
+  }
+};
+
+/**
+ * Watchdog for the home-machine YouTube archiver (home-machine/yt-archive/).
+ * The in-dyno youtube-download-sweep is a deliberate production noop
+ * (YouTube bot-blocks datacenter IPs), so if the home cron stops — machine
+ * off, wrapper broken, repo checkout wedged — archives silently stop landing.
+ * Detects Published YouTube items stuck at zero download attempts past the
+ * grace window, captures a grouped Sentry issue every tick while broken, and
+ * emails ALERT_RECIPIENTS (6h dedupe via `sync_logs.sync_type=
+ * 'yt-archive-alert'`). Cheap query (one indexed SELECT, limit 50).
+ */
+export const ytArchiveWatchTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("yt-archive-watch start");
+  try {
+    const result = await maybeAlertYtArchiveBehind();
+    helpers.logger.info(
+      `yt-archive-watch ${result.reason} sent=${result.sent} staleCount=${result.state.staleCount} (${Date.now() - start}ms)`,
+    );
+  } catch (err) {
+    helpers.logger.error(
+      `yt-archive-watch failed (${Date.now() - start}ms): ${
         err instanceof Error ? err.message : String(err)
       }`,
     );

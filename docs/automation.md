@@ -34,6 +34,8 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   13:00      daily-scorecard-email → Postmark (per opted-in user). 9am EDT / 8am EST in winter.
   */15 min   sc-credits-watch       → email Pat + Sam when SC returns HTTP 402 (deduped 4h)
   */15 min   descript-credits-watch → email Pat + Sam when Descript jobs hit "Insufficient AI credits" (deduped 4h)
+  *:45       yt-archive-watch       → Sentry issue + email Pat + Sam when YouTube items sit unarchived >12h (home-machine cron down; email deduped 6h)
+  (home Mac, hourly) yt-archive launchd cron → archive-yt-local.ts: yt-dlp → prod S3 + prod DB. NOT on the worker dyno — see home-machine/yt-archive/
 
 USER / API ENTRY POINTS
   POST /api/accounts/[id]/refresh?mode=async              → account-refresh
@@ -191,6 +193,13 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Outputs:** enqueues one `youtube-download` job per candidate, `jobKey: yt-dl-{id}`, `maxAttempts: 2` (deterministic failures don't deserve graphile's default 25)
 - **Downstream:** `youtube-download` → `transcribe-whisper`
 - **Rules:**
+  - **NOOP in production** (`NODE_ENV=production` → logs and returns):
+    YouTube bot-blocks Heroku's datacenter IPs, so in-dyno yt-dlp always hits
+    "Sign in to confirm you're not a bot". Production YouTube archiving is
+    owned by the **home-machine hourly cron** (`home-machine/yt-archive/` —
+    launchd job `com.hubandspoke.yt-archive` running
+    `scripts/archive-yt-local.ts` from a residential IP). `yt-archive-watch`
+    (below) alarms when that cron stops landing archives.
   - `MAX_ATTEMPTS = 5` defined locally (`youtube-download-sweep.ts:14`); same constant duplicated in `enrichment/orchestrator.ts:20`
   - Sweep gate paces retries; dyno-level maxAttempts only retries the same tick
 
@@ -700,6 +709,43 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   just for this alarm would be over-engineered. The queue view already
   carries the upstream's verbatim error in `last_error` and tracks
   `updated_at` on every retry, which is the auto-resolve signal.
+
+### `yt-archive-watch` — home-machine YouTube archiver watchdog
+- **Trigger:** cron `45 * * * *` (hourly at :45). Added 2026-06-09 after the
+  home cron silently failed for 3 days (the repo checkout it `git pull`s was
+  switched off the branch carrying its `--since-days` flag support — fixed by
+  landing the flags on `main`, but the class of failure is "anything that
+  stops the home Mac's hourly run", which nothing server-side noticed).
+- **Files:** `src/jobs/tasks/scheduled.ts` (`ytArchiveWatchTask`),
+  `src/lib/services/yt-archive-watch.ts` (detection + dedupe),
+  `src/lib/email.ts` (`sendYtArchiveBehindEmail`),
+  `src/lib/services/alert-recipients.ts`
+- **Inputs:** `productionItems` where `status='Published' AND youtube_id IS
+  NOT NULL AND media_s3_key IS NULL AND COALESCE(youtube_download_attempts,0)=0`,
+  brand in the watched set, published more than 12h ago (grace window) and
+  within the last 30 days (the home cron's own look-back).
+- **Outputs:**
+  - **Sentry event** every tick while broken — fingerprinted to one grouped
+    issue (`yt-archive-behind`) so alert rules fire on new/regression and the
+    event count is the "still broken" heartbeat.
+  - Email to `ALERT_RECIPIENTS` (Pat + Sam), deduped to one per 6h via
+    `sync_logs.sync_type='yt-archive-alert'`.
+- **Downstream:** none. Once the home cron is healthy it backfills
+  automatically (it looks back `RUN_SINCE_DAYS`) and the alert self-clears.
+- **Why attempts=0 and not "no media":** `archive-yt-local.ts` increments
+  `youtube_download_attempts` on success AND failure, so attempts=0 past the
+  grace window means the cron never even saw the item — machine off, wrapper
+  broken, checkout wedged. Items with attempts>0 are per-video failures
+  (dead/private/bot-gated), which are expected and not systemic.
+- **Brand scope:** the home cron only archives the brands in its env file
+  (`BRANDS` in `~/.config/hubandspoke/yt-archive.env`). The watchdog mirrors
+  that list in `DEFAULT_WATCH_BRANDS`, overridable without a deploy via the
+  `YT_ARCHIVE_WATCH_BRANDS` Heroku config var — **keep both in sync when
+  changing the brand set.**
+- **Belt-and-braces:** the wrapper itself (`home-machine/yt-archive/wrapper.sh`)
+  also fires a Sentry event (fingerprint `yt-archive-home-cron`) on any exit
+  other than 0/2, with the log tail attached. The server-side watch is the
+  authoritative catcher — it fires even when the Mac is off.
 
 ---
 

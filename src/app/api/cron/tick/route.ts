@@ -25,6 +25,7 @@ const SCHEDULED_TASK_NAMES: ReadonlyArray<keyof TaskPayloads> = [
   "klaviyo-sync-sweep",
   "evergreen-scan",
   "youtube-download-sweep",
+  "yt-archive-watch",
 ];
 
 export async function GET(request: NextRequest) {

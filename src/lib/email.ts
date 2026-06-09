@@ -326,3 +326,53 @@ export async function sendScCreditsExhaustedEmail(opts: {
     MessageStream: "outbound",
   });
 }
+
+export async function sendYtArchiveBehindEmail(opts: {
+  to: string;
+  staleCount: number;
+  oldestPublishedAt: Date | null;
+  sample: Array<{ id: string; title: string | null; brand: string | null; publishedDate: string | null }>;
+}) {
+  const oldestText = opts.oldestPublishedAt
+    ? `oldest published ${opts.oldestPublishedAt.toISOString().slice(0, 10)}`
+    : "age unknown";
+  const subject = "[Hub & Spoke] YouTube archiver is behind";
+  const sampleLinesText = opts.sample
+    .map((s) => `  - [${s.brand ?? "?"}] ${s.title ?? s.id} (published ${s.publishedDate ?? "?"})`)
+    .join("\n");
+  const sampleLinesHtml = opts.sample
+    .map(
+      (s) =>
+        `<li>[${(s.brand ?? "?").replace(/&/g, "&amp;").replace(/</g, "&lt;")}] ${(s.title ?? s.id).replace(/&/g, "&amp;").replace(/</g, "&lt;")} (published ${s.publishedDate ?? "?"})</li>`,
+    )
+    .join("");
+  const lines = [
+    `Heads up — ${opts.staleCount} published YouTube item(s) have had ZERO download attempts for over 12 hours (${oldestText}). The home-machine hourly archiver has likely stopped running or stopped working.`,
+    "",
+    sampleLinesText,
+    "",
+    "Check on the designated Mac:",
+    "  tail -50 ~/Library/Logs/hubandspoke-yt-archive.log",
+    "  launchctl list | grep yt-archive   # second column != 0 means last run failed",
+    "",
+    "The in-dyno youtube-download-sweep is a deliberate noop in production (YouTube bot-blocks datacenter IPs), so nothing else picks this up — once the cron is healthy again it backfills automatically on its next hourly tick.",
+    "",
+    "— Hub & Spoke",
+  ];
+  return getClient().sendEmail({
+    From: from,
+    To: opts.to,
+    Subject: subject,
+    TextBody: lines.join("\n"),
+    HtmlBody: `
+      <p>Heads up — <strong>${opts.staleCount}</strong> published YouTube item(s) have had <strong>zero download attempts</strong> for over 12 hours (${oldestText}). The home-machine hourly archiver has likely stopped running or stopped working.</p>
+      <ul style="color:#374151;font-size:13px;">${sampleLinesHtml}</ul>
+      <p>Check on the designated Mac:</p>
+      <pre style="margin:0 0 12px;padding:8px 12px;border-left:3px solid #dc2626;background:#fef2f2;color:#991b1b;font-family:ui-monospace,Menlo,monospace;font-size:12px;">tail -50 ~/Library/Logs/hubandspoke-yt-archive.log
+launchctl list | grep yt-archive   # second column != 0 means last run failed</pre>
+      <p style="color:#666;font-size:12px;">The in-dyno youtube-download-sweep is a deliberate noop in production (YouTube bot-blocks datacenter IPs), so nothing else picks this up — once the cron is healthy again it backfills automatically on its next hourly tick.</p>
+      <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
+    `,
+    MessageStream: "outbound",
+  });
+}

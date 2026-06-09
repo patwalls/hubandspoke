@@ -65,6 +65,7 @@ import {
   dailyScorecardEmailTask,
   scCreditsWatchTask,
   descriptCreditsWatchTask,
+  ytArchiveWatchTask,
 } from "./scheduled";
 import { thresholdMonitorSweepTask } from "./threshold-monitor-sweep";
 import {
@@ -155,6 +156,7 @@ export interface TaskPayloads {
   "daily-scorecard-email": Record<string, never>;
   "sc-credits-watch": Record<string, never>;
   "descript-credits-watch": Record<string, never>;
+  "yt-archive-watch": Record<string, never>;
   "worker-heartbeat": Record<string, never>;
   "klaviyo-sync-sweep": Record<string, never>;
 }
@@ -208,6 +210,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "daily-scorecard-email": dailyScorecardEmailTask,
   "sc-credits-watch": scCreditsWatchTask,
   "descript-credits-watch": descriptCreditsWatchTask,
+  "yt-archive-watch": ytArchiveWatchTask,
   "worker-heartbeat": workerHeartbeatTask,
   "klaviyo-sync-sweep": klaviyoSyncSweepTask,
 };

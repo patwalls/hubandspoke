@@ -36,4 +36,5 @@ export const CRONTAB = `
 0 13 * * * daily-scorecard-email
 */15 * * * * sc-credits-watch
 */15 * * * * descript-credits-watch
+45 * * * * yt-archive-watch
 `.trim();
