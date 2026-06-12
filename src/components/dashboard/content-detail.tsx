@@ -2110,7 +2110,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               postType={postType}
               publishedLink={publishedLink || null}
               brandSlug={brand}
-              disabled={isYouTube}
+              // Synced YT rows own their account identity, but the sync's
+              // long/short classification is fallible — post type stays
+              // editable so operators can correct e.g. a Short that came
+              // in with a watch?v= link and got tagged youtube_long.
+              accountDisabled={isYouTube}
               onChange={({ accountId: nextId, postType: nextType }) => {
                 setAccountId(nextId);
                 setPostType(nextType);

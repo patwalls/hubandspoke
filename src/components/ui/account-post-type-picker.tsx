@@ -23,7 +23,10 @@ import {
   platformHasMultiplePostTypes,
   toPlatform,
 } from "@/lib/platforms";
-import { inferPostTypeFromUrl } from "@/lib/infer-post-type";
+import {
+  inferPostTypeFromUrl,
+  resolveAutoPostType,
+} from "@/lib/infer-post-type";
 import type { PostType } from "@/lib/platform-field-schemas";
 
 export interface PickerAccount extends AccountBadgeAccount {
@@ -49,6 +52,11 @@ interface AccountPostTypePickerProps {
    *  create form). Omit to show all brands grouped. */
   brandSlug?: string | null;
   disabled?: boolean;
+  /** Lock only the account selector, leaving the post-type dropdown
+   *  editable. Synced items (e.g. YouTube archive rows) own their account
+   *  identity, but the sync's long/short classification can be wrong and
+   *  operators need to be able to correct it. */
+  accountDisabled?: boolean;
   className?: string;
   /** Override the styling of BOTH Popover triggers (Account selector +
    *  Post Type selector). When set, the picker drops its default
@@ -72,6 +80,7 @@ export function AccountPostTypePicker({
   publishedLink,
   brandSlug,
   disabled,
+  accountDisabled,
   className,
   triggerClassName,
 }: AccountPostTypePickerProps) {
@@ -113,18 +122,22 @@ export function AccountPostTypePicker({
 
   // URL-driven post-type inference. Fires only when (a) we have an account
   // selected, (b) the URL's implied post type matches that account's
-  // platform, and (c) the user hasn't already picked a post type manually.
+  // platform, (c) the user hasn't already picked a post type manually, and
+  // (d) there is no post type yet. (d) lives in resolveAutoPostType and is
+  // load-bearing: a stored post type is authoritative and the URL shape is
+  // only a hint — e.g. a YouTube Short synced with a watch?v= link would
+  // otherwise get silently rewritten to youtube_long every time someone
+  // opened the page.
   useEffect(() => {
-    if (!selected || postTypeTouched) return;
-    const inferred = inferPostTypeFromUrl(publishedLink);
+    if (!selected || postTypeTouched || disabled) return;
+    const inferred = resolveAutoPostType({
+      currentPostType: postType as string | null,
+      publishedLink,
+      accountPlatform: selected.platform,
+    });
     if (!inferred) return;
-    const platformOfInferred = inferred.startsWith("youtube_") ? "youtube"
-      : inferred.startsWith("instagram_") ? "instagram"
-      : inferred;
-    if (platformOfInferred !== selected.platform) return;
-    if (postType === inferred) return;
     onChange({ accountId: selected.id, postType: inferred });
-  }, [publishedLink, selected, postType, postTypeTouched, onChange]);
+  }, [publishedLink, selected, postType, postTypeTouched, disabled, onChange]);
 
   function selectAccount(next: PickerAccount) {
     setAccountPopoverOpen(false);
@@ -160,7 +173,7 @@ export function AccountPostTypePicker({
       {/* Account selector */}
       <Popover open={accountPopoverOpen} onOpenChange={setAccountPopoverOpen}>
         <PopoverTrigger
-          disabled={disabled}
+          disabled={disabled || accountDisabled}
           className={cn(
             triggerClassName ??
               cn(

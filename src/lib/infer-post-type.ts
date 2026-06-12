@@ -77,6 +77,35 @@ export function inferPostTypeFromUrl(
 }
 
 /**
+ * Decide whether the AccountPostTypePicker should auto-apply a post type
+ * inferred from the item's published URL. Returns the post type to apply,
+ * or null when nothing should change.
+ *
+ * Never overrides an existing post type: the stored value is authoritative
+ * and the URL shape is only a hint. YouTube Shorts in particular can be
+ * synced with a `watch?v=` link — inferring from that URL would say
+ * youtube_long, and auto-applying it used to silently rewrite a Short to
+ * long-form every time someone opened the page (with no way to undo it,
+ * since the picker is account-locked on synced YT items).
+ */
+export function resolveAutoPostType(opts: {
+  currentPostType: string | null | undefined;
+  publishedLink: string | null | undefined;
+  accountPlatform: string;
+}): PostType | null {
+  if (opts.currentPostType) return null;
+  const inferred = inferPostTypeFromUrl(opts.publishedLink);
+  if (!inferred) return null;
+  const platformOfInferred = inferred.startsWith("youtube_")
+    ? "youtube"
+    : inferred.startsWith("instagram_")
+      ? "instagram"
+      : inferred;
+  if (platformOfInferred !== opts.accountPlatform) return null;
+  return inferred;
+}
+
+/**
  * Best-effort account resolution from a URL. Matches:
  *   1. the URL's host against the platform set, then
  *   2. the first path segment (minus @) against handle,
