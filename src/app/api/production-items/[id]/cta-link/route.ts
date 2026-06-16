@@ -32,6 +32,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         slug: link.slug,
         clicksCount: link.clicksCount,
         leadsCount: link.leadsCount,
+        // Subset of leadsCount from the HubSpot lead form; the rest are native
+        // Starter Story captures. Powers the LEADS hover breakdown.
+        hubspotLeadsCount: link.hubspotLeadsCount,
         lastClickedAt: link.lastClickedAt,
         destinationUrl: link.destinationUrl,
         targetType: link.targetType,

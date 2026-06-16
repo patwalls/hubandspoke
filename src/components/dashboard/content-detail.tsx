@@ -35,6 +35,12 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -4401,20 +4407,31 @@ function CtaMetricCards({
   fallbackClicks: number | null;
   fallbackLeads: number | null;
 }) {
-  const [live, setLive] = useState<{ clicks: number; leads: number } | null>(
-    null,
-  );
+  const [live, setLive] = useState<{
+    clicks: number;
+    leads: number;
+    hubspotLeads: number;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/production-items/${itemId}/cta-link`)
       .then((r) => (r.ok ? r.json() : null))
       .then(
-        (j: { shortLink?: { clicksCount: number; leadsCount?: number } | null } | null) => {
+        (
+          j: {
+            shortLink?: {
+              clicksCount: number;
+              leadsCount?: number;
+              hubspotLeadsCount?: number;
+            } | null;
+          } | null,
+        ) => {
           if (!cancelled && j?.shortLink) {
             setLive({
               clicks: j.shortLink.clicksCount,
               leads: j.shortLink.leadsCount ?? 0,
+              hubspotLeads: j.shortLink.hubspotLeadsCount ?? 0,
             });
           }
         },
@@ -4446,13 +4463,71 @@ function CtaMetricCards({
           Leads
         </p>
         <div className="mt-2">
-          <span className="text-3xl font-semibold text-foreground tabular-nums">
-            {formatCompact(leads)}
-          </span>
+          <LeadsBreakdown
+            total={leads ?? 0}
+            hubspotLeads={live?.hubspotLeads ?? null}
+          >
+            <span className="text-3xl font-semibold text-foreground tabular-nums">
+              {formatCompact(leads)}
+            </span>
+          </LeadsBreakdown>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">From this link</p>
       </div>
     </>
+  );
+}
+
+// Hover breakdown for a leads number: HubSpot lead-form captures vs. native
+// Starter Story captures (signups, pricing/checkout intent, opt-ins). The two
+// always sum to the total. `hubspotLeads` is only known once the live cta-link
+// fetch resolves — pass null to render the number with no hover (e.g. while the
+// synced fallback is showing).
+function LeadsBreakdown({
+  total,
+  hubspotLeads,
+  children,
+}: {
+  total: number;
+  hubspotLeads: number | null;
+  children: React.ReactNode;
+}) {
+  if (hubspotLeads == null) return <>{children}</>;
+  const starterStory = Math.max(0, total - hubspotLeads);
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span className="inline-flex cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-4" />
+          }
+        >
+          {children}
+        </TooltipTrigger>
+        <TooltipContent align="start" className="w-52">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">HubSpot leads</span>
+              <span className="font-semibold tabular-nums">
+                {hubspotLeads.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Starter Story leads</span>
+              <span className="font-semibold tabular-nums">
+                {starterStory.toLocaleString()}
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-center justify-between gap-4 border-t border-foreground/10 pt-1">
+              <span className="text-muted-foreground">Total</span>
+              <span className="font-semibold tabular-nums">
+                {total.toLocaleString()}
+              </span>
+            </div>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -4465,6 +4540,7 @@ interface GoLinkData {
   slug: string;
   clicksCount: number;
   leadsCount: number;
+  hubspotLeadsCount?: number;
   destinationUrl: string;
 }
 
@@ -4601,9 +4677,14 @@ function GoLinkPopover({
                 clicks
               </span>
               <span>
-                <span className="font-semibold text-foreground tabular-nums">
-                  {(data?.leadsCount ?? 0).toLocaleString()}
-                </span>{" "}
+                <LeadsBreakdown
+                  total={data?.leadsCount ?? 0}
+                  hubspotLeads={data ? (data.hubspotLeadsCount ?? 0) : null}
+                >
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {(data?.leadsCount ?? 0).toLocaleString()}
+                  </span>
+                </LeadsBreakdown>{" "}
                 leads
               </span>
             </div>

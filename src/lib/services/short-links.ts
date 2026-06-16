@@ -16,6 +16,10 @@ export interface ShortLink {
   destinationUrl: string;
   clicksCount: number;
   leadsCount: number;
+  // The subset of leadsCount captured via the HubSpot lead form (the rest are
+  // native Starter Story captures: signups, pricing/checkout intent, opt-ins).
+  // leadsCount === hubspotLeadsCount + native, so the UI can split LEADS.
+  hubspotLeadsCount: number;
   lastClickedAt: string | null;
   tag: string | null;
   archived: boolean;
@@ -45,6 +49,7 @@ type RawShortLink = {
   destination_url: string;
   clicks_count: number;
   leads_count?: number;
+  hubspot_leads_count?: number;
   last_clicked_at: string | null;
   tag: string | null;
   archived: boolean;
@@ -64,6 +69,7 @@ function normalize(raw: RawShortLink): ShortLink {
     destinationUrl: raw.destination_url,
     clicksCount: raw.clicks_count,
     leadsCount: raw.leads_count ?? 0,
+    hubspotLeadsCount: raw.hubspot_leads_count ?? 0,
     lastClickedAt: raw.last_clicked_at,
     tag: raw.tag,
     archived: raw.archived,
