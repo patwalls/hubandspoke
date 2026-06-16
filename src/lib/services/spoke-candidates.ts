@@ -1,7 +1,8 @@
-import { and, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   accounts,
+  contentEvents,
   formats as formatsTable,
   productionItems,
 } from "@/lib/db/schema";
@@ -61,6 +62,9 @@ const MIN_PAIR_SOURCE_COHORT = 3;
 const FRESHNESS_HALF_LIFE_DAYS = 45;
 const FRESHNESS_FLOOR = 0.15;
 const SPOKE_THRESHOLD = 1.0;
+// "Not interested" / "Kill this idea" from the queue triage dialog hides a
+// (pillar, format) pair for this long. Mirrors the repost queue's TTL.
+const DISMISSAL_TTL_DAYS = 30;
 const MAX_CANDIDATES = 200;
 const PILLAR_POST_TYPE = "youtube_long";
 
@@ -138,6 +142,7 @@ export interface SpokeCandidatesResult {
     droppedInFlight: number;
     droppedCooldown: number;
     droppedBelowThreshold: number;
+    droppedDismissed: number;
   };
   config: {
     pillarWindowDays: number;
@@ -167,6 +172,7 @@ export async function selectSpokeCandidates(opts: {
     droppedInFlight: 0,
     droppedCooldown: 0,
     droppedBelowThreshold: 0,
+    droppedDismissed: 0,
   };
 
   // 1. Eligible pillars: brand-scoped, YT long-form, Published, fresh-ish.
@@ -481,6 +487,35 @@ export async function selectSpokeCandidates(opts: {
     priorByPair.set(key, list);
   }
 
+  // 5b. Dismissed pairs — 30d hide-list. The queue triage dialog's "Not
+  //     interested" / "Kill this idea" write a `spoke_dismissed` content_event
+  //     on the pillar carrying the rejected `formatId`. Build a Set keyed by
+  //     `${pillarId}|${formatId}` so the scoring loop skips just that pair,
+  //     not the pillar's other candidate formats.
+  const dismissalRows = await db
+    .select({
+      contentItemId: contentEvents.contentItemId,
+      payload: contentEvents.payload,
+    })
+    .from(contentEvents)
+    .where(
+      and(
+        eq(contentEvents.eventType, "spoke_dismissed"),
+        inArray(contentEvents.contentItemId, pillarIds),
+        gte(
+          contentEvents.createdAt,
+          sql`(now() - interval '${sql.raw(String(DISMISSAL_TTL_DAYS))} days')`,
+        ),
+      ),
+    );
+  const dismissedPairs = new Set<string>();
+  for (const r of dismissalRows) {
+    const p = r.payload;
+    if (p && p.type === "spoke_dismissed" && p.formatId) {
+      dismissedPairs.add(`${r.contentItemId}|${p.formatId}`);
+    }
+  }
+
   // 6. Per-pillar scoring. For each pillar, resolve its assigned format,
   //    look up that format's children via `parentFormatId`, and score
   //    only (pillar × child) pairs.
@@ -518,6 +553,10 @@ export async function selectSpokeCandidates(opts: {
 
     for (const fmt of candidateFormats) {
       stats.rawPairs++;
+      if (dismissedPairs.has(`${pillar.id}|${fmt.id}`)) {
+        stats.droppedDismissed++;
+        continue;
+      }
       const fmtKey = fmt.name.toLowerCase().trim();
       const formatBar = formatBarByName.get(fmtKey);
       // v1.2: missing format cohort → formatFit collapses to neutral 1.0.

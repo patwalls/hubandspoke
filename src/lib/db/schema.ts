@@ -1331,6 +1331,12 @@ export type ContentEventPayload =
       sourceItemId: string;
       sourceTitle: string | null;
     }
+  // SPOKE "Repurposed" queue dismissal. Scoped to a (pillar, format) PAIR —
+  // the row's content_item_id is the pillar, `formatId` narrows it to the one
+  // target format the operator rejected. `reason` distinguishes "Not
+  // interested" (null) from "Kill this idea" (a written reason). 30-day hide,
+  // mirroring repost_dismissed.
+  | { type: "spoke_dismissed"; formatId: string; reason: string | null }
   // Generic tool-integration events. Single envelope so adding a tool is
   // (1) emit with a new `tool` string, (2) register the icon/label in
   // content-activity.tsx's TOOL_REGISTRY. No new variant per tool, no

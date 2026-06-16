@@ -279,6 +279,7 @@ export function QueueView({
             droppedInFlight: 0,
             droppedCooldown: 0,
             droppedBelowThreshold: 0,
+            droppedDismissed: 0,
           },
           config: {
             pillarWindowDays: 730,

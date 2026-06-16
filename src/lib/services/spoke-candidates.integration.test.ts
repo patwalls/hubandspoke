@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { selectSpokeCandidates } from "./spoke-candidates";
+import { db } from "@/lib/db";
+import { contentEvents } from "@/lib/db/schema";
+import {
+  createTestFormat,
+  createTestProductionItem,
+  getTestAccountId,
+} from "@/test/factories";
+
+const DAY_MS = 86_400_000;
 
 // Smoke integration: exercises the full SQL path against the dev DB so a
 // schema rename or a broken percentile_cont aggregate fails CI before it
@@ -51,5 +60,56 @@ describe("selectSpokeCandidates (integration smoke)", () => {
     });
     expect(result.items).toEqual([]);
     expect(result.stats.rawPillars).toBe(0);
+  });
+
+  // Proves the spoke_dismissed hide-list flips behavior: a (pillar, format)
+  // pair that surfaces as a candidate disappears once a spoke_dismissed event
+  // names that exact format. The content_events row cascades away when the
+  // factory deletes the pillar in afterEach.
+  it("hides a (pillar, format) pair after a spoke_dismissed event", async () => {
+    const accountId = await getTestAccountId();
+
+    // Parent format with one child — the only declared repurpose target.
+    const parent = await createTestFormat({});
+    const child = await createTestFormat({ parentFormatId: parent.id });
+
+    // Decoys establish a low channel P60 so the real pillar's pillarStrength
+    // (views ÷ P60) clears the SPOKE threshold. They themselves score < 1.0
+    // (pillarStrength ≈ 1.0 × aged freshness) so they don't pollute results.
+    for (let i = 0; i < 3; i++) {
+      await createTestProductionItem({
+        postType: "youtube_long",
+        status: "Published",
+        format: parent.name,
+        accountId,
+        views: 50,
+        publishedAt: new Date(Date.now() - 60 * DAY_MS),
+      });
+    }
+
+    const pillar = await createTestProductionItem({
+      postType: "youtube_long",
+      status: "Published",
+      format: parent.name,
+      accountId,
+      views: 500_000,
+      publishedAt: new Date(Date.now() - 5 * DAY_MS),
+    });
+
+    const pairId = `${pillar.id}:${child.id}`;
+
+    const before = await selectSpokeCandidates({ brand: "starter-story" });
+    expect(before.items.some((i) => i.id === pairId)).toBe(true);
+
+    // Dismiss the exact pair.
+    await db.insert(contentEvents).values({
+      contentItemId: pillar.id,
+      eventType: "spoke_dismissed",
+      payload: { type: "spoke_dismissed", formatId: child.id, reason: null },
+    });
+
+    const after = await selectSpokeCandidates({ brand: "starter-story" });
+    expect(after.items.some((i) => i.id === pairId)).toBe(false);
+    expect(after.stats.droppedDismissed).toBeGreaterThanOrEqual(1);
   });
 });
