@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -10,7 +10,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AccountBadge } from "@/components/ui/account-badge";
+import { UserChip } from "./user-chip";
+import { KillIdeaDialog } from "./kill-idea-dialog";
 import { cn } from "@/lib/utils";
 import type { SpokeCandidate } from "@/lib/services/spoke-candidates";
 
@@ -38,8 +47,47 @@ export function SpokeTriageDialog({
   onActioned,
 }: SpokeTriageDialogProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
+  const [killOpen, setKillOpen] = useState(false);
+  const [assigneeUserId, setAssigneeUserId] = useState<string>("");
+  const [assignableUsers, setAssignableUsers] = useState<
+    Array<{ id: string; name: string | null; email: string; avatarUrl: string | null }>
+  >([]);
+
+  // Reset the picker whenever a different pair opens in the dialog.
+  useEffect(() => {
+    setAssigneeUserId("");
+  }, [candidate.id]);
+
+  useEffect(() => {
+    if (assignableUsers.length > 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/users/assignable");
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          users: Array<{
+            id: string;
+            name: string | null;
+            email: string;
+            avatarUrl: string | null;
+          }>;
+        };
+        if (!cancelled) setAssignableUsers(json.users ?? []);
+      } catch {
+        // Non-fatal — picker just won't have options.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [assignableUsers.length]);
+
+  const busy = submitting || dismissing;
 
   async function handleRepurpose() {
+    if (!assigneeUserId) return;
     if (submitting) return;
     setSubmitting(true);
     try {
@@ -48,7 +96,10 @@ export function SpokeTriageDialog({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ targetFormatId: candidate.format.id }),
+          body: JSON.stringify({
+            targetFormatId: candidate.format.id,
+            editorUserId: assigneeUserId,
+          }),
         },
       );
       const json = (await res.json().catch(() => ({}))) as {
@@ -61,7 +112,7 @@ export function SpokeTriageDialog({
       }
       const newId = json.id ?? null;
       toast.success(`Repurpose queued — ${candidate.format.name}`, {
-        description: "Lands in Assigned for you to draft.",
+        description: "Lands in Assigned for the editor to draft.",
         action: newId
           ? {
               label: "Open draft →",
@@ -79,6 +130,60 @@ export function SpokeTriageDialog({
       onActioned();
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function postDismiss(reason: string | null) {
+    const res = await fetch(
+      `/api/production-items/${candidate.pillar.id}/spoke-dismiss`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetFormatId: candidate.format.id,
+          ...(reason ? { reason } : {}),
+        }),
+      },
+    );
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+  }
+
+  async function handleDismissOnly() {
+    if (busy) return;
+    setDismissing(true);
+    try {
+      await postDismiss(null);
+      toast(`Dismissed — ${candidate.format.name}`, {
+        description: "Won't reappear for 30 days.",
+        duration: 4000,
+      });
+      onOpenChange(false);
+      onActioned();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to dismiss");
+    } finally {
+      setDismissing(false);
+    }
+  }
+
+  async function handleKill(reason: string) {
+    setDismissing(true);
+    try {
+      await postDismiss(reason);
+      toast(`Killed — ${candidate.format.name}`, {
+        description: "Won't reappear for 30 days.",
+        duration: 4000,
+      });
+      setKillOpen(false);
+      onOpenChange(false);
+      onActioned();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to kill");
+    } finally {
+      setDismissing(false);
     }
   }
 
@@ -234,22 +339,83 @@ export function SpokeTriageDialog({
             </section>
           )}
 
+          <section className="space-y-2">
+            <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+              Assign editor
+            </div>
+            <Select
+              value={assigneeUserId || ""}
+              onValueChange={(v) => setAssigneeUserId(v ?? "")}
+              disabled={busy}
+            >
+              <SelectTrigger
+                aria-label="Assignee"
+                className="h-10 [&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1"
+              >
+                {assigneeUserId ? (
+                  (() => {
+                    const u = assignableUsers.find((x) => x.id === assigneeUserId);
+                    return u ? (
+                      <UserChip user={u} />
+                    ) : (
+                      <SelectValue placeholder="Select an editor" />
+                    );
+                  })()
+                ) : (
+                  <span className="text-muted-foreground">Select an editor…</span>
+                )}
+              </SelectTrigger>
+              <SelectContent>
+                {assignableUsers.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    <UserChip user={u} />
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </section>
+
           <button
             type="button"
             onClick={() => void handleRepurpose()}
-            disabled={submitting}
+            disabled={busy || !assigneeUserId}
             className={cn(
               "h-10 w-full rounded-md text-sm font-medium transition-colors",
               "bg-emerald-600 text-white hover:bg-emerald-700",
               "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed",
             )}
+            title={
+              !assigneeUserId
+                ? "Pick an editor first"
+                : `Create a ${candidate.format.name} draft in Assigned`
+            }
           >
             {submitting
               ? "Queueing repurpose…"
-              : `Repurpose into ${candidate.format.name}`}
+              : !assigneeUserId
+                ? "Pick an editor to continue"
+                : `Repurpose into ${candidate.format.name}`}
           </button>
 
-          <div className="flex items-center justify-end border-t border-border pt-3">
+          <div className="flex items-center justify-between border-t border-border pt-3">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void handleDismissOnly()}
+                disabled={busy}
+                className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                Not interested
+              </button>
+              <button
+                type="button"
+                onClick={() => setKillOpen(true)}
+                disabled={busy}
+                className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+              >
+                Kill this idea
+              </button>
+            </div>
             <div className="flex items-center gap-3">
               {candidate.pillar.publishedLink && (
                 <a
@@ -273,6 +439,14 @@ export function SpokeTriageDialog({
             </div>
           </div>
         </div>
+
+        <KillIdeaDialog
+          open={killOpen}
+          onOpenChange={setKillOpen}
+          title={`${candidate.pillar.title || "(Untitled)"} → ${candidate.format.name}`}
+          saving={dismissing}
+          onConfirm={handleKill}
+        />
       </DialogContent>
     </Dialog>
   );

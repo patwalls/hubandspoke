@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
-import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
+import {
+  contentEvents,
+  formats,
+  productionItems,
+  repurposeTriggers,
+  users,
+} from "@/lib/db/schema";
 import { recordItemCreated } from "@/lib/services/item-created";
 import {
   getChannelsForFormats,
@@ -20,10 +26,12 @@ interface RouteContext {
 /**
  * POST /api/production-items/[id]/repurpose
  *
- * Body: { targetFormatId: string }
+ * Body: { targetFormatId: string, editorUserId?: string }
  *
  * Spawn a derivative production_item in `targetFormatId`, pre-linked to the
- * source as a pillar and assigned to the calling user. Replaces the legacy
+ * source as a pillar and assigned to `editorUserId` when provided (the SPOKE
+ * queue picker), else the calling user (the content-detail Actions menu, which
+ * has no picker). Replaces the legacy
  * Claude+Descript dispatcher: no LLM, no Descript clip job — the editor
  * does the work by hand on the new item's detail page.
  *
@@ -40,9 +48,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
 
-  let body: { targetFormatId?: unknown };
+  let body: { targetFormatId?: unknown; editorUserId?: unknown };
   try {
-    body = (await request.json()) as { targetFormatId?: unknown };
+    body = (await request.json()) as {
+      targetFormatId?: unknown;
+      editorUserId?: unknown;
+    };
   } catch {
     return NextResponse.json(
       { error: "Request body must be JSON" },
@@ -59,6 +70,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { status: 400 }
     );
   }
+  const editorUserIdOverride =
+    typeof body.editorUserId === "string" && body.editorUserId.trim().length > 0
+      ? body.editorUserId.trim()
+      : null;
 
   const [source] = await db
     .select()
@@ -115,7 +130,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // Editor is the clicker — they're spawning the derivative for themselves.
+  // Editor: the SPOKE queue picker sends `editorUserId`; the content-detail
+  // Actions menu sends nothing and the clicker takes it. Validate an override
+  // points at a real user so a stale picker value can't orphan the assignment.
+  let editorUserId = actorUserId;
+  let editorName: string | null = null;
+  if (editorUserIdOverride) {
+    const [editor] = await db
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(eq(users.id, editorUserIdOverride))
+      .limit(1);
+    if (!editor) {
+      return NextResponse.json(
+        { error: "Editor not found" },
+        { status: 400 }
+      );
+    }
+    editorUserId = editor.id;
+    editorName = editor.name?.trim() || editor.email.split("@")[0] || editor.email;
+  }
+
   // Format validation is belt-and-braces — `target` is a row in the
   // formats table by construction, so this should always succeed and
   // returns the canonical-cased name.
@@ -136,10 +171,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
       pillarContentNotionId: source.notionId,
       pillarContentItemId: source.id,
       utmCampaign: await generateUtmCampaign(source.title),
-      editorUserId: actorUserId,
+      editorUserId,
       createdVia: "api:repurpose",
     })
     .returning({ id: productionItems.id });
+
+  // Log the editor assignment in the activity feed when an explicit editor was
+  // picked (SPOKE queue). The self-assign path (Actions menu) skips this —
+  // "Pat added Pat as editor" is noise. Mirrors the cross-post convention:
+  // payload stores the display name, not the id.
+  if (editorUserIdOverride && editorName) {
+    try {
+      await db.insert(contentEvents).values({
+        contentItemId: created.id,
+        userId: actorUserId,
+        eventType: "editor_change",
+        payload: { type: "editor_change", from: null, to: editorName },
+      });
+    } catch (err) {
+      console.error("[api:repurpose] editor_change event failed", err);
+    }
+  }
 
   try {
     await recordItemCreated(db, {
