@@ -203,10 +203,17 @@ interface SCTikTokVideo {
 }
 
 interface SCLinkedInPost {
+  // The live `/v1/linkedin/company/posts` response is lean: each post is just
+  // `{ url, id, datePublished, text }`. The `urn`/`posted_at`/`stats`/`images`
+  // fields below are kept optional so we stay forward-compatible if SC ever
+  // enriches the payload — but the mapping must not REQUIRE them, or every
+  // post gets skipped (which is exactly the bug this shape revealed).
+  id?: string;
   urn?: string;
   activity_urn?: string;
   url?: string;
   text?: string;
+  datePublished?: string;
   posted_at?: { date?: string; timestamp?: number };
   author?: { name?: string };
   stats?: {
@@ -533,6 +540,59 @@ async function fetchTikTokVideosPaged(
   return { items, credits };
 }
 
+/**
+ * Map one Scrape Creators company post onto a NormalizedItem, or null when it
+ * lacks the minimum (a URL + a derivable content id).
+ *
+ * Exported for testing. The live `/v1/linkedin/company/posts` payload is lean
+ * — `{ url, id, datePublished, text }` — but earlier code keyed the dedup id on
+ * `activity_urn`/`urn` and the date on `posted_at.timestamp`, neither of which
+ * the live API returns, so every post was silently skipped. This handles both
+ * shapes: prefer the live fields, fall back to the legacy ones.
+ */
+export function normalizeLinkedInCompanyPost(
+  p: SCLinkedInPost
+): NormalizedItem | null {
+  const url = p.url;
+  if (!url) return null;
+  const contentId =
+    p.id || p.activity_urn || p.urn || extractContentId("linkedin", url);
+  if (!contentId) return null;
+  const body = p.text ?? "";
+  const thumbnail = p.video?.thumbnail ?? p.images?.[0]?.url ?? null;
+  const rawDate = p.datePublished
+    ? new Date(p.datePublished)
+    : p.posted_at?.timestamp
+      ? new Date(p.posted_at.timestamp)
+      : null;
+  const publishedAt =
+    rawDate && !Number.isNaN(rawDate.getTime()) ? rawDate : null;
+  return {
+    platformContentId: String(contentId),
+    publishedLink: url,
+    postType: "linkedin",
+    title: body
+      ? body.slice(0, 120) + (body.length > 120 ? "..." : "")
+      : "(No caption)",
+    thumbnail,
+    publishedAt,
+    publishedDate: publishedAt ? publishedAt.toISOString().split("T")[0] : null,
+    // Engagement/views aren't in the company-posts payload — leave null rather
+    // than fabricate zeros.
+    // The company-FEED payload carries no engagement — likes/comments/views
+    // are filled in afterward by the hourly `performance-decay` job, which
+    // calls `/v1/linkedin/post` per item (see performance-decay.ts → the
+    // `kinds.has("linkedin")` branch). Views aren't returned by SC for
+    // LinkedIn at all, so decay estimates them from likes (viewsEstimated).
+    // Leave everything null here rather than fabricate zeros.
+    views: null,
+    likes: p.stats?.total_reactions ?? null,
+    comments: p.stats?.comments ?? null,
+    contentBody: body || null,
+    contentBodySource: body ? "scrape_creators" : null,
+  };
+}
+
 async function fetchLinkedInCompanyPostsPaged(
   companyUrl: string,
   maxPages: number
@@ -549,29 +609,8 @@ async function fetchLinkedInCompanyPostsPaged(
     credits++;
     const posts: SCLinkedInPost[] = data.posts || data.items || [];
     for (const p of posts) {
-      const contentId = p.activity_urn || p.urn;
-      const url = p.url;
-      if (!contentId || !url) continue;
-      const body = p.text ?? "";
-      const thumbnail =
-        p.video?.thumbnail ?? p.images?.[0]?.url ?? null;
-      const postedTs = p.posted_at?.timestamp;
-      items.push({
-        platformContentId: String(contentId),
-        publishedLink: url,
-        postType: "linkedin",
-        title: body
-          ? body.slice(0, 120) + (body.length > 120 ? "..." : "")
-          : "(No caption)",
-        thumbnail,
-        publishedAt: postedTs ? new Date(postedTs) : null,
-        publishedDate: postedTs ? new Date(postedTs).toISOString().split("T")[0] : null,
-        views: null,
-        likes: p.stats?.total_reactions ?? null,
-        comments: p.stats?.comments ?? null,
-        contentBody: body || null,
-        contentBodySource: body ? "scrape_creators" : null,
-      });
+      const item = normalizeLinkedInCompanyPost(p);
+      if (item) items.push(item);
     }
     if (posts.length === 0) break;
   }

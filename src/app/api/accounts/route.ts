@@ -6,6 +6,7 @@ import { fetchBrandBySlug } from "@/lib/db/brands";
 import { getAccounts, getAccountsForBrand } from "@/lib/db/accounts";
 import { enqueue } from "@/jobs/enqueue";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
+import { parseLinkedInAccountInput } from "@/lib/platform-url";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -64,7 +65,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const cleanHandle = handle.trim().replace(/^@/, "");
+    let cleanHandle = handle.trim().replace(/^@/, "");
+    let resolvedUrl = url ?? null;
+
+    // LinkedIn: the account kind (company vs personal) is load-bearing and
+    // lives in the URL. Parse whatever was pasted into a canonical
+    // `(handle, url)` pair and reject numeric company IDs up front — SC can't
+    // sync those, and storing one would just get the account auto-deactivated
+    // on its first sync. See parseLinkedInAccountInput for the full rationale.
+    if (platform === "linkedin") {
+      const parsed = parseLinkedInAccountInput(handle);
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
+      }
+      cleanHandle = parsed.handle;
+      resolvedUrl = parsed.url ?? url ?? null;
+    }
 
     const [row] = await db
       .insert(accounts)
@@ -73,7 +89,7 @@ export async function POST(request: NextRequest) {
         platform,
         handle: cleanHandle,
         displayName: displayName ?? null,
-        url: url ?? null,
+        url: resolvedUrl,
       })
       // The unique index is on `(platform, lower(handle))` — an expression
       // index that can't be named as an ON CONFLICT target by column list.

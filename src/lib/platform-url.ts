@@ -163,6 +163,74 @@ export function extractContentIdFromUrl(
 }
 
 /**
+ * Normalize whatever a user pastes into the "Handle" field for a LinkedIn
+ * account into a stored `(handle, url)` pair.
+ *
+ * Why this exists: LinkedIn is the one platform where the account *kind*
+ * (company page vs personal profile) is load-bearing and lives in the URL —
+ * content-sync only works for company pages (`/v1/linkedin/company/posts`)
+ * and refuses anything whose stored `url` doesn't contain `/company/`. The
+ * create form only collects a single free-text field, so we parse the kind
+ * out of it here and persist a canonical `url` the sync paths can rely on.
+ *
+ * Crucially, Scrape Creators (our data provider) **rejects numeric company
+ * IDs** — `linkedin.com/company/27061078` 400s with "use the company's URL
+ * slug instead". The admin dashboard URL is exactly that numeric form, so we
+ * catch it and return a help message instead of silently storing an account
+ * that will fail every sync and get auto-deactivated.
+ *
+ * Accepts: full profile/company URLs, admin URLs (slug is taken from the
+ * `/company/<slug>/admin/...` prefix), bare `company/<slug>` / `in/<slug>`,
+ * and a bare handle (left as-is, url null — refresh probes both kinds).
+ */
+export type LinkedInAccountInput =
+  | { ok: true; handle: string; url: string; kind: "company" | "personal" }
+  | { ok: true; handle: string; url: null; kind: "bare" }
+  | { ok: false; error: string };
+
+export function parseLinkedInAccountInput(raw: string): LinkedInAccountInput {
+  const input = (raw ?? "").trim();
+  if (!input) return { ok: false, error: "handle cannot be empty" };
+
+  const company =
+    input.match(/linkedin\.com\/company\/([^/?#\s]+)/i) ??
+    input.match(/^company\/([^/?#\s]+)/i);
+  if (company) {
+    const slug = company[1];
+    if (/^\d+$/.test(slug)) {
+      return {
+        ok: false,
+        error:
+          "LinkedIn numeric company IDs aren't supported by our data provider. " +
+          "Open the company's public page (not the admin dashboard) and use its " +
+          "vanity URL, e.g. linkedin.com/company/hubspot.",
+      };
+    }
+    return {
+      ok: true,
+      handle: slug,
+      url: `https://www.linkedin.com/company/${slug}`,
+      kind: "company",
+    };
+  }
+
+  const personal =
+    input.match(/linkedin\.com\/in\/([^/?#\s]+)/i) ??
+    input.match(/^in\/([^/?#\s]+)/i);
+  if (personal) {
+    const slug = personal[1];
+    return {
+      ok: true,
+      handle: slug,
+      url: `https://www.linkedin.com/in/${slug}`,
+      kind: "personal",
+    };
+  }
+
+  return { ok: true, handle: input.replace(/^@/, ""), url: null, kind: "bare" };
+}
+
+/**
  * Loose URL key for fallback dedup when neither side has a `platform_content_id`
  * we can extract (rare — short links, custom domains). Strips query string,
  * fragment, trailing slash, leading `www.`, and folds `threads.com` →

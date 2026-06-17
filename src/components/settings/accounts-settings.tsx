@@ -329,14 +329,26 @@ export function AccountsSettingsContent({
               </select>
             </div>
             <div>
-              <Label htmlFor="new-handle">Handle</Label>
+              <Label htmlFor="new-handle">
+                {newPlatform === "linkedin" ? "Company page URL" : "Handle"}
+              </Label>
               <Input
                 id="new-handle"
                 className="mt-1"
-                placeholder="starterstory"
+                placeholder={
+                  newPlatform === "linkedin"
+                    ? "linkedin.com/company/your-company"
+                    : "starterstory"
+                }
                 value={newHandle}
                 onChange={(e) => setNewHandle(e.target.value)}
               />
+              {newPlatform === "linkedin" && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Paste the company&rsquo;s public URL (vanity slug, not the
+                  numeric admin URL). Only company pages sync posts.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex justify-end">
