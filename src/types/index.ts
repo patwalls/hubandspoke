@@ -53,6 +53,9 @@ export interface ProductionItem {
   comments: number | null;
   clicks: number | null;
   leads: number | null;
+  /** Subset of `leads` captured via the HubSpot lead form. SS (native) leads
+   *  = leads - hubspotLeads. Null until link-metrics-sync has run. */
+  hubspotLeads: number | null;
   ctrFirstHour: number | null;
   apvFirst24Hours: number | null;
   editorEmail: string | null;

@@ -610,6 +610,13 @@
       "when": 1780772402274,
       "tag": "0086_empty_boomerang",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1781812468409,
+      "tag": "0087_bizarre_madelyne_pryor",
+      "breakpoints": true
     }
   ]
 }

@@ -81,6 +81,12 @@ export const productionItems = pgTable(
     comments: integer("comments"),
     clicks: integer("clicks"),
     leads: integer("leads"),
+    // Subset of `leads` captured via the HubSpot lead form. The rest of
+    // `leads` are native Starter Story captures (signups, pricing/checkout
+    // intent, opt-ins). leads === hubspotLeads + native, so the UI can split
+    // LEADS into HS vs SS columns. Synced from the short-link API alongside
+    // `leads` by link-metrics-sync.
+    hubspotLeads: integer("hubspot_leads"),
     ctrFirstHour: decimal("ctr_first_hour"),
     apvFirst24Hours: decimal("apv_first_24_hours"),
     // Cross-post scanner confidence (0-100) captured at Idea creation time.

@@ -70,7 +70,8 @@ type SortKey =
   | "likes"
   | "comments"
   | "clicks"
-  | "leads"
+  | "ssLeads"
+  | "hsLeads"
   | "vsP75";
 
 function publishedSortMs(item: ProductionItem): number | null {
@@ -84,6 +85,23 @@ function publishedSortMs(item: ProductionItem): number | null {
     if (!isNaN(t)) return t;
   }
   return null;
+}
+
+// LEADS split: `leads` is the total from the post's tracking link; `hubspotLeads`
+// is the subset captured via the HubSpot lead form. SS (native) = total - HS.
+// Both return null when the post has no leads at all (no tracking link / unsynced)
+// so the column renders "-" and null-sorts last.
+export function hsLeadsOf(
+  item: Pick<ProductionItem, "leads" | "hubspotLeads">,
+): number | null {
+  if (item.leads == null) return null;
+  return item.hubspotLeads ?? 0;
+}
+export function ssLeadsOf(
+  item: Pick<ProductionItem, "leads" | "hubspotLeads">,
+): number | null {
+  if (item.leads == null) return null;
+  return Math.max(0, item.leads - (item.hubspotLeads ?? 0));
 }
 
 function getFreshness(item: ProductionItem): {
@@ -470,6 +488,15 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
       if (bR == null) return -1;
       return sortDir === "asc" ? aR - bR : bR - aR;
     }
+    if (sortKey === "ssLeads" || sortKey === "hsLeads") {
+      const pick = sortKey === "ssLeads" ? ssLeadsOf : hsLeadsOf;
+      const aL = pick(a);
+      const bL = pick(b);
+      if (aL == null && bL == null) return 0;
+      if (aL == null) return 1;
+      if (bL == null) return -1;
+      return sortDir === "asc" ? aL - bL : bL - aL;
+    }
     const aVal = a[sortKey];
     const bVal = b[sortKey];
     if (aVal == null && bVal == null) return 0;
@@ -850,7 +877,20 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
               <SortHeader label="Likes" sortKeyName="likes" />
               <SortHeader label="Comments" sortKeyName="comments" />
               <SortHeader label="Clicks" sortKeyName="clicks" />
-              <SortHeader label="Leads" sortKeyName="leads" />
+              <SortHeader
+                label="SS Leads"
+                sortKeyName="ssLeads"
+                title={
+                  "Native Starter Story leads from this post's tracking link — " +
+                  "signups, pricing/checkout intent, opt-ins. " +
+                  "Total leads minus the HubSpot-form subset."
+                }
+              />
+              <SortHeader
+                label="HS Leads"
+                sortKeyName="hsLeads"
+                title="Leads from this post's tracking link captured via the HubSpot lead form."
+              />
             </tr>
           </thead>
           <tbody>
@@ -1060,13 +1100,22 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
                   {item.clicks?.toLocaleString() || "-"}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                  {item.leads || "-"}
+                  {(() => {
+                    const ss = ssLeadsOf(item);
+                    return ss ? ss.toLocaleString() : "-";
+                  })()}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
+                  {(() => {
+                    const hs = hsLeadsOf(item);
+                    return hs ? hs.toLocaleString() : "-";
+                  })()}
                 </td>
               </tr>
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={hasPerformanceSync ? 12 : 11} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                <td colSpan={hasPerformanceSync ? 13 : 12} className="px-4 py-12 text-center text-muted-foreground text-sm">
                   {query
                     ? `No content items match “${search}”.`
                     : "No content items found for the selected filters."}

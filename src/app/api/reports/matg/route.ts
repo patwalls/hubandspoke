@@ -397,6 +397,7 @@ export async function GET(request: NextRequest) {
       comments: item.comments,
       clicks: item.clicks,
       leads: item.leads,
+      hubspotLeads: item.hubspotLeads,
       ctrFirstHour: item.ctrFirstHour ? parseFloat(item.ctrFirstHour) : null,
       apvFirst24Hours: item.apvFirst24Hours ? parseFloat(item.apvFirst24Hours) : null,
       editorEmail: item.editorEmail,

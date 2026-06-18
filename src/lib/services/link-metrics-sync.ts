@@ -27,13 +27,17 @@ export async function syncLinkMetrics(): Promise<{
   // have both a per-post link and (post-backfill it won't, but be safe) a
   // legacy link — sum clicks, and take the MAX leads (leads are computed from
   // the same utm_campaign, so summing would double-count).
-  const byItem = new Map<string, { clicks: number; leads: number }>();
+  const byItem = new Map<
+    string,
+    { clicks: number; leads: number; hubspotLeads: number }
+  >();
   for (const link of hubandspokeLinks) {
     const id = link.contentExternalId as string;
-    const prev = byItem.get(id) ?? { clicks: 0, leads: 0 };
+    const prev = byItem.get(id) ?? { clicks: 0, leads: 0, hubspotLeads: 0 };
     byItem.set(id, {
       clicks: prev.clicks + (link.clicksCount ?? 0),
       leads: Math.max(prev.leads, link.leadsCount ?? 0),
+      hubspotLeads: Math.max(prev.hubspotLeads, link.hubspotLeadsCount ?? 0),
     });
   }
 
@@ -47,6 +51,7 @@ export async function syncLinkMetrics(): Promise<{
       id: productionItems.id,
       clicks: productionItems.clicks,
       leads: productionItems.leads,
+      hubspotLeads: productionItems.hubspotLeads,
     })
     .from(productionItems)
     .where(inArray(productionItems.id, ids));
@@ -56,10 +61,20 @@ export async function syncLinkMetrics(): Promise<{
   for (const [id, metrics] of byItem) {
     const cur = currentById.get(id);
     if (!cur) continue; // link points at an item not in this DB (cross-env) — skip
-    if (cur.clicks === metrics.clicks && cur.leads === metrics.leads) continue;
+    if (
+      cur.clicks === metrics.clicks &&
+      cur.leads === metrics.leads &&
+      cur.hubspotLeads === metrics.hubspotLeads
+    )
+      continue;
     await db
       .update(productionItems)
-      .set({ clicks: metrics.clicks, leads: metrics.leads, updatedAt: new Date() })
+      .set({
+        clicks: metrics.clicks,
+        leads: metrics.leads,
+        hubspotLeads: metrics.hubspotLeads,
+        updatedAt: new Date(),
+      })
       .where(eq(productionItems.id, id));
     updated += 1;
   }
@@ -78,8 +93,12 @@ export async function syncLinkMetricsForItem(
 
   const clicks = links.reduce((sum, l) => sum + (l.clicksCount ?? 0), 0);
   const leads = links.reduce((max, l) => Math.max(max, l.leadsCount ?? 0), 0);
+  const hubspotLeads = links.reduce(
+    (max, l) => Math.max(max, l.hubspotLeadsCount ?? 0),
+    0,
+  );
   await db
     .update(productionItems)
-    .set({ clicks, leads, updatedAt: new Date() })
+    .set({ clicks, leads, hubspotLeads, updatedAt: new Date() })
     .where(eq(productionItems.id, productionItemId));
 }
