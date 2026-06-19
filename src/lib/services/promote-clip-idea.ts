@@ -513,35 +513,56 @@ interface PromotedClipFormat {
  * (Pat's "don't let me generate anything in Descript unless the format
  * has a prompt" rule).
  */
-async function loadPromotedClipFormat(args: {
+export async function loadPromotedClipFormat(args: {
   brand: string;
   targetFormatName: string | null;
 }): Promise<PromotedClipFormat> {
-  const rows = await db
-    .select({
-      id: formats.id,
-      name: formats.name,
-      brand: formats.brand,
-      skill: formats.instructions,
-      clipAspectRatio: formats.clipAspectRatio,
-      clipTargetPostType: formats.clipTargetPostType,
-    })
-    .from(formats)
-    .where(
-      args.targetFormatName
-        ? and(
-            eq(formats.brand, args.brand),
-            eq(formats.isClippableFormat, true),
-            eq(formats.name, args.targetFormatName),
-          )
-        : and(
-            eq(formats.brand, args.brand),
-            eq(formats.isClippableFormat, true),
-          ),
-    )
-    .orderBy(formats.createdAt)
-    .limit(1);
-  const row = rows[0];
+  const cols = {
+    id: formats.id,
+    name: formats.name,
+    brand: formats.brand,
+    skill: formats.instructions,
+    clipAspectRatio: formats.clipAspectRatio,
+    clipTargetPostType: formats.clipTargetPostType,
+  };
+  const brandClippable = and(
+    eq(formats.brand, args.brand),
+    eq(formats.isClippableFormat, true),
+  );
+
+  // Prefer an exact name match on the clip idea's stored target_format.
+  let row = args.targetFormatName
+    ? (
+        await db
+          .select(cols)
+          .from(formats)
+          .where(and(brandClippable, eq(formats.name, args.targetFormatName)))
+          .limit(1)
+      )[0]
+    : undefined;
+
+  // No exact match — the stored target_format is stale (the format was
+  // renamed after this idea was generated) or null (legacy pre-multi-format
+  // rows). Fall back to the brand's primary clippable format, same contract
+  // as getPrimaryClippableFormat. Throwing here would surface as a bare
+  // "Failed (502)" in the promote UI; degrading to the brand default keeps
+  // the clip promotable.
+  if (!row) {
+    if (args.targetFormatName) {
+      console.warn(
+        `loadPromotedClipFormat: target_format "${args.targetFormatName}" did not match a clippable format on brand "${args.brand}"; falling back to the brand's primary clippable format.`,
+      );
+    }
+    row = (
+      await db
+        .select(cols)
+        .from(formats)
+        .where(brandClippable)
+        .orderBy(formats.createdAt)
+        .limit(1)
+    )[0];
+  }
+
   if (!row) throw new NoClippableFormatForBrandError(args.brand);
   if (!row.skill || !row.skill.trim()) {
     throw new FormatMissingSkillError(row.id, row.name, row.brand);

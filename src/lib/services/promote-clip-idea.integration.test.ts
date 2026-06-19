@@ -11,7 +11,11 @@
  * round-trip to assert it directly.
  */
 import { describe, it, expect } from "vitest";
-import { getPromotedClipFormat } from "./promote-clip-idea";
+import {
+  getPromotedClipFormat,
+  loadPromotedClipFormat,
+  NoClippableFormatForBrandError,
+} from "./promote-clip-idea";
 import { createTestFormat } from "@/test/factories";
 
 describe("getPromotedClipFormat", () => {
@@ -41,5 +45,61 @@ describe("getPromotedClipFormat", () => {
     });
     // ssBrand has no flagged format → null
     expect(await getPromotedClipFormat(ssBrand)).toBeNull();
+  });
+});
+
+describe("loadPromotedClipFormat", () => {
+  it("resolves an exact target_format name match", async () => {
+    const brand = `vitest-exact-${Date.now().toString(36)}`;
+    const fmt = await createTestFormat({
+      brand,
+      isClippableFormat: true,
+      instructions: "skill body",
+    });
+    const result = await loadPromotedClipFormat({
+      brand,
+      targetFormatName: fmt.name,
+    });
+    expect(result.name).toBe(fmt.name);
+  });
+
+  it("falls back to the brand's primary clippable format when target_format is stale", async () => {
+    // Regression: clip ideas store the format name at generation time; when a
+    // format is later renamed the stored name no longer matches. The exact
+    // lookup used to throw NoClippableFormatForBrandError, surfacing as a bare
+    // "Failed (502)" in the promote UI. It should degrade to the brand default.
+    const brand = `vitest-stale-${Date.now().toString(36)}`;
+    const fmt = await createTestFormat({
+      brand,
+      isClippableFormat: true,
+      instructions: "skill body",
+    });
+    const result = await loadPromotedClipFormat({
+      brand,
+      targetFormatName: "Repackage Section w/ Hook", // never created for this brand
+    });
+    expect(result.name).toBe(fmt.name);
+  });
+
+  it("falls back to the primary clippable format when target_format is null", async () => {
+    const brand = `vitest-null-${Date.now().toString(36)}`;
+    const fmt = await createTestFormat({
+      brand,
+      isClippableFormat: true,
+      instructions: "skill body",
+    });
+    const result = await loadPromotedClipFormat({
+      brand,
+      targetFormatName: null,
+    });
+    expect(result.name).toBe(fmt.name);
+  });
+
+  it("throws NoClippableFormatForBrandError only when the brand has no clippable format at all", async () => {
+    const brand = `vitest-noclip-${Date.now().toString(36)}`;
+    await createTestFormat({ brand, isClippableFormat: false });
+    await expect(
+      loadPromotedClipFormat({ brand, targetFormatName: "anything" }),
+    ).rejects.toBeInstanceOf(NoClippableFormatForBrandError);
   });
 });

@@ -6,6 +6,7 @@ import {
   ClipIdeaNotFoundError,
   ClipIdeaSourceMissingMediaError,
   FormatMissingSkillError,
+  NoClippableFormatForBrandError,
 } from "@/lib/services/promote-clip-idea";
 
 interface RouteContext {
@@ -43,6 +44,9 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
     if (err instanceof FormatMissingSkillError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    if (err instanceof NoClippableFormatForBrandError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
     const message = err instanceof Error ? err.message : "Unknown error";
