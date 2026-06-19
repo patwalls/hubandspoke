@@ -11,6 +11,7 @@ import {
   computeProvenStatusForBrand,
   staleProvenStatus,
 } from "@/lib/services/format-proven";
+import { cascadeFormatRename } from "@/lib/services/format-rename";
 
 async function isAncestor(candidateAncestorId: string, descendantId: string): Promise<boolean> {
   // Walk up from candidateAncestorId. Return true if we reach descendantId.
@@ -276,13 +277,33 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    // Get the old name before updating so we can cascade the rename
+    // Get the old name + brand before updating so we can cascade the rename
+    // (brand-scoped) to every column that links to the format by name.
     const [existing] = await db
-      .select({ name: formats.name })
+      .select({ name: formats.name, brand: formats.brand })
       .from(formats)
       .where(eq(formats.id, id));
     if (!existing) {
       return NextResponse.json({ error: "Format not found" }, { status: 404 });
+    }
+
+    const isRename =
+      body.name !== undefined && body.name !== null && existing.name !== body.name;
+
+    // Reject a rename that collides with another format on the same brand —
+    // (brand, name) is unique, so the bare UPDATE would 500 with a constraint
+    // violation. A 400 with a clear message is friendlier.
+    if (isRename) {
+      const [clash] = await db
+        .select({ id: formats.id })
+        .from(formats)
+        .where(and(eq(formats.brand, existing.brand), eq(formats.name, body.name!)));
+      if (clash && clash.id !== id) {
+        return NextResponse.json(
+          { error: `A format named "${body.name}" already exists on ${existing.brand}.` },
+          { status: 400 },
+        );
+      }
     }
 
     // Partial patch: only write columns the client actually sent. Missing
@@ -314,22 +335,33 @@ export async function PUT(request: NextRequest) {
     if (body.clipAspectRatio !== undefined)
       updateData.clipAspectRatio = body.clipAspectRatio || null;
 
-    const [updated] = await db
-      .update(formats)
-      .set(updateData)
-      .where(eq(formats.id, id))
-      .returning();
+    // A rename updates formats.name AND cascades to every string reference.
+    // Wrap both in one transaction so a partial failure can't leave a format
+    // pointing at rows that still carry the old name (or vice-versa).
+    const updated = isRename
+      ? await db.transaction(async (tx) => {
+          const [u] = await tx
+            .update(formats)
+            .set(updateData)
+            .where(eq(formats.id, id))
+            .returning();
+          await cascadeFormatRename(tx, {
+            brand: existing.brand,
+            oldName: existing.name,
+            newName: body.name!,
+          });
+          return u;
+        })
+      : (
+          await db
+            .update(formats)
+            .set(updateData)
+            .where(eq(formats.id, id))
+            .returning()
+        )[0];
 
     if (accountChannels !== undefined) {
       await setFormatChannels(id, accountChannels);
-    }
-
-    // If the name changed, update all production items that use the old name
-    if (body.name !== undefined && existing.name !== body.name) {
-      await db
-        .update(productionItems)
-        .set({ format: body.name, updatedAt: new Date() })
-        .where(eq(productionItems.format, existing.name));
     }
 
     return NextResponse.json(updated);

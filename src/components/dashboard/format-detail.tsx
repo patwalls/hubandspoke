@@ -822,6 +822,48 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     [formatId, load]
   );
 
+  // Renaming a format rewrites every production_item.format + clip_idea
+  // target that links to it by name (server cascade, brand-scoped). Show the
+  // blast radius before committing so a rename is never a silent surprise.
+  // Skip the prompt when nothing references the format yet (fresh format / typo
+  // fix) — confirming a 0-impact rename is just friction.
+  const confirmAndRename = useCallback(
+    async (next: string) => {
+      const savedName = data?.format.name ?? "";
+      let impact: { productionItems: number; clipIdeas: number } | null = null;
+      try {
+        const res = await fetch(`/api/formats/rename-impact?id=${formatId}`);
+        if (res.ok) impact = await res.json();
+      } catch {
+        // Non-fatal: fall back to a generic confirm below.
+      }
+
+      if (impact && impact.productionItems === 0 && impact.clipIdeas === 0) {
+        await persistField({ name: next });
+        return;
+      }
+
+      const plural = (n: number, word: string) =>
+        `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
+      const detail = impact
+        ? `\n\nThis also updates ${plural(
+            impact.productionItems,
+            "production item",
+          )} and ${plural(
+            impact.clipIdeas,
+            "clip idea",
+          )} that reference this format by name.`
+        : "";
+
+      if (!window.confirm(`Rename "${savedName}" → "${next}"?${detail}`)) {
+        setName(savedName);
+        return;
+      }
+      await persistField({ name: next });
+    },
+    [formatId, data, persistField],
+  );
+
   async function handleDelete() {
     if (!confirm("Delete this format? This cannot be undone.")) return;
     setDeleting(true);
@@ -1121,7 +1163,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             onBlur={() => {
               const next = name.trim();
               if (next && next !== (data.format.name ?? "")) {
-                void persistField({ name: next });
+                void confirmAndRename(next);
               } else if (!next) {
                 // Don't allow clearing — snap back to the saved value.
                 setName(data.format.name);

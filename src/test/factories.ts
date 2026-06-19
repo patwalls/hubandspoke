@@ -276,6 +276,9 @@ export interface CreateTestClipIdeaOptions {
   endSec?: number;
   status?: string;
   estimatedViews?: number;
+  /** Name-string link to a format (brand derived via the source item). */
+  targetFormat?: string | null;
+  acceptedTargetFormat?: string | null;
 }
 
 /**
@@ -301,6 +304,8 @@ export async function createTestClipIdea(
       modelUsage: {},
       status: opts.status ?? "suggested",
       estimatedViews: opts.estimatedViews ?? null,
+      targetFormat: opts.targetFormat ?? null,
+      acceptedTargetFormat: opts.acceptedTargetFormat ?? null,
     })
     .returning();
   trackCleanup("clipIdeas", row.id);
