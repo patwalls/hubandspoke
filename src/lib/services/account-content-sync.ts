@@ -1010,6 +1010,7 @@ export async function syncAccountContent(
       handle: accounts.handle,
       url: accounts.url,
       brandSlug: brands.slug,
+      isActive: accounts.isActive,
     })
     .from(accounts)
     .innerJoin(brands, eq(brands.id, accounts.brandId))
@@ -1146,6 +1147,9 @@ export async function syncAccountContent(
           upsert.skippedDuplicates > 0
             ? `${upsert.skippedDuplicates} cross-account duplicate${upsert.skippedDuplicates === 1 ? "" : "s"} skipped — see logs`
             : null,
+        // Restore an account that was auto-deactivated by a previous
+        // permanent-failure (e.g. Threads went private and came back).
+        ...(row.isActive === false ? { isActive: true } : {}),
         updatedAt: new Date(),
       })
       .where(eq(accounts.id, accountId));
