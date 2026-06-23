@@ -229,6 +229,7 @@ export function QueueView({
           items: [],
           stats: {
             rawCandidates: 0,
+            droppedNonRepostablePlatform: 0,
             droppedOriginalOnPlatform: 0,
             droppedDismissed: 0,
             droppedPriorKilled: 0,
@@ -244,6 +245,7 @@ export function QueueView({
             minAgeDaysByPlatform: {},
             minAgeDaysDefault: 180,
             noOriginalRepostPlatforms: [],
+            noRepostPlatforms: [],
           },
         });
         return;
