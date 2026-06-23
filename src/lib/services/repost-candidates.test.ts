@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isOriginalRepostBlocked } from "./repost-candidates";
+import {
+  isOriginalRepostBlocked,
+  isPlatformRepostBlocked,
+} from "./repost-candidates";
 
 // You don't re-upload a long-form YouTube video the way you re-share a banger
 // tweet or reel, so original YouTube content is barred from the repost queue —
@@ -23,5 +26,23 @@ describe("isOriginalRepostBlocked", () => {
 
   it("does not block when platform is unknown", () => {
     expect(isOriginalRepostBlocked(null, "original")).toBe(false);
+  });
+});
+
+// A newsletter is an email blast, not a re-shareable post — it should never
+// reach the repost queue, regardless of source type.
+describe("isPlatformRepostBlocked", () => {
+  it("blocks newsletters (platform-level, no source type needed)", () => {
+    expect(isPlatformRepostBlocked("newsletter")).toBe(true);
+  });
+
+  it("keeps re-shareable platforms eligible", () => {
+    for (const platform of ["x", "instagram", "tiktok", "linkedin", "threads", "youtube"]) {
+      expect(isPlatformRepostBlocked(platform)).toBe(false);
+    }
+  });
+
+  it("does not block when platform is unknown", () => {
+    expect(isPlatformRepostBlocked(null)).toBe(false);
   });
 });

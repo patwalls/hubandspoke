@@ -100,6 +100,18 @@ const COOLDOWN_DAYS_DEFAULT = 60;
  *  `cross_post`) stay eligible; only `original` is blocked. (Pat, 2026-05-27.) */
 const NO_ORIGINAL_REPOST_PLATFORMS = new Set<string>(["youtube"]);
 
+/** Platforms whose content is never repostable at all, regardless of source
+ *  type. A newsletter is an email blast, not a post you re-share — unlike
+ *  {@link NO_ORIGINAL_REPOST_PLATFORMS} (which only blocks `original`), this
+ *  blocks every source type. (Pat, 2026-06-23.) */
+const NO_REPOST_PLATFORMS = new Set<string>(["newsletter"]);
+
+/** Whether an item is barred from the repost queue entirely because its
+ *  platform isn't a re-shareable surface (e.g. a newsletter). */
+export function isPlatformRepostBlocked(platform: string | null): boolean {
+  return platform != null && NO_REPOST_PLATFORMS.has(platform);
+}
+
 /** Whether an item is barred from the repost queue because reposting an
  *  original on its platform is nonsensical (you don't re-upload a long-form
  *  YouTube video). Clips and cross-posts on the same platform stay eligible —
@@ -196,6 +208,7 @@ export interface RepostCandidatesResult {
   items: RepostCandidate[];
   stats: {
     rawCandidates: number;
+    droppedNonRepostablePlatform: number;
     droppedOriginalOnPlatform: number;
     droppedDismissed: number;
     droppedPriorKilled: number;
@@ -211,6 +224,7 @@ export interface RepostCandidatesResult {
     minAgeDaysByPlatform: Record<string, number>;
     minAgeDaysDefault: number;
     noOriginalRepostPlatforms: string[];
+    noRepostPlatforms: string[];
   };
 }
 
@@ -221,6 +235,7 @@ export async function selectRepostCandidates(opts: {
 
   const stats = {
     rawCandidates: 0,
+    droppedNonRepostablePlatform: 0,
     droppedOriginalOnPlatform: 0,
     droppedDismissed: 0,
     droppedPriorKilled: 0,
@@ -298,6 +313,12 @@ export async function selectRepostCandidates(opts: {
   // same platform stay eligible. Done in code (like the age gate) so the
   // platform set is the single source of truth. (Pat, 2026-05-27.)
   const repostable = rawCandidates.filter((c) => {
+    // Newsletters are never repostable (an email blast isn't a re-shareable
+    // post), so they're dropped regardless of source type.
+    if (isPlatformRepostBlocked(c.accountPlatform)) {
+      stats.droppedNonRepostablePlatform++;
+      return false;
+    }
     const blocked = isOriginalRepostBlocked(c.accountPlatform, c.sourceType);
     if (blocked) stats.droppedOriginalOnPlatform++;
     return !blocked;
@@ -615,6 +636,7 @@ function configBlock() {
     minAgeDaysByPlatform: MIN_AGE_DAYS_BY_PLATFORM,
     minAgeDaysDefault: MIN_AGE_DAYS_DEFAULT,
     noOriginalRepostPlatforms: [...NO_ORIGINAL_REPOST_PLATFORMS],
+    noRepostPlatforms: [...NO_REPOST_PLATFORMS],
   };
 }
 
