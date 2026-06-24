@@ -11,6 +11,12 @@ export interface ProductionItem {
   /** Precise publish moment (ISO string). When present, the content view
    *  uses this for sort tie-breaking within a day. */
   publishedAt: string | null;
+  /** Operator-entered expected go-live time (ISO string) for a Scheduled
+   *  item. Drives the schedule-reconcile matcher's publish-time signal. */
+  expectedPublishAt?: string | null;
+  /** Set (ISO string) when the reconciler gave up auto-matching a Scheduled
+   *  item past its window — surfaces a "needs attention" badge. */
+  scheduleNeedsAttentionAt?: string | null;
   status: string | null;
   platform: string[] | null;
   /** Canonical post_type key (youtube_long, instagram_reel, x, …). Populated

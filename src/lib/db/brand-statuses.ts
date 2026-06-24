@@ -30,9 +30,14 @@ export type DefaultStatusSeed = {
 //     outcome flow; my-work role logic keys off it
 //   - Published: publish-date filters in queries.ts
 //   - Killed: kill-confirmation modal in content-detail.tsx
+//   - Scheduled: write-only via the publish route's schedule mode; the
+//     schedule-reconcile sweep keys off the literal "Scheduled" string to
+//     find pending items, and content-detail.tsx filters it out of the
+//     editable status dropdown. Renaming it would break the matcher.
 export const PROTECTED_STATUS_NAMES: ReadonlySet<string> = new Set([
   "Idea",
   "Assigned",
+  "Scheduled",
   "Published",
   "Killed",
 ]);
@@ -45,6 +50,7 @@ export const DEFAULT_BRAND_STATUSES: ReadonlyArray<DefaultStatusSeed> = [
   { name: "Review", color: "yellow", isPipelineColumn: true },
   { name: "Final Review", color: "orange", isPipelineColumn: true },
   { name: "Ready To Publish", color: "pink", isPipelineColumn: true },
+  { name: "Scheduled", color: "blue", isProtected: true },
   { name: "Published", color: "pink", isProtected: true },
   { name: "Killed", color: "zinc", isProtected: true },
 ];

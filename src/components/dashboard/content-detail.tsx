@@ -2324,6 +2324,17 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </SelectContent>
             </Select>
 
+            {/* Reconciler gave up auto-detecting this Scheduled post going
+             *  live (aged past its window). Prompts a manual check/publish. */}
+            {item.status === "Scheduled" && item.scheduleNeedsAttentionAt ? (
+              <span
+                title="We couldn't auto-detect this going live within its window. Check whether it posted and publish manually, or it may have been cancelled."
+                className="inline-flex items-center gap-1 rounded border border-amber-200 bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800"
+              >
+                ⚠ Needs attention
+              </span>
+            ) : null}
+
             {/* Author handle moved into the state row below — it's
              *  read-only source-data, belongs with the other Pattern B
              *  tags rather than alongside the editable identity chips. */}
@@ -4323,6 +4334,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         itemId={item.id}
         initialLink={item.publishedLink ?? null}
         initialPublishedDate={item.publishedDate ?? null}
+        initialExpectedPublishAt={item.expectedPublishAt ?? null}
         currentStatus={item.status ?? null}
         onSuccess={() => {
           void load();

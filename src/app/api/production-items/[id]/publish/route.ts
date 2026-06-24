@@ -49,6 +49,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     mode?: unknown;
     link?: unknown;
     publishedDate?: unknown;
+    expectedPublishAt?: unknown;
   };
 
   const mode = body.mode;
@@ -65,6 +66,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       publishedLink: productionItems.publishedLink,
       publishedDate: productionItems.publishedDate,
       publishedAt: productionItems.publishedAt,
+      expectedPublishAt: productionItems.expectedPublishAt,
     })
     .from(productionItems)
     .where(eq(productionItems.id, id))
@@ -154,18 +156,62 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   } else {
     nextStatus = "Scheduled";
-    if (existing.status === "Scheduled") {
+
+    // Optional operator-entered "expected go-live" time. Accept an ISO
+    // string; null/empty clears it. Drives the schedule-reconcile matcher's
+    // publish-time proximity signal. Compare on epoch ms so re-saving the
+    // same time doesn't emit a spurious change.
+    let expectedNext: Date | null | undefined; // undefined = leave untouched
+    const expRaw = body.expectedPublishAt;
+    if (typeof expRaw === "string") {
+      const trimmed = expRaw.trim();
+      if (!trimmed) {
+        expectedNext = null;
+      } else {
+        const d = new Date(trimmed);
+        if (Number.isNaN(d.getTime())) {
+          return NextResponse.json(
+            { error: `"${trimmed}" is not a valid date/time.` },
+            { status: 400 },
+          );
+        }
+        expectedNext = d;
+      }
+    } else if (expRaw === null) {
+      expectedNext = null;
+    }
+
+    const expectedChanged =
+      expectedNext !== undefined &&
+      (existing.expectedPublishAt?.getTime() ?? null) !==
+        (expectedNext?.getTime() ?? null);
+
+    const statusChanging = existing.status !== "Scheduled";
+
+    if (!statusChanging && !expectedChanged) {
       // No-op — caller didn't change anything. Return the row as-is so
       // the UI's optimistic refetch doesn't need to special-case 200-but-
       // nothing-changed.
       return NextResponse.json({ status: "noop" });
     }
-    updates.status = "Scheduled";
-    changes.push({
-      target: { kind: "production_item_field", field: "status" },
-      from: existing.status,
-      to: "Scheduled",
-    });
+
+    if (statusChanging) {
+      updates.status = "Scheduled";
+      // Stamp the moment of scheduling once (first transition only) — the
+      // reconcile sweep's give-up window is measured from here. A clear of
+      // any prior needs-attention flag: re-scheduling restarts the clock.
+      updates.scheduledAt = new Date();
+      updates.scheduleNeedsAttentionAt = null;
+      changes.push({
+        target: { kind: "production_item_field", field: "status" },
+        from: existing.status,
+        to: "Scheduled",
+      });
+    }
+
+    if (expectedChanged) {
+      updates.expectedPublishAt = expectedNext;
+    }
   }
 
   const inserted = await db.transaction(async (tx) => {

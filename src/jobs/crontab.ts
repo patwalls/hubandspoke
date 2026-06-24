@@ -28,6 +28,7 @@ export const CRONTAB = `
 40 * * * * hook-dispatch-sweep
 55 * * * * vision-extract-sweep
 5 * * * * account-content-sync-sweep
+*/10 * * * * schedule-reconcile-sweep
 */30 * * * * klaviyo-sync-sweep
 */30 * * * * sync-link-metrics
 0 15 * * * evergreen-scan

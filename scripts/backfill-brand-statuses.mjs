@@ -20,7 +20,7 @@
 import postgres from "postgres";
 
 // Mirrors PROTECTED_STATUS_NAMES in src/lib/db/brand-statuses.ts.
-const PROTECTED = ["Idea", "Assigned", "Published", "Killed"];
+const PROTECTED = ["Idea", "Assigned", "Scheduled", "Published", "Killed"];
 
 const STARTER_STORY_LEGACY = [
   { name: "Idea", color: "zinc", isProtected: true },
@@ -38,6 +38,7 @@ const STARTER_STORY_LEGACY = [
   { name: "Review", color: "yellow", isPipelineColumn: true },
   { name: "Final Review", color: "orange", isPipelineColumn: true },
   { name: "Ready To Publish", color: "pink", isPipelineColumn: true },
+  { name: "Scheduled", color: "blue", isProtected: true },
   { name: "Published", color: "pink", isProtected: true },
   { name: "Killed", color: "zinc", isProtected: true },
 ];
@@ -48,6 +49,7 @@ const DEFAULT_SET = [
   { name: "Review", color: "yellow", isPipelineColumn: true },
   { name: "Final Review", color: "orange", isPipelineColumn: true },
   { name: "Ready To Publish", color: "pink", isPipelineColumn: true },
+  { name: "Scheduled", color: "blue", isProtected: true },
   { name: "Published", color: "pink", isProtected: true },
   { name: "Killed", color: "zinc", isProtected: true },
 ];

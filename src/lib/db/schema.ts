@@ -390,11 +390,35 @@ export const productionItems = pgTable(
     // carries the full {actor_user_id, format, source_type, post_type}
     // payload for the Activity tab.
     createdVia: text("created_via"),
+    // ── Scheduled-status reconciliation ──────────────────────────────────
+    // Stamped (first transition only) when an item moves to status =
+    // "Scheduled" via the publish route's schedule mode. The schedule-
+    // reconcile sweep keys off this to (a) find pending Scheduled items and
+    // (b) decide when an unmatched item has aged past its give-up window.
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    // Optional operator-entered "I expect this to go live around then" time
+    // captured in the Schedule dialog. Used as a strong publish-time
+    // proximity signal by the matcher; falls back to `scheduledAt` when null.
+    expectedPublishAt: timestamp("expected_publish_at", {
+      withTimezone: true,
+    }),
+    // Set when the reconcile sweep gives up auto-matching a Scheduled item
+    // (aged past its per-post-type stale window with no confident match).
+    // The item stays Scheduled but is badged "needs attention" so an
+    // operator publishes it manually; the matcher skips it from then on.
+    scheduleNeedsAttentionAt: timestamp("schedule_needs_attention_at", {
+      withTimezone: true,
+    }),
   },
   (table) => [
     index("idx_production_items_published_date").on(table.publishedDate),
     index("idx_production_items_published_at").on(table.publishedAt),
     index("idx_production_items_status").on(table.status),
+    // Reconcile sweep filters pending Scheduled items by scheduledAt; partial
+    // so it only indexes the handful of rows actually awaiting a match.
+    index("idx_production_items_scheduled_at")
+      .on(table.scheduledAt)
+      .where(sql`${table.scheduledAt} IS NOT NULL`),
     index("idx_production_items_brand").on(table.brand),
     index("idx_production_items_account").on(table.accountId),
     index("idx_production_items_post_type").on(table.postType),
@@ -446,6 +470,53 @@ export const productionItems = pgTable(
       .where(
         sql`${table.platformContentId} IS NOT NULL AND ${table.deletedAt} IS NULL`
       ),
+  ]
+);
+
+// Borderline (55–84 confidence) match proposals from the schedule-reconcile
+// sweep: "this newly-synced Published post is probably the post that this
+// Scheduled item was planning." High-confidence matches (≥85) auto-merge and
+// never land here; these wait for a human to Confirm (→ reconcile) or Reject.
+// One pending row per (scheduledItem, candidate) — the unique index lets
+// re-sweeps upsert the score/reason instead of piling up duplicates.
+export const scheduledMatchSuggestions = pgTable(
+  "scheduled_match_suggestions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // The Scheduled planning item awaiting reconciliation.
+    scheduledItemId: uuid("scheduled_item_id")
+      .references(() => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    // The synced Published row the matcher thinks corresponds to it.
+    candidateItemId: uuid("candidate_item_id")
+      .references(() => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    // 0–100 confidence from the matcher (only 55–84 reach this table).
+    score: integer("score").notNull(),
+    // Short human-readable rationale from the matcher (LLM + structural).
+    reason: text("reason"),
+    // pending → confirmed (reconciled) | rejected (left Scheduled).
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: uuid("resolved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    uniqueIndex("uniq_scheduled_match_suggestion_pair").on(
+      table.scheduledItemId,
+      table.candidateItemId
+    ),
+    index("idx_scheduled_match_suggestions_scheduled").on(
+      table.scheduledItemId
+    ),
+    index("idx_scheduled_match_suggestions_status").on(table.status),
   ]
 );
 

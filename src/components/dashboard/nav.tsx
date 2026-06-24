@@ -389,6 +389,7 @@ export function SectionTabs({
           { href: `/${currentBrand}/content`, label: "Content" },
           { href: `/${currentBrand}/production`, label: "Production" },
           { href: `/${currentBrand}/queue`, label: "Queue" },
+          { href: `/${currentBrand}/scheduled`, label: "Scheduled" },
           { href: `/${currentBrand}/formats`, label: "Formats" },
           { href: `/${currentBrand}/accounts`, label: "Accounts" },
         ];
@@ -445,6 +446,7 @@ export function SectionTabs({
             (tab.label === "Content" && pathname === "/content") ||
             (tab.label === "Queue" &&
               (pathname === "/queue" || pathname.startsWith(`${tab.href}/`))) ||
+            (tab.label === "Scheduled" && pathname === "/scheduled") ||
             (tab.label === "Production" && pathname === "/production") ||
             (tab.label === "Formats" && pathname === "/formats") ||
             (tab.label === "Accounts" && pathname.endsWith("/accounts"));

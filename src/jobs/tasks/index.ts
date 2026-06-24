@@ -62,6 +62,7 @@ import {
   evergreenScanTask,
   accountRefreshSweepTask,
   accountContentSyncSweepTask,
+  scheduleReconcileSweepTask,
   dailyScorecardEmailTask,
   scCreditsWatchTask,
   descriptCreditsWatchTask,
@@ -152,6 +153,7 @@ export interface TaskPayloads {
   "youtube-download-sweep": Record<string, never>;
   "account-refresh-sweep": Record<string, never>;
   "account-content-sync-sweep": Record<string, never>;
+  "schedule-reconcile-sweep": Record<string, never>;
   "threshold-monitor-sweep": Record<string, never>;
   "daily-scorecard-email": Record<string, never>;
   "sc-credits-watch": Record<string, never>;
@@ -206,6 +208,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "youtube-download-sweep": youtubeDownloadSweepTask,
   "account-refresh-sweep": accountRefreshSweepTask,
   "account-content-sync-sweep": accountContentSyncSweepTask,
+  "schedule-reconcile-sweep": scheduleReconcileSweepTask,
   "threshold-monitor-sweep": thresholdMonitorSweepTask,
   "daily-scorecard-email": dailyScorecardEmailTask,
   "sc-credits-watch": scCreditsWatchTask,

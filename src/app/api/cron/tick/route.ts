@@ -22,6 +22,7 @@ const SCHEDULED_TASK_NAMES: ReadonlyArray<keyof TaskPayloads> = [
   "enrichment-sweep",
   "hook-dispatch-sweep",
   "account-content-sync-sweep",
+  "schedule-reconcile-sweep",
   "klaviyo-sync-sweep",
   "evergreen-scan",
   "youtube-download-sweep",

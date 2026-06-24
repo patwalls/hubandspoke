@@ -26,6 +26,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   *:50  hook-fallback-sweep       → fan-out → hook-fallback (per item, no LLM)
   */20  youtube-download-sweep    → fan-out → youtube-download → transcribe-whisper
   */30  account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
+  */10  schedule-reconcile-sweep  → targeted account-content-sync (accounts w/ pending Scheduled items) + runScheduleReconcile() → auto-merge / suggest / needs-attention
   */30  klaviyo-sync-sweep        → fan-out → klaviyo-sync-account (per active newsletter account with Klaviyo list id)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
   (per-post) capture-velocity-snapshot → scheduled at publish+{15m,30m,1h,2h,4h,8h,24h,48h} per item; writes one view_snapshots row each
@@ -220,6 +221,44 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
     platform's SC endpoint paginates)
   - Sweeps use jobKey + `unsafe_dedupe` so overlapping ticks don't
     double-enqueue a pending account
+
+### `schedule-reconcile-sweep` — tie live posts back to Scheduled items (every 10 min)
+- **Trigger:** cron `*/10 * * * *`
+- **Files:** `src/jobs/tasks/scheduled.ts` (`scheduleReconcileSweepTask`),
+  `src/lib/services/schedule-reconcile/{matcher,reconcile,review}.ts`,
+  `src/lib/services/merge-production-items.ts` (`reconcileScheduledIntoPublished`)
+- **Why:** operators schedule a post via a platform's native scheduler / a
+  post-scheduler and mark the planning item **Scheduled** (publish route,
+  `mode=schedule`). When it goes live, `account-content-sync` discovers it as
+  a *separate* Published row. This sweep reunites them.
+- **Two jobs per tick:**
+  1. **Targeted freshness:** enqueues `account-content-sync` (`mode=latest`,
+     jobKey dedup) for ONLY the distinct accounts that own a pending Scheduled
+     item (not given-up). ≈$0 extra SC spend when nothing is scheduled.
+  2. **Match pass:** `runScheduleReconcile()` over current data. For each
+     pending Scheduled item: structural candidate gate (same account,
+     Published, synced-origin, published inside the scheduling window, same
+     post_type) → Haiku scorer (`matcher.ts`, single pinned `return_match`
+     tool, fail-soft) → tier policy.
+- **Tier policy (`reconcile.ts`):** score **≥85** → auto-merge
+  (`reconcileScheduledIntoPublished`: Scheduled item is pinned as merge keeper,
+  absorbs the synced row, flips to Published with the real link/date/thumbnail,
+  emits `status_change` + `content_changed`, schedules velocity snapshots);
+  **55–84** → upsert a `scheduled_match_suggestions` row (pending) for human
+  Confirm/Reject at `/[brand]/scheduled`; **<55** → leave Scheduled, retry.
+- **Give-up window (per post_type):** unmatched past `staleWindowHours()` —
+  **24h** for fast formats (x, tiktok, threads, instagram_*), **48h** otherwise
+  — stamps `production_items.schedule_needs_attention_at`, surfaces a
+  needs-attention badge, and stops matching that item. "Some content should
+  never sit at Scheduled more than 24h."
+- **Rules / idempotency:** matcher runs against whatever Published rows exist
+  now, so a post synced this tick is matched next tick (~10-min latency, by
+  design). Rejected (item, candidate) pairs are excluded from future matching.
+  LLM error on a tick = treat as no-match, retry. System merges pass
+  `userId=null` and skip the `production_items_merges` audit row (trail is in
+  `content_events`).
+- **Surface:** `/[brand]/scheduled` (page) + `GET /api/scheduled-matches` +
+  `POST /api/scheduled-matches/[id]` (`confirm` → reconcile, `reject` → exclude).
 
 ### `account-content-sync` — sync one account's content
 - **Trigger:** enqueued by `account-content-sync-sweep`; on-demand

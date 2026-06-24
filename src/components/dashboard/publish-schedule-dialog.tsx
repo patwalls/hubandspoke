@@ -39,6 +39,9 @@ interface Props {
    *  Publish tab opens pre-filled and the button reads "Save changes". */
   initialLink?: string | null;
   initialPublishedDate?: string | null;
+  /** If the item is already scheduled, pass its expected go-live time (ISO
+   *  string) so the Schedule tab opens pre-filled. */
+  initialExpectedPublishAt?: string | null;
   /** Current status string ("Ready To Publish" / "Published" / etc.) —
    *  drives default tab + button label. */
   currentStatus?: string | null;
@@ -50,12 +53,25 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Convert a stored UTC ISO string to the `YYYY-MM-DDTHH:mm` shape a
+ *  <input type="datetime-local"> expects, in the viewer's local time. */
+function isoToLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
+}
+
 export function PublishScheduleDialog({
   open,
   onOpenChange,
   itemId,
   initialLink,
   initialPublishedDate,
+  initialExpectedPublishAt,
   currentStatus,
   onSuccess,
 }: Props) {
@@ -69,6 +85,9 @@ export function PublishScheduleDialog({
   const [publishedDate, setPublishedDate] = useState<string>(
     initialPublishedDate ?? todayIsoDate(),
   );
+  const [expectedPublishAt, setExpectedPublishAt] = useState<string>(
+    isoToLocalInput(initialExpectedPublishAt),
+  );
   const [submitting, setSubmitting] = useState(false);
 
   // Reset form state every time the dialog opens. Without this an edit
@@ -78,8 +97,15 @@ export function PublishScheduleDialog({
     setMode(isAlreadyScheduled ? "schedule" : "publish");
     setLink(initialLink ?? "");
     setPublishedDate(initialPublishedDate ?? todayIsoDate());
+    setExpectedPublishAt(isoToLocalInput(initialExpectedPublishAt));
     setSubmitting(false);
-  }, [open, isAlreadyScheduled, initialLink, initialPublishedDate]);
+  }, [
+    open,
+    isAlreadyScheduled,
+    initialLink,
+    initialPublishedDate,
+    initialExpectedPublishAt,
+  ]);
 
   const linkValid = useMemo(() => {
     const t = link.trim();
@@ -103,6 +129,12 @@ export function PublishScheduleDialog({
       if (mode === "publish") {
         payload.link = link.trim();
         if (publishedDate) payload.publishedDate = publishedDate;
+      } else {
+        // Send the expected go-live time as a full UTC ISO string (the
+        // datetime-local value is in the viewer's local zone). Empty string
+        // explicitly clears any previously-set time.
+        const t = expectedPublishAt.trim();
+        payload.expectedPublishAt = t ? new Date(t).toISOString() : "";
       }
       const res = await fetch(
         `/api/production-items/${itemId}/publish`,
@@ -138,7 +170,7 @@ export function PublishScheduleDialog({
   const saveLabel = (() => {
     if (submitting) return "Saving…";
     if (mode === "schedule") {
-      return isAlreadyScheduled ? "Already scheduled" : "Schedule";
+      return isAlreadyScheduled ? "Save changes" : "Schedule";
     }
     if (isAlreadyPublished) return "Save changes";
     return "Publish";
@@ -222,14 +254,33 @@ export function PublishScheduleDialog({
             </div>
           </div>
         ) : (
-          <div className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">Schedule (placeholder)</p>
-            <p className="mt-1 text-xs">
-              Saving flags this post as <span className="font-medium">Scheduled</span>.
-              Full scheduling — picking a date / time, auto-publishing —
-              lands later. For now this just locks the status so it stops
-              appearing in Ready-To-Publish queues.
-            </p>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="expected-publish-at">
+                Expected go-live{" "}
+                <span className="font-normal text-muted-foreground">
+                  (optional)
+                </span>
+              </Label>
+              <Input
+                id="expected-publish-at"
+                type="datetime-local"
+                value={expectedPublishAt}
+                onChange={(e) => setExpectedPublishAt(e.target.value)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                When you expect this to actually post (your native scheduler /
+                post-scheduler time). We auto-detect the live post within ~10
+                min of go-live and tie it back to this item — a closer time
+                makes the match more accurate. Leave blank if unsure.
+              </p>
+            </div>
+            <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
+              Saving flags this post as{" "}
+              <span className="font-medium text-foreground">Scheduled</span> and
+              stops it appearing in Ready-To-Publish queues. Once it goes live,
+              it auto-flips to Published with the real link and metrics.
+            </div>
           </div>
         )}
 
@@ -245,7 +296,7 @@ export function PublishScheduleDialog({
           <Button
             type="button"
             onClick={() => void handleSave()}
-            disabled={saveDisabled || (mode === "schedule" && isAlreadyScheduled)}
+            disabled={saveDisabled}
           >
             {saveLabel}
           </Button>

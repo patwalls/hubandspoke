@@ -70,7 +70,7 @@ Render chips with `statusClassWithPalette(status, palette)` (server) or
 The legacy `statusClass(status)` lookup against `STATUS_COLORS` is kept as
 a fallback only; new code shouldn't use it directly.
 
-**Protected names.** Four status names are seeded with `isProtected = true`
+**Protected names.** Five status names are seeded with `isProtected = true`
 on every brand and locked from rename/delete in the UI. The canonical list
 is `PROTECTED_STATUS_NAMES` in `src/lib/db/brand-statuses.ts`:
 
@@ -79,13 +79,18 @@ is `PROTECTED_STATUS_NAMES` in `src/lib/db/brand-statuses.ts`:
   cross-post-feed, evergreen-scan
 - `Assigned` — target of triage "accept", clip promotion, and the queue
   outcome flow; my-work role logic keys off it
+- `Scheduled` — write-only via the publish route's schedule mode; the
+  `schedule-reconcile-sweep` matcher filters Scheduled items by this literal,
+  and content-detail filters it out of the editable status dropdown
 - `Published` — publish-date filters in `src/lib/db/queries.ts`
 - `Killed` — kill-confirmation modal in `src/components/dashboard/content-detail.tsx`
 
 Renaming any of these would silently break the flow that hard-codes the
 string. New brands get the seed via `POST /api/brands`; existing brands are
 re-flagged by re-running `scripts/backfill-brand-statuses.mjs` (idempotent —
-seed pass + re-flag pass).
+seed pass + re-flag pass). `Scheduled` was added to the protected set
+2026-06-24; `scripts/backfill-scheduled-status.mjs` inserts the row (positioned
+just before `Published`) into brands that already have a palette.
 
 ## Filter state lives in the URL
 

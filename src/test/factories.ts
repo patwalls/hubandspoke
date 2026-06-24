@@ -46,7 +46,7 @@ import {
   users,
 } from "@/lib/db/schema";
 
-type CleanupTable = "productionItems" | "formats" | "clipIdeas";
+type CleanupTable = "productionItems" | "formats" | "clipIdeas" | "accounts";
 const created: Array<{ table: CleanupTable; id: string }> = [];
 
 afterEach(async () => {
@@ -64,6 +64,8 @@ afterEach(async () => {
         await db.delete(formats).where(eq(formats.id, row.id));
       } else if (row.table === "clipIdeas") {
         await db.delete(clipIdeas).where(eq(clipIdeas.id, row.id));
+      } else if (row.table === "accounts") {
+        await db.delete(accounts).where(eq(accounts.id, row.id));
       }
     } catch (err) {
       console.error(
@@ -145,6 +147,43 @@ export async function getTestAccountId(opts: {
   return row.id;
 }
 
+export interface CreateTestAccountOptions {
+  brand?: string;
+  platform?: string;
+  handle?: string;
+}
+
+/**
+ * Insert a disposable `accounts` row so a test owns a fully-controlled set of
+ * production items (the shared starter-story/x account from getTestAccountId
+ * carries real data that would pollute candidate-gate assertions). Auto-cleans
+ * in afterEach — delete the items it owns first (LIFO handles this when items
+ * are created after the account).
+ */
+export async function createTestAccount(
+  opts: CreateTestAccountOptions = {},
+): Promise<typeof accounts.$inferSelect> {
+  const brandSlug = opts.brand ?? "starter-story";
+  const [brand] = await db
+    .select({ id: brands.id })
+    .from(brands)
+    .where(eq(brands.slug, brandSlug))
+    .limit(1);
+  if (!brand) {
+    throw new Error(`No brand '${brandSlug}' in DB — seed brands first`);
+  }
+  const [row] = await db
+    .insert(accounts)
+    .values({
+      brandId: brand.id,
+      platform: opts.platform ?? "x",
+      handle: opts.handle ?? `vitest-acct-${randomSuffix()}`,
+    })
+    .returning();
+  trackCleanup("accounts", row.id);
+  return row;
+}
+
 export interface CreateTestFormatOptions {
   brand?: string;
   name?: string;
@@ -196,6 +235,14 @@ export interface CreateTestProductionItemOptions {
   publishedAt?: Date | null;
   /** date-only column; defaults to the calendar date of publishedAt. */
   publishedDate?: string | null;
+  publishedLink?: string | null;
+  platformContentId?: string | null;
+  thumbnail?: string | null;
+  hook?: string | null;
+  /** Scheduled-status reconciliation fields. */
+  scheduledAt?: Date | null;
+  expectedPublishAt?: Date | null;
+  scheduleNeedsAttentionAt?: Date | null;
   views?: number;
   descriptProjectId?: string | null;
   descriptProjectUrl?: string | null;
@@ -249,6 +296,13 @@ export async function createTestProductionItem(
       platform: opts.platform ?? ["X"],
       publishedAt,
       publishedDate,
+      publishedLink: opts.publishedLink ?? null,
+      platformContentId: opts.platformContentId ?? null,
+      thumbnail: opts.thumbnail ?? null,
+      hook: opts.hook ?? null,
+      scheduledAt: opts.scheduledAt ?? null,
+      expectedPublishAt: opts.expectedPublishAt ?? null,
+      scheduleNeedsAttentionAt: opts.scheduleNeedsAttentionAt ?? null,
       editorUserId: userId,
       views: opts.views ?? 0,
       descriptProjectId: opts.descriptProjectId ?? null,

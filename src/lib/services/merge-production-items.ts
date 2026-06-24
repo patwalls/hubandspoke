@@ -1,7 +1,16 @@
 import { db } from "@/lib/db";
-import { productionItems, contentComments } from "@/lib/db/schema";
+import {
+  productionItems,
+  contentComments,
+  contentEvents,
+} from "@/lib/db/schema";
 import { eq, and, count } from "drizzle-orm";
 import { sql } from "drizzle-orm";
+import {
+  recordContentChanges,
+  type ContentChange,
+} from "@/lib/services/content-revisions";
+import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 
 export interface MergeResult {
   success: boolean;
@@ -71,7 +80,8 @@ async function determineKeeper(
 export async function mergeProductionItems(
   primaryId: string,
   secondaryId: string,
-  userId: string
+  userId: string | null,
+  opts: { forceKeeperId?: string } = {}
 ): Promise<MergeResult> {
   if (primaryId === secondaryId) {
     return {
@@ -116,8 +126,31 @@ export async function mergeProductionItems(
       };
     }
 
-    // 2. Smart detection: Determine which item should be kept
-    const { keeper, duplicate } = await determineKeeper(itemById1, itemById2);
+    // 2. Decide the keeper. Callers that already know which row must survive
+    // (e.g. schedule-reconcile pins the Scheduled planning item so its hook /
+    // format / assignment / comments win) pass forceKeeperId to bypass the
+    // ownership heuristic.
+    let keeper: typeof productionItems.$inferSelect;
+    let duplicate: typeof productionItems.$inferSelect;
+    if (opts.forceKeeperId) {
+      if (opts.forceKeeperId === itemById1.id) {
+        keeper = itemById1;
+        duplicate = itemById2;
+      } else if (opts.forceKeeperId === itemById2.id) {
+        keeper = itemById2;
+        duplicate = itemById1;
+      } else {
+        return {
+          success: false,
+          message: "forceKeeperId does not match either item",
+          primaryId,
+          secondaryId,
+          deletedId: "",
+        };
+      }
+    } else {
+      ({ keeper, duplicate } = await determineKeeper(itemById1, itemById2));
+    }
     const primary = keeper;
     const secondary = duplicate;
 
@@ -245,16 +278,20 @@ export async function mergeProductionItems(
       })
       .where(eq(productionItems.id, secondary.id));
 
-    // 8. Create audit log entry
-    // Note: This assumes a productionItemsMerges table exists in the schema
-    try {
-      await db.execute(sql`
-        INSERT INTO production_items_merges (id, primary_item_id, secondary_item_id, merged_by, merge_strategy, created_at)
-        VALUES (gen_random_uuid(), ${primary.id}, ${secondary.id}, ${userId}, 'smart_merge', now())
-      `);
-    } catch (err: any) {
-      // Table might not exist yet (migration pending), log but don't fail the merge
-      console.warn("[merge-production-items] audit log insert failed:", err.message);
+    // 8. Create audit log entry. Only for user-initiated merges — the
+    // production_items_merges table requires a non-null merged_by, so
+    // system reconciles (userId null) record their trail via content_events
+    // instead (see reconcileScheduledIntoPublished).
+    if (userId) {
+      try {
+        await db.execute(sql`
+          INSERT INTO production_items_merges (id, primary_item_id, secondary_item_id, merged_by, merge_strategy, created_at)
+          VALUES (gen_random_uuid(), ${primary.id}, ${secondary.id}, ${userId}, 'smart_merge', now())
+        `);
+      } catch (err: any) {
+        // Table might not exist yet (migration pending), log but don't fail the merge
+        console.warn("[merge-production-items] audit log insert failed:", err.message);
+      }
     }
 
     return {
@@ -274,4 +311,137 @@ export async function mergeProductionItems(
       deletedId: "",
     };
   }
+}
+
+export interface ReconcileResult {
+  success: boolean;
+  message: string;
+  /** The surviving Published item id (= the original Scheduled item). */
+  publishedItemId: string | null;
+}
+
+/**
+ * "The Scheduled item becomes the published row." Used by schedule-reconcile
+ * when a synced Published post is confidently matched to a Scheduled planning
+ * item. Pins the Scheduled item as keeper so its hook / format / assignment /
+ * comments survive, absorbs the synced duplicate via mergeProductionItems
+ * (which repoints child FKs, transfers platformContentId + views, and
+ * soft-deletes the synced row), then stamps the real published fields onto
+ * the keeper and flips it to Published — mirroring the publish route's
+ * Scheduled → Published transition (events + velocity snapshots).
+ *
+ * `userId` is null for the cron-driven path; the activity trail is captured
+ * via content_events with a sync source rather than the merges audit table.
+ */
+export async function reconcileScheduledIntoPublished(
+  scheduledId: string,
+  syncedId: string,
+  userId: string | null
+): Promise<ReconcileResult> {
+  // Capture the synced row's real published data before the merge soft-
+  // deletes it (the merge only nulls platformContentId, but read up front so
+  // we never depend on the soft-deleted row's other columns).
+  const [synced] = await db
+    .select({
+      publishedLink: productionItems.publishedLink,
+      publishedDate: productionItems.publishedDate,
+      publishedAt: productionItems.publishedAt,
+      thumbnail: productionItems.thumbnail,
+    })
+    .from(productionItems)
+    .where(eq(productionItems.id, syncedId))
+    .limit(1);
+  const [scheduled] = await db
+    .select({
+      status: productionItems.status,
+      publishedLink: productionItems.publishedLink,
+      publishedDate: productionItems.publishedDate,
+    })
+    .from(productionItems)
+    .where(eq(productionItems.id, scheduledId))
+    .limit(1);
+
+  if (!synced || !scheduled) {
+    return {
+      success: false,
+      message: "Scheduled or synced item not found",
+      publishedItemId: null,
+    };
+  }
+
+  const merge = await mergeProductionItems(scheduledId, syncedId, userId, {
+    forceKeeperId: scheduledId,
+  });
+  if (!merge.success) {
+    return { success: false, message: merge.message, publishedItemId: null };
+  }
+
+  // Stamp the keeper with the live post's published fields + flip status.
+  const publishedAt = synced.publishedAt ?? new Date();
+  await db.transaction(async (tx) => {
+    await tx
+      .update(productionItems)
+      .set({
+        status: "Published",
+        publishedLink: synced.publishedLink,
+        publishedDate: synced.publishedDate,
+        publishedAt,
+        thumbnail: synced.thumbnail,
+        scheduleNeedsAttentionAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, scheduledId));
+
+    const changes: ContentChange[] = [
+      {
+        target: { kind: "production_item_field", field: "status" },
+        from: scheduled.status,
+        to: "Published",
+      },
+    ];
+    if (scheduled.publishedLink !== synced.publishedLink) {
+      changes.push({
+        target: { kind: "production_item_field", field: "publishedLink" },
+        from: scheduled.publishedLink,
+        to: synced.publishedLink,
+      });
+    }
+    if (scheduled.publishedDate !== synced.publishedDate) {
+      changes.push({
+        target: { kind: "production_item_field", field: "publishedDate" },
+        from: scheduled.publishedDate,
+        to: synced.publishedDate,
+      });
+    }
+    await recordContentChanges({
+      tx,
+      contentItemId: scheduledId,
+      userId,
+      source: { kind: "sync", system: "account-content" },
+      changes,
+    });
+    await tx.insert(contentEvents).values({
+      contentItemId: scheduledId,
+      userId,
+      eventType: "status_change",
+      payload: {
+        type: "status_change",
+        from: scheduled.status,
+        to: "Published",
+      },
+    });
+  });
+
+  // Mirror the publish route: schedule the early velocity checkpoints.
+  try {
+    await scheduleVelocitySnapshots(scheduledId, publishedAt);
+  } catch (err) {
+    console.error("[reconcile] scheduleVelocitySnapshots failed", err);
+  }
+
+  return {
+    success: true,
+    message: "Reconciled scheduled item into published post",
+    publishedItemId: scheduledId,
+  };
 }
