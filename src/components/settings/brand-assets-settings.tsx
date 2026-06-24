@@ -3,32 +3,49 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { DownloadIcon, UploadIcon, CheckIcon, Loader2Icon } from "lucide-react";
+import {
+  DownloadIcon,
+  UploadIcon,
+  Loader2Icon,
+  Trash2Icon,
+  FileIcon,
+} from "lucide-react";
+
+export interface WatermarkFile {
+  id: string;
+  fileName: string;
+  sizeBytes: number | null;
+  createdAt: string;
+}
 
 interface Props {
   brand: string;
   brandLabel: string;
-  hasWatermark: boolean;
+  initialWatermarks: WatermarkFile[];
   initialGuidelines: string | null;
+}
+
+function formatBytes(bytes: number | null) {
+  if (!bytes) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 export function BrandAssetsSettings({
   brand,
   brandLabel,
-  hasWatermark,
+  initialWatermarks,
   initialGuidelines,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [watermarkUploaded, setWatermarkUploaded] = useState(hasWatermark);
-  const [uploadState, setUploadState] = useState<
-    "idle" | "uploading" | "success" | "error"
-  >("idle");
+  const [watermarks, setWatermarks] = useState<WatermarkFile[]>(initialWatermarks);
+  const [uploadState, setUploadState] = useState<"idle" | "uploading" | "error">("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [guidelines, setGuidelines] = useState(initialGuidelines ?? "");
-  const [saveState, setSaveState] = useState<
-    "idle" | "saving" | "saved" | "error"
-  >("idle");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -38,14 +55,13 @@ export function BrandAssetsSettings({
     setUploadError(null);
 
     try {
-      // 1. Get presigned PUT URL
       const presignRes = await fetch("/api/brand-assets/watermark/presign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           brand,
           fileName: file.name,
-          contentType: file.type || "application/zip",
+          contentType: file.type || "application/octet-stream",
           fileSize: file.size,
         }),
       });
@@ -55,33 +71,59 @@ export function BrandAssetsSettings({
       }
       const { uploadUrl, key } = await presignRes.json();
 
-      // 2. Upload directly to S3
       const putRes = await fetch(uploadUrl, {
         method: "PUT",
-        headers: { "Content-Type": file.type || "application/zip" },
+        headers: { "Content-Type": file.type || "application/octet-stream" },
         body: file,
       });
       if (!putRes.ok) throw new Error("Upload to S3 failed");
 
-      // 3. Confirm
       const confirmRes = await fetch("/api/brand-assets/watermark/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brand, key }),
+        body: JSON.stringify({
+          brand,
+          key,
+          fileName: file.name,
+          fileSize: file.size,
+        }),
       });
       if (!confirmRes.ok) {
         const { error } = await confirmRes.json();
         throw new Error(error ?? "Failed to confirm upload");
       }
+      const { id } = await confirmRes.json();
 
-      setWatermarkUploaded(true);
-      setUploadState("success");
+      setWatermarks((prev) => [
+        {
+          id,
+          fileName: file.name,
+          sizeBytes: file.size,
+          createdAt: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      setUploadState("idle");
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
       setUploadState("error");
     } finally {
-      // Reset input so the same file can be re-selected if needed
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/brand-assets/watermark/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      setWatermarks((prev) => prev.filter((w) => w.id !== id));
+    } catch {
+      // leave item in list on failure — user can retry
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -113,40 +155,68 @@ export function BrandAssetsSettings({
 
       {/* Watermarks */}
       <section className="space-y-3">
-        <div>
-          <h3 className="text-sm font-medium">Watermarks</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Upload a ZIP of watermark files for this brand. Editors download
-            these from the Actions menu on any content item.
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium">Watermarks</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              ZIP or image files editors download from the Actions menu on any content item.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadState === "uploading"}
+          >
+            {uploadState === "uploading" ? (
+              <Loader2Icon className="size-3.5 animate-spin mr-1.5" />
+            ) : (
+              <UploadIcon className="size-3.5 mr-1.5" />
+            )}
+            Upload file
+          </Button>
         </div>
 
-        {watermarkUploaded ? (
-          <div className="flex items-center gap-3 p-3 rounded-md border bg-muted/40">
-            <CheckIcon className="size-4 text-green-600 shrink-0" />
-            <span className="text-sm flex-1">Watermarks uploaded</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                (window.location.href = `/api/brand-assets/watermark/download?brand=${brand}`)
-              }
-            >
-              <DownloadIcon className="size-3.5 mr-1.5" />
-              Download
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadState === "uploading"}
-            >
-              {uploadState === "uploading" ? (
-                <Loader2Icon className="size-3.5 animate-spin" />
-              ) : (
-                "Replace"
-              )}
-            </Button>
+        {watermarks.length > 0 ? (
+          <div className="rounded-md border divide-y">
+            {watermarks.map((wm) => (
+              <div key={wm.id} className="flex items-center gap-3 px-3 py-2.5">
+                <FileIcon className="size-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm truncate">{wm.fileName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {[
+                      formatBytes(wm.sizeBytes),
+                      new Date(wm.createdAt).toLocaleDateString(),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    (window.location.href = `/api/brand-assets/watermark/download?id=${wm.id}`)
+                  }
+                >
+                  <DownloadIcon className="size-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => handleDelete(wm.id)}
+                  disabled={deletingId === wm.id}
+                >
+                  {deletingId === wm.id ? (
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                  ) : (
+                    <Trash2Icon className="size-3.5" />
+                  )}
+                </Button>
+              </div>
+            ))}
           </div>
         ) : (
           <button
@@ -163,18 +233,13 @@ export function BrandAssetsSettings({
             ) : (
               <>
                 <UploadIcon className="size-5" />
-                <span className="text-sm font-medium">
-                  Click to upload watermarks ZIP
-                </span>
-                <span className="text-xs">ZIP up to 200 MB</span>
+                <span className="text-sm font-medium">No watermarks uploaded yet</span>
+                <span className="text-xs">ZIP or image files, up to 200 MB each</span>
               </>
             )}
           </button>
         )}
 
-        {uploadState === "success" && !watermarkUploaded && (
-          <p className="text-xs text-green-600">Watermarks uploaded successfully.</p>
-        )}
         {uploadError && (
           <p className="text-xs text-destructive">{uploadError}</p>
         )}
@@ -182,7 +247,7 @@ export function BrandAssetsSettings({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".zip,application/zip,application/x-zip-compressed"
+          accept=".zip,.png,.jpg,.jpeg,.gif,.webp,.svg,application/zip,application/x-zip-compressed,image/*"
           className="hidden"
           onChange={handleFileChange}
         />

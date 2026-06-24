@@ -6,6 +6,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -111,6 +112,12 @@ export async function getPresignedGetUrl(
       : undefined,
   });
   return getSignedUrl(s3Client(), cmd, { expiresIn: ttlSeconds });
+}
+
+export async function deleteObject(key: string): Promise<void> {
+  await s3Client().send(
+    new DeleteObjectCommand({ Bucket: bucketName(), Key: key })
+  );
 }
 
 export async function headObject(key: string): Promise<{

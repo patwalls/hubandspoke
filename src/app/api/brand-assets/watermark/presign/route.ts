@@ -8,11 +8,8 @@ const MAX_BYTES = 200 * 1024 * 1024; // 200 MB
 const PREFIX = (process.env.HUBANDSPOKE_S3_PREFIX || "hubandspoke/uploads")
   .replace(/\/+$/, "");
 
-const ALLOWED_TYPES = new Set([
-  "application/zip",
-  "application/x-zip-compressed",
-  "application/octet-stream",
-]);
+const ALLOWED_RE =
+  /^(application\/(zip|x-zip-compressed|octet-stream)|image\/(png|jpe?g|gif|webp|svg\+xml))$/;
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -46,9 +43,9 @@ export async function POST(request: NextRequest) {
       { status: 413 }
     );
   }
-  if (!ALLOWED_TYPES.has(contentType)) {
+  if (!ALLOWED_RE.test(contentType)) {
     return NextResponse.json(
-      { error: "Only ZIP files are allowed" },
+      { error: "Only ZIP and image files are allowed" },
       { status: 400 }
     );
   }

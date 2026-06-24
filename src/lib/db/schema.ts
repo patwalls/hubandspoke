@@ -1560,6 +1560,23 @@ export const brands = pgTable(
   (table) => [uniqueIndex("idx_brands_slug_lower").on(sql`lower(${table.slug})`)]
 );
 
+export const brandWatermarks = pgTable(
+  "brand_watermarks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    brandId: uuid("brand_id")
+      .notNull()
+      .references(() => brands.id, { onDelete: "cascade" }),
+    s3Key: text("s3_key").notNull(),
+    fileName: text("file_name").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("idx_brand_watermarks_brand_id").on(table.brandId)]
+);
+
 // Per-brand status palette. Replaces the old hard-coded STATUS_COLORS map and
 // PIPELINE_STATUSES list — each brand now owns its own statuses, ordering, and
 // chip colors. Four names are seeded with isProtected = true on every brand
