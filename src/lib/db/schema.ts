@@ -1548,6 +1548,8 @@ export const brands = pgTable(
       () => users.id,
       { onDelete: "set null" }
     ),
+    watermarkS3Key: text("watermark_s3_key"),
+    brandGuidelines: text("brand_guidelines"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

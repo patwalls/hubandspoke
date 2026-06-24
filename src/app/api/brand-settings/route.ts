@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
       weeklyViewsGoal: row.weeklyViewsGoal ?? null,
       weekStartDay: row.weekStartDay ?? 0,
       defaultEditorUserId: row.defaultEditorUserId ?? null,
+      brandGuidelines: row.brandGuidelines ?? null,
     });
   } catch (error) {
     console.error("Error fetching brand settings:", error);
@@ -40,12 +41,14 @@ export async function PUT(request: NextRequest) {
       weeklyViewsGoal,
       weekStartDay,
       defaultEditorUserId,
+      brandGuidelines,
     } = body as {
       brand?: string;
       weeklyGoal?: number | null;
       weeklyViewsGoal?: number | null;
       weekStartDay?: number;
       defaultEditorUserId?: string | null;
+      brandGuidelines?: string | null;
     };
 
     if (!brand) {
@@ -101,6 +104,9 @@ export async function PUT(request: NextRequest) {
     if (defaultEditorUserId !== undefined) {
       patch.defaultEditorUserId = defaultEditorUserId || null;
     }
+    if (brandGuidelines !== undefined) {
+      patch.brandGuidelines = brandGuidelines ?? null;
+    }
 
     const [row] = await db
       .update(brands)
@@ -116,6 +122,7 @@ export async function PUT(request: NextRequest) {
       weeklyViewsGoal: row.weeklyViewsGoal,
       weekStartDay: row.weekStartDay,
       defaultEditorUserId: row.defaultEditorUserId,
+      brandGuidelines: row.brandGuidelines,
     });
   } catch (error) {
     console.error("Error updating brand settings:", error);

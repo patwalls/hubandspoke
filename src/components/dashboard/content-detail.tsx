@@ -2994,7 +2994,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   <DropdownMenuItem
                     onClick={() => {
                       window.location.href =
-                        "/watermarks/starter-story-watermarks.zip";
+                        `/api/brand-assets/watermark/download?brand=${item.brand}`;
                     }}
                   >
                     <DownloadIcon className="size-3.5" /> Download watermarks
