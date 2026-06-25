@@ -53,12 +53,28 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     (s) => s.endSec > startSec && s.startSec < endSec,
   );
 
-  // Opening segments of the source, for the "include intro" hook picker. The
-  // intro lives before the clip body, so the overlapping excerpt above never
-  // contains it. Capped so the payload stays small — the intro hook is always
-  // near the top of the video, and the editor extends within this window.
+  // Opening segments of the source = what "Include intro at top" prepends.
+  // We take the natural intro window (first INTRO_WINDOW segments) and then a
+  // ~15s lead-in PAST it, extended to a full segment so the intro never ends
+  // mid-sentence — operators kept wanting "a little more after the intro" (the
+  // host's hand-off into the interview). Capped at MAX_INTRO_SEGMENTS so the
+  // payload stays small and we can't accidentally prepend half the episode.
   const INTRO_WINDOW = 24;
-  const introSegments = allSegments.slice(0, INTRO_WINDOW);
+  const INTRO_PAD_SEC = 15;
+  const MAX_INTRO_SEGMENTS = 40;
+  let introCount = Math.min(INTRO_WINDOW, allSegments.length);
+  if (introCount > 0) {
+    const targetEnd = allSegments[introCount - 1].endSec + INTRO_PAD_SEC;
+    for (
+      let i = introCount;
+      i < allSegments.length && i < MAX_INTRO_SEGMENTS;
+      i++
+    ) {
+      introCount = i + 1;
+      if (allSegments[i].endSec >= targetEnd) break; // land on a full sentence
+    }
+  }
+  const introSegments = allSegments.slice(0, introCount);
 
   let videoUrl: string | null = null;
   let videoContentType: string | null = row.mediaContentType ?? null;
