@@ -260,15 +260,15 @@ export function IdeaQueueTable({
 
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs table-fixed">
+          <table className="w-full text-xs table-fixed min-w-[1112px]">
             <colgroup>
               <col className="w-[36px]" />
-              <col className="w-[240px]" />
-              <col />
-              <col className="w-[220px]" />
-              <col className="w-[220px]" />
-              <col className="w-[100px]" />
-              <col className="w-[100px]" />
+              <col className="w-[176px]" />
+              <col className="w-[340px]" />
+              <col className="w-[200px]" />
+              <col className="w-[184px]" />
+              <col className="w-[88px]" />
+              <col className="w-[88px]" />
             </colgroup>
             <thead>
               <tr className="border-b border-border bg-accent/50">

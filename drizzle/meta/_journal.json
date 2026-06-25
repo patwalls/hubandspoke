@@ -645,6 +645,13 @@
       "when": 1782412927010,
       "tag": "0091_tricky_meltdown",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1782413182577,
+      "tag": "0092_light_toro",
+      "breakpoints": true
     }
   ]
 }

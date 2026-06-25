@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -73,6 +73,10 @@ interface Preview {
   videoUrl: string | null;
   videoContentType: string | null;
   segments: PreviewSegment[];
+  /** Opening lines of the source, for the "include intro" hook picker. */
+  introSegments: PreviewSegment[];
+  /** Currently-saved prepended hook ranges (ordered). */
+  hookSegments: { startSec: number; endSec: number }[];
 }
 
 interface PromotionFormat {
@@ -159,6 +163,12 @@ export function ClipTriageDialog({
   const [hookDraft, setHookDraft] = useState("");
   const [hookBaseline, setHookBaseline] = useState("");
   const [hookSaving, setHookSaving] = useState(false);
+  // "Include intro" — prepend the whole intro (every opening line the source
+  // gives us) as spoken footage ahead of the clip body. Persisted as the one
+  // hook range [first intro line start, last intro line end] in
+  // clipIdeas.hookSegments.
+  const [includeIntro, setIncludeIntro] = useState(false);
+  const [introSaving, setIntroSaving] = useState(false);
 
   useEffect(() => {
     if (!open) setError(null);
@@ -171,6 +181,9 @@ export function ClipTriageDialog({
     if (idea) {
       setHookDraft(idea.hook);
       setHookBaseline(idea.hook);
+      // Clear intro state on idea switch; the preview-seed effect re-applies
+      // the saved hookSegments once the new idea's preview lands.
+      setIncludeIntro(false);
     }
   }, [idea]);
 
@@ -231,6 +244,60 @@ export function ClipTriageDialog({
       cancelled = true;
     };
   }, [open, idea]);
+
+  // Seed the "include intro" toggle from the saved hookSegments whenever a
+  // fresh preview lands — intro is all-or-nothing now, so a non-empty saved
+  // range just means the toggle is on.
+  useEffect(() => {
+    if (!preview) return;
+    setIncludeIntro((preview.hookSegments ?? []).length > 0);
+  }, [preview]);
+
+  const introSegs = preview?.introSegments ?? [];
+
+  // The whole intro as one contiguous range (first intro line start → last
+  // intro line end), and its joined text. null when there's no intro to use.
+  const wholeIntroRange =
+    introSegs.length > 0
+      ? {
+          startSec: introSegs[0].startSec,
+          endSec: introSegs[introSegs.length - 1].endSec,
+        }
+      : null;
+  const introText = introSegs
+    .map((s) => s.text.trim())
+    .filter(Boolean)
+    .join(" ");
+
+  const saveHookSegments = useCallback(
+    async (segs: { startSec: number; endSec: number }[] | null) => {
+      if (!idea) return;
+      setIntroSaving(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/clip-ideas/${idea.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hookSegments: segs }),
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          setError(json?.error || `Failed to save intro (${res.status})`);
+        }
+      } finally {
+        setIntroSaving(false);
+      }
+    },
+    [idea],
+  );
+
+  const toggleIntro = useCallback(
+    (checked: boolean) => {
+      setIncludeIntro(checked);
+      void saveHookSegments(checked && wholeIntroRange ? [wholeIntroRange] : null);
+    },
+    [wholeIntroRange, saveHookSegments],
+  );
 
   const handleKill = useCallback(
     async (reason: string | null) => {
@@ -320,6 +387,15 @@ export function ClipTriageDialog({
   const duration = Math.max(0, Math.round(idea.endSec - idea.startSec));
   const isDecided = idea.status && idea.status !== "suggested";
 
+  const introActive = includeIntro && wholeIntroRange != null;
+  const introDuration = wholeIntroRange
+    ? Math.max(0, Math.round(wholeIntroRange.endSec - wholeIntroRange.startSec))
+    : 0;
+  // Ordered ranges the right-side player plays back: intro (if on) then body.
+  const playbackSegments = introActive
+    ? [wholeIntroRange!, { startSec: idea.startSec, endSec: idea.endSec }]
+    : [{ startSec: idea.startSec, endSec: idea.endSec }];
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -361,16 +437,52 @@ export function ClipTriageDialog({
                   </p>
                 </div>
 
-                {preview && preview.segments.length > 0 && (
-                  <div className="space-y-1">
+                {!isDecided && introSegs.length > 0 && (
+                  <label className="flex items-start gap-2 cursor-pointer select-none rounded-md border border-border bg-muted/30 p-2.5">
+                    <input
+                      type="checkbox"
+                      checked={includeIntro}
+                      disabled={introSaving}
+                      onChange={(e) => toggleIntro(e.target.checked)}
+                      className="mt-0.5 size-4 accent-primary disabled:opacity-50"
+                    />
+                    <span className="text-[13px] leading-snug">
+                      <span className="font-medium">Include intro at top</span>
+                      <span className="block text-[11px] text-muted-foreground">
+                        Prepends the whole intro of the source video ahead of the
+                        clip. Requires a precise cut.
+                      </span>
+                    </span>
+                  </label>
+                )}
+
+                {((preview && preview.segments.length > 0) || introActive) && (
+                  <div className="space-y-2">
                     <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                       Transcript
                     </h3>
-                    <div className="max-h-48 overflow-y-auto text-[13px] leading-relaxed text-muted-foreground">
-                      {preview.segments
-                        .map((s) => s.text.trim())
-                        .filter(Boolean)
-                        .join(" ")}
+                    <div className="max-h-60 space-y-2 overflow-y-auto">
+                      {/* Intro plays first, so it reads first in the transcript —
+                          its own section directly under the header. */}
+                      {introActive && (
+                        <div className="rounded border border-dashed border-amber-300 bg-amber-50/60 px-2.5 py-2">
+                          <div className="text-[10px] font-mono font-semibold uppercase tracking-wider text-amber-800">
+                            Intro · {fmtTs(wholeIntroRange!.startSec)}–
+                            {fmtTs(wholeIntroRange!.endSec)} ({introDuration}s)
+                          </div>
+                          <p className="mt-1 text-[12px] leading-relaxed text-amber-900">
+                            {introText || "(no transcript text for the intro)"}
+                          </p>
+                        </div>
+                      )}
+                      {preview && preview.segments.length > 0 && (
+                        <div className="text-[13px] leading-relaxed text-muted-foreground">
+                          {preview.segments
+                            .map((s) => s.text.trim())
+                            .filter(Boolean)
+                            .join(" ")}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -413,16 +525,14 @@ export function ClipTriageDialog({
                 {idea.targetPostType === "x" ? (
                   <XPostPreview
                     body={hookDraft || idea.hook}
-                    startSec={idea.startSec}
-                    endSec={idea.endSec}
+                    segments={playbackSegments}
                     preview={preview}
                     account={idea.targetAccount ?? null}
                   />
                 ) : (
                   <ShortsPreview
                     hook={hookDraft || idea.hook}
-                    startSec={idea.startSec}
-                    endSec={idea.endSec}
+                    segments={playbackSegments}
                     preview={preview}
                   />
                 )}
@@ -481,10 +591,18 @@ export function ClipTriageDialog({
                             </a>
                           </p>
                         )}
+                        {introActive && (
+                          <p className="mt-1.5 text-[11px] text-amber-700 leading-snug">
+                            <span className="font-medium">
+                              Intro prepended.
+                            </span>{" "}
+                            Only the precise-cut options can stitch it in.
+                          </p>
+                        )}
                       </div>
                       <DropdownMenuItem
                         onClick={() => void runCreateInDescript("full")}
-                        disabled={!packAttached}
+                        disabled={!packAttached || introActive}
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
@@ -512,7 +630,7 @@ export function ClipTriageDialog({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => void runCreateInDescript("agent")}
-                        disabled={!packAttached}
+                        disabled={!packAttached || introActive}
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
@@ -583,14 +701,12 @@ export function ClipTriageDialog({
  */
 function XPostPreview({
   body,
-  startSec,
-  endSec,
+  segments,
   preview,
   account,
 }: {
   body: string;
-  startSec: number;
-  endSec: number;
+  segments: { startSec: number; endSec: number }[];
   preview: Preview | null;
   account: {
     handle: string;
@@ -623,21 +739,18 @@ function XPostPreview({
         <div className="overflow-hidden rounded-2xl border border-border bg-black">
           {isAudio ? (
             <div className="flex w-full items-center justify-center py-3">
-              <audio
-                key={`${preview.videoUrl}-x-audio`}
-                src={`${preview.videoUrl}#t=${startSec},${endSec}`}
-                controls
-                preload="metadata"
+              <SegmentedMedia
+                videoUrl={preview.videoUrl}
+                isAudio
+                segments={segments}
                 className="w-full px-3"
               />
             </div>
           ) : (
-            <video
-              key={`${preview.videoUrl}-x-video`}
-              src={`${preview.videoUrl}#t=${startSec},${endSec}`}
-              controls
-              preload="metadata"
-              playsInline
+            <SegmentedMedia
+              videoUrl={preview.videoUrl}
+              isAudio={false}
+              segments={segments}
               className="block aspect-video h-auto w-full bg-black object-contain"
             />
           )}
@@ -671,13 +784,11 @@ function XPostPreview({
 
 function ShortsPreview({
   hook,
-  startSec,
-  endSec,
+  segments,
   preview,
 }: {
   hook: string;
-  startSec: number;
-  endSec: number;
+  segments: { startSec: number; endSec: number }[];
   preview: Preview | null;
 }) {
   const captionText =
@@ -708,21 +819,18 @@ function ShortsPreview({
         {preview?.videoUrl ? (
           isAudio ? (
             <div className="flex w-full items-center justify-center py-3">
-              <audio
-                key={`${preview.videoUrl}-audio`}
-                src={`${preview.videoUrl}#t=${startSec},${endSec}`}
-                controls
-                preload="metadata"
+              <SegmentedMedia
+                videoUrl={preview.videoUrl}
+                isAudio
+                segments={segments}
                 className="w-full px-3"
               />
             </div>
           ) : (
-            <video
-              key={`${preview.videoUrl}-video`}
-              src={`${preview.videoUrl}#t=${startSec},${endSec}`}
-              controls
-              preload="metadata"
-              playsInline
+            <SegmentedMedia
+              videoUrl={preview.videoUrl}
+              isAudio={false}
+              segments={segments}
               className="block h-auto w-full bg-black object-contain"
             />
           )
@@ -751,5 +859,109 @@ function ShortsPreview({
         <Share2Icon className="h-5 w-5" strokeWidth={1.8} />
       </div>
     </div>
+  );
+}
+
+/**
+ * A media element that plays an ordered list of source ranges back-to-back —
+ * the same intro→body sequence the precise cut will assemble. With one segment
+ * it just plays that range and stops; with an intro prepended it starts at the
+ * intro, then jumps to the body when the intro ends, so the preview matches the
+ * final clip. A single HTML media element can't play disjoint ranges natively,
+ * so we drive it: seek to the first segment on load, skip across the gap to the
+ * next segment in `timeupdate`, pause at the last segment's end, and restart
+ * from the top on the next Play.
+ */
+function SegmentedMedia({
+  videoUrl,
+  isAudio,
+  segments,
+  className,
+}: {
+  videoUrl: string;
+  isAudio: boolean;
+  segments: { startSec: number; endSec: number }[];
+  className?: string;
+}) {
+  const ref = useRef<HTMLMediaElement | null>(null);
+  // Index of the segment currently playing. Advances strictly forward so the
+  // sequence is correct even when ranges overlap (e.g. a clip whose body sits
+  // inside the intro window). The `key` remounts the element when the segment
+  // list changes, which resets this to 0.
+  const idxRef = useRef(0);
+  const segKey = segments.map((s) => `${s.startSec}-${s.endSec}`).join("|");
+
+  const seekStart = () => {
+    const el = ref.current;
+    if (!el || segments.length === 0) return;
+    idxRef.current = 0;
+    try {
+      el.currentTime = segments[0].startSec;
+    } catch {
+      // metadata not ready yet; onLoadedMetadata will fire again
+    }
+  };
+
+  const onTimeUpdate = () => {
+    const el = ref.current;
+    if (!el || segments.length === 0) return;
+    const seg = segments[idxRef.current];
+    if (!seg) return;
+    // Reached the end of the current segment → advance to the next, or stop
+    // (leaving the last frame showing) if this was the final one.
+    if (el.currentTime >= seg.endSec - 0.04) {
+      const next = idxRef.current + 1;
+      if (next < segments.length) {
+        idxRef.current = next;
+        el.currentTime = segments[next].startSec;
+      } else {
+        el.pause();
+      }
+    }
+  };
+
+  const onPlay = () => {
+    const el = ref.current;
+    if (!el || segments.length === 0) return;
+    // Pressing Play after it finished restarts from the first segment (intro).
+    const last = segments.length - 1;
+    if (idxRef.current >= last && el.currentTime >= segments[last].endSec - 0.05) {
+      idxRef.current = 0;
+      el.currentTime = segments[0].startSec;
+    }
+  };
+
+  const setRef = (el: HTMLMediaElement | null) => {
+    ref.current = el;
+  };
+
+  if (isAudio) {
+    return (
+      <audio
+        key={`${videoUrl}|${segKey}`}
+        ref={setRef}
+        src={videoUrl}
+        controls
+        preload="metadata"
+        onLoadedMetadata={seekStart}
+        onTimeUpdate={onTimeUpdate}
+        onPlay={onPlay}
+        className={className}
+      />
+    );
+  }
+  return (
+    <video
+      key={`${videoUrl}|${segKey}`}
+      ref={setRef}
+      src={videoUrl}
+      controls
+      preload="metadata"
+      playsInline
+      onLoadedMetadata={seekStart}
+      onTimeUpdate={onTimeUpdate}
+      onPlay={onPlay}
+      className={className}
+    />
   );
 }

@@ -638,6 +638,18 @@ export const clipIdeas = pgTable(
     batchId: uuid("batch_id").notNull(),
     startSec: decimal("start_sec").notNull(),
     endSec: decimal("end_sec").notNull(),
+    // Optional spoken-footage hook(s) prepended before the main
+    // [startSec,endSec] range when the clip is cut. Each entry is a source
+    // time range the editor pulled from elsewhere in the video (typically a
+    // punchy intro line). The precise-cut worker ffmpeg-trims each entry and
+    // concatenates them in order ahead of the body before uploading to
+    // Descript, so the final clip plays hook→body as one file. Null/empty =
+    // body only (the original single-range behavior). Only honored by the
+    // precise-cut paths — the full-video/agent paths can't prepend a
+    // non-contiguous range.
+    hookSegments: jsonb("hook_segments").$type<
+      Array<{ startSec: number; endSec: number }>
+    >(),
     hook: text("hook").notNull(),
     angle: text("angle").notNull(),
     rationale: text("rationale").notNull(),

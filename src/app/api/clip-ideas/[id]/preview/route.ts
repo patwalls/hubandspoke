@@ -19,6 +19,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .select({
       startSec: clipIdeas.startSec,
       endSec: clipIdeas.endSec,
+      hookSegments: clipIdeas.hookSegments,
       sourceProductionItemId: clipIdeas.sourceProductionItemId,
       mediaS3Key: productionItems.mediaS3Key,
       mediaContentType: productionItems.mediaContentType,
@@ -47,9 +48,17 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   // Segments overlap the clip range iff seg.end > startSec AND seg.start < endSec.
   // Using strict inequality on the edges skips segments that only touch the
   // boundary, which would otherwise pad the excerpt with a stray word.
-  const overlapping = (t?.segments ?? []).filter(
+  const allSegments = t?.segments ?? [];
+  const overlapping = allSegments.filter(
     (s) => s.endSec > startSec && s.startSec < endSec,
   );
+
+  // Opening segments of the source, for the "include intro" hook picker. The
+  // intro lives before the clip body, so the overlapping excerpt above never
+  // contains it. Capped so the payload stays small — the intro hook is always
+  // near the top of the video, and the editor extends within this window.
+  const INTRO_WINDOW = 24;
+  const introSegments = allSegments.slice(0, INTRO_WINDOW);
 
   let videoUrl: string | null = null;
   let videoContentType: string | null = row.mediaContentType ?? null;
@@ -66,9 +75,16 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   return NextResponse.json({
     startSec,
     endSec,
+    hookSegments: row.hookSegments ?? [],
     videoUrl,
     videoContentType,
     segments: overlapping.map((s) => ({
+      startSec: s.startSec,
+      endSec: s.endSec,
+      text: s.text,
+      speaker: s.speaker ?? null,
+    })),
+    introSegments: introSegments.map((s) => ({
       startSec: s.startSec,
       endSec: s.endSec,
       text: s.text,

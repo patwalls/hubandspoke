@@ -103,9 +103,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as {
     hook?: unknown;
+    hookSegments?: unknown;
   };
 
-  const updates: { hook?: string } = {};
+  const updates: {
+    hook?: string;
+    hookSegments?: Array<{ startSec: number; endSec: number }> | null;
+  } = {};
   if (typeof body.hook === "string") {
     const trimmed = body.hook.trim();
     if (!trimmed) {
@@ -121,6 +125,48 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
     }
     updates.hook = trimmed;
+  }
+
+  // hookSegments: ordered spoken-footage ranges prepended before the body when
+  // cut. null/[] clears it (back to body-only). Validate each range is a
+  // positive-length, non-negative window; cap the count so a malformed client
+  // can't enqueue an unbounded concat.
+  if (body.hookSegments !== undefined) {
+    if (body.hookSegments === null) {
+      updates.hookSegments = null;
+    } else if (Array.isArray(body.hookSegments)) {
+      if (body.hookSegments.length > 5) {
+        return NextResponse.json(
+          { error: "Too many hook segments (max 5)" },
+          { status: 400 },
+        );
+      }
+      const cleaned: Array<{ startSec: number; endSec: number }> = [];
+      for (const seg of body.hookSegments) {
+        const s = (seg as { startSec?: unknown })?.startSec;
+        const e = (seg as { endSec?: unknown })?.endSec;
+        if (
+          typeof s !== "number" ||
+          typeof e !== "number" ||
+          !Number.isFinite(s) ||
+          !Number.isFinite(e) ||
+          s < 0 ||
+          e <= s
+        ) {
+          return NextResponse.json(
+            { error: "Invalid hook segment range" },
+            { status: 400 },
+          );
+        }
+        cleaned.push({ startSec: s, endSec: e });
+      }
+      updates.hookSegments = cleaned.length ? cleaned : null;
+    } else {
+      return NextResponse.json(
+        { error: "hookSegments must be an array or null" },
+        { status: 400 },
+      );
+    }
   }
 
   if (Object.keys(updates).length === 0) {

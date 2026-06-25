@@ -26,6 +26,11 @@ import {
   buildCompositionName,
 } from "@/lib/services/descript-composition";
 import { resolveClipAspectRatio } from "@/lib/db/formats";
+import {
+  buildConcatFfmpegArgs,
+  isValidSegment,
+  type ClipSegment,
+} from "@/lib/clip-assembly";
 import { downloadToFile, safeUnlink } from "./descript-upload-helpers";
 
 export interface ClipIdeaPreciseCutPayload {
@@ -111,6 +116,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
       hook: clipIdeas.hook,
       startSec: clipIdeas.startSec,
       endSec: clipIdeas.endSec,
+      hookSegments: clipIdeas.hookSegments,
       sourceProductionItemId: clipIdeas.sourceProductionItemId,
       mediaS3Key: productionItems.mediaS3Key,
       mediaContentType: productionItems.mediaContentType,
@@ -135,6 +141,17 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
     throw new Error(`invalid range: startSec=${startSec} endSec=${endSec}`);
   }
 
+  // Prepend any spoken-footage hook(s) ahead of the body. Each hookSegments
+  // entry is a source range pulled from elsewhere in the video (the editor's
+  // "include intro" selection). Filter to valid ranges so a malformed entry
+  // can't poison the cut, then assemble [hooks…, body] in order. Empty/absent
+  // hookSegments → single-range cut, unchanged from the original flow.
+  const hookSegments = (row.hookSegments ?? []).filter(isValidSegment);
+  const segments: ClipSegment[] = [
+    ...hookSegments,
+    { startSec, endSec },
+  ];
+
   const jobDir = tmpdir();
   const runId = randomUUID();
   const sourcePath = join(jobDir, `clip-src-${runId}.mp4`);
@@ -142,20 +159,37 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
 
   try {
     helpers.logger.info(
-      `precise-cut start clip=${clipIdeaId} range=${startSec}-${endSec}`,
+      `precise-cut start clip=${clipIdeaId} range=${startSec}-${endSec}` +
+        (hookSegments.length
+          ? ` +${hookSegments.length} hook segment(s): ${hookSegments
+              .map((s) => `${s.startSec}-${s.endSec}`)
+              .join(",")}`
+          : ""),
     );
 
     const getUrl = await getPresignedGetUrl(row.mediaS3Key, 3600);
     await downloadToFile(getUrl, sourcePath);
 
-    await ffmpegTrim({
-      ffmpegPath: ffmpegInstaller.path,
-      inputPath: sourcePath,
-      outputPath: clipPath,
-      startSec,
-      endSec,
-      logger: helpers.logger,
-    });
+    if (segments.length > 1) {
+      // ≥2 ranges: single-pass filter_complex concat (hook→body). Re-encodes
+      // with clean PTS so Descript's importer accepts it, same as the trim path.
+      await ffmpegConcat({
+        ffmpegPath: ffmpegInstaller.path,
+        inputPath: sourcePath,
+        outputPath: clipPath,
+        segments,
+        logger: helpers.logger,
+      });
+    } else {
+      await ffmpegTrim({
+        ffmpegPath: ffmpegInstaller.path,
+        inputPath: sourcePath,
+        outputPath: clipPath,
+        startSec,
+        endSec,
+        logger: helpers.logger,
+      });
+    }
 
     const uploadContentType = row.mediaContentType || "video/mp4";
 
@@ -513,5 +547,45 @@ async function ffmpegTrim(args: {
     });
   });
   args.logger.info("ffmpeg re-encode ok");
+}
+
+async function ffmpegConcat(args: {
+  ffmpegPath: string;
+  inputPath: string;
+  outputPath: string;
+  segments: ClipSegment[];
+  logger: { info: (msg: string) => void; error: (msg: string) => void };
+}): Promise<void> {
+  // Single ffmpeg pass: trim each range off the one source input and concat
+  // them in order. The concat filter + per-segment setpts/asetpts produce an
+  // mp4 with timestamps starting at 0 — the same property the single-cut
+  // re-encode relies on for Descript's importer to accept it. Re-encode is
+  // ~real-time on the Basic worker dyno and stays well inside the 30-min
+  // deadline (total ≈ sum of segment durations, which is bounded by the clip).
+  const ffArgs = buildConcatFfmpegArgs({
+    inputPath: args.inputPath,
+    outputPath: args.outputPath,
+    segments: args.segments,
+  });
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(args.ffmpegPath, ffArgs, {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    proc.stderr.on("data", (b) => {
+      stderr += b.toString();
+    });
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else
+        reject(
+          new Error(
+            `ffmpeg concat exited ${code}${stderr ? `: ${stderr.slice(0, 500)}` : ""}`,
+          ),
+        );
+    });
+  });
+  args.logger.info(`ffmpeg concat ok (${args.segments.length} segments)`);
 }
 

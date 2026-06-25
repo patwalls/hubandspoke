@@ -1,0 +1,1 @@
+ALTER TABLE "clip_ideas" ADD COLUMN "hook_segments" jsonb;
