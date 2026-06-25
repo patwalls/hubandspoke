@@ -1295,6 +1295,9 @@ export const users = pgTable(
     // comment authors + assignments back to our user rows even when the email
     // isn't exposed to integrations (Notion redacts it for some accounts).
     notionUserId: text("notion_user_id").unique(),
+    // Brand UUIDs this user is associated with — purely informational, does
+    // not gate access. Edited in Settings → Users.
+    brandIds: jsonb("brand_ids").$type<string[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1323,6 +1326,8 @@ export const invites = pgTable(
       onDelete: "set null",
     }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    // Channels pre-assigned at invite time — copied to users.brand_ids on accept.
+    brandIds: jsonb("brand_ids").$type<string[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

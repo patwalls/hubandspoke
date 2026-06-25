@@ -19,23 +19,39 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import type { Role } from "@/lib/rbac";
+import type { BrandOption } from "@/components/settings/user-management";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
+  brands: BrandOption[];
 }
 
-export function InviteDialog({ open, onOpenChange, onCreated }: Props) {
+export function InviteDialog({ open, onOpenChange, onCreated, brands }: Props) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("creator");
+  const [selectedBrandIds, setSelectedBrandIds] = useState<Set<string>>(
+    new Set()
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function toggleBrand(id: string) {
+    setSelectedBrandIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   function reset() {
     setEmail("");
     setRole("creator");
+    setSelectedBrandIds(new Set());
     setError(null);
     setSubmitting(false);
   }
@@ -48,7 +64,11 @@ export function InviteDialog({ open, onOpenChange, onCreated }: Props) {
       const res = await fetch("/api/invites", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), role }),
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          role,
+          brandIds: [...selectedBrandIds],
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -112,6 +132,40 @@ export function InviteDialog({ open, onOpenChange, onCreated }: Props) {
               access.
             </p>
           </div>
+
+          {brands.length > 0 && (
+            <div className="space-y-2">
+              <Label>Channels</Label>
+              <div className="space-y-1 max-h-40 overflow-y-auto rounded-md border border-input bg-background px-3 py-2">
+                {brands.map((b) => (
+                  <label
+                    key={b.id}
+                    className="flex items-center gap-3 cursor-pointer rounded px-1 py-1 hover:bg-muted/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedBrandIds.has(b.id)}
+                      onChange={() => toggleBrand(b.id)}
+                      className="h-4 w-4 accent-primary"
+                    />
+                    <span className="text-sm">{b.label}</span>
+                  </label>
+                ))}
+              </div>
+              {selectedBrandIds.size > 0 && (
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {[...selectedBrandIds].map((id) => {
+                    const b = brands.find((br) => br.id === id);
+                    return (
+                      <Badge key={id} variant="secondary" className="text-xs">
+                        {b?.label ?? id}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {error && <p className="text-xs text-destructive">{error}</p>}
 

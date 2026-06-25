@@ -23,7 +23,11 @@ export async function PATCH(
 
   const { id } = await params;
 
-  let body: { role?: unknown; dailyScorecardEmailEnabled?: unknown };
+  let body: {
+    role?: unknown;
+    dailyScorecardEmailEnabled?: unknown;
+    brandIds?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -50,6 +54,18 @@ export async function PATCH(
       );
     }
     update.dailyScorecardEmailEnabled = body.dailyScorecardEmailEnabled;
+  }
+  if (body.brandIds !== undefined) {
+    if (
+      !Array.isArray(body.brandIds) ||
+      !body.brandIds.every((id) => typeof id === "string")
+    ) {
+      return NextResponse.json(
+        { error: "brandIds must be an array of strings" },
+        { status: 400 }
+      );
+    }
+    update.brandIds = body.brandIds as string[];
   }
   if (Object.keys(update).length === 0) {
     return NextResponse.json(

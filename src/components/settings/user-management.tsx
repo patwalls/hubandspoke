@@ -6,9 +6,12 @@ import { MembersTable, type Member } from "@/components/settings/members-table";
 import { InvitesTable, type Invite } from "@/components/settings/invites-table";
 import { InviteDialog } from "@/components/settings/invite-dialog";
 
+export type BrandOption = { id: string; slug: string; label: string };
+
 export function UserManagement({ currentUserId }: { currentUserId: string }) {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [invites, setInvites] = useState<Invite[] | null>(null);
+  const [brands, setBrands] = useState<BrandOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
 
@@ -34,10 +37,28 @@ export function UserManagement({ currentUserId }: { currentUserId: string }) {
     }
   }, []);
 
+  const loadBrands = useCallback(async () => {
+    try {
+      const res = await fetch("/api/brands");
+      if (!res.ok) return;
+      const json = await res.json();
+      setBrands(
+        (json.brands ?? []).map((b: BrandOption) => ({
+          id: b.id,
+          slug: b.slug,
+          label: b.label,
+        }))
+      );
+    } catch {
+      // Non-fatal — channel picker just won't have options
+    }
+  }, []);
+
   useEffect(() => {
     loadMembers();
     loadInvites();
-  }, [loadMembers, loadInvites]);
+    loadBrands();
+  }, [loadMembers, loadInvites, loadBrands]);
 
   return (
     <div className="space-y-8 max-w-4xl">
@@ -59,6 +80,7 @@ export function UserManagement({ currentUserId }: { currentUserId: string }) {
         </div>
         <MembersTable
           members={members}
+          brands={brands}
           currentUserId={currentUserId}
           onChanged={loadMembers}
           onError={setError}
@@ -82,6 +104,7 @@ export function UserManagement({ currentUserId }: { currentUserId: string }) {
       <InviteDialog
         open={inviteOpen}
         onOpenChange={setInviteOpen}
+        brands={brands}
         onCreated={() => {
           loadInvites();
         }}

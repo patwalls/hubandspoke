@@ -19,6 +19,7 @@ export async function GET() {
         invitedBy: users.invitedBy,
         createdAt: users.createdAt,
         dailyScorecardEmailEnabled: users.dailyScorecardEmailEnabled,
+        brandIds: users.brandIds,
       })
       .from(users)
       .orderBy(desc(users.createdAt));

@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
           name: name || null,
           role: invite.role,
           invitedBy: invite.invitedByUserId,
+          brandIds: invite.brandIds ?? [],
         })
         .returning({ id: users.id, email: users.email });
 
