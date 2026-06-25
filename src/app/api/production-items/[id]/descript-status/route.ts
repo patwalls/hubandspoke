@@ -242,8 +242,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   // until the resolver writes it.
   const compositionId = item.descriptCompositionId ?? null;
   const projectId = item.descriptProjectId ?? null;
-  const projectUrl =
-    item.descriptProjectUrl ?? trigger?.descriptProjectUrl ?? null;
+  // Strict 1:1, same reasoning as compositionId above: the trigger's
+  // descriptProjectUrl is reused across re-promotions of the same clip idea,
+  // so falling back to it surfaces a STALE project from a previous cut — while
+  // a fresh cut is still processing (this row's URL not yet stamped), the
+  // "Open project in Descript" link would send editors to a different clip.
+  // Only link the project this row actually owns; hide it until the worker
+  // stamps it.
+  const projectUrl = item.descriptProjectUrl ?? null;
   const compositionUrl =
     projectId && compositionId
       ? buildDescriptCompositionUrl(projectId, compositionId)

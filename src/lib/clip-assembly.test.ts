@@ -21,16 +21,18 @@ describe("isValidSegment", () => {
 });
 
 describe("buildConcatFilterComplex", () => {
-  it("emits a trim+concat graph for two segments (hook → body)", () => {
+  it("emits a per-input setpts+concat graph for two segments (hook → body)", () => {
     const filter = buildConcatFilterComplex([
       { startSec: 2, endSec: 6 }, // intro hook
       { startSec: 381.2, endSec: 450.5 }, // body
     ]);
+    // Each segment is its own input (input-seeked in the argv), so the filter
+    // references [0:..]/[1:..] and only normalizes PTS — no in-filter trim.
     expect(filter).toBe(
-      "[0:v]trim=start=2:end=6,setpts=PTS-STARTPTS[v0];" +
-        "[0:a]atrim=start=2:end=6,asetpts=PTS-STARTPTS[a0];" +
-        "[0:v]trim=start=381.2:end=450.5,setpts=PTS-STARTPTS[v1];" +
-        "[0:a]atrim=start=381.2:end=450.5,asetpts=PTS-STARTPTS[a1];" +
+      "[0:v]setpts=PTS-STARTPTS[v0];" +
+        "[0:a]asetpts=PTS-STARTPTS[a0];" +
+        "[1:v]setpts=PTS-STARTPTS[v1];" +
+        "[1:a]asetpts=PTS-STARTPTS[a1];" +
         "[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]",
     );
   });
@@ -52,7 +54,7 @@ describe("buildConcatFilterComplex", () => {
 });
 
 describe("buildConcatFfmpegArgs", () => {
-  it("wraps the filter with one input, both maps, and Descript-safe codecs", () => {
+  it("input-seeks each segment (fast) instead of decoding from zero", () => {
     const args = buildConcatFfmpegArgs({
       inputPath: "/tmp/src.mp4",
       outputPath: "/tmp/out.mp4",
@@ -61,11 +63,15 @@ describe("buildConcatFfmpegArgs", () => {
         { startSec: 100, endSec: 130 },
       ],
     });
-    // single input, in order
-    expect(args.filter((a) => a === "-i")).toHaveLength(1);
-    expect(args[args.indexOf("-i") + 1]).toBe("/tmp/src.mp4");
+    // One input-seeked open per segment: -ss <start> -t <dur> -i <src>
+    expect(args.filter((a) => a === "-i")).toHaveLength(2);
+    expect(args.filter((a) => a === "/tmp/src.mp4")).toHaveLength(2);
+    // First segment: -ss 2 -t 4, second: -ss 100 -t 30 (durations, not -to)
+    const i0 = args.indexOf("-ss");
+    expect(args.slice(i0, i0 + 4)).toEqual(["-ss", "2", "-t", "4"]);
+    const i1 = args.indexOf("-ss", i0 + 4);
+    expect(args.slice(i1, i1 + 4)).toEqual(["-ss", "100", "-t", "30"]);
     // both streams mapped out of the concat
-    expect(args).toContain("-map");
     expect(args).toContain("[outv]");
     expect(args).toContain("[outa]");
     // codecs mirror the single-cut path so Descript's importer accepts it

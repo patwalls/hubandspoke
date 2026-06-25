@@ -26,11 +26,18 @@ export function isValidSegment(seg: ClipSegment): boolean {
 }
 
 /**
- * Build the `filter_complex` graph that trims each segment off the single
- * source input and concatenates them in order. Re-encoding the result resets
- * PTS to zero per segment (`setpts`/`asetpts`) and across the join (concat
- * filter), which is exactly what Descript's importer needs — the same property
- * the input-seek + re-encode single-cut path relies on.
+ * Build the `filter_complex` graph that concatenates N already-seeked inputs.
+ *
+ * Each segment is opened as its OWN input (`-ss <start> -t <dur> -i <src>` in
+ * the argv below), so ffmpeg input-seeks straight to each range instead of
+ * decoding the whole timeline. The filter then just normalizes PTS per input
+ * (`setpts`/`asetpts`, since input-seek can leave a small offset) and concats.
+ *
+ * This is the key perf property: the original single-input `trim` approach
+ * decoded the source from 0 up to the LAST segment's end — for a clip whose
+ * body sits minutes into a long podcast, that's minutes of wasted decode (the
+ * dead zone between the intro and the body). Input-seeking each range only
+ * decodes the seconds we actually keep — matching the proven single-cut path.
  *
  * Pure + exported so the arg mapping is unit-tested without spawning ffmpeg.
  */
@@ -42,13 +49,9 @@ export function buildConcatFilterComplex(segments: ClipSegment[]): string {
   }
   const parts: string[] = [];
   const concatInputs: string[] = [];
-  segments.forEach((seg, i) => {
-    parts.push(
-      `[0:v]trim=start=${seg.startSec}:end=${seg.endSec},setpts=PTS-STARTPTS[v${i}]`,
-    );
-    parts.push(
-      `[0:a]atrim=start=${seg.startSec}:end=${seg.endSec},asetpts=PTS-STARTPTS[a${i}]`,
-    );
+  segments.forEach((_seg, i) => {
+    parts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
+    parts.push(`[${i}:a]asetpts=PTS-STARTPTS[a${i}]`);
     concatInputs.push(`[v${i}][a${i}]`);
   });
   parts.push(
@@ -58,9 +61,11 @@ export function buildConcatFilterComplex(segments: ClipSegment[]): string {
 }
 
 /**
- * Full ffmpeg argv for the multi-segment concat. Mirrors the codec/flags of the
- * worker's single-cut `ffmpegTrim` (libx264 veryfast + aac + faststart) so the
- * uploaded file is byte-compatible with what Descript already accepts.
+ * Full ffmpeg argv for the multi-segment concat. Each segment becomes its own
+ * input-seeked open of the source (`-ss <start> -t <dur> -i <src>`), then the
+ * filter concatenates them. Mirrors the codec/flags of the worker's single-cut
+ * `ffmpegTrim` (libx264 veryfast + aac + faststart) so the uploaded file is
+ * byte-compatible with what Descript already accepts.
  */
 export function buildConcatFfmpegArgs(args: {
   inputPath: string;
@@ -68,13 +73,21 @@ export function buildConcatFfmpegArgs(args: {
   segments: ClipSegment[];
 }): string[] {
   const filter = buildConcatFilterComplex(args.segments);
-  return [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-y",
-    "-i",
-    args.inputPath,
+  const argv: string[] = ["-hide_banner", "-loglevel", "error", "-y"];
+  // One input-seeked open per segment. `-ss`/`-t` BEFORE `-i` = fast input seek
+  // (decode starts at the segment, not at 0). `-t` is a duration, which avoids
+  // the `-to`-after-`-ss` ambiguity across ffmpeg versions.
+  for (const seg of args.segments) {
+    argv.push(
+      "-ss",
+      String(seg.startSec),
+      "-t",
+      String(seg.endSec - seg.startSec),
+      "-i",
+      args.inputPath,
+    );
+  }
+  argv.push(
     "-filter_complex",
     filter,
     "-map",
@@ -90,5 +103,6 @@ export function buildConcatFfmpegArgs(args: {
     "-movflags",
     "+faststart",
     args.outputPath,
-  ];
+  );
+  return argv;
 }
