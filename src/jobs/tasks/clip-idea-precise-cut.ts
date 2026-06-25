@@ -342,6 +342,7 @@ async function pollUploadOnce(
         clipAspectRatio: formats.clipAspectRatio,
         clipTargetPostType: formats.clipTargetPostType,
         clipIdeaExtras: clipIdeas.extras,
+        clipHookSegments: clipIdeas.hookSegments,
       })
       .from(repurposeTriggers)
       .leftJoin(formats, eq(repurposeTriggers.targetFormatId, formats.id))
@@ -380,13 +381,25 @@ async function pollUploadOnce(
             (v): v is string => typeof v === "string" && v.trim() !== "",
           )
         : [];
+    // When the cut prepended an intro (hookSegments), the composition is
+    // already the exact intro+body clip — the layout pack must NOT re-clip it
+    // down to the format's target section, or it deletes the intro. Tell
+    // Underlord to preserve all footage and only style it.
+    const hasPrependedIntro =
+      Array.isArray(row.clipHookSegments) && row.clipHookSegments.length > 0;
     const prompt = buildLayoutPackPrompt({
       skill: row.formatSkill,
       compositionId,
       hookText,
       aspectRatio,
       quotables,
+      preserveAllFootage: hasPrependedIntro,
     });
+    if (hasPrependedIntro) {
+      helpers.logger.info(
+        `precise-cut layout preserve-footage clip=${payload.clipIdeaId} (intro prepended — no re-clip)`,
+      );
+    }
     const agent = await invokeDescriptAgent({
       projectId: row.descriptProjectId,
       prompt,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { substituteFormatPrompt } from "./descript";
+import { buildLayoutPackPrompt, substituteFormatPrompt } from "./descript";
 
 // Pure unit test — no DB, no network. The Descript Underlord receives the
 // output of this function verbatim; getting the substitution rules wrong
@@ -51,5 +51,38 @@ describe("substituteFormatPrompt", () => {
     // include {{startTimestamp}} unconditionally and it just becomes "".
     const out = substituteFormatPrompt("[{{startTimestamp}}]", { hook: "x" });
     expect(out).toBe("[]");
+  });
+});
+
+describe("buildLayoutPackPrompt", () => {
+  // A Skill that tells Underlord to re-clip — the exact instruction that
+  // deletes a prepended intro on the +Underlord path.
+  const SKILL = "I want you to only clip out the section about the tech stack.";
+
+  it("passes the skill through unchanged by default (re-clip allowed)", () => {
+    const out = buildLayoutPackPrompt({
+      skill: SKILL,
+      compositionId: "abc",
+      hookText: "Hook",
+    });
+    expect(out).toContain("only clip out the section");
+    expect(out).not.toMatch(/do NOT.*re-clip/i);
+  });
+
+  it("injects a no-trim override when an intro is prepended", () => {
+    const out = buildLayoutPackPrompt({
+      skill: SKILL,
+      compositionId: "abc",
+      hookText: "Hook",
+      preserveAllFootage: true,
+    });
+    // Override appears before the skill text and is reinforced after it.
+    expect(out.indexOf("OVERRIDES")).toBeLessThan(out.indexOf("only clip out"));
+    expect(out).toMatch(/Keep every second/);
+    expect(out).toMatch(/keep ALL footage/i);
+    // The skill's own instruction is still present (we can't strip free-form
+    // text) but is explicitly neutralized by the override.
+    expect(out).toContain("only clip out the section");
+    expect(out).toContain('compositionId="abc"');
   });
 });

@@ -120,6 +120,14 @@ export function buildLayoutPackPrompt(args: {
   hookText: string;
   aspectRatio?: "9:16" | "16:9";
   quotables?: string[];
+  /** Set when the composition was assembled by the precise-cut worker from an
+   *  editor-chosen intro PLUS the body (clipIdeas.hookSegments). In that case
+   *  the footage selection is already final, and the format Skill's "only clip
+   *  out the section…" instruction would make Underlord re-clip and DELETE the
+   *  prepended intro. This flag injects a hard no-trim override so Underlord
+   *  only styles the composition (pack + hook + filler marking) and keeps all
+   *  footage. */
+  preserveAllFootage?: boolean;
 }): string {
   const descriptOnly = extractDescriptSection(args.skill);
   const inner = substituteFormatPrompt(descriptOnly, {
@@ -132,6 +140,29 @@ export function buildLayoutPackPrompt(args: {
     args.aspectRatio === "16:9"
       ? `Apply the following format-specific instructions to the horizontal 16:9 composition with compositionId="${args.compositionId}":`
       : `Apply the following format-specific instructions to the composition with compositionId="${args.compositionId}":`;
+
+  if (args.preserveAllFootage) {
+    // The format Skill below still contains its "only clip out the section…"
+    // selection instruction; we can't surgically strip it from free-form
+    // Skill text, so we override it explicitly — first AND last, where models
+    // weight instructions most.
+    return [
+      `CRITICAL — READ FIRST, THIS OVERRIDES ANYTHING BELOW THAT CONFLICTS:`,
+      `This composition is ALREADY the exact, final clip the editor assembled — a prepended intro followed by the target section, precisely cut. The footage selection is DONE.`,
+      `Do NOT clip, trim, shorten, re-clip, cut down, remove, or re-select ANY footage. Keep every second from the first frame to the last.`,
+      `IGNORE any instruction below that says to "only clip out", "clip out the section", or otherwise select/extract a portion — re-clipping would DELETE the intro the editor added.`,
+      `Your ONLY job: apply the layout pack (9:16 framing, hook-text track, captions) and mark filler words as ignored (strike-through, never delete). Do not shorten the clip.`,
+      ``,
+      orientationLine,
+      "",
+      inner,
+      "",
+      `Reminder: keep ALL footage — do NOT trim or re-clip. Only apply the layout pack, set the hook text, and mark fillers as ignored.`,
+      ``,
+      `Reply with the compositionId in the form compositionId="${args.compositionId}".`,
+    ].join("\n");
+  }
+
   return [
     orientationLine,
     "",
