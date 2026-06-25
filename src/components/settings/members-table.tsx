@@ -26,8 +26,18 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import type { Role } from "@/lib/rbac";
 import type { BrandOption } from "@/components/settings/user-management";
+
+export type ContentRole = "producer" | "curator" | "member";
 
 export type Member = {
   id: string;
@@ -39,6 +49,7 @@ export type Member = {
   createdAt: string;
   dailyScorecardEmailEnabled: boolean;
   brandIds: string[];
+  contentRole: ContentRole | null;
 };
 
 interface Props {
@@ -56,6 +67,21 @@ function formatDate(iso: string): string {
     month: "short",
     day: "numeric",
   });
+}
+
+const CONTENT_ROLE_STYLES: Record<ContentRole, string> = {
+  producer: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  curator: "bg-blue-100 text-blue-700 border-blue-200",
+  member: "bg-secondary text-secondary-foreground border-transparent",
+};
+
+function ContentRoleBadge({ role }: { role: ContentRole | null }) {
+  if (!role) return <span className="text-muted-foreground">—</span>;
+  return (
+    <Badge className={CONTENT_ROLE_STYLES[role]}>
+      {role.charAt(0).toUpperCase() + role.slice(1)}
+    </Badge>
+  );
 }
 
 function ChannelBadges({
@@ -88,11 +114,12 @@ function EditMemberDialog({
 }: {
   member: Member;
   brands: BrandOption[];
-  onSave: (brandIds: string[]) => Promise<void>;
+  onSave: (data: { brandIds: string[]; contentRole: ContentRole | null }) => Promise<void>;
   onClose: () => void;
 }) {
-  const [selected, setSelected] = useState<Set<string>>(
-    new Set(member.brandIds)
+  const [selected, setSelected] = useState<Set<string>>(new Set(member.brandIds));
+  const [contentRole, setContentRole] = useState<ContentRole | "">(
+    member.contentRole ?? ""
   );
   const [saving, setSaving] = useState(false);
 
@@ -107,7 +134,10 @@ function EditMemberDialog({
 
   async function handleSave() {
     setSaving(true);
-    await onSave([...selected]);
+    await onSave({
+      brandIds: [...selected],
+      contentRole: contentRole || null,
+    });
     setSaving(false);
   }
 
@@ -121,31 +151,46 @@ function EditMemberDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1">
-          <p className="text-sm font-medium">Channels</p>
-          <p className="text-xs text-muted-foreground">
-            Which brands this person is working on.
-          </p>
-        </div>
-
-        <div className="space-y-2 max-h-64 overflow-y-auto">
-          {brands.length === 0 && (
-            <p className="text-xs text-muted-foreground">No brands found.</p>
-          )}
-          {brands.map((b) => (
-            <label
-              key={b.id}
-              className="flex items-center gap-3 cursor-pointer rounded-md px-2 py-1.5 hover:bg-muted/50"
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Role</Label>
+            <Select
+              value={contentRole}
+              onValueChange={(v) => setContentRole(v as ContentRole | "")}
             >
-              <input
-                type="checkbox"
-                checked={selected.has(b.id)}
-                onChange={() => toggle(b.id)}
-                className="h-4 w-4 accent-primary"
-              />
-              <span className="text-sm">{b.label}</span>
-            </label>
-          ))}
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="No role set" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="producer">Producer</SelectItem>
+                <SelectItem value="curator">Curator</SelectItem>
+                <SelectItem value="member">Member</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Channels</Label>
+            <div className="space-y-1 max-h-48 overflow-y-auto rounded-md border border-input bg-background px-3 py-2">
+              {brands.length === 0 && (
+                <p className="text-xs text-muted-foreground py-1">No brands found.</p>
+              )}
+              {brands.map((b) => (
+                <label
+                  key={b.id}
+                  className="flex items-center gap-3 cursor-pointer rounded px-1 py-1.5 hover:bg-muted/50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(b.id)}
+                    onChange={() => toggle(b.id)}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  <span className="text-sm">{b.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
 
         <DialogFooter>
@@ -172,7 +217,7 @@ export function MembersTable({
   const [editTarget, setEditTarget] = useState<Member | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function changeRole(member: Member, role: Role) {
+  async function changePermission(member: Member, role: Role) {
     try {
       const res = await fetch(`/api/users/${member.id}`, {
         method: "PATCH",
@@ -181,11 +226,11 @@ export function MembersTable({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Failed to update role");
+        throw new Error(body.error || "Failed to update permissions");
       }
       onChanged();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Failed to update role");
+      onError(err instanceof Error ? err.message : "Failed to update permissions");
     }
   }
 
@@ -208,21 +253,24 @@ export function MembersTable({
     }
   }
 
-  async function saveChannels(member: Member, brandIds: string[]) {
+  async function saveMember(
+    member: Member,
+    data: { brandIds: string[]; contentRole: ContentRole | null }
+  ) {
     try {
       const res = await fetch(`/api/users/${member.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandIds }),
+        body: JSON.stringify({ brandIds: data.brandIds, contentRole: data.contentRole }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Failed to update channels");
+        throw new Error(body.error || "Failed to update member");
       }
       setEditTarget(null);
       onChanged();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Failed to update channels");
+      onError(err instanceof Error ? err.message : "Failed to update member");
     }
   }
 
@@ -259,6 +307,7 @@ export function MembersTable({
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
+              <TableHead>Permissions</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Channels</TableHead>
               <TableHead>Joined</TableHead>
@@ -293,6 +342,9 @@ export function MembersTable({
                     </Badge>
                   </TableCell>
                   <TableCell>
+                    <ContentRoleBadge role={m.contentRole} />
+                  </TableCell>
+                  <TableCell>
                     <ChannelBadges brandIds={m.brandIds} brands={brands} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
@@ -319,22 +371,20 @@ export function MembersTable({
                         }
                       />
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => setEditTarget(m)}
-                        >
+                        <DropdownMenuItem onClick={() => setEditTarget(m)}>
                           Edit
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         {m.role === "creator" ? (
                           <DropdownMenuItem
-                            onClick={() => changeRole(m, "admin")}
+                            onClick={() => changePermission(m, "admin")}
                             disabled={isSelf}
                           >
                             Make admin
                           </DropdownMenuItem>
                         ) : (
                           <DropdownMenuItem
-                            onClick={() => changeRole(m, "creator")}
+                            onClick={() => changePermission(m, "creator")}
                             disabled={isSelf}
                           >
                             Demote to creator
@@ -357,7 +407,7 @@ export function MembersTable({
             {members.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-center text-muted-foreground text-xs py-6"
                 >
                   No users yet.
@@ -372,7 +422,7 @@ export function MembersTable({
         <EditMemberDialog
           member={editTarget}
           brands={brands}
-          onSave={(ids) => saveChannels(editTarget, ids)}
+          onSave={(data) => saveMember(editTarget, data)}
           onClose={() => setEditTarget(null)}
         />
       )}

@@ -1310,6 +1310,10 @@ export const users = pgTable(
     // Brand UUIDs this user is associated with — purely informational, does
     // not gate access. Edited in Settings → Users.
     brandIds: jsonb("brand_ids").$type<string[]>().notNull().default([]),
+    // Content workflow role — purely informational, no access gating.
+    contentRole: text("content_role", {
+      enum: ["producer", "curator", "member"],
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1338,8 +1342,11 @@ export const invites = pgTable(
       onDelete: "set null",
     }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
-    // Channels pre-assigned at invite time — copied to users.brand_ids on accept.
+    // Channels + content role pre-assigned at invite time — copied to users on accept.
     brandIds: jsonb("brand_ids").$type<string[]>().notNull().default([]),
+    contentRole: text("content_role", {
+      enum: ["producer", "curator", "member"],
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

@@ -22,6 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type { Role } from "@/lib/rbac";
 import type { BrandOption } from "@/components/settings/user-management";
+import type { ContentRole } from "@/components/settings/members-table";
 
 interface Props {
   open: boolean;
@@ -33,6 +34,7 @@ interface Props {
 export function InviteDialog({ open, onOpenChange, onCreated, brands }: Props) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("creator");
+  const [contentRole, setContentRole] = useState<ContentRole | "">("");
   const [selectedBrandIds, setSelectedBrandIds] = useState<Set<string>>(
     new Set()
   );
@@ -51,6 +53,7 @@ export function InviteDialog({ open, onOpenChange, onCreated, brands }: Props) {
   function reset() {
     setEmail("");
     setRole("creator");
+    setContentRole("");
     setSelectedBrandIds(new Set());
     setError(null);
     setSubmitting(false);
@@ -67,6 +70,7 @@ export function InviteDialog({ open, onOpenChange, onCreated, brands }: Props) {
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           role,
+          contentRole: contentRole || null,
           brandIds: [...selectedBrandIds],
         }),
       });
@@ -114,12 +118,12 @@ export function InviteDialog({ open, onOpenChange, onCreated, brands }: Props) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="invite-role">Role</Label>
+            <Label htmlFor="invite-permission">Permissions</Label>
             <Select
               value={role}
               onValueChange={(v) => v && setRole(v as Role)}
             >
-              <SelectTrigger id="invite-role" className="w-full">
+              <SelectTrigger id="invite-permission" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -131,6 +135,23 @@ export function InviteDialog({ open, onOpenChange, onCreated, brands }: Props) {
               Admins can invite and manage users. Creators have normal app
               access.
             </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="invite-content-role">Role</Label>
+            <Select
+              value={contentRole}
+              onValueChange={(v) => setContentRole(v as ContentRole | "")}
+            >
+              <SelectTrigger id="invite-content-role" className="w-full">
+                <SelectValue placeholder="No role set" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="producer">Producer</SelectItem>
+                <SelectItem value="curator">Curator</SelectItem>
+                <SelectItem value="member">Member</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {brands.length > 0 && (

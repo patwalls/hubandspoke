@@ -652,6 +652,13 @@
       "when": 1782413182577,
       "tag": "0092_light_toro",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1782414076403,
+      "tag": "0093_clumsy_mephisto",
+      "breakpoints": true
     }
   ]
 }

@@ -27,6 +27,7 @@ export async function PATCH(
     role?: unknown;
     dailyScorecardEmailEnabled?: unknown;
     brandIds?: unknown;
+    contentRole?: unknown;
   };
   try {
     body = await request.json();
@@ -66,6 +67,13 @@ export async function PATCH(
       );
     }
     update.brandIds = body.brandIds as string[];
+  }
+  if (body.contentRole !== undefined) {
+    const validRoles = ["producer", "curator", "member"];
+    if (body.contentRole !== null && !validRoles.includes(body.contentRole as string)) {
+      return NextResponse.json({ error: "Invalid contentRole" }, { status: 400 });
+    }
+    update.contentRole = (body.contentRole as "producer" | "curator" | "member") ?? null;
   }
   if (Object.keys(update).length === 0) {
     return NextResponse.json(

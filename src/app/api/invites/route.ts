@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
   if (guard.response) return guard.response;
   const { session } = guard;
 
-  let body: { email?: unknown; role?: unknown; brandIds?: unknown };
+  let body: { email?: unknown; role?: unknown; brandIds?: unknown; contentRole?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -82,6 +82,12 @@ export async function POST(request: NextRequest) {
     body.brandIds.every((id) => typeof id === "string")
       ? (body.brandIds as string[])
       : [];
+
+  const validContentRoles = ["producer", "curator", "member"];
+  const contentRole =
+    typeof body.contentRole === "string" && validContentRoles.includes(body.contentRole)
+      ? (body.contentRole as "producer" | "curator" | "member")
+      : null;
 
   try {
     const [existingUser] = await db
@@ -123,6 +129,7 @@ export async function POST(request: NextRequest) {
         tokenHash,
         expiresAt,
         brandIds,
+        contentRole,
       })
       .returning();
 
