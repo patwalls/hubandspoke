@@ -458,6 +458,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   // seconds later. Polled at the same cadence as descript-status.
   const [draftAlgorithmRunning, setDraftAlgorithmRunning] =
     useState<boolean>(false);
+  // Tracks the prior poll's running state so we can detect the running→idle
+  // edge (the algorithm just committed its draft). `loadRef` lets this early
+  // effect call the `load` refetch that's defined further down without a TDZ.
+  const prevDraftRunningRef = useRef(false);
+  const loadRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!data?.item?.id) return;
     const itemId = data.item.id;
@@ -517,7 +522,17 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         );
         if (!res.ok || cancelled) return;
         const json = (await res.json()) as { state: "idle" | "running" };
-        if (!cancelled) setDraftAlgorithmRunning(json.state === "running");
+        if (cancelled) return;
+        const running = json.state === "running";
+        setDraftAlgorithmRunning(running);
+        // Running → idle means the algorithm just wrote a new draft. The page
+        // won't otherwise know (it's a background write, often auto-fired by
+        // cross-post with no user action), so refetch to pull the fresh
+        // caption into the editable preview — no manual reload needed.
+        if (prevDraftRunningRef.current && !running) {
+          loadRef.current?.();
+        }
+        prevDraftRunningRef.current = running;
       } catch {
         // Non-fatal; leave the lock state stale.
       }
@@ -1419,6 +1434,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       setLoading(false);
     }
   }, [contentId, applyItem]);
+
+  // Keep loadRef pointed at the latest load so the draft-algorithm poller
+  // (declared earlier) can refetch on the running→idle edge without a TDZ.
+  loadRef.current = load;
 
   useEffect(() => {
     load();

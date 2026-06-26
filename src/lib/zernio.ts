@@ -273,6 +273,36 @@ export function tikTokTarget(post: ZernioPost): ZernioPlatformTarget | null {
   return post.platforms?.find((p) => p.platform === "tiktok") ?? null;
 }
 
+export interface ZernioAccountPost {
+  /** The REAL platform post id (TikTok video id) — unlike a post's
+   *  `platformPostId`, which is only a publish id. */
+  id: string;
+  message: string | null;
+  createdTime: string | null;
+  /** Canonical public URL to the live post. */
+  permalink: string | null;
+  mediaType: string | null;
+  likeCount?: number;
+  commentCount?: number;
+}
+
+/**
+ * List the account's ACTUAL published posts (from the platform), each with the
+ * real video id + permalink. This is the only reliable source of a published
+ * TikTok's public URL — the Content Posting API returns a publish id, not the
+ * video id, and never the URL. We match our just-published post against this
+ * feed by recency + caption.
+ */
+export async function getAccountPosts(
+  accountId: string,
+): Promise<ZernioAccountPost[]> {
+  const json = (await zernioFetch(
+    `/accounts/${encodeURIComponent(accountId)}/posts`,
+    { method: "GET" },
+  )) as { posts?: ZernioAccountPost[] } | null;
+  return json?.posts ?? [];
+}
+
 /** Fetch a post by id — used for the bounded confirmation poll / webhook
  *  cross-check. */
 export async function getPost(postId: string): Promise<ZernioPost> {

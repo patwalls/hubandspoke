@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { verifyZernioSignature } from "@/lib/zernio";
+import { reconcileTikTokPublish } from "@/lib/services/tiktok-draft/send";
 
 // Zernio webhook fields aren't firmly documented; accept a tolerant shape.
 // Documented post events: post.published, post.failed, post.partial,
@@ -76,42 +77,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, ignored: "no matching item" });
   }
 
-  if (payload.event === "post.failed") {
-    const reason =
-      payload.post?.platforms?.find((p) => p.errorMessage)?.errorMessage ??
-      "Zernio reported the post failed";
-    await db
-      .update(productionItems)
-      .set({
-        zernioStatus: "failed",
-        zernioError: reason.slice(0, 1000),
-        updatedAt: new Date(),
-      })
-      .where(eq(productionItems.id, item.id));
-    return NextResponse.json({ ok: true });
-  }
-
-  if (payload.event === "post.published") {
-    // The async publish landed. Capture the live URL and fold it into the
-    // normal publish pipeline (real link + Published status) so the post is
-    // treated like any other published item.
-    const tiktok =
-      payload.post?.platforms?.find((p) => p.platform === "tiktok") ??
-      payload.post?.platforms?.[0];
-    const liveUrl = tiktok?.platformPostUrl ?? null;
-    const set: Record<string, unknown> = {
-      zernioStatus: "published",
-      zernioError: null,
-      updatedAt: new Date(),
-    };
-    if (liveUrl) {
-      set.publishedLink = liveUrl;
-      set.status = "Published";
-    }
-    await db
-      .update(productionItems)
-      .set(set)
-      .where(eq(productionItems.id, item.id));
+  // Funnel published/failed through the same reconcile the polls use, so the
+  // link gets constructed identically. The webhook means Zernio is done, so
+  // for post.published we finalize even if the link is somehow still missing.
+  if (payload.event === "post.published" || payload.event === "post.failed") {
+    await reconcileTikTokPublish(item.id, null, {
+      finalizeWithoutLink: payload.event === "post.published",
+    });
     return NextResponse.json({ ok: true });
   }
 

@@ -20,6 +20,7 @@ import { getMediaRule } from "@/lib/platform-media-rules";
 import { getPresignedGetUrl, headObject } from "@/lib/s3";
 import {
   createTikTokPost,
+  getAccountPosts,
   getPost,
   getTikTokCreatorInfo,
   tikTokTarget,
@@ -30,24 +31,66 @@ import { enqueue } from "@/jobs/enqueue";
 
 const DEFAULT_PRIVACY = "PUBLIC_TO_EVERYONE";
 
+function normalizeForMatch(s: string | null | undefined): string {
+  // Strip everything but letters/digits for an identity comparison between our
+  // caption and the platform's (often truncated) post message. Structural, not
+  // semantic — we're matching our OWN known post, not interpreting meaning.
+  return (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 /**
- * Resolve the live TikTok URL for a published post. TikTok's API usually
- * returns NO `platformPostUrl` — but the `platformPostId`
- * (`v_pub_url~v2-1.<videoId>`) embeds the 19-digit video id, so we construct
- * the canonical URL `tiktok.com/@<handle>/video/<videoId>` ourselves. (For
- * SELF_ONLY/private posts that URL is valid but only the owner can view it.)
+ * Resolve the REAL live URL of a just-published post by looking it up in the
+ * account's actual post feed (`getAccountPosts`). This is the only reliable
+ * source: TikTok's Content Posting API returns a publish id, not the video id
+ * or URL, so constructing a URL from it is wrong. We match by recency (the
+ * post we just made is the newest) with a caption-prefix tiebreaker, and
+ * return the clean permalink. Returns null until the post shows up in the feed
+ * (a few seconds after publish) — the caller keeps polling.
  */
-function resolveLiveUrl(
-  target: { platformPostUrl?: string | null; platformPostId?: string | null } | null,
-  handle: string | null,
-): string | null {
-  const direct = target?.platformPostUrl?.trim();
-  if (direct) return direct;
-  const videoId = target?.platformPostId?.match(/\d{15,}/)?.[0];
-  if (videoId && handle) {
-    return `https://www.tiktok.com/@${handle.replace(/^@/, "")}/video/${videoId}`;
+async function resolvePublishedUrl(
+  zernioAccountId: string | null,
+  caption: string,
+  sentAt: Date | null,
+): Promise<string | null> {
+  if (!zernioAccountId) return null;
+  let posts;
+  try {
+    posts = await getAccountPosts(zernioAccountId);
+  } catch {
+    return null;
   }
-  return null;
+  if (!posts.length) return null;
+
+  // Only consider posts created around/after we sent it (2-min grace for clock
+  // skew + processing). Without a sentAt, consider the whole recent feed.
+  const floor = sentAt ? sentAt.getTime() - 2 * 60 * 1000 : 0;
+  const recent = posts.filter(
+    (p) =>
+      p.permalink &&
+      (!sentAt ||
+        (p.createdTime && new Date(p.createdTime).getTime() >= floor)),
+  );
+  if (!recent.length) return null;
+
+  const capKey = normalizeForMatch(caption).slice(0, 24);
+  const byCaption =
+    capKey.length >= 8
+      ? recent.find((p) =>
+          normalizeForMatch(p.message).startsWith(capKey.slice(0, 16)),
+        )
+      : null;
+  const chosen =
+    byCaption ??
+    recent
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b.createdTime ?? 0).getTime() -
+          new Date(a.createdTime ?? 0).getTime(),
+      )[0];
+
+  // Strip tracking query params for a clean canonical link.
+  return chosen?.permalink ? chosen.permalink.split("?")[0] : null;
 }
 
 /** Conservative video size ceiling. Docs conflict (287.6 MB vs 4 GB); 287 MB
@@ -559,22 +602,30 @@ export async function sendTikTokDraft(
     if (target?.status === "failed") {
       throw new Error(target.errorMessage || "TikTok rejected the post");
     }
-    const liveUrl = resolveLiveUrl(target, ctx.accountHandle);
-    const published = target?.status === "published";
+    // The just-published post usually isn't in the account feed yet (TikTok
+    // takes a few seconds), so this is typically null at create time → we go
+    // to 'publishing' and the poll picks up the real URL.
+    const liveUrl =
+      target?.status === "published"
+        ? await resolvePublishedUrl(ctx.zernioAccountId, ctx.caption, new Date())
+        : null;
+    // "Settled" means live AND we have the real link. Don't settle a live post
+    // without its link (the bug Pat hit) — keep polling until it appears.
+    const settled = target?.status === "published" && !!liveUrl;
 
     // Stamp immediately after the 2xx (no slow work between) to minimize the
     // window where a crash could lose the postId and cause a retry double-post.
     const set: Record<string, unknown> = {
       zernioPostId: post._id,
-      zernioStatus: published ? "published" : "publishing",
+      zernioStatus: settled ? "published" : "publishing",
       zernioSentAt: new Date(),
       zernioScheduledAt: null,
       zernioError: null,
       updatedAt: new Date(),
     };
-    // Once live, fold into the normal publish pipeline: real link + Published
-    // status so metrics/reconcile treat it like any other published post.
-    if (liveUrl) {
+    // Flip to Published only WITH the link, so the publish pipeline never sees
+    // a Published-but-linkless item.
+    if (settled) {
       set.publishedLink = liveUrl;
       set.status = "Published";
       set.publishedAt = new Date();
@@ -590,16 +641,17 @@ export async function sendTikTokDraft(
       tool: "zernio",
       action: "published",
       status: "success",
-      label: published ? "Published to TikTok" : "Publishing to TikTok…",
+      label: settled ? "Published to TikTok" : "Publishing to TikTok…",
       url: liveUrl,
       meta: { zernioPostId: post._id },
     });
 
-    // Still finalizing on Zernio's side → schedule a worker poll as the
-    // closed-tab fallback (the page banner also polls client-side). Both run
-    // the same idempotent reconcile, so racing is harmless. Best-effort: a
-    // failed enqueue (e.g. no worker locally) must not fail the publish.
-    if (!published) {
+    // Not fully settled (still publishing, or live but link not assigned yet)
+    // → schedule a worker poll as the closed-tab fallback (the page banner also
+    // polls client-side). Both run the same idempotent reconcile, so racing is
+    // harmless. Best-effort: a failed enqueue (e.g. no worker locally) must not
+    // fail the publish.
+    if (!settled) {
       try {
         await enqueue(
           "zernio-poll-publish",
@@ -611,7 +663,7 @@ export async function sendTikTokDraft(
       }
     }
 
-    return { zernioPostId: post._id, caption: ctx.caption, published, liveUrl };
+    return { zernioPostId: post._id, caption: ctx.caption, published: settled, liveUrl };
   } catch (err) {
     // Release the claim into a retryable failed state and surface the error.
     const message = err instanceof Error ? err.message : String(err);
@@ -653,14 +705,17 @@ export interface ReconcileResult {
  * `failed`. Idempotent + safe to call from anywhere: the client poller, the
  * worker fallback, and the webhook all funnel through here.
  *
- * Note: TikTok's API frequently returns NO public URL (only a publish id), and
- * SELF_ONLY/private posts never have one — so we flip to Published even with no
- * link; `publishedLink` fills in only when Zernio hands us a real URL (public
- * posts), otherwise the account content sync backfills it later.
+ * The link: TikTok's Content Posting API returns only a publish id, so we look
+ * the real URL up in the account's post feed (`resolvePublishedUrl`). That
+ * post takes a few seconds to appear, so we DON'T settle a live post until the
+ * link resolves — we keep polling. `finalizeWithoutLink` (used by the worker
+ * poll at its deadline) force-settles a linkless live post so it can't poll
+ * forever.
  */
 export async function reconcileTikTokPublish(
   itemId: string,
   actorUserId: string | null = null,
+  opts: { finalizeWithoutLink?: boolean } = {},
 ): Promise<ReconcileResult> {
   const [item] = await db
     .select({
@@ -669,7 +724,8 @@ export async function reconcileTikTokPublish(
       status: productionItems.status,
       publishedLink: productionItems.publishedLink,
       publishedAt: productionItems.publishedAt,
-      accountHandle: accounts.handle,
+      zernioSentAt: productionItems.zernioSentAt,
+      zernioAccountId: accounts.zernioAccountId,
     })
     .from(productionItems)
     .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
@@ -712,7 +768,35 @@ export async function reconcileTikTokPublish(
   }
 
   if (target?.status === "published") {
-    const liveUrl = resolveLiveUrl(target, item.accountHandle);
+    // Look up the REAL post URL in the account feed (matched by recency +
+    // caption). Falls back to any link we already have.
+    let caption = "";
+    const [draft] = await db
+      .select({ content: contentDrafts.content })
+      .from(contentDrafts)
+      .where(
+        and(
+          eq(contentDrafts.productionItemId, itemId),
+          eq(contentDrafts.isCurrent, true),
+        ),
+      )
+      .limit(1);
+    if (typeof draft?.content?.caption === "string") caption = draft.content.caption;
+
+    const liveUrl =
+      item.publishedLink ??
+      (await resolvePublishedUrl(
+        item.zernioAccountId,
+        caption,
+        item.zernioSentAt,
+      ));
+
+    // Live but the post isn't in the account feed yet → keep polling so we can
+    // attach the real URL, unless we're force-finalizing at the deadline.
+    if (!liveUrl && !opts.finalizeWithoutLink) {
+      return current(false);
+    }
+
     const set: Record<string, unknown> = {
       zernioStatus: "published",
       zernioError: null,
@@ -733,13 +817,13 @@ export async function reconcileTikTokPublish(
       action: "published",
       status: "success",
       label: "Published to TikTok",
-      url: liveUrl,
+      url: liveUrl ?? null,
       meta: { zernioPostId: item.zernioPostId },
     });
 
     return {
       zernioStatus: "published",
-      publishedLink: liveUrl ?? item.publishedLink ?? null,
+      publishedLink: liveUrl ?? null,
       status: "Published",
       settled: true,
     };

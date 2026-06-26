@@ -23,7 +23,14 @@ export const zernioPollPublishTask: Task = async (rawPayload, helpers) => {
   const { productionItemId, deadlineAt } =
     rawPayload as ZernioPollPublishPayload;
 
-  const result = await reconcileTikTokPublish(productionItemId);
+  const pastDeadline = Date.now() >= (deadlineAt ?? Date.now() + DEADLINE_MS);
+
+  // At the deadline, force-settle even a live-but-linkless post so it can't
+  // poll forever (it becomes Published without a link; the metrics/content
+  // sync can backfill the URL later).
+  const result = await reconcileTikTokPublish(productionItemId, null, {
+    finalizeWithoutLink: pastDeadline,
+  });
   if (result.settled) {
     helpers.logger.info(
       `[zernio-poll] item ${productionItemId} settled → ${result.zernioStatus}`,
@@ -31,9 +38,9 @@ export const zernioPollPublishTask: Task = async (rawPayload, helpers) => {
     return;
   }
 
-  if (Date.now() >= (deadlineAt ?? Date.now() + DEADLINE_MS)) {
+  if (pastDeadline) {
     helpers.logger.warn(
-      `[zernio-poll] item ${productionItemId} still publishing at deadline — leaving for the webhook`,
+      `[zernio-poll] item ${productionItemId} still publishing at deadline`,
     );
     return;
   }
