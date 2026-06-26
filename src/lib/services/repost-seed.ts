@@ -31,6 +31,10 @@ import {
   type PostType,
 } from "@/lib/platform-field-schemas";
 import { getMediaRule } from "@/lib/platform-media-rules";
+import {
+  resolveCleanSourceMedia,
+  classifyMediaSource,
+} from "@/lib/services/clean-media-resolver";
 import type { db as dbClient } from "@/lib/db";
 
 type Tx = Parameters<Parameters<typeof dbClient.transaction>[0]>[0];
@@ -77,22 +81,59 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
   //    would seed a row the target's simulator rejects with a "doesn't
   //    support video" warning. For same-kind targets the filter is a no-op.
   const allowedKinds = new Set(getMediaRule(postType).allowedKinds);
-  const sourceMediaAll = await tx
-    .select({
-      index: productionItemMedia.index,
-      kind: productionItemMedia.kind,
-      s3Bucket: productionItemMedia.s3Bucket,
-      s3Key: productionItemMedia.s3Key,
-      contentType: productionItemMedia.contentType,
-      sizeBytes: productionItemMedia.sizeBytes,
-      posterS3Key: productionItemMedia.posterS3Key,
-      sourceUrl: productionItemMedia.sourceUrl,
-    })
-    .from(productionItemMedia)
-    .where(eq(productionItemMedia.productionItemId, sourceId));
-  const sourceMedia = sourceMediaAll.filter((m) =>
-    allowedKinds.has(m.kind as "image" | "video"),
-  );
+
+  // Prefer the ORIGINAL clean media over whatever the source happens to hold.
+  // A TikTok source's archived video is a watermarked download; the resolver
+  // walks lineage to the nearest saved clean media (our Descript export /
+  // upload) so the repost publishes clean. Falls back to the source's own
+  // rows only when no clean original exists anywhere.
+  const resolution = await resolveCleanSourceMedia(sourceId);
+  let mediaProvenance: "clean" | "watermark_fallback" | "none" = "none";
+  let sourceMedia: Array<{
+    index: number;
+    kind: string;
+    s3Bucket: string;
+    s3Key: string;
+    contentType: string;
+    sizeBytes: number | null;
+    posterS3Key: string | null;
+    sourceUrl: string | null;
+  }>;
+  if (resolution.kind === "archived") {
+    sourceMedia = resolution.rows.filter((m) =>
+      allowedKinds.has(m.kind as "image" | "video"),
+    );
+    mediaProvenance = "clean";
+  } else {
+    // No clean original anywhere — mirror the source's own rows (today's
+    // behavior). Flag when that fallback is a watermarked TikTok download so
+    // the operator can hit "Swap in original media".
+    const sourceMediaAll = await tx
+      .select({
+        index: productionItemMedia.index,
+        kind: productionItemMedia.kind,
+        s3Bucket: productionItemMedia.s3Bucket,
+        s3Key: productionItemMedia.s3Key,
+        contentType: productionItemMedia.contentType,
+        sizeBytes: productionItemMedia.sizeBytes,
+        posterS3Key: productionItemMedia.posterS3Key,
+        sourceUrl: productionItemMedia.sourceUrl,
+      })
+      .from(productionItemMedia)
+      .where(eq(productionItemMedia.productionItemId, sourceId));
+    sourceMedia = sourceMediaAll.filter((m) =>
+      allowedKinds.has(m.kind as "image" | "video"),
+    );
+    mediaProvenance = sourceMediaAll.some(
+      (m) =>
+        m.kind === "video" &&
+        classifyMediaSource(m.sourceUrl) === "tiktok_dirty",
+    )
+      ? "watermark_fallback"
+      : sourceMediaAll.length > 0
+        ? "clean"
+        : "none";
+  }
 
   const mediaChanges: ContentChange[] = [];
   if (sourceMedia.length > 0) {
@@ -131,6 +172,7 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
       });
     }
   } else if (
+    resolution.kind === "none" &&
     sourceLegacyMedia?.s3Bucket &&
     sourceLegacyMedia.s3Key &&
     sourceLegacyMedia.contentType
@@ -216,4 +258,8 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
     generatedBy: "copy:source",
     createdByUserId: actorUserId,
   });
+
+  // Let callers log/branch on whether we seeded the clean original vs fell
+  // back to a watermarked download.
+  return { mediaProvenance };
 }

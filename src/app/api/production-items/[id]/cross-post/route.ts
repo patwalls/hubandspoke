@@ -7,6 +7,7 @@ import { resolveEditor } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
+import { resolveCleanSourceMedia } from "@/lib/services/clean-media-resolver";
 import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { seedRepostContent } from "@/lib/services/repost-seed";
 import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
@@ -164,7 +165,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   //      `withMedia: true` re-enrichment so the cross-post doesn't ship
   //      with an empty media slot. See repost/route.ts for the full
   //      cost-model rationale.
+  // Clean original resolvable up the lineage → seed that, skip the
+  // watermarked TikTok download.
+  const hasCleanOriginal =
+    (await resolveCleanSourceMedia(source.id)).kind === "archived";
   const sourceNeedsMedia =
+    !hasCleanOriginal &&
     isVideoBearingPostType(source.postType) &&
     !source.mediaS3Key &&
     !(await hasAnyCarouselRow(source.id));
@@ -215,7 +221,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // carousel mirroring natively. Cheap LIMIT 1 query.
     const hasCarouselMedia = await hasAnyCarouselRow(source.id);
     const readiness = checkRepostReadiness(source, hasCarouselMedia);
-    if (!readiness.ok) {
+    // A resolvable clean original counts as ready even without own media.
+    if (!readiness.ok && !hasCleanOriginal) {
       return NextResponse.json(
         {
           error:

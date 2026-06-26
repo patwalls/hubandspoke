@@ -49,6 +49,15 @@ USER / API ENTRY POINTS
   POST /api/production-items/[id]/cross-post              → draft-algorithm-run (auto-fire after seed, any seeded target). Source body is run through stripDateOpenerWithLLM (Haiku, fail-soft) before seedRepostContent — strips stale "X years ago today:" leads on aged sources.
   POST /api/production-items/[id]/cross-post  manual=true → (no job — operator opted to bypass gate + automation; row created for manual upload)
   POST /api/production-items/[id]/repost                  → (no Underlord job — see "Underlord usage tracking" below. Row inherits source media via seedRepostContent.) Source body is run through stripDateOpenerWithLLM (Haiku, fail-soft) before seedRepostContent — strips stale "X years ago today:" leads on repost-of-repost.
+  # Clean-original media (2026-06-26): seedRepostContent + both repost/cross-post routes now call
+  #   resolveCleanSourceMedia(sourceId) (src/lib/services/clean-media-resolver.ts) FIRST. It walks
+  #   lineage (reposted_from_item_id → pillar_content_item_id, depth-bounded, cycle-safe) to the
+  #   nearest ALREADY-SAVED clean media (Descript export / manual upload; skips tiktok_dirty
+  #   downloads classified via production_item_media.source_url). When found: seed those rows
+  #   (shared keys) and SKIP the withMedia:true watermark download (enrichSingleItem). When none:
+  #   today's behavior (mirror source rows, mediaProvenance='watermark_fallback'). No Descript
+  #   re-render — archived media only. Manual escape hatch: POST .../original-media (swap) +
+  #   GET .../original-media (download).
   # Removed 2026-05-18: cross-post + repost used to enqueue
   # `descript-derivative-create`, which fires Underlord ($3.50/call) to
   # duplicate the source composition. Burned $35 in 30 min from a short

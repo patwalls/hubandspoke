@@ -87,6 +87,12 @@ export interface ProductionItem {
   zernioScheduledAt?: string | null;
   zernioSentAt?: string | null;
   zernioError?: string | null;
+  /** Original-media gating (computed by the detail GET). `hasWatermarkedMedia`
+   *  = this item's own video is a TikTok download; `cleanOriginAvailable` = a
+   *  clean original lives up the lineage we can pull/download. */
+  hasWatermarkedMedia?: boolean;
+  cleanOriginAvailable?: boolean;
+  cleanOriginLabel?: string | null;
   /** Canva autofill state for instagram_post derivatives. canvaAutofillJobId
    *  is set while the autofill is in flight and cleared on success; canvaEditUrl
    *  is the final design link the editor opens. */

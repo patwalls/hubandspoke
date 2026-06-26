@@ -23,6 +23,10 @@ import { getPresignedGetUrl } from "@/lib/s3";
 import { getChannelsForFormats } from "@/lib/format-channels";
 import { checkRepostReadiness } from "@/lib/services/descript-derivative";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
+import {
+  classifyMediaSource,
+  resolveCleanSourceMedia,
+} from "@/lib/services/clean-media-resolver";
 
 const POSTER_URL_TTL_SECONDS = 60 * 60;
 
@@ -520,6 +524,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         posterS3Key: productionItemMedia.posterS3Key,
         contentType: productionItemMedia.contentType,
         sizeBytes: productionItemMedia.sizeBytes,
+        sourceUrl: productionItemMedia.sourceUrl,
       })
       .from(productionItemMedia)
       .where(eq(productionItemMedia.productionItemId, id))
@@ -641,9 +646,28 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     const canDuplicate = readiness.ok;
     const blockedReason = readiness.ok ? null : readiness.reason;
 
+    // Gating for the "original media" Actions items. `hasWatermarkedMedia`:
+    // the item's own video is a TikTok download. `cleanOriginAvailable`: a
+    // clean original lives up the lineage (depth > 0) we can pull/download.
+    const hasWatermarkedMedia = mediaRows.some(
+      (m) => m.kind === "video" && classifyMediaSource(m.sourceUrl) === "tiktok_dirty",
+    );
+    let cleanOriginAvailable = false;
+    let cleanOriginLabel: string | null = null;
+    if (hasWatermarkedMedia || item.sourceType !== "original") {
+      const clean = await resolveCleanSourceMedia(item.id);
+      if (clean.kind === "archived" && clean.origin.depth > 0) {
+        cleanOriginAvailable = true;
+        cleanOriginLabel = clean.label;
+      }
+    }
+
     return NextResponse.json({
       item: {
         ...item,
+        hasWatermarkedMedia,
+        cleanOriginAvailable,
+        cleanOriginLabel,
         ctrFirstHour: item.ctrFirstHour ? parseFloat(item.ctrFirstHour) : null,
         apvFirst24Hours: item.apvFirst24Hours
           ? parseFloat(item.apvFirst24Hours)

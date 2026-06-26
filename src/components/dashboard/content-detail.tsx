@@ -1337,6 +1337,35 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     }
   }, [contentId]);
 
+  // "Swap in original media": replace this item's watermarked TikTok media
+  // with the clean original resolved up the lineage. Refetches on success so
+  // the simulator re-renders the clean video.
+  const handleSwapOriginalMedia = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/production-items/${contentId}/original-media`,
+        { method: "POST" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error("Couldn't swap in the original", {
+          description: json?.error || `HTTP ${res.status}`,
+        });
+        return;
+      }
+      if (json?.pulled === false) {
+        toast.info("This is already the original media.");
+        return;
+      }
+      toast.success("Swapped in the original media", {
+        description: json?.source ?? undefined,
+      });
+      loadRef.current?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't swap media");
+    }
+  }, [contentId]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -3034,6 +3063,31 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                       )}
                     </DropdownMenuItem>
                   )}
+                  {/* Original (non-watermarked) media — resolved up the
+                   *  lineage. Shows only when a clean original lives on an
+                   *  ancestor (e.g. a Descript export / IG source). */}
+                  {item.cleanOriginAvailable && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        window.location.href = `/api/production-items/${item.id}/original-media`;
+                      }}
+                      title={item.cleanOriginLabel ?? undefined}
+                    >
+                      <DownloadIcon className="size-3.5" /> Download original
+                      media
+                    </DropdownMenuItem>
+                  )}
+                  {item.cleanOriginAvailable &&
+                    item.hasWatermarkedMedia &&
+                    !isPublished && (
+                      <DropdownMenuItem
+                        onClick={() => void handleSwapOriginalMedia()}
+                        title={item.cleanOriginLabel ?? undefined}
+                      >
+                        <RefreshCwIcon className="size-3.5" /> Swap in original
+                        media
+                      </DropdownMenuItem>
+                    )}
                   <DropdownMenuItem
                     onClick={() => {
                       window.location.href =

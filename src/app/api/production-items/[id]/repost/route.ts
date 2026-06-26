@@ -10,6 +10,7 @@ import { recordItemCreated } from "@/lib/services/item-created";
 import { seedRepostContent } from "@/lib/services/repost-seed";
 import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
+import { resolveCleanSourceMedia } from "@/lib/services/clean-media-resolver";
 import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -114,7 +115,12 @@ export async function POST(request: Request, context: RouteContext) {
   //      `withMedia: true, force: true` re-enrichment to backfill (10 credits).
   //      Per-slide idempotency in `archiveCarouselMedia` makes this safe to
   //      re-run repeatedly.
+  // If a clean original is resolvable up the lineage (our Descript export /
+  // upload), we'll seed THAT — so don't download the watermarked TikTok video.
+  const hasCleanOriginal =
+    (await resolveCleanSourceMedia(source.id)).kind === "archived";
   const sourceNeedsMedia =
+    !hasCleanOriginal &&
     isVideoBearingPostType(source.postType) &&
     !source.mediaS3Key &&
     !(await hasAnyCarouselRow(source.id));
@@ -174,7 +180,9 @@ export async function POST(request: Request, context: RouteContext) {
   if (!manual) {
     const hasCarouselMedia = await hasAnyCarouselRow(source.id);
     const readiness = checkRepostReadiness(source, hasCarouselMedia);
-    if (!readiness.ok) {
+    // A resolvable clean original (e.g. a Descript-export ancestor) counts as
+    // ready even when the source's own media is absent.
+    if (!readiness.ok && !hasCleanOriginal) {
       // Surface the residual "tried to enrich and still no media" case so
       // we can fix the silent media-archiving failure behind the scenes.
       // The operator still gets a recoverable response — the dialog

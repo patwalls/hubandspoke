@@ -212,6 +212,9 @@ export interface CreateTestMediaOptions {
   contentType?: string;
   sizeBytes?: number | null;
   posterS3Key?: string | null;
+  /** Origin marker — null = manual upload, a Descript prefix = clean export,
+   *  a tiktokcdn URL = watermarked download. Drives clean-media classification. */
+  sourceUrl?: string | null;
 }
 
 /**
@@ -233,6 +236,7 @@ export async function createTestMedia(
       contentType: opts.contentType ?? "video/mp4",
       sizeBytes: opts.sizeBytes ?? 1024 * 1024,
       posterS3Key: opts.posterS3Key ?? null,
+      sourceUrl: opts.sourceUrl ?? null,
     })
     .returning();
   trackCleanup("productionItemMedia", row.id);
