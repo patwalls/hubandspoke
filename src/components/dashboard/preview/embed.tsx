@@ -61,6 +61,25 @@ export function PreviewEmbed({
 
   useEffect(() => {
     if (resolution.kind !== "script") return;
+
+    // TikTok's embed.js scans the DOM for unprocessed `.tiktok-embed`
+    // blockquotes only when it (re)loads. In an SPA the blockquote mounts
+    // AFTER the script first ran, and it exposes no public re-scan API — so
+    // the placeholder (blank box + logo) never becomes the video. Force a
+    // re-scan by re-injecting the script each time the embed mounts/changes.
+    if (resolution.script.includes("tiktok.com/embed")) {
+      const prev = document.querySelector(
+        'script[src^="https://www.tiktok.com/embed"]',
+      );
+      if (prev) prev.remove();
+      const s = document.createElement("script");
+      s.src = "https://www.tiktok.com/embed.js";
+      s.async = true;
+      s.charset = "utf-8";
+      document.body.appendChild(s);
+      return;
+    }
+
     loadScript(resolution.script);
 
     // Nudge platform scripts that have already loaded to re-scan for the

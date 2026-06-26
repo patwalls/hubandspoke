@@ -28,8 +28,37 @@ import {
 } from "@/lib/zernio";
 import { recordToolAction } from "@/lib/services/content-events";
 import { enqueue } from "@/jobs/enqueue";
+import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 
 const DEFAULT_PRIVACY = "PUBLIC_TO_EVERYONE";
+
+/**
+ * Kick off the same metrics machinery the normal publish path uses, so a
+ * TikTok post published through Zernio gets its views/likes/comments instead
+ * of staying blank: an immediate per-item refresh + the early velocity
+ * snapshots. Best-effort — never let a metrics hiccup affect the publish.
+ */
+async function triggerPublishedMetrics(
+  itemId: string,
+  publishedAt: Date | null,
+): Promise<void> {
+  try {
+    await enqueue(
+      "refresh-item-metrics",
+      { productionItemId: itemId },
+      { jobKey: `refresh-item-metrics-${itemId}` },
+    );
+  } catch {
+    // ignore — the hourly performance-decay sweep will still pick it up
+  }
+  if (publishedAt) {
+    try {
+      await scheduleVelocitySnapshots(itemId, publishedAt);
+    } catch {
+      // ignore
+    }
+  }
+}
 
 function normalizeForMatch(s: string | null | undefined): string {
   // Strip everything but letters/digits for an identity comparison between our
@@ -661,6 +690,9 @@ export async function sendTikTokDraft(
       } catch {
         // ignore — client poll covers the watching-user case
       }
+    } else {
+      // Live + linked now → start pulling metrics immediately.
+      await triggerPublishedMetrics(itemId, new Date());
     }
 
     return { zernioPostId: post._id, caption: ctx.caption, published: settled, liveUrl };
@@ -820,6 +852,15 @@ export async function reconcileTikTokPublish(
       url: liveUrl ?? null,
       meta: { zernioPostId: item.zernioPostId },
     });
+
+    // Now that it's live + linked, pull metrics (the link is required for the
+    // Scrape Creators fetch). Only fires when we have a real URL.
+    if (liveUrl) {
+      await triggerPublishedMetrics(
+        itemId,
+        item.publishedAt ?? new Date(),
+      );
+    }
 
     return {
       zernioStatus: "published",
