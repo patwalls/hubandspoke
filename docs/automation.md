@@ -1102,6 +1102,37 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
   - Hard-fails (throws → graphile retries) on Typefully API errors
   - Idempotent: re-running on an item with `typefully_draft_id` set is a noop
 
+### `zernio-create-draft` — scheduled TikTok LIVE publish (Zernio)
+
+TikTok-only. Publishes the item's rendered video **live** to the connected
+TikTok account via the Zernio API (a pre-audited TikTok Content Posting client
+— direct post, `publishNow: true`, no own-app audit). _(Name kept from the
+draft-mode original; `createTikTokPost({draft:true})` can re-enable inbox
+delivery.)_
+
+- **Trigger:** the **immediate** publish runs inline in `POST /api/production-items/[id]/tiktok-draft` (`mode=send-now`). The **scheduled** publish enqueues `zernio-create-draft` with `runAt` = the operator's go-live time and `jobKey=zernio:<id>` (`jobKeyMode='replace'`, so reschedule never leaves a second job).
+- **Files:** `src/jobs/tasks/zernio-create-draft.ts`, `src/lib/services/tiktok-draft/send.ts` (shared sender + guardrails, used by both the route and the task), `src/lib/zernio.ts` (API client).
+- **Inputs:** `{ productionItemId, privacyLevel? }` — the task re-validates every guardrail against a fresh DB read at fire time.
+- **Outputs:** Zernio post created via `POST https://zernio.com/api/v1/posts` (`publishNow:true` + `tiktokSettings` with the chosen `privacyLevel` + consent flags). Stamps `production_items.zernio_post_id` + `zernio_status` (`published` if the response is already live, else `publishing`) + `zernio_sent_at`. **On a live URL** also sets `published_link` + `status='Published'` + `published_at` — folding into the normal publish pipeline. Inserts a `tool_action` row (`tool=zernio`, `action=published`). The presigned S3 video URL is minted **inside the send**, immediately before the call (never persisted / passed in the payload).
+- **Downstream:** `/api/webhooks/zernio` — `post.published` sets `published_link` + `status='Published'` + `zernio_status='published'`; `post.failed` sets `zernio_status='failed'` + error. (Direct publish is async on Zernio's side; the webhook is how a `publishing` item becomes `published` with its live link.)
+- **Guardrails (all hard blocks; nothing mutates on block):** postType must be exactly `tiktok`; **exactly one** `production_item_media` row that is a video (the slideshow guard — counts the table, NOT the legacy `media_s3_key` mirror); S3 object exists (`headObject`); non-empty caption; account has `zernio_account_id`; not already published/in-flight (atomic claim `zernio_status='sending'`, excludes sending/publishing/published/delivered); media/caption unchanged since preview. Warn-only: video >287 MB, 24h count ≥25 (TikTok's API cap — Zernio's 429 is the authority).
+- **Rules:**
+  - Scheduling is held in OUR queue (we call Zernio with `publishNow` at fire time) — never Zernio's `scheduledFor`, so the presigned URL is always fresh.
+  - Race-guard: the task bails if `zernio_status` is no longer `scheduled` (cancelled/superseded) or `zernio_post_id` is already set (idempotent).
+  - Hard guardrail blocks at fire time are swallowed after stamping `zernio_error` (retry can't help); Zernio API errors re-throw → graphile retries.
+  - Privacy levels + TikTok consent are enforced server-side: the publish dialog's GET preview fetches `GET /accounts/{id}/tiktok/creator-info` for allowed `privacyLevel`s; the send sets `contentPreviewConfirmed`/`expressConsentGiven`.
+  - Requires `ZERNIO_API_KEY` + `ZERNIO_PROFILE_ID` (and `ZERNIO_WEBHOOK_SECRET` for the webhook). Account connection (`accounts.zernio_account_id`) is set by the in-app OAuth flow at `/api/integrations/zernio/connect` → `/api/integrations/zernio/callback`.
+
+### Finalizing a publish — `reconcileTikTokPublish` (3 funnels, one idempotent fn)
+
+Direct publish is **async** on Zernio's side: the create returns `zernio_status='publishing'` and the live result lands seconds later. Three paths converge on `reconcileTikTokPublish(itemId)` in `src/lib/services/tiktok-draft/send.ts` (idempotent — re-running on a settled item is a noop) to flip `publishing → published` (+ `published_link`/`status='Published'` when TikTok returns a URL) or `→ failed`:
+
+1. **Client poll (primary, no infra needed):** the content page's `TiktokDraftBanner` shows an animated spinner and polls `GET /api/production-items/[id]/tiktok-status` every 3s (cap ~40 tries / 2 min) while `publishing`; the endpoint calls reconcile and returns `{ settled }`. Works locally with no worker, and is what the watching user sees.
+2. **Worker poll (closed-tab fallback, prod):** `sendTikTokDraft` enqueues `zernio-poll-publish` (`jobKey=zernio-poll:<id>`) on a `publishing` result; the task reconciles + self-re-enqueues every 10s until settled or a 5-min deadline. Needs the worker dyno (no-op locally).
+3. **Webhook (belt-and-suspenders):** `POST /api/webhooks/zernio` `post.published` also sets `published_link`/`status`. Only fires if the Zernio webhook is configured.
+
+**The live link:** TikTok's API almost never returns `platformPostUrl` — but `platformPostId` is `v_pub_url~v2-1.<videoId>`, so `resolveLiveUrl()` constructs the canonical `https://www.tiktok.com/@<handle>/video/<videoId>` from the embedded 19-digit video id + the connected account's handle. So `published_link` is set automatically on every publish, going forward. (For SELF_ONLY/private test posts the URL is valid but only the owner can view it; for Public posts it's the real public link.)
+
 ---
 
 ## Lifecycle views

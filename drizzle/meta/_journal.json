@@ -659,6 +659,13 @@
       "when": 1782414076403,
       "tag": "0093_clumsy_mephisto",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1782430979100,
+      "tag": "0094_spooky_firebrand",
+      "breakpoints": true
     }
   ]
 }

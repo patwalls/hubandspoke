@@ -88,6 +88,10 @@ interface ContentPreviewProps {
    *  caption editor so editors don't type into a draft about to be
    *  overwritten. See `SimulatorProps.draftAlgorithmRunning`. */
   draftAlgorithmRunning?: boolean;
+  /** Force the simulator into a non-editable preview regardless of draftId.
+   *  Used inside the Publish/Schedule dialog to show "exactly what will be
+   *  sent" without turning the modal into an editing surface. */
+  forceReadOnly?: boolean;
 }
 
 export function ContentPreview({
@@ -103,6 +107,7 @@ export function ContentPreview({
   descriptProcessingLabel,
   descriptProcessingDetail,
   draftAlgorithmRunning,
+  forceReadOnly = false,
 }: ContentPreviewProps) {
   // Prefer the canonical `postType` ("x", "instagram_reel", …) — it's the
   // accounts-rollout key and matches the simulator map directly. Fall back
@@ -119,7 +124,7 @@ export function ContentPreview({
   const Simulator = SIMULATORS[platform];
   const fieldMap = PLATFORM_FIELD_MAP[platform];
   const data = resolvePreviewData(platform, item, media, liveContent);
-  const editable = draftId !== null;
+  const editable = !forceReadOnly && draftId !== null;
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -131,9 +136,11 @@ export function ContentPreview({
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
             How this will look on {PLATFORM_LABEL[platform]}.
-            {editable
-              ? " Type directly in the mock to edit the draft."
-              : " Read-only — no draft yet."}
+            {forceReadOnly
+              ? " Exactly what will be sent."
+              : editable
+                ? " Type directly in the mock to edit the draft."
+                : " Read-only — no draft yet."}
           </p>
         </div>
         <Badge variant="outline" className="text-[11px] shrink-0">

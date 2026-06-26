@@ -201,6 +201,7 @@ const TOOL_REGISTRY: Record<
 > = {
   descript: { label: "Descript", Icon: FilmIcon, accent: "text-purple-600" },
   typefully: { label: "Typefully", Icon: SendIcon, accent: "text-blue-600" },
+  zernio: { label: "TikTok", Icon: SendIcon, accent: "text-rose-600" },
 };
 const TOOL_FALLBACK = { label: "Tool", Icon: WrenchIcon, accent: "text-muted-foreground" };
 

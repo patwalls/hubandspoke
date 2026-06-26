@@ -79,6 +79,14 @@ export interface ProductionItem {
   descriptPublishJobId?: string | null;
   descriptPublishedAt?: string | null;
   descriptPublishError?: string | null;
+  /** Zernio TikTok draft-to-inbox state. Orthogonal to `status` — tracks
+   *  only whether the video was delivered to the creator's TikTok inbox.
+   *  idle (null) / sending / scheduled / delivered / failed. */
+  zernioPostId?: string | null;
+  zernioStatus?: string | null;
+  zernioScheduledAt?: string | null;
+  zernioSentAt?: string | null;
+  zernioError?: string | null;
   /** Canva autofill state for instagram_post derivatives. canvaAutofillJobId
    *  is set while the autofill is in flight and cleared on success; canvaEditUrl
    *  is the final design link the editor opens. */

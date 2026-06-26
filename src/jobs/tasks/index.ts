@@ -90,6 +90,14 @@ import {
   type GenerateInstagramCaptionPayload,
 } from "./generate-instagram-caption";
 import {
+  zernioCreateDraftTask,
+  type ZernioCreateDraftPayload,
+} from "./zernio-create-draft";
+import {
+  zernioPollPublishTask,
+  type ZernioPollPublishPayload,
+} from "./zernio-poll-publish";
+import {
   draftAlgorithmRunTask,
   type DraftAlgorithmRunPayload,
 } from "./draft-algorithm-run";
@@ -133,6 +141,8 @@ export interface TaskPayloads {
   "capture-velocity-snapshot": CaptureVelocitySnapshotPayload;
   "generate-clip-ideas": GenerateClipIdeasPayload;
   "typefully-create-draft": TypefullyCreateDraftPayload;
+  "zernio-create-draft": ZernioCreateDraftPayload;
+  "zernio-poll-publish": ZernioPollPublishPayload;
   "generate-instagram-caption": GenerateInstagramCaptionPayload;
   "draft-algorithm-run": DraftAlgorithmRunPayload;
   "canva-create-copy": CanvaCreateCopyPayload;
@@ -189,6 +199,8 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "capture-velocity-snapshot": captureVelocitySnapshotTask,
   "generate-clip-ideas": generateClipIdeasTask,
   "typefully-create-draft": typefullyCreateDraftTask,
+  "zernio-create-draft": zernioCreateDraftTask,
+  "zernio-poll-publish": zernioPollPublishTask,
   "generate-instagram-caption": generateInstagramCaptionTask,
   "draft-algorithm-run": draftAlgorithmRunTask,
   "canva-create-copy": canvaCreateCopyTask,

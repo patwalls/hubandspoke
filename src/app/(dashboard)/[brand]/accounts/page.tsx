@@ -67,6 +67,7 @@ export default async function BrandAccountsPage({
         syncSupported: platformSupportsLatest(a.platform),
         backfillSupported: platformSupportsBackfill(a.platform),
         contentCount: contentCounts.get(a.id) ?? 0,
+        zernioAccountId: a.zernioAccountId,
       }))}
       brands={brands.map((b) => ({ slug: b.slug, label: b.label }))}
       scopeBrandSlug={brand}

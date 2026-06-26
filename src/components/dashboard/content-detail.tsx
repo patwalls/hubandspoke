@@ -108,6 +108,8 @@ export interface DraftRow {
 export type FieldSaveState = "idle" | "saving" | "saved" | "error";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { PublishScheduleDialog } from "./publish-schedule-dialog";
+import { TiktokDraftDialog } from "./tiktok-draft-dialog";
+import { TiktokDraftBanner } from "./tiktok-draft-banner";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
@@ -1249,6 +1251,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   // an item to status='Published' or 'Scheduled' (the generic PUT route
   // rejects those status values directly so editors can't half-publish).
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  // TikTok draft-to-inbox (Zernio) confirm dialog. Only offered for tiktok
+  // items; sends the video to the creator's TikTok inbox as a draft.
+  const [tiktokDialogOpen, setTiktokDialogOpen] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   // "More fields" toggle: hides Account, Pillar, Source type, Reposted from
   // by default so the metadata card surfaces only the fields a clip operator
@@ -2887,9 +2892,17 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           ) : (
             <button
               type="button"
-              onClick={() => setPublishDialogOpen(true)}
+              onClick={() =>
+                item.postType === "tiktok"
+                  ? setTiktokDialogOpen(true)
+                  : setPublishDialogOpen(true)
+              }
               className={buttonVariants({ variant: "default", size: "sm" })}
-              title="Mark this post as published (paste the live link) or schedule it for later"
+              title={
+                item.postType === "tiktok"
+                  ? "Publish this video to your TikTok inbox now, or schedule it"
+                  : "Mark this post as published (paste the live link) or schedule it for later"
+              }
             >
               <UploadIcon className="size-3.5" /> Publish or Schedule
             </button>
@@ -3076,6 +3089,21 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           })()}
         </div>
       </div>
+
+      {/* TikTok draft status banner — delivered / scheduled / failed. Driven
+       *  off zernioStatus so it survives a refresh (the human may finish the
+       *  post hours later, on their phone). Keeps the caption one click away
+       *  because TikTok doesn't carry it into the inbox draft. */}
+      {item.postType === "tiktok" && (
+        <TiktokDraftBanner
+          itemId={item.id}
+          zernioStatus={item.zernioStatus}
+          zernioError={item.zernioError}
+          zernioScheduledAt={item.zernioScheduledAt}
+          onRetry={() => setTiktokDialogOpen(true)}
+          onChanged={() => void load()}
+        />
+      )}
 
       {/* Metrics — only shown once the post is actually live */}
       {isPublished && (
@@ -4338,6 +4366,19 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         currentStatus={item.status ?? null}
         onSuccess={() => {
           void load();
+        }}
+      />
+
+      <TiktokDraftDialog
+        open={tiktokDialogOpen}
+        onOpenChange={setTiktokDialogOpen}
+        item={item}
+        onSuccess={() => {
+          void load();
+        }}
+        onGoOldWay={() => {
+          setTiktokDialogOpen(false);
+          setPublishDialogOpen(true);
         }}
       />
 

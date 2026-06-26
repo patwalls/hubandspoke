@@ -56,6 +56,9 @@ interface AccountRow {
    *  soft-deleted items). Drives the Content column and the "this will
    *  delete N pieces of content" line in the delete confirmation. */
   contentCount: number;
+  /** Zernio ConnectedAccount id for TikTok posting. Null = not connected.
+   *  Only meaningful for platform='tiktok' accounts. */
+  zernioAccountId: string | null;
 }
 
 interface BrandOption {
@@ -659,6 +662,22 @@ export function AccountsSettingsContent({
                               title="Paginate back through the full catalog (up to 50 SC credits)"
                             >
                               Backfill
+                            </Button>
+                          )}
+                          {a.platform === "tiktok" && (
+                            <Button
+                              size="sm"
+                              variant={a.zernioAccountId ? "ghost" : "outline"}
+                              onClick={() => {
+                                window.location.href = `/api/integrations/zernio/connect?accountId=${a.id}`;
+                              }}
+                              title={
+                                a.zernioAccountId
+                                  ? "TikTok is connected for draft posting. Click to reconnect."
+                                  : "Connect this TikTok account so Hub & Spoke can send drafts to its inbox"
+                              }
+                            >
+                              {a.zernioAccountId ? "TikTok ✓" : "Connect TikTok"}
                             </Button>
                           )}
                           <Button

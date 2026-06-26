@@ -41,12 +41,21 @@ import {
   accounts,
   brands,
   clipIdeas,
+  contentDrafts,
   formats,
   productionItems,
+  productionItemMedia,
   users,
+  type ContentDraftContent,
 } from "@/lib/db/schema";
 
-type CleanupTable = "productionItems" | "formats" | "clipIdeas" | "accounts";
+type CleanupTable =
+  | "productionItems"
+  | "formats"
+  | "clipIdeas"
+  | "accounts"
+  | "productionItemMedia"
+  | "contentDrafts";
 const created: Array<{ table: CleanupTable; id: string }> = [];
 
 afterEach(async () => {
@@ -66,6 +75,12 @@ afterEach(async () => {
         await db.delete(clipIdeas).where(eq(clipIdeas.id, row.id));
       } else if (row.table === "accounts") {
         await db.delete(accounts).where(eq(accounts.id, row.id));
+      } else if (row.table === "productionItemMedia") {
+        await db
+          .delete(productionItemMedia)
+          .where(eq(productionItemMedia.id, row.id));
+      } else if (row.table === "contentDrafts") {
+        await db.delete(contentDrafts).where(eq(contentDrafts.id, row.id));
       }
     } catch (err) {
       console.error(
@@ -151,6 +166,9 @@ export interface CreateTestAccountOptions {
   brand?: string;
   platform?: string;
   handle?: string;
+  /** Zernio ConnectedAccount id — set for tests that need a TikTok account
+   *  "connected" for draft posting. */
+  zernioAccountId?: string | null;
 }
 
 /**
@@ -178,9 +196,75 @@ export async function createTestAccount(
       brandId: brand.id,
       platform: opts.platform ?? "x",
       handle: opts.handle ?? `vitest-acct-${randomSuffix()}`,
+      zernioAccountId: opts.zernioAccountId ?? null,
     })
     .returning();
   trackCleanup("accounts", row.id);
+  return row;
+}
+
+export interface CreateTestMediaOptions {
+  productionItemId: string;
+  index?: number;
+  kind?: string;
+  s3Bucket?: string;
+  s3Key?: string;
+  contentType?: string;
+  sizeBytes?: number | null;
+  posterS3Key?: string | null;
+}
+
+/**
+ * Insert a `production_item_media` row (one carousel slide). Auto-cleans in
+ * afterEach (and the FK cascade from the owning item covers it too). Defaults
+ * to a single video slide at index 0.
+ */
+export async function createTestMedia(
+  opts: CreateTestMediaOptions,
+): Promise<typeof productionItemMedia.$inferSelect> {
+  const [row] = await db
+    .insert(productionItemMedia)
+    .values({
+      productionItemId: opts.productionItemId,
+      index: opts.index ?? 0,
+      kind: opts.kind ?? "video",
+      s3Bucket: opts.s3Bucket ?? "vitest-bucket",
+      s3Key: opts.s3Key ?? `vitest/${randomSuffix()}.mp4`,
+      contentType: opts.contentType ?? "video/mp4",
+      sizeBytes: opts.sizeBytes ?? 1024 * 1024,
+      posterS3Key: opts.posterS3Key ?? null,
+    })
+    .returning();
+  trackCleanup("productionItemMedia", row.id);
+  return row;
+}
+
+export interface CreateTestContentDraftOptions {
+  productionItemId: string;
+  content?: ContentDraftContent;
+  version?: number;
+  isCurrent?: boolean;
+}
+
+/**
+ * Insert a `content_drafts` row (the current draft by default). Auto-cleans in
+ * afterEach. Pass `content: { caption: "…" }` for TikTok tests.
+ */
+export async function createTestContentDraft(
+  opts: CreateTestContentDraftOptions,
+): Promise<typeof contentDrafts.$inferSelect> {
+  const [row] = await db
+    .insert(contentDrafts)
+    .values({
+      productionItemId: opts.productionItemId,
+      version: opts.version ?? 1,
+      isCurrent: opts.isCurrent ?? true,
+      content: opts.content ?? {},
+      fieldSchemaSnapshot: { version: 1, fields: [] },
+      generatedBy: "vitest",
+    })
+    .returning();
+  trackCleanup("contentDrafts", row.id);
   return row;
 }
 

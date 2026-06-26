@@ -187,6 +187,26 @@ export const productionItems = pgTable(
       withTimezone: true,
     }),
     typefullyError: text("typefully_error"),
+    // Zernio TikTok publish state (sync OUT, TikTok only). Set when we ask
+    // Zernio to publish this item's video LIVE to the connected TikTok account
+    // (riding Zernio's pre-audited Content Posting client). Once a live URL
+    // lands it folds into the normal publish pipeline (publishedLink + status=
+    // Published). Derivable states:
+    //   idle:       postId + status both null → never sent
+    //   sending:    status='sending', postId null → an immediate publish is mid-flight (the claim)
+    //   scheduled:  status='scheduled', scheduledAt set, postId null → queued in OUR worker
+    //   publishing: postId set, status='publishing' → Zernio accepted it, finishing async (webhook confirms)
+    //   published:  postId set, status='published' → live; publishedLink populated
+    //   failed:     status='failed', error set → retryable
+    // (A legacy 'delivered' value meant inbox-draft mode, kept as a fallback
+    //  if the draft path is ever re-enabled via createTikTokPost({draft:true}).)
+    zernioPostId: text("zernio_post_id"),
+    zernioStatus: text("zernio_status"),
+    zernioScheduledAt: timestamp("zernio_scheduled_at", {
+      withTimezone: true,
+    }),
+    zernioSentAt: timestamp("zernio_sent_at", { withTimezone: true }),
+    zernioError: text("zernio_error"),
     // ── Legacy single-media columns ──────────────────────────────────────
     // Source-of-truth for media is `production_item_media` (carousel rows).
     // The columns below mirror the row at `index = 0` for cheap reads (queue
@@ -1781,6 +1801,12 @@ export const accounts = pgTable(
     // Typefully draft auto-creation for this account. Get the id from
     // GET https://api.typefully.com/v2/social-sets.
     typefullySocialSetId: bigint("typefully_social_set_id", { mode: "number" }),
+    // Maps this account to a Zernio ConnectedAccount `_id` (the value passed as
+    // `accountId` when posting). Null = TikTok posting not connected for this
+    // account. Stamped by the Zernio OAuth callback
+    // (/api/integrations/zernio/callback). Only meaningful on platform='tiktok'
+    // accounts for v1.
+    zernioAccountId: text("zernio_account_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
