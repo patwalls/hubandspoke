@@ -45,11 +45,23 @@ export interface AutoClipIdeaGateInput {
  * transcript exists? Mirrors the service's own backfill gate
  * (original + youtube_long) and adds the cost gates the service does NOT
  * have: brand allowlist, Published status, and the recency cap.
+ *
+ * source_recording items (uploaded interviews/podcasts not tied to a published
+ * channel post) bypass the brand allowlist, Published-status, and recency
+ * gates — the upload itself is the intent signal, and there is no publish date
+ * to measure recency against.
  */
 export function evaluateAutoClipIdeaGates(
   item: AutoClipIdeaGateInput,
   now: Date = new Date(),
 ): { eligible: true } | { eligible: false; reason: string } {
+  if (item.sourceType === "source_recording") {
+    if (item.postType !== "youtube_long") {
+      return { eligible: false, reason: `source_recording-wrong-post-type-${item.postType ?? "null"}` };
+    }
+    return { eligible: true };
+  }
+
   const brands = getAutoClipIdeaBrands();
   if (!item.brand || !brands.includes(item.brand)) {
     return { eligible: false, reason: `brand-not-auto-enabled-${item.brand ?? "null"}` };

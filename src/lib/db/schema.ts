@@ -1480,7 +1480,7 @@ export type ContentEventPayload =
       type: "item_created";
       source: string; // e.g. "api:create", "sync:account-content"
       format: string | null;
-      sourceType: string; // "original" | "repost" | "cross_post" | "repurposed"
+      sourceType: string; // "original" | "repost" | "cross_post" | "repurposed" | "source_recording"
       postType: string | null;
     }
   // Versioning / audit-trail variant. Emitted whenever a tracked field on

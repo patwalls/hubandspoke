@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/command";
 import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
+import { UploadRecordingDialog } from "./upload-recording-dialog";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
 import { AccountBadge } from "@/components/ui/account-badge";
@@ -144,6 +145,8 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
   const [openFormatPickerId, setOpenFormatPickerId] = useState<string | null>(null);
   const [savingFormatId, setSavingFormatId] = useState<string | null>(null);
   const [formatOverrides, setFormatOverrides] = useState<Record<string, string | null>>({});
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+
   // "new"       = blank manual-entry dialog (today's behavior)
   // "from-link" = shows a paste-URL + Fetch row at the top that auto-fills
   //               all fields from the preview-link API. Edit mode leaves
@@ -560,32 +563,42 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
             corrupt filtering. Switch to a brand to add a post.
           */}
           {brand !== "all" && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-            >
-              + Add Post
-              <svg
-                className="ml-1 h-3 w-3 shrink-0 opacity-60"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            <div className="flex flex-col items-end gap-1">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  + Add Post
+                  <svg
+                    className="ml-1 h-3 w-3 shrink-0 opacity-60"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => openAddDialog("new")}>
+                    Create new
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openAddDialog("from-link")}>
+                    Add from link
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setUploadDialogOpen(true)}
               >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => openAddDialog("new")}>
-                Create new
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => openAddDialog("from-link")}>
-                Add from link
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                + Custom MP4 Upload
+              </Button>
+            </div>
           )}
         </div>
       </div>
@@ -1125,6 +1138,13 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
           </tbody>
         </table>
       </div>
+
+      <UploadRecordingDialog
+        open={uploadDialogOpen}
+        onOpenChange={setUploadDialogOpen}
+        brand={brand}
+        formats={formats}
+      />
     </div>
   );
 }
