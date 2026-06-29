@@ -563,42 +563,35 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
             corrupt filtering. Switch to a brand to add a post.
           */}
           {brand !== "all" && (
-            <div className="flex flex-col items-end gap-1">
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                >
-                  + Add Post
-                  <svg
-                    className="ml-1 h-3 w-3 shrink-0 opacity-60"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="m6 9 6 6 6-6" />
-                  </svg>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => openAddDialog("new")}>
-                    Create new
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => openAddDialog("from-link")}>
-                    Add from link
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setUploadDialogOpen(true)}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={buttonVariants({ variant: "outline", size: "sm" })}
               >
-                + Custom MP4 Upload
-              </Button>
-            </div>
+                + Add Post
+                <svg
+                  className="ml-1 h-3 w-3 shrink-0 opacity-60"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => openAddDialog("new")}>
+                  Create new
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => openAddDialog("from-link")}>
+                  Add from link
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setUploadDialogOpen(true)}>
+                  Custom MP4 upload
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>
