@@ -115,6 +115,8 @@ export function resolveEmbed(
       // reliable URN→URL mapping from the public URL alone. Link-out only.
       return { kind: "link-only", href: publishedLink };
     case "newsletter":
+    case "snapchat_story":
+    case "snapchat_spotlight":
       return { kind: "link-only", href: publishedLink };
   }
 }

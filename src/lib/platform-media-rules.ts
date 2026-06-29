@@ -155,6 +155,24 @@ export const PLATFORM_MEDIA_RULES: Record<PostType, PlatformMediaRule> = {
     replaceLabel: "",
     aspectClass: null,
   },
+  snapchat_story: {
+    mode: "single-any",
+    maxCount: 1,
+    allowedKinds: ["image", "video"],
+    accept: IMAGE_VIDEO_NO_GIF_ACCEPT,
+    addLabel: "Add photo or video",
+    replaceLabel: "Replace media",
+    aspectClass: "aspect-[9/16]",
+  },
+  snapchat_spotlight: {
+    mode: "single-video",
+    maxCount: 1,
+    allowedKinds: ["video"],
+    accept: VIDEO_ONLY_ACCEPT,
+    addLabel: "Add video",
+    replaceLabel: "Replace video",
+    aspectClass: "aspect-[9/16]",
+  },
 };
 
 /** Cheap wrapper — null-safe lookup that handles the "post type not yet set"

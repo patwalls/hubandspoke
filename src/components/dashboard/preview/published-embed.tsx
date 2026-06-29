@@ -22,6 +22,8 @@ const PLATFORM_LABEL: Record<PlatformKey, string> = {
   tiktok: "TikTok",
   threads: "Threads",
   newsletter: "Newsletter",
+  snapchat_story: "Snapchat Story",
+  snapchat_spotlight: "Snapchat Spotlight",
 };
 
 export function PublishedEmbed({ item }: { item: ProductionItem }) {

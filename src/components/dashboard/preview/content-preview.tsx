@@ -40,6 +40,8 @@ const SIMULATORS: Record<PlatformKey, (props: SimulatorProps) => React.ReactNode
   tiktok: TikTokSimulator,
   threads: ThreadsSimulator,
   newsletter: NewsletterSimulator,
+  snapchat_story: TikTokSimulator,
+  snapchat_spotlight: TikTokSimulator,
 };
 
 const PLATFORM_LABEL: Record<PlatformKey, string> = {
@@ -54,6 +56,8 @@ const PLATFORM_LABEL: Record<PlatformKey, string> = {
   tiktok: "TikTok",
   threads: "Threads",
   newsletter: "Newsletter",
+  snapchat_story: "Snapchat Story",
+  snapchat_spotlight: "Snapchat Spotlight",
 };
 
 interface ContentPreviewProps {

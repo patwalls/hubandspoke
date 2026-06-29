@@ -77,6 +77,8 @@ const PLATFORM_LABEL: Record<PostType, string> = {
   linkedin: "LinkedIn",
   threads: "Threads",
   newsletter: "Newsletter",
+  snapchat_story: "Snapchat Story",
+  snapchat_spotlight: "Snapchat Spotlight",
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────

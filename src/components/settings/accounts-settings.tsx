@@ -73,6 +73,7 @@ const PLATFORM_OPTIONS = [
   { value: "tiktok", label: "TikTok" },
   { value: "linkedin", label: "LinkedIn" },
   { value: "threads", label: "Threads" },
+  { value: "snapchat", label: "Snapchat" },
   { value: "newsletter", label: "Newsletter" },
   { value: "other", label: "Other" },
 ];
@@ -634,7 +635,7 @@ export function AccountsSettingsContent({
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={refreshingId === a.id || a.platform === "newsletter" || a.platform === "other"}
+                            disabled={refreshingId === a.id || a.platform === "newsletter" || a.platform === "snapchat" || a.platform === "other"}
                             onClick={() => handleRefresh(a.id)}
                             title="Refresh profile metadata (followers, avatar, bio)"
                           >

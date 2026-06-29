@@ -16,7 +16,9 @@ export type PostType =
   | "linkedin"
   | "newsletter"
   | "tiktok"
-  | "threads";
+  | "threads"
+  | "snapchat_story"
+  | "snapchat_spotlight";
 
 /** @deprecated renamed to PostType. Kept as a type alias during the accounts
  *  rollout so downstream imports don't break mid-PR. Delete after sweep. */
@@ -285,6 +287,34 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
       },
     ],
   },
+  snapchat_story: {
+    version: SCHEMA_VERSION,
+    fields: [
+      {
+        key: "caption",
+        label: "Story text",
+        type: "text",
+        maxLength: 250,
+        required: true,
+        prompt:
+          "Short text overlay for the Snapchat Story. One punchy line — specific and curious. No hashtags.",
+      },
+    ],
+  },
+  snapchat_spotlight: {
+    version: SCHEMA_VERSION,
+    fields: [
+      {
+        key: "caption",
+        label: "Caption",
+        type: "longtext",
+        maxLength: 500,
+        required: true,
+        prompt:
+          "Snapchat Spotlight caption. First line is the hook — one specific, curious sentence. Keep it tight.",
+      },
+    ],
+  },
 };
 
 // Per-postType role map for the simulator + repost-seed: which draft field
@@ -315,6 +345,8 @@ export const PLATFORM_FIELD_MAP: Record<PostType, PlatformFieldMap> = {
   newsletter: { caption: "body", secondary: "subject", cta: null },
   tiktok: { caption: "caption", secondary: null, cta: null },
   threads: { caption: "post", secondary: null, cta: "cta" },
+  snapchat_story: { caption: "caption", secondary: null, cta: null },
+  snapchat_spotlight: { caption: "caption", secondary: null, cta: null },
 };
 
 // Map a historical platform string to a canonical post-type key. Used by
@@ -342,6 +374,10 @@ export function normalizePlatform(raw: string): PostType | null {
   if (s === "newsletter") return "newsletter";
   if (s === "tiktok") return "tiktok";
   if (s === "threads") return "threads";
+
+  if (s === "snapchat story") return "snapchat_story";
+  if (s === "snapchat spotlight") return "snapchat_spotlight";
+  if (s === "snapchat") return "snapchat_story";
 
   return null;
 }

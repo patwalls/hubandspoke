@@ -104,6 +104,23 @@ function LinkedinIcon({ size = 16, className, ...rest }: LucideProps) {
   );
 }
 
+function SnapchatIcon({ size = 16, className, ...rest }: LucideProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="currentColor"
+      className={className}
+      aria-hidden
+      {...rest}
+    >
+      <path d="M12.166.024c2.938 0 5.59 1.563 7.007 4.033.51.9.717 1.875.717 3.314 0 .472-.034.939-.05 1.398 0 .083.062.174.162.203.43.127.87.19 1.31.19.365 0 .73-.047 1.08-.142.048-.013.1-.02.15-.02.283 0 .567.194.567.47 0 .26-.181.476-.44.553-.946.285-1.86.44-2.29 1.176-.03.05-.043.107-.037.162.076.7.753 2.004 1.96 3.297.326.352.715.637 1.143.84.27.127.414.417.35.703-.063.287-.32.483-.614.483a.735.735 0 0 1-.188-.024 9.278 9.278 0 0 0-1.414-.263 7.35 7.35 0 0 0-.734-.04c-.25 0-.5.014-.748.04-.253.027-.504.073-.75.138a.521.521 0 0 1-.123.015c-.336 0-.64-.228-.728-.56-.043-.16-.043-.323 0-.484.188-.71.254-1.44.196-2.166-.33.07-.664.11-1 .12h-.098c-.343 0-.686-.04-1.02-.117-.057.726.01 1.456.197 2.163.043.16.043.323 0 .483-.087.33-.39.56-.727.56a.521.521 0 0 1-.122-.015 7.635 7.635 0 0 0-.752-.138 7.352 7.352 0 0 0-.746-.04c-.246 0-.49.013-.733.04-.476.052-.95.14-1.414.262a.735.735 0 0 1-.188.024.619.619 0 0 1-.614-.483.587.587 0 0 1 .35-.703c.428-.203.817-.488 1.143-.84 1.207-1.293 1.884-2.597 1.96-3.297a.213.213 0 0 0-.037-.162c-.43-.736-1.344-.891-2.29-1.176-.26-.077-.44-.293-.44-.553 0-.276.284-.47.567-.47.05 0 .102.007.15.02.35.095.714.143 1.08.143.44 0 .88-.063 1.31-.19.1-.029.163-.12.163-.203-.017-.46-.05-.926-.05-1.398 0-1.44.207-2.413.716-3.314C6.578 1.587 9.23.024 12.166.024z" />
+    </svg>
+  );
+}
+
 // The official Threads brand mark reads as a muddy "@"-glyph at 14–16px.
 // Lucide's `AtSign` is cleaner and semantically close (Threads' whole
 // identity is the @-handle), so we use it in place of the brand mark for
@@ -141,6 +158,8 @@ export function PlatformIcon({
       return <LinkedinIcon size={size} className={cls} />;
     case "threads":
       return <ThreadsBrandIcon size={size} className={cls} />;
+    case "snapchat":
+      return <SnapchatIcon size={size} className={cls} />;
     case "newsletter":
       return <Mail size={size} className={cls} aria-hidden />;
     case "other":

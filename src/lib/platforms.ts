@@ -8,6 +8,7 @@ export type Platform =
   | "tiktok"
   | "linkedin"
   | "threads"
+  | "snapchat"
   | "newsletter"
   | "other";
 
@@ -65,6 +66,12 @@ export const PLATFORM_META: Record<Platform, PlatformMeta> = {
     defaultPostType: "threads",
     colorClass: "text-foreground",
   },
+  snapchat: {
+    label: "Snapchat",
+    postTypes: ["snapchat_story", "snapchat_spotlight"],
+    defaultPostType: "snapchat_story",
+    colorClass: "text-yellow-400",
+  },
   newsletter: {
     label: "Newsletter",
     postTypes: ["newsletter"],
@@ -93,6 +100,8 @@ export const POST_TYPE_SHORT_LABEL: Record<PostType, string> = {
   tiktok: "Video",
   linkedin: "Post",
   threads: "Post",
+  snapchat_story: "Story",
+  snapchat_spotlight: "Spotlight",
   newsletter: "Issue",
 };
 

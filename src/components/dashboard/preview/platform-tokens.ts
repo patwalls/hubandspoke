@@ -26,4 +26,6 @@ export const PLATFORM_FONT: Record<PlatformKey, string> = {
   tiktok: FONT_INSTAGRAM,
   linkedin: FONT_LINKEDIN,
   newsletter: FONT_SERIF,
+  snapchat_story: FONT_INSTAGRAM,
+  snapchat_spotlight: FONT_INSTAGRAM,
 };
