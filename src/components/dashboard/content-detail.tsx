@@ -1893,10 +1893,19 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   ]);
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
+  // Uploaded source recordings (and any item with archived video but no live
+  // post to embed — `isPublished` keys off publishedLink, which an upload
+  // never has) should still preview their MP4. Without this the left pane
+  // never renders for an upload and the page shows no video at all.
+  const hasArchivedVideo =
+    !!item.mediaS3Key &&
+    (item.mediaContentType?.startsWith("video/") ?? false) &&
+    !item.publishedLink;
   // Two-column Details layout fires for inline-drafting items (left =
-  // editable simulator) AND for published items (left = real embed of the
-  // live post). Other states keep today's form-only layout.
-  const showLeftPane = isPrePublishInline || isPublished;
+  // editable simulator), published items (left = real embed of the live
+  // post), and uploaded-video items (left = read-only MP4 player). Other
+  // states keep today's form-only layout.
+  const showLeftPane = isPrePublishInline || isPublished || hasArchivedVideo;
   // Descript-render state. Drives the IG Reel embed-style placeholder
   // until the rendered MP4 actually lands in S3. Four states derived from
   // the existing `descript_*` columns:
@@ -3375,6 +3384,24 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         />
       ) : isPublished ? (
         <PublishedEmbed item={item} />
+      ) : hasArchivedVideo ? (
+        // Uploaded video with no live post to embed — read-only MP4 player
+        // via the same simulator (resolvePreviewData builds a video slide
+        // from item.mediaUrl).
+        <ContentPreview
+          item={item}
+          media={data.media ?? []}
+          draftId={draft?.id ?? null}
+          liveContent={liveContent}
+          onLocalEdit={onLocalEdit}
+          onCommit={onCommit}
+          onMediaMutated={() => void load()}
+          onDraftMutated={() => void load()}
+          descriptRenderState={descriptRenderState}
+          descriptProcessingLabel={descriptProcessingLabel}
+          descriptProcessingDetail={descriptProcessingDetail}
+          draftAlgorithmRunning={draftAlgorithmRunning}
+        />
       ) : null}
       {/* RIGHT column. Used to be the metadata sidebar
        *  (PropertyRowGroups for Published link/date + CTA UTM + DM
