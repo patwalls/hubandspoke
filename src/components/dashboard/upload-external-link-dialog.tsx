@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { PickerAccount } from "@/components/ui/account-post-type-picker";
 
 type Stage = "idle" | "fetching" | "submitting";
 
@@ -33,6 +34,7 @@ interface UploadExternalLinkDialogProps {
   onOpenChange: (open: boolean) => void;
   brand: string;
   formats?: string[];
+  accounts?: PickerAccount[];
 }
 
 export function UploadExternalLinkDialog({
@@ -40,11 +42,14 @@ export function UploadExternalLinkDialog({
   onOpenChange,
   brand,
   formats,
+  accounts,
 }: UploadExternalLinkDialogProps) {
   const router = useRouter();
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [title, setTitle] = useState("");
   const [format, setFormat] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const youtubeAccounts = accounts?.filter((a) => a.platform === "youtube" && a.isActive) ?? [];
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +58,7 @@ export function UploadExternalLinkDialog({
     setYoutubeUrl("");
     setTitle("");
     setFormat("");
+    setAccountId("");
     setPreview(null);
     setStage("idle");
     setError(null);
@@ -108,6 +114,7 @@ export function UploadExternalLinkDialog({
           title: t,
           brand,
           format: format || undefined,
+          accountId: accountId || undefined,
           publishedDate: preview?.publishedDate ?? undefined,
           thumbnail: preview?.thumbnail ?? undefined,
         }),
@@ -189,6 +196,24 @@ export function UploadExternalLinkDialog({
               disabled={busy}
             />
           </div>
+
+          {youtubeAccounts.length > 0 && (
+            <div className="space-y-1.5">
+              <Label>YouTube channel <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Select value={accountId} onValueChange={(v) => setAccountId(v ?? "")} disabled={busy}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pick a channel…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {youtubeAccounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.handle}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {formats && formats.length > 0 && (
             <div className="space-y-1.5">

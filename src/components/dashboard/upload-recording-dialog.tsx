@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import type { PickerAccount } from "@/components/ui/account-post-type-picker";
 
 type Stage = "idle" | "creating" | "uploading" | "confirming";
 
@@ -29,6 +30,7 @@ interface UploadRecordingDialogProps {
   onOpenChange: (open: boolean) => void;
   brand: string;
   formats?: string[];
+  accounts?: PickerAccount[];
 }
 
 export function UploadRecordingDialog({
@@ -36,10 +38,13 @@ export function UploadRecordingDialog({
   onOpenChange,
   brand,
   formats,
+  accounts,
 }: UploadRecordingDialogProps) {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [format, setFormat] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const youtubeAccounts = accounts?.filter((a) => a.platform === "youtube" && a.isActive) ?? [];
   const [file, setFile] = useState<File | null>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
@@ -79,6 +84,7 @@ export function UploadRecordingDialog({
     clearStallTimer();
     setTitle("");
     setFormat("");
+    setAccountId("");
     setFile(null);
     setStage("idle");
     setProgress(0);
@@ -145,6 +151,7 @@ export function UploadRecordingDialog({
           title: title.trim(),
           brand,
           format: format || undefined,
+          accountId: accountId || undefined,
         }),
       });
       const json = await res.json();
@@ -297,6 +304,24 @@ export function UploadRecordingDialog({
               disabled={busy}
             />
           </div>
+
+          {youtubeAccounts.length > 0 && (
+            <div className="space-y-1.5">
+              <Label>YouTube channel <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Select value={accountId} onValueChange={(v) => setAccountId(v ?? "")} disabled={busy}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pick a channel…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {youtubeAccounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.handle}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {formats && formats.length > 0 && (
             <div className="space-y-1.5">

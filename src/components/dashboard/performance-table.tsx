@@ -1142,12 +1142,14 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
         onOpenChange={setUploadDialogOpen}
         brand={brand}
         formats={formats}
+        accounts={accounts}
       />
       <UploadExternalLinkDialog
         open={externalLinkDialogOpen}
         onOpenChange={setExternalLinkDialogOpen}
         brand={brand}
         formats={formats}
+        accounts={accounts}
       />
     </div>
   );

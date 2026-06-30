@@ -20,6 +20,7 @@ import { productionItems } from "@/lib/db/schema";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { resolveEditor } from "@/lib/services/assignees";
 import { recordItemCreated } from "@/lib/services/item-created";
+import { todayLocalISO } from "@/lib/utils/dates";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { title?: string; brand?: string; format?: string; accountId?: string };
+  let body: { title?: string; brand?: string; format?: string; accountId?: string; };
   try {
     body = await request.json();
   } catch {
@@ -66,7 +67,9 @@ export async function POST(request: NextRequest) {
       accountId,
       postType: "youtube_long",
       sourceType: "source_recording",
-      status: "Idea",
+      status: "Published",
+      publishedDate: todayLocalISO(),
+      publishedAt: new Date(),
       editorUserId,
       createdVia: "api:upload-recording",
     })
