@@ -104,6 +104,7 @@ export async function POST(request: NextRequest) {
         status: "Published",
         youtubeId,
         youtubeUrl,
+        publishedLink: youtubeUrl,
         publishedDate,
         publishedAt: new Date(),
         thumbnail,

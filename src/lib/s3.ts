@@ -15,7 +15,18 @@ let _client: S3Client | null = null;
 export function s3Client(): S3Client {
   if (_client) return _client;
   const region = process.env.AWS_REGION || "us-east-1";
-  _client = new S3Client({ region });
+  // `requestChecksumCalculation: "WHEN_REQUIRED"` is critical for the
+  // browser-upload flow. Since @aws-sdk/client-s3 v3.729 the SDK injects a
+  // default CRC32 integrity checksum into every PutObject. When we *presign*
+  // a PutObjectCommand (getPresignedPutUrl), the checksum is computed over the
+  // empty signing-time body and baked into the URL as
+  // `x-amz-checksum-crc32=AAAAAA==` (CRC32 of zero bytes). The browser then
+  // streams the real file, S3 validates it against "checksum of empty", and
+  // the connection dies mid-upload — the progress bar freezes partway and
+  // never completes. "WHEN_REQUIRED" stops the SDK from adding that checksum
+  // unless the operation actually requires one, which fixes presigned PUTs.
+  // Safe for our server-side uploads too (S3 doesn't require checksums there).
+  _client = new S3Client({ region, requestChecksumCalculation: "WHEN_REQUIRED" });
   return _client;
 }
 
