@@ -7,6 +7,12 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  ListPartsCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
+  type ListPartsCommandOutput,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -128,6 +134,117 @@ export async function getPresignedGetUrl(
 export async function deleteObject(key: string): Promise<void> {
   await s3Client().send(
     new DeleteObjectCommand({ Bucket: bucketName(), Key: key })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Multipart upload (browser → S3, large files)
+//
+// A single presigned PUT of a multi-hundred-MB file rides on one long-lived
+// connection; any stall/middlebox timeout kills the whole upload with no
+// resume (this is what made the Upload Recording dialog never complete).
+// Multipart splits the file into small parts the browser PUTs independently
+// (each a fresh, short request that can be retried in isolation).
+//
+// Crucially, the browser never reads part ETags: the `www.starterstory.com`
+// bucket's CORS does not expose the ETag response header (and we can't modify
+// that shared bucket's CORS). Instead the *server* calls ListParts to gather
+// ETags at completion time — no CORS exposure needed. The browser only PUTs
+// parts (which already works cross-origin) and tells us when it's done.
+// ---------------------------------------------------------------------------
+
+/** Start a multipart upload; returns the S3-assigned uploadId. */
+export async function createMultipartUpload(
+  key: string,
+  contentType: string
+): Promise<string> {
+  const res = await s3Client().send(
+    new CreateMultipartUploadCommand({
+      Bucket: bucketName(),
+      Key: key,
+      ContentType: contentType,
+    })
+  );
+  if (!res.UploadId) throw new Error("S3 did not return an UploadId");
+  return res.UploadId;
+}
+
+/**
+ * Presign one UploadPart URL. Intentionally signs only host (no
+ * ContentLength), so the browser can PUT a part of any size — the final part
+ * is always smaller than the rest, and signing the length would reject it.
+ */
+export async function getPresignedUploadPartUrl(
+  key: string,
+  uploadId: string,
+  partNumber: number
+): Promise<string> {
+  const cmd = new UploadPartCommand({
+    Bucket: bucketName(),
+    Key: key,
+    UploadId: uploadId,
+    PartNumber: partNumber,
+  });
+  return getSignedUrl(s3Client(), cmd, { expiresIn: 21600 }); // 6h — long uploads
+}
+
+/**
+ * Finish a multipart upload. Reads the uploaded parts' ETags server-side via
+ * ListParts (so the browser never needs CORS-exposed ETags), then completes.
+ * Paginates ListParts in case there are >1000 parts.
+ */
+export async function completeMultipartUpload(
+  key: string,
+  uploadId: string
+): Promise<void> {
+  const bucket = bucketName();
+  const parts: { PartNumber: number; ETag: string }[] = [];
+  let partNumberMarker: string | undefined = undefined;
+  do {
+    const list: ListPartsCommandOutput = await s3Client().send(
+      new ListPartsCommand({
+        Bucket: bucket,
+        Key: key,
+        UploadId: uploadId,
+        PartNumberMarker: partNumberMarker,
+      })
+    );
+    for (const p of list.Parts ?? []) {
+      if (p.PartNumber != null && p.ETag != null) {
+        parts.push({ PartNumber: p.PartNumber, ETag: p.ETag });
+      }
+    }
+    partNumberMarker = list.IsTruncated
+      ? list.NextPartNumberMarker
+      : undefined;
+  } while (partNumberMarker);
+
+  if (parts.length === 0) {
+    throw new Error("No uploaded parts found to complete");
+  }
+  parts.sort((a, b) => a.PartNumber - b.PartNumber);
+
+  await s3Client().send(
+    new CompleteMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: { Parts: parts },
+    })
+  );
+}
+
+/** Best-effort cleanup of an aborted/cancelled multipart upload. */
+export async function abortMultipartUpload(
+  key: string,
+  uploadId: string
+): Promise<void> {
+  await s3Client().send(
+    new AbortMultipartUploadCommand({
+      Bucket: bucketName(),
+      Key: key,
+      UploadId: uploadId,
+    })
   );
 }
 

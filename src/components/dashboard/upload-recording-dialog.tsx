@@ -55,6 +55,10 @@ export function UploadRecordingDialog({
   const xhrRef = useRef<XMLHttpRequest | null>(null);
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastProgressRef = useRef<number>(0);
+  // Holds the in-flight multipart upload so a cancel/unmount can abort it on
+  // S3 (best-effort) instead of leaving orphaned parts behind.
+  const multipartRef = useRef<{ key: string; uploadId: string } | null>(null);
+  const cancelledRef = useRef(false);
 
   function clearStallTimer() {
     if (stallTimerRef.current) {
@@ -69,19 +73,36 @@ export function UploadRecordingDialog({
     stallTimerRef.current = setTimeout(() => setStalled(true), 60_000);
   }
 
+  // Best-effort: tell S3 to discard a partially-uploaded multipart upload.
+  function abortMultipart() {
+    const mp = multipartRef.current;
+    if (!mp) return;
+    multipartRef.current = null;
+    // Fire-and-forget; keepalive lets it survive an unmount/navigation.
+    fetch("/api/uploads/multipart/abort", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(mp),
+      keepalive: true,
+    }).catch(() => {});
+  }
+
   // Clean up XHR and stall timer if the dialog is closed mid-upload
   useEffect(() => {
     return () => {
+      cancelledRef.current = true;
       xhrRef.current?.abort();
       clearStallTimer();
+      abortMultipart();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function reset() {
+    cancelledRef.current = true;
     xhrRef.current?.abort();
     xhrRef.current = null;
     clearStallTimer();
+    abortMultipart();
     setTitle("");
     setFormat("");
     setAccountId("");
@@ -136,9 +157,43 @@ export function UploadRecordingDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title]);
 
+  // PUT one part to S3 with a per-part timeout. Resolves on success, rejects
+  // on HTTP error / network error / timeout / abort. `onLoaded` reports the
+  // bytes sent so far for this part so the caller can aggregate overall %.
+  function putPart(
+    url: string,
+    blob: Blob,
+    onLoaded: (loaded: number) => void,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhrRef.current = xhr;
+      // Per-part timeout. Parts are ~8MB; 3 min is generous even on a slow
+      // link, and a stalled part is retried rather than hanging forever.
+      xhr.timeout = 3 * 60 * 1000;
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          onLoaded(e.loaded);
+          resetStallTimer();
+        }
+      });
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`HTTP ${xhr.status}`));
+      });
+      xhr.addEventListener("error", () => reject(new Error("network error")));
+      xhr.addEventListener("timeout", () => reject(new Error("timed out")));
+      xhr.addEventListener("abort", () => reject(new Error("cancelled")));
+      xhr.open("PUT", url);
+      xhr.send(blob);
+    });
+  }
+
   async function handleSubmit() {
     if (!title.trim() || !file) return;
     setError(null);
+    cancelledRef.current = false;
+    const uploadFile = file;
 
     // 1. Create the production item
     setStage("creating");
@@ -167,106 +222,120 @@ export function UploadRecordingDialog({
       return;
     }
 
-    // 2. Get presigned upload URL
+    // 2. Start a multipart upload — returns a presigned URL per part. We PUT
+    //    parts directly to S3 (each small + independently retryable), which is
+    //    far more reliable than one giant presigned PUT that stalls forever.
     setStage("uploading");
     setProgress(0);
-    const contentType = file.type || "video/mp4";
-    let uploadUrl: string, key: string, bucket: string;
+    const contentType = uploadFile.type || "video/mp4";
+    let key: string, bucket: string, uploadId: string, partSize: number;
+    let partUrls: { partNumber: number; url: string }[];
     try {
-      const res = await fetch("/api/uploads/s3-presign", {
+      const res = await fetch("/api/uploads/multipart/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           itemId,
-          fileName: file.name,
+          fileName: uploadFile.name,
           contentType,
-          fileSize: file.size,
+          fileSize: uploadFile.size,
         }),
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error || `Presign failed (HTTP ${res.status})`);
+        setError(json.error || `Could not start upload (HTTP ${res.status})`);
         setStage("idle");
         return;
       }
-      uploadUrl = json.uploadUrl;
       key = json.key;
       bucket = json.bucket;
+      uploadId = json.uploadId;
+      partSize = json.partSize;
+      partUrls = json.partUrls;
+      multipartRef.current = { key, uploadId };
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Presign failed");
+      setError(err instanceof Error ? err.message : "Could not start upload");
       setStage("idle");
       return;
     }
 
-    // 3. Upload file to S3
+    // 3. Upload each part, retrying a stalled/failed part in isolation. Overall
+    //    progress = (bytes in completed parts + current part's bytes) / total.
     lastProgressRef.current = 0;
     resetStallTimer();
+    const totalBytes = uploadFile.size;
+    let completedBytes = 0;
+    const MAX_PART_ATTEMPTS = 4;
     try {
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhrRef.current = xhr;
-        // 20-minute hard timeout — long enough for ~1 GB on a slow connection
-        xhr.timeout = 20 * 60 * 1000;
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            if (pct !== lastProgressRef.current) {
-              lastProgressRef.current = pct;
-              resetStallTimer();
+      for (const { partNumber, url } of partUrls) {
+        const start = (partNumber - 1) * partSize;
+        const end = Math.min(start + partSize, totalBytes);
+        const blob = uploadFile.slice(start, end);
+
+        let attempt = 0;
+        for (;;) {
+          attempt++;
+          try {
+            await putPart(url, blob, (loaded) => {
+              const pct = Math.round(
+                ((completedBytes + loaded) / totalBytes) * 100,
+              );
+              if (pct !== lastProgressRef.current) {
+                lastProgressRef.current = pct;
+                setProgress(pct);
+              }
+            });
+            break; // part succeeded
+          } catch (err) {
+            if (cancelledRef.current) throw new Error("cancelled");
+            if (attempt >= MAX_PART_ATTEMPTS) {
+              const why = err instanceof Error ? err.message : "upload error";
+              throw new Error(
+                `Part ${partNumber} failed after ${attempt} tries (${why})`,
+              );
             }
-            setProgress(pct);
+            // Brief backoff before retrying the same part.
+            await new Promise((r) => setTimeout(r, 1000 * attempt));
           }
-        });
-        xhr.addEventListener("load", () => {
-          clearStallTimer();
-          if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
-        });
-        xhr.addEventListener("error", () => {
-          clearStallTimer();
-          reject(new Error("Upload failed (network error)"));
-        });
-        xhr.addEventListener("timeout", () => {
-          clearStallTimer();
-          reject(new Error("Upload timed out — check your connection and try again"));
-        });
-        xhr.addEventListener("abort", () => {
-          clearStallTimer();
-          reject(new Error("Upload cancelled"));
-        });
-        xhr.open("PUT", uploadUrl);
-        xhr.setRequestHeader("Content-Type", contentType);
-        xhr.send(file);
-      });
+        }
+        completedBytes = end;
+        setProgress(Math.round((completedBytes / totalBytes) * 100));
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      clearStallTimer();
       setStalled(false);
+      abortMultipart();
+      setError(err instanceof Error ? err.message : "Upload failed");
       setStage("idle");
       return;
     }
+    clearStallTimer();
 
-    // 4. Confirm upload (triggers Whisper transcription → clip ideas)
+    // 4. Complete: the server lists parts (reads ETags it can see; the browser
+    //    can't) and finalizes the object, then enqueues Whisper transcription.
     setStage("confirming");
     try {
-      const res = await fetch("/api/uploads/confirm", {
+      const res = await fetch("/api/uploads/multipart/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           itemId,
           key,
           bucket,
+          uploadId,
           contentType,
-          fileSize: file.size,
+          fileSize: uploadFile.size,
         }),
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        setError(json.error || `Confirm failed (HTTP ${res.status})`);
+        setError(json.error || `Finalize failed (HTTP ${res.status})`);
         setStage("idle");
         return;
       }
+      multipartRef.current = null; // completed — nothing to abort
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Confirm failed");
+      setError(err instanceof Error ? err.message : "Finalize failed");
       setStage("idle");
       return;
     }
