@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { resolveEditor } from "@/lib/services/assignees";
 import { recordItemCreated } from "@/lib/services/item-created";
@@ -65,6 +66,16 @@ export async function POST(request: NextRequest) {
       { error: "Could not extract a YouTube video ID from that URL" },
       { status: 400 },
     );
+  }
+
+  // If this YouTube video already exists, redirect to it instead of erroring.
+  const [existing] = await db
+    .select({ id: productionItems.id })
+    .from(productionItems)
+    .where(eq(productionItems.youtubeId, youtubeId))
+    .limit(1);
+  if (existing) {
+    return NextResponse.json({ id: existing.id, alreadyExists: true }, { status: 200 });
   }
 
   try {

@@ -126,9 +126,14 @@ export function UploadExternalLinkDialog({
         setStage("idle");
         return;
       }
-      toast.success("External video added — download queued, clip ideas will generate after transcription");
+      const data = json as { id: string; alreadyExists?: boolean };
+      if (data.alreadyExists) {
+        toast.info("This video is already in the library — taking you there now");
+      } else {
+        toast.success("External video added — download queued, clip ideas will generate after transcription");
+      }
       handleOpenChange(false);
-      router.push(`/${brand}/content/${(json as { id: string }).id}`);
+      router.push(`/${brand}/content/${data.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
       setStage("idle");
