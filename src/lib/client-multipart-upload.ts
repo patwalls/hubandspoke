@@ -17,6 +17,13 @@
 
 const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB per part
 
+// A single chunk should upload in seconds even on a slow link; 2 min is
+// generous. Without a timeout a stalled TCP connection hangs the whole upload
+// forever (the XHR never fires load/error), which is exactly what we saw on
+// large R2 uploads. A timed-out part is retried in isolation.
+const PART_TIMEOUT_MS = 2 * 60 * 1000;
+const MAX_PART_ATTEMPTS = 4;
+
 export interface MultipartUploadArgs {
   file: File;
   uploadId: string;
@@ -42,6 +49,9 @@ function putPart(args: {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", args.url, true);
+    // Per-part timeout so a stalled connection rejects (and gets retried)
+    // instead of hanging the whole upload indefinitely.
+    xhr.timeout = PART_TIMEOUT_MS;
     // S3 multipart parts don't need a Content-Type; sending application/octet-stream
     // avoids the browser pre-flighting a CORS OPTIONS request per-part.
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
@@ -66,6 +76,7 @@ function putPart(args: {
       }
     };
     xhr.onerror = () => reject(new Error("Part upload failed (network error)"));
+    xhr.ontimeout = () => reject(new Error("Part upload timed out"));
     xhr.onabort = () => reject(new Error("Part upload aborted"));
     xhr.send(args.chunk);
   });
@@ -110,14 +121,33 @@ export async function runMultipartUpload(
     }
 
     // Upload the chunk with per-byte progress folded into overall progress.
-    const etag = await putPart({
-      url: presignJson.url,
-      chunk,
-      onProgress: (loaded) => {
-        const totalUploaded = bytesUploadedBeforeCurrentPart + loaded;
-        onProgress?.(Math.round((totalUploaded / file.size) * 100));
-      },
-    });
+    // Retry a failed/timed-out part in isolation (the presigned URL stays
+    // valid for an hour, so the same URL is reused across attempts).
+    let etag = "";
+    let attempt = 0;
+    for (;;) {
+      attempt++;
+      try {
+        etag = await putPart({
+          url: presignJson.url,
+          chunk,
+          onProgress: (loaded) => {
+            const totalUploaded = bytesUploadedBeforeCurrentPart + loaded;
+            onProgress?.(Math.round((totalUploaded / file.size) * 100));
+          },
+        });
+        break;
+      } catch (err) {
+        if (attempt >= MAX_PART_ATTEMPTS) {
+          const why = err instanceof Error ? err.message : "upload error";
+          throw new Error(
+            `Part ${partNumber} failed after ${attempt} attempts (${why})`,
+          );
+        }
+        // Brief backoff before retrying the same part.
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+      }
+    }
 
     parts.push({ PartNumber: partNumber, ETag: etag });
     bytesUploadedBeforeCurrentPart += partBytes;
