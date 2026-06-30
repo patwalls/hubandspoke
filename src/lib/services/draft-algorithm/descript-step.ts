@@ -156,6 +156,7 @@ export async function runDescriptStepForDerivative(
       descriptProjectId: productionItems.descriptProjectId,
       descriptProjectUrl: productionItems.descriptProjectUrl,
       mediaS3Key: productionItems.mediaS3Key,
+      mediaS3Bucket: productionItems.mediaS3Bucket,
     })
     .from(productionItems)
     .where(eq(productionItems.id, args.pillarItemId))
@@ -209,7 +210,9 @@ export async function runDescriptStepForDerivative(
   // pillar sees it as warm, then enqueue the resolver with the
   // post-import agent prompt so Underlord runs once the import finishes.
   if (!pillar.descriptProjectId && pillar.mediaS3Key) {
-    const presigned = await getPresignedGetUrl(pillar.mediaS3Key, 3600);
+    const presigned = await getPresignedGetUrl(pillar.mediaS3Key, 3600, {
+      bucket: pillar.mediaS3Bucket ?? undefined,
+    });
     const projectName = pillar.title ?? `Pillar ${pillar.id.slice(0, 8)}`;
     const importRes = await createDescriptProjectFromUrl({
       projectName,

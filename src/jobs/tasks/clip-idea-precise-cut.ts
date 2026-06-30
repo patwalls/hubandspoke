@@ -119,6 +119,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
       hookSegments: clipIdeas.hookSegments,
       sourceProductionItemId: clipIdeas.sourceProductionItemId,
       mediaS3Key: productionItems.mediaS3Key,
+      mediaS3Bucket: productionItems.mediaS3Bucket,
       mediaContentType: productionItems.mediaContentType,
     })
     .from(clipIdeas)
@@ -167,7 +168,9 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
           : ""),
     );
 
-    const getUrl = await getPresignedGetUrl(row.mediaS3Key, 3600);
+    const getUrl = await getPresignedGetUrl(row.mediaS3Key, 3600, {
+      bucket: row.mediaS3Bucket ?? undefined,
+    });
     await downloadToFile(getUrl, sourcePath);
 
     if (segments.length > 1) {

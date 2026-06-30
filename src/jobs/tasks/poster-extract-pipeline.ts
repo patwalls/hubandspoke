@@ -127,6 +127,10 @@ export async function extractPosterFromMediaS3(
   mediaS3Key: string,
   productionItemId: string,
   logger: { info: (msg: string) => void } = { info: () => {} },
+  // Bucket the source media lives in. Source recordings now land in R2, so the
+  // GET presign must target that bucket — defaulting to the AWS S3 bucket would
+  // presign a URL for an object that isn't there. Undefined → default S3.
+  sourceBucket?: string,
 ): Promise<{ posterS3Key: string; bucket: string; bytes: number }> {
   const runDir = join(tmpdir(), `poster-extract-${randomUUID()}`);
   await mkdir(runDir, { recursive: true });
@@ -134,7 +138,9 @@ export async function extractPosterFromMediaS3(
   const outputPath = join(runDir, "frame0.jpg");
 
   try {
-    const presignedGet = await getPresignedGetUrl(mediaS3Key, POSTER_GET_URL_TTL);
+    const presignedGet = await getPresignedGetUrl(mediaS3Key, POSTER_GET_URL_TTL, {
+      bucket: sourceBucket,
+    });
     try {
       await downloadToFile(presignedGet, inputPath);
     } catch (err) {

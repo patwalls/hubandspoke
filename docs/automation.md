@@ -1289,6 +1289,15 @@ Every sweep filter AND the per-item executor must resolve platform kinds through
 - `enrichment/orchestrator.ts` (`enrichSingleItem` + `runEnrichmentSweep`) uses the helper
 - `hook-extract/orchestrator.ts` gates directly on `post_type` via `inArray(productionItems.postType, SHORT_FORM_POST_TYPES)`, mirroring `hook-extract/fallback.ts`
 
+### Media storage — `media_s3_bucket` is canonical, readers must route by it
+Uploaded media no longer lives in one bucket. Browser **multipart uploads** of source video/audio (the Upload Recording / draft-dropzone flow → `/api/uploads/multipart/create`) go to **Cloudflare R2** unconditionally — R2 is ~$0.015/GB-mo with **zero egress**, which matters because raw pillars get re-read repeatedly (transcribe → clip → Descript import). Everything else (images, server-side archive of IG/TikTok/YouTube media, ffmpeg-cut clips via `putObjectFromFile`) still goes to **AWS S3**. The upload route stamps `production_items.media_s3_bucket` with whichever bucket the object landed in.
+
+`src/lib/s3.ts` routes a single client per call by bucket name: `clientForBucket(bucket)` returns the R2 client when `bucket === r2BucketName()`, else the AWS S3 client. `getPresignedGetUrl`, `headObject`, and the multipart helpers all take an optional `bucket` arg (default = AWS S3 bucket).
+
+**The invariant:** any task that reads archived media back MUST `select` `media_s3_bucket` alongside `media_s3_key` and pass `{ bucket: row.mediaS3Bucket ?? undefined }` into the presign/head call. Omitting it signs the URL against AWS S3 — a silent 404 at download time for any R2-stored item (transcription, clipping, and Descript cold-import all fail with no upload-side symptom). `?? undefined` keeps legacy S3 rows (null bucket) on the default path unchanged. Readers that obey this: `transcribe-whisper` (`whisper-pipeline.ts`), `clip-idea-precise-cut`, `extract-poster` (→ `poster-extract-pipeline.ts`'s `sourceBucket` param), `coldImportPillar` in `descript-derivative.ts` (live via `promote-clip-idea`), and `descript-step.ts`. **Not yet bucket-aware** (safe today only because `production_item_media` is never written by the R2 path): the TikTok send path (`tiktok-draft/send.ts` reads `production_item_media.s3Key` but never selects `s3Bucket`) — fix it before any R2 object can reach `production_item_media`.
+
+Routing contract is pinned by `src/lib/s3.test.ts`.
+
 ---
 
 ## External systems

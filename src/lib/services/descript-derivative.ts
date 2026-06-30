@@ -373,6 +373,7 @@ export async function coldImportPillar(args: {
         descriptProjectId: productionItems.descriptProjectId,
         descriptProjectUrl: productionItems.descriptProjectUrl,
         mediaS3Key: productionItems.mediaS3Key,
+        mediaS3Bucket: productionItems.mediaS3Bucket,
       })
       .from(productionItems)
       .where(eq(productionItems.id, args.pillarId))
@@ -398,7 +399,9 @@ export async function coldImportPillar(args: {
       );
     }
 
-    const presigned = await getPresignedGetUrl(pillar.mediaS3Key, 3600);
+    const presigned = await getPresignedGetUrl(pillar.mediaS3Key, 3600, {
+      bucket: pillar.mediaS3Bucket ?? undefined,
+    });
     const projectName = pillar.title ?? `Pillar ${pillar.id.slice(0, 8)}`;
     const importRes = await createDescriptProjectFromUrl({
       projectName,

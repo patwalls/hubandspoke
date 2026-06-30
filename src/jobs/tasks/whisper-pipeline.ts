@@ -198,6 +198,7 @@ export async function extractAudioToS3(
   const [item] = await db
     .select({
       mediaS3Key: productionItems.mediaS3Key,
+      mediaS3Bucket: productionItems.mediaS3Bucket,
       mediaContentType: productionItems.mediaContentType,
     })
     .from(productionItems)
@@ -233,7 +234,9 @@ export async function extractAudioToS3(
     logger.info(
       `whisper extract start item=${productionItemId} key=${item.mediaS3Key}`,
     );
-    const getUrl = await getPresignedGetUrl(item.mediaS3Key, 3600);
+    const getUrl = await getPresignedGetUrl(item.mediaS3Key, 3600, {
+      bucket: item.mediaS3Bucket ?? undefined,
+    });
     await downloadToFile(getUrl, sourcePath);
     await runFfmpegSegmented({
       inputPath: sourcePath,

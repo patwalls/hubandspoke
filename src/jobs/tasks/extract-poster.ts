@@ -84,9 +84,12 @@ export const extractPosterTask: Task = async (rawPayload, helpers) => {
     return;
   }
 
-  const result = await extractPosterFromMediaS3(item.mediaS3Key, productionItemId, {
-    info: (msg) => helpers.logger.info(`extract-poster ${msg}`),
-  });
+  const result = await extractPosterFromMediaS3(
+    item.mediaS3Key,
+    productionItemId,
+    { info: (msg) => helpers.logger.info(`extract-poster ${msg}`) },
+    item.mediaS3Bucket ?? undefined,
+  );
 
   await db
     .update(productionItems)
