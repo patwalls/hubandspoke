@@ -80,18 +80,19 @@ export function UploadExternalLinkDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, brand }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || `Failed to fetch metadata (HTTP ${res.status})`);
+        setError((json as { error?: string }).error || `Failed to fetch metadata (HTTP ${res.status})`);
         setStage("idle");
         return;
       }
+      const data = json as { title?: string | null; publishedDate?: string | null; thumbnail?: string | null };
       setPreview({
-        title: json.title ?? null,
-        publishedDate: json.publishedDate ?? null,
-        thumbnail: json.thumbnail ?? null,
+        title: data.title ?? null,
+        publishedDate: data.publishedDate ?? null,
+        thumbnail: data.thumbnail ?? null,
       });
-      if (json.title && !title) setTitle(json.title);
+      if (data.title && !title) setTitle(data.title);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -119,15 +120,15 @@ export function UploadExternalLinkDialog({
           thumbnail: preview?.thumbnail ?? undefined,
         }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || `Failed to create item (HTTP ${res.status})`);
+        setError((json as { error?: string }).error || `Server error (HTTP ${res.status}) — check logs`);
         setStage("idle");
         return;
       }
       toast.success("External video added — download queued, clip ideas will generate after transcription");
       handleOpenChange(false);
-      router.push(`/${brand}/content/${json.id}`);
+      router.push(`/${brand}/content/${(json as { id: string }).id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
       setStage("idle");

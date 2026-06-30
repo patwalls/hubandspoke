@@ -67,60 +67,68 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const formatCheck = await normalizeFormatForWrite(brand, body.format ?? null);
-  if (!formatCheck.ok) {
-    return NextResponse.json({ error: formatCheck.error }, { status: 400 });
-  }
-  const validatedFormat = formatCheck.value;
-
-  const editorUserId =
-    session.user.id ??
-    (await resolveEditor({ brand, format: validatedFormat ?? null }));
-
-  const publishedDate = body.publishedDate ?? todayLocalISO();
-  const thumbnail = body.thumbnail ?? null;
-
-  const [created] = await db
-    .insert(productionItems)
-    .values({
-      title,
-      brand,
-      format: validatedFormat ?? null,
-      accountId: body.accountId?.trim() || null,
-      postType: "youtube_long",
-      sourceType: "source_recording",
-      status: "Published",
-      youtubeId,
-      youtubeUrl,
-      publishedDate,
-      publishedAt: new Date(),
-      thumbnail,
-      editorUserId,
-      createdVia: "api:upload-external-link",
-    })
-    .returning({ id: productionItems.id });
-
   try {
-    await recordItemCreated(db, {
-      itemId: created.id,
-      source: "api:upload-external-link",
-      actorUserId: session.user.id ?? null,
-      format: validatedFormat ?? null,
-      sourceType: "source_recording",
-      postType: "youtube_long",
-    });
-  } catch (err) {
-    console.error("recordItemCreated failed for upload-external-link:", err);
-  }
+    const formatCheck = await normalizeFormatForWrite(brand, body.format ?? null);
+    if (!formatCheck.ok) {
+      return NextResponse.json({ error: formatCheck.error }, { status: 400 });
+    }
+    const validatedFormat = formatCheck.value;
 
-  // Kick off the download immediately. The local worker picks this up and
-  // runs yt-dlp; after the video lands in S3, transcribe-whisper fires and
-  // clip ideas auto-generate (source_recording gate in clip-ideas-auto.ts).
-  try {
-    await enqueue("youtube-download", { productionItemId: created.id });
-  } catch (err) {
-    console.error("youtube-download enqueue failed (non-fatal):", err);
-  }
+    const editorUserId =
+      session.user.id ??
+      (await resolveEditor({ brand, format: validatedFormat ?? null }));
 
-  return NextResponse.json({ id: created.id }, { status: 201 });
+    const publishedDate = body.publishedDate ?? todayLocalISO();
+    const thumbnail = body.thumbnail ?? null;
+
+    const [created] = await db
+      .insert(productionItems)
+      .values({
+        title,
+        brand,
+        format: validatedFormat ?? null,
+        accountId: body.accountId?.trim() || null,
+        postType: "youtube_long",
+        sourceType: "source_recording",
+        status: "Published",
+        youtubeId,
+        youtubeUrl,
+        publishedDate,
+        publishedAt: new Date(),
+        thumbnail,
+        editorUserId,
+        createdVia: "api:upload-external-link",
+      })
+      .returning({ id: productionItems.id });
+
+    try {
+      await recordItemCreated(db, {
+        itemId: created.id,
+        source: "api:upload-external-link",
+        actorUserId: session.user.id ?? null,
+        format: validatedFormat ?? null,
+        sourceType: "source_recording",
+        postType: "youtube_long",
+      });
+    } catch (err) {
+      console.error("recordItemCreated failed for upload-external-link:", err);
+    }
+
+    // Kick off the download immediately. The local worker picks this up and
+    // runs yt-dlp; after the video lands in S3, transcribe-whisper fires and
+    // clip ideas auto-generate (source_recording gate in clip-ideas-auto.ts).
+    try {
+      await enqueue("youtube-download", { productionItemId: created.id });
+    } catch (err) {
+      console.error("youtube-download enqueue failed (non-fatal):", err);
+    }
+
+    return NextResponse.json({ id: created.id }, { status: 201 });
+  } catch (err) {
+    console.error("upload-external-link failed:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Internal server error" },
+      { status: 500 },
+    );
+  }
 }
