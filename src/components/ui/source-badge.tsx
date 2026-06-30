@@ -5,6 +5,7 @@ type SourceType =
   | "repost"
   | "cross_post"
   | "repurposed"
+  | "source_recording"
   | null
   | undefined;
 
@@ -37,6 +38,12 @@ const STYLES: Record<
     dotClassName: "bg-sky-500",
     title:
       "Derivative of a pillar — clip, short cut, or other format spawned from longer content",
+  },
+  source_recording: {
+    label: "Source recording",
+    dotClassName: "bg-violet-500",
+    title:
+      "Uploaded source recording — a raw pillar with no social account, used to generate clips",
   },
 };
 

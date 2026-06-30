@@ -105,7 +105,13 @@ export interface ProductionItem {
    *  with `pillarContentItemId` set). Populated by queries that self-join
    *  productionItems. The clip queue surfaces this as a column. */
   pillarContentTitle?: string | null;
-  sourceType?: "original" | "repost" | "cross_post" | "repurposed" | null;
+  sourceType?:
+    | "original"
+    | "repost"
+    | "cross_post"
+    | "repurposed"
+    | "source_recording"
+    | null;
   /** FK to `clip_ideas.id` when this row was promoted from a clip-idea
    *  (sourceType='repurposed' post-consolidation). The triage modal in the
    *  queue fetches the clip-idea on click via this id and renders the

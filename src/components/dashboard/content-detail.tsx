@@ -2187,28 +2187,45 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             {/* Account chip — Pattern A. Replaces the static AccountBadge
              *  display; click opens the AccountPostTypePicker. Note this
              *  is now the ONE editing surface for account/postType — the
-             *  sidebar's Account row was removed in the same pass. */}
-            <AccountPostTypePicker
-              accounts={accounts}
-              accountId={accountId}
-              postType={postType}
-              publishedLink={publishedLink || null}
-              brandSlug={brand}
-              // Synced YT rows own their account identity, but the sync's
-              // long/short classification is fallible — post type stays
-              // editable so operators can correct e.g. a Short that came
-              // in with a watch?v= link and got tagged youtube_long.
-              accountDisabled={isYouTube}
-              onChange={({ accountId: nextId, postType: nextType }) => {
-                setAccountId(nextId);
-                setPostType(nextType);
-                void persistField({
-                  accountId: nextId,
-                  postType: nextType,
-                });
-              }}
-              triggerClassName={CHIP_A_BASE}
-            />
+             *  sidebar's Account row was removed in the same pass.
+             *
+             *  Source recordings (uploaded raw interviews/podcasts) have no
+             *  social account by design — they're pillars we clip from. With
+             *  no account, the picker renders an empty/placeholder trigger
+             *  that looks broken, so show a clear read-only "Source recording"
+             *  chip instead. post_type stays youtube_long (set at upload), so
+             *  there's nothing for the operator to pick here. */}
+            {item.sourceType === "source_recording" && !accountId ? (
+              <span
+                className={CHIP_B_BASE}
+                title="Uploaded source recording — a raw pillar with no social account, used to generate clips"
+              >
+                <FilmIcon className="size-3.5 text-muted-foreground" />
+                Source recording
+              </span>
+            ) : (
+              <AccountPostTypePicker
+                accounts={accounts}
+                accountId={accountId}
+                postType={postType}
+                publishedLink={publishedLink || null}
+                brandSlug={brand}
+                // Synced YT rows own their account identity, but the sync's
+                // long/short classification is fallible — post type stays
+                // editable so operators can correct e.g. a Short that came
+                // in with a watch?v= link and got tagged youtube_long.
+                accountDisabled={isYouTube}
+                onChange={({ accountId: nextId, postType: nextType }) => {
+                  setAccountId(nextId);
+                  setPostType(nextType);
+                  void persistField({
+                    accountId: nextId,
+                    postType: nextType,
+                  });
+                }}
+                triggerClassName={CHIP_A_BASE}
+              />
+            )}
 
             {/* Format chip — click opens the brand-format command picker.
              *  Same picker the sidebar Format row used to mount. */}
