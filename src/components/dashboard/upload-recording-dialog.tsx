@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, type DragEvent } from "react";
+import { useState, useRef, useCallback, useEffect, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UploadCloudIcon, FileVideoIcon, XIcon } from "lucide-react";
@@ -43,16 +43,46 @@ export function UploadRecordingDialog({
   const [file, setFile] = useState<File | null>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
+  const [stalled, setStalled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
+  const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastProgressRef = useRef<number>(0);
+
+  function clearStallTimer() {
+    if (stallTimerRef.current) {
+      clearTimeout(stallTimerRef.current);
+      stallTimerRef.current = null;
+    }
+  }
+
+  function resetStallTimer() {
+    clearStallTimer();
+    setStalled(false);
+    stallTimerRef.current = setTimeout(() => setStalled(true), 60_000);
+  }
+
+  // Clean up XHR and stall timer if the dialog is closed mid-upload
+  useEffect(() => {
+    return () => {
+      xhrRef.current?.abort();
+      clearStallTimer();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function reset() {
+    xhrRef.current?.abort();
+    xhrRef.current = null;
+    clearStallTimer();
     setTitle("");
     setFormat("");
     setFile(null);
     setStage("idle");
     setProgress(0);
+    setStalled(false);
     setError(null);
     setDragging(false);
   }
@@ -162,30 +192,48 @@ export function UploadRecordingDialog({
     }
 
     // 3. Upload file to S3
+    lastProgressRef.current = 0;
+    resetStallTimer();
     try {
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
+        // 20-minute hard timeout — long enough for ~1 GB on a slow connection
+        xhr.timeout = 20 * 60 * 1000;
         xhr.upload.addEventListener("progress", (e) => {
           if (e.lengthComputable) {
-            setProgress(Math.round((e.loaded / e.total) * 100));
+            const pct = Math.round((e.loaded / e.total) * 100);
+            if (pct !== lastProgressRef.current) {
+              lastProgressRef.current = pct;
+              resetStallTimer();
+            }
+            setProgress(pct);
           }
         });
         xhr.addEventListener("load", () => {
+          clearStallTimer();
           if (xhr.status >= 200 && xhr.status < 300) resolve();
           else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
         });
-        xhr.addEventListener("error", () =>
-          reject(new Error("Upload failed (network error)")),
-        );
-        xhr.addEventListener("abort", () =>
-          reject(new Error("Upload aborted")),
-        );
+        xhr.addEventListener("error", () => {
+          clearStallTimer();
+          reject(new Error("Upload failed (network error)"));
+        });
+        xhr.addEventListener("timeout", () => {
+          clearStallTimer();
+          reject(new Error("Upload timed out — check your connection and try again"));
+        });
+        xhr.addEventListener("abort", () => {
+          clearStallTimer();
+          reject(new Error("Upload cancelled"));
+        });
         xhr.open("PUT", uploadUrl);
         xhr.setRequestHeader("Content-Type", contentType);
         xhr.send(file);
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
+      setStalled(false);
       setStage("idle");
       return;
     }
@@ -330,6 +378,11 @@ export function UploadRecordingDialog({
                 />
               </div>
               <p className="text-xs text-muted-foreground text-right">{progress}%</p>
+              {stalled && (
+                <p className="text-xs text-amber-600">
+                  Upload seems slow — still running, but you can Cancel and retry if it doesn&apos;t move soon.
+                </p>
+              )}
             </div>
           )}
 
