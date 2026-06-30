@@ -37,6 +37,7 @@ import {
 import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
 import { UploadRecordingDialog } from "./upload-recording-dialog";
+import { UploadExternalLinkDialog } from "./upload-external-link-dialog";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
 import { AccountBadge } from "@/components/ui/account-badge";
@@ -146,6 +147,7 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
   const [savingFormatId, setSavingFormatId] = useState<string | null>(null);
   const [formatOverrides, setFormatOverrides] = useState<Record<string, string | null>>({});
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [externalLinkDialogOpen, setExternalLinkDialogOpen] = useState(false);
 
   // "new"       = blank manual-entry dialog (today's behavior)
   // "from-link" = shows a paste-URL + Fetch row at the top that auto-fills
@@ -589,6 +591,9 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setUploadDialogOpen(true)}>
                   Custom MP4 upload
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setExternalLinkDialogOpen(true)}>
+                  Upload external link
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1135,6 +1140,12 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
       <UploadRecordingDialog
         open={uploadDialogOpen}
         onOpenChange={setUploadDialogOpen}
+        brand={brand}
+        formats={formats}
+      />
+      <UploadExternalLinkDialog
+        open={externalLinkDialogOpen}
+        onOpenChange={setExternalLinkDialogOpen}
         brand={brand}
         formats={formats}
       />
