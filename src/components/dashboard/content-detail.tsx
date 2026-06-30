@@ -90,6 +90,7 @@ import { MergeModal } from "./merge-modal";
 import { ForkFormatDialog } from "./fork-format-dialog";
 import { PublishedEmbed } from "./preview/published-embed";
 import type { ContentDraftContent, FormatFieldSchema } from "@/lib/db/schema";
+import { runMultipartUpload } from "@/lib/client-multipart-upload";
 
 // Server returns contentDrafts rows with `createdAt`/`updatedAt` as ISO
 // strings (JSON), not Date objects — keep a local shape for that.
@@ -1133,35 +1134,44 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     setMediaUploadError(null);
   }
 
-  // Mirrors the first three steps of `submitDescriptUpload` (presign → S3
-  // PUT → confirm) without the Descript-import step. The /api/uploads/confirm
-  // route auto-enqueues Whisper, so the transcript lands on its own — clip
-  // ideas can then be generated even on items that aren't published yet.
+  // Uses S3 multipart upload (10 MB chunks) so large MP4s don't stall on a
+  // single long-lived TCP connection. The /api/uploads/confirm route still
+  // handles the DB commit + Whisper enqueue — only the S3 transport changes.
   async function submitMediaUpload() {
     if (!data || !mediaUploadFile) return;
     setMediaUploadStage("uploading");
     setMediaUploadError(null);
     setMediaUploadProgress(0);
 
-    let uploadUrl: string, key: string, bucket: string;
+    const contentType = mediaUploadFile.type || "video/mp4";
+    let key = "";
+    let bucket = "";
+    let uploadId = "";
+
+    // Step 1: create multipart upload → get uploadId + key.
     try {
-      const res = await fetch("/api/uploads/s3-presign", {
+      const res = await fetch("/api/uploads/multipart/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           itemId: contentId,
           fileName: mediaUploadFile.name,
-          contentType: mediaUploadFile.type || "video/mp4",
+          contentType,
           fileSize: mediaUploadFile.size,
         }),
       });
-      const json = await res.json();
-      if (!res.ok) {
+      const json = (await res.json().catch(() => ({}))) as {
+        uploadId?: string;
+        key?: string;
+        bucket?: string;
+        error?: string;
+      };
+      if (!res.ok || !json.uploadId || !json.key || !json.bucket) {
         setMediaUploadError(json.error || `HTTP ${res.status}`);
         setMediaUploadStage("idle");
         return;
       }
-      uploadUrl = json.uploadUrl;
+      uploadId = json.uploadId;
       key = json.key;
       bucket = json.bucket;
     } catch (err) {
@@ -1170,36 +1180,51 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       return;
     }
 
-    const contentType = mediaUploadFile.type || "video/mp4";
+    // Step 2: upload all parts in 10 MB chunks.
+    let parts: Array<{ PartNumber: number; ETag: string }>;
     try {
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) {
-            setMediaUploadProgress(Math.round((e.loaded / e.total) * 100));
-          }
-        });
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
-        });
-        xhr.addEventListener("error", () =>
-          reject(new Error("Upload failed (network)")),
-        );
-        xhr.addEventListener("abort", () =>
-          reject(new Error("Upload aborted")),
-        );
-        xhr.open("PUT", uploadUrl);
-        xhr.setRequestHeader("Content-Type", contentType);
-        xhr.send(mediaUploadFile);
+      parts = await runMultipartUpload({
+        file: mediaUploadFile,
+        uploadId,
+        key,
+        bucket,
+        onProgress: setMediaUploadProgress,
       });
     } catch (err) {
       setMediaUploadError(err instanceof Error ? err.message : "Upload failed");
       setMediaUploadStage("idle");
+      // Best-effort abort so S3 doesn't hold the incomplete upload.
+      void fetch("/api/uploads/multipart/abort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, uploadId, bucket }),
+      });
       return;
     }
 
+    // Step 3: tell S3/R2 to assemble the parts into the final object.
     setMediaUploadStage("confirming");
+    try {
+      const completeRes = await fetch("/api/uploads/multipart/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, uploadId, parts, bucket }),
+      });
+      if (!completeRes.ok) {
+        const json = (await completeRes.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setMediaUploadError(json.error || `Complete failed: HTTP ${completeRes.status}`);
+        setMediaUploadStage("idle");
+        return;
+      }
+    } catch (err) {
+      setMediaUploadError(err instanceof Error ? err.message : "Complete failed");
+      setMediaUploadStage("idle");
+      return;
+    }
+
+    // Step 4: commit to DB and enqueue Whisper (existing confirm route).
     try {
       const res = await fetch("/api/uploads/confirm", {
         method: "POST",
@@ -1213,7 +1238,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         }),
       });
       if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
         setMediaUploadError(json.error || `Confirm failed: HTTP ${res.status}`);
         setMediaUploadStage("idle");
         return;

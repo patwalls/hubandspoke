@@ -9,12 +9,14 @@ import {
   DeleteObjectCommand,
   CreateMultipartUploadCommand,
   UploadPartCommand,
-  ListPartsCommand,
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
-  type ListPartsCommandOutput,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+// ---------------------------------------------------------------------------
+// AWS S3 client
+// ---------------------------------------------------------------------------
 
 let _client: S3Client | null = null;
 
@@ -40,6 +42,49 @@ export function bucketName(): string {
   const b = process.env.HUBANDSPOKE_S3_BUCKET;
   if (!b) throw new Error("HUBANDSPOKE_S3_BUCKET not set");
   return b;
+}
+
+// ---------------------------------------------------------------------------
+// Cloudflare R2 client (S3-compatible)
+// ---------------------------------------------------------------------------
+
+let _r2Client: S3Client | null = null;
+
+function r2Client(): S3Client {
+  if (_r2Client) return _r2Client;
+  const endpoint = process.env.R2_ENDPOINT;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
+    throw new Error(
+      "R2 credentials not configured (R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)",
+    );
+  }
+  _r2Client = new S3Client({
+    region: "auto",
+    endpoint,
+    credentials: { accessKeyId, secretAccessKey },
+  });
+  return _r2Client;
+}
+
+export function r2BucketName(): string {
+  const b = process.env.R2_BUCKET;
+  if (!b) throw new Error("R2_BUCKET not set");
+  return b;
+}
+
+// ---------------------------------------------------------------------------
+// Routing: pick S3 or R2 based on the bucket name stored with the object.
+// ---------------------------------------------------------------------------
+
+function clientForBucket(bucket: string): S3Client {
+  try {
+    if (bucket === r2BucketName()) return r2Client();
+  } catch {
+    // R2 not configured — fall through to S3.
+  }
+  return s3Client();
 }
 
 function keyPrefix(): string {
@@ -118,17 +163,18 @@ export async function getPresignedPutUrl(
 export async function getPresignedGetUrl(
   key: string,
   ttlSeconds = 900,
-  opts?: { downloadFileName?: string }
+  opts?: { downloadFileName?: string; bucket?: string }
 ): Promise<string> {
+  const bucket = opts?.bucket ?? bucketName();
   const cmd = new GetObjectCommand({
-    Bucket: bucketName(),
+    Bucket: bucket,
     Key: key,
     // Force browser to download instead of playing in-tab when set.
     ResponseContentDisposition: opts?.downloadFileName
       ? `attachment; filename="${opts.downloadFileName.replace(/"/g, "")}"`
       : undefined,
   });
-  return getSignedUrl(s3Client(), cmd, { expiresIn: ttlSeconds });
+  return getSignedUrl(clientForBucket(bucket), cmd, { expiresIn: ttlSeconds });
 }
 
 export async function deleteObject(key: string): Promise<void> {
@@ -137,30 +183,35 @@ export async function deleteObject(key: string): Promise<void> {
   );
 }
 
+export async function headObject(
+  key: string,
+  bucket = bucketName(),
+): Promise<{ contentLength?: number; contentType?: string } | null> {
+  try {
+    const res = await clientForBucket(bucket).send(
+      new HeadObjectCommand({ Bucket: bucket, Key: key })
+    );
+    return {
+      contentLength: res.ContentLength,
+      contentType: res.ContentType,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Multipart upload (browser → S3, large files)
-//
-// A single presigned PUT of a multi-hundred-MB file rides on one long-lived
-// connection; any stall/middlebox timeout kills the whole upload with no
-// resume (this is what made the Upload Recording dialog never complete).
-// Multipart splits the file into small parts the browser PUTs independently
-// (each a fresh, short request that can be retried in isolation).
-//
-// Crucially, the browser never reads part ETags: the `www.starterstory.com`
-// bucket's CORS does not expose the ETag response header (and we can't modify
-// that shared bucket's CORS). Instead the *server* calls ListParts to gather
-// ETags at completion time — no CORS exposure needed. The browser only PUTs
-// parts (which already works cross-origin) and tells us when it's done.
+// Multipart upload helpers (used by /api/uploads/multipart/* routes)
 // ---------------------------------------------------------------------------
 
-/** Start a multipart upload; returns the S3-assigned uploadId. */
 export async function createMultipartUpload(
   key: string,
-  contentType: string
+  contentType: string,
+  bucket = bucketName(),
 ): Promise<string> {
-  const res = await s3Client().send(
+  const res = await clientForBucket(bucket).send(
     new CreateMultipartUploadCommand({
-      Bucket: bucketName(),
+      Bucket: bucket,
       Key: key,
       ContentType: contentType,
     })
@@ -169,62 +220,29 @@ export async function createMultipartUpload(
   return res.UploadId;
 }
 
-/**
- * Presign one UploadPart URL. Intentionally signs only host (no
- * ContentLength), so the browser can PUT a part of any size — the final part
- * is always smaller than the rest, and signing the length would reject it.
- */
-export async function getPresignedUploadPartUrl(
+export async function presignUploadPart(
   key: string,
   uploadId: string,
-  partNumber: number
+  partNumber: number,
+  expiresIn = 3600,
+  bucket = bucketName(),
 ): Promise<string> {
   const cmd = new UploadPartCommand({
-    Bucket: bucketName(),
+    Bucket: bucket,
     Key: key,
     UploadId: uploadId,
     PartNumber: partNumber,
   });
-  return getSignedUrl(s3Client(), cmd, { expiresIn: 21600 }); // 6h — long uploads
+  return getSignedUrl(clientForBucket(bucket), cmd, { expiresIn });
 }
 
-/**
- * Finish a multipart upload. Reads the uploaded parts' ETags server-side via
- * ListParts (so the browser never needs CORS-exposed ETags), then completes.
- * Paginates ListParts in case there are >1000 parts.
- */
 export async function completeMultipartUpload(
   key: string,
-  uploadId: string
+  uploadId: string,
+  parts: Array<{ PartNumber: number; ETag: string }>,
+  bucket = bucketName(),
 ): Promise<void> {
-  const bucket = bucketName();
-  const parts: { PartNumber: number; ETag: string }[] = [];
-  let partNumberMarker: string | undefined = undefined;
-  do {
-    const list: ListPartsCommandOutput = await s3Client().send(
-      new ListPartsCommand({
-        Bucket: bucket,
-        Key: key,
-        UploadId: uploadId,
-        PartNumberMarker: partNumberMarker,
-      })
-    );
-    for (const p of list.Parts ?? []) {
-      if (p.PartNumber != null && p.ETag != null) {
-        parts.push({ PartNumber: p.PartNumber, ETag: p.ETag });
-      }
-    }
-    partNumberMarker = list.IsTruncated
-      ? list.NextPartNumberMarker
-      : undefined;
-  } while (partNumberMarker);
-
-  if (parts.length === 0) {
-    throw new Error("No uploaded parts found to complete");
-  }
-  parts.sort((a, b) => a.PartNumber - b.PartNumber);
-
-  await s3Client().send(
+  await clientForBucket(bucket).send(
     new CompleteMultipartUploadCommand({
       Bucket: bucket,
       Key: key,
@@ -234,33 +252,20 @@ export async function completeMultipartUpload(
   );
 }
 
-/** Best-effort cleanup of an aborted/cancelled multipart upload. */
 export async function abortMultipartUpload(
   key: string,
-  uploadId: string
+  uploadId: string,
+  bucket = bucketName(),
 ): Promise<void> {
-  await s3Client().send(
-    new AbortMultipartUploadCommand({
-      Bucket: bucketName(),
-      Key: key,
-      UploadId: uploadId,
-    })
-  );
-}
-
-export async function headObject(key: string): Promise<{
-  contentLength?: number;
-  contentType?: string;
-} | null> {
   try {
-    const res = await s3Client().send(
-      new HeadObjectCommand({ Bucket: bucketName(), Key: key })
+    await clientForBucket(bucket).send(
+      new AbortMultipartUploadCommand({
+        Bucket: bucket,
+        Key: key,
+        UploadId: uploadId,
+      })
     );
-    return {
-      contentLength: res.ContentLength,
-      contentType: res.ContentType,
-    };
   } catch {
-    return null;
+    // Best-effort cleanup — swallow errors so the caller isn't blocked.
   }
 }

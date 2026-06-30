@@ -126,13 +126,13 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  // HEAD each key to confirm S3 actually has the bytes the client claims
-  // were uploaded. Catches a faked confirm where the PUT failed silently.
+  // HEAD each key to confirm storage actually has the bytes the client claims
+  // were uploaded. Uses the stored bucket to route to S3 vs R2 correctly.
   for (const u of uploads) {
-    const head = await headObject(u.key);
+    const head = await headObject(u.key, u.bucket);
     if (!head) {
       return NextResponse.json(
-        { error: `Upload not found in S3: ${u.key}` },
+        { error: `Upload not found in storage: ${u.key}` },
         { status: 400 },
       );
     }
@@ -225,15 +225,16 @@ export async function POST(request: Request, context: RouteContext) {
   });
 
   // Sign GET URLs so the simulator can render the new media immediately.
+  // Route to the right storage backend via the stored bucket name.
   const withUrls = await Promise.all(
     inserted.map(async (row) => {
-      const url = await getPresignedGetUrl(row.s3Key, PRESIGN_GET_TTL).catch(
-        () => null,
-      );
+      const url = await getPresignedGetUrl(row.s3Key, PRESIGN_GET_TTL, {
+        bucket: row.s3Bucket,
+      }).catch(() => null);
       const posterUrl = row.posterS3Key
-        ? await getPresignedGetUrl(row.posterS3Key, PRESIGN_GET_TTL).catch(
-            () => null,
-          )
+        ? await getPresignedGetUrl(row.posterS3Key, PRESIGN_GET_TTL, {
+            bucket: row.s3Bucket,
+          }).catch(() => null)
         : null;
       return {
         id: row.id,

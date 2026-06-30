@@ -38,11 +38,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify the object actually exists on S3 (defends against client lying).
-  const head = await headObject(key);
+  // Verify the object actually exists in storage (defends against client lying).
+  const head = await headObject(key, bucket);
   if (!head) {
     return NextResponse.json(
-      { error: "Object not found in S3" },
+      { error: "Object not found in storage" },
       { status: 404 }
     );
   }

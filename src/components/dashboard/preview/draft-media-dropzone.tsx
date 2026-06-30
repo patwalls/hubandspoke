@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ImagePlusIcon, Loader2Icon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { dropZoneOptionsForPostType } from "@/lib/services/draft-media";
+import { runMultipartUpload } from "@/lib/client-multipart-upload";
 import type { PreviewSlide } from "./resolve-preview-data";
 
 interface DraftMediaDropZoneProps {
@@ -215,69 +216,148 @@ export function DraftMediaDropZone({
       });
 
       try {
-        // Step 1: presign
-        const presignRes = await fetch(
-          `/api/production-items/${itemId}/media/presign`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              files: accepted.map((f) => ({
-                name: f.name,
-                contentType: f.type,
-                sizeBytes: f.size,
-              })),
-            }),
-          },
-        );
-        const presignJson = (await presignRes.json().catch(() => ({}))) as {
-          files?: Array<{
-            uploadUrl: string;
-            key: string;
-            bucket: string;
-            contentType: string;
-            sizeBytes: number;
-            kind: "image" | "video";
-          }>;
-          error?: string;
-        };
-        if (!presignRes.ok || !presignJson.files) {
-          throw new Error(presignJson.error || "Failed to start upload");
-        }
-
-        // Step 2: PUT each file directly to S3 with XHR-based progress.
-        // Per-file progress updates the placeholder; aggregate progress
-        // updates the toast description.
+        // Upload files sequentially. Videos use S3 multipart (10 MB chunks)
+        // so a stalled TCP connection only delays one chunk, not the whole
+        // file. Images use the existing single-PUT path (they're small).
         const perFileBytesUploaded = new Array(accepted.length).fill(0);
-        await Promise.all(
-          accepted.map((file, i) => {
-            const slot = presignJson.files![i];
-            return putToS3WithProgress({
+        const uploadedMeta: Array<{
+          key: string;
+          bucket: string;
+          contentType: string;
+          sizeBytes: number;
+          kind: "image" | "video";
+        }> = [];
+
+        for (let i = 0; i < accepted.length; i++) {
+          const file = accepted[i];
+          const isVideo = file.type.startsWith("video/");
+
+          const onFileProgress = (percent: number) => {
+            perFileBytesUploaded[i] = Math.round((percent / 100) * file.size);
+            setPlaceholders((prev) =>
+              prev.map((p) =>
+                p.id === ids[i] ? { ...p, progress: percent } : p,
+              ),
+            );
+            const uploadedTotal = perFileBytesUploaded.reduce(
+              (a, b) => a + b,
+              0,
+            );
+            const overall = Math.round((uploadedTotal / totalBytes) * 100);
+            toast.loading(`Uploading ${toastSubject}…`, {
+              id: toastId,
+              description: `${overall}% • ${formatBytes(uploadedTotal)} of ${formatBytes(totalBytes)}`,
+              duration: Infinity,
+            });
+          };
+
+          if (isVideo) {
+            // Multipart path for videos.
+            const createRes = await fetch("/api/uploads/multipart/create", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                itemId,
+                fileName: file.name,
+                contentType: file.type,
+                fileSize: file.size,
+              }),
+            });
+            const createJson = (await createRes.json().catch(() => ({}))) as {
+              uploadId?: string;
+              key?: string;
+              bucket?: string;
+              error?: string;
+            };
+            if (!createRes.ok || !createJson.uploadId || !createJson.key || !createJson.bucket) {
+              throw new Error(createJson.error || "Failed to start video upload");
+            }
+            const { uploadId: videoUploadId, key, bucket } = createJson;
+
+            let parts: Array<{ PartNumber: number; ETag: string }>;
+            try {
+              parts = await runMultipartUpload({
+                file,
+                uploadId: videoUploadId,
+                key,
+                bucket,
+                onProgress: onFileProgress,
+              });
+            } catch (err) {
+              void fetch("/api/uploads/multipart/abort", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key, uploadId: videoUploadId, bucket }),
+              });
+              throw err;
+            }
+
+            const completeRes = await fetch("/api/uploads/multipart/complete", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ key, uploadId: videoUploadId, parts, bucket }),
+            });
+            const completeJson = (await completeRes.json().catch(() => ({}))) as {
+              error?: string;
+            };
+            if (!completeRes.ok) {
+              throw new Error(completeJson.error || "Failed to complete video upload");
+            }
+
+            uploadedMeta.push({
+              key,
+              bucket,
+              contentType: file.type,
+              sizeBytes: file.size,
+              kind: "video",
+            });
+          } else {
+            // Single-PUT path for images (small files, existing approach).
+            const presignRes = await fetch(
+              `/api/production-items/${itemId}/media/presign`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  files: [
+                    { name: file.name, contentType: file.type, sizeBytes: file.size },
+                  ],
+                }),
+              },
+            );
+            const presignJson = (await presignRes.json().catch(() => ({}))) as {
+              files?: Array<{
+                uploadUrl: string;
+                key: string;
+                bucket: string;
+                contentType: string;
+                sizeBytes: number;
+                kind: "image" | "video";
+              }>;
+              error?: string;
+            };
+            if (!presignRes.ok || !presignJson.files?.[0]) {
+              throw new Error(presignJson.error || "Failed to start image upload");
+            }
+            const slot = presignJson.files[0];
+
+            await putToS3WithProgress({
               url: slot.uploadUrl,
               file,
-              onProgress: (percent) => {
-                perFileBytesUploaded[i] = Math.round((percent / 100) * file.size);
-                setPlaceholders((prev) =>
-                  prev.map((p) =>
-                    p.id === ids[i] ? { ...p, progress: percent } : p,
-                  ),
-                );
-                const uploadedTotal = perFileBytesUploaded.reduce(
-                  (a, b) => a + b,
-                  0,
-                );
-                const overall = Math.round((uploadedTotal / totalBytes) * 100);
-                toast.loading(`Uploading ${toastSubject}…`, {
-                  id: toastId,
-                  description: `${overall}% • ${formatBytes(uploadedTotal)} of ${formatBytes(totalBytes)}`,
-                  duration: Infinity,
-                });
-              },
+              onProgress: onFileProgress,
             });
-          }),
-        );
 
-        // Step 3: confirm + write rows
+            uploadedMeta.push({
+              key: slot.key,
+              bucket: slot.bucket,
+              contentType: slot.contentType,
+              sizeBytes: slot.sizeBytes,
+              kind: slot.kind,
+            });
+          }
+        }
+
+        // Confirm all uploads in one call — writes the productionItemMedia rows.
         toast.loading(`Saving ${toastSubject}…`, {
           id: toastId,
           description: "Almost done — recording the upload.",
@@ -288,15 +368,7 @@ export function DraftMediaDropZone({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              uploads: presignJson.files.map((f) => ({
-                key: f.key,
-                bucket: f.bucket,
-                contentType: f.contentType,
-                sizeBytes: f.sizeBytes,
-                kind: f.kind,
-              })),
-            }),
+            body: JSON.stringify({ uploads: uploadedMeta }),
           },
         );
         const confirmJson = (await confirmRes.json().catch(() => ({}))) as {
