@@ -83,8 +83,9 @@ export const youtubeDownloadTask: Task = async (rawPayload, helpers) => {
 
   const tmpPath = join(tmpdir(), `yt-dl-${productionItemId}.mp4`);
   const cookiesPath = await maybeWriteCookies(productionItemId);
+  const cookiesFromBrowser = process.env.YT_DLP_COOKIES_FROM_BROWSER?.trim() || null;
   helpers.logger.info(
-    `youtube-download start id=${productionItemId} url=${item.youtubeUrl} cookies=${cookiesPath ? "yes" : "no"}`,
+    `youtube-download start id=${productionItemId} url=${item.youtubeUrl} cookies=${cookiesPath ? "file" : cookiesFromBrowser ? `browser:${cookiesFromBrowser}` : "none"}`,
   );
 
   try {
@@ -99,6 +100,7 @@ export const youtubeDownloadTask: Task = async (rawPayload, helpers) => {
           outputPath: tmpPath,
           ffmpegPath: ffmpegInstaller.path,
           cookiesPath,
+          cookiesFromBrowser,
           playerClients: strategy.clients,
           logger: helpers.logger,
         });
@@ -191,6 +193,7 @@ function runYtDlp(args: {
   outputPath: string;
   ffmpegPath: string;
   cookiesPath: string | null;
+  cookiesFromBrowser: string | null;
   playerClients: string;
   logger: { info: (msg: string) => void; error: (msg: string) => void };
 }): Promise<void> {
@@ -229,6 +232,8 @@ function runYtDlp(args: {
     ];
     if (args.cookiesPath) {
       ytArgs.push("--cookies", args.cookiesPath);
+    } else if (args.cookiesFromBrowser) {
+      ytArgs.push("--cookies-from-browser", args.cookiesFromBrowser);
     }
     ytArgs.push(args.url);
 

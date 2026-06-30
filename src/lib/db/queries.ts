@@ -446,7 +446,7 @@ export async function getContentReport(
     eq(productionItems.status, "Published"),
     gte(productionItems.publishedDate, startDate),
     lte(productionItems.publishedDate, endDate),
-    isNotNull(productionItems.accountId),
+    sql`(${productionItems.accountId} IS NOT NULL OR ${productionItems.sourceType} = 'source_recording')`,
     isNull(productionItems.deletedAt),
   ];
   if (brand !== "all") {
