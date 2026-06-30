@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { resolveEditor } from "@/lib/services/assignees";
 import { recordItemCreated } from "@/lib/services/item-created";
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
   const [existing] = await db
     .select({ id: productionItems.id })
     .from(productionItems)
-    .where(and(eq(productionItems.youtubeId, youtubeId), isNull(productionItems.deletedAt)))
+    .where(and(eq(productionItems.youtubeId, youtubeId), isNull(productionItems.deletedAt), ne(productionItems.status, "Killed")))
     .limit(1);
   if (existing) {
     return NextResponse.json({ id: existing.id, alreadyExists: true }, { status: 200 });
@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
       const [dup] = await db
         .select({ id: productionItems.id })
         .from(productionItems)
-        .where(and(eq(productionItems.youtubeId, youtubeId), isNull(productionItems.deletedAt)))
+        .where(and(eq(productionItems.youtubeId, youtubeId), isNull(productionItems.deletedAt), ne(productionItems.status, "Killed")))
         .limit(1);
       if (dup) {
         return NextResponse.json({ id: dup.id, alreadyExists: true }, { status: 200 });
