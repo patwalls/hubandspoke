@@ -30,10 +30,13 @@ import {
 
 const POSTER_URL_TTL_SECONDS = 60 * 60;
 
-async function presignOrNull(key: string | null): Promise<string | null> {
+async function presignOrNull(
+  key: string | null,
+  bucket?: string,
+): Promise<string | null> {
   if (!key) return null;
   try {
-    return await getPresignedGetUrl(key, POSTER_URL_TTL_SECONDS);
+    return await getPresignedGetUrl(key, POSTER_URL_TTL_SECONDS, { bucket });
   } catch {
     return null;
   }
@@ -135,6 +138,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         thumbnail: productionItems.thumbnail,
         posterS3Key: productionItems.posterS3Key,
         mediaS3Key: productionItems.mediaS3Key,
+        mediaS3Bucket: productionItems.mediaS3Bucket,
         mediaContentType: productionItems.mediaContentType,
         status: productionItems.status,
         platform: productionItems.platform,
@@ -449,6 +453,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             thumbnail: productionItems.thumbnail,
             posterS3Key: productionItems.posterS3Key,
             mediaS3Key: productionItems.mediaS3Key,
+            mediaS3Bucket: productionItems.mediaS3Bucket,
             mediaContentType: productionItems.mediaContentType,
           })
           .from(productionItems)
@@ -521,6 +526,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         index: productionItemMedia.index,
         kind: productionItemMedia.kind,
         s3Key: productionItemMedia.s3Key,
+        s3Bucket: productionItemMedia.s3Bucket,
         posterS3Key: productionItemMedia.posterS3Key,
         contentType: productionItemMedia.contentType,
         sizeBytes: productionItemMedia.sizeBytes,
@@ -532,28 +538,49 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
     // Presign all S3-archived assets in parallel. Failures degrade to null
     // (callers fall back to the legacy `thumbnail` column on the row).
-    const allS3Keys = [
-      item.posterS3Key,
-      item.mediaS3Key,
-      ...derivatives.map((d) => d.posterS3Key),
-      ...derivatives.map((d) => d.mediaS3Key),
-      ...topPerformers.map((t) => t.posterS3Key),
-      ...topPerformers.map((t) => t.mediaS3Key),
-      ...reposts.map((r) => r.posterS3Key),
-      ...reposts.map((r) => r.mediaS3Key),
-      ...crossPosts.map((r) => r.posterS3Key),
-      ...crossPosts.map((r) => r.mediaS3Key),
-      ...mediaRows.map((m) => m.s3Key),
-      ...mediaRows.map((m) => m.posterS3Key),
+    // Pair each archived key with the bucket it actually lives in. Media
+    // objects may be in R2 (source recordings upload there) or S3, so they
+    // presign against the row's stored mediaS3Bucket. Posters are always
+    // written to the default S3 bucket (extract-poster putObjects them there),
+    // so they presign with bucket undefined → S3. media_assets rows carry
+    // their own s3Bucket for both the asset and its poster.
+    const keyBucketPairs: Array<{ key: string | null; bucket?: string }> = [
+      { key: item.posterS3Key },
+      { key: item.mediaS3Key, bucket: item.mediaS3Bucket ?? undefined },
+      ...derivatives.flatMap((d) => [
+        { key: d.posterS3Key },
+        { key: d.mediaS3Key, bucket: d.mediaS3Bucket ?? undefined },
+      ]),
+      ...topPerformers.flatMap((t) => [
+        { key: t.posterS3Key },
+        { key: t.mediaS3Key, bucket: t.mediaS3Bucket ?? undefined },
+      ]),
+      ...reposts.flatMap((r) => [
+        { key: r.posterS3Key },
+        { key: r.mediaS3Key, bucket: r.mediaS3Bucket ?? undefined },
+      ]),
+      ...crossPosts.flatMap((r) => [
+        { key: r.posterS3Key },
+        { key: r.mediaS3Key, bucket: r.mediaS3Bucket ?? undefined },
+      ]),
+      ...mediaRows.flatMap((m) => [
+        { key: m.s3Key, bucket: m.s3Bucket ?? undefined },
+        { key: m.posterS3Key, bucket: m.s3Bucket ?? undefined },
+      ]),
     ];
     const presignedByKey = new Map<string, string>();
+    const seenKeys = new Set<string>();
     await Promise.all(
-      Array.from(new Set(allS3Keys.filter((k): k is string => !!k))).map(
-        async (key) => {
-          const url = await presignOrNull(key);
+      keyBucketPairs
+        .filter((p): p is { key: string; bucket?: string } => {
+          if (!p.key || seenKeys.has(p.key)) return false;
+          seenKeys.add(p.key);
+          return true;
+        })
+        .map(async ({ key, bucket }) => {
+          const url = await presignOrNull(key, bucket);
           if (url) presignedByKey.set(key, url);
-        }
-      )
+        })
     );
     const urlFor = (key: string | null): string | null =>
       key ? (presignedByKey.get(key) ?? null) : null;

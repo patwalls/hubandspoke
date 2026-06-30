@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     .select({
       title: productionItems.title,
       mediaS3Key: productionItems.mediaS3Key,
+      mediaS3Bucket: productionItems.mediaS3Bucket,
     })
     .from(productionItems)
     .where(eq(productionItems.id, itemId));
@@ -47,6 +48,7 @@ export async function GET(request: NextRequest) {
 
   const url = await getPresignedGetUrl(item.mediaS3Key, 60 * 5, {
     downloadFileName,
+    bucket: item.mediaS3Bucket ?? undefined,
   });
   return NextResponse.redirect(url, 302);
 }

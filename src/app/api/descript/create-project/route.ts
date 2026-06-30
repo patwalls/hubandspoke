@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
     mode?: "url" | "s3";
     url?: string;
     s3Key?: string;
+    bucket?: string;
     projectName?: string;
     itemId?: string;
   };
@@ -84,8 +85,21 @@ export async function POST(request: NextRequest) {
     if (!s3Key) {
       return NextResponse.json({ error: "s3Key required" }, { status: 400 });
     }
+    // Resolve the bucket the object lives in so R2-backed source recordings
+    // presign correctly (defaulting to the S3 bucket would 404). Prefer an
+    // explicit body.bucket; otherwise look it up from the item's stored
+    // media_s3_bucket (the s3 button always imports the item's own media).
+    let bucket = body.bucket?.trim() || undefined;
+    if (!bucket && itemId) {
+      const [it] = await db
+        .select({ mediaS3Bucket: productionItems.mediaS3Bucket })
+        .from(productionItems)
+        .where(eq(productionItems.id, itemId))
+        .limit(1);
+      bucket = it?.mediaS3Bucket ?? undefined;
+    }
     // Descript fetches the file shortly after; 2 hours covers slow imports.
-    const mediaUrl = await getPresignedGetUrl(s3Key, 60 * 60 * 2);
+    const mediaUrl = await getPresignedGetUrl(s3Key, 60 * 60 * 2, { bucket });
     const result = await createDescriptProjectFromUrl({
       projectName,
       mediaUrl,

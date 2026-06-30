@@ -22,6 +22,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       hookSegments: clipIdeas.hookSegments,
       sourceProductionItemId: clipIdeas.sourceProductionItemId,
       mediaS3Key: productionItems.mediaS3Key,
+      mediaS3Bucket: productionItems.mediaS3Bucket,
       mediaContentType: productionItems.mediaContentType,
       contentMediaUrl: productionItems.contentMediaUrl,
     })
@@ -80,7 +81,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   let videoContentType: string | null = row.mediaContentType ?? null;
   if (row.mediaS3Key) {
     try {
-      videoUrl = await getPresignedGetUrl(row.mediaS3Key, 3600);
+      videoUrl = await getPresignedGetUrl(row.mediaS3Key, 3600, {
+        bucket: row.mediaS3Bucket ?? undefined,
+      });
     } catch {
       videoUrl = null;
     }
