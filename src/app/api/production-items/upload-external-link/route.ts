@@ -137,9 +137,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ id: created.id }, { status: 201 });
   } catch (err) {
     console.error("upload-external-link failed:", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Internal server error" },
-      { status: 500 },
-    );
+    // Unique constraint on youtube_id — race between pre-check and insert
+    const isUnique = err != null && typeof err === "object" && "code" in err && (err as { code: unknown }).code === "23505";
+    if (isUnique) {
+      const [dup] = await db
+        .select({ id: productionItems.id })
+        .from(productionItems)
+        .where(eq(productionItems.youtubeId, youtubeId))
+        .limit(1);
+      if (dup) {
+        return NextResponse.json({ id: dup.id, alreadyExists: true }, { status: 200 });
+      }
+    }
+    return NextResponse.json({ error: "Something went wrong — please try again" }, { status: 500 });
   }
 }
