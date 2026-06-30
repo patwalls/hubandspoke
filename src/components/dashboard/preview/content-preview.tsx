@@ -122,7 +122,13 @@ export function ContentPreview({
   const platform: PostType | null =
     item.postType && item.postType in PLATFORM_FIELD_SCHEMAS
       ? (item.postType as PostType)
-      : resolveSchemaForPlatforms(item.platform ?? null).key;
+      : (resolveSchemaForPlatforms(item.platform ?? null).key ??
+        // Last resort: an item with archived video but no resolvable platform
+        // (e.g. an uploaded source recording whose post_type got nulled) should
+        // still preview its MP4. Treat it as long-form video.
+        ((item.mediaContentType?.startsWith("video/") ?? false)
+          ? ("youtube_long" as PostType)
+          : null));
   if (!platform) return null;
 
   const Simulator = SIMULATORS[platform];
