@@ -13,6 +13,10 @@ export type BrandListEntry = Pick<
 const BRAND_PRIORITY: Record<string, number> = {
   "starter-story": 0,
   "matg": 1,
+  "my-first-million": 2,
+  "futurepedia": 3,
+  "hubspot-marketing": 4,
+  "jonathan-hunt": 5,
 };
 
 // React `cache()` is request-scoped: deduped within a render pass, cleared
