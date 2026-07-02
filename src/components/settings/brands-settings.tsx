@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,11 +14,9 @@ interface BrandRow {
   avatarUrl: string | null;
   color: string | null;
   disabled: boolean;
+  sortOrder: number;
 }
 
-// Presets match the gradient classes shipped with the seed. Picking from a
-// short list avoids users hand-typing Tailwind strings that don't render;
-// the `custom` escape hatch lets advanced users drop in arbitrary classes.
 const COLOR_PRESETS: Array<{ value: string; label: string }> = [
   { value: "from-emerald-500 to-emerald-700", label: "Emerald" },
   { value: "from-orange-500 to-rose-600", label: "Orange → Rose" },
@@ -67,11 +65,35 @@ function BrandAvatar({ brand, size = 28 }: { brand: BrandRow; size?: number }) {
   );
 }
 
-export function BrandsSettingsContent({ brands }: { brands: BrandRow[] }) {
+function DragHandle({ disabled }: { disabled?: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={cn(
+        "shrink-0",
+        disabled ? "text-muted-foreground/30 cursor-not-allowed" : "text-muted-foreground/50 cursor-grab active:cursor-grabbing"
+      )}
+    >
+      <circle cx="5" cy="4" r="1.5" fill="currentColor" />
+      <circle cx="11" cy="4" r="1.5" fill="currentColor" />
+      <circle cx="5" cy="8" r="1.5" fill="currentColor" />
+      <circle cx="11" cy="8" r="1.5" fill="currentColor" />
+      <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="11" cy="12" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function BrandsSettingsContent({ brands: initialBrands }: { brands: BrandRow[] }) {
   const router = useRouter();
-  const [showAdd, setShowAdd] = useState(false);
+  const [ordered, setOrdered] = useState<BrandRow[]>(initialBrands);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
 
   // Add-brand form
   const [slug, setSlug] = useState("");
@@ -79,12 +101,68 @@ export function BrandsSettingsContent({ brands }: { brands: BrandRow[] }) {
   const [avatarUrl, setAvatarUrl] = useState("");
   const [color, setColor] = useState(COLOR_PRESETS[0].value);
 
-  // Edit state — which brand is open, and its in-flight field values.
+  // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [editAvatar, setEditAvatar] = useState("");
   const [editColor, setEditColor] = useState("");
   const [editDisabled, setEditDisabled] = useState(false);
+
+  // Drag-and-drop state
+  const draggingId = useRef<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [reorderSaving, setReorderSaving] = useState(false);
+
+  function handleDragStart(id: string) {
+    draggingId.current = id;
+  }
+
+  function handleDragOver(e: React.DragEvent, id: string) {
+    e.preventDefault();
+    if (draggingId.current && draggingId.current !== id) {
+      setDragOverId(id);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent, targetId: string) {
+    e.preventDefault();
+    const sourceId = draggingId.current;
+    if (!sourceId || sourceId === targetId) {
+      setDragOverId(null);
+      return;
+    }
+    const next = [...ordered];
+    const fromIdx = next.findIndex((b) => b.id === sourceId);
+    const toIdx = next.findIndex((b) => b.id === targetId);
+    const [item] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, item);
+    setOrdered(next);
+    setDragOverId(null);
+    draggingId.current = null;
+    persistOrder(next);
+  }
+
+  function handleDragEnd() {
+    draggingId.current = null;
+    setDragOverId(null);
+  }
+
+  async function persistOrder(rows: BrandRow[]) {
+    setReorderSaving(true);
+    try {
+      const res = await fetch("/api/brands/reorder", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: rows.map((b) => b.id) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      router.refresh();
+    } catch {
+      setError("Failed to save order — try again");
+    } finally {
+      setReorderSaving(false);
+    }
+  }
 
   async function handleAdd() {
     if (!slug.trim() || !label.trim()) {
@@ -262,7 +340,8 @@ export function BrandsSettingsContent({ brands }: { brands: BrandRow[] }) {
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
             <tr>
-              <th className="text-left px-3 py-2 w-12" />
+              <th className="text-left px-3 py-2 w-8" />
+              <th className="text-left px-3 py-2 w-10" />
               <th className="text-left px-3 py-2">Brand</th>
               <th className="text-left px-3 py-2">Slug</th>
               <th className="text-left px-3 py-2">Status</th>
@@ -270,10 +349,25 @@ export function BrandsSettingsContent({ brands }: { brands: BrandRow[] }) {
             </tr>
           </thead>
           <tbody>
-            {brands.map((b) => {
+            {ordered.map((b) => {
               const isEditing = editingId === b.id;
+              const isDragOver = dragOverId === b.id;
               return (
-                <tr key={b.id} className="border-t border-border align-top">
+                <tr
+                  key={b.id}
+                  draggable={!isEditing}
+                  onDragStart={() => handleDragStart(b.id)}
+                  onDragOver={(e) => handleDragOver(e, b.id)}
+                  onDrop={(e) => handleDrop(e, b.id)}
+                  onDragEnd={handleDragEnd}
+                  className={cn(
+                    "border-t border-border align-top transition-colors",
+                    isDragOver && "bg-muted/60"
+                  )}
+                >
+                  <td className="px-3 py-3">
+                    <DragHandle disabled={isEditing} />
+                  </td>
                   <td className="px-3 py-2">
                     <BrandAvatar brand={isEditing ? { ...b, label: editLabel, avatarUrl: editAvatar || null, color: editColor || null } : b} />
                   </td>
@@ -373,6 +467,11 @@ export function BrandsSettingsContent({ brands }: { brands: BrandRow[] }) {
             })}
           </tbody>
         </table>
+        {reorderSaving && (
+          <div className="px-3 py-1.5 text-[11px] text-muted-foreground bg-muted/30 border-t border-border">
+            Saving order…
+          </div>
+        )}
       </div>
     </div>
   );

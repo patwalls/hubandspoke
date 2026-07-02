@@ -1665,6 +1665,9 @@ export const brands = pgTable(
     ),
     watermarkS3Key: text("watermark_s3_key"),
     brandGuidelines: text("brand_guidelines"),
+    // Controls the order brands appear in the top nav and settings table.
+    // Lower values appear first. Editable via drag-and-drop in settings.
+    sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

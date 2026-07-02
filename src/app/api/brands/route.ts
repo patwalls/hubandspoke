@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
 import { getBrands, invalidateBrandCache } from "@/lib/db/brands";
 import { insertDefaultStatusesForBrand } from "@/lib/db/brand-statuses";
+import { max } from "drizzle-orm";
 
 export async function GET() {
   const session = await auth();
@@ -47,6 +48,10 @@ export async function POST(request: NextRequest) {
     }
 
     const row = await db.transaction(async (tx) => {
+      const [{ maxOrder }] = await tx
+        .select({ maxOrder: max(brands.sortOrder) })
+        .from(brands);
+      const nextOrder = (maxOrder ?? -1) + 1;
       const [created] = await tx
         .insert(brands)
         .values({
@@ -55,6 +60,7 @@ export async function POST(request: NextRequest) {
           avatarUrl: avatarUrl ?? null,
           color: color ?? null,
           disabled: disabled ?? false,
+          sortOrder: nextOrder,
         })
         .onConflictDoNothing({ target: brands.slug })
         .returning();

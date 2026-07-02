@@ -20,6 +20,7 @@ export default async function BrandsSettingsPage() {
         avatarUrl: b.avatarUrl,
         color: b.color,
         disabled: b.disabled,
+        sortOrder: b.sortOrder,
       }))}
     />
   );

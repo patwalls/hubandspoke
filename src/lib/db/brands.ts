@@ -10,27 +10,15 @@ export type BrandListEntry = Pick<
   "id" | "slug" | "label" | "avatarUrl" | "color" | "disabled"
 >;
 
-const BRAND_PRIORITY: Record<string, number> = {
-  "starter-story": 0,
-  "matg": 1,
-  "my-first-million": 2,
-  "futurepedia": 3,
-  "hubspot-marketing": 4,
-  "jonathan-hunt": 5,
-};
-
 // React `cache()` is request-scoped: deduped within a render pass, cleared
 // between requests. A plain module-level `let` was process-scoped and
 // outlived invalidation calls on Next 16's RSC path, causing stale brand
 // state after PATCH /api/brands.
 const load = cache(async () => {
-  const rows = await db.select().from(brands).orderBy(asc(brands.label));
-  rows.sort((a, b) => {
-    const pa = BRAND_PRIORITY[a.slug] ?? 99;
-    const pb = BRAND_PRIORITY[b.slug] ?? 99;
-    if (pa !== pb) return pa - pb;
-    return a.label.localeCompare(b.label);
-  });
+  const rows = await db
+    .select()
+    .from(brands)
+    .orderBy(asc(brands.sortOrder), asc(brands.label));
   const enabled = rows.filter((b) => !b.disabled);
   const bySlug = new Map(rows.map((b) => [b.slug, b]));
   return { all: rows, enabled, bySlug };

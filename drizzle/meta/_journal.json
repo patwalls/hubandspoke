@@ -666,6 +666,13 @@
       "when": 1782430979100,
       "tag": "0094_spooky_firebrand",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1783010716436,
+      "tag": "0095_windy_plazm",
+      "breakpoints": true
     }
   ]
 }
