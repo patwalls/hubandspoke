@@ -214,6 +214,11 @@ export interface PrimaryRowMeta {
   handle: string;
   postType: string | null;
   avatarUrl: string | null;
+  /** Brand this row's account belongs to. Populated from the joined
+   *  brands row. Used by the dashboard's "Group by → Brand" mode (most
+   *  meaningful on the cross-brand /all view). */
+  brandSlug: string | null;
+  brandLabel: string | null;
 }
 
 export interface FormatViewBar {

@@ -594,6 +594,8 @@ export async function getContentReport(
     handle: string;
     postType: string | null;
     avatarUrl: string | null;
+    brandSlug: string | null;
+    brandLabel: string | null;
   };
   const primaryRowMetaByKey = new Map<string, PrimaryRowMeta>();
   const itemToRowKey = new Map<string, string>();
@@ -631,7 +633,10 @@ export async function getContentReport(
   for (const r of rows) {
     if (!r.accountId || !r.accountHandle || !r.accountPlatform) continue;
     const pt = r.item.postType ?? null;
-    const key = `${r.accountPlatform}|${r.accountHandle}|${pt ?? ""}`;
+    // Key by the concrete account id (not platform|handle) so two brands that
+    // happen to share a handle never collapse into one row — required for the
+    // "Group by → Brand" split on the cross-brand /all view.
+    const key = `${r.accountId}|${pt ?? ""}`;
     itemToRowKey.set(r.item.id, key);
     if (!primaryRowMetaByKey.has(key)) {
       // Build label: account appears on multiple platforms → include platform suffix
@@ -655,6 +660,8 @@ export async function getContentReport(
         handle: r.accountHandle,
         postType: pt,
         avatarUrl: r.accountAvatarUrl ?? null,
+        brandSlug: r.accountBrandSlug ?? null,
+        brandLabel: r.accountBrandLabel ?? null,
       });
     }
   }

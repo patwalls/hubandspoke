@@ -26,6 +26,13 @@ interface FilterPillsProps {
   startDate: string;
   endDate: string;
   viewType: string;
+  /** How the primary breakdown table buckets its rows:
+   *  "brand" | "platform" | "account" | "postType". Only rendered when
+   *  `onGroupByChange` is supplied. */
+  selectedGroupBy?: string;
+  /** Whether to offer "Brand" as a group-by option. Only meaningful on the
+   *  cross-brand /all view; hidden on single-brand dashboards. */
+  showBrandGroup?: boolean;
   /** Canonical platform key (youtube, instagram, …) or "all". Replaces the
    *  legacy channel-string platform filter. */
   selectedPlatformKey: string;
@@ -61,6 +68,7 @@ interface FilterPillsProps {
    *  to write both URL params in one update. */
   onDateRangeChange?: (startDate: string, endDate: string) => void;
   onViewTypeChange: (v: string) => void;
+  onGroupByChange?: (v: string) => void;
   onPlatformKeyChange: (v: string) => void;
   onAccountChange: (v: string) => void;
   onPostTypeChange: (v: string) => void;
@@ -360,6 +368,8 @@ export function FilterPills({
   startDate,
   endDate,
   viewType,
+  selectedGroupBy,
+  showBrandGroup = false,
   selectedPlatformKey,
   selectedAccountId,
   selectedPostType,
@@ -374,6 +384,7 @@ export function FilterPills({
   onEndDateChange,
   onDateRangeChange,
   onViewTypeChange,
+  onGroupByChange,
   onPlatformKeyChange,
   onAccountChange,
   onPostTypeChange,
@@ -449,8 +460,25 @@ export function FilterPills({
     ...formats.map((f) => ({ value: f, label: f })),
   ];
 
+  // Group-by dimensions for the primary breakdown table. "Brand" is only
+  // offered on the cross-brand /all view (single-brand grouping is a no-op).
+  const groupByOptions = [
+    ...(showBrandGroup ? [{ value: "brand", label: "Brand" }] : []),
+    { value: "platform", label: "Platform" },
+    { value: "account", label: "Account" },
+    { value: "postType", label: "Post type" },
+  ];
+
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {onGroupByChange && (
+        <SelectPill
+          label="Group by"
+          value={selectedGroupBy ?? "platform"}
+          options={groupByOptions}
+          onChange={onGroupByChange}
+        />
+      )}
       <DateRangePill
         startDate={startDate}
         endDate={endDate}

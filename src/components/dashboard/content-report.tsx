@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { format, subDays } from "date-fns";
 import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
-import { PeriodTable } from "./period-table";
+import { PeriodTable, type GroupDim } from "./period-table";
 import type { ContentReportData } from "@/types";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
@@ -18,6 +18,14 @@ const PLATFORM_TABS = [
   { key: "viewsPerPost" as const, label: "Views Per Post" },
 ];
 
+// Table heading suffix per group-by dimension ("… by Brand" / "… by Platform").
+const GROUP_BY_TITLE: Record<string, string> = {
+  brand: "Brand",
+  platform: "Platform",
+  account: "Account",
+  postType: "Post Type",
+};
+
 export function ContentReport({ brand }: { brand: string }) {
   const { defaultStart, defaultEnd } = useMemo(() => {
     const today = new Date();
@@ -27,6 +35,10 @@ export function ContentReport({ brand }: { brand: string }) {
     };
   }, []);
 
+  // On the cross-brand /all view, grouping the primary table by brand is the
+  // most useful default; on a single-brand dashboard "by brand" is a no-op so
+  // we default to the platform breakdown instead.
+  const isAll = brand === "all";
   const filters = useUrlState({
     platform: { default: "all" },
     accountId: { default: "all" },
@@ -38,6 +50,7 @@ export function ContentReport({ brand }: { brand: string }) {
     startDate: { default: defaultStart },
     endDate: { default: defaultEnd },
     viewType: { default: "weekly" },
+    groupBy: { default: isAll ? "brand" : "platform" },
   });
   const {
     platform: selectedPlatformKey,
@@ -50,8 +63,14 @@ export function ContentReport({ brand }: { brand: string }) {
     startDate,
     endDate,
     viewType,
+    groupBy: groupByRaw,
   } = filters.values;
   const provenOnly = provenOnlyFlag === "1";
+  // "Brand" grouping only makes sense across brands; on a single-brand page,
+  // fall back to platform even if the URL carries groupBy=brand (e.g. from a
+  // link or a switched brand tab).
+  const groupBy: GroupDim =
+    !isAll && groupByRaw === "brand" ? "platform" : (groupByRaw as GroupDim);
 
   useRememberListUrl({ brand, listKey: "dashboard" });
 
@@ -215,6 +234,9 @@ export function ContentReport({ brand }: { brand: string }) {
         startDate={startDate}
         endDate={endDate}
         viewType={viewType}
+        selectedGroupBy={groupBy}
+        showBrandGroup={isAll}
+        onGroupByChange={(v) => filters.set("groupBy", v)}
         selectedPlatformKey={selectedPlatformKey}
         selectedAccountId={selectedAccountId}
         selectedPostType={selectedPostType}
@@ -237,13 +259,13 @@ export function ContentReport({ brand }: { brand: string }) {
         onProvenOnlyChange={(v) => filters.set("provenOnly", v ? "1" : "0")}
       />
 
-      {/* By-platform table */}
+      {/* Primary breakdown table — grouped by the selected dimension */}
       {data ? (
         <PeriodTable
           title={
             data.showingFormats
               ? "Content Production (by Format)"
-              : "Content Production (by Platform)"
+              : `Content Production (by ${GROUP_BY_TITLE[groupBy] ?? "Platform"})`
           }
           description="Track content created across all platforms."
           periods={data.periods}
@@ -252,6 +274,7 @@ export function ContentReport({ brand }: { brand: string }) {
           brand={brand}
           filterKey={data.showingFormats ? "format" : "platform"}
           rowMeta={data.showingFormats ? undefined : data.primaryRowMeta}
+          groupBy={data.showingFormats ? undefined : groupBy}
         />
       ) : !loading ? (
         <div className="text-center py-20">

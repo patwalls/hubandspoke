@@ -231,6 +231,8 @@ export async function GET(request: NextRequest) {
       handle: string;
       postType: string | null;
       avatarUrl: string | null;
+      brandSlug: string | null;
+      brandLabel: string | null;
     };
     const postTypeShort: Record<string, string> = {
       youtube_long: "Long",
@@ -265,6 +267,8 @@ export async function GET(request: NextRequest) {
           handle: r.accountHandle,
           postType: pt,
           avatarUrl: r.accountAvatarUrl ?? null,
+          brandSlug: r.accountBrandSlug ?? null,
+          brandLabel: r.accountBrandLabel ?? null,
         });
       }
     }

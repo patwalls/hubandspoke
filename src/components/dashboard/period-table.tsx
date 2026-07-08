@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { ChevronRightIcon } from "lucide-react";
@@ -23,6 +23,8 @@ type CellFilter =
   | { kind: "platform"; platform: string }
   | { kind: "account"; accountId: string; postType: string | null }
   | { kind: "format"; format: string }
+  | { kind: "postType"; postType: string }
+  | { kind: "brand"; brandSlug: string }
   | null;
 
 function buildContentUrl(
@@ -32,6 +34,9 @@ function buildContentUrl(
   endDate: string,
 ): string {
   const params = new URLSearchParams();
+  // A "brand" group parent drills into that specific brand's content list
+  // (rather than the current — possibly cross-brand — scope).
+  const targetBrand = filter?.kind === "brand" ? filter.brandSlug : brand;
   if (filter?.kind === "platform") {
     params.set("platform", filter.platform);
   } else if (filter?.kind === "account") {
@@ -39,10 +44,12 @@ function buildContentUrl(
     if (filter.postType) params.set("postType", filter.postType);
   } else if (filter?.kind === "format") {
     params.set("format", filter.format);
+  } else if (filter?.kind === "postType") {
+    params.set("postType", filter.postType);
   }
   params.set("startDate", startDate);
   params.set("endDate", endDate);
-  return `/${brand}/content?${params.toString()}`;
+  return `/${targetBrand}/content?${params.toString()}`;
 }
 
 type MetricKey = "production" | "views" | "clicks" | "leads" | "viewsPerPost";
@@ -55,13 +62,32 @@ interface PeriodTableProps {
   tabs: { key: MetricKey; label: string }[];
   brand?: string;
   filterKey?: "platform" | "format";
-  /** Optional per-row metadata. When present the primary table groups rows
-   *  by `meta.platform` (YouTube, Instagram, …) and renders collapsible
-   *  parent rows with summed totals. Expand a platform row to fan out its
-   *  per-account children. Passed through as-is by the format-scoped
-   *  tables (which don't have account metadata) — the fallback branch
-   *  renders the legacy flat list. */
+  /** Optional per-row metadata. When present (together with `groupBy`) the
+   *  primary table groups rows by the chosen dimension and renders
+   *  collapsible parent rows with summed totals. Expand a parent to fan out
+   *  its children. Passed through as-is by the format-scoped tables (which
+   *  don't have account metadata) — the fallback branch renders the legacy
+   *  flat list. */
   rowMeta?: Record<string, PrimaryRowMeta>;
+  /** Dimension to bucket the primary rows by. Defaults to "platform" when
+   *  `rowMeta` is present but no explicit value is passed. */
+  groupBy?: GroupDim;
+}
+
+/** How the primary breakdown table buckets its per-(account, post_type) rows
+ *  into collapsible parents. */
+export type GroupDim = "platform" | "brand" | "account" | "postType";
+
+/** Full, self-describing label for a post type (e.g. "Instagram Reel",
+ *  "YouTube Short") — used as a group-parent label when grouping by post
+ *  type. Composed from the platform label + the short post-type label. */
+function postTypeGroupLabel(meta: PrimaryRowMeta): string {
+  const platform = toPlatform(meta.platform);
+  const platformLabel = PLATFORM_META[platform].label;
+  const short = meta.postType
+    ? POST_TYPE_SHORT_LABEL[meta.postType as PostType] ?? meta.postType
+    : null;
+  return short ? `${platformLabel} ${short}` : platformLabel;
 }
 
 function formatValue(value: number, metricKey: MetricKey): string {
@@ -85,9 +111,10 @@ export function PeriodTable({
   brand,
   filterKey = "platform",
   rowMeta,
+  groupBy = "platform",
 }: PeriodTableProps) {
   const [activeTab, setActiveTab] = useState<MetricKey>(tabs[0].key);
-  const [expandedPlatforms, setExpandedPlatforms] = useState<Set<string>>(
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     () => new Set(),
   );
   const rangeStart = periods[0]?.start ?? "";
@@ -115,33 +142,62 @@ export function PeriodTable({
   const data = metrics[activeTab] || {};
   const rows = Object.keys(data).sort();
 
-  // Grouping: when rowMeta is supplied, bucket rows by their platform so
-  // the UI can render collapsible platform parents. Rows without meta go
-  // into a "Misc" bucket rendered flat at the bottom.
+  // Grouping: when rowMeta is supplied, bucket rows by the selected dimension
+  // so the UI can render collapsible parents. Rows whose meta lacks the
+  // grouping key (e.g. no post_type when grouping by post type) go into a
+  // "Misc" bucket rendered flat at the bottom.
   const groups = useMemo(() => {
     if (!rowMeta) return null;
-    const byPlatform = new Map<string, { platform: string; rows: string[] }>();
+    const groupKeyFor = (meta: PrimaryRowMeta): string | null => {
+      switch (groupBy) {
+        case "brand":
+          return meta.brandSlug;
+        case "account":
+          return meta.accountId;
+        case "postType":
+          return meta.postType;
+        case "platform":
+        default:
+          return meta.platform;
+      }
+    };
+    const labelFor = (meta: PrimaryRowMeta): string => {
+      switch (groupBy) {
+        case "brand":
+          return meta.brandLabel ?? meta.brandSlug ?? "—";
+        case "account":
+          return `@${meta.handle}`;
+        case "postType":
+          return postTypeGroupLabel(meta);
+        case "platform":
+        default:
+          return PLATFORM_META[toPlatform(meta.platform)].label;
+      }
+    };
+    const byKey = new Map<
+      string,
+      { key: string; label: string; meta: PrimaryRowMeta; rows: string[] }
+    >();
     const misc: string[] = [];
     for (const row of rows) {
       const meta = rowMeta[row];
-      if (!meta?.platform) {
+      const key = meta ? groupKeyFor(meta) : null;
+      if (!meta || !key) {
         misc.push(row);
         continue;
       }
-      const p = meta.platform;
-      if (!byPlatform.has(p)) byPlatform.set(p, { platform: p, rows: [] });
-      byPlatform.get(p)!.rows.push(row);
+      if (!byKey.has(key)) {
+        byKey.set(key, { key, label: labelFor(meta), meta, rows: [] });
+      }
+      byKey.get(key)!.rows.push(row);
     }
-    // Stable order: sort platforms alphabetically by label, then children
-    // alphabetically by row label.
-    const sortedPlatforms = Array.from(byPlatform.values()).sort((a, b) =>
-      PLATFORM_META[toPlatform(a.platform)].label.localeCompare(
-        PLATFORM_META[toPlatform(b.platform)].label
-      )
+    // Stable order: parents alphabetically by label, then children by row label.
+    const sortedGroups = Array.from(byKey.values()).sort((a, b) =>
+      a.label.localeCompare(b.label)
     );
-    for (const g of sortedPlatforms) g.rows.sort();
-    return { platforms: sortedPlatforms, misc: misc.sort() };
-  }, [rowMeta, rows]);
+    for (const g of sortedGroups) g.rows.sort();
+    return { groups: sortedGroups, misc: misc.sort() };
+  }, [rowMeta, rows, groupBy]);
 
   // Per-row totals (reused by flat + grouped renders).
   const rowTotals: Record<string, number> = {};
@@ -233,11 +289,11 @@ export function PeriodTable({
     grandTotal = Object.values(rowTotals).reduce((a, b) => a + b, 0);
   }
 
-  function togglePlatform(platform: string) {
-    setExpandedPlatforms((prev) => {
+  function toggleGroup(key: string) {
+    setExpandedGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(platform)) next.delete(platform);
-      else next.add(platform);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
@@ -315,18 +371,53 @@ export function PeriodTable({
     </tr>
   );
 
-  const renderPlatformParent = (
-    platform: string,
-    childRows: string[],
+  // Icon + click-through filter for a group parent, keyed off the grouping
+  // dimension and a representative child's meta.
+  const groupParentIcon = (meta: PrimaryRowMeta) => {
+    switch (groupBy) {
+      case "account":
+        return (
+          <AccountAvatar
+            avatarUrl={meta.avatarUrl}
+            platform={meta.platform}
+            handle={meta.handle}
+            size={18}
+          />
+        );
+      case "postType":
+      case "platform":
+        return <PlatformIcon platform={meta.platform} size={14} />;
+      case "brand":
+      default:
+        return null;
+    }
+  };
+  const groupParentFilter = (key: string, meta: PrimaryRowMeta): CellFilter => {
+    switch (groupBy) {
+      case "brand":
+        return { kind: "brand", brandSlug: key };
+      case "account":
+        return { kind: "account", accountId: key, postType: null };
+      case "postType":
+        return { kind: "postType", postType: key };
+      case "platform":
+      default:
+        return { kind: "platform", platform: meta.platform };
+    }
+  };
+
+  const renderGroupParent = (
+    group: { key: string; label: string; meta: PrimaryRowMeta; rows: string[] },
     expanded: boolean,
   ) => {
-    const platformLabel = PLATFORM_META[toPlatform(platform)].label;
+    const { key, label, meta, rows: childRows } = group;
     const rangeTotal = sumRangeForRows(childRows, activeTab);
-    const platformFilter: CellFilter = { kind: "platform", platform };
+    const filter = groupParentFilter(key, meta);
+    const icon = groupParentIcon(meta);
     return (
       <tr
-        key={`platform-${platform}`}
-        onClick={() => togglePlatform(platform)}
+        key={`group-${key}`}
+        onClick={() => toggleGroup(key)}
         className={cn(
           "border-b border-border hover:bg-accent/40 transition-colors cursor-pointer select-none",
           expanded && "bg-accent/20",
@@ -340,8 +431,8 @@ export function PeriodTable({
                 expanded && "rotate-90",
               )}
             />
-            <PlatformIcon platform={platform} size={14} />
-            <span>{platformLabel}</span>
+            {icon}
+            <span>{label}</span>
             <span className="text-[10px] font-normal text-muted-foreground tabular-nums">
               {childRows.length}
             </span>
@@ -357,7 +448,7 @@ export function PeriodTable({
                 v === 0 ? "text-border" : "text-foreground"
               }`}
             >
-              {cellContent(formatValue(v, activeTab), v, platformFilter, p.start, p.end)}
+              {cellContent(formatValue(v, activeTab), v, filter, p.start, p.end)}
             </td>
           );
         })}
@@ -368,7 +459,7 @@ export function PeriodTable({
           {cellContent(
             formatValue(rangeTotal, activeTab),
             rangeTotal,
-            platformFilter,
+            filter,
             rangeStart,
             rangeEnd,
           )}
@@ -424,13 +515,13 @@ export function PeriodTable({
           <tbody>
             {groups ? (
               <>
-                {groups.platforms.map((g) => {
-                  const expanded = expandedPlatforms.has(g.platform);
+                {groups.groups.map((g) => {
+                  const expanded = expandedGroups.has(g.key);
                   return (
-                    <>
-                      {renderPlatformParent(g.platform, g.rows, expanded)}
+                    <Fragment key={`group-frag-${g.key}`}>
+                      {renderGroupParent(g, expanded)}
                       {expanded && g.rows.map((row) => renderChildRow(row))}
-                    </>
+                    </Fragment>
                   );
                 })}
                 {groups.misc.map((row) => renderChildRow(row))}
