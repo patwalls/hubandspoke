@@ -170,6 +170,8 @@ export async function GET(request: NextRequest) {
         accountAvatarUrl: accounts.avatarUrl,
         accountBrandSlug: brands.slug,
         accountBrandLabel: brands.label,
+        accountBrandAvatarUrl: brands.avatarUrl,
+        accountBrandColor: brands.color,
       })
       .from(productionItems)
       .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
@@ -233,6 +235,8 @@ export async function GET(request: NextRequest) {
       avatarUrl: string | null;
       brandSlug: string | null;
       brandLabel: string | null;
+      brandAvatarUrl: string | null;
+      brandColor: string | null;
     };
     const postTypeShort: Record<string, string> = {
       youtube_long: "Long",
@@ -269,6 +273,8 @@ export async function GET(request: NextRequest) {
           avatarUrl: r.accountAvatarUrl ?? null,
           brandSlug: r.accountBrandSlug ?? null,
           brandLabel: r.accountBrandLabel ?? null,
+          brandAvatarUrl: r.accountBrandAvatarUrl ?? null,
+          brandColor: r.accountBrandColor ?? null,
         });
       }
     }

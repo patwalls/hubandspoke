@@ -8,6 +8,7 @@ import type { MetricData, Period, PrimaryRowMeta } from "@/types";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { PlatformIcon } from "@/components/ui/platform-icon";
 import { AccountAvatar } from "@/components/ui/account-avatar";
+import { BrandAvatar } from "@/components/ui/brand-avatar";
 import { PLATFORM_META, POST_TYPE_SHORT_LABEL, toPlatform } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { cn } from "@/lib/utils";
@@ -388,6 +389,14 @@ export function PeriodTable({
       case "platform":
         return <PlatformIcon platform={meta.platform} size={14} />;
       case "brand":
+        return (
+          <BrandAvatar
+            label={meta.brandLabel ?? meta.brandSlug ?? "—"}
+            avatarUrl={meta.brandAvatarUrl}
+            color={meta.brandColor}
+            size={18}
+          />
+        );
       default:
         return null;
     }

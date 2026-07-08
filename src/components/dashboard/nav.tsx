@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BackLink } from "@/components/dashboard/back-link";
+import { BrandAvatar as BrandAvatarChip } from "@/components/ui/brand-avatar";
 
 // Brand shape passed down from the (server) layout — mirrors BrandListEntry
 // from @/lib/db/brands but redeclared locally so this client component
@@ -40,8 +41,6 @@ function getBrandFromPath(
 }
 
 function BrandAvatar({ brand, size = 20 }: { brand: Brand; size?: number }) {
-  const [errored, setErrored] = useState(false);
-
   // The synthetic "all" sidebar entry shouldn't show initials — "A" reads
   // like a real brand acronym. A grid icon reads as "every brand at once"
   // at a glance and stays visually distinct from real brand avatars.
@@ -65,40 +64,13 @@ function BrandAvatar({ brand, size = 20 }: { brand: Brand; size?: number }) {
     );
   }
 
-  const initials = brand.label
-    .split(" ")
-    .filter((w) => /[A-Za-z0-9]/.test(w[0] ?? ""))
-    .slice(0, 2)
-    .map((w) => w[0]!.toUpperCase())
-    .join("");
-
-  if (!errored && brand.avatar) {
-    return (
-      <span
-        className="relative shrink-0 inline-block rounded-full overflow-hidden bg-muted"
-        style={{ width: size, height: size }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={brand.avatar}
-          alt=""
-          onError={() => setErrored(true)}
-          className="h-full w-full object-cover"
-        />
-      </span>
-    );
-  }
-
   return (
-    <span
-      className={cn(
-        "rounded-full bg-gradient-to-br text-white font-semibold flex items-center justify-center select-none",
-        brand.color
-      )}
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
-    >
-      {initials}
-    </span>
+    <BrandAvatarChip
+      label={brand.label}
+      avatarUrl={brand.avatar}
+      color={brand.color}
+      size={size}
+    />
   );
 }
 

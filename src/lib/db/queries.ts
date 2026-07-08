@@ -560,6 +560,8 @@ export async function getContentReport(
       accountAvatarUrl: accounts.avatarUrl,
       accountBrandSlug: brands.slug,
       accountBrandLabel: brands.label,
+      accountBrandAvatarUrl: brands.avatarUrl,
+      accountBrandColor: brands.color,
     })
     .from(productionItems)
     .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
@@ -596,6 +598,8 @@ export async function getContentReport(
     avatarUrl: string | null;
     brandSlug: string | null;
     brandLabel: string | null;
+    brandAvatarUrl: string | null;
+    brandColor: string | null;
   };
   const primaryRowMetaByKey = new Map<string, PrimaryRowMeta>();
   const itemToRowKey = new Map<string, string>();
@@ -662,6 +666,8 @@ export async function getContentReport(
         avatarUrl: r.accountAvatarUrl ?? null,
         brandSlug: r.accountBrandSlug ?? null,
         brandLabel: r.accountBrandLabel ?? null,
+        brandAvatarUrl: r.accountBrandAvatarUrl ?? null,
+        brandColor: r.accountBrandColor ?? null,
       });
     }
   }

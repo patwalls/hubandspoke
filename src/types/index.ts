@@ -216,9 +216,12 @@ export interface PrimaryRowMeta {
   avatarUrl: string | null;
   /** Brand this row's account belongs to. Populated from the joined
    *  brands row. Used by the dashboard's "Group by → Brand" mode (most
-   *  meaningful on the cross-brand /all view). */
+   *  meaningful on the cross-brand /all view). `brandColor` is a Tailwind
+   *  gradient class pair for the initials-fallback avatar chip. */
   brandSlug: string | null;
   brandLabel: string | null;
+  brandAvatarUrl: string | null;
+  brandColor: string | null;
 }
 
 export interface FormatViewBar {
