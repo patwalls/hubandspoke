@@ -61,6 +61,17 @@ describe("mapping: Pulse → SC shapes", () => {
     expect(d).toMatchObject({ viewCountInt: 1000, likeCountInt: 50, commentCountInt: 7, title: "vid" });
   });
 
+  it("viewless X and reel answers defer to SC (views are the KPI)", () => {
+    expect(mapPulseToTweet(pulse({ platform: "x", views: null, likes: 42 }))).toBeNull();
+    expect(
+      mapPulseToInstagramMetrics(pulse({ platform: "instagram", postType: "instagram_reel", views: 2000, viewsEstimated: true, likes: 9 }))
+    ).toBeNull();
+    // photo posts have no public views anywhere — likes-only is a full answer
+    expect(
+      mapPulseToInstagramMetrics(pulse({ platform: "instagram", postType: "instagram_post", views: 1233, viewsEstimated: true, likes: 9 }))
+    ).toMatchObject({ views: null, likes: 9 });
+  });
+
   it("tweet mapping reproduces the SCTweet nesting the decay branch reads", () => {
     const t = mapPulseToTweet(
       pulse({ platform: "x", views: 5000, likes: 42, comments: 3, publishedAt: "2026-07-01T00:00:00.000Z" })

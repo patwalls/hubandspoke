@@ -67,7 +67,10 @@ export function mapPulseToVideoDetail(m: PulsePostMetrics): SCVideoDetail | null
 }
 
 export function mapPulseToTweet(m: PulsePostMetrics): SCTweet | null {
-  if (m.likes == null && m.views == null && m.comments == null) return null;
+  // Views are the dashboard KPI and X exposes them only on Pulse's guest-GraphQL
+  // path — its syndication fallback answers likes-only. A viewless answer must
+  // not preempt SC (which always has views), or the views column goes stale.
+  if (m.views == null) return null;
   return {
     __typename: "Tweet",
     rest_id: m.contentId,
@@ -93,6 +96,9 @@ export function mapPulseToPostMetrics(m: PulsePostMetrics): SCPostMetrics | null
 
 export function mapPulseToInstagramMetrics(m: PulsePostMetrics): SCInstagramPostMetrics | null {
   const views = realViews(m);
+  // Reels have real play counts (the KPI) — a viewless reel answer defers to SC.
+  // Photo posts have no public views anywhere, so likes/comments suffice there.
+  if (m.postType === "instagram_reel" && views == null) return null;
   if (views == null && m.likes == null && m.comments == null) return null;
   return {
     shortcode: m.contentId,
