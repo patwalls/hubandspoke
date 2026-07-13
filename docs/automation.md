@@ -133,6 +133,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Skips items with no `publishedDate`
   - View estimator (`view-estimator.ts`) fills `views` from `likes` when SC returns incomplete data
   - Newsletter (Klaviyo) branch: keyed on `platform_content_id` (campaign id) + account → Klaviyo API key (env-resolved per handle). Requires `KLAVIYO_CONVERSION_METRIC_ID` env var even when we don't care about conversions (Klaviyo's reporting endpoint requires it).
+  - **Pulse-first (DARK as of 2026-07-13):** the seven single-URL fetchers are consumed via `src/lib/services/metrics-provider.ts`, which — when `PULSE_METRICS_ENABLED=1` — tries Pulse (`pulse.walls.sh`, Pat's residential-IP metrics API, free per call) before ScrapeCreators and falls back to SC on any failure or unusable answer. Flag unset (the default) → straight delegation to `sc-fetchers.ts`, exactly the pre-2026-07 behavior. Pulse-estimated views are dropped in mapping (the hub's own `view-estimator` governs). `RefreshItemResult.creditsUsed` is 0 for Pulse-served answers, 1 for SC-served. Env at cutover: `PULSE_METRICS_ENABLED=1`, optional `PULSE_API_URL` / `PULSE_API_TOKEN` / `PULSE_TIMEOUT_MS`. Files: `src/lib/services/pulse-client.ts`, `src/lib/services/metrics-provider.ts`.
 
 ### `threshold-monitor-sweep` — auto-create repurposed items
 - **Trigger:** cron `15 * * * *` (every hour at :15)
@@ -268,6 +269,37 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   `content_events`).
 - **Surface:** `/[brand]/scheduled` (page) + `GET /api/scheduled-matches` +
   `POST /api/scheduled-matches/[id]` (`confirm` → reconcile, `reject` → exclude).
+
+### Feedhook push receiver — new-post webhooks (DARK as of 2026-07-13)
+- **Trigger:** `POST /api/webhooks/feedhook` — signed deliveries from Feedhook
+  (`feedhook.walls.sh`, Pat's webhook service). `video.published` for YouTube
+  channels (WebSub push, ~8s after upload); `post.published` for polled
+  platforms (x / instagram / tiktok — Feedhook polls Pulse `/content` every
+  ~10 min server-side).
+- **Files:** `src/app/api/webhooks/feedhook/route.ts`,
+  `src/lib/feedhook.ts` (signature verify + types),
+  `scripts/feedhook-subscribe.mjs` (cutover: create one subscription per
+  active account, stamp `accounts.feedhook_subscription_id`).
+- **What it does:** verify `x-feedhook-signature` (HMAC-SHA256 of the raw
+  body with the shared `FEEDHOOK_WEBHOOK_SECRET` — every subscription is
+  created with this same secret), match the account by
+  `feedhook_subscription_id`, and enqueue the existing
+  `account-content-sync` (mode=latest) for it. Duplicate deliveries are
+  harmless — the sync's upsert dedup absorbs them. Always answers 2xx to
+  verified deliveries (Feedhook retries 8x over ~9h otherwise).
+- **DARK:** two independent switches, both currently off in prod:
+  (1) no subscriptions exist until `scripts/feedhook-subscribe.mjs --apply`
+  runs; (2) `FEEDHOOK_SYNC_ENABLED` unset → the receiver verifies + acks +
+  logs `DARK: would sync …` but enqueues nothing.
+- **Cutover intent:** replaces the SC-credit cost of `schedule-reconcile-sweep`'s
+  10-min polling (push tells us when to sync instead of asking SC on a
+  timer) and lets the hourly `account-content-sync-sweep` drop to a
+  safety-net cadence. The reconciler itself is unchanged — it keys off
+  Published rows, however they arrive.
+- **Env at cutover:** `FEEDHOOK_WEBHOOK_SECRET` (receiver + subscribe script),
+  `FEEDHOOK_SYNC_ENABLED=1`, `FEEDHOOK_API_KEY` (subscribe script only; the
+  Feedhook account should be on the internal plan — the fleet exceeds the
+  pro feed limit).
 
 ### `account-content-sync` — sync one account's content
 - **Trigger:** enqueued by `account-content-sync-sweep`; on-demand

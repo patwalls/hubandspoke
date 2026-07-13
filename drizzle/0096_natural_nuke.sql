@@ -1,0 +1,1 @@
+ALTER TABLE "accounts" ADD COLUMN "feedhook_subscription_id" text;

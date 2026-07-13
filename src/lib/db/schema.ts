@@ -1810,6 +1810,12 @@ export const accounts = pgTable(
     // (/api/integrations/zernio/callback). Only meaningful on platform='tiktok'
     // accounts for v1.
     zernioAccountId: text("zernio_account_id"),
+    // Maps this account to a Feedhook (feedhook.walls.sh) subscription that
+    // pushes new-post webhooks to /api/webhooks/feedhook. Null = not
+    // subscribed (the hourly SC polling sweep stays this account's only
+    // discovery path). Stamped by scripts/feedhook-subscribe.mjs at cutover.
+    // DARK until FEEDHOOK_SYNC_ENABLED is set — see docs/automation.md.
+    feedhookSubscriptionId: text("feedhook_subscription_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

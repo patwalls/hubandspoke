@@ -27,6 +27,10 @@ import { db } from "@/lib/db";
 import { accounts, productionItems, syncLogs } from "@/lib/db/schema";
 import { recordScUsage } from "@/lib/services/sc-usage-log";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
+// Pulse-first fetchers with ScrapeCreators fallback — with PULSE_METRICS_ENABLED
+// unset (the default) these delegate straight to sc-fetchers, byte-for-byte the
+// old behavior. The `source` marker on results drives credit accounting via
+// `creditsFor` (Pulse answers are free; SC answers cost 1).
 import {
   fetchSingleVideo,
   fetchTweetByUrl,
@@ -35,7 +39,8 @@ import {
   fetchLinkedInPostByUrl,
   fetchYouTubeCommunityPostByUrl,
   fetchTikTokVideoByUrl,
-} from "./sc-fetchers";
+  creditsFor,
+} from "./metrics-provider";
 import { estimateViewsFromLikes } from "./view-estimator";
 import { fetchCampaignMetrics, KlaviyoError } from "@/lib/services/klaviyo-client";
 
@@ -285,7 +290,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
-    return { itemId, updated: true, platform: "youtube", views, likes, comments, creditsUsed: 1 };
+    return { itemId, updated: true, platform: "youtube", views, likes, comments, creditsUsed: creditsFor(detail) };
   }
 
   // --- YouTube Community post (SC returns only likeCount → estimate views) ---
@@ -327,7 +332,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       views: derived.views,
       likes: post.likes,
       comments: null,
-      creditsUsed: 1,
+      creditsUsed: creditsFor(post),
     };
   }
 
@@ -368,7 +373,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
-    return { itemId, updated: true, platform: "twitter", views, likes, comments, creditsUsed: 1 };
+    return { itemId, updated: true, platform: "twitter", views, likes, comments, creditsUsed: creditsFor(tweet) };
   }
 
   // --- Instagram post / reel (Reels: SC returns play_count; Photos: null → estimate) ---
@@ -413,7 +418,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       views: derived.views,
       likes,
       comments,
-      creditsUsed: 1,
+      creditsUsed: creditsFor(post),
     };
   }
 
@@ -459,7 +464,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       views: derived.views,
       likes,
       comments,
-      creditsUsed: 1,
+      creditsUsed: creditsFor(post),
     };
   }
 
@@ -504,7 +509,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       views: derived.views,
       likes,
       comments,
-      creditsUsed: 1,
+      creditsUsed: creditsFor(post),
     };
   }
 
@@ -549,7 +554,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       views: derived.views,
       likes,
       comments,
-      creditsUsed: 1,
+      creditsUsed: creditsFor(post),
     };
   }
 
