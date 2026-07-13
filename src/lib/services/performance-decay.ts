@@ -220,6 +220,9 @@ export interface RefreshItemResult {
   comments: number | null;
   note?: string;
   creditsUsed: number;
+  /** Which provider actually answered: pulse (free) or sc (1 credit).
+   *  Absent for klaviyo and unsupported-platform results. */
+  source?: "pulse" | "sc";
 }
 
 /**
@@ -290,7 +293,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
-    return { itemId, updated: true, platform: "youtube", views, likes, comments, creditsUsed: creditsFor(detail) };
+    return { itemId, updated: true, platform: "youtube", views, likes, comments, creditsUsed: creditsFor(detail), source: detail.source };
   }
 
   // --- YouTube Community post (SC returns only likeCount → estimate views) ---
@@ -308,6 +311,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         comments: null,
         note,
         creditsUsed: 1,
+        source: "sc",
       };
     }
     const derived = deriveViews(null, post.likes);
@@ -333,6 +337,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       likes: post.likes,
       comments: null,
       creditsUsed: creditsFor(post),
+      source: post.source,
     };
   }
 
@@ -351,6 +356,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         comments: null,
         note,
         creditsUsed: 1,
+        source: "sc",
       };
     }
     const views = tweet.views?.count ? parseInt(tweet.views.count, 10) : null;
@@ -373,7 +379,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
-    return { itemId, updated: true, platform: "twitter", views, likes, comments, creditsUsed: creditsFor(tweet) };
+    return { itemId, updated: true, platform: "twitter", views, likes, comments, creditsUsed: creditsFor(tweet), source: tweet.source };
   }
 
   // --- Instagram post / reel (Reels: SC returns play_count; Photos: null → estimate) ---
@@ -391,6 +397,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         comments: null,
         note,
         creditsUsed: 1,
+        source: "sc",
       };
     }
     const { likes, comments, thumbnail } = post;
@@ -419,6 +426,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       likes,
       comments,
       creditsUsed: creditsFor(post),
+      source: post.source,
     };
   }
 
@@ -438,6 +446,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         comments: null,
         note,
         creditsUsed: 1,
+        source: "sc",
       };
     }
     const { likes, comments } = post;
@@ -465,6 +474,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       likes,
       comments,
       creditsUsed: creditsFor(post),
+      source: post.source,
     };
   }
 
@@ -483,6 +493,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         comments: null,
         note,
         creditsUsed: 1,
+        source: "sc",
       };
     }
     const { likes, comments } = post;
@@ -510,6 +521,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       likes,
       comments,
       creditsUsed: creditsFor(post),
+      source: post.source,
     };
   }
 
@@ -528,6 +540,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
         comments: null,
         note,
         creditsUsed: 1,
+        source: "sc",
       };
     }
     const { likes, comments } = post;
@@ -555,6 +568,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       likes,
       comments,
       creditsUsed: creditsFor(post),
+      source: post.source,
     };
   }
 
@@ -785,14 +799,17 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
     try {
       const r = await refreshItemMetrics(item.id);
       creditsUsed += r.creditsUsed;
-      if (r.creditsUsed > 0) {
+      // Log every provider-backed refresh — Pulse answers land as credits=0
+      // rows tagged "via pulse" so the provider mix is observable. Klaviyo
+      // (source undefined) keeps its no-accounting bypass.
+      if (r.source) {
         void recordScUsage({
           caller: "performance-decay",
           productionItemId: item.id,
           platform: r.platform,
           credits: r.creditsUsed,
           ok: r.updated,
-          notes: r.note ?? null,
+          notes: r.source === "pulse" ? [r.note, "via pulse"].filter(Boolean).join(" — ") : (r.note ?? null),
           durationMs: Date.now() - itemStart,
         });
       }

@@ -122,14 +122,14 @@ export const captureVelocitySnapshotTask: Task = async (
 
   const refreshed = await refreshItemMetrics(productionItemId);
 
-  if (refreshed.creditsUsed > 0) {
+  if (refreshed.source) {
     void recordScUsage({
       caller: "capture-velocity-snapshot",
       productionItemId,
       platform: refreshed.platform,
       credits: refreshed.creditsUsed,
       ok: refreshed.updated,
-      notes: `cp=${checkpointKey}`,
+      notes: refreshed.source === "pulse" ? `cp=${checkpointKey} — via pulse` : `cp=${checkpointKey}`,
       durationMs: Date.now() - start,
     });
   }
