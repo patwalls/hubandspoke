@@ -13,6 +13,7 @@ const VALID_PLATFORMS = new Set([
   "linkedin",
   "threads",
   "snapchat",
+  "facebook",
   "newsletter",
   "other",
 ]);

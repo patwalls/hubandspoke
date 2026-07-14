@@ -173,6 +173,15 @@ export const PLATFORM_MEDIA_RULES: Record<PostType, PlatformMediaRule> = {
     replaceLabel: "Replace video",
     aspectClass: "aspect-[9/16]",
   },
+  facebook_post: {
+    mode: "photos-or-video",
+    maxCount: 4,
+    allowedKinds: ["image", "video"],
+    accept: IMAGE_VIDEO_ACCEPT,
+    addLabel: "Add photo or video",
+    replaceLabel: "Replace media",
+    aspectClass: null,
+  },
 };
 
 /** Cheap wrapper — null-safe lookup that handles the "post type not yet set"

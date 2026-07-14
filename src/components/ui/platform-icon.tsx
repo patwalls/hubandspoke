@@ -121,6 +121,23 @@ function SnapchatIcon({ size = 16, className, ...rest }: LucideProps) {
   );
 }
 
+function FacebookIcon({ size = 16, className, ...rest }: LucideProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="currentColor"
+      className={className}
+      aria-hidden
+      {...rest}
+    >
+      <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.413c0-3.025 1.792-4.697 4.533-4.697 1.312 0 2.686.236 2.686.236v2.97h-1.513c-1.491 0-1.956.93-1.956 1.874v2.25h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z" />
+    </svg>
+  );
+}
+
 // The official Threads brand mark reads as a muddy "@"-glyph at 14–16px.
 // Lucide's `AtSign` is cleaner and semantically close (Threads' whole
 // identity is the @-handle), so we use it in place of the brand mark for
@@ -160,6 +177,8 @@ export function PlatformIcon({
       return <ThreadsBrandIcon size={size} className={cls} />;
     case "snapchat":
       return <SnapchatIcon size={size} className={cls} />;
+    case "facebook":
+      return <FacebookIcon size={size} className={cls} />;
     case "newsletter":
       return <Mail size={size} className={cls} aria-hidden />;
     case "other":

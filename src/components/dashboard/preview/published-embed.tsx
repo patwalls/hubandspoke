@@ -24,6 +24,7 @@ const PLATFORM_LABEL: Record<PlatformKey, string> = {
   newsletter: "Newsletter",
   snapchat_story: "Snapchat Story",
   snapchat_spotlight: "Snapchat Spotlight",
+  facebook_post: "Facebook",
 };
 
 export function PublishedEmbed({ item }: { item: ProductionItem }) {

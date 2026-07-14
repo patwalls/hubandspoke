@@ -9,6 +9,7 @@ export type Platform =
   | "linkedin"
   | "threads"
   | "snapchat"
+  | "facebook"
   | "newsletter"
   | "other";
 
@@ -72,6 +73,12 @@ export const PLATFORM_META: Record<Platform, PlatformMeta> = {
     defaultPostType: "snapchat_story",
     colorClass: "text-yellow-400",
   },
+  facebook: {
+    label: "Facebook",
+    postTypes: ["facebook_post"],
+    defaultPostType: "facebook_post",
+    colorClass: "text-blue-600",
+  },
   newsletter: {
     label: "Newsletter",
     postTypes: ["newsletter"],
@@ -103,6 +110,7 @@ export const POST_TYPE_SHORT_LABEL: Record<PostType, string> = {
   snapchat_story: "Story",
   snapchat_spotlight: "Spotlight",
   newsletter: "Issue",
+  facebook_post: "Post",
 };
 
 /** True if the platform distinguishes multiple post types. AccountBadge uses

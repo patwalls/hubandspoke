@@ -74,6 +74,7 @@ const PLATFORM_OPTIONS = [
   { value: "linkedin", label: "LinkedIn" },
   { value: "threads", label: "Threads" },
   { value: "snapchat", label: "Snapchat" },
+  { value: "facebook", label: "Facebook" },
   { value: "newsletter", label: "Newsletter" },
   { value: "other", label: "Other" },
 ];
@@ -334,7 +335,11 @@ export function AccountsSettingsContent({
             </div>
             <div>
               <Label htmlFor="new-handle">
-                {newPlatform === "linkedin" ? "Company page URL" : "Handle"}
+                {newPlatform === "linkedin"
+                  ? "Company page URL"
+                  : newPlatform === "facebook"
+                    ? "Page URL"
+                    : "Handle"}
               </Label>
               <Input
                 id="new-handle"
@@ -342,7 +347,9 @@ export function AccountsSettingsContent({
                 placeholder={
                   newPlatform === "linkedin"
                     ? "linkedin.com/company/your-company"
-                    : "starterstory"
+                    : newPlatform === "facebook"
+                      ? "facebook.com/starterstory"
+                      : "starterstory"
                 }
                 value={newHandle}
                 onChange={(e) => setNewHandle(e.target.value)}
@@ -351,6 +358,12 @@ export function AccountsSettingsContent({
                 <p className="mt-1 text-xs text-muted-foreground">
                   Paste the company&rsquo;s public URL (vanity slug, not the
                   numeric admin URL). Only company pages sync posts.
+                </p>
+              )}
+              {newPlatform === "facebook" && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Paste the page&rsquo;s public URL (e.g.
+                  facebook.com/starterstory).
                 </p>
               )}
             </div>

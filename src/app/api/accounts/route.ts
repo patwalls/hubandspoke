@@ -6,7 +6,7 @@ import { fetchBrandBySlug } from "@/lib/db/brands";
 import { getAccounts, getAccountsForBrand } from "@/lib/db/accounts";
 import { enqueue } from "@/jobs/enqueue";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
-import { parseLinkedInAccountInput } from "@/lib/platform-url";
+import { parseLinkedInAccountInput, parseFacebookAccountInput } from "@/lib/platform-url";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -26,6 +26,7 @@ const VALID_PLATFORMS = new Set([
   "linkedin",
   "threads",
   "snapchat",
+  "facebook",
   "newsletter",
   "other",
 ]);
@@ -81,6 +82,17 @@ export async function POST(request: NextRequest) {
       }
       cleanHandle = parsed.handle;
       resolvedUrl = parsed.url ?? url ?? null;
+    }
+
+    // Facebook: SC requires a full page URL. Parse whatever was pasted into
+    // a canonical `(handle, url)` pair.
+    if (platform === "facebook") {
+      const parsed = parseFacebookAccountInput(handle);
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
+      }
+      cleanHandle = parsed.handle;
+      resolvedUrl = parsed.url;
     }
 
     const [row] = await db

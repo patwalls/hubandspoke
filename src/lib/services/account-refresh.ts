@@ -223,6 +223,25 @@ async function fetchThreadsUser(handle: string): Promise<AccountRefreshResult | 
   };
 }
 
+async function fetchFacebookPage(url: string): Promise<AccountRefreshResult | null> {
+  const json = await scFetchJson<Record<string, unknown>>("/v1/facebook/profile", { url });
+  if (!json || typeof json.name !== "string") return null;
+  return {
+    displayName: json.name,
+    avatarUrl:
+      (json.profilePicLarge as string | undefined) ??
+      (json.profilePicMedium as string | undefined) ??
+      null,
+    bio: (json.pageIntro as string | undefined) ?? null,
+    followerCount: pickInt(json, ["followerCount"]),
+    externalId:
+      (json.id as string | undefined) ??
+      pickString(json, ["adLibrary.pageId"]),
+    url: (json.url as string | undefined) ?? url,
+    metadata: json,
+  };
+}
+
 // ─── Orchestrator ─────────────────────────────────────────────────────────
 
 /**
@@ -272,6 +291,11 @@ export async function refreshAccount(
       case "threads":
         result = await fetchThreadsUser(handle);
         break;
+      case "facebook": {
+        const fbUrl = account.url ?? `https://www.facebook.com/${handle}`;
+        result = await fetchFacebookPage(fbUrl);
+        break;
+      }
       case "newsletter":
       case "other":
         skipMessage = `Scrape Creators has no account-level endpoint for platform=${account.platform}`;

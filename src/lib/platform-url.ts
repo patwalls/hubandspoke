@@ -18,7 +18,8 @@ export type PlatformKey =
   | "threads"
   | "x"
   | "tiktok"
-  | "linkedin";
+  | "linkedin"
+  | "facebook";
 
 /**
  * Coerce a fine-grained postType (`instagram_reel`, `youtube_shorts`) or a
@@ -37,6 +38,7 @@ export function platformOf(
   if (k === "x" || k === "twitter") return "x";
   if (k === "tiktok") return "tiktok";
   if (k === "linkedin") return "linkedin";
+  if (k === "facebook" || k.startsWith("facebook_")) return "facebook";
   return null;
 }
 
@@ -86,6 +88,11 @@ export function extractContentId(
       const urn = url.match(/urn:li:(?:activity|share):(\d+)/);
       return urn?.[1] ?? null;
     }
+    case "facebook": {
+      // /posts/<id> or /videos/<id>
+      const m = url.match(/\/(?:posts|videos)\/(\d+)/);
+      return m?.[1] ?? null;
+    }
   }
 }
 
@@ -121,6 +128,10 @@ export function canonicalPostUrl(
       return `https://www.youtube.com/watch?v=${args.code}`;
     case "linkedin":
       return `https://www.linkedin.com/feed/update/urn:li:activity:${args.code}/`;
+    case "facebook":
+      return handle
+        ? `https://www.facebook.com/${handle}/posts/${args.code}`
+        : `https://www.facebook.com/permalink.php?story_fbid=${args.code}`;
   }
 }
 
@@ -145,6 +156,7 @@ export function inferPlatformFromUrl(
   if (host === "x.com" || host === "twitter.com") return "x";
   if (host === "tiktok.com" || host === "vm.tiktok.com") return "tiktok";
   if (host === "linkedin.com") return "linkedin";
+  if (host === "facebook.com" || host === "fb.com" || host === "m.facebook.com") return "facebook";
   return null;
 }
 
@@ -228,6 +240,49 @@ export function parseLinkedInAccountInput(raw: string): LinkedInAccountInput {
   }
 
   return { ok: true, handle: input.replace(/^@/, ""), url: null, kind: "bare" };
+}
+
+/**
+ * Normalize whatever a user pastes into the Handle field for a Facebook
+ * account into a stored `(handle, url)` pair.
+ *
+ * SC's Facebook endpoints require a full page URL (not just a handle), so
+ * we store the canonical URL in `accounts.url` and extract the slug as the
+ * handle for display. Accepts full URLs or bare page slugs.
+ */
+export type FacebookAccountInput =
+  | { ok: true; handle: string; url: string }
+  | { ok: false; error: string };
+
+export function parseFacebookAccountInput(raw: string): FacebookAccountInput {
+  const input = (raw ?? "").trim();
+  if (!input) return { ok: false, error: "handle cannot be empty" };
+
+  // Full URL — extract the first path segment as the slug.
+  const urlMatch = input.match(/facebook\.com\/([^/?#\s]+)/i);
+  if (urlMatch) {
+    const slug = urlMatch[1];
+    // Skip generic Facebook paths
+    if (["pages", "groups", "events", "marketplace", "watch", "profile.php"].includes(slug.toLowerCase())) {
+      return {
+        ok: false,
+        error: "Enter the Facebook page URL (e.g. facebook.com/starterstory), not a generic Facebook path.",
+      };
+    }
+    return {
+      ok: true,
+      handle: slug,
+      url: `https://www.facebook.com/${slug}`,
+    };
+  }
+
+  // Bare slug — treat as a page name directly.
+  const slug = input.replace(/^@/, "");
+  return {
+    ok: true,
+    handle: slug,
+    url: `https://www.facebook.com/${slug}`,
+  };
 }
 
 /**

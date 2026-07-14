@@ -117,6 +117,7 @@ export function resolveEmbed(
     case "newsletter":
     case "snapchat_story":
     case "snapchat_spotlight":
+    case "facebook_post":
       return { kind: "link-only", href: publishedLink };
   }
 }

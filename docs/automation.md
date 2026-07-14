@@ -220,7 +220,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Cost:** ~22 SC credits per sweep at current volume (3 IG + 3 LinkedIn + 2 Threads + 3 TikTok + 3 X + 4 YouTube × 2 endpoints). 24 sweeps/day → ~528 SC calls/day. Tunable via `CRONTAB` in `src/jobs/crontab.ts`.
 - **Files:** `src/jobs/tasks/scheduled.ts` (`accountContentSyncSweepTask`)
 - **Inputs:** every active `accounts` row on an SC-supported platform
-  (`youtube, instagram, tiktok, linkedin, x, threads`)
+  (`youtube, instagram, tiktok, linkedin, x, threads, facebook`)
 - **Outputs:** enqueues one `account-content-sync` per row with `mode=latest`, `jobKey: account-content-sync-{id}-latest`
 - **Downstream:** `account-content-sync`
 - **Rules:**
@@ -229,6 +229,8 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Skips platforms with no SC content-list coverage (`newsletter`, `other`)
   - `x` and `threads` are enqueued but always in `latest` mode (neither
     platform's SC endpoint paginates)
+  - `facebook` requires `accounts.url` to be set (the page URL); the fetcher
+    throws if it's missing
   - Sweeps use jobKey + `unsafe_dedupe` so overlapping ticks don't
     double-enqueue a pending account
 
@@ -710,7 +712,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 ### `account-refresh-sweep` — weekly metadata refresh
 - **Trigger:** cron `0 17 * * 1` (Mondays 17:00 UTC)
 - **Files:** `src/jobs/tasks/scheduled.ts:125-147`
-- **Inputs:** active `accounts` on SC-supported platforms (`youtube, instagram, x, tiktok, linkedin, threads`)
+- **Inputs:** active `accounts` on SC-supported platforms (`youtube, instagram, x, tiktok, linkedin, threads, facebook`)
 - **Outputs:** enqueues one `account-refresh` job per account, `jobKey: account-refresh-{id}`
 - **Downstream:** `account-refresh`
 - **Rules:** explicitly skips `newsletter` and `other` (no SC coverage)

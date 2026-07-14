@@ -47,6 +47,7 @@ const LATEST_SUPPORTED = new Set([
   "linkedin",
   "x",
   "threads",
+  "facebook",
 ]);
 
 /** Platforms where we paginate on `backfill`. Others collapse to latest. */
@@ -55,6 +56,7 @@ const BACKFILL_SUPPORTED = new Set([
   "instagram",
   "tiktok",
   "linkedin",
+  "facebook",
 ]);
 
 export function platformSupportsLatest(platform: string): boolean {
@@ -79,6 +81,7 @@ const PLATFORM_LABEL: Record<PostType, string> = {
   newsletter: "Newsletter",
   snapchat_story: "Snapchat Story",
   snapchat_spotlight: "Snapchat Spotlight",
+  facebook_post: "Facebook",
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -251,6 +254,18 @@ interface SCThreadsPost {
   parent_pk?: string | null;
   parent_post_pk?: string | null;
   in_reply_to_id?: string | null;
+}
+
+interface SCFacebookPost {
+  id: string;
+  text?: string;
+  url?: string;
+  permalink?: string;
+  reactionCount?: number;
+  commentCount?: number;
+  videoViewCount?: number | null;
+  publishTime?: number;
+  videoDetails?: { thumbnail?: string; sdUrl?: string; hdUrl?: string } | null;
 }
 
 /**
@@ -707,6 +722,47 @@ async function fetchThreadsLatest(
   return { items, credits: 1 };
 }
 
+async function fetchFacebookPostsPaged(
+  pageUrl: string,
+  maxPages: number
+): Promise<{ items: NormalizedItem[]; credits: number }> {
+  const items: NormalizedItem[] = [];
+  let credits = 0;
+  let cursor: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const query: Record<string, string> = { url: pageUrl };
+    if (cursor) query.cursor = cursor;
+    const data = await scGetJson("/v1/facebook/profile/posts", query);
+    credits++;
+    const posts: SCFacebookPost[] = data.posts || [];
+    for (const p of posts) {
+      if (!p.id) continue;
+      const postUrl = p.permalink ?? p.url ?? null;
+      if (!postUrl) continue;
+      const body = p.text ?? "";
+      items.push({
+        platformContentId: p.id,
+        publishedLink: postUrl,
+        postType: "facebook_post" as const,
+        title: body
+          ? body.slice(0, 120) + (body.length > 120 ? "..." : "")
+          : "(No caption)",
+        thumbnail: p.videoDetails?.thumbnail ?? null,
+        publishedAt: p.publishTime ? new Date(p.publishTime * 1000) : null,
+        publishedDate: p.publishTime ? unixToDate(p.publishTime) : null,
+        views: p.videoViewCount ?? null,
+        likes: p.reactionCount ?? null,
+        comments: p.commentCount ?? null,
+        contentBody: body || null,
+        contentBodySource: body ? "scrape_creators" : null,
+      });
+    }
+    cursor = data.cursor ?? undefined;
+    if (!cursor || posts.length === 0) break;
+  }
+  return { items, credits };
+}
+
 // ─── Upsert ───────────────────────────────────────────────────────────────
 
 /** Look up any productionItems for this account that might collide with an
@@ -1117,6 +1173,18 @@ export async function syncAccountContent(
         fetched.push(...r.items);
         credits += r.credits;
         pages += 1;
+        break;
+      }
+      case "facebook": {
+        if (!row.url) {
+          throw new Error(
+            "Facebook content sync requires a page URL — re-add the account with the full facebook.com/page-slug URL"
+          );
+        }
+        const r = await fetchFacebookPostsPaged(row.url, maxPages);
+        fetched.push(...r.items);
+        credits += r.credits;
+        pages += r.credits;
         break;
       }
     }

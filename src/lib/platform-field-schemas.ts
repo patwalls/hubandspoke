@@ -18,7 +18,8 @@ export type PostType =
   | "tiktok"
   | "threads"
   | "snapchat_story"
-  | "snapchat_spotlight";
+  | "snapchat_spotlight"
+  | "facebook_post";
 
 /** @deprecated renamed to PostType. Kept as a type alias during the accounts
  *  rollout so downstream imports don't break mid-PR. Delete after sweep. */
@@ -315,6 +316,20 @@ export const PLATFORM_FIELD_SCHEMAS: Record<PostType, FormatFieldSchema> = {
       },
     ],
   },
+  facebook_post: {
+    version: SCHEMA_VERSION,
+    fields: [
+      {
+        key: "body",
+        label: "Post body",
+        type: "longtext",
+        maxLength: 63206,
+        required: true,
+        prompt:
+          "Facebook post body. Open with a one-line hook. Short paragraphs drawn from the pillar transcript — specifics over platitudes. End with a clear call-to-action or question to drive comments.",
+      },
+    ],
+  },
 };
 
 // Per-postType role map for the simulator + repost-seed: which draft field
@@ -347,6 +362,7 @@ export const PLATFORM_FIELD_MAP: Record<PostType, PlatformFieldMap> = {
   threads: { caption: "post", secondary: null, cta: "cta" },
   snapchat_story: { caption: "caption", secondary: null, cta: null },
   snapchat_spotlight: { caption: "caption", secondary: null, cta: null },
+  facebook_post: { caption: "body", secondary: null, cta: null },
 };
 
 // Map a historical platform string to a canonical post-type key. Used by
@@ -378,6 +394,8 @@ export function normalizePlatform(raw: string): PostType | null {
   if (s === "snapchat story") return "snapchat_story";
   if (s === "snapchat spotlight") return "snapchat_spotlight";
   if (s === "snapchat") return "snapchat_story";
+
+  if (s === "facebook" || s === "facebook post") return "facebook_post";
 
   return null;
 }
