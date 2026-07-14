@@ -160,7 +160,24 @@ export async function enrichSingleItem(
     throw err;
   }
 
-  if (!result) return null;
+  // No enricher matched this item's platform — null/unmapped post_type
+  // (see dispatchEnrichment / platformKindFromPostType). Stamp the row so it
+  // drops out of the (attempts ASC, updated_at ASC) selection instead of
+  // staying pinned to the front of the queue and eating the whole sweep batch
+  // every tick. Mirrors the performance-decay path's stampSyncResult() guard.
+  // The 24h cooldown clause in selectEnrichmentCandidates still re-checks it
+  // later, so if an enricher for its platform lands the item picks back up.
+  if (!result) {
+    await db
+      .update(productionItems)
+      .set({
+        enrichmentAttempts: MAX_ATTEMPTS,
+        enrichmentError: `no-enricher-for-post-type:${item.postType ?? "null"}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, itemId));
+    return null;
+  }
 
   // Snapshot audited fields before applying the update so we can diff
   // and emit `content_changed` events for any of them that moved.
