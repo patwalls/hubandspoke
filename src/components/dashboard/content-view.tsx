@@ -9,6 +9,7 @@ import type { PickerAccount } from "@/components/ui/account-post-type-picker";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
+import { BangersView } from "./bangers-view";
 
 interface ContentViewProps {
   brand: string;
@@ -43,6 +44,7 @@ export function ContentView({ brand }: ContentViewProps) {
   // pre-2026-05-22 hand-rolled seeding; not worth carrying forward — the
   // alias only fired on first mount and Dashboard always used `platform`.)
   const filters = useUrlState({
+    view: { default: "list" },
     platform: { default: "all" },
     accountId: { default: "all" },
     postType: { default: "all" },
@@ -54,6 +56,7 @@ export function ContentView({ brand }: ContentViewProps) {
     viewType: { default: "weekly" },
   });
   const {
+    view: activeView,
     platform: selectedPlatformKey,
     accountId: selectedAccountId,
     postType: selectedPostType,
@@ -161,13 +164,29 @@ export function ContentView({ brand }: ContentViewProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Content</h1>
-        <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-          Browse and edit individual content items
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Content</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            Browse and edit individual content items
+          </p>
+        </div>
+        <button
+          onClick={() => filters.set("view", activeView === "bangers" ? "list" : "bangers")}
+          className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+            activeView === "bangers"
+              ? "border-foreground bg-foreground text-background"
+              : "border-border bg-background text-muted-foreground hover:bg-muted"
+          }`}
+        >
+          🔥 Top Bangers
+        </button>
       </div>
 
+      {activeView === "bangers" ? (
+        <BangersView brand={brand} />
+      ) : (
+      <>
       <FilterPills
         startDate={startDate}
         endDate={endDate}
@@ -216,6 +235,8 @@ export function ContentView({ brand }: ContentViewProps) {
         <div className="text-center py-20">
           <p className="text-muted-foreground text-sm">No data available.</p>
         </div>
+      )}
+      </>
       )}
     </div>
   );

@@ -210,7 +210,7 @@ function OptionRow({
   );
 }
 
-function DateRangePill({
+export function DateRangePill({
   startDate,
   endDate,
   onStartDateChange,

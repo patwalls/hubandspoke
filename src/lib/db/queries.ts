@@ -1429,3 +1429,202 @@ export async function getVelocityCoverage(): Promise<VelocityCoverageRow[]> {
     a.brand.localeCompare(b.brand)
   );
 }
+
+// ---------------------------------------------------------------------------
+// Top Bangers
+// ---------------------------------------------------------------------------
+
+export interface TopBangersParams {
+  brand: string;
+  platform?: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+}
+
+export interface BangerItem {
+  rank: number;
+  id: string;
+  title: string | null;
+  thumbnail: string | null;
+  posterUrl: string | null;
+  mediaUrl: string | null;
+  mediaContentType: string | null;
+  format: string | null;
+  postType: string | null;
+  platform: string | null;
+  accountHandle: string | null;
+  accountAvatarUrl: string | null;
+  publishedAt: string | null;
+  views: number;
+  vsAvg: number;
+  badge: "viral" | "trending" | "outlier" | null;
+}
+
+export interface TopBangersResult {
+  items: BangerItem[];
+  stats: {
+    totalViews: number;
+    avgViewsPerBanger: number;
+    bestChannel: string | null;
+    bestFormat: string | null;
+  };
+}
+
+export async function getTopBangers(
+  params: TopBangersParams
+): Promise<TopBangersResult> {
+  const { brand, platform = "all", startDate, endDate, limit = 10 } = params;
+
+  const conditions = [
+    isNotNull(productionItems.views),
+    isNotNull(productionItems.publishedAt),
+    isNull(productionItems.deletedAt),
+  ];
+
+  if (brand !== "all") {
+    conditions.push(eq(productionItems.brand, brand));
+  }
+
+  if (startDate) {
+    conditions.push(gte(productionItems.publishedAt, new Date(startDate)));
+  }
+  if (endDate) {
+    conditions.push(lte(productionItems.publishedAt, new Date(endDate)));
+  }
+
+  if (platform !== "all") {
+    conditions.push(eq(accounts.platform, platform));
+  }
+
+  // 1. Fetch per-postType averages for classification
+  const avgRows = await db
+    .select({
+      postType: productionItems.postType,
+      avgViews: sql<number>`avg(${productionItems.views})`.as("avg_views"),
+    })
+    .from(productionItems)
+    .leftJoin(accounts, eq(productionItems.accountId, accounts.id))
+    .where(and(...conditions))
+    .groupBy(productionItems.postType);
+
+  const avgByPostType = new Map<string | null, number>();
+  for (const row of avgRows) {
+    avgByPostType.set(row.postType, Number(row.avgViews) || 1);
+  }
+
+  // 2. Fetch top N items
+  const topItems = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      thumbnail: productionItems.thumbnail,
+      format: productionItems.format,
+      postType: productionItems.postType,
+      publishedAt: productionItems.publishedAt,
+      views: productionItems.views,
+      accountPlatform: accounts.platform,
+      accountHandle: accounts.handle,
+      accountAvatarUrl: accounts.avatarUrl,
+      posterS3Key: productionItems.posterS3Key,
+      mediaS3Key: productionItems.mediaS3Key,
+      mediaContentType: productionItems.mediaContentType,
+    })
+    .from(productionItems)
+    .leftJoin(accounts, eq(productionItems.accountId, accounts.id))
+    .where(and(...conditions))
+    .orderBy(sql`${productionItems.views} desc nulls last`)
+    .limit(limit);
+
+  // 3. Classify and build result
+  const items: BangerItem[] = topItems.map((row, i) => {
+    const avg = avgByPostType.get(row.postType) ?? 1;
+    const vsAvg = row.views ? Math.round((row.views / avg) * 10) / 10 : 0;
+    let badge: BangerItem["badge"] = null;
+    if (vsAvg >= 3) badge = "viral";
+    else if (vsAvg >= 2) badge = "trending";
+    else if (vsAvg >= 1.2) badge = "outlier";
+
+    return {
+      rank: i + 1,
+      id: row.id,
+      title: row.title,
+      thumbnail: row.thumbnail,
+      posterUrl: null as string | null,
+      mediaUrl: null as string | null,
+      mediaContentType: row.mediaContentType ?? null,
+      format: row.format,
+      postType: row.postType,
+      platform: row.accountPlatform,
+      accountHandle: row.accountHandle,
+      accountAvatarUrl: row.accountAvatarUrl,
+      publishedAt: row.publishedAt?.toISOString() ?? null,
+      views: row.views ?? 0,
+      vsAvg,
+      badge,
+    };
+  });
+
+  // Presign S3 cover URLs
+  const s3Keys = new Set<string>();
+  for (const row of topItems) {
+    if (row.posterS3Key) s3Keys.add(row.posterS3Key);
+    if (row.mediaS3Key) s3Keys.add(row.mediaS3Key);
+  }
+  const urlByKey = new Map<string, string>();
+  await Promise.all(
+    [...s3Keys].map(async (key) => {
+      urlByKey.set(key, await getPresignedGetUrl(key, 60 * 60));
+    })
+  );
+  for (let i = 0; i < items.length; i++) {
+    const row = topItems[i];
+    items[i].posterUrl = row.posterS3Key ? urlByKey.get(row.posterS3Key) ?? null : null;
+    items[i].mediaUrl = row.mediaS3Key ? urlByKey.get(row.mediaS3Key) ?? null : null;
+  }
+
+  // 4. Summary stats
+  const totalViews = items.reduce((sum, it) => sum + it.views, 0);
+  const avgViewsPerBanger =
+    items.length > 0 ? Math.round(totalViews / items.length) : 0;
+
+  const channelCounts = new Map<string, number>();
+  for (const it of items) {
+    if (it.platform) {
+      channelCounts.set(it.platform, (channelCounts.get(it.platform) ?? 0) + 1);
+    }
+  }
+  let bestChannel: string | null = null;
+  let bestChannelCount = 0;
+  for (const [ch, count] of channelCounts) {
+    if (count > bestChannelCount) {
+      bestChannel = ch;
+      bestChannelCount = count;
+    }
+  }
+
+  const formatCounts = new Map<string, number>();
+  for (const it of items) {
+    if (it.format) {
+      formatCounts.set(it.format, (formatCounts.get(it.format) ?? 0) + 1);
+    }
+  }
+  let bestFormat: string | null = null;
+  let bestFormatCount = 0;
+  for (const [f, count] of formatCounts) {
+    if (count > bestFormatCount) {
+      bestFormat = f;
+      bestFormatCount = count;
+    }
+  }
+
+  return {
+    items,
+    stats: {
+      totalViews,
+      avgViewsPerBanger,
+      bestChannel,
+      bestFormat,
+    },
+  };
+}
