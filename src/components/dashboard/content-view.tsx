@@ -184,7 +184,7 @@ export function ContentView({ brand }: ContentViewProps) {
       </div>
 
       {activeView === "bangers" ? (
-        <BangersView brand={brand} />
+        <BangersView brand={brand} accounts={accounts} />
       ) : (
       <>
       <FilterPills

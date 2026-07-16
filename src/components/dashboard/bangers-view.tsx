@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -22,18 +22,8 @@ import type { BangerItem, TopBangersResult } from "@/lib/db/queries";
 
 interface BangersViewProps {
   brand: string;
+  accounts: Array<{ platform: string }>;
 }
-
-const CHANNEL_FILTERS: { value: string; label: string; platform?: Platform }[] = [
-  { value: "all", label: "All" },
-  ...Object.entries(PLATFORM_META)
-    .filter(([key]) => key !== "other")
-    .map(([key, meta]) => ({
-      value: key,
-      label: meta.label,
-      platform: key as Platform,
-    })),
-];
 
 function defaultDateRange(): { startDate: string; endDate: string } {
   const end = new Date();
@@ -75,7 +65,21 @@ function formatDate(iso: string | null): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function BangersView({ brand }: BangersViewProps) {
+export function BangersView({ brand, accounts }: BangersViewProps) {
+  const brandPlatforms = useMemo(() => {
+    const set = new Set(accounts.map((a) => a.platform));
+    return [
+      { value: "all", label: "All" } as { value: string; label: string; platform?: Platform },
+      ...Object.entries(PLATFORM_META)
+        .filter(([key]) => key !== "other" && set.has(key))
+        .map(([key, meta]) => ({
+          value: key,
+          label: meta.label,
+          platform: key as Platform,
+        })),
+    ];
+  }, [accounts]);
+
   const [platform, setPlatform] = useState("all");
   const defaults = defaultDateRange();
   const [startDate, setStartDate] = useState(defaults.startDate);
@@ -122,7 +126,7 @@ export function BangersView({ brand }: BangersViewProps) {
       {/* Filters */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1.5">
-          {CHANNEL_FILTERS.map((ch) => (
+          {brandPlatforms.map((ch) => (
             <button
               key={ch.value}
               onClick={() => setPlatform(ch.value)}
