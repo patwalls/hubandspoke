@@ -1459,6 +1459,7 @@ export interface BangerItem {
   views: number;
   vsAvg: number;
   badge: "viral" | "trending" | "outlier" | null;
+  sourceType: string | null;
 }
 
 export interface TopBangersResult {
@@ -1529,6 +1530,7 @@ export async function getTopBangers(
       posterS3Key: productionItems.posterS3Key,
       mediaS3Key: productionItems.mediaS3Key,
       mediaContentType: productionItems.mediaContentType,
+      sourceType: productionItems.sourceType,
     })
     .from(productionItems)
     .leftJoin(accounts, eq(productionItems.accountId, accounts.id))
@@ -1562,6 +1564,7 @@ export async function getTopBangers(
       views: row.views ?? 0,
       vsAvg,
       badge,
+      sourceType: row.sourceType ?? null,
     };
   });
 

@@ -15,6 +15,7 @@ import { PlatformIcon } from "@/components/ui/platform-icon";
 import { PerformanceBadge } from "./performance-badge";
 import { DateRangePill } from "./filter-pills";
 import { CoverImg } from "./cover-img";
+import { SourceBadge } from "@/components/ui/source-badge";
 import { coverImageUrl } from "@/lib/cover-image";
 import { PLATFORM_META, type Platform } from "@/lib/platforms";
 import { cn } from "@/lib/utils";
@@ -247,6 +248,7 @@ function BangerRow({ item, brand }: { item: BangerItem; brand: string }) {
               )}
               <span>·</span>
               <span>{formatDate(item.publishedAt)}</span>
+              <SourceBadge sourceType={item.sourceType} />
             </div>
           </div>
         </Link>
