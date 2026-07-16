@@ -170,9 +170,10 @@ export function BangersView({ brand, accounts }: BangersViewProps) {
               <TableRow>
                 <TableHead className="w-[40px] text-center">#</TableHead>
                 <TableHead>Content</TableHead>
-                <TableHead>Format</TableHead>
                 <TableHead className="text-right">Views</TableHead>
                 <TableHead className="text-right">Performance</TableHead>
+                <TableHead>Format</TableHead>
+                <TableHead>Source</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -248,10 +249,15 @@ function BangerRow({ item, brand }: { item: BangerItem; brand: string }) {
               )}
               <span>·</span>
               <span>{formatDate(item.publishedAt)}</span>
-              <SourceBadge sourceType={item.sourceType} />
             </div>
           </div>
         </Link>
+      </TableCell>
+      <TableCell className="text-right">
+        <span className="text-sm font-semibold">{formatViews(item.views)}</span>
+      </TableCell>
+      <TableCell className="text-right">
+        <PerformanceBadge badge={item.badge} multiplier={item.vsAvg} />
       </TableCell>
       <TableCell>
         {item.format ? (
@@ -262,11 +268,8 @@ function BangerRow({ item, brand }: { item: BangerItem; brand: string }) {
           <span className="text-xs text-muted-foreground">—</span>
         )}
       </TableCell>
-      <TableCell className="text-right">
-        <span className="text-sm font-semibold">{formatViews(item.views)}</span>
-      </TableCell>
-      <TableCell className="text-right">
-        <PerformanceBadge badge={item.badge} multiplier={item.vsAvg} />
+      <TableCell>
+        <SourceBadge sourceType={item.sourceType} />
       </TableCell>
     </TableRow>
   );
