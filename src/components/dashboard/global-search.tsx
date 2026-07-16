@@ -73,7 +73,7 @@ type NavEntry = { slug: string; label: string; href: (brand: string) => string }
 const QUICK_NAV: NavEntry[] = [
   { slug: "", label: "Dashboard", href: (b) => `/${b}` },
   { slug: "content", label: "Content", href: (b) => `/${b}/content` },
-  { slug: "production", label: "Production", href: (b) => `/${b}/production` },
+  { slug: "production", label: "In Production", href: (b) => `/${b}/production` },
   { slug: "queue", label: "Queue", href: (b) => `/${b}/queue` },
   { slug: "formats", label: "Formats", href: (b) => `/${b}/formats` },
   { slug: "my-work", label: "My Work", href: () => `/my-work` },

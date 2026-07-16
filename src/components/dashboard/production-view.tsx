@@ -349,7 +349,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-            Production
+            In Production
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
             Track content moving through the pipeline.

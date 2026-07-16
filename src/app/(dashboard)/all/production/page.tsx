@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { ProductionView } from "@/components/dashboard/production-view";
 import { auth } from "@/lib/auth";
 
-export const metadata: Metadata = { title: "Production · All" };
+export const metadata: Metadata = { title: "In Production · All" };
 
 export default async function AllProductionPage() {
   const session = await auth();

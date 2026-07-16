@@ -15,7 +15,7 @@ export async function generateMetadata({
   const { brand } = await params;
   const brandConfig = await fetchBrandBySlug(brand);
   return {
-    title: brandConfig ? `Production · ${brandConfig.label}` : "Production",
+    title: brandConfig ? `In Production · ${brandConfig.label}` : "In Production",
   };
 }
 
