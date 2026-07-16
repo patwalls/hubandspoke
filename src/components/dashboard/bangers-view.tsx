@@ -269,7 +269,7 @@ function BangerRow({ item, brand }: { item: BangerItem; brand: string }) {
         )}
       </TableCell>
       <TableCell>
-        <SourceBadge sourceType={item.sourceType} />
+        <SourceBadge sourceType={item.sourceType as "original" | "repost" | "cross_post" | "repurposed" | "source_recording" | null} />
       </TableCell>
     </TableRow>
   );
