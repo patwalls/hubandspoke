@@ -540,6 +540,9 @@ async function postImportProjectMedia(
   if (!res.ok) {
     const msg =
       (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    console.error(
+      `[descript] import failed status=${res.status} body=${JSON.stringify(json)} request_project_name=${typeof body.project_name === "string" ? body.project_name.length : "?"} chars`,
+    );
     throw new Error(`Descript import failed: ${msg}`);
   }
   return json as ImportProjectResponse;
