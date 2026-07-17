@@ -14,12 +14,18 @@ import { productionItems } from "@/lib/db/schema";
  * `title` is trimmed and falls back to an item-id-derived stub when empty;
  * the production_item_id is always present.
  */
+// Descript enforces a ~255-char project name limit and returns a generic
+// 500 when exceeded. The UUID suffix is always 39 chars (` [<uuid>]`),
+// so cap the title at 200 to leave a safe margin.
+const MAX_TITLE_LENGTH = 200;
+
 export function buildCompositionName(args: {
   title: string | null | undefined;
   productionItemId: string;
 }): string {
   const cleanTitle = (args.title ?? "").trim();
-  const head = cleanTitle.length > 0 ? cleanTitle : `Item ${args.productionItemId.slice(0, 8)}`;
+  const raw = cleanTitle.length > 0 ? cleanTitle : `Item ${args.productionItemId.slice(0, 8)}`;
+  const head = raw.length > MAX_TITLE_LENGTH ? raw.slice(0, MAX_TITLE_LENGTH).trimEnd() + "…" : raw;
   return `${head} [${args.productionItemId}]`;
 }
 
