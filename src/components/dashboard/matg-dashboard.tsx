@@ -8,6 +8,7 @@ import { PeriodTable } from "./period-table";
 import type { ContentReportData } from "@/types";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
+import { exportChannelSummaryCsv } from "@/lib/export-csv";
 
 const PLATFORM_TABS = [
   { key: "production" as const, label: "Production" },
@@ -63,6 +64,7 @@ export function MATGDashboard() {
   // Data
   const [data, setData] = useState<ContentReportData | null>(null);
   const [accounts, setAccounts] = useState<FilterAccount[]>([]);
+  const [showExportConfirm, setShowExportConfirm] = useState(false);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -185,7 +187,60 @@ export function MATGDashboard() {
 
       {/* By-platform table */}
       {data && (
-        <PeriodTable
+        <>
+          <div className="flex justify-end">
+            <div className="relative">
+              <button
+                onClick={() => setShowExportConfirm((v) => !v)}
+                className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent transition-colors"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Export CSV
+              </button>
+              {showExportConfirm && (
+                <div className="absolute right-0 top-full mt-2 w-80 rounded-lg border border-border bg-background shadow-lg p-4 z-10">
+                  <p className="text-sm font-medium mb-1">Export channel metrics</p>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    Views for LinkedIn, Threads, Instagram posts, and YouTube Community are estimated from likes using a platform-specific multiplier. These are flagged in the{" "}
+                    <span className="font-medium text-foreground">Est. Views</span>{" "}
+                    column of the export.
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setShowExportConfirm(false)}
+                      className="text-sm text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        exportChannelSummaryCsv(data.items, "matg", startDate, endDate);
+                        setShowExportConfirm(false);
+                      }}
+                      className="text-sm font-medium rounded-md bg-foreground text-background px-3 py-1.5 hover:opacity-90 transition-opacity"
+                    >
+                      Download CSV
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          <PeriodTable
           title={
             data.showingFormats
               ? "Content Production (by Format)"
@@ -199,6 +254,7 @@ export function MATGDashboard() {
           filterKey={data.showingFormats ? "format" : "platform"}
           rowMeta={data.showingFormats ? undefined : data.primaryRowMeta}
         />
+        </>
       )}
     </div>
   );
