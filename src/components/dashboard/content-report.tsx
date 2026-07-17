@@ -8,6 +8,7 @@ import { PeriodTable, type GroupDim } from "./period-table";
 import type { ContentReportData } from "@/types";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
+import { exportChannelSummaryCsv } from "@/lib/export-csv";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 
 const PLATFORM_TABS = [
@@ -77,6 +78,7 @@ export function ContentReport({ brand }: { brand: string }) {
   const [data, setData] = useState<ContentReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [showExportConfirm, setShowExportConfirm] = useState(false);
 
   // Accounts for the new Account dropdown. Fetched once per mount; the
   // picker's cascade logic inside FilterPills filters them by platform.
@@ -261,21 +263,75 @@ export function ContentReport({ brand }: { brand: string }) {
 
       {/* Primary breakdown table — grouped by the selected dimension */}
       {data ? (
-        <PeriodTable
-          title={
-            data.showingFormats
-              ? "Content Production (by Format)"
-              : `Content Production (by ${GROUP_BY_TITLE[groupBy] ?? "Platform"})`
-          }
-          description="Track content created across all platforms."
-          periods={data.periods}
-          metrics={data.byPlatform}
-          tabs={PLATFORM_TABS}
-          brand={brand}
-          filterKey={data.showingFormats ? "format" : "platform"}
-          rowMeta={data.showingFormats ? undefined : data.primaryRowMeta}
-          groupBy={data.showingFormats ? undefined : groupBy}
-        />
+        <>
+          <div className="flex justify-end">
+            <div className="relative">
+              <button
+                onClick={() => setShowExportConfirm((v) => !v)}
+                className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent transition-colors"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Export CSV
+              </button>
+              {showExportConfirm && (
+                <div className="absolute right-0 top-full mt-2 w-80 rounded-lg border border-border bg-background shadow-lg p-4 z-10">
+                  <p className="text-sm font-medium mb-1">Export channel metrics</p>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    Views for LinkedIn, Threads, Instagram posts, and YouTube Community are estimated from likes using a platform-specific multiplier. These are flagged in the{" "}
+                    <span className="font-medium text-foreground">Est. Views</span>{" "}
+                    column of the export.
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setShowExportConfirm(false)}
+                      className="text-sm text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        exportChannelSummaryCsv(data.items, brand, startDate, endDate);
+                        setShowExportConfirm(false);
+                      }}
+                      className="text-sm font-medium rounded-md bg-foreground text-background px-3 py-1.5 hover:opacity-90 transition-opacity"
+                    >
+                      Download CSV
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          <PeriodTable
+            title={
+              data.showingFormats
+                ? "Content Production (by Format)"
+                : `Content Production (by ${GROUP_BY_TITLE[groupBy] ?? "Platform"})`
+            }
+            description="Track content created across all platforms."
+            periods={data.periods}
+            metrics={data.byPlatform}
+            tabs={PLATFORM_TABS}
+            brand={brand}
+            filterKey={data.showingFormats ? "format" : "platform"}
+            rowMeta={data.showingFormats ? undefined : data.primaryRowMeta}
+            groupBy={data.showingFormats ? undefined : groupBy}
+          />
+        </>
       ) : !loading ? (
         <div className="text-center py-20">
           <p className="text-muted-foreground text-sm">
