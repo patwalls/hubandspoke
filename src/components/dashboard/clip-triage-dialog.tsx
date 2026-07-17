@@ -40,6 +40,7 @@ interface ClipIdeaSummary {
   endSec: number;
   estimatedViews: number | null;
   status?: string;
+  descriptAttempts?: number;
   acceptedEditorName?: string | null;
   acceptedProductionItemId?: string | null;
   /** Target format name this idea was generated for. Surfaced in the
@@ -427,6 +428,17 @@ export function ClipTriageDialog({
                     className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm font-medium leading-snug focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
                   />
                 </div>
+
+                {(idea.descriptAttempts ?? 0) > 0 && (
+                  <div className="flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[12px] text-amber-800">
+                    <span className="font-semibold">
+                      Attempted: {idea.descriptAttempts}×
+                    </span>
+                    <span className="text-amber-700">
+                      — Descript failed before. Re-promote to try again.
+                    </span>
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

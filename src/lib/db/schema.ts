@@ -732,6 +732,11 @@ export const clipIdeas = pgTable(
     decidedByUserId: uuid("decided_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    // Incremented each time "Start Over" is clicked on a stuck Descript job
+    // for a derivative produced from this clip idea. Surfaces in the queue
+    // as "Attempted: Nx" so editors can find the idea after being redirected
+    // back and know it has been tried before.
+    descriptAttempts: integer("descript_attempts").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

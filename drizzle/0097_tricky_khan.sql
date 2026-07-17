@@ -1,0 +1,1 @@
+ALTER TABLE "clip_ideas" ADD COLUMN "descript_attempts" integer DEFAULT 0 NOT NULL;

@@ -20,6 +20,7 @@ interface ClipIdeaSummary {
   endSec: number;
   estimatedViews: number | null;
   status?: string;
+  descriptAttempts?: number;
   acceptedEditorName?: string | null;
   acceptedProductionItemId?: string | null;
 }

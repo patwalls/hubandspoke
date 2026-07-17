@@ -5052,6 +5052,7 @@ interface DescriptStatusResponse {
     lastError: string | null;
   } | null;
   redriveAvailable: boolean;
+  startOverAvailable: boolean;
   publish: {
     state: "idle" | "rendering" | "rendered" | "failed";
     jobId: string | null;
@@ -5144,9 +5145,12 @@ function DescriptStatusPill({
    *  title-area state row to match the rest of the chip system. */
   variant?: "default" | "chip";
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [data, setData] = useState<DescriptStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [redriving, setRedriving] = useState(false);
+  const [startingOver, setStartingOver] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -5232,6 +5236,35 @@ function DescriptStatusPill({
       setRedriving(false);
     }
   }, [productionItemId, fetchStatus]);
+
+  const handleStartOver = useCallback(async () => {
+    setStartingOver(true);
+    try {
+      const res = await fetch(
+        `/api/production-items/${productionItemId}/start-over-descript`,
+        { method: "POST" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error("Start Over failed", {
+          description: json?.error || `HTTP ${res.status}`,
+        });
+        return;
+      }
+      // Extract brand from the current path (/{brand}/content/...) and
+      // navigate to the queue tab for this clip's format.
+      const brand = pathname.split("/")[1] ?? "";
+      const dest = json.formatSlug
+        ? `/${brand}/queue/${json.formatSlug}`
+        : `/${brand}/queue`;
+      toast.success("Starting over — clip idea is back in the queue", {
+        description: "Find it in the queue and re-promote when ready.",
+      });
+      router.push(dest);
+    } finally {
+      setStartingOver(false);
+    }
+  }, [productionItemId, pathname, router]);
 
   if (loading || !data) return null;
   // Hide entirely for items with no Descript context (e.g. an Original
@@ -5420,16 +5453,27 @@ function DescriptStatusPill({
             variant="outline"
             size="sm"
             onClick={() => void fetchStatus()}
-            disabled={redriving}
+            disabled={redriving || startingOver}
           >
             Refresh
           </Button>
+          {data.startOverAvailable && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleStartOver()}
+              disabled={redriving || startingOver}
+            >
+              {startingOver ? "Starting over…" : "Start Over"}
+            </Button>
+          )}
           {data.redriveAvailable && (
             <Button
               type="button"
               size="sm"
               onClick={handleRedrive}
-              disabled={redriving}
+              disabled={redriving || startingOver}
             >
               {redriving ? "Re-running…" : "Re-run"}
             </Button>
