@@ -68,11 +68,7 @@ async function runRedrive(id: string) {
   // trigger against the pillar's production_item id, not the derivative).
   const triggerSourceId = item.pillarContentItemId ?? item.id;
   const [trigger] = await db
-    .select({
-      id: repurposeTriggers.id,
-      descriptJobId: repurposeTriggers.descriptJobId,
-      descriptImportPath: repurposeTriggers.descriptImportPath,
-    })
+    .select({ id: repurposeTriggers.id })
     .from(repurposeTriggers)
     .where(eq(repurposeTriggers.productionItemId, triggerSourceId))
     .orderBy(desc(repurposeTriggers.id))
@@ -93,12 +89,18 @@ async function runRedrive(id: string) {
   const idByName = new Map(taskIds.map((r) => [r.identifier, r.id]));
   const ids = [...idByName.values()];
 
-  // Find the most recent job with matching triggerId, then filter by task_id in JS
-  // to avoid Drizzle's array parameter expansion issue with ANY()
+  // Search by derivativeItemId (the item being redriven), not by triggerId.
+  // A pillar can have multiple clip promotions — each gets its own trigger
+  // row. The trigger lookup above uses ORDER BY id DESC LIMIT 1, so on a
+  // pillar with >1 promotion it may return a trigger for a *different*
+  // derivative. Searching by triggerId would then find the wrong job (or
+  // none at all), and the fallback enqueue would hand the wrong
+  // descriptJobId to descript-clip-resolve, causing assertCompositionUnique
+  // to fire when that composition is already stamped on the other derivative.
   const candidateJobs = ids.length
     ? ((await db.execute(sql`
         SELECT id, task_id FROM graphile_worker._private_jobs
-        WHERE payload->>'triggerId' = ${trigger.id}
+        WHERE payload->>'derivativeItemId' = ${id}
         ORDER BY id DESC
         LIMIT 10
       `)) as unknown as Array<{ id: number; task_id: number }>)
@@ -127,19 +129,33 @@ async function runRedrive(id: string) {
 
   const job = jobResults[0] ?? null;
   if (!job) {
-    // Stalled state: trigger exists, project was created in Descript,
-    // but no queue job is around to redrive (the original task either
-    // exhausted its attempts and got swept, or crashed without
-    // re-enqueueing the polling phase). If we still have the Descript-
-    // side jobId, enqueue a fresh `descript-clip-resolve` to re-poll
-    // it. The poller will either find the job stopped successfully
-    // and stamp composition_id, or surface the Descript error in
-    // last_error after retrying.
-    if (!trigger.descriptJobId) {
+    // Stalled state: no queue job found for this derivative. Find the
+    // trigger that actually belongs to THIS derivative by matching on
+    // descript_project_url — Phase 1 of clip-idea-precise-cut writes the
+    // same URL to both the trigger row and the derivative's production_item
+    // row, giving us a reliable join key even when the pillar has multiple
+    // clip promotions.
+    const [derivativeTrigger] = (await db.execute(sql`
+      SELECT rt.id, rt.descript_job_id, rt.descript_import_path
+      FROM repurpose_triggers rt
+      INNER JOIN production_items pi
+        ON pi.descript_project_url = rt.descript_project_url
+        AND pi.descript_project_url IS NOT NULL
+      WHERE pi.id = ${id}
+        AND rt.descript_job_id IS NOT NULL
+      ORDER BY rt.id DESC
+      LIMIT 1
+    `)) as unknown as Array<{
+      id: string;
+      descript_job_id: string;
+      descript_import_path: string | null;
+    }>;
+
+    if (!derivativeTrigger?.descript_job_id) {
       return NextResponse.json(
         {
           error:
-            "No queue job and no Descript jobId on the trigger — there's nothing left to recover. Re-promote the clip from the source.",
+            "No queue job and no Descript jobId for this item — there's nothing left to recover. Re-promote the clip from the source.",
         },
         { status: 400 },
       );
@@ -148,14 +164,14 @@ async function runRedrive(id: string) {
     // either cold-import or warm-duplicate, so we omit it and let the
     // task auto-detect from the job result shape.
     const importMode =
-      trigger.descriptImportPath === "agent"
+      derivativeTrigger.descript_import_path === "agent"
         ? false
-        : trigger.descriptImportPath === "precise-cut"
+        : derivativeTrigger.descript_import_path === "precise-cut"
           ? true
           : undefined;
     await enqueue("descript-clip-resolve", {
-      triggerId: trigger.id,
-      jobId: trigger.descriptJobId,
+      triggerId: derivativeTrigger.id,
+      jobId: derivativeTrigger.descript_job_id,
       derivativeItemId: id,
       pillarItemId: item.pillarContentItemId ?? undefined,
       ...(importMode !== undefined ? { importMode } : {}),
