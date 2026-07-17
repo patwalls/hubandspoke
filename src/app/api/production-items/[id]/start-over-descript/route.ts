@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clipIdeas, productionItems, repurposeTriggers } from "@/lib/db/schema";
+import {
+  clipIdeas,
+  formatChannels,
+  formats,
+  productionItems,
+  repurposeTriggers,
+} from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { formatNameToSlug } from "@/lib/db/formats";
+import { findAccountForBrandPlatform } from "@/lib/db/accounts";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -77,6 +84,67 @@ async function runStartOver(id: string, actorUserId: string) {
     );
   }
 
+  // Look up fresh platform/postType/accountId from the format configuration —
+  // the stuck item may have stale or incorrect values from when it was first
+  // generated, so we always derive from the current format settings.
+  let freshPlatform: string[] | undefined;
+  let freshPostType: string | undefined;
+  let freshAccountId: string | undefined;
+  if (item.format) {
+    const [fmt] = await db
+      .select({
+        id: formats.id,
+        clipTargetPlatform: formats.clipTargetPlatform,
+        clipTargetPostType: formats.clipTargetPostType,
+      })
+      .from(formats)
+      .where(and(eq(formats.name, item.format), eq(formats.brand, item.brand)))
+      .limit(1);
+    if (fmt) {
+      freshPostType = (fmt.clipTargetPostType as string | null) ?? undefined;
+      freshPlatform =
+        fmt.clipTargetPlatform &&
+        Array.isArray(fmt.clipTargetPlatform) &&
+        (fmt.clipTargetPlatform as string[]).length > 0
+          ? (fmt.clipTargetPlatform as string[])
+          : undefined;
+      if (freshPostType) {
+        const [fcRow] = await db
+          .select({ accountId: formatChannels.accountId })
+          .from(formatChannels)
+          .where(
+            and(
+              eq(formatChannels.formatId, fmt.id),
+              eq(formatChannels.postType, freshPostType),
+            ),
+          )
+          .limit(1);
+        if (fcRow) {
+          freshAccountId = fcRow.accountId;
+        } else {
+          const platformKeyMap: Record<string, string> = {
+            instagram_reel: "instagram",
+            instagram_post: "instagram",
+            youtube_long: "youtube",
+            youtube_short: "youtube",
+            x: "x",
+            tiktok: "tiktok",
+            linkedin: "linkedin",
+            threads: "threads",
+          };
+          const platformKey = platformKeyMap[freshPostType];
+          if (platformKey) {
+            const acc = await findAccountForBrandPlatform({
+              brandSlug: item.brand,
+              platform: platformKey,
+            });
+            freshAccountId = acc?.id ?? undefined;
+          }
+        }
+      }
+    }
+  }
+
   // Find the triggerId from any queue job for this derivative, so we can
   // clear its Descript state below.
   const jobWithTrigger = (await db.execute(sql`
@@ -138,9 +206,9 @@ async function runStartOver(id: string, actorUserId: string) {
     .values({
       title: item.title ?? item.hook ?? "",
       status: "Idea",
-      platform: item.platform ?? undefined,
-      postType: item.postType ?? undefined,
-      accountId: item.accountId ?? undefined,
+      platform: freshPlatform ?? (item.platform ?? undefined),
+      postType: freshPostType ?? (item.postType ?? undefined),
+      accountId: freshAccountId ?? (item.accountId ?? undefined),
       format: item.format ?? undefined,
       brand: item.brand,
       contentBody: item.contentBody ?? undefined,

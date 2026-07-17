@@ -399,12 +399,16 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       status === "processing",
     /** Whether "Start Over" is available — true when this item was promoted
      *  from a clip idea AND the job is in any error/stuck/stalled state so
-     *  there's actually something broken to recover from. */
+     *  there's actually something broken to recover from. Includes the case
+     *  where a job is queued for retry (status=processing) but has already
+     *  errored at least once — editors shouldn't have to wait for all
+     *  retries to exhaust before they can start over. */
     startOverAvailable:
       !!item.sourceClipIdeaId &&
       (status === "stuck" ||
         status === "failed" ||
-        status === "stalled"),
+        status === "stalled" ||
+        (status === "processing" && !!queueJob?.last_error)),
     /** Publish-and-archive state — separate axis from the composition
      *  status. The pill polls this independently and shows a secondary
      *  "Rendering MP4…" / "Rendered ✓" / "Render failed (Retry)" block
