@@ -149,6 +149,26 @@ export async function POST(request: NextRequest) {
       if (dup) {
         return NextResponse.json({ id: dup.id, alreadyExists: true }, { status: 200 });
       }
+      // The unique index on youtube_id spans ALL rows, but the live lookup
+      // above filters out soft-deleted / Killed items — so re-uploading a link
+      // whose item was deleted or killed collided here and fell through to a
+      // 500 + Sentry page (HUBANDSPOKE-1T). Surface a clean 409 instead.
+      const [inactive] = await db
+        .select({ id: productionItems.id, status: productionItems.status })
+        .from(productionItems)
+        .where(eq(productionItems.youtubeId, youtubeId))
+        .limit(1);
+      if (inactive) {
+        return NextResponse.json(
+          {
+            error:
+              "This YouTube video is already in the system on a deleted or killed item. Restore that item instead of re-uploading.",
+            existingId: inactive.id,
+            existingStatus: inactive.status,
+          },
+          { status: 409 },
+        );
+      }
     }
     return NextResponse.json({ error: "Something went wrong — please try again" }, { status: 500 });
   }

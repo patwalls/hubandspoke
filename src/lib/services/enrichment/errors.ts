@@ -30,11 +30,12 @@ export class PermanentEnrichmentError extends Error {
  */
 export function isPermanentEnrichmentError(err: unknown): boolean {
   if (err instanceof PermanentEnrichmentError) return true;
-  // Deleted / private / not-found source post, or a malformed request SC
-  // rejects outright — no amount of retrying brings it back.
+  // Deleted / private / not-found / forbidden source post, or a malformed
+  // request SC rejects outright — no amount of retrying brings it back. 403 is
+  // SC's "forbidden" for private / age-gated / blocked posts (HUBANDSPOKE-26).
   if (
     err instanceof ScrapeCreatorsError &&
-    (err.status === 404 || err.status === 400)
+    (err.status === 404 || err.status === 403 || err.status === 400)
   ) {
     return true;
   }
