@@ -6,6 +6,7 @@ import { selectAutoClipIdeaJobs } from "@/lib/services/clip-ideas-auto";
 import {
   extractAudioToS3,
   transcribeFromS3Audio,
+  isPermanentWhisperError,
   type AudioChunk,
 } from "./whisper-pipeline";
 
@@ -54,29 +55,45 @@ export const transcribeWhisperTask: Task = async (rawPayload, helpers) => {
     return;
   }
 
-  // Phase 2: audio already in S3 — run Whisper per chunk.
-  if (payload.audioS3Key && payload.audioS3Bucket) {
-    await transcribeFromS3Audio(
+  try {
+    // Phase 2: audio already in S3 — run Whisper per chunk.
+    if (payload.audioS3Key && payload.audioS3Bucket) {
+      await transcribeFromS3Audio(
+        productionItemId,
+        payload.audioS3Key,
+        payload.audioS3Bucket,
+        payload.audioChunks ?? null,
+        helpers.logger,
+      );
+      await maybeAutoEnqueueClipIdeas(productionItemId, helpers);
+      return;
+    }
+
+    // Phase 1: extract audio, split into chunks, re-enqueue.
+    const { audioS3Bucket, audioS3Key, chunks } = await extractAudioToS3(
       productionItemId,
-      payload.audioS3Key,
-      payload.audioS3Bucket,
-      payload.audioChunks ?? null,
       helpers.logger,
     );
-    await maybeAutoEnqueueClipIdeas(productionItemId, helpers);
-    return;
+    await helpers.addJob(
+      "transcribe-whisper",
+      { productionItemId, audioS3Key, audioS3Bucket, audioChunks: chunks },
+      { runAt: new Date(Date.now() + 1000) },
+    );
+  } catch (err) {
+    // Unprocessable media (no decodable stream, not audio/video, missing, or
+    // too large even chunked) can never transcribe — swallow so the job
+    // doesn't exhaust graphile retries and page Sentry every time
+    // (HUBANDSPOKE-24: "ffmpeg exited 1: Output file #0 does not contain any
+    // stream"). Transient failures (ffmpeg timeout, Whisper/OpenAI blip) still
+    // throw and retry with backoff.
+    if (isPermanentWhisperError(err)) {
+      helpers.logger.warn(
+        `transcribe-whisper skip item=${productionItemId} — unprocessable media (${err.kind}): ${err.message.slice(0, 200)}`,
+      );
+      return;
+    }
+    throw err;
   }
-
-  // Phase 1: extract audio, split into chunks, re-enqueue.
-  const { audioS3Bucket, audioS3Key, chunks } = await extractAudioToS3(
-    productionItemId,
-    helpers.logger,
-  );
-  await helpers.addJob(
-    "transcribe-whisper",
-    { productionItemId, audioS3Key, audioS3Bucket, audioChunks: chunks },
-    { runAt: new Date(Date.now() + 1000) },
-  );
 };
 
 /**

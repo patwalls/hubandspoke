@@ -50,6 +50,7 @@ export class WhisperTranscribeError extends Error {
       | "no_media"
       | "not_av"
       | "ffmpeg_failed"
+      | "ffmpeg_timeout"
       | "audio_too_large"
       | "whisper_failed"
       | "unknown",
@@ -57,6 +58,24 @@ export class WhisperTranscribeError extends Error {
     super(message);
     this.name = "WhisperTranscribeError";
   }
+}
+
+/**
+ * True when a WhisperTranscribeError can never succeed on retry — the source
+ * media is missing, isn't audio/video, has no decodable stream, or is too big
+ * for Whisper even after chunking. The transcribe task swallows these (marks
+ * the item skipped) instead of exhausting graphile retries and paging Sentry
+ * (HUBANDSPOKE-24). Transient kinds (ffmpeg timeout, a Whisper/OpenAI blip,
+ * unknown) stay retryable.
+ */
+export function isPermanentWhisperError(err: unknown): err is WhisperTranscribeError {
+  return (
+    err instanceof WhisperTranscribeError &&
+    (err.kind === "no_media" ||
+      err.kind === "not_av" ||
+      err.kind === "ffmpeg_failed" ||
+      err.kind === "audio_too_large")
+  );
 }
 
 let _openai: OpenAI | null = null;
@@ -149,7 +168,9 @@ function runFfmpegSegmented(args: {
       reject(
         new WhisperTranscribeError(
           `ffmpeg timed out after ${FFMPEG_TIMEOUT_MS / 1000}s`,
-          "ffmpeg_failed",
+          // Timeout is a resource condition (big file, slow dyno), not a bad
+          // input — keep it retryable, distinct from unprocessable-media.
+          "ffmpeg_timeout",
         ),
       );
     }, FFMPEG_TIMEOUT_MS);
