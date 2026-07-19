@@ -1,38 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   contentDrafts,
   contentEvents,
+  type ContentDraftContent,
   type FormatFieldSchema,
 } from "@/lib/db/schema";
 import {
   createTestProductionItem,
   getTestUserId,
 } from "@/test/factories";
+import { applyDraftPatch } from "@/lib/services/content-drafts/apply-patch";
 
-// Pins the clone-on-write behavior for inline draft edits:
-//   • each PUT inserts a NEW version row instead of UPDATEing in place
+// Pins the clone-on-write behavior for inline draft edits (the PUT
+// /drafts/[draftId] route delegates to applyDraftPatch):
+//   • each edit inserts a NEW version row instead of UPDATEing in place
 //   • the old version stays around with isCurrent=false
 //   • one `content_changed` event lands per field whose value moved
-//
-// We exercise the helper layer directly here since the route's
-// requireSession() guard can't be satisfied from vitest. The route
-// composes:
-//   1. demote current draft (isCurrent=false)
-//   2. insert new draft row (version+1, isCurrent=true, generatedBy="user:edit")
-//   3. recordContentChanges with source: { kind: "user" } per moved field
-// This test replays steps 1–3 against a real draft row and asserts the
-// outputs — same code path as the route except the session is mocked.
+//   • concurrent autosaves chain instead of colliding on
+//     uq_content_drafts_current (HUBANDSPOKE-15/19/1V/1S)
 
 const SCHEMA: FormatFieldSchema = {
   fields: [
-    { key: "caption", type: "longtext", label: "Caption", required: false },
+    {
+      key: "caption",
+      type: "longtext",
+      label: "Caption",
+      prompt: "The caption.",
+      required: false,
+    },
   ],
   version: 1,
 };
 
-async function seedInitialDraft(itemId: string, content: Record<string, unknown>) {
+async function seedInitialDraft(itemId: string, content: ContentDraftContent) {
   const [row] = await db
     .insert(contentDrafts)
     .values({
@@ -53,56 +55,13 @@ async function seedInitialDraft(itemId: string, content: Record<string, unknown>
 describe("clone-on-write draft edits + content_changed audit", () => {
   it("creates a new version row + emits draft_field event when caption changes", async () => {
     const item = await createTestProductionItem({});
-    const initial = await seedInitialDraft(item.id, {
-      caption: "First caption",
-    });
+    await seedInitialDraft(item.id, { caption: "First caption" });
     const userId = await getTestUserId();
 
-    // Mimic the route's tx: demote current, insert v+1, record changes.
-    const [next] = await db.transaction(async (tx) => {
-      await tx
-        .update(contentDrafts)
-        .set({ isCurrent: false, updatedAt: new Date() })
-        .where(eq(contentDrafts.id, initial.id));
-
-      const inserted = await tx
-        .insert(contentDrafts)
-        .values({
-          productionItemId: item.id,
-          version: initial.version + 1,
-          isCurrent: true,
-          content: { caption: "Second caption" },
-          fieldSchemaSnapshot: SCHEMA,
-          generatedBy: "user:edit",
-          promptVersion: null,
-          modelUsage: null,
-          createdByUserId: userId,
-        })
-        .returning();
-
-      const { recordContentChanges } = await import(
-        "@/lib/services/content-revisions"
-      );
-      await recordContentChanges({
-        tx,
-        contentItemId: item.id,
-        userId,
-        source: { kind: "user" },
-        changes: [
-          {
-            target: {
-              kind: "draft_field",
-              draftId: inserted[0].id,
-              version: inserted[0].version,
-              field: "caption",
-            },
-            from: "First caption",
-            to: "Second caption",
-          },
-        ],
-      });
-
-      return inserted;
+    const next = await applyDraftPatch({
+      itemId: item.id,
+      validatedPatch: { caption: "Second caption" },
+      actorUserId: userId,
     });
 
     // Both draft rows present, only the new one is current.
@@ -110,7 +69,7 @@ describe("clone-on-write draft edits + content_changed audit", () => {
       .select()
       .from(contentDrafts)
       .where(eq(contentDrafts.productionItemId, item.id))
-      .orderBy(asc(contentDrafts.version));
+      .orderBy(contentDrafts.version);
     expect(drafts).toHaveLength(2);
     expect(drafts[0].version).toBe(1);
     expect(drafts[0].isCurrent).toBe(false);
@@ -139,12 +98,7 @@ describe("clone-on-write draft edits + content_changed audit", () => {
     expect(events).toHaveLength(1);
     const payload = events[0].payload as {
       type: string;
-      target: {
-        kind: string;
-        draftId: string;
-        version: number;
-        field: string;
-      };
+      target: { kind: string; draftId: string; version: number; field: string };
       source: { kind: string };
       from?: string;
       to?: string;
@@ -162,29 +116,13 @@ describe("clone-on-write draft edits + content_changed audit", () => {
 
   it("emits zero events when the new value equals the old (no-op edit)", async () => {
     const item = await createTestProductionItem({});
-    const initial = await seedInitialDraft(item.id, { caption: "Same value" });
+    await seedInitialDraft(item.id, { caption: "Same value" });
     const userId = await getTestUserId();
 
-    const { recordContentChanges } = await import(
-      "@/lib/services/content-revisions"
-    );
-    await recordContentChanges({
-      tx: db,
-      contentItemId: item.id,
-      userId,
-      source: { kind: "user" },
-      changes: [
-        {
-          target: {
-            kind: "draft_field",
-            draftId: initial.id,
-            version: initial.version,
-            field: "caption",
-          },
-          from: "Same value",
-          to: "Same value",
-        },
-      ],
+    await applyDraftPatch({
+      itemId: item.id,
+      validatedPatch: { caption: "Same value" },
+      actorUserId: userId,
     });
 
     const events = await db
@@ -197,5 +135,49 @@ describe("clone-on-write draft edits + content_changed audit", () => {
         ),
       );
     expect(events).toHaveLength(0);
+  });
+
+  it("serializes concurrent autosaves instead of colliding on uq_content_drafts_current", async () => {
+    // Regression for HUBANDSPOKE-15/19/1V/1S: the editor autosave fired two
+    // overlapping PUTs against the same current draft. Both read the same
+    // current row, both demoted it, and both inserted a second is_current=true
+    // row → duplicate-key violation. The per-item advisory lock must make them
+    // chain (v1→v2→v3) with exactly one current row surviving.
+    const item = await createTestProductionItem({});
+    await seedInitialDraft(item.id, { caption: "v1" });
+    const userId = await getTestUserId();
+
+    // Fire both at once — with a pool of >1 connection these genuinely race.
+    const results = await Promise.all([
+      applyDraftPatch({
+        itemId: item.id,
+        validatedPatch: { caption: "edit-A" },
+        actorUserId: userId,
+      }),
+      applyDraftPatch({
+        itemId: item.id,
+        validatedPatch: { caption: "edit-B" },
+        actorUserId: userId,
+      }),
+    ]);
+
+    // Neither call threw (the whole point) and both produced a row.
+    expect(results.filter(Boolean)).toHaveLength(2);
+
+    const drafts = await db
+      .select()
+      .from(contentDrafts)
+      .where(eq(contentDrafts.productionItemId, item.id))
+      .orderBy(contentDrafts.version);
+
+    // Three rows total, distinct sequential versions, exactly one current.
+    expect(drafts).toHaveLength(3);
+    expect(drafts.map((d) => d.version)).toEqual([1, 2, 3]);
+    expect(drafts.filter((d) => d.isCurrent)).toHaveLength(1);
+    expect(drafts[2].isCurrent).toBe(true);
+    // The winner's edit is the surviving current content (whichever ran last).
+    expect((drafts[2].content as { caption: string }).caption).toMatch(
+      /^edit-[AB]$/,
+    );
   });
 });
