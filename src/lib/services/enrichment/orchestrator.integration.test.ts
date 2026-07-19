@@ -42,4 +42,39 @@ describe("enrichSingleItem — unenrichable items", () => {
     const candidates = await selectEnrichmentCandidates(10_000);
     expect(candidates).not.toContain(item.id);
   });
+
+  it("fails soft on a permanent URL mismatch instead of throwing", async () => {
+    // post_type routes to the Twitter enricher, but the published_link points
+    // at a different host — a data inconsistency the enricher can never
+    // resolve. Previously this threw out of the task every tick → graphile
+    // retry storm → a Sentry page per exhaustion (HUBANDSPOKE-20/27/…). It must
+    // now swallow, stamp, and give up.
+    const item = await createTestProductionItem({
+      status: "Published",
+      postType: "x",
+      publishedLink: "https://www.starterstory.com",
+    });
+
+    // Does NOT throw — the whole point of the fix.
+    const result = await enrichSingleItem(item.id);
+    expect(result).toBeNull();
+
+    const [row] = await db
+      .select({
+        attempts: productionItems.enrichmentAttempts,
+        error: productionItems.enrichmentError,
+        completedAt: productionItems.enrichmentCompletedAt,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, item.id));
+
+    // Maxed out (drops from the retry queue) with the reason preserved, but not
+    // marked complete — a corrected link self-heals via the 24h sweep.
+    expect(row.attempts).toBe(5);
+    expect(row.error).toContain("is not a Twitter/X URL");
+    expect(row.completedAt).toBeNull();
+
+    const candidates = await selectEnrichmentCandidates(10_000);
+    expect(candidates).not.toContain(item.id);
+  });
 });

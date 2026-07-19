@@ -4,6 +4,7 @@ import { productionItems } from "@/lib/db/schema";
 import { bucketName } from "@/lib/s3";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
 import { archiveCarouselMedia, type CarouselSlide } from "./shared";
+import { PermanentEnrichmentError } from "./errors";
 import type { EnrichmentResult } from "./types";
 
 interface YTCommunityChannel {
@@ -60,7 +61,9 @@ function buildSlides(
   const seen = new Set<string>();
   const slides: CarouselSlide[] = [];
   for (const img of raw) {
-    if (!img.url) continue;
+    // SC occasionally returns a null/empty entry inside `images` — guard the
+    // whole element, not just a missing `.url`, or we deref null. (HUBANDSPOKE-25)
+    if (!img?.url) continue;
     const base = img.url.split("?")[0];
     if (seen.has(base)) continue;
     seen.add(base);
@@ -86,7 +89,7 @@ export async function enrichYouTubeCommunityItem(
 
   if (!item) throw new Error(`Production item ${itemId} not found`);
   if (!item.publishedLink || !isYouTubeCommunityUrl(item.publishedLink)) {
-    throw new Error(
+    throw new PermanentEnrichmentError(
       `Item ${itemId} is not a YT community URL: ${item.publishedLink ?? "(none)"}`
     );
   }

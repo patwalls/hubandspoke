@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import { bucketName } from "@/lib/s3";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
+import { PermanentEnrichmentError } from "./errors";
 import {
   archiveCarouselMedia,
   saveTranscript,
@@ -108,7 +109,7 @@ export async function enrichTwitterItem(
 
   if (!item) throw new Error(`Production item ${itemId} not found`);
   if (!item.publishedLink || !isTwitterUrl(item.publishedLink)) {
-    throw new Error(
+    throw new PermanentEnrichmentError(
       `Item ${itemId} is not a Twitter/X URL: ${item.publishedLink ?? "(none)"}`
     );
   }

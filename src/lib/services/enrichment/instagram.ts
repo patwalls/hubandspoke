@@ -9,6 +9,7 @@ import {
   saveTranscript,
   type CarouselSlide,
 } from "./shared";
+import { PermanentEnrichmentError } from "./errors";
 import type { EnrichmentResult } from "./types";
 
 const IG_HOSTS = new Set([
@@ -140,9 +141,10 @@ export async function enrichInstagramItem(
     .limit(1);
 
   if (!item) throw new Error(`Production item ${itemId} not found`);
-  if (!item.publishedLink) throw new Error(`Item ${itemId} has no published_link`);
+  if (!item.publishedLink)
+    throw new PermanentEnrichmentError(`Item ${itemId} has no published_link`);
   if (!isInstagramUrl(item.publishedLink)) {
-    throw new Error(
+    throw new PermanentEnrichmentError(
       `Item ${itemId} published_link is not Instagram: ${item.publishedLink}`
     );
   }

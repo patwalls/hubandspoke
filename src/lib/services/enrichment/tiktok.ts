@@ -4,6 +4,7 @@ import { productionItems, transcripts } from "@/lib/db/schema";
 import { bucketName } from "@/lib/s3";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
 import { archiveRemoteToS3, saveTranscript } from "./shared";
+import { PermanentEnrichmentError } from "./errors";
 import type { EnrichmentResult } from "./types";
 
 interface TTAuthor {
@@ -93,7 +94,7 @@ export async function enrichTikTokItem(
 
   if (!item) throw new Error(`Production item ${itemId} not found`);
   if (!item.publishedLink || !isTikTokUrl(item.publishedLink)) {
-    throw new Error(
+    throw new PermanentEnrichmentError(
       `Item ${itemId} is not a TikTok URL: ${item.publishedLink ?? "(none)"}`
     );
   }

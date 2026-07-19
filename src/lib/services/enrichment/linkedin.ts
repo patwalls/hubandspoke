@@ -4,6 +4,7 @@ import { productionItems } from "@/lib/db/schema";
 import { bucketName } from "@/lib/s3";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
 import { archiveCarouselMedia, type CarouselSlide } from "./shared";
+import { PermanentEnrichmentError } from "./errors";
 import type { EnrichmentResult } from "./types";
 
 interface LIAuthor {
@@ -74,7 +75,7 @@ export async function enrichLinkedInItem(
 
   if (!item) throw new Error(`Production item ${itemId} not found`);
   if (!item.publishedLink || !isLinkedInUrl(item.publishedLink)) {
-    throw new Error(
+    throw new PermanentEnrichmentError(
       `Item ${itemId} is not a LinkedIn URL: ${item.publishedLink ?? "(none)"}`
     );
   }

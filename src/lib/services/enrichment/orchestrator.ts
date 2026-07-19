@@ -11,6 +11,7 @@ import { enrichLinkedInItem } from "./linkedin";
 import { enrichTikTokItem } from "./tiktok";
 import { enrichNewsletterItem } from "./newsletter";
 import { maybeEnqueueWhisperTranscribe } from "@/lib/services/transcribe-after-upload";
+import { isPermanentEnrichmentError } from "./errors";
 import {
   recordContentChanges,
   type ContentChange,
@@ -72,6 +73,57 @@ async function auditEnrichmentDiff(
       `[enrichment] audit emit failed for item=${itemId}:`,
       err instanceof Error ? err.message : err,
     );
+  }
+}
+
+/**
+ * Apply an enrichment result's column updates and stamp the row complete.
+ *
+ * If writing `platform_content_id` collides with another row that already
+ * claims the same global id (Postgres 23505 on
+ * `uniq_production_items_platform_content_id_global` — two production_items
+ * backed by the same underlying post, e.g. a newsletter campaign linked
+ * twice), we drop that single column and persist the rest of the enrichment
+ * rather than crash the task. The collision is a durable data condition, not a
+ * transient fault, so it doesn't warrant a retry or a Sentry page.
+ */
+async function persistEnrichmentUpdates(
+  itemId: string,
+  updates: Partial<typeof productionItems.$inferInsert>,
+): Promise<void> {
+  try {
+    await db
+      .update(productionItems)
+      .set({
+        ...updates,
+        enrichmentCompletedAt: new Date(),
+        enrichmentError: null,
+        enrichmentAttempts: sql`${productionItems.enrichmentAttempts} + 1`,
+      })
+      .where(eq(productionItems.id, itemId));
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    const constraint = (err as { constraint_name?: string })?.constraint_name ?? "";
+    const isPlatformIdCollision =
+      code === "23505" &&
+      "platformContentId" in updates &&
+      (constraint === "" || constraint.includes("platform_content_id"));
+    if (!isPlatformIdCollision) throw err;
+
+    console.warn(
+      `[enrichment] platform_content_id collision for item=${itemId}; persisting without it`,
+    );
+    const rest = { ...updates };
+    delete rest.platformContentId;
+    await db
+      .update(productionItems)
+      .set({
+        ...rest,
+        enrichmentCompletedAt: new Date(),
+        enrichmentError: "platform_content_id collision — kept existing id",
+        enrichmentAttempts: sql`${productionItems.enrichmentAttempts} + 1`,
+      })
+      .where(eq(productionItems.id, itemId));
   }
 }
 
@@ -149,14 +201,22 @@ export async function enrichSingleItem(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // Permanent per-item failure (bad/missing URL, deleted source post): stamp
+    // the row to MAX_ATTEMPTS so it drops out of the retry queue, then swallow
+    // the error — no graphile-worker retry storm, no Sentry page. Left
+    // un-completed so a corrected published_link self-heals via the 24h sweep.
+    const permanent = isPermanentEnrichmentError(err);
     await db
       .update(productionItems)
       .set({
-        enrichmentAttempts: sql`${productionItems.enrichmentAttempts} + 1`,
+        enrichmentAttempts: permanent
+          ? MAX_ATTEMPTS
+          : sql`${productionItems.enrichmentAttempts} + 1`,
         enrichmentError: message.slice(0, 1000),
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, itemId));
+    if (permanent) return null;
     throw err;
   }
 
@@ -195,15 +255,7 @@ export async function enrichSingleItem(
     .where(eq(productionItems.id, itemId))
     .limit(1);
 
-  await db
-    .update(productionItems)
-    .set({
-      ...result.updates,
-      enrichmentCompletedAt: new Date(),
-      enrichmentError: null,
-      enrichmentAttempts: sql`${productionItems.enrichmentAttempts} + 1`,
-    })
-    .where(eq(productionItems.id, itemId));
+  await persistEnrichmentUpdates(itemId, result.updates);
 
   if (beforeRow) {
     await auditEnrichmentDiff(itemId, result.updates, beforeRow);
@@ -345,10 +397,16 @@ export async function runEnrichmentSweep(
       const message = err instanceof Error ? err.message : String(err);
       summary.failed++;
       summary.errors.push({ itemId: item.id, message });
+      // Permanent failures max out attempts so they leave the queue; transient
+      // ones just increment so the 24h cooldown retries them. Either way the
+      // per-item failure is isolated — one bad URL doesn't tank the batch.
+      const permanent = isPermanentEnrichmentError(err);
       await db
         .update(productionItems)
         .set({
-          enrichmentAttempts: sql`${productionItems.enrichmentAttempts} + 1`,
+          enrichmentAttempts: permanent
+            ? MAX_ATTEMPTS
+            : sql`${productionItems.enrichmentAttempts} + 1`,
           enrichmentError: message.slice(0, 1000),
           updatedAt: new Date(),
         })
@@ -380,15 +438,7 @@ export async function runEnrichmentSweep(
       .where(eq(productionItems.id, item.id))
       .limit(1);
 
-    await db
-      .update(productionItems)
-      .set({
-        ...result.updates,
-        enrichmentCompletedAt: new Date(),
-        enrichmentError: null,
-        enrichmentAttempts: sql`${productionItems.enrichmentAttempts} + 1`,
-      })
-      .where(eq(productionItems.id, item.id));
+    await persistEnrichmentUpdates(item.id, result.updates);
 
     if (beforeRow) {
       await auditEnrichmentDiff(item.id, result.updates, beforeRow);
