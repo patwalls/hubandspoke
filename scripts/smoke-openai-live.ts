@@ -13,7 +13,7 @@ import postgres from "postgres";
 import { openai } from "../src/lib/openai";
 import { generateDraft } from "../src/lib/draft-agent";
 import { getTranscriptForPrompt } from "../src/lib/services/whisper-transcribe";
-import type { FormatFieldSchema } from "../src/lib/db/schema";
+import { getSchemaForPostType, type PostType } from "../src/lib/platform-field-schemas";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -97,26 +97,33 @@ async function checkResponsesWebSearch() {
 async function checkRealDraftGeneration() {
   console.log("\n[3] real generateDraft against a live prod item (read-only)");
   try {
-    const [item] = await sql`
+    // Field schema is derived from post_type (getSchemaForPostType), not
+    // stored on formats. Pick a transcript-bearing item whose post_type has
+    // a schema (x / instagram_* / linkedin / tiktok / …).
+    const items = await sql`
       SELECT pi.id, pi.title, pi.format, pi.brand, pi.platform, pi.post_type,
              pi.pillar_content_item_id AS pillar_id
       FROM transcripts tr
       JOIN production_items pi ON pi.id = tr.production_item_id
-      JOIN formats f ON f.name = pi.format AND f.brand = pi.brand
-      WHERE f.field_schema IS NOT NULL
-      LIMIT 1
+      WHERE pi.post_type IS NOT NULL
+      LIMIT 25
     `;
-    if (!item) {
-      console.log("  (skip) no item with transcript + format-with-field-schema");
+    const chosen = items
+      .map((it) => ({ it, schema: getSchemaForPostType(it.post_type as PostType) }))
+      .find((x) => x.schema && x.schema.fields.length > 0);
+    if (!chosen) {
+      console.log("  (skip) no transcript-bearing item with a schema-backed post_type");
       return;
     }
-    console.log(`  target: ${item.brand} / ${item.title} (format=${item.format}, id=${item.id})`);
+    const item = chosen.it;
+    const fieldSchema = chosen.schema!;
+    console.log(
+      `  target: ${item.brand} / ${item.title} (post_type=${item.post_type}, id=${item.id})`,
+    );
 
-    const [format] = await sql`
-      SELECT instructions, field_schema FROM formats
-      WHERE brand = ${item.brand} AND name = ${item.format}
-    `;
-    const fieldSchema = format.field_schema as FormatFieldSchema;
+    const [format] = item.format
+      ? await sql`SELECT instructions FROM formats WHERE brand = ${item.brand} AND name = ${item.format}`
+      : [{ instructions: null }];
     const transcriptSourceId = (item.pillar_id as string | null) ?? (item.id as string);
     const transcript = await getTranscriptForPrompt(transcriptSourceId);
     if (!transcript) {
@@ -134,7 +141,7 @@ async function checkRealDraftGeneration() {
         postType: (item.post_type as string | null) ?? null,
       },
       fieldSchema,
-      formatInstructions: format.instructions as string | null,
+      formatInstructions: (format?.instructions as string | null) ?? null,
       pillarTitle: item.title as string | null,
       substrate: {
         kind: "transcript",
