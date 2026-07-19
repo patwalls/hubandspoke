@@ -8,7 +8,7 @@
 //   - aged past its per-post-type window with no match → flag needs-attention
 //     and stop matching it (some content must never sit at Scheduled past 24h)
 
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
@@ -52,7 +52,7 @@ export interface ReconcileSummary {
  */
 export async function runScheduleReconcile(opts?: {
   now?: Date;
-  client?: Anthropic;
+  client?: OpenAI;
   /** Restrict the scan to specific Scheduled item ids. Used by tests to
    *  isolate from other pending items in a shared dev DB; could also scope a
    *  targeted re-run. */

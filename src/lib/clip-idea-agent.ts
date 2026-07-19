@@ -1,6 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
+import { openai } from "@/lib/openai";
 
-// Sonnet 4.6. Prompt V9 (2026-05-21): split the monolithic prompt into a
+// gpt-4.1. Prompt V9 (2026-05-21): split the monolithic prompt into a
 // format-agnostic SECTION_SELECTION_PROMPT_BASE plus a per-format FORMAT
 // block pulled from each format's `## Clip Idea Generation` skill section.
 // Tool schema is also format-driven — declarations of `extras` (e.g.
@@ -10,7 +11,7 @@ import Anthropic from "@anthropic-ai/sdk";
 // schema, so the original Repackage Section w/ Hook format keeps working
 // without any skill edits. V8 added MAX_LEAD_IN_SEC=15; V7 introduced the
 // verbatim transcriptAnchorQuote gate; V6 the blueprintAnchorHook gate.
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "gpt-4.1";
 export const PROMPT_VERSION = 9;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
@@ -201,7 +202,7 @@ export interface GenerationResult {
  */
 function buildTools(
   extrasSchema: Record<string, unknown> | null
-): Anthropic.Tool[] {
+): OpenAI.Chat.Completions.ChatCompletionTool[] {
   const baseProperties: Record<string, unknown> = {
     startSec: { type: "number" },
     endSec: { type: "number" },
@@ -244,26 +245,29 @@ function buildTools(
 
   return [
     {
-      name: "propose_clip_ideas",
-      description:
-        "Submit exactly 10 clip ideas derived from the transcript. Sort highest to lowest estimated views. Pass `ideas` as a real JSON array of objects — never a JSON-encoded string.",
-      input_schema: {
-        type: "object" as const,
-        properties: {
-          ideas: {
-            type: "array",
-            description:
-              "Array of 10 idea objects. Must be a real JSON array, not a string containing JSON.",
-            minItems: 10,
-            maxItems: 10,
-            items: {
-              type: "object",
-              properties: baseProperties,
-              required: baseRequired,
+      type: "function",
+      function: {
+        name: "propose_clip_ideas",
+        description:
+          "Submit exactly 10 clip ideas derived from the transcript. Sort highest to lowest estimated views. Pass `ideas` as a real JSON array of objects — never a JSON-encoded string.",
+        parameters: {
+          type: "object" as const,
+          properties: {
+            ideas: {
+              type: "array",
+              description:
+                "Array of 10 idea objects. Must be a real JSON array, not a string containing JSON.",
+              minItems: 10,
+              maxItems: 10,
+              items: {
+                type: "object",
+                properties: baseProperties,
+                required: baseRequired,
+              },
             },
           },
+          required: ["ideas"],
         },
-        required: ["ideas"],
       },
     },
   ];
@@ -943,7 +947,7 @@ ${lines.join("\n")}`;
 export async function generateClipIdeas(
   args: GenerateArgs
 ): Promise<GenerationResult> {
-  const client = new Anthropic();
+  const client = openai();
 
   const { block: refLibraryBlock, hooks: referenceHooks } =
     buildReferenceLibrary(args.blueprint);
@@ -1007,8 +1011,10 @@ export async function generateClipIdeas(
     .filter(Boolean)
     .join("\n");
 
-  async function attempt(extraNote?: string): Promise<Anthropic.Message> {
-    return client.messages.create({
+  async function attempt(
+    extraNote?: string
+  ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+    return client.chat.completions.create({
       model: MODEL,
       // 10 ideas × (hook + angle + 2-4 sentence rationale + 8+ word
       // anchor quote + blueprint anchor) easily blows past 4096 on chatty
@@ -1016,10 +1022,10 @@ export async function generateClipIdeas(
       // supports up to 64K. Symptom of being too low was V7 silently failing
       // shape validation because the tool_use JSON was truncated mid-array.
       max_tokens: 8192,
-      system: systemPrompt,
       tools,
-      tool_choice: { type: "tool", name: "propose_clip_ideas" },
+      tool_choice: { type: "function", function: { name: "propose_clip_ideas" } },
       messages: [
+        { role: "system", content: systemPrompt },
         { role: "user", content: extraNote ? `${userMessage}\n\n${extraNote}` : userMessage },
       ],
     });
@@ -1034,13 +1040,26 @@ export async function generateClipIdeas(
   };
 
   function extractIdeas(
-    response: Anthropic.Message,
+    response: OpenAI.Chat.Completions.ChatCompletion,
     label: string,
   ): { ideas: ClipIdea[]; shapeFailures: string[] } | null {
     failureModeRef.current = "other";
-    for (const block of response.content) {
-      if (block.type === "tool_use" && block.name === "propose_clip_ideas") {
-        const input = block.input as { ideas?: unknown };
+    for (const call of response.choices[0]?.message?.tool_calls ?? []) {
+      if (call.type === "function" && call.function.name === "propose_clip_ideas") {
+        // OpenAI returns tool-call arguments as a JSON string; parse it into
+        // the same `{ ideas }` shape the old Anthropic `block.input` gave us.
+        // A parse failure here (usually truncation at max_tokens) is treated
+        // like any other extraction miss — log it and fall through to the
+        // no-tool-call path so the caller can retry.
+        let input: { ideas?: unknown };
+        try {
+          input = JSON.parse(call.function.arguments) as { ideas?: unknown };
+        } catch (err) {
+          console.warn(
+            `[clip-idea-agent] ${label} JSON.parse failed on tool_call arguments: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          continue;
+        }
         // Sonnet quirk: with deeply-nested tool schemas the model sometimes
         // returns the array as a JSON-encoded STRING instead of a real array
         // (`{"ideas": "[{...}, {...}]"}` rather than `{"ideas": [{...}]}`).
@@ -1107,7 +1126,7 @@ export async function generateClipIdeas(
             firstFailure = `input.ideas is ${typeof input.ideas} (keys: ${Object.keys(input).join(",")})`;
           }
           console.warn(
-            `[clip-idea-agent] ${label} validation failed: stop_reason=${response.stop_reason} idea_count=${ideaCount} input_tokens=${response.usage.input_tokens} output_tokens=${response.usage.output_tokens} first_failure=${firstFailure}`,
+            `[clip-idea-agent] ${label} validation failed: finish_reason=${response.choices[0]?.finish_reason} idea_count=${ideaCount} input_tokens=${response.usage?.prompt_tokens} output_tokens=${response.usage?.completion_tokens} first_failure=${firstFailure}`,
           );
           return null;
         }
@@ -1115,7 +1134,7 @@ export async function generateClipIdeas(
       }
     }
     console.warn(
-      `[clip-idea-agent] ${label} returned no tool_use block: stop_reason=${response.stop_reason}`,
+      `[clip-idea-agent] ${label} returned no tool_call block: finish_reason=${response.choices[0]?.finish_reason}`,
     );
     return null;
   }
@@ -1217,10 +1236,13 @@ export async function generateClipIdeas(
   return {
     ideas: validIdeas,
     modelUsage: {
-      input_tokens: response.usage.input_tokens,
-      output_tokens: response.usage.output_tokens,
-      cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? undefined,
-      cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
+      input_tokens: response.usage?.prompt_tokens ?? 0,
+      output_tokens: response.usage?.completion_tokens ?? 0,
+      // OpenAI has no separate cache-creation counter; only a cached-prompt
+      // read count under prompt_tokens_details.
+      cache_creation_input_tokens: undefined,
+      cache_read_input_tokens:
+        response.usage?.prompt_tokens_details?.cached_tokens ?? undefined,
     },
     diagnostics: resolved.diagnostics,
   };

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { openai } from "@/lib/openai";
 import {
   contentDrafts,
   formats,
@@ -26,7 +27,7 @@ import { renderCtaExemplars, type CtaChannel } from "./cta-exemplars";
 // Shared "smart, tracked CTA" generator used by BOTH the Regenerate CTA button
 // (regenerate-cta.ts) and the full draft algorithm (run.ts). It:
 //   1. Reads the post body + format Skill + lead-magnet catalog.
-//   2. Asks Opus to write a house-style one-liner AND pick a target — a
+//   2. Asks gpt-4.1 to write a house-style one-liner AND pick a target — a
 //      specific guest's episode when the post is about a guest, else the
 //      best-fit lead magnet (episode-first, lead-magnet fallback).
 //   3. Mints (or refreshes) ONE go.starterstory.com tracking link per post,
@@ -37,7 +38,7 @@ import { renderCtaExemplars, type CtaChannel } from "./cta-exemplars";
 // The clone-on-write into content_drafts is the CALLER's job — this service is
 // pure "produce the cta string + side-effect the tracking link".
 
-const MODEL = "claude-opus-4-7";
+const MODEL = "gpt-4.1";
 export const TRACKED_CTA_VERSION = 2;
 
 const BASE_URL = process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.com";
@@ -301,51 +302,57 @@ Call propose_cta exactly once with: copy_line, target_type, target_url, and lead
 async function planCta(
   args: GenerateTrackedCtaArgs & { leadMagnets: LeadMagnet[] },
 ): Promise<CtaPlan> {
-  const client = new Anthropic();
+  const client = openai();
   const channel = args.channel as CtaChannel;
 
-  const tools: Anthropic.Tool[] = [
+  const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     {
-      name: "find_episode",
-      description:
-        "Search Starter Story's published episodes/case studies by guest name, company, or topic. Returns candidates with their canonical URL. Use when the post is about a specific guest/founder/company.",
-      input_schema: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "Guest name, company name, or topic to search for.",
+      type: "function",
+      function: {
+        name: "find_episode",
+        description:
+          "Search Starter Story's published episodes/case studies by guest name, company, or topic. Returns candidates with their canonical URL. Use when the post is about a specific guest/founder/company.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Guest name, company name, or topic to search for.",
+            },
           },
+          required: ["query"],
         },
-        required: ["query"],
       },
     },
     {
-      name: "propose_cta",
-      description: "Submit the final CTA plan.",
-      input_schema: {
-        type: "object",
-        properties: {
-          copy_line: {
-            type: "string",
-            description:
-              "The one-line CTA copy, ending with a colon. No URL in this text.",
+      type: "function",
+      function: {
+        name: "propose_cta",
+        description: "Submit the final CTA plan.",
+        parameters: {
+          type: "object",
+          properties: {
+            copy_line: {
+              type: "string",
+              description:
+                "The one-line CTA copy, ending with a colon. No URL in this text.",
+            },
+            target_type: {
+              type: "string",
+              enum: ["lead_magnet", "episode", "custom"],
+            },
+            target_url: {
+              type: "string",
+              description: "The destination URL (without UTM params).",
+            },
+            lead_magnet_id: {
+              type: ["integer", "null"],
+              description:
+                "The id of the chosen lead magnet when target_type is lead_magnet; otherwise null.",
+            },
           },
-          target_type: {
-            type: "string",
-            enum: ["lead_magnet", "episode", "custom"],
-          },
-          target_url: {
-            type: "string",
-            description: "The destination URL (without UTM params).",
-          },
-          lead_magnet_id: {
-            type: ["integer", "null"],
-            description:
-              "The id of the chosen lead magnet when target_type is lead_magnet; otherwise null.",
-          },
+          required: ["copy_line", "target_type", "target_url"],
         },
-        required: ["copy_line", "target_type", "target_url"],
       },
     },
   ];
@@ -387,43 +394,61 @@ async function planCta(
     `Decide the best target for this post, then call propose_cta once.`,
   ].join("\n");
 
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: [{ type: "text", text: userPayload }] },
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "user", content: userPayload },
   ];
 
   const MAX_ITERATIONS = 4;
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    const response = await client.messages.create({
+    const response = await client.chat.completions.create({
       model: MODEL,
       max_tokens: 1024,
-      system: SYSTEM_PROMPT,
       tools,
-      tool_choice: { type: "auto" },
+      tool_choice: "auto",
       messages,
     });
-    messages.push({ role: "assistant", content: response.content });
+    const assistantMsg = response.choices[0]?.message;
+    // Round-trip the assistant turn (incl. its tool_calls) so the next call
+    // sees the full history.
+    if (assistantMsg) messages.push(assistantMsg);
 
-    const toolUses = response.content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+    const toolCalls = (assistantMsg?.tool_calls ?? []).filter(
+      (c): c is OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall =>
+        c.type === "function",
     );
 
-    const propose = toolUses.find((b) => b.name === "propose_cta");
+    const propose = toolCalls.find((c) => c.function.name === "propose_cta");
     if (propose) {
-      return validatePlan(propose.input, args.leadMagnets);
+      let input: unknown = {};
+      try {
+        input = JSON.parse(propose.function.arguments);
+      } catch {
+        throw new Error("tracked-cta: propose_cta returned unparseable arguments");
+      }
+      return validatePlan(input, args.leadMagnets);
     }
 
-    if (toolUses.length === 0) {
+    if (toolCalls.length === 0) {
       throw new Error(
-        `tracked-cta: model stopped without proposing a cta (stop_reason=${response.stop_reason})`,
+        `tracked-cta: model stopped without proposing a cta (finish_reason=${response.choices[0]?.finish_reason})`,
       );
     }
 
     // Service the find_episode calls (and surface an error for anything else,
-    // nudging the model back to propose_cta).
-    const results: Anthropic.ToolResultBlockParam[] = [];
-    for (const tu of toolUses) {
-      if (tu.name === "find_episode") {
-        const query = String((tu.input as { query?: unknown })?.query ?? "").trim();
+    // nudging the model back to propose_cta). Every tool_call must get a
+    // matching tool message before the next request.
+    for (const call of toolCalls) {
+      if (call.function.name === "find_episode") {
+        let query = "";
+        try {
+          query = String(
+            (JSON.parse(call.function.arguments) as { query?: unknown })?.query ??
+              "",
+          ).trim();
+        } catch {
+          query = "";
+        }
         let content = "[]";
         try {
           const episodes = await searchContent({ q: query, limit: 5 });
@@ -438,17 +463,15 @@ async function planCta(
         } catch {
           content = JSON.stringify({ error: "episode search unavailable" });
         }
-        results.push({ type: "tool_result", tool_use_id: tu.id, content });
-      } else if (tu.name !== "propose_cta") {
-        results.push({
-          type: "tool_result",
-          tool_use_id: tu.id,
-          content: JSON.stringify({ error: `Unknown tool: ${tu.name}` }),
-          is_error: true,
+        messages.push({ role: "tool", tool_call_id: call.id, content });
+      } else {
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: JSON.stringify({ error: `Unknown tool: ${call.function.name}` }),
         });
       }
     }
-    messages.push({ role: "user", content: results });
   }
 
   throw new Error(

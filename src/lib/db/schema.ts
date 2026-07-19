@@ -804,7 +804,7 @@ export const clipSections = pgTable(
      *  performance. The per-format hook writer can adjust per format. */
     estimatedViews: bigint("estimated_views", { mode: "number" }),
     promptVersion: integer("prompt_version").notNull().default(1),
-    /** e.g. "claude-sonnet-4-6:section-v1". Surfaces in algorithm-version
+    /** e.g. "gpt-4.1:section-v1". Surfaces in algorithm-version
      *  badges on the operator UI alongside the hook writer's version. */
     generatedBy: text("generated_by").notNull(),
     modelUsage: jsonb("model_usage"),

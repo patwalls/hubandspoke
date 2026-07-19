@@ -326,13 +326,13 @@ Stack format):
 - Inline the relevant prompt inputs (skill text, etc.) so the eval is
   hermetic — it validates the prompt+skill *design*, not whatever is in the
   dev DB.
-- Make the agent accept an injectable `client?: Anthropic` (see
+- Make the agent accept an injectable `client?: OpenAI` (see
   `services/draft-algorithm/derivative-hook.ts`) so the *deterministic*
   wiring tests in the sibling `*.test.ts` can mock responses, while the eval
   calls the real client.
 
 **Running.** `npm run test:eval` (sets `RUN_LLM_EVALS=1`, needs
-`ANTHROPIC_API_KEY` in `.env.local`). Evals are **excluded** from
+`OPENAI_API_KEY` in `.env.local`). Evals are **excluded** from
 `npm run test` / CI — they cost money and are non-deterministic. The `eval`
 vitest project (`vitest.config.ts`) carries a longer `testTimeout`. Run
 them by hand whenever you touch the prompt they guard, and re-run a couple

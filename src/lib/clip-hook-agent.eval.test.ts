@@ -10,7 +10,7 @@ import type { TranscriptWord, TranscriptSegment } from "./clip-anchor-utils";
 // "feature stack" regression (an app-feature demo accepted for the Tech
 // Stack format). It is excluded from `npm run test`; run it with:
 //
-//   npm run test:eval        (sets RUN_LLM_EVALS=1; needs ANTHROPIC_API_KEY)
+//   npm run test:eval        (sets RUN_LLM_EVALS=1; needs OPENAI_API_KEY)
 //
 // When iterating on the eligibility prompt in clip-hook-agent.ts, run this
 // until every fixture's expectedEligible passes.

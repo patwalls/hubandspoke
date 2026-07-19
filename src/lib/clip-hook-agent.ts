@@ -1,4 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
+import { openai } from "@/lib/openai";
 import {
   resolveAnchorForRange,
   tokenize,
@@ -6,7 +7,7 @@ import {
   type TranscriptWord,
 } from "./clip-anchor-utils";
 
-// Haiku 4.5. Splice v10 hook writer (2026-05-22). Reads ONE pre-detected
+// gpt-4.1-mini. Splice v10 hook writer (2026-05-22). Reads ONE pre-detected
 // section and ONE format's skill section. Decides if the format applies
 // (auto-eligibility), and if so writes a format-styled hook + extras for
 // that section. Returns `eligible: false` when the section doesn't fit
@@ -14,9 +15,9 @@ import {
 // Stack format) — no clip_idea row gets inserted in that case.
 //
 // One call per (section, format) pair. With ~12 sections × 3 formats the
-// pipeline is ~36 Haiku calls per pillar (~$0.11 total), parallel via a
+// pipeline is ~36 gpt-4.1-mini calls per pillar (cheap), parallel via a
 // 5-wide semaphore in the service layer.
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "gpt-4.1-mini";
 // v2 (2026-05-27): subject-strict eligibility. v1 decided fit on framing and
 // would relabel an app-feature demo as a "feature stack" to satisfy the Tech
 // Stack format's name; v2 forbids that reframing and matches on the section's
@@ -80,7 +81,7 @@ Never respond with plain text. Always call the tool.`;
 
 const tools = (
   extrasSchema: Record<string, unknown> | null,
-): Anthropic.Tool[] => {
+): OpenAI.Chat.Completions.ChatCompletionTool[] => {
   const props: Record<string, unknown> = {
     eligible: { type: "boolean" },
     reason: { type: "string", maxLength: 240 },
@@ -115,13 +116,16 @@ const tools = (
   }
   return [
     {
-      name: "write_format_hook",
-      description:
-        "Decide whether the format fits the section, and write the hook (with format extras) if it does.",
-      input_schema: {
-        type: "object" as const,
-        properties: props,
-        required: ["eligible", "reason"],
+      type: "function",
+      function: {
+        name: "write_format_hook",
+        description:
+          "Decide whether the format fits the section, and write the hook (with format extras) if it does.",
+        parameters: {
+          type: "object" as const,
+          properties: props,
+          required: ["eligible", "reason"],
+        },
       },
     },
   ];
@@ -186,10 +190,10 @@ export interface HookGenerateArgs {
   transcriptWords: TranscriptWord[];
   transcriptSegments: TranscriptSegment[];
   pillarDurationSec: number;
-  /** Test seam: inject a stubbed Anthropic client. Defaults to a real
-   *  `new Anthropic()` (reads ANTHROPIC_API_KEY). Mirrors the template in
+  /** Test seam: inject a stubbed OpenAI client. Defaults to the shared
+   *  `openai()` client (reads OPENAI_API_KEY). Mirrors the template in
    *  `services/draft-algorithm/derivative-hook.ts`. */
-  client?: Anthropic;
+  client?: OpenAI;
 }
 
 function sanitizeHookText(s: string): string | null {
@@ -381,14 +385,14 @@ function validate(
 }
 
 /**
- * Write a per-format hook for one section. Single Haiku call (cheap),
+ * Write a per-format hook for one section. Single gpt-4.1-mini call (cheap),
  * decides eligibility + writes hook or skips. Retries once on shape /
  * anchor validation failure with corrective feedback.
  */
 export async function writeFormatHookForSection(
   args: HookGenerateArgs,
 ): Promise<HookGenerationResult> {
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? openai();
 
   const formatBlock = args.formatSkillSection
     ? `=====================================================
@@ -433,14 +437,14 @@ ${DEFAULT_FORMAT_BLOCK}`;
 
   async function attempt(
     extra?: string,
-  ): Promise<Anthropic.Message> {
-    return client.messages.create({
+  ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+    return client.chat.completions.create({
       model: MODEL,
       max_tokens: 1024,
-      system: systemPrompt,
       tools: tools(args.extrasSchema),
-      tool_choice: { type: "tool", name: "write_format_hook" },
+      tool_choice: { type: "function", function: { name: "write_format_hook" } },
       messages: [
+        { role: "system", content: systemPrompt },
         {
           role: "user",
           content: extra ? `${userMessage}\n\n${extra}` : userMessage,
@@ -452,11 +456,17 @@ ${DEFAULT_FORMAT_BLOCK}`;
   let response = await attempt();
 
   function extract(
-    resp: Anthropic.Message,
+    resp: OpenAI.Chat.Completions.ChatCompletion,
   ): { input: unknown } | null {
-    for (const block of resp.content) {
-      if (block.type === "tool_use" && block.name === "write_format_hook") {
-        return { input: block.input };
+    for (const call of resp.choices[0]?.message?.tool_calls ?? []) {
+      if (call.type !== "function" || call.function.name !== "write_format_hook")
+        continue;
+      try {
+        return { input: JSON.parse(call.function.arguments) };
+      } catch {
+        // Malformed tool arguments — take the same path as a missing
+        // tool block: validation fails, the caller retries then gives up.
+        return null;
       }
     }
     return null;
@@ -508,12 +518,10 @@ ${DEFAULT_FORMAT_BLOCK}`;
         extras: null,
       },
       modelUsage: {
-        input_tokens: response.usage.input_tokens,
-        output_tokens: response.usage.output_tokens,
-        cache_creation_input_tokens:
-          response.usage.cache_creation_input_tokens ?? undefined,
+        input_tokens: response.usage?.prompt_tokens ?? 0,
+        output_tokens: response.usage?.completion_tokens ?? 0,
         cache_read_input_tokens:
-          response.usage.cache_read_input_tokens ?? undefined,
+          response.usage?.prompt_tokens_details?.cached_tokens ?? undefined,
       },
     };
   }
@@ -521,12 +529,10 @@ ${DEFAULT_FORMAT_BLOCK}`;
   return {
     candidate: validated,
     modelUsage: {
-      input_tokens: response.usage.input_tokens,
-      output_tokens: response.usage.output_tokens,
-      cache_creation_input_tokens:
-        response.usage.cache_creation_input_tokens ?? undefined,
+      input_tokens: response.usage?.prompt_tokens ?? 0,
+      output_tokens: response.usage?.completion_tokens ?? 0,
       cache_read_input_tokens:
-        response.usage.cache_read_input_tokens ?? undefined,
+        response.usage?.prompt_tokens_details?.cached_tokens ?? undefined,
     },
   };
 }

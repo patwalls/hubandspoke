@@ -16,12 +16,13 @@
 // stylistic pattern (length, emoji density, MRR-numbers cadence) the
 // model has to mirror.
 
-import Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { openai } from "@/lib/openai";
 import { productionItems, transcripts } from "@/lib/db/schema";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "gpt-4.1-mini";
 export const HOOK_EXTRACTOR_VERSION = `${MODEL}:derivative-hook:v1`;
 
 const MAX_EXEMPLARS = 12;
@@ -45,8 +46,8 @@ export interface GenerateDerivativeHookArgs {
    *  which part of the pillar Underlord is about to clip out, so the
    *  generated hook actually relates to that segment. */
   skillSection: string;
-  /** Override for tests. Defaults to a fresh `new Anthropic()`. */
-  client?: Anthropic;
+  /** Override for tests. Defaults to the shared `openai()` client. */
+  client?: OpenAI;
 }
 
 export interface GeneratedHook {
@@ -77,21 +78,24 @@ RULES
 
 Never respond with plain text. Always call return_hook exactly once.`;
 
-const TOOLS: Anthropic.Tool[] = [
+const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
-    name: "return_hook",
-    description:
-      "Return the single on-screen hook line that matches the format's style and is grounded in the clipped segment.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        hook: {
-          type: "string",
-          description:
-            "One short sentence, 6–18 words. Match the style of the past hooks exactly. No quotes around it — just the bare text.",
+    type: "function",
+    function: {
+      name: "return_hook",
+      description:
+        "Return the single on-screen hook line that matches the format's style and is grounded in the clipped segment.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          hook: {
+            type: "string",
+            description:
+              "One short sentence, 6–18 words. Match the style of the past hooks exactly. No quotes around it — just the bare text.",
+          },
         },
+        required: ["hook"],
       },
-      required: ["hook"],
     },
   },
 ];
@@ -161,36 +165,26 @@ export async function generateDerivativeHook(
     args.derivativeItemId,
   );
 
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? openai();
 
-  const userBlocks: Anthropic.TextBlockParam[] = [
-    {
-      type: "text",
-      text: `## FORMAT: ${args.formatName}\n\n## PAST HOOKS IN THIS FORMAT (style reference — match these exactly)\n${renderExemplarsBlock(exemplars)}`,
-    },
-    {
-      type: "text",
-      text: `## CLIP INSTRUCTIONS (the segment Underlord will cut out of the pillar — your hook should describe THIS segment, not the whole pillar)\n${args.skillSection.trim()}`,
-    },
-    {
-      type: "text",
-      text: `## PILLAR TRANSCRIPT (read this to find the actual content of the clipped segment)\n${transcript}`,
-    },
-    {
-      type: "text",
-      text: "Write the hook now. Call return_hook exactly once.",
-    },
-  ];
+  const userText = [
+    `## FORMAT: ${args.formatName}\n\n## PAST HOOKS IN THIS FORMAT (style reference — match these exactly)\n${renderExemplarsBlock(exemplars)}`,
+    `## CLIP INSTRUCTIONS (the segment Underlord will cut out of the pillar — your hook should describe THIS segment, not the whole pillar)\n${args.skillSection.trim()}`,
+    `## PILLAR TRANSCRIPT (read this to find the actual content of the clipped segment)\n${transcript}`,
+    "Write the hook now. Call return_hook exactly once.",
+  ].join("\n\n");
 
-  let response: Anthropic.Message;
+  let response: OpenAI.Chat.Completions.ChatCompletion;
   try {
-    response = await client.messages.create({
+    response = await client.chat.completions.create({
       model: MODEL,
       max_tokens: 256,
-      system: SYSTEM_PROMPT,
       tools: TOOLS,
-      tool_choice: { type: "tool", name: "return_hook" },
-      messages: [{ role: "user", content: userBlocks }],
+      tool_choice: { type: "function", function: { name: "return_hook" } },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userText },
+      ],
     });
   } catch (err) {
     return {
@@ -202,9 +196,14 @@ export async function generateDerivativeHook(
     };
   }
 
-  for (const block of response.content) {
-    if (block.type !== "tool_use" || block.name !== "return_hook") continue;
-    const input = block.input as { hook?: unknown };
+  for (const call of response.choices[0]?.message?.tool_calls ?? []) {
+    if (call.type !== "function" || call.function.name !== "return_hook") continue;
+    let input: { hook?: unknown };
+    try {
+      input = JSON.parse(call.function.arguments) as { hook?: unknown };
+    } catch {
+      return { ok: false, failure: { reason: "llm-empty" } };
+    }
     const hook = typeof input.hook === "string" ? input.hook.trim() : "";
     if (hook.length === 0) {
       return { ok: false, failure: { reason: "llm-empty" } };

@@ -1,40 +1,48 @@
 import { describe, expect, it, vi } from "vitest";
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import { stripDateOpenerWithLLM } from "./repost-text-cleanup";
 
-// Build a minimal stub of the Anthropic client whose `messages.create`
-// returns the response shape we care about (a single `tool_use` block).
+type ToolCall = OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
+
+// Build a minimal stub of the OpenAI client whose `chat.completions.create`
+// returns the response shape we care about (a single function tool_call).
 function fakeClient(response: {
   toolName?: string;
   toolInput?: unknown;
   throws?: Error;
-  contentOverride?: Anthropic.ContentBlock[];
-}): { client: Anthropic; calls: number } {
+  toolCallsOverride?: ToolCall[];
+}): { client: OpenAI; calls: number } {
   let calls = 0;
   const client = {
-    messages: {
-      create: vi.fn(async () => {
-        calls += 1;
-        if (response.throws) throw response.throws;
-        const content: Anthropic.ContentBlock[] =
-          response.contentOverride ?? [
-            {
-              type: "tool_use",
-              id: "tool_test",
-              name: response.toolName ?? "return_body",
-              input: response.toolInput ?? {},
-            } as unknown as Anthropic.ContentBlock,
-          ];
-        return { content } as unknown as Anthropic.Message;
-      }),
+    chat: {
+      completions: {
+        create: vi.fn(async () => {
+          calls += 1;
+          if (response.throws) throw response.throws;
+          const tool_calls: ToolCall[] =
+            response.toolCallsOverride ?? [
+              {
+                id: "tool_test",
+                type: "function",
+                function: {
+                  name: response.toolName ?? "return_body",
+                  arguments: JSON.stringify(response.toolInput ?? {}),
+                },
+              } as unknown as ToolCall,
+            ];
+          return {
+            choices: [{ message: { tool_calls } }],
+          } as unknown as OpenAI.Chat.Completions.ChatCompletion;
+        }),
+      },
     },
-  } as unknown as Anthropic;
+  } as unknown as OpenAI;
   return {
     client,
     get calls() {
       return calls;
     },
-  } as { client: Anthropic; calls: number };
+  } as { client: OpenAI; calls: number };
 }
 
 describe("stripDateOpenerWithLLM", () => {
@@ -106,13 +114,11 @@ describe("stripDateOpenerWithLLM", () => {
     expect(result).toBe(original);
   });
 
-  it("fails soft when no tool_use block is returned — returns the original", async () => {
+  it("fails soft when no tool call is returned — returns the original", async () => {
     const original =
       "8 years ago today:\n\nI woke up at 6AM and dragged myself to a Starbucks.";
     const fake = fakeClient({
-      contentOverride: [
-        { type: "text", text: "I forgot to use the tool" } as unknown as Anthropic.ContentBlock,
-      ],
+      toolCallsOverride: [],
     });
     const result = await stripDateOpenerWithLLM(original, {
       client: fake.client,

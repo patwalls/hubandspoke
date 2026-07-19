@@ -6,7 +6,7 @@
 //   1. Structural candidate gate (cheap SQL) — same account, Published,
 //      synced-origin, published within the item's scheduling window, same
 //      post_type when known. Usually 0–3 rows.
-//   2. LLM scorer (Haiku, single pinned tool, fail-soft) — reads the plan
+//   2. LLM scorer (gpt-4.1-mini, single pinned tool, fail-soft) — reads the plan
 //      (title / hook / body) against each candidate's real title / caption
 //      and the publish-time proximity, and returns the best match index +
 //      a 0–100 confidence. Content-meaning judgement is the LLM's job, not
@@ -15,12 +15,13 @@
 //
 // Mirrors the template at draft-algorithm/derivative-hook.ts.
 
-import Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import { and, eq, gte, isNotNull, lte, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { openai } from "@/lib/openai";
 import { productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "gpt-4.1-mini";
 export const SCHEDULE_MATCHER_VERSION = `${MODEL}:schedule-match:v1`;
 
 // Look at most this many recent candidates — the gate already narrows hard,
@@ -84,31 +85,34 @@ Confidence scale:
 
 Never respond with plain text. Always call return_match exactly once.`;
 
-const TOOLS: Anthropic.Tool[] = [
+const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
-    name: "return_match",
-    description:
-      "Return which candidate (if any) is the scheduled post going live, with a confidence score.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        match_index: {
-          type: "integer",
-          description:
-            "The 1-based index of the candidate that is the same post as the plan. Use 0 if none of the candidates is the scheduled post.",
+    type: "function",
+    function: {
+      name: "return_match",
+      description:
+        "Return which candidate (if any) is the scheduled post going live, with a confidence score.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          match_index: {
+            type: "integer",
+            description:
+              "The 1-based index of the candidate that is the same post as the plan. Use 0 if none of the candidates is the scheduled post.",
+          },
+          confidence: {
+            type: "integer",
+            description:
+              "0–100 confidence that the chosen candidate is the same post. Use 0 when match_index is 0.",
+          },
+          reason: {
+            type: "string",
+            description:
+              "One short sentence explaining the decision (what matched or why nothing did).",
+          },
         },
-        confidence: {
-          type: "integer",
-          description:
-            "0–100 confidence that the chosen candidate is the same post. Use 0 when match_index is 0.",
-        },
-        reason: {
-          type: "string",
-          description:
-            "One short sentence explaining the decision (what matched or why nothing did).",
-        },
+        required: ["match_index", "confidence", "reason"],
       },
-      required: ["match_index", "confidence", "reason"],
     },
   },
 ];
@@ -227,33 +231,32 @@ function renderCandidates(
  */
 export async function findBestScheduledMatch(
   item: ScheduledItemForMatch,
-  opts: { client?: Anthropic; candidates?: MatchCandidate[] } = {},
+  opts: { client?: OpenAI; candidates?: MatchCandidate[] } = {},
 ): Promise<ScheduleMatchResult> {
   const candidates = opts.candidates ?? (await loadMatchCandidates(item));
   if (candidates.length === 0) {
     return { ok: true, value: null };
   }
 
-  const client = opts.client ?? new Anthropic();
+  const client = opts.client ?? openai();
 
-  const userBlocks: Anthropic.TextBlockParam[] = [
-    { type: "text", text: renderPlan(item) },
-    { type: "text", text: renderCandidates(item, candidates) },
-    {
-      type: "text",
-      text: "Decide now. Call return_match exactly once.",
-    },
-  ];
+  const userText = [
+    renderPlan(item),
+    renderCandidates(item, candidates),
+    "Decide now. Call return_match exactly once.",
+  ].join("\n\n");
 
-  let response: Anthropic.Message;
+  let response: OpenAI.Chat.Completions.ChatCompletion;
   try {
-    response = await client.messages.create({
+    response = await client.chat.completions.create({
       model: MODEL,
       max_tokens: 256,
-      system: SYSTEM_PROMPT,
       tools: TOOLS,
-      tool_choice: { type: "tool", name: "return_match" },
-      messages: [{ role: "user", content: userBlocks }],
+      tool_choice: { type: "function", function: { name: "return_match" } },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userText },
+      ],
     });
   } catch (err) {
     return {
@@ -265,13 +268,23 @@ export async function findBestScheduledMatch(
     };
   }
 
-  for (const block of response.content) {
-    if (block.type !== "tool_use" || block.name !== "return_match") continue;
-    const input = block.input as {
+  for (const call of response.choices[0]?.message?.tool_calls ?? []) {
+    if (call.type !== "function" || call.function.name !== "return_match")
+      continue;
+    let input: {
       match_index?: unknown;
       confidence?: unknown;
       reason?: unknown;
     };
+    try {
+      input = JSON.parse(call.function.arguments) as {
+        match_index?: unknown;
+        confidence?: unknown;
+        reason?: unknown;
+      };
+    } catch {
+      return { ok: false, failure: { reason: "llm-empty" } };
+    }
     const idx =
       typeof input.match_index === "number" ? Math.trunc(input.match_index) : 0;
     const reason =
