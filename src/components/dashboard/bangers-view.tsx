@@ -30,7 +30,7 @@ function defaultDateRange(): { startDate: string; endDate: string } {
   const end = new Date();
   end.setDate(end.getDate() + 1);
   const start = new Date();
-  start.setDate(start.getDate() - 90);
+  start.setDate(start.getDate() - 7);
   return {
     startDate: start.toISOString().slice(0, 10),
     endDate: end.toISOString().slice(0, 10),
