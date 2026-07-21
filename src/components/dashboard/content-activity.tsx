@@ -313,6 +313,87 @@ interface EventGroup {
 
 type FeedItem = ActivityItem | EventGroup;
 
+/** A run of 3+ consecutive identical events (same type + same user) collapsed
+ *  into a single row with a count and an expand toggle. */
+interface CollapsedRun {
+  kind: "collapsed";
+  /** Representative event (the first one) — used for avatar + description. */
+  representative: EventItem;
+  /** All items in the run (already grouped by groupItems). */
+  items: FeedItem[];
+}
+
+type DisplayItem = FeedItem | CollapsedRun;
+
+/** Extract a stable key that identifies "what kind of event" a FeedItem is,
+ *  used to detect consecutive identical events for collapsing. */
+function feedItemKey(item: FeedItem): string {
+  if (item.kind === "comment") return `comment:${item.id}`;
+  const ev = item.kind === "group" ? item.primary : item;
+  const p = ev.payload;
+  if (p.type === "tool_action") return `tool_action:${p.tool}:${p.action}`;
+  if (p.type === "content_changed") {
+    const t = p.target;
+    const field = t.kind === "production_item_field" || t.kind === "draft_field" ? t.field : t.kind;
+    return `content_changed:${field}`;
+  }
+  return p.type;
+}
+
+function feedItemUser(item: FeedItem): string | null {
+  if (item.kind === "comment") return item.user?.id ?? null;
+  if (item.kind === "group") return item.primary.user?.id ?? null;
+  return item.user?.id ?? null;
+}
+
+function representativeEvent(item: FeedItem): EventItem | null {
+  if (item.kind === "comment") return null;
+  if (item.kind === "group") return item.primary;
+  return item;
+}
+
+/** Second-pass collapse: after groupItems, fold consecutive runs of 3+
+ *  identical event types (same user) into a single CollapsedRun row. */
+function collapseRuns(items: FeedItem[]): DisplayItem[] {
+  const MIN_RUN = 3;
+  // Event types that should never be collapsed (milestone-style events)
+  const NEVER_COLLAPSE = new Set(["item_created", "repost_created", "cross_post_created", "killed", "status_change"]);
+
+  const result: DisplayItem[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const current = items[i];
+    const key = feedItemKey(current);
+    const userId = feedItemUser(current);
+    const rep = representativeEvent(current);
+
+    // Don't collapse comments, or milestone events
+    const payloadType = rep?.payload.type ?? "";
+    if (!rep || NEVER_COLLAPSE.has(payloadType)) {
+      result.push(current);
+      i++;
+      continue;
+    }
+
+    let j = i + 1;
+    while (j < items.length) {
+      const next = items[j];
+      if (feedItemKey(next) !== key) break;
+      if (feedItemUser(next) !== userId) break;
+      j++;
+    }
+
+    const run = items.slice(i, j);
+    if (run.length >= MIN_RUN) {
+      result.push({ kind: "collapsed", representative: rep, items: run });
+    } else {
+      result.push(...run);
+    }
+    i = j;
+  }
+  return result;
+}
+
 /** Walk the chronologically-ordered visibleItems and produce a feed
  *  where bursts of related events (publish action → status + link +
  *  date all in one tx) render as one row. Single events that don't fit
@@ -854,7 +935,17 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
             No activity yet. Start the discussion.
           </p>
         ) : (
-          groupItems(visibleItems).map((item) => {
+          collapseRuns(groupItems(visibleItems)).map((item) => {
+            if (item.kind === "collapsed") {
+              return (
+                <CollapsedRunRow
+                  key={`collapsed-${item.representative.id}`}
+                  run={item}
+                  brand={brand}
+                  statusPalette={statusPalette}
+                />
+              );
+            }
             if (item.kind === "comment") {
               return (
                 <CommentRow
@@ -1128,6 +1219,84 @@ function GroupedEventRow({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function CollapsedRunRow({
+  run,
+  brand,
+  statusPalette,
+}: {
+  run: CollapsedRun;
+  brand: string;
+  statusPalette?: ReadonlyMap<string, string>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const { representative: rep, items } = run;
+  const actorName = userDisplayName(rep.user, "Someone");
+  const avatarUrl = rep.user?.avatarUrl ?? null;
+  const isToolAction = rep.payload.type === "tool_action";
+  const tool = isToolAction
+    ? TOOL_REGISTRY[(rep.payload as ToolActionPayload).tool] ?? TOOL_FALLBACK
+    : null;
+  const sourceBadge =
+    rep.payload.type === "content_changed" && rep.payload.source.kind !== "user"
+      ? badgeForSource(rep.payload.source)
+      : null;
+
+  const firstDate = timeAgo(rep.createdAt);
+  const lastItem = items[items.length - 1];
+  const lastEvent = lastItem.kind === "group" ? lastItem.primary : lastItem.kind === "event" ? lastItem : null;
+  const lastDate = lastEvent ? timeAgo(lastEvent.createdAt) : null;
+  const dateRange = lastDate && lastDate !== firstDate ? `${firstDate} – ${lastDate}` : firstDate;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-3 items-center">
+        {tool ? (
+          <div className={cn("size-8 rounded-full bg-accent inline-flex items-center justify-center shrink-0", tool.accent)}>
+            <tool.Icon className="size-4" />
+          </div>
+        ) : sourceBadge ? (
+          <div className={cn("size-8 rounded-full bg-accent inline-flex items-center justify-center shrink-0", sourceBadge.accent)} title={sourceBadge.label}>
+            <sourceBadge.Icon className="size-4" />
+          </div>
+        ) : avatarUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={avatarUrl} alt="" className="size-8 rounded-full object-cover shrink-0" />
+        ) : (
+          <div className="size-8 rounded-full bg-accent text-muted-foreground text-xs font-medium inline-flex items-center justify-center shrink-0">
+            {initialsFor(actorName)}
+          </div>
+        )}
+        <div className="min-w-0 flex-1 text-sm text-muted-foreground">
+          <EventBody actorName={actorName} event={rep} brand={brand} statusPalette={statusPalette} />{" "}
+          <span className="text-xs">· {items.length}×</span>{" "}
+          <span className="text-xs">· {dateRange}</span>
+          {" "}
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-xs text-primary hover:underline"
+          >
+            {expanded ? "Collapse" : `Show all ${items.length}`}
+          </button>
+        </div>
+      </div>
+      {expanded && (
+        <div className="ml-11 space-y-2 border-l border-border/60 pl-3">
+          {items.map((item, idx) => {
+            if (item.kind === "event") {
+              return <EventRow key={item.id} event={item} brand={brand} statusPalette={statusPalette} />;
+            }
+            if (item.kind === "group") {
+              return <GroupedEventRow key={item.primary.id} group={item} brand={brand} statusPalette={statusPalette} />;
+            }
+            return null;
+          })}
+        </div>
+      )}
     </div>
   );
 }
