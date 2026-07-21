@@ -53,7 +53,6 @@ import {
 } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { applyStarterTemplate } from "@/lib/format-skill";
-import { FormatSkillEditor } from "./format-skill-editor";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { FormatStatusBadge } from "./format-status-badge";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
@@ -1512,22 +1511,24 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                   }}
                   className="text-xs text-primary hover:underline"
                 >
-                  Load starter template
+                  Add template
                 </button>
               </div>
-              <FormatSkillEditor
+              <Textarea
                 value={instructions}
-                isClippable={isClippableFormat}
-                onChange={(next) => setInstructions(next)}
-                onBlur={(next) => {
+                onChange={(e) => setInstructions(e.target.value)}
+                onBlur={() => {
                   const saved = data.format.instructions ?? "";
-                  if (next !== saved) {
-                    void persistField({ instructions: next || null });
+                  if (instructions !== saved) {
+                    void persistField({ instructions: instructions || null });
                   }
                 }}
+                rows={12}
+                placeholder="Teach Claude this format: what it is, why it works, how to pick the moment, what to avoid. Click &quot;Add template&quot; for the structure."
+                className="font-mono text-xs"
               />
               <p className="text-xs text-muted-foreground">
-                Each section is read by a different Claude agent. Expand a section to edit — changes save automatically on blur.
+                A single skill definition. Claude reads it to generate clip ideas, run Descript edits, and write cross-post captions.
               </p>
             </div>
           </PropertyRowSolo>
@@ -2323,11 +2324,22 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </div>
 
             <div className="space-y-2">
-              <Label>Skill</Label>
-              <FormatSkillEditor
+              <div className="flex items-center justify-between">
+                <Label>Skill</Label>
+                <button
+                  type="button"
+                  onClick={() => setChildInstructions(applyStarterTemplate(childInstructions))}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Add template
+                </button>
+              </div>
+              <Textarea
                 value={childInstructions}
-                isClippable={false}
-                onChange={(next) => setChildInstructions(next)}
+                onChange={(e) => setChildInstructions(e.target.value)}
+                placeholder="Describe this derivative as a Claude-style skill."
+                rows={6}
+                className="font-mono text-xs"
               />
             </div>
 

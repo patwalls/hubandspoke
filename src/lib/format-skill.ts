@@ -79,66 +79,6 @@ export function applyStarterTemplate(existing: string): string {
   return `${existing.trimEnd()}\n\n${appended}`;
 }
 
-function extractSectionBody(skill: string, headingRe: RegExp): string {
-  const match = headingRe.exec(skill);
-  if (!match) return "";
-  const after = skill.slice(match.index + match[0].length);
-  const next = /^[ \t]*#{2,4}[ \t]+\S/m.exec(after);
-  return (next ? after.slice(0, next.index) : after).trim();
-}
-
-export function extractWhatThisFormatIs(skill: string): string {
-  return extractSectionBody(skill, /^[ \t]*##[ \t]+What this format is[ \t]*$/im);
-}
-export function extractWhyItWorks(skill: string): string {
-  return extractSectionBody(skill, /^[ \t]*##[ \t]+Why it works[ \t]*$/im);
-}
-export function extractClipGuidance(skill: string): string {
-  return extractSectionBody(skill, /^[ \t]*##[ \t]+Clip guidance[ \t]*$/im);
-}
-export function extractAvoidSection(skill: string): string {
-  return extractSectionBody(skill, /^[ \t]*##[ \t]+Avoid[ \t]*$/im);
-}
-
-export interface SkillSections {
-  whatThisFormatIs: string;
-  whyItWorks: string;
-  clipGuidance: string;
-  avoid: string;
-  clipIdeaGeneration: string;
-  descriptInstructions: string;
-  crossPostRules: string;
-}
-
-export function parseSkillSections(skill: string): SkillSections {
-  return {
-    whatThisFormatIs: extractWhatThisFormatIs(skill),
-    whyItWorks: extractWhyItWorks(skill),
-    clipGuidance: extractClipGuidance(skill),
-    avoid: extractAvoidSection(skill),
-    clipIdeaGeneration: extractClipIdeaSection(skill) ?? "",
-    descriptInstructions: DESCRIPT_SECTION_HEADING.test(skill)
-      ? extractSectionBody(skill, DESCRIPT_SECTION_HEADING)
-      : "",
-    crossPostRules: extractCrossPostRulesSection(skill) ?? "",
-  };
-}
-
-export function assembleSkillFromSections(sections: SkillSections): string {
-  const parts: string[] = [];
-  const add = (heading: string, body: string) => {
-    const trimmed = body.trim();
-    if (trimmed) parts.push(`${heading}\n${trimmed}`);
-  };
-  add("## What this format is", sections.whatThisFormatIs);
-  add("## Why it works", sections.whyItWorks);
-  add("## Clip guidance", sections.clipGuidance);
-  add("## Avoid", sections.avoid);
-  add("## Clip Idea Generation", sections.clipIdeaGeneration);
-  add("## Descript Clip & Pack Info", sections.descriptInstructions);
-  add("## Cross Post Rules", sections.crossPostRules);
-  return parts.join("\n\n");
-}
 
 const DESCRIPT_SECTION_HEADING = /^[ \t]*##{1,2}[ \t]+Descript Clip & Pack Info[ \t]*$/im;
 const CROSS_POST_RULES_HEADING = /^[ \t]*##{1,2}[ \t]+Cross Post Rules[ \t]*$/im;
