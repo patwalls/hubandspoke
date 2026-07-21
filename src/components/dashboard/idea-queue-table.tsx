@@ -311,7 +311,7 @@ export function IdeaQueueTable({
                   onSort={toggleSort}
                 />
                 <SortableHeader
-                  label="Published"
+                  label="Pillar Publish Date"
                   sortKey="pillarDate"
                   activeKey={sortKey}
                   direction={sortDir}
