@@ -3,21 +3,29 @@
  *
  * Each format's `instructions` text is treated like a Claude Skill: a
  * self-contained markdown recipe that the dispatcher agent reads when
- * producing content in that format. The four sections below are the
- * shape the agent looks for. The text is also what ships into Asana
- * tasks, so sections double as human-readable documentation.
+ * producing content in that format. Sections are also human-readable
+ * documentation for anyone editing the format.
  */
-export const DEFAULT_FORMAT_SKILL_TEMPLATE = `## What this format is
-Short one-liner. e.g. Vertical 30–60s highlight clip for Instagram Reels.
+export const DEFAULT_FORMAT_SKILL_TEMPLATE = `## Post formatting
+Describe how posts in this format are structured. e.g. "This is a one-liner tweet + vertical video. The hook text IS the entire post — no caption body needed."
 
-## Why it works
-What makes this format hit. e.g. Strong hook in the first 3s, payoff by 15s. Audience gets a tactical insight without watching the full pillar.
+## Caption formatting
+- [Add caption style rules. e.g. Don't use em dashes.]
+- [e.g. For bullet points, use >]
 
-## Clip guidance
-How to pick and frame the moment. e.g. Look for a single strong quote, a surprising reveal, or a tactical tip. Start on a clean sentence boundary. End on a thought-ending beat. Target length 30–60 seconds.
+## Descript Clip & Pack Info
+Apply the layout pack at [PASTE_PACK_URL_HERE] to this composition. The pack handles [e.g. vertical 9:16 framing, the hook-text track, and the captions slot] — use it instead of manually setting aspect ratio or adding caption tracks.
 
-## Avoid
-What not to do. e.g. No filler intros. No "so yeah" tail-offs. Skip moments where the speaker is reading from a doc.
+Set the hook text track at the top of the composition to: "{{hook}}". Replace whatever placeholder or default text the layout pack provides — do not append; replace.
+
+Inside the composition, mark filler words ("um", "uh", "like" when used as filler, "you know", "I mean", false starts, repeated words, and long silences > 400ms) as IGNORED — use Descript's ignore / strike-through feature so the words remain visible in the script crossed out but are skipped during playback. DO NOT DELETE these words.
+
+Do not add transitions, effects, music, or title cards beyond what the layout pack already includes. Do not re-order anything. Do not rewrite the transcript.
+
+## Cross Post Rules
+- [e.g. Instagram, TikTok and YT Shorts should be vertical]
+- [e.g. X, Threads, LinkedIn should be horizontal — apply these changes in Descript underlord]
+- [e.g. For X cross-posts: use the source's on-screen hook as the tweet body, verbatim. No thread, no bullet points, no CTA, no link. One line, that's it.]
 
 ## Clip Idea Generation
 The Splice agent reads this section when generating clip ideas for this format. Describe:
@@ -43,10 +51,10 @@ If this section is absent, the agent falls back to the default Reels-style behav
 `;
 
 const TEMPLATE_HEADINGS = [
-  "## What this format is",
-  "## Why it works",
-  "## Clip guidance",
-  "## Avoid",
+  "## Post formatting",
+  "## Caption formatting",
+  "## Descript Clip & Pack Info",
+  "## Cross Post Rules",
   "## Clip Idea Generation",
 ];
 
