@@ -40,12 +40,6 @@ The Splice agent reads this section when generating clip ideas for this format. 
 \`\`\`
 
 If this section is absent, the agent falls back to the default Reels-style behavior (narrator overlay hook, 30–60s clip, no extras).
-
-## Descript Clip & Pack Info
-How Descript Underlord should edit a clip in this format. Include: layout pack URL (if any), hook text placeholder, filler-word marking rules, and anything it must NOT do.
-
-## Cross Post Rules
-Platform-by-platform caption and framing rules when repurposing clips from this format. One rule per platform.
 `;
 
 const TEMPLATE_HEADINGS = [
@@ -54,8 +48,6 @@ const TEMPLATE_HEADINGS = [
   "## Clip guidance",
   "## Avoid",
   "## Clip Idea Generation",
-  "## Descript Clip & Pack Info",
-  "## Cross Post Rules",
 ];
 
 /**
