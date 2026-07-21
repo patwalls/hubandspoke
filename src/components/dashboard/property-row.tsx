@@ -1,18 +1,46 @@
 import type React from "react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 /** Single label + value row. Mirrors the content-detail page's row shape —
  *  narrow label column on the left, editor/value on the right. Use inside a
  *  PropertyRowGroup for the divider styling. */
 export function PropertyRow({
   label,
+  tooltip,
   children,
 }: {
   label: string;
+  tooltip?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="grid grid-cols-[130px_1fr] items-center gap-3 min-h-9 px-3">
-      <div className="text-sm text-muted-foreground">{label}</div>
+      <div className="text-sm text-muted-foreground flex items-center gap-1">
+        {label}
+        {tooltip && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-border text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0"
+                aria-label={`Help: ${label}`}
+              >
+                ?
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                className="max-w-xs text-xs leading-relaxed"
+              >
+                {tooltip}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+      </div>
       <div className="min-w-0">{children}</div>
     </div>
   );

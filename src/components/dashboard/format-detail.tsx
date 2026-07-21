@@ -53,6 +53,7 @@ import {
 } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { applyStarterTemplate } from "@/lib/format-skill";
+import { FormatSkillEditor } from "./format-skill-editor";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { FormatStatusBadge } from "./format-status-badge";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
@@ -1268,7 +1269,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
         <TabsContent value="details" className="pt-5 space-y-3">
         <div className="rounded-lg border border-border bg-card overflow-hidden">
           <PropertyRowGroup>
-            <PropertyRow label="Parent format">
+            <PropertyRow label="Parent format" tooltip="Derivative formats inherit the pillar's audience and analytics context. Pillar formats have no parent — leave blank if this is a top-level format.">
             <Popover open={parentPopoverOpen} onOpenChange={setParentPopoverOpen}>
               <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
                 {selectedParent ? (
@@ -1333,7 +1334,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               </PopoverContent>
             </Popover>
             </PropertyRow>
-            <PropertyRow label="Accounts">
+            <PropertyRow label="Accounts" tooltip="Which brand account and post type this format publishes to. Each entry maps to one (account, post type) pair — e.g. SS + instagram_reel. Used to route items to the right publishing channel and filter the content table.">
             <Popover open={channelsPopoverOpen} onOpenChange={setChannelsPopoverOpen}>
               <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex min-h-8 items-center justify-between gap-2 cursor-pointer text-left`}>
                 {selections.length === 0 ? (
@@ -1413,7 +1414,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </PropertyRow>
           </PropertyRowGroup>
           <PropertyRowGroup>
-            <PropertyRow label="View threshold">
+            <PropertyRow label="View threshold" tooltip="When a post in this format hits this many views, Hub & Spoke automatically creates a repurposed production item and kicks off the draft algorithm. Checked every hour. Leave blank to disable.">
             <Input
               type="number"
               value={viewThreshold}
@@ -1427,7 +1428,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               className={PROPERTY_INPUT_CLASS}
             />
             </PropertyRow>
-            <PropertyRow label="Editor">
+            <PropertyRow label="Editor" tooltip="The person responsible for producing content in this format. Used to filter the content board by editor.">
             <Popover open={editorPopoverOpen} onOpenChange={setEditorPopoverOpen}>
               <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
                 {editor ? (
@@ -1514,21 +1515,19 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                   Load starter template
                 </button>
               </div>
-              <Textarea
+              <FormatSkillEditor
                 value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-                onBlur={() => {
+                isClippable={isClippableFormat}
+                onChange={(next) => setInstructions(next)}
+                onBlur={(next) => {
                   const saved = data.format.instructions ?? "";
-                  if (instructions !== saved) {
-                    void persistField({ instructions: instructions || null });
+                  if (next !== saved) {
+                    void persistField({ instructions: next || null });
                   }
                 }}
-                rows={10}
-                placeholder="Teach Claude this format: what it is, why it works, how to pick the moment, what to avoid. Click “Load starter template” for the structure."
-                className="font-mono text-xs"
               />
               <p className="text-xs text-muted-foreground">
-                A single skill definition. Claude reads it to dispatch Repurpose actions (e.g. Descript clipping) and it&apos;s attached to every Asana task.
+                Each section is read by a different Claude agent. Expand a section to edit — changes save automatically on blur.
               </p>
             </div>
           </PropertyRowSolo>
@@ -2324,22 +2323,11 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Prompt</Label>
-                <button
-                  type="button"
-                  onClick={() => setChildInstructions(applyStarterTemplate(childInstructions))}
-                  className="text-xs text-primary hover:underline"
-                >
-                  Load starter template
-                </button>
-              </div>
-              <Textarea
+              <Label>Skill</Label>
+              <FormatSkillEditor
                 value={childInstructions}
-                onChange={(e) => setChildInstructions(e.target.value)}
-                placeholder="Describe this derivative as a Claude-style skill."
-                rows={6}
-                className="font-mono text-xs"
+                isClippable={false}
+                onChange={(next) => setChildInstructions(next)}
               />
             </div>
 
