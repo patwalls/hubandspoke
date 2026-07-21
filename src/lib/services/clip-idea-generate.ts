@@ -341,27 +341,40 @@ export async function generateClipIdeasForItem(
   }
 
   // Resolve target account for the new production_items rows.
-  const targetPostType = format.clipTargetPostType ?? "instagram_reel";
-  const targetPlatform =
-    format.clipTargetPlatform &&
-    Array.isArray(format.clipTargetPlatform) &&
-    format.clipTargetPlatform.length > 0
-      ? (format.clipTargetPlatform as string[])
-      : ["Instagram Reel"];
+  // If clipTargetPostType is set, look for a format_channels row matching that
+  // post type. If null, fall back to the first format_channels row for this
+  // format (any post type) so we don't accidentally default to instagram_reel.
+  let targetPostType: string = "instagram_reel";
   let targetAccountId: string | null = null;
-  const [fcRow] = await db
-    .select({ accountId: formatChannels.accountId })
-    .from(formatChannels)
-    .where(
-      and(
-        eq(formatChannels.formatId, format.id),
-        eq(formatChannels.postType, targetPostType),
-      ),
-    )
-    .limit(1);
-  if (fcRow) {
-    targetAccountId = fcRow.accountId;
+  if (format.clipTargetPostType) {
+    const [fcRow] = await db
+      .select({ accountId: formatChannels.accountId })
+      .from(formatChannels)
+      .where(
+        and(
+          eq(formatChannels.formatId, format.id),
+          eq(formatChannels.postType, format.clipTargetPostType),
+        ),
+      )
+      .limit(1);
+    targetPostType = format.clipTargetPostType;
+    if (fcRow) {
+      targetAccountId = fcRow.accountId;
+    }
   } else {
+    // clipTargetPostType not set — use the first format_channels row to
+    // derive both the post type and account, rather than hardcoding instagram_reel.
+    const [fcRow] = await db
+      .select({ accountId: formatChannels.accountId, postType: formatChannels.postType })
+      .from(formatChannels)
+      .where(eq(formatChannels.formatId, format.id))
+      .limit(1);
+    if (fcRow?.postType) {
+      targetPostType = fcRow.postType;
+      targetAccountId = fcRow.accountId;
+    }
+  }
+  if (!targetAccountId) {
     const platformKey = accountPlatformForPostType(targetPostType);
     if (platformKey) {
       const acc = await findAccountForBrandPlatform({
@@ -371,6 +384,12 @@ export async function generateClipIdeasForItem(
       targetAccountId = acc?.id ?? null;
     }
   }
+  const targetPlatform =
+    format.clipTargetPlatform &&
+    Array.isArray(format.clipTargetPlatform) &&
+    format.clipTargetPlatform.length > 0
+      ? (format.clipTargetPlatform as string[])
+      : null;
 
   const batchId = randomUUID();
   const aggregatedUsage = {
