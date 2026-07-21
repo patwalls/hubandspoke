@@ -25,7 +25,7 @@ interface ClipIdeaSummary {
   acceptedProductionItemId?: string | null;
 }
 
-type SortKey = "channel" | "content" | "pillar" | "format" | "views";
+type SortKey = "channel" | "content" | "pillar" | "pillarDate" | "format" | "views";
 type SortDir = "asc" | "desc";
 
 interface AssignableUser {
@@ -96,6 +96,8 @@ export function IdeaQueueTable({
           return item.title?.toLowerCase() ?? null;
         case "pillar":
           return item.pillarContentTitle?.toLowerCase() ?? null;
+        case "pillarDate":
+          return item.pillarPublishedDate ?? null;
         case "format":
           return item.format?.toLowerCase() ?? null;
         case "views":
@@ -261,12 +263,13 @@ export function IdeaQueueTable({
 
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs table-fixed min-w-[1112px]">
+          <table className="w-full text-xs table-fixed min-w-[1216px]">
             <colgroup>
               <col className="w-[36px]" />
               <col className="w-[176px]" />
               <col className="w-[340px]" />
               <col className="w-[200px]" />
+              <col className="w-[104px]" />
               <col className="w-[184px]" />
               <col className="w-[88px]" />
               <col className="w-[88px]" />
@@ -306,6 +309,15 @@ export function IdeaQueueTable({
                   activeKey={sortKey}
                   direction={sortDir}
                   onSort={toggleSort}
+                />
+                <SortableHeader
+                  label="Published"
+                  sortKey="pillarDate"
+                  activeKey={sortKey}
+                  direction={sortDir}
+                  onSort={toggleSort}
+                  className="whitespace-nowrap"
+                  title="Publish date of the source pillar video"
                 />
                 <SortableHeader
                   label="Format"
@@ -601,6 +613,9 @@ function IdeaQueueRow({
         ) : (
           <span className="truncate block">—</span>
         )}
+      </td>
+      <td className="px-3 py-2 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+        {item.pillarPublishedDate ?? "—"}
       </td>
       <td className="px-3 py-2 text-sm text-muted-foreground max-w-[220px]">
         {item.format && formatId ? (

@@ -105,6 +105,8 @@ export interface ProductionItem {
    *  with `pillarContentItemId` set). Populated by queries that self-join
    *  productionItems. The clip queue surfaces this as a column. */
   pillarContentTitle?: string | null;
+  /** Published date of the pillar production_item ("YYYY-MM-DD"). */
+  pillarPublishedDate?: string | null;
   sourceType?:
     | "original"
     | "repost"

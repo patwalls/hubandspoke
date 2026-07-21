@@ -67,6 +67,8 @@ type UserExtras = {
   /** Title of the pillar production_item, resolved via self-join on
    *  pillarContentItemId. Surfaced in the clip queue's Pillar column. */
   pillarContentTitle?: string | null;
+  /** Published date of the pillar production_item ("YYYY-MM-DD"). */
+  pillarPublishedDate?: string | null;
 };
 
 function mapProductionItem(
@@ -120,6 +122,7 @@ function mapProductionItem(
     repostedFromItemId: item.repostedFromItemId,
     pillarContentItemId: item.pillarContentItemId,
     pillarContentTitle: extras.pillarContentTitle ?? null,
+    pillarPublishedDate: extras.pillarPublishedDate ?? null,
     posterS3Key: item.posterS3Key,
     mediaS3Key: item.mediaS3Key,
     mediaContentType: item.mediaContentType,
@@ -909,13 +912,19 @@ export async function getProductionPipeline(
     )
   );
   const pillarTitleById = new Map<string, string | null>();
+  const pillarPublishedDateById = new Map<string, string | null>();
   if (pillarIds.length > 0) {
     const pillarRows = await db
-      .select({ id: productionItems.id, title: productionItems.title })
+      .select({
+        id: productionItems.id,
+        title: productionItems.title,
+        publishedDate: productionItems.publishedDate,
+      })
       .from(productionItems)
       .where(inArray(productionItems.id, pillarIds));
     for (const p of pillarRows) {
       pillarTitleById.set(p.id, p.title ?? null);
+      pillarPublishedDateById.set(p.id, p.publishedDate ?? null);
     }
   }
 
@@ -942,6 +951,9 @@ export async function getProductionPipeline(
           : null,
       pillarContentTitle: r.item.pillarContentItemId
         ? pillarTitleById.get(r.item.pillarContentItemId) ?? null
+        : null,
+      pillarPublishedDate: r.item.pillarContentItemId
+        ? pillarPublishedDateById.get(r.item.pillarContentItemId) ?? null
         : null,
     })
   );
