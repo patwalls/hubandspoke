@@ -256,6 +256,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [editor, setEditor] = useState("");
   const [editorAsanaGid, setEditorAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
+  const [preTemplateInstructions, setPreTemplateInstructions] = useState<string | null>(null);
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
   const [isClippableFormat, setIsClippableFormat] = useState(false);
   const [isCanvaFormat, setIsCanvaFormat] = useState(false);
@@ -1502,17 +1503,33 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     Claude-powered
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = applyStarterTemplate(instructions);
-                    setInstructions(next);
-                    void persistField({ instructions: next });
-                  }}
-                  className="text-xs text-primary hover:underline"
-                >
-                  Add template
-                </button>
+                <div className="flex items-center gap-3">
+                  {preTemplateInstructions !== null && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInstructions(preTemplateInstructions);
+                        void persistField({ instructions: preTemplateInstructions || null });
+                        setPreTemplateInstructions(null);
+                      }}
+                      className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      Revert
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreTemplateInstructions(instructions);
+                      const next = applyStarterTemplate(instructions);
+                      setInstructions(next);
+                      void persistField({ instructions: next });
+                    }}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Add template
+                  </button>
+                </div>
               </div>
               <Textarea
                 value={instructions}
