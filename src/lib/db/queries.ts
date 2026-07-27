@@ -518,11 +518,16 @@ export async function getContentReport(
   }
 
   // Origin filter — "made in Hub & Spoke" vs "synced from the platform".
-  // Two ORed signals:
+  // Three ORed signals for hubandspoke:
   //   (a) `createdVia` is stamped non-sync — definitive (post-2026-05-11
   //       every insert site stamps this, so new work is always accurate).
   //   (b) `sourceType IN ('repost','cross_post','repurposed')` — best-effort
   //       fallback for pre-2026-05-11 rows where `createdVia` is NULL.
+  //   (c) `repostedFromItemId/pillarContentItemId IS NOT NULL` — FK-proven
+  //       H&S structural relationships, catches derivatives regardless of
+  //       sourceType / createdVia vintage.
+  //   (d) `hubSpokeOverride = true` — manual operator override for items
+  //       published externally then synced in from the platform API.
   //
   // Known false-positive risk on (b): three retroactive-classification
   // scripts can stamp those source types on rows that were originally
@@ -536,15 +541,23 @@ export async function getContentReport(
       sql`(
         (${productionItems.createdVia} IS NOT NULL AND ${productionItems.createdVia} NOT LIKE 'sync:%')
         OR ${productionItems.sourceType} IN ('repost', 'cross_post', 'repurposed')
+        OR ${productionItems.repostedFromItemId} IS NOT NULL
+        OR ${productionItems.pillarContentItemId} IS NOT NULL
+        OR ${productionItems.hubSpokeOverride} = true
       )`
     );
   } else if (origin === "synced") {
     conditions.push(
       sql`(
-        ${productionItems.createdVia} LIKE 'sync:%'
-        OR (
-          ${productionItems.createdVia} IS NULL
-          AND (${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')
+        ${productionItems.hubSpokeOverride} IS NOT TRUE
+        AND (
+          ${productionItems.createdVia} LIKE 'sync:%'
+          OR (
+            ${productionItems.createdVia} IS NULL
+            AND (${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')
+            AND ${productionItems.repostedFromItemId} IS NULL
+            AND ${productionItems.pillarContentItemId} IS NULL
+          )
         )
       )`
     );

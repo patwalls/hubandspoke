@@ -193,6 +193,13 @@ export interface ProductionItem {
   newsletterBodyHtml?: string | null;
   newsletterRecipients?: number | null;
   klaviyoListId?: string | null;
+  /** Provenance stamp. 'api:create', 'api:repost', 'sync:account-content',
+   *  etc. Null on rows created before 2026-05-11. */
+  createdVia?: string | null;
+  /** Manual operator override: this item was created in Hub & Spoke even
+   *  though `createdVia` says otherwise (e.g. published externally then
+   *  synced in). Flips the "made in Hub & Spoke" origin filter. */
+  hubSpokeOverride?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }

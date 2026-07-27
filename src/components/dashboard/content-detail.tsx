@@ -2633,6 +2633,35 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 </Popover>
               );
             })()}
+            {/* Hub & Spoke override — show when already set (so it can be
+             *  cleared) OR when the item came in via sync (so an operator
+             *  can claim it). Hidden for items already recognised as H&S
+             *  through createdVia / sourceType to avoid redundant noise. */}
+            {(item.hubSpokeOverride ||
+              (item.createdVia as string | null)?.startsWith("sync:")) && (
+              <button
+                className={cn(
+                  CHIP_B_BASE,
+                  CHIP_B_CLICKABLE,
+                  item.hubSpokeOverride
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "",
+                )}
+                title={
+                  item.hubSpokeOverride
+                    ? "Marked as Hub & Spoke — click to remove"
+                    : "Mark as Hub & Spoke content"
+                }
+                onClick={() =>
+                  void persistField({
+                    hubSpokeOverride: item.hubSpokeOverride ? null : true,
+                  })
+                }
+              >
+                <SparklesIcon className="size-3" aria-hidden />
+                {item.hubSpokeOverride ? "Hub & Spoke" : "Mark as Hub & Spoke"}
+              </button>
+            )}
             <DescriptStatusPill productionItemId={item.id} variant="chip" />
             <CanvaStatusPill productionItemId={item.id} initialItem={item} variant="chip" />
             <TranscriptButton

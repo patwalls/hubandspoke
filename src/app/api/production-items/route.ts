@@ -433,6 +433,7 @@ export async function PUT(request: NextRequest) {
       killReason,
       utmCampaign,
       shortLinkSlug,
+      hubSpokeOverride,
     } = body;
 
     if (!id) {
@@ -585,6 +586,7 @@ export async function PUT(request: NextRequest) {
     if (comments !== undefined) updateData.comments = comments === "" || comments === null ? null : Number(comments);
     if (clicks !== undefined) updateData.clicks = clicks === "" || clicks === null ? null : Number(clicks);
     if (leads !== undefined) updateData.leads = leads === "" || leads === null ? null : Number(leads);
+    if (hubSpokeOverride !== undefined) updateData.hubSpokeOverride = hubSpokeOverride === true ? true : null;
 
     // Source type is not user-editable as of 2026-05-11 — it's derived
     // exclusively by system flows (notion-sync, account-content-sync,

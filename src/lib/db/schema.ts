@@ -292,6 +292,11 @@ export const productionItems = pgTable(
       (): AnyPgColumn => clipIdeas.id,
       { onDelete: "set null" }
     ),
+    // Manual override: operator confirmed this item was created inside Hub &
+    // Spoke even though `createdVia` says otherwise (e.g. published externally
+    // then synced in from the platform API). Flips the "made in Hub & Spoke"
+    // origin filter regardless of `createdVia` or `sourceType`.
+    hubSpokeOverride: boolean("hub_spoke_override"),
     // Populated once by the evergreen classifier on an original item. null =
     // not yet evaluated; true/false = AI verdict. Reasoning is copied onto
     // generated repost rows so the triage UI has context without re-fetching.
