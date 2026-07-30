@@ -10,6 +10,7 @@ import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { BangersView } from "./bangers-view";
+import { DuplicatesView } from "./duplicates-view";
 
 interface ContentViewProps {
   brand: string;
@@ -139,7 +140,6 @@ export function ContentView({ brand }: ContentViewProps) {
         format: selectedFormat,
         source: selectedSource,
         origin: selectedOrigin,
-        ...(activeView === "duplicates" ? { special: "duplicates" } : {}),
       });
       const res = await fetch(`${apiBase}?${params}`);
       const text = await res.text();
@@ -157,7 +157,7 @@ export function ContentView({ brand }: ContentViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin, activeView]);
+  }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin]);
 
   useEffect(() => {
     fetchReport();
@@ -186,6 +186,8 @@ export function ContentView({ brand }: ContentViewProps) {
 
       {activeView === "bangers" ? (
         <BangersView brand={brand} accounts={accounts} />
+      ) : activeView === "duplicates" ? (
+        <DuplicatesView brand={brand} />
       ) : (
       <>
       <FilterPills

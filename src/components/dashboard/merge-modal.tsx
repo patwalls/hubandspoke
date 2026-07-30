@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Search, GitMerge } from "lucide-react";
 import type { ProductionItem } from "@/types";
@@ -21,6 +21,9 @@ interface MergeModalProps {
   primaryItem: ProductionItem;
   brand: string;
   contentId: string;
+  /** When provided, skips the search step and pre-selects this item as the
+   *  duplicate to merge. Used by the Potential Duplicates view. */
+  preselectedSecondaryItem?: ProductionItem | null;
   onMergeComplete?: () => void;
 }
 
@@ -30,15 +33,27 @@ export function MergeModal({
   primaryItem,
   brand,
   contentId,
+  preselectedSecondaryItem,
   onMergeComplete,
 }: MergeModalProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [foundItems, setFoundItems] = useState<ProductionItem[]>([]);
+  const [foundItems, setFoundItems] = useState<ProductionItem[]>(
+    preselectedSecondaryItem ? [preselectedSecondaryItem] : []
+  );
   const [selectedSecondaryId, setSelectedSecondaryId] = useState<string | null>(
-    null
+    preselectedSecondaryItem?.id ?? null
   );
   const [searching, setSearching] = useState(false);
   const [merging, setMerging] = useState(false);
+
+  // Reset form when the dialog opens, preserving any preselected item.
+  useEffect(() => {
+    if (!open) return;
+    setSearchQuery("");
+    setFoundItems(preselectedSecondaryItem ? [preselectedSecondaryItem] : []);
+    setSelectedSecondaryId(preselectedSecondaryItem?.id ?? null);
+    setMerging(false);
+  }, [open, preselectedSecondaryItem]);
 
   // Search for items by title/id
   const handleSearch = async () => {
@@ -135,8 +150,8 @@ export function MergeModal({
             )}
           </div>
 
-          {/* Search for duplicate */}
-          <div className="space-y-2">
+          {/* Search for duplicate — hidden when a secondary item is pre-selected */}
+          {!preselectedSecondaryItem && <div className="space-y-2">
             <Label htmlFor="search-query">Search for duplicate item</Label>
             <div className="flex gap-2">
               <Input
@@ -157,12 +172,12 @@ export function MergeModal({
                 <Search className="size-4" />
               </Button>
             </div>
-          </div>
+          </div>}
 
           {/* Found items */}
           {foundItems.length > 0 && (
             <div className="space-y-2">
-              <Label>Found items</Label>
+              <Label>{preselectedSecondaryItem ? "Merging with:" : "Found items"}</Label>
               <div className="max-h-48 overflow-y-auto space-y-2">
                 {foundItems.map((item) => (
                   <button

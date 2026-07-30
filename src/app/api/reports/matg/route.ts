@@ -62,7 +62,6 @@ export async function GET(request: NextRequest) {
   const sourceFilter = searchParams.get("source") || "all";
   const provenOnly = searchParams.get("provenOnly") === "1";
   const originFilter = searchParams.get("origin") || "all";
-  const specialFilter = searchParams.get("special") || "none";
 
   try {
     const { weeklyGoal, weeklyViewsGoal, weekStartDay } = await getBrandSettings("matg");
@@ -154,23 +153,6 @@ export async function GET(request: NextRequest) {
             ${productionItems.createdVia} IS NULL
             AND (${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')
           )
-        )`
-      );
-    }
-
-    if (specialFilter === "duplicates") {
-      conditions.push(
-        sql`(
-          (${productionItems.publishedLink} IS NOT NULL AND ${productionItems.publishedLink} IN (
-            SELECT published_link FROM production_items
-            WHERE deleted_at IS NULL AND published_link IS NOT NULL AND brand = 'matg'
-            GROUP BY published_link HAVING COUNT(*) > 1
-          ))
-          OR (${productionItems.platformContentId} IS NOT NULL AND ${productionItems.platformContentId} IN (
-            SELECT platform_content_id FROM production_items
-            WHERE deleted_at IS NULL AND platform_content_id IS NOT NULL AND brand = 'matg'
-            GROUP BY platform_content_id HAVING COUNT(*) > 1
-          ))
         )`
       );
     }
