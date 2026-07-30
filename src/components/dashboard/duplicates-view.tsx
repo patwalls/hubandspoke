@@ -2,31 +2,51 @@
 
 import { useEffect, useState } from "react";
 import { GitMerge, ExternalLink } from "lucide-react";
-import type { ProductionItem } from "@/types";
-import type { DuplicateGroup } from "@/app/api/reports/duplicates/route";
+import type { DuplicateGroup, DuplicateItem } from "@/app/api/reports/duplicates/route";
 import { MergeModal } from "./merge-modal";
 
 interface DuplicatesViewProps {
   brand: string;
 }
 
-function ItemCard({ item }: { item: ProductionItem }) {
+function isHubAndSpoke(item: DuplicateItem): boolean {
+  if (item.hubSpokeOverride) return true;
+  if (item.createdVia && !item.createdVia.startsWith("sync:")) return true;
+  return false;
+}
+
+function ItemCard({ item }: { item: DuplicateItem }) {
   const account = item.account;
   const platform = account?.platform ?? (item.platform?.[0] ?? null);
+  const madeInHs = isHubAndSpoke(item);
   return (
-    <div className="flex-1 min-w-0 rounded-lg border border-border bg-card p-3 space-y-1.5">
-      <p className="text-sm font-medium line-clamp-2">{item.title ?? "(untitled)"}</p>
+    <div className={`flex-1 min-w-0 rounded-lg border bg-card p-3 space-y-1.5 ${madeInHs ? "border-emerald-300" : "border-border"}`}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-medium line-clamp-2">{item.title ?? "(untitled)"}</p>
+        {madeInHs && (
+          <span className="shrink-0 inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 whitespace-nowrap">
+            H&amp;S original
+          </span>
+        )}
+      </div>
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         {account && <span>@{account.handle}</span>}
         {platform && !account && <span>{platform}</span>}
         {item.publishedDate && <span>{item.publishedDate}</span>}
         {item.views != null && <span>{item.views.toLocaleString()} views</span>}
       </div>
-      {item.sourceType && (
-        <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground capitalize">
-          {item.sourceType.replace("_", " ")}
-        </span>
-      )}
+      <div className="flex flex-wrap gap-1.5">
+        {item.sourceType && (
+          <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground capitalize">
+            {item.sourceType.replace("_", " ")}
+          </span>
+        )}
+        {item.commentCount > 0 && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+            💬 {item.commentCount} {item.commentCount === 1 ? "comment" : "comments"}
+          </span>
+        )}
+      </div>
       {item.publishedLink && (
         <a
           href={item.publishedLink}
@@ -43,8 +63,8 @@ function ItemCard({ item }: { item: ProductionItem }) {
 }
 
 interface MergeState {
-  primaryItem: ProductionItem;
-  secondaryItem: ProductionItem;
+  primaryItem: DuplicateItem;
+  secondaryItem: DuplicateItem;
 }
 
 export function DuplicatesView({ brand }: DuplicatesViewProps) {

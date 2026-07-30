@@ -4,10 +4,19 @@ import { productionItems, accounts, brands } from "@/lib/db/schema";
 import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
 import type { ProductionItem } from "@/types";
 
+export interface DuplicateItem extends ProductionItem {
+  /** Non-null + not starting with "sync:" → created inside Hub & Spoke. */
+  createdVia: string | null;
+  /** Manual operator override marking this item as H&S-origin even if synced. */
+  hubSpokeOverride: boolean | null;
+  /** Count of internal Hub & Spoke comments on this item. */
+  commentCount: number;
+}
+
 export interface DuplicateGroup {
   key: string;
   keyType: "publishedLink" | "platformContentId";
-  items: ProductionItem[];
+  items: DuplicateItem[];
 }
 
 function shapeItem(r: {
@@ -19,7 +28,8 @@ function shapeItem(r: {
   accountAvatarUrl: string | null;
   accountBrandSlug: string | null;
   accountBrandLabel: string | null;
-}): ProductionItem {
+  commentCount: number;
+}): DuplicateItem {
   const account = r.accountId
     ? {
         id: r.accountId,
@@ -88,6 +98,10 @@ function shapeItem(r: {
       item.predictedViewsSnapshotAt?.toISOString() ?? null,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
+    // Duplicate-view extras
+    createdVia: item.createdVia,
+    hubSpokeOverride: item.hubSpokeOverride,
+    commentCount: r.commentCount,
   };
 }
 
@@ -106,6 +120,10 @@ export async function GET(request: NextRequest) {
     accountAvatarUrl: accounts.avatarUrl,
     accountBrandSlug: brands.slug,
     accountBrandLabel: brands.label,
+    commentCount: sql<number>`(
+      SELECT COUNT(*) FROM content_comments
+      WHERE content_item_id = ${productionItems.id}
+    )`,
   };
 
   const baseWhere = and(
@@ -152,7 +170,7 @@ export async function GET(request: NextRequest) {
     );
 
   // Group by link
-  const linkGroups = new Map<string, ProductionItem[]>();
+  const linkGroups = new Map<string, DuplicateItem[]>();
   for (const r of byLinkRows) {
     const key = r.item.publishedLink!;
     if (!linkGroups.has(key)) linkGroups.set(key, []);
@@ -160,7 +178,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Group by platformContentId — skip items already in a link group
-  const contentIdGroups = new Map<string, ProductionItem[]>();
+  const contentIdGroups = new Map<string, DuplicateItem[]>();
   for (const r of byContentIdRows) {
     if (linkItemIds.has(r.item.id)) continue;
     const key = r.item.platformContentId!;
