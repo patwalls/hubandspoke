@@ -181,11 +181,7 @@ export function PublishScheduleDialog({
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>
-            {isAlreadyPublished
-              ? "Edit publish info"
-              : isAlreadyScheduled
-                ? "Edit schedule"
-                : "Publish or Schedule"}
+            {isAlreadyPublished ? "Edit publish info" : "Publish or Schedule"}
           </DialogTitle>
         </DialogHeader>
 
@@ -193,7 +189,7 @@ export function PublishScheduleDialog({
          *  already-scheduled item because mode is forced — switching to
          *  the other tab in that state would be unintuitive (Scheduled
          *  → Publish would need a link the user may not have yet). */}
-        {!isAlreadyPublished && !isAlreadyScheduled && (
+        {!isAlreadyPublished && (
           <div className="flex w-full rounded-md border border-border bg-muted/40 p-0.5 text-xs">
             <button
               type="button"
