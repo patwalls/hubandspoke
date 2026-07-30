@@ -178,18 +178,26 @@ export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION
 log "invoking archive: brands=$BRANDS limit=$RUN_LIMIT since-days=$RUN_SINCE_DAYS sleep=${RUN_SLEEP_MIN}-${RUN_SLEEP_MAX}s"
 
 set +e
-# cookies-from-browser=none: launchd has no GUI session, and Chrome holds
-# an exclusive lock on its Cookies SQLite DB while running on the user's
-# desktop — so the default `chrome` cookie path hangs the yt-dlp invocation
-# indefinitely on every video. Bot-gated videos fail (acceptable for a
-# best-effort hourly cron); the previous behavior was 0/N success.
+# Auth via a pre-exported cookies.txt at $CONFIG_DIR/cookies.txt — this defeats
+# YouTube's "Sign in to confirm you're not a bot" gate, which now blocks ALL
+# cookieless downloads from this IP. launchd is headless (no GUI/keychain, and
+# Chrome locks its live cookie DB), so `--cookies-from-browser` hangs here; a
+# static file avoids both, and yt-dlp rewrites it after each run to stay fresh.
+# Falls back to cookieless if the file is missing (re-export with:
+#   yt-dlp --cookies-from-browser chrome --cookies "$CONFIG_DIR/cookies.txt" \
+#          --skip-download --simulate https://www.youtube.com/watch?v=<id> ).
+if [ -f "$CONFIG_DIR/cookies.txt" ]; then
+  COOKIE_ARG="--cookies=$CONFIG_DIR/cookies.txt"
+else
+  COOKIE_ARG="--cookies-from-browser=none"
+fi
 npx --no-install tsx scripts/archive-yt-local.ts \
     --brands="$BRANDS" \
     --since-days="$RUN_SINCE_DAYS" \
     --limit="$RUN_LIMIT" \
     --sleep-min="$RUN_SLEEP_MIN" \
     --sleep-max="$RUN_SLEEP_MAX" \
-    --cookies-from-browser=none
+    "$COOKIE_ARG"
 SCRIPT_EXIT=$?
 set -e
 

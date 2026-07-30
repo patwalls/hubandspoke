@@ -79,6 +79,13 @@ const SLEEP_MAX = Number(arg("sleep-max") ?? "0");
 // videos. Default to chrome since that's where Pat is signed in. Pass
 // `--cookies-from-browser=none` to disable.
 const COOKIES_FROM_BROWSER = (arg("cookies-from-browser") ?? "chrome").trim();
+// `--cookies=/path/to/cookies.txt` uses a static Netscape cookie file instead
+// of reading a live browser profile. This is what the headless launchd cron
+// uses: launchd has no GUI/keychain access and Chrome locks its cookie DB, so
+// browser extraction hangs there — a pre-exported file sidesteps both. yt-dlp
+// also rewrites this file after each run, keeping it reasonably fresh. When
+// set, it takes precedence over --cookies-from-browser.
+const COOKIES_FILE = arg("cookies");
 
 const SINCE = SINCE_ARG ?? (SINCE_DAYS ? computeSince(Number(SINCE_DAYS)) : undefined);
 
@@ -186,7 +193,9 @@ function runYtDlp(url: string, outputPath: string, clients: string): Promise<voi
       "-o",
       outputPath,
     ];
-    if (COOKIES_FROM_BROWSER && COOKIES_FROM_BROWSER !== "none") {
+    if (COOKIES_FILE) {
+      ytDlpArgs.push("--cookies", COOKIES_FILE);
+    } else if (COOKIES_FROM_BROWSER && COOKIES_FROM_BROWSER !== "none") {
       ytDlpArgs.push("--cookies-from-browser", COOKIES_FROM_BROWSER);
     }
     if (SLEEP_MIN > 0) {

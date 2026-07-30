@@ -212,6 +212,15 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
     launchd job `com.hubandspoke.yt-archive` running
     `scripts/archive-yt-local.ts` from a residential IP). `yt-archive-watch`
     (below) alarms when that cron stops landing archives.
+  - **Auth via cookies (2026-07-29):** YouTube now bot-blocks *cookieless*
+    downloads even from the residential home IP ("Sign in to confirm you're not
+    a bot"), so the cron authenticates with a pre-exported Netscape cookie file
+    at `~/.config/hubandspoke/cookies.txt` (`archive-yt-local.ts --cookies=<file>`;
+    yt-dlp rewrites it after each run to stay fresh). It can't use
+    `--cookies-from-browser` because launchd is headless — no keychain/GUI, and
+    Chrome holds an exclusive lock on its live cookie DB. Re-export when it goes
+    stale: `yt-dlp --cookies-from-browser chrome --cookies
+    ~/.config/hubandspoke/cookies.txt --skip-download --simulate <any-yt-url>`.
   - `MAX_ATTEMPTS = 5` defined locally (`youtube-download-sweep.ts:14`); same constant duplicated in `enrichment/orchestrator.ts:20`
   - Sweep gate paces retries; dyno-level maxAttempts only retries the same tick
 
