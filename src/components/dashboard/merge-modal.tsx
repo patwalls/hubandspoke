@@ -50,7 +50,7 @@ export function MergeModal({
     setSearching(true);
     try {
       const res = await fetch(
-        `/api/production-items/search?brand=${brand}&q=${encodeURIComponent(searchQuery)}&limit=10`
+        `/api/production-items/search?brand=${brand}&q=${encodeURIComponent(searchQuery)}&limit=10&includeAll=1`
       );
       const json = await res.json().catch(() => ({}));
       if (res.ok && json.items) {
