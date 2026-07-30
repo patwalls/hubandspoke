@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { format, subDays } from "date-fns";
-import { FilterPills } from "./filter-pills";
+import { FilterPills, SelectPill } from "./filter-pills";
 import { PerformanceTable } from "./performance-table";
 import type { ContentReportData } from "@/types";
 import type { PickerAccount } from "@/components/ui/account-post-type-picker";
@@ -139,6 +139,7 @@ export function ContentView({ brand }: ContentViewProps) {
         format: selectedFormat,
         source: selectedSource,
         origin: selectedOrigin,
+        ...(activeView === "duplicates" ? { special: "duplicates" } : {}),
       });
       const res = await fetch(`${apiBase}?${params}`);
       const text = await res.text();
@@ -156,7 +157,7 @@ export function ContentView({ brand }: ContentViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin]);
+  }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin, activeView]);
 
   useEffect(() => {
     fetchReport();
@@ -171,16 +172,16 @@ export function ContentView({ brand }: ContentViewProps) {
             Browse and edit individual content items
           </p>
         </div>
-        <button
-          onClick={() => filters.set("view", activeView === "bangers" ? "list" : "bangers")}
-          className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-            activeView === "bangers"
-              ? "border-foreground bg-foreground text-background"
-              : "border-border bg-background text-muted-foreground hover:bg-muted"
-          }`}
-        >
-          🔥 Top Bangers
-        </button>
+        <SelectPill
+          label="Other"
+          value={activeView === "bangers" || activeView === "duplicates" ? activeView : "list"}
+          options={[
+            { value: "list", label: "All content" },
+            { value: "bangers", label: "Top Bangers" },
+            { value: "duplicates", label: "Potential duplicates" },
+          ]}
+          onChange={(v) => filters.set("view", v)}
+        />
       </div>
 
       {activeView === "bangers" ? (

@@ -272,6 +272,10 @@ interface ReportParams {
    *  - "hubandspoke" → anything not stamped `sync:*` (created in this app)
    *  - "synced"      → `sync:*` or NULL (synced from the platform / pre-2026-05-11) */
   origin?: string;
+  /** Special report mode:
+   *  - "duplicates" → only items sharing a publishedLink or platformContentId
+   *    with another non-deleted item on the same brand */
+  special?: string;
 }
 
 /**
@@ -428,6 +432,7 @@ export async function getContentReport(
     source,
     provenOnly,
     origin,
+    special,
   } = params;
 
   const { weeklyGoal, weeklyViewsGoal, weekStartDay } = await getBrandSettings(brand);
@@ -559,6 +564,26 @@ export async function getContentReport(
             AND ${productionItems.pillarContentItemId} IS NULL
           )
         )
+      )`
+    );
+  }
+
+  // Potential-duplicates filter — items that share a publishedLink or
+  // platformContentId with another non-deleted item on the same brand.
+  if (special === "duplicates") {
+    const brandClause = brand !== "all" ? sql` AND brand = ${brand}` : sql``;
+    conditions.push(
+      sql`(
+        (${productionItems.publishedLink} IS NOT NULL AND ${productionItems.publishedLink} IN (
+          SELECT published_link FROM production_items
+          WHERE deleted_at IS NULL AND published_link IS NOT NULL${brandClause}
+          GROUP BY published_link HAVING COUNT(*) > 1
+        ))
+        OR (${productionItems.platformContentId} IS NOT NULL AND ${productionItems.platformContentId} IN (
+          SELECT platform_content_id FROM production_items
+          WHERE deleted_at IS NULL AND platform_content_id IS NOT NULL${brandClause}
+          GROUP BY platform_content_id HAVING COUNT(*) > 1
+        ))
       )`
     );
   }
