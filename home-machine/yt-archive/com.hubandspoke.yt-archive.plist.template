@@ -53,10 +53,13 @@
     <integer>60</integer>
 
     <!--
-      Don't run on battery — yt-dlp + ffmpeg are CPU-hungry. If the home
-      Mac is ever a laptop on battery, skip until plugged in.
+      LowPriorityIO was removed 2026-07-30. Its comment claimed it skipped
+      runs on battery; it does not (that would be PowerType) — it only
+      deprioritizes this job's disk I/O. When an ollama model drove the host
+      into swap exhaustion, that flag put us at the back of the I/O queue and
+      the archiver was the first thing on the machine to starve: every yt-dlp
+      child stalled past its 300s timeout while foreground processes ran
+      normally. Downloads are ~180 MB an hour; normal priority is not rude.
     -->
-    <key>LowPriorityIO</key>
-    <true/>
 </dict>
 </plist>

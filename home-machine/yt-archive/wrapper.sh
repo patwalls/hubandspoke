@@ -15,6 +15,7 @@
 # Exit codes:
 #   0  — ran cleanly, all candidates archived
 #   2  — ran but one or more videos failed (normal — dead videos, etc.)
+#   8  — host memory exhausted; skipped the run on purpose (see preflight below)
 #   anything else — wrapper bailed before invoking the script
 #
 # Any exit other than 0/2 also fires a best-effort Sentry event (see the
@@ -151,6 +152,28 @@ else
     fi
 fi
 
+# --- host health preflight -----------------------------------------------
+
+# 2026-07-30 incident: an ollama model (qwen3:30b-a3b, ~19 GB) sat resident
+# for 3.5 days on this 32 GB host and drove swap to 97% full. Everything then
+# stalled in uninterruptible I/O — including our yt-dlp children, which burned
+# the script's full 300s timeout on all three player-client strategies and
+# reported "timeout after 300s" for every video. The archiver looked broken;
+# the host was simply thrashing. `LowPriorityIO` in the plist made us the
+# first process to starve.
+#
+# Fail fast with a distinct exit code so Sentry says "host out of memory"
+# instead of us producing an hour of misleading download timeouts.
+SWAP_FREE_MB=$(sysctl -n vm.swapusage 2>/dev/null | sed -nE 's/.*free = ([0-9]+)\.[0-9]+M.*/\1/p')
+MEM_FREE_PCT=$(memory_pressure 2>/dev/null | sed -nE 's/.*free percentage: ([0-9]+)%.*/\1/p')
+: "${SWAP_FREE_MB:=99999}"
+: "${MEM_FREE_PCT:=100}"
+if [[ "$SWAP_FREE_MB" -lt 2048 && "$MEM_FREE_PCT" -lt 15 ]]; then
+    log "host memory exhausted (swap_free=${SWAP_FREE_MB}MB free_mem=${MEM_FREE_PCT}%) — skipping run"
+    log "top memory consumer: $(ps -axo rss,comm | sort -rn | head -1 | awk '{rss=$1; $1=""; sub(/^ +/,""); printf "%.1fGB %s", rss/1048576, $0}')"
+    exit 8
+fi
+
 # --- DATABASE_URL --------------------------------------------------------
 
 if ! command -v heroku >/dev/null 2>&1; then
@@ -158,8 +181,18 @@ if ! command -v heroku >/dev/null 2>&1; then
     exit 5
 fi
 
-if ! PROD_DB_URL="$(heroku config:get DATABASE_URL --app hubandspoke 2>/tmp/yt-archive-heroku.err)"; then
-    log "heroku config:get failed — likely token expired. run: heroku login"
+# `timeout` is mandatory here, not defensive polish. On 2026-07-30 this exact
+# call wedged in uninterruptible I/O for 60+ minutes. Because launchd will not
+# start a second instance of a StartInterval job while the first is alive, that
+# single hang silently blocked *every* subsequent hourly tick — the failure
+# mode that turned a slow host into a dead pipeline.
+if ! PROD_DB_URL="$(timeout 120 heroku config:get DATABASE_URL --app hubandspoke 2>/tmp/yt-archive-heroku.err)"; then
+    HEROKU_RC=$?
+    if [[ $HEROKU_RC -eq 124 ]]; then
+        log "heroku config:get timed out after 120s — host starved or heroku CLI wedged"
+    else
+        log "heroku config:get failed (rc=$HEROKU_RC) — possibly expired token. run: heroku login"
+    fi
     log "stderr: $(tail -c 400 /tmp/yt-archive-heroku.err)"
     exit 6
 fi
@@ -191,7 +224,11 @@ if [ -f "$CONFIG_DIR/cookies.txt" ]; then
 else
   COOKIE_ARG="--cookies-from-browser=none"
 fi
-npx --no-install tsx scripts/archive-yt-local.ts \
+# Hard ceiling below the hourly cadence. The script has its own per-download
+# timeout, but that only covers yt-dlp children — a starved host can stall the
+# node process itself, and an overrunning instance blocks every later tick
+# (launchd won't overlap a StartInterval job). 50 min leaves the next tick clean.
+timeout 3000 npx --no-install tsx scripts/archive-yt-local.ts \
     --brands="$BRANDS" \
     --since-days="$RUN_SINCE_DAYS" \
     --limit="$RUN_LIMIT" \
@@ -201,7 +238,11 @@ npx --no-install tsx scripts/archive-yt-local.ts \
 SCRIPT_EXIT=$?
 set -e
 
-log "archive exit=$SCRIPT_EXIT"
+if [[ $SCRIPT_EXIT -eq 124 ]]; then
+    log "archive exceeded the 50min ceiling and was killed — next tick starts clean"
+else
+    log "archive exit=$SCRIPT_EXIT"
+fi
 
 # --- log rotation (cheap) ------------------------------------------------
 

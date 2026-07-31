@@ -264,7 +264,18 @@ async function archiveOne(
         errs.push(`[${s.name}] ${(err as Error).message}`);
       }
     }
-    if (!downloaded) return { ok: false, err: errs.join(" || ").slice(0, 450) };
+    // THROW, don't return. This is the "every player-client strategy failed"
+    // path, and it must land in the catch below so the item gets
+    // `youtube_download_attempts + 1` and its error recorded — exactly like
+    // every other failure. Returning early here skipped both, which broke two
+    // things on 2026-07-30:
+    //   1. `yt-archive-watch` treats attempts=0 as "the cron never saw this
+    //      item" (machine off / wrapper broken) and emailed Pat + Sam that the
+    //      archiver had stopped. It hadn't — it was running hourly and failing
+    //      right here, so the alert named the wrong cause.
+    //   2. The candidate query filters on `attempts < 3`, so these items never
+    //      aged out of the pool and were re-downloaded every single hour.
+    if (!downloaded) throw new Error(errs.join(" || ").slice(0, 450));
 
     const fileStat = await stat(tmpPath);
     const key = buildKey(item.id, `${item.youtube_id ?? "video"}.mp4`);

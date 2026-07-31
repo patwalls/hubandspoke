@@ -830,6 +830,18 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   grace window means the cron never even saw the item — machine off, wrapper
   broken, checkout wedged. Items with attempts>0 are per-video failures
   (dead/private/bot-gated), which are expected and not systemic.
+- **This invariant was false until 2026-07-30.** `archiveOne` returned early on
+  the "all player-client strategies failed" path instead of throwing, skipping
+  the catch block that does the increment. So the single most common systemic
+  failure — every strategy timing out — looked identical to "the Mac is off",
+  and the watchdog emailed Pat + Sam that the archiver had *stopped running*
+  while it was in fact running hourly and failing on those exact items. It also
+  meant those items never aged past the `attempts < 3` candidate filter, so each
+  hourly run re-downloaded the same doomed videos. Fixed at
+  `scripts/archive-yt-local.ts:267` (throw, don't return). **When reading a
+  `yt-archive-behind` alert, confirm against
+  `~/Library/Logs/hubandspoke-yt-archive.log` before concluding the cron is
+  down** — attempts=0 is now trustworthy, but the log is authoritative.
 - **Brand scope:** the home cron only archives the brands in its env file
   (`BRANDS` in `~/.config/hubandspoke/yt-archive.env`). The watchdog mirrors
   that list in `DEFAULT_WATCH_BRANDS`, overridable without a deploy via the
@@ -839,6 +851,22 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   also fires a Sentry event (fingerprint `yt-archive-home-cron`) on any exit
   other than 0/2, with the log tail attached. The server-side watch is the
   authoritative catcher — it fires even when the Mac is off.
+- **Host-contention guards (added 2026-07-30).** The home Mac is shared with
+  Pulse's local LLM judge, whose ollama model (`qwen3:30b-a3b`) holds ~19 GB
+  resident on a 32 GB box. When that drove swap to 97% full, every yt-dlp child
+  stalled past its 300s per-strategy timeout and one `heroku config:get` wedged
+  in uninterruptible I/O for 60+ minutes. Because launchd will not start a
+  second instance of a `StartInterval` job while the first is alive, that single
+  hang blocked *every* subsequent hourly tick. Three guards now exist:
+  - **Memory preflight** — bails with **exit 8** (→ Sentry) when swap free
+    < 2 GB *and* system free memory < 15%, logging the top consumer, instead of
+    burning an hour producing misleading download timeouts.
+  - **`timeout 120` on `heroku config:get`** and **`timeout 3000` on the
+    archive run** — no single call can ever again block later ticks.
+  - **`LowPriorityIO` removed from the plist.** Its comment claimed it skipped
+    runs on battery; it does not (that would be `PowerType`). It only
+    deprioritized this job's disk I/O, which made the archiver the first thing
+    on the machine to starve under memory pressure.
 
 ---
 
