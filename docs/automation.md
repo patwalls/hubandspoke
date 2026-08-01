@@ -858,9 +858,30 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   in uninterruptible I/O for 60+ minutes. Because launchd will not start a
   second instance of a `StartInterval` job while the first is alive, that single
   hang blocked *every* subsequent hourly tick. Three guards now exist:
-  - **Memory preflight** — bails with **exit 8** (→ Sentry) when swap free
-    < 2 GB *and* system free memory < 15%, logging the top consumer, instead of
-    burning an hour producing misleading download timeouts.
+  - **Memory preflight with model eviction** — when swap free < 2 GB *and*
+    system free memory < 15%, the wrapper evicts the loaded ollama model, waits
+    for reclamation, and runs. Only exits **8** (→ Sentry) if memory is still
+    exhausted afterwards.
+
+    **Why eviction and not just skipping:** skipping alone was tried first and
+    failed — Slope's judge holds `qwen3:30b-a3b` (~18.8 GB) resident 24/7 on
+    this 32 GB box, so the preflight skipped **24 consecutive hourly ticks** and
+    nothing archived for a full day. Measured over 5 minutes, the model never
+    actually unloads on its own: it enters `Stopping...` and Slope re-requests
+    it before the memory is released, so free memory never leaves 8–9%. There is
+    no idle window to wait for, and a bare `ollama stop` is undone within
+    seconds. The archiver has to take the memory, use it, and give it back.
+
+    **Measured cost:** eviction reclaims ~2 GB of swap in ~32s; a full 5-video
+    batch (incl. a 411 MB video) ran in 233s; the model reloads automatically on
+    Slope's next judge call in **6s cold** — against pulse's 120s
+    `AbortSignal.timeout`. So the price is a ~6s judge latency spike once an
+    hour, only when there is archiving work. Set `YT_ARCHIVE_EVICT_OLLAMA=0` in
+    `~/.config/hubandspoke/yt-archive.env` to disable and revert to skipping.
+
+    Eviction is deliberately narrow: it fires only when the **top memory
+    consumer is `llama-server`**, and only calls `ollama stop <model>`. It never
+    kills arbitrary processes.
   - **`timeout 120` on `heroku config:get`** and **`timeout 3000` on the
     archive run** — no single call can ever again block later ticks.
   - **`LowPriorityIO` removed from the plist.** Its comment claimed it skipped

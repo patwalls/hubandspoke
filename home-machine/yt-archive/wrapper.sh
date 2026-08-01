@@ -162,16 +162,63 @@ fi
 # the host was simply thrashing. `LowPriorityIO` in the plist made us the
 # first process to starve.
 #
-# Fail fast with a distinct exit code so Sentry says "host out of memory"
-# instead of us producing an hour of misleading download timeouts.
-SWAP_FREE_MB=$(sysctl -n vm.swapusage 2>/dev/null | sed -nE 's/.*free = ([0-9]+)\.[0-9]+M.*/\1/p')
-MEM_FREE_PCT=$(memory_pressure 2>/dev/null | sed -nE 's/.*free percentage: ([0-9]+)%.*/\1/p')
-: "${SWAP_FREE_MB:=99999}"
-: "${MEM_FREE_PCT:=100}"
-if [[ "$SWAP_FREE_MB" -lt 2048 && "$MEM_FREE_PCT" -lt 15 ]]; then
-    log "host memory exhausted (swap_free=${SWAP_FREE_MB}MB free_mem=${MEM_FREE_PCT}%) — skipping run"
-    log "top memory consumer: $(ps -axo rss,comm | sort -rn | head -1 | awk '{rss=$1; $1=""; sub(/^ +/,""); printf "%.1fGB %s", rss/1048576, $0}')"
-    exit 8
+# 2026-08-01 follow-up: "skip when starved" was not enough. Slope's judge keeps
+# qwen3:30b-a3b (~18.8 GB) resident 24/7 on this 32 GB box, so the preflight
+# skipped 24 hourly ticks in a row and nothing was archived for a full day.
+# Measured over 5 min: the model never actually unloads — it enters "Stopping..."
+# and Slope re-requests it before the memory is released, so free memory never
+# leaves 8-9%. There is no idle window to wait for, and a bare `ollama stop` is
+# undone within seconds.
+#
+# So: take the memory, use it, give it back. We evict the loaded model, run, and
+# let Slope's next judge call reload it automatically. That costs one model load
+# (~20s — well inside pulse's 120s AbortSignal timeout in src/index.ts) plus a
+# few contended minutes once an hour, instead of never archiving at all.
+#
+# Set YT_ARCHIVE_EVICT_OLLAMA=0 in the env file to disable and go back to
+# skipping (exit 8).
+read_mem() {
+    SWAP_FREE_MB=$(sysctl -n vm.swapusage 2>/dev/null | sed -nE 's/.*free = ([0-9]+)\.[0-9]+M.*/\1/p')
+    MEM_FREE_PCT=$(memory_pressure 2>/dev/null | sed -nE 's/.*free percentage: ([0-9]+)%.*/\1/p')
+    : "${SWAP_FREE_MB:=99999}"
+    : "${MEM_FREE_PCT:=100}"
+}
+mem_is_starved() { [[ "$SWAP_FREE_MB" -lt 2048 && "$MEM_FREE_PCT" -lt 15 ]]; }
+top_consumer() {
+    ps -axo rss,comm | sort -rn | head -1 |
+        awk '{rss=$1; $1=""; sub(/^ +/,""); printf "%.1fGB %s", rss/1048576, $0}'
+}
+
+read_mem
+if mem_is_starved; then
+    log "host memory low (swap_free=${SWAP_FREE_MB}MB free_mem=${MEM_FREE_PCT}%) — top: $(top_consumer)"
+
+    # Only evict an actual ollama model, and only if ollama is the thing eating
+    # the box. Never kill processes we don't understand.
+    if [[ "${YT_ARCHIVE_EVICT_OLLAMA:-1}" == "1" ]] \
+        && command -v ollama >/dev/null 2>&1 \
+        && [[ "$(top_consumer)" == *"llama-server"* ]]; then
+        LOADED_MODEL=$(ollama ps 2>/dev/null | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | awk 'NR==2 {print $1}')
+        if [[ -n "${LOADED_MODEL:-}" ]]; then
+            log "evicting ollama model '$LOADED_MODEL' for this run (it reloads on the next judge call)"
+            timeout 60 ollama stop "$LOADED_MODEL" >/dev/null 2>&1 || true
+            # Reclamation isn't instant, and `ollama stop` returns before the
+            # memory is actually released. Poll rather than guess.
+            for _ in $(seq 1 20); do
+                sleep 3
+                read_mem
+                mem_is_starved || break
+            done
+            log "after eviction: swap_free=${SWAP_FREE_MB}MB free_mem=${MEM_FREE_PCT}%"
+        fi
+    fi
+
+    read_mem
+    if mem_is_starved; then
+        log "host memory still exhausted (swap_free=${SWAP_FREE_MB}MB free_mem=${MEM_FREE_PCT}%) — skipping run"
+        log "top memory consumer: $(top_consumer)"
+        exit 8
+    fi
 fi
 
 # --- DATABASE_URL --------------------------------------------------------
