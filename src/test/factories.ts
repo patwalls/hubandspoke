@@ -331,6 +331,7 @@ export interface CreateTestProductionItemOptions {
   scheduledAt?: Date | null;
   expectedPublishAt?: Date | null;
   scheduleNeedsAttentionAt?: Date | null;
+  scheduledNoDate?: boolean | null;
   views?: number;
   descriptProjectId?: string | null;
   descriptProjectUrl?: string | null;
@@ -391,6 +392,7 @@ export async function createTestProductionItem(
       scheduledAt: opts.scheduledAt ?? null,
       expectedPublishAt: opts.expectedPublishAt ?? null,
       scheduleNeedsAttentionAt: opts.scheduleNeedsAttentionAt ?? null,
+      scheduledNoDate: opts.scheduledNoDate ?? false,
       editorUserId: userId,
       views: opts.views ?? 0,
       descriptProjectId: opts.descriptProjectId ?? null,

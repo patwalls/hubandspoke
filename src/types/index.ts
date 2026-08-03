@@ -17,6 +17,9 @@ export interface ProductionItem {
   /** Set (ISO string) when the reconciler gave up auto-matching a Scheduled
    *  item past its window — surfaces a "needs attention" badge. */
   scheduleNeedsAttentionAt?: string | null;
+  /** True when the item was scheduled without a known publish date. The
+   *  hourly schedule-nodate-sweep watches it for up to 14 days. */
+  scheduledNoDate?: boolean | null;
   status: string | null;
   platform: string[] | null;
   /** Canonical post_type key (youtube_long, instagram_reel, x, …). Populated

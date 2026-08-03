@@ -2437,6 +2437,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               >
                 ⚠ Needs attention
               </span>
+            ) : item.status === "Scheduled" && item.scheduledNoDate && !item.scheduleNeedsAttentionAt ? (
+              <span
+                title="Scheduled without a publish date. We check hourly for up to 14 days and will auto-detect when this goes live."
+                className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700"
+              >
+                No date yet
+              </span>
             ) : null}
 
             {/* Author handle moved into the state row below — it's
@@ -4534,6 +4541,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         initialLink={item.publishedLink ?? null}
         initialPublishedDate={item.publishedDate ?? null}
         initialExpectedPublishAt={item.expectedPublishAt ?? null}
+        initialNoDate={item.scheduledNoDate ?? false}
         currentStatus={item.status ?? null}
         onSuccess={() => {
           void load();

@@ -9,7 +9,7 @@
 //     and stop matching it (some content must never sit at Scheduled past 24h)
 
 import type OpenAI from "openai";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
 import {
@@ -27,6 +27,10 @@ export const SUGGEST_SCORE = 55;
 // Modeled on the per-platform age-gate maps in repost-candidates.ts.
 const STALE_WINDOW_HOURS = { fast: 24, default: 48 } as const;
 const FAST_POST_TYPES = new Set(["x", "tiktok", "threads"]);
+
+// No-date items have no expected go-live; 14 days gives ample runway before
+// flagging them as needing attention.
+const NODATE_STALE_WINDOW_HOURS = 14 * 24;
 
 export function staleWindowHours(postType: string | null): number {
   if (!postType) return STALE_WINDOW_HOURS.default;
@@ -87,6 +91,11 @@ export async function runScheduleReconcile(opts?: {
         isNull(productionItems.scheduleNeedsAttentionAt),
         isNotNull(productionItems.accountId),
         isNull(productionItems.deletedAt),
+        // No-date items are handled by the separate hourly schedule-nodate-sweep.
+        or(
+          isNull(productionItems.scheduledNoDate),
+          eq(productionItems.scheduledNoDate, false),
+        ),
         opts?.onlyItemIds && opts.onlyItemIds.length > 0
           ? inArray(productionItems.id, opts.onlyItemIds)
           : undefined,
@@ -153,6 +162,137 @@ export async function runScheduleReconcile(opts?: {
           );
       } else {
         // Merge failed (e.g. cross-account guard) — leave Scheduled.
+        summary.skipped++;
+      }
+    } else if (score >= SUGGEST_SCORE) {
+      await db
+        .insert(scheduledMatchSuggestions)
+        .values({
+          scheduledItemId: row.id,
+          candidateItemId: candidateId,
+          score,
+          reason,
+          status: "pending",
+        })
+        .onConflictDoUpdate({
+          target: [
+            scheduledMatchSuggestions.scheduledItemId,
+            scheduledMatchSuggestions.candidateItemId,
+          ],
+          set: { score, reason, status: "pending", updatedAt: now },
+        });
+      summary.suggested++;
+    } else {
+      summary.skipped++;
+    }
+  }
+
+  return summary;
+}
+
+/**
+ * Run one reconcile pass over pending "no publish date yet" Scheduled items.
+ * Identical logic to runScheduleReconcile() but uses a 14-day give-up window
+ * and only processes items where scheduledNoDate = true. Called by the hourly
+ * schedule-nodate-sweep cron task.
+ */
+export async function runScheduleNodateReconcile(opts?: {
+  now?: Date;
+  client?: OpenAI;
+  onlyItemIds?: string[];
+}): Promise<ReconcileSummary> {
+  const now = opts?.now ?? new Date();
+  const summary: ReconcileSummary = {
+    considered: 0,
+    autoMerged: 0,
+    suggested: 0,
+    gaveUp: 0,
+    llmErrors: 0,
+    skipped: 0,
+  };
+
+  const items = await db
+    .select({
+      id: productionItems.id,
+      accountId: productionItems.accountId,
+      postType: productionItems.postType,
+      title: productionItems.title,
+      hook: productionItems.hook,
+      contentBody: productionItems.contentBody,
+      scheduledAt: productionItems.scheduledAt,
+      expectedPublishAt: productionItems.expectedPublishAt,
+    })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.status, "Scheduled"),
+        eq(productionItems.scheduledNoDate, true),
+        isNotNull(productionItems.scheduledAt),
+        isNull(productionItems.scheduleNeedsAttentionAt),
+        isNotNull(productionItems.accountId),
+        isNull(productionItems.deletedAt),
+        opts?.onlyItemIds && opts.onlyItemIds.length > 0
+          ? inArray(productionItems.id, opts.onlyItemIds)
+          : undefined,
+      ),
+    );
+
+  for (const row of items) {
+    summary.considered++;
+    const scheduledAt = row.scheduledAt!;
+    const accountId = row.accountId!;
+
+    const ageHours = (now.getTime() - scheduledAt.getTime()) / (1000 * 60 * 60);
+    if (ageHours > NODATE_STALE_WINDOW_HOURS) {
+      await db
+        .update(productionItems)
+        .set({ scheduleNeedsAttentionAt: now, updatedAt: now })
+        .where(eq(productionItems.id, row.id));
+      summary.gaveUp++;
+      continue;
+    }
+
+    const item: ScheduledItemForMatch = {
+      id: row.id,
+      accountId,
+      postType: row.postType,
+      title: row.title,
+      hook: row.hook,
+      contentBody: row.contentBody,
+      scheduledAt,
+      expectedPublishAt: row.expectedPublishAt,
+    };
+
+    const result = await findBestScheduledMatch(item, { client: opts?.client });
+    if (!result.ok) {
+      summary.llmErrors++;
+      continue;
+    }
+    if (!result.value) {
+      summary.skipped++;
+      continue;
+    }
+
+    const { candidateId, score, reason } = result.value;
+
+    if (score >= AUTO_MATCH_SCORE) {
+      const merged = await reconcileScheduledIntoPublished(
+        row.id,
+        candidateId,
+        null,
+      );
+      if (merged.success) {
+        summary.autoMerged++;
+        await db
+          .update(scheduledMatchSuggestions)
+          .set({ status: "superseded", resolvedAt: now, updatedAt: now })
+          .where(
+            and(
+              eq(scheduledMatchSuggestions.scheduledItemId, row.id),
+              eq(scheduledMatchSuggestions.status, "pending"),
+            ),
+          );
+      } else {
         summary.skipped++;
       }
     } else if (score >= SUGGEST_SCORE) {

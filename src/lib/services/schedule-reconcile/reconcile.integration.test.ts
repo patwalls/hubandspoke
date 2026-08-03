@@ -11,7 +11,7 @@ import {
   findBestScheduledMatch,
   type ScheduledItemForMatch,
 } from "./matcher";
-import { runScheduleReconcile } from "./reconcile";
+import { runScheduleReconcile, runScheduleNodateReconcile } from "./reconcile";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -362,5 +362,145 @@ describe("runScheduleReconcile tier policy", () => {
       .from(productionItems)
       .where(eq(productionItems.id, slow.id));
     expect(slowRow.na).toBeNull();
+  });
+});
+
+describe("runScheduleReconcile — no-date item exclusion", () => {
+  it("skips items with scheduledNoDate=true (leaves them for the nodate sweep)", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+
+    // A no-date scheduled item — should be invisible to the date sweep.
+    const noDateItem = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "youtube_long",
+      scheduledAt: now,
+      scheduledNoDate: true,
+      publishedAt: null,
+      publishedDate: null,
+    });
+    // A candidate that would match if the sweep ran.
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "youtube_long",
+      publishedAt: now,
+    });
+
+    const summary = await runScheduleReconcile({
+      client: stubClient(1, 95),
+      onlyItemIds: [noDateItem.id],
+    });
+    // The date sweep must not have touched the no-date item.
+    expect(summary.considered).toBe(0);
+    expect(summary.autoMerged).toBe(0);
+
+    const [row] = await db
+      .select({ status: productionItems.status })
+      .from(productionItems)
+      .where(eq(productionItems.id, noDateItem.id));
+    expect(row.status).toBe("Scheduled");
+  });
+});
+
+describe("runScheduleNodateReconcile", () => {
+  it("auto-merges a no-date item when a confident match is found", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+
+    const sched = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "youtube_long",
+      scheduledAt: now,
+      scheduledNoDate: true,
+      publishedAt: null,
+      publishedDate: null,
+      title: "my youtube video",
+    });
+    const synced = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "youtube_long",
+      publishedAt: now,
+      publishedLink: "https://youtu.be/abc123",
+      platformContentId: `vitest-nodate-pcid-${now.getTime()}`,
+    });
+
+    const summary = await runScheduleNodateReconcile({
+      client: stubClient(1, 90),
+      onlyItemIds: [sched.id],
+    });
+    expect(summary.autoMerged).toBe(1);
+
+    const [keeper] = await db
+      .select({ status: productionItems.status, link: productionItems.publishedLink })
+      .from(productionItems)
+      .where(eq(productionItems.id, sched.id));
+    expect(keeper.status).toBe("Published");
+    expect(keeper.link).toBe("https://youtu.be/abc123");
+
+    const [absorbed] = await db
+      .select({ deletedAt: productionItems.deletedAt })
+      .from(productionItems)
+      .where(eq(productionItems.id, synced.id));
+    expect(absorbed.deletedAt).not.toBeNull();
+  });
+
+  it("does not give up a no-date item after 48h (still within 14-day window)", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    const at50h = new Date(now.getTime() - 50 * HOUR);
+
+    const sched = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "youtube_long",
+      scheduledAt: at50h,
+      scheduledNoDate: true,
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const summary = await runScheduleNodateReconcile({
+      client: stubClient(0, 0),
+      onlyItemIds: [sched.id],
+    });
+    expect(summary.gaveUp).toBe(0);
+
+    const [row] = await db
+      .select({ na: productionItems.scheduleNeedsAttentionAt })
+      .from(productionItems)
+      .where(eq(productionItems.id, sched.id));
+    expect(row.na).toBeNull();
+  });
+
+  it("gives up a no-date item after 14 days and flags needs-attention", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    const at15days = new Date(now.getTime() - 15 * 24 * HOUR);
+
+    const sched = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "youtube_long",
+      scheduledAt: at15days,
+      scheduledNoDate: true,
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const summary = await runScheduleNodateReconcile({
+      client: stubClient(0, 0),
+      onlyItemIds: [sched.id],
+    });
+    expect(summary.gaveUp).toBe(1);
+
+    const [row] = await db
+      .select({ na: productionItems.scheduleNeedsAttentionAt })
+      .from(productionItems)
+      .where(eq(productionItems.id, sched.id));
+    expect(row.na).not.toBeNull();
   });
 });

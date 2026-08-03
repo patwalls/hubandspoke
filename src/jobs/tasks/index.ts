@@ -63,6 +63,7 @@ import {
   accountRefreshSweepTask,
   accountContentSyncSweepTask,
   scheduleReconcileSweepTask,
+  scheduleNodateSweepTask,
   dailyScorecardEmailTask,
   scCreditsWatchTask,
   descriptCreditsWatchTask,
@@ -164,6 +165,7 @@ export interface TaskPayloads {
   "account-refresh-sweep": Record<string, never>;
   "account-content-sync-sweep": Record<string, never>;
   "schedule-reconcile-sweep": Record<string, never>;
+  "schedule-nodate-sweep": Record<string, never>;
   "threshold-monitor-sweep": Record<string, never>;
   "daily-scorecard-email": Record<string, never>;
   "sc-credits-watch": Record<string, never>;
@@ -221,6 +223,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "account-refresh-sweep": accountRefreshSweepTask,
   "account-content-sync-sweep": accountContentSyncSweepTask,
   "schedule-reconcile-sweep": scheduleReconcileSweepTask,
+  "schedule-nodate-sweep": scheduleNodateSweepTask,
   "threshold-monitor-sweep": thresholdMonitorSweepTask,
   "daily-scorecard-email": dailyScorecardEmailTask,
   "sc-credits-watch": scCreditsWatchTask,

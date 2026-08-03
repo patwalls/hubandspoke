@@ -26,7 +26,8 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   *:50  hook-fallback-sweep       → fan-out → hook-fallback (per item, no LLM)
   */20  youtube-download-sweep    → fan-out → youtube-download → transcribe-whisper
   */30  account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
-  */10  schedule-reconcile-sweep  → targeted account-content-sync (accounts w/ pending Scheduled items) + runScheduleReconcile() → auto-merge / suggest / needs-attention
+  */10  schedule-reconcile-sweep  → targeted account-content-sync (accounts w/ pending Scheduled items) + runScheduleReconcile() → auto-merge / suggest / needs-attention (date-known items only)
+  :50   schedule-nodate-sweep     → same as above but for scheduledNoDate=true items; 60-min cadence, 14-day give-up window
   */30  klaviyo-sync-sweep        → fan-out → klaviyo-sync-account (per active newsletter account with Klaviyo list id)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
   (per-post) capture-velocity-snapshot → scheduled at publish+{15m,30m,1h,2h,4h,8h,24h,48h} per item; writes one view_snapshots row each
@@ -278,6 +279,31 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   LLM error on a tick = treat as no-match, retry. System merges pass
   `userId=null` and skip the `production_items_merges` audit row (trail is in
   `content_events`).
+- **Scope:** only processes items where `scheduled_no_date = false` (or null).
+  Items with `scheduled_no_date = true` are handled exclusively by
+  `schedule-nodate-sweep` below.
+
+### `schedule-nodate-sweep` — reconcile "no publish date yet" Scheduled items (every 60 min)
+- **Trigger:** cron `50 * * * *`
+- **Files:** `src/jobs/tasks/scheduled.ts` (`scheduleNodateSweepTask`),
+  `src/lib/services/schedule-reconcile/reconcile.ts` (`runScheduleNodateReconcile`)
+- **Why:** some brands upload YouTube videos as private/scheduled without
+  knowing the publish date. Setting `scheduledNoDate=true` via the Schedule
+  dialog (new "No publish date yet" checkbox) marks the item for this sweep
+  instead of the 10-min sweep. The YouTube video is invisible to the sync API
+  until it goes public, so checking hourly is sufficient — there's no date to
+  target — and keeps Social Curator API usage low over the longer window.
+- **Two jobs per tick:** identical structure to `schedule-reconcile-sweep`
+  (targeted `account-content-sync` enqueue + `runScheduleNodateReconcile()`
+  match pass), but filtered to `scheduled_no_date = true` items only.
+- **Give-up window:** **14 days** from `scheduled_at` (vs 24/48h for date-known
+  items). Stamps `schedule_needs_attention_at` and surfaces the same
+  "Needs attention" badge when exceeded.
+- **Tier policy:** identical to `schedule-reconcile-sweep` (≥85 auto-merge,
+  55–84 suggestion, <55 retry).
+- **Detection latency:** ~60 min (acceptable — operator doesn't know the date).
+- **UI:** items with `scheduled_no_date=true` show a blue "No date yet" badge
+  alongside the status chip in the content detail view.
 - **Surface:** `/[brand]/scheduled` (page) + `GET /api/scheduled-matches` +
   `POST /api/scheduled-matches/[id]` (`confirm` → reconcile, `reject` → exclude).
 

@@ -50,6 +50,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     link?: unknown;
     publishedDate?: unknown;
     expectedPublishAt?: unknown;
+    noDate?: unknown;
   };
 
   const mode = body.mode;
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       publishedDate: productionItems.publishedDate,
       publishedAt: productionItems.publishedAt,
       expectedPublishAt: productionItems.expectedPublishAt,
+      scheduledNoDate: productionItems.scheduledNoDate,
     })
     .from(productionItems)
     .where(eq(productionItems.id, id))
@@ -157,27 +159,35 @@ export async function POST(request: NextRequest, context: RouteContext) {
   } else {
     nextStatus = "Scheduled";
 
+    const noDate = body.noDate === true;
+
     // Optional operator-entered "expected go-live" time. Accept an ISO
     // string; null/empty clears it. Drives the schedule-reconcile matcher's
-    // publish-time proximity signal. Compare on epoch ms so re-saving the
-    // same time doesn't emit a spurious change.
+    // publish-time proximity signal. Not applicable (and ignored) when
+    // noDate=true. Compare on epoch ms so re-saving the same time doesn't
+    // emit a spurious change.
     let expectedNext: Date | null | undefined; // undefined = leave untouched
-    const expRaw = body.expectedPublishAt;
-    if (typeof expRaw === "string") {
-      const trimmed = expRaw.trim();
-      if (!trimmed) {
-        expectedNext = null;
-      } else {
-        const d = new Date(trimmed);
-        if (Number.isNaN(d.getTime())) {
-          return NextResponse.json(
-            { error: `"${trimmed}" is not a valid date/time.` },
-            { status: 400 },
-          );
+    if (!noDate) {
+      const expRaw = body.expectedPublishAt;
+      if (typeof expRaw === "string") {
+        const trimmed = expRaw.trim();
+        if (!trimmed) {
+          expectedNext = null;
+        } else {
+          const d = new Date(trimmed);
+          if (Number.isNaN(d.getTime())) {
+            return NextResponse.json(
+              { error: `"${trimmed}" is not a valid date/time.` },
+              { status: 400 },
+            );
+          }
+          expectedNext = d;
         }
-        expectedNext = d;
+      } else if (expRaw === null) {
+        expectedNext = null;
       }
-    } else if (expRaw === null) {
+    } else {
+      // Switching to no-date: clear any previously-set expected time.
       expectedNext = null;
     }
 
@@ -186,9 +196,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       (existing.expectedPublishAt?.getTime() ?? null) !==
         (expectedNext?.getTime() ?? null);
 
+    const noDateChanged = noDate !== (existing.scheduledNoDate ?? false);
     const statusChanging = existing.status !== "Scheduled";
 
-    if (!statusChanging && !expectedChanged) {
+    if (!statusChanging && !expectedChanged && !noDateChanged) {
       // No-op — caller didn't change anything. Return the row as-is so
       // the UI's optimistic refetch doesn't need to special-case 200-but-
       // nothing-changed.
@@ -202,11 +213,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
       // any prior needs-attention flag: re-scheduling restarts the clock.
       updates.scheduledAt = new Date();
       updates.scheduleNeedsAttentionAt = null;
+      updates.scheduledNoDate = noDate;
       changes.push({
         target: { kind: "production_item_field", field: "status" },
         from: existing.status,
         to: "Scheduled",
       });
+    } else if (noDateChanged) {
+      // Re-scheduling with a different date mode — restart the clock so the
+      // new sweep picks it up cleanly.
+      updates.scheduledAt = new Date();
+      updates.scheduleNeedsAttentionAt = null;
+      updates.scheduledNoDate = noDate;
     }
 
     if (expectedChanged) {

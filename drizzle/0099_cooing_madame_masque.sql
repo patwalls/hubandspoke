@@ -1,0 +1,1 @@
+ALTER TABLE "production_items" ADD COLUMN "scheduled_no_date" boolean DEFAULT false;

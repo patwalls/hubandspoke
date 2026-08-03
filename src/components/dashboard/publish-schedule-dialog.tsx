@@ -42,6 +42,8 @@ interface Props {
   /** If the item is already scheduled, pass its expected go-live time (ISO
    *  string) so the Schedule tab opens pre-filled. */
   initialExpectedPublishAt?: string | null;
+  /** Whether the item was scheduled without a publish date (no-date mode). */
+  initialNoDate?: boolean;
   /** Current status string ("Ready To Publish" / "Published" / etc.) —
    *  drives default tab + button label. */
   currentStatus?: string | null;
@@ -72,6 +74,7 @@ export function PublishScheduleDialog({
   initialLink,
   initialPublishedDate,
   initialExpectedPublishAt,
+  initialNoDate,
   currentStatus,
   onSuccess,
 }: Props) {
@@ -88,6 +91,7 @@ export function PublishScheduleDialog({
   const [expectedPublishAt, setExpectedPublishAt] = useState<string>(
     isoToLocalInput(initialExpectedPublishAt),
   );
+  const [noDate, setNoDate] = useState<boolean>(initialNoDate ?? false);
   const [submitting, setSubmitting] = useState(false);
 
   // Reset form state every time the dialog opens. Without this an edit
@@ -98,6 +102,7 @@ export function PublishScheduleDialog({
     setLink(initialLink ?? "");
     setPublishedDate(initialPublishedDate ?? todayIsoDate());
     setExpectedPublishAt(isoToLocalInput(initialExpectedPublishAt));
+    setNoDate(initialNoDate ?? false);
     setSubmitting(false);
   }, [
     open,
@@ -105,6 +110,7 @@ export function PublishScheduleDialog({
     initialLink,
     initialPublishedDate,
     initialExpectedPublishAt,
+    initialNoDate,
   ]);
 
   const linkValid = useMemo(() => {
@@ -130,11 +136,14 @@ export function PublishScheduleDialog({
         payload.link = link.trim();
         if (publishedDate) payload.publishedDate = publishedDate;
       } else {
-        // Send the expected go-live time as a full UTC ISO string (the
-        // datetime-local value is in the viewer's local zone). Empty string
-        // explicitly clears any previously-set time.
-        const t = expectedPublishAt.trim();
-        payload.expectedPublishAt = t ? new Date(t).toISOString() : "";
+        payload.noDate = noDate;
+        if (!noDate) {
+          // Send the expected go-live time as a full UTC ISO string (the
+          // datetime-local value is in the viewer's local zone). Empty string
+          // explicitly clears any previously-set time.
+          const t = expectedPublishAt.trim();
+          payload.expectedPublishAt = t ? new Date(t).toISOString() : "";
+        }
       }
       const res = await fetch(
         `/api/production-items/${itemId}/publish`,
@@ -154,7 +163,9 @@ export function PublishScheduleDialog({
           ? isAlreadyPublished
             ? "Publish info updated"
             : "Published"
-          : "Scheduled",
+          : noDate
+            ? "Scheduled (no date yet)"
+            : "Scheduled",
       );
       onSuccess?.();
       onOpenChange(false);
@@ -251,31 +262,59 @@ export function PublishScheduleDialog({
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="expected-publish-at">
-                Expected go-live{" "}
-                <span className="font-normal text-muted-foreground">
-                  (optional)
-                </span>
-              </Label>
-              <Input
-                id="expected-publish-at"
-                type="datetime-local"
-                value={expectedPublishAt}
-                onChange={(e) => setExpectedPublishAt(e.target.value)}
+            <div className="flex items-center gap-2">
+              <input
+                id="no-date"
+                type="checkbox"
+                className="h-4 w-4 rounded border-border accent-foreground"
+                checked={noDate}
+                onChange={(e) => {
+                  setNoDate(e.target.checked);
+                  if (e.target.checked) setExpectedPublishAt("");
+                }}
               />
-              <p className="text-[11px] text-muted-foreground">
-                When you expect this to actually post (your native scheduler /
-                post-scheduler time). We auto-detect the live post within ~10
-                min of go-live and tie it back to this item — a closer time
-                makes the match more accurate. Leave blank if unsure.
-              </p>
+              <Label htmlFor="no-date" className="cursor-pointer font-normal">
+                No publish date yet
+              </Label>
             </div>
+            {!noDate && (
+              <div className="space-y-1.5">
+                <Label htmlFor="expected-publish-at">
+                  Expected go-live{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (optional)
+                  </span>
+                </Label>
+                <Input
+                  id="expected-publish-at"
+                  type="datetime-local"
+                  value={expectedPublishAt}
+                  onChange={(e) => setExpectedPublishAt(e.target.value)}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  When you expect this to actually post (your native scheduler /
+                  post-scheduler time). We auto-detect the live post within ~10
+                  min of go-live and tie it back to this item — a closer time
+                  makes the match more accurate. Leave blank if unsure.
+                </p>
+              </div>
+            )}
             <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-              Saving flags this post as{" "}
-              <span className="font-medium text-foreground">Scheduled</span> and
-              stops it appearing in Ready-To-Publish queues. Once it goes live,
-              it auto-flips to Published with the real link and metrics.
+              {noDate ? (
+                <>
+                  Saving flags this post as{" "}
+                  <span className="font-medium text-foreground">Scheduled (No Date Yet)</span>.
+                  We check hourly for up to 14 days and auto-flip it to Published
+                  once the video goes live.
+                </>
+              ) : (
+                <>
+                  Saving flags this post as{" "}
+                  <span className="font-medium text-foreground">Scheduled</span> and
+                  stops it appearing in Ready-To-Publish queues. Once it goes live,
+                  it auto-flips to Published with the real link and metrics.
+                </>
+              )}
             </div>
           </div>
         )}

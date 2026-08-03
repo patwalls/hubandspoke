@@ -434,6 +434,11 @@ export const productionItems = pgTable(
     scheduleNeedsAttentionAt: timestamp("schedule_needs_attention_at", {
       withTimezone: true,
     }),
+    // Set when an item is scheduled without a known publish date. The normal
+    // 24/48h give-up window does not apply; a separate hourly sweep watches
+    // these for up to 14 days. The existing schedule-reconcile-sweep skips
+    // these items entirely.
+    scheduledNoDate: boolean("scheduled_no_date").default(false),
   },
   (table) => [
     index("idx_production_items_published_date").on(table.publishedDate),

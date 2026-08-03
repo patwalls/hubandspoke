@@ -24,7 +24,7 @@ import { sendDailyScorecardEmail } from "@/lib/email";
 import { db } from "@/lib/db";
 import { accounts, productionItems, users } from "@/lib/db/schema";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
-import { runScheduleReconcile } from "@/lib/services/schedule-reconcile/reconcile";
+import { runScheduleReconcile, runScheduleNodateReconcile } from "@/lib/services/schedule-reconcile/reconcile";
 import type { EnrichItemPayload } from "./enrich-item";
 import type { ExtractHookPayload } from "./extract-hook";
 import type { HookFallbackPayload } from "./hook-fallback";
@@ -282,6 +282,53 @@ export const scheduleReconcileSweepTask: Task = async (_payload, helpers) => {
   const summary = await runScheduleReconcile();
   helpers.logger.info(
     `schedule-reconcile-sweep synced=${enqueued} considered=${summary.considered} ` +
+      `merged=${summary.autoMerged} suggested=${summary.suggested} ` +
+      `gaveUp=${summary.gaveUp} llmErrors=${summary.llmErrors} ` +
+      `skipped=${summary.skipped} (${Date.now() - start}ms)`,
+  );
+};
+
+/**
+ * No-date schedule reconcile sweep (every 60 min). Same two-phase structure as
+ * scheduleReconcileSweepTask, but restricted to items marked scheduledNoDate=true.
+ * These items have no known publish date so a 60-min detection window is
+ * acceptable, and checking hourly keeps Social Curator API usage low over the
+ * 14-day eligibility window.
+ */
+export const scheduleNodateSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("schedule-nodate-sweep start");
+
+  const accountRows = await db
+    .selectDistinct({ accountId: productionItems.accountId })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.status, "Scheduled"),
+        eq(productionItems.scheduledNoDate, true),
+        isNotNull(productionItems.accountId),
+        isNull(productionItems.scheduleNeedsAttentionAt),
+        isNull(productionItems.deletedAt),
+      ),
+    );
+
+  let enqueued = 0;
+  for (const row of accountRows) {
+    if (!row.accountId) continue;
+    const payload: AccountContentSyncPayload = {
+      accountId: row.accountId,
+      mode: "latest",
+    };
+    await helpers.addJob("account-content-sync", payload as never, {
+      jobKey: `account-content-sync-${row.accountId}-latest`,
+      jobKeyMode: "unsafe_dedupe",
+    });
+    enqueued++;
+  }
+
+  const summary = await runScheduleNodateReconcile();
+  helpers.logger.info(
+    `schedule-nodate-sweep synced=${enqueued} considered=${summary.considered} ` +
       `merged=${summary.autoMerged} suggested=${summary.suggested} ` +
       `gaveUp=${summary.gaveUp} llmErrors=${summary.llmErrors} ` +
       `skipped=${summary.skipped} (${Date.now() - start}ms)`,
