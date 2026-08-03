@@ -582,7 +582,8 @@ export async function getContentReport(
     .from(productionItems)
     .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
     .leftJoin(brands, eq(brands.id, accounts.brandId))
-    .where(and(...conditions));
+    .where(and(...conditions))
+    .limit(10000);
   const items = rows.map((r) => r.item);
   const accountByItemId = new Map(
     rows
