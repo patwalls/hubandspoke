@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, Calendar } from "lucide-react";
+import { AlertTriangle, ArrowRight, Calendar, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { postTypeLabel } from "@/lib/badge-colors";
 import type {
   ScheduledReviewData,
   ScheduledMatchSuggestionView,
   NeedsAttentionItemView,
+  WatchingNoDateItemView,
 } from "@/lib/services/schedule-reconcile/review";
 
 function fmt(iso: string | null): string {
@@ -210,7 +211,7 @@ export function ScheduledReview({
     void refetch();
   }
 
-  const { suggestions, needsAttention } = data;
+  const { suggestions, needsAttention, watching } = data;
 
   return (
     <div className="space-y-8">
@@ -240,6 +241,38 @@ export function ScheduledReview({
           </div>
         )}
       </section>
+
+      {watching.length > 0 && (
+        <section>
+          <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-foreground">
+            <Eye className="size-4 text-blue-500" />
+            Watching for publish
+          </h2>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Scheduled without a publish date. Checked hourly for up to 14 days — will auto-tie when the video goes live.
+          </p>
+          <div className="space-y-2">
+            {watching.map((n: WatchingNoDateItemView) => (
+              <Link
+                key={n.id}
+                href={`/${brand}/content/${n.id}`}
+                className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50/50 px-3 py-2 transition-colors hover:border-blue-300 dark:border-blue-900 dark:bg-blue-950/20"
+              >
+                <Eye className="size-4 shrink-0 text-blue-400" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-foreground">
+                    {n.title || "(untitled)"}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {postTypeLabel(n.postType)} · watching since {fmt(n.scheduledAt)}
+                  </div>
+                </div>
+                <span className="text-xs text-muted-foreground">View →</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-foreground">

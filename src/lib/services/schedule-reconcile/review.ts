@@ -6,7 +6,7 @@
 //   - needsAttention: Scheduled items the matcher gave up on (aged past their
 //     per-post-type window) — an operator should publish them manually.
 
-import { aliasedTable, and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { aliasedTable, and, desc, eq, isNotNull, isNull, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
 
@@ -42,9 +42,17 @@ export interface NeedsAttentionItemView {
   expectedPublishAt: string | null;
 }
 
+export interface WatchingNoDateItemView {
+  id: string;
+  title: string | null;
+  postType: string | null;
+  scheduledAt: string | null;
+}
+
 export interface ScheduledReviewData {
   suggestions: ScheduledMatchSuggestionView[];
   needsAttention: NeedsAttentionItemView[];
+  watching: WatchingNoDateItemView[];
 }
 
 export async function getScheduledReviewData(
@@ -109,6 +117,26 @@ export async function getScheduledReviewData(
     )
     .orderBy(desc(productionItems.scheduleNeedsAttentionAt));
 
+  // No-date items currently being watched by the hourly sweep (not yet timed out).
+  const watchingRows = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      postType: productionItems.postType,
+      scheduledAt: productionItems.scheduledAt,
+    })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.brand, brand),
+        eq(productionItems.status, "Scheduled"),
+        eq(productionItems.scheduledNoDate, true),
+        isNull(productionItems.scheduleNeedsAttentionAt),
+        isNull(productionItems.deletedAt),
+      ),
+    )
+    .orderBy(asc(productionItems.scheduledAt));
+
   return {
     suggestions: suggestionRows.map((r) => ({
       id: r.id,
@@ -139,6 +167,12 @@ export async function getScheduledReviewData(
       postType: r.postType,
       scheduledAt: r.scheduledAt?.toISOString() ?? null,
       expectedPublishAt: r.expectedPublishAt?.toISOString() ?? null,
+    })),
+    watching: watchingRows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      postType: r.postType,
+      scheduledAt: r.scheduledAt?.toISOString() ?? null,
     })),
   };
 }
