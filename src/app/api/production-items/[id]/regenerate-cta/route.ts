@@ -32,13 +32,17 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   if (guard.response) return guard.response;
   const actorUserId = (guard.session.user.id as string | undefined) ?? null;
 
-  const { id } = await context.params;
-
   try {
-    const result = await regenerateCtaForItem({
-      productionItemId: id,
-      actorUserId,
-    });
+    const { id } = await context.params;
+    const result = await Promise.race([
+      regenerateCtaForItem({ productionItemId: id, actorUserId }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("CTA regeneration timed out — please try again.")),
+          25_000,
+        ),
+      ),
+    ]);
     if (result.status === "skipped") {
       const userActionable =
         result.reason === "no_cta_field" ||

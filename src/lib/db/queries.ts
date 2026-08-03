@@ -872,11 +872,15 @@ export async function getContentReport(
 }
 
 export async function getProductionPipeline(
-  brand: string
+  brand: string,
+  options?: { excludeIdea?: boolean }
 ): Promise<ProductionItem[]> {
   const editors = aliasedTable(users, "editor_user");
 
-  const inFlightStatuses = await resolveInFlightStatuses(brand);
+  let inFlightStatuses = await resolveInFlightStatuses(brand);
+  if (options?.excludeIdea) {
+    inFlightStatuses = inFlightStatuses.filter((s) => s !== "Idea");
+  }
 
   const rows = await db
     .select({

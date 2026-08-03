@@ -53,6 +53,7 @@ function config() {
 async function call<T>(path: string): Promise<T> {
   const { url, key } = config();
   const res = await fetch(`${url}${path}`, {
+    signal: AbortSignal.timeout(10_000),
     headers: {
       Authorization: `Bearer ${key}`,
       Accept: "application/json",

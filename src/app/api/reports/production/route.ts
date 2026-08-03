@@ -8,9 +8,11 @@ import {
 export async function GET(request: NextRequest) {
   const brand = request.nextUrl.searchParams.get("brand") || "starter-story";
 
+  const excludeIdea = request.nextUrl.searchParams.get("excludeIdea") === "true";
+
   try {
     const [items, ctx] = await Promise.all([
-      getProductionPipeline(brand),
+      getProductionPipeline(brand, { excludeIdea }),
       buildViewPredictorContext(brand),
     ]);
     const withPredictions = items.map((item) => {

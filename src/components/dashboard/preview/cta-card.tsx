@@ -296,7 +296,7 @@ function RegenerateCtaButton({
       );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(json?.error || "Couldn't regenerate CTA");
+        toast.error(json?.error || "Something went wrong — try again.");
         return;
       }
       if (json?.status === "skipped") {
@@ -306,7 +306,7 @@ function RegenerateCtaButton({
       toast.success("CTA regenerated");
       onRegenerated?.();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't regenerate CTA");
+      toast.error(err instanceof Error ? err.message : "Something went wrong — try again.");
     } finally {
       setBusy(false);
     }

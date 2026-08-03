@@ -162,7 +162,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/reports/production?brand=${encodeURIComponent(brand)}`
+        `/api/reports/production?brand=${encodeURIComponent(brand)}&excludeIdea=true`
       );
       if (!res.ok) {
         console.error(`Production API returned HTTP ${res.status}`);
