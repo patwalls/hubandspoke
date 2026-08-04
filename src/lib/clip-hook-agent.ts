@@ -7,7 +7,7 @@ import {
   type TranscriptWord,
 } from "./clip-anchor-utils";
 
-// gpt-4.1-mini. Splice v10 hook writer (2026-05-22). Reads ONE pre-detected
+// gpt-4.1. Splice v10 hook writer (2026-05-22). Reads ONE pre-detected
 // section and ONE format's skill section. Decides if the format applies
 // (auto-eligibility), and if so writes a format-styled hook + extras for
 // that section. Returns `eligible: false` when the section doesn't fit
@@ -15,9 +15,9 @@ import {
 // Stack format) — no clip_idea row gets inserted in that case.
 //
 // One call per (section, format) pair. With ~12 sections × 3 formats the
-// pipeline is ~36 gpt-4.1-mini calls per pillar (cheap), parallel via a
+// pipeline is ~36 gpt-4.1 calls per pillar, parallel via a
 // 5-wide semaphore in the service layer.
-const MODEL = "gpt-4.1-mini";
+const MODEL = "gpt-4.1";
 // v2 (2026-05-27): subject-strict eligibility. v1 decided fit on framing and
 // would relabel an app-feature demo as a "feature stack" to satisfy the Tech
 // Stack format's name; v2 forbids that reframing and matches on the section's
@@ -325,7 +325,7 @@ function validate(
     Number.isFinite(tightEndRaw) &&
     tightStartRaw >= args.section.startSec &&
     tightEndRaw <= args.section.endSec &&
-    tightEndRaw - tightStartRaw >= 20 // minimum clip length
+    tightEndRaw - tightStartRaw >= 25 // minimum clip length — must match MIN_CLIP_DURATION_SEC in clip-anchor-utils.ts
   ) {
     finalStart = tightStartRaw;
     finalEnd = tightEndRaw;
@@ -385,7 +385,7 @@ function validate(
 }
 
 /**
- * Write a per-format hook for one section. Single gpt-4.1-mini call (cheap),
+ * Write a per-format hook for one section. Single gpt-4.1 call,
  * decides eligibility + writes hook or skips. Retries once on shape /
  * anchor validation failure with corrective feedback.
  */
