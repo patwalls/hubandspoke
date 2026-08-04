@@ -14,7 +14,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Popover,
@@ -44,7 +43,15 @@ import { buildChannelOptions, channelKey } from "@/lib/channel-options";
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
 import { applyStarterTemplate } from "@/lib/format-skill";
 import { QuickAddFormatDialog } from "./quick-add-format-dialog";
+import { FormatLibraryDialog } from "./format-library-dialog";
 import { FormatStatusBadge } from "./format-status-badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDownIcon } from "lucide-react";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
 
 interface AsanaMember {
@@ -82,6 +89,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   // Filter + sort state in the URL — keeps the filtered Formats view
   // shareable and restores it via the detail-page back-link.
@@ -376,29 +384,37 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setQuickAddOpen(true)}
-            className="w-full sm:w-auto"
-          >
-            ✨ Quick add (AI)
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring w-full sm:w-auto">
+              Add Format
+              <ChevronDownIcon className="ml-0.5 size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setLibraryOpen(true)}>
+                📚 From Library
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setQuickAddOpen(true)}>
+                ✨ Quick Add (AI)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={openCreate}>
+                ➕ Create Manually
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <FormatLibraryDialog
+            brand={brand}
+            open={libraryOpen}
+            onOpenChange={setLibraryOpen}
+            onAdded={() => void fetchFormats()}
+          />
           <QuickAddFormatDialog
             brand={brand}
             open={quickAddOpen}
             onOpenChange={setQuickAddOpen}
-            onCreated={() => {
-              // Refetch the list so the new format shows up immediately.
-              void fetchFormats();
-            }}
+            onCreated={() => void fetchFormats()}
           />
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger>
-            <Button onClick={openCreate} className="w-full sm:w-auto">
-              Add Format
-            </Button>
-          </DialogTrigger>
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>New Format</DialogTitle>
