@@ -68,8 +68,8 @@ export function IdeaQueueTable({
   formatNameToId,
 }: IdeaQueueTableProps) {
   const [users, setUsers] = useState<AssignableUser[]>([]);
-  const [sortKey, setSortKey] = useState<SortKey | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sortKey, setSortKey] = useState<SortKey | null>("pillarDate");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkKillOpen, setBulkKillOpen] = useState(false);
   const [bulkKilling, setBulkKilling] = useState(false);
