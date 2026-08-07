@@ -86,6 +86,13 @@ const COOKIES_FROM_BROWSER = (arg("cookies-from-browser") ?? "chrome").trim();
 // also rewrites this file after each run, keeping it reasonably fresh. When
 // set, it takes precedence over --cookies-from-browser.
 const COOKIES_FILE = arg("cookies");
+// `--count-only` resolves the candidate set, prints `CANDIDATES=<n>`, and exits
+// without downloading anything. The launchd wrapper calls this first so it only
+// evicts the ollama judge model when there is actually work to do — otherwise a
+// quiet day still cost 24 evictions, i.e. ~450 GB/day of pointless SSD reads
+// reloading an 18.8 GB model plus 24 needless judge stalls.
+// See home-machine/yt-archive/wrapper.sh.
+const COUNT_ONLY = process.argv.includes("--count-only");
 
 const SINCE = SINCE_ARG ?? (SINCE_DAYS ? computeSince(Number(SINCE_DAYS)) : undefined);
 
@@ -111,7 +118,11 @@ if (!PROD_DB_URL) {
   process.exit(1);
 }
 const BUCKET = process.env.HUBANDSPOKE_S3_BUCKET;
-if (!BUCKET) {
+// --count-only never uploads, so it needs PROD_DB_URL and nothing else. Keeping
+// the S3 requirement here would make the probe fail closed on an unrelated
+// misconfiguration, and the wrapper would then archive nothing while reporting
+// "inconclusive" forever.
+if (!BUCKET && !COUNT_ONLY) {
   console.error("HUBANDSPOKE_S3_BUCKET is required");
   process.exit(1);
 }
@@ -436,6 +447,14 @@ async function main() {
       usePostTypeFilter ? [SINCE, BRANDS, LIMIT, POST_TYPES] : [SINCE, BRANDS, LIMIT],
     );
     items = r.rows;
+  }
+
+  if (COUNT_ONLY) {
+    // Machine-readable and exact-matched by the wrapper (`^CANDIDATES=`).
+    // Keep the prefix stable.
+    console.log(`CANDIDATES=${items.length}`);
+    await pool.end();
+    process.exit(0);
   }
 
   console.log(`Found ${items.length} candidates. Starting...`);

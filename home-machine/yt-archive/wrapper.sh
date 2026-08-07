@@ -189,8 +189,14 @@ top_consumer() {
         awk '{rss=$1; $1=""; sub(/^ +/,""); printf "%.1fGB %s", rss/1048576, $0}'
 }
 
-read_mem
-if mem_is_starved; then
+# Deliberately a function, not inline: it must run AFTER we know there is work
+# to do. Evicting unconditionally meant a quiet day still paid 24 evictions —
+# ~450 GB/day of pointless SSD reads reloading an 18.8 GB model, plus 24
+# needless judge stalls. See the --count-only gate below.
+ensure_memory_or_exit() {
+    read_mem
+    mem_is_starved || return 0
+
     log "host memory low (swap_free=${SWAP_FREE_MB}MB free_mem=${MEM_FREE_PCT}%) — top: $(top_consumer)"
 
     # Only evict an actual ollama model, and only if ollama is the thing eating
@@ -219,7 +225,7 @@ if mem_is_starved; then
         log "top memory consumer: $(top_consumer)"
         exit 8
     fi
-fi
+}
 
 # --- DATABASE_URL --------------------------------------------------------
 
@@ -270,6 +276,39 @@ fi
 export PROD_DB_URL
 export HUBANDSPOKE_S3_BUCKET HUBANDSPOKE_S3_PREFIX
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION
+
+# --- is there anything to do? --------------------------------------------
+
+# Cheap DB-only probe before we consider touching the ollama judge. Costs one
+# small query; saves an 18.8 GB model reload on every hour that has no work.
+#
+# Fail-OPEN by design: if the probe times out, errors, or prints something we
+# don't understand, we assume there IS work and fall through to the normal
+# path. Never let a broken probe silently stop archiving — that failure mode
+# (a guard that quietly does nothing) is exactly what cost us 2026-07-31.
+CANDIDATE_COUNT=""
+set +e
+COUNT_OUT="$(timeout 240 npx --no-install tsx scripts/archive-yt-local.ts \
+    --brands="$BRANDS" \
+    --since-days="$RUN_SINCE_DAYS" \
+    --limit="$RUN_LIMIT" \
+    --count-only 2>/dev/null | grep -E '^CANDIDATES=' | tail -1)"
+set -e
+CANDIDATE_COUNT="${COUNT_OUT#CANDIDATES=}"
+
+if [[ "$CANDIDATE_COUNT" =~ ^[0-9]+$ ]]; then
+    if [[ "$CANDIDATE_COUNT" -eq 0 ]]; then
+        log "0 candidates — nothing to archive, skipping without touching ollama"
+        exit 0
+    fi
+    log "$CANDIDATE_COUNT candidate(s) to archive"
+else
+    log "candidate probe inconclusive — proceeding as if there is work"
+fi
+
+# --- memory (only now that we know there's work) --------------------------
+
+ensure_memory_or_exit
 
 # --- run -----------------------------------------------------------------
 

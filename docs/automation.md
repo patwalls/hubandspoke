@@ -893,10 +893,23 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   in uninterruptible I/O for 60+ minutes. Because launchd will not start a
   second instance of a `StartInterval` job while the first is alive, that single
   hang blocked *every* subsequent hourly tick. Three guards now exist:
-  - **Memory preflight with model eviction** — when swap free < 2 GB *and*
-    system free memory < 15%, the wrapper evicts the loaded ollama model, waits
-    for reclamation, and runs. Only exits **8** (→ Sentry) if memory is still
-    exhausted afterwards.
+  - **Work check before anything else** (`--count-only`, added 2026-08-07) —
+    the wrapper resolves `DATABASE_URL`, runs `archive-yt-local.ts --count-only`
+    (a single DB query, prints `CANDIDATES=<n>`), and **exits 0 without touching
+    ollama when there is no work**. Previously the eviction ran unconditionally,
+    so a quiet day still cost 24 evictions — ~450 GB/day of pointless SSD reads
+    reloading an 18.8 GB model plus 24 needless judge stalls. Measured: a no-work
+    tick is now ~6s and leaves the model resident.
+
+    The probe **fails open**: a timeout, error, or unparseable output means "assume
+    there is work" and the normal path runs. A guard that quietly stops archiving
+    is the exact failure that cost 2026-07-31 — never let this one do that.
+    `--count-only` also skips the `HUBANDSPOKE_S3_BUCKET` requirement, so an
+    unrelated S3 misconfiguration can't make the probe fail closed.
+  - **Memory preflight with model eviction** — *only reached when there is work.*
+    When swap free < 2 GB *and* system free memory < 15%, the wrapper evicts the
+    loaded ollama model, waits for reclamation, and runs. Only exits **8**
+    (→ Sentry) if memory is still exhausted afterwards.
 
     **Why eviction and not just skipping:** skipping alone was tried first and
     failed — Slope's judge holds `qwen3:30b-a3b` (~18.8 GB) resident 24/7 on
