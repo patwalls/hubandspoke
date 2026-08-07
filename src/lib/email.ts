@@ -346,14 +346,29 @@ export async function sendYtArchiveBehindEmail(opts: {
         `<li>[${(s.brand ?? "?").replace(/&/g, "&amp;").replace(/</g, "&lt;")}] ${(s.title ?? s.id).replace(/&/g, "&amp;").replace(/</g, "&lt;")} (published ${s.publishedDate ?? "?"})</li>`,
     )
     .join("");
+  // Deliberately does NOT assert a cause. This alert only knows that items are
+  // not getting archived — it cannot tell "the Mac is off" from "downloads are
+  // failing" from "Heroku creds expired". It claimed "has likely stopped
+  // running" twice in a row (2026-07-30, 2026-08-06) and was wrong about the
+  // reason both times, sending people to `heroku login` for a memory problem
+  // and to the launchd job for a credentials problem. The log is authoritative;
+  // this email's job is to point at it and decode what's found there.
   const lines = [
-    `Heads up — ${opts.staleCount} published YouTube item(s) have had ZERO download attempts for over 12 hours (${oldestText}). The home-machine hourly archiver has likely stopped running or stopped working.`,
+    `Heads up — ${opts.staleCount} published YouTube item(s) have had ZERO download attempts for over 12 hours (${oldestText}). The home-machine hourly archiver is not completing its runs; the cause is in the log on the Mac.`,
     "",
     sampleLinesText,
     "",
     "Check on the designated Mac:",
     "  tail -50 ~/Library/Logs/hubandspoke-yt-archive.log",
-    "  launchctl list | grep yt-archive   # second column != 0 means last run failed",
+    "  launchctl list | grep yt-archive   # 2nd column = last exit code",
+    "",
+    "What the exit code means:",
+    "  0 / 2  ran fine — if items are still missing, they are per-video failures, not a broken cron",
+    "  6      Heroku credentials expired (chronic). Fix permanently:",
+    "           heroku login && heroku authorizations:create -d 'yt-archive home cron'",
+    "         then add HEROKU_API_KEY=<token> to ~/.config/hubandspoke/yt-archive.env",
+    "  8      host out of memory — the log names the top consumer (usually the ollama judge model)",
+    "  other  the wrapper bailed before starting; the log line says why",
     "",
     "The in-dyno youtube-download-sweep is a deliberate noop in production (YouTube bot-blocks datacenter IPs), so nothing else picks this up — once the cron is healthy again it backfills automatically on its next hourly tick.",
     "",
@@ -365,11 +380,18 @@ export async function sendYtArchiveBehindEmail(opts: {
     Subject: subject,
     TextBody: lines.join("\n"),
     HtmlBody: `
-      <p>Heads up — <strong>${opts.staleCount}</strong> published YouTube item(s) have had <strong>zero download attempts</strong> for over 12 hours (${oldestText}). The home-machine hourly archiver has likely stopped running or stopped working.</p>
+      <p>Heads up — <strong>${opts.staleCount}</strong> published YouTube item(s) have had <strong>zero download attempts</strong> for over 12 hours (${oldestText}). The home-machine hourly archiver is <strong>not completing its runs</strong>; the cause is in the log on the Mac.</p>
       <ul style="color:#374151;font-size:13px;">${sampleLinesHtml}</ul>
       <p>Check on the designated Mac:</p>
       <pre style="margin:0 0 12px;padding:8px 12px;border-left:3px solid #dc2626;background:#fef2f2;color:#991b1b;font-family:ui-monospace,Menlo,monospace;font-size:12px;">tail -50 ~/Library/Logs/hubandspoke-yt-archive.log
-launchctl list | grep yt-archive   # second column != 0 means last run failed</pre>
+launchctl list | grep yt-archive   # 2nd column = last exit code</pre>
+      <p style="margin:0 0 6px;">What the exit code means:</p>
+      <table style="border-collapse:collapse;font-size:12px;color:#374151;margin:0 0 12px;">
+        <tr><td style="padding:2px 10px 2px 0;font-family:ui-monospace,Menlo,monospace;"><strong>0 / 2</strong></td><td style="padding:2px 0;">ran fine — remaining gaps are per-video failures, not a broken cron</td></tr>
+        <tr><td style="padding:2px 10px 2px 0;font-family:ui-monospace,Menlo,monospace;"><strong>6</strong></td><td style="padding:2px 0;">Heroku credentials expired (chronic) — <code>heroku login &amp;&amp; heroku authorizations:create -d 'yt-archive home cron'</code>, then add <code>HEROKU_API_KEY=&lt;token&gt;</code> to <code>~/.config/hubandspoke/yt-archive.env</code></td></tr>
+        <tr><td style="padding:2px 10px 2px 0;font-family:ui-monospace,Menlo,monospace;"><strong>8</strong></td><td style="padding:2px 0;">host out of memory — the log names the top consumer (usually the ollama judge model)</td></tr>
+        <tr><td style="padding:2px 10px 2px 0;font-family:ui-monospace,Menlo,monospace;"><strong>other</strong></td><td style="padding:2px 0;">wrapper bailed before starting; the log line says why</td></tr>
+      </table>
       <p style="color:#666;font-size:12px;">The in-dyno youtube-download-sweep is a deliberate noop in production (YouTube bot-blocks datacenter IPs), so nothing else picks this up — once the cron is healthy again it backfills automatically on its next hourly tick.</p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,

@@ -233,14 +233,32 @@ fi
 # start a second instance of a StartInterval job while the first is alive, that
 # single hang silently blocked *every* subsequent hourly tick — the failure
 # mode that turned a slow host into a dead pipeline.
-if ! PROD_DB_URL="$(timeout 120 heroku config:get DATABASE_URL --app hubandspoke 2>/tmp/yt-archive-heroku.err)"; then
-    HEROKU_RC=$?
+#
+# Capture the status with `|| HEROKU_RC=$?`, NOT `if ! cmd; then HEROKU_RC=$?`.
+# In the latter, `$?` inside the branch is the status of the negation (always 0),
+# so every failure logged a useless "rc=0" — which it did on 2026-08-06.
+HEROKU_RC=0
+PROD_DB_URL="$(timeout 120 heroku config:get DATABASE_URL --app hubandspoke 2>/tmp/yt-archive-heroku.err)" || HEROKU_RC=$?
+if [[ $HEROKU_RC -ne 0 ]]; then
+    HEROKU_ERR="$(tail -c 400 /tmp/yt-archive-heroku.err 2>/dev/null)"
     if [[ $HEROKU_RC -eq 124 ]]; then
         log "heroku config:get timed out after 120s — host starved or heroku CLI wedged"
+    elif [[ "$HEROKU_ERR" == *"open up the browser to login"* || "$HEROKU_ERR" == *"Invalid credentials"* ]]; then
+        # Chronic: 35 occurrences in this log since 2026-05-18. The CLI drops to
+        # an interactive browser prompt, which under launchd dies as
+        # "TypeError: process.stdin.setRawMode is not a function".
+        # Permanent fix is a non-expiring token instead of an interactive login:
+        #   heroku login && heroku authorizations:create -d "yt-archive home cron"
+        # then add HEROKU_API_KEY=<token> to ~/.config/hubandspoke/yt-archive.env
+        # (the wrapper `set -a`-sources that file, so the CLI picks it up and
+        # never prompts again).
+        log "heroku credentials EXPIRED (rc=$HEROKU_RC) — CLI wants an interactive login it cannot get under launchd"
+        log "fix permanently: heroku login && heroku authorizations:create -d 'yt-archive home cron'"
+        log "then add HEROKU_API_KEY=<token> to $ENV_FILE"
     else
-        log "heroku config:get failed (rc=$HEROKU_RC) — possibly expired token. run: heroku login"
+        log "heroku config:get failed (rc=$HEROKU_RC)"
     fi
-    log "stderr: $(tail -c 400 /tmp/yt-archive-heroku.err)"
+    log "stderr: $HEROKU_ERR"
     exit 6
 fi
 

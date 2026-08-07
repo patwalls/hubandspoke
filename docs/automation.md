@@ -849,6 +849,15 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
     event count is the "still broken" heartbeat.
   - Email to `ALERT_RECIPIENTS` (Pat + Sam), deduped to one per 6h via
     `sync_logs.sync_type='yt-archive-alert'`.
+
+    **The email deliberately does not assert a cause.** It only knows items
+    aren't being archived; it cannot distinguish "Mac is off" from "downloads
+    failing" from "Heroku creds expired". It claimed *"has likely stopped
+    running"* twice in a row (2026-07-30, 2026-08-06) and named the wrong reason
+    both times — sending people to `heroku login` for a memory problem, and to
+    the launchd job for a credentials problem. It now says runs aren't
+    completing, points at the log as authoritative, and includes an exit-code
+    decoder (0/2 ran fine · 6 Heroku creds · 8 host OOM · other = bailed early).
 - **Downstream:** none. Once the home cron is healthy it backfills
   automatically (it looks back `RUN_SINCE_DAYS`) and the alert self-clears.
 - **Why attempts=0 and not "no media":** `archive-yt-local.ts` increments
