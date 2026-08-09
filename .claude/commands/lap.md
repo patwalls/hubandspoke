@@ -116,6 +116,24 @@ the lap gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, same DS
   `_private_tasks` constraints → resume) — executed with the evidence quoted in the log.
 
 **Rung 2 — code fixes (the "within reason" push authority):**
+
+**Deploy-regression protocol (check EVERY lap, first among rung-2 work):** any
+Sentry issue whose `firstSeen` is AFTER the latest release timestamp
+(`heroku releases -n 1`) is presumed a shipped regression. For client-side
+errors on page routes this is CRITICAL — a user is seeing "Application
+error". Response, in order of preference:
+1. **`git revert` the offending commit and push** — identify it from the
+   release diff; revert beats forward-fixing under pressure and is always
+   within the push policy (a revert of a just-shipped commit can't make prod
+   older than it was this morning).
+2. Forward-fix only when the cause is pinpointed AND the fix is smaller than
+   the revert (e.g. a one-line hoist). Reproduce first when a repro is
+   cheap: minified TDZ/reference errors un-minify by loading the same route
+   against `npm run dev` locally (real symbol names; see 2026-08-10 —
+   "Cannot access 'nV'" became "Cannot access 'INLINE_DRAFTING_POST_TYPES'").
+3. Either way: Sentry event with what shipped, what broke, what was done.
+Note the SSR fail-opens (detail-ssr / queue-ssr tags): those Sentry events
+mean users are silently on the slow fallback path — treat as ATTN, not CRIT.
 Allowed when ALL hold:
 - The root cause is demonstrated (a Sentry stack trace, a reproduced error — not a hunch).
 - The fix is small: ≤ ~60 changed lines, ≤ 3 files, no schema/migrations, no new

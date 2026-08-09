@@ -219,6 +219,42 @@ interface ViewPrediction {
   reason?: "insufficient_data";
 }
 
+// HOISTED to module scope 2026-08-10: this was a component-body const, and
+// the SSR-initialData mount effect (which runs applyItem synchronously on
+// mount) reached it before the render pass had initialized it — a TDZ
+// ReferenceError ("Cannot access before initialization") that only fired
+// for inline-drafting post types (tiktok item in prod, Sentry 2026-08-10).
+// It is a static Set with no component dependencies; module scope is where
+// it always belonged.
+// Pre-publish "drafting surface" layout: simulator card on the left,
+// form metadata on the right, no Instructions panel, no separate
+// Preview tab. Wired post types are listed here; everything else
+// keeps today's form-left/Instructions-right layout.
+const INLINE_DRAFTING_POST_TYPES: ReadonlySet<string> = new Set([
+  "x",
+  "instagram_post",
+  "instagram_reel",
+  "instagram_story",
+  "linkedin",
+  "tiktok",
+  "youtube_community",
+  "youtube_shorts",
+  // Threads (2026-05-15) — ThreadsSimulator was wired in
+  // content-preview.tsx; the post type was just missed in this set,
+  // so Threads kept falling back to the form-left/Instructions-right
+  // layout. Pat shouldn't see editorial Instructions on a draftable
+  // post.
+  "threads",
+  // Newsletter (2026-05-15) — drafting surface for in-app newsletters.
+  // Subject + preview text + body editable inside the inbox mock; the
+  // draft auto-ensure machinery the other inline post types use creates
+  // an empty contentDrafts row on page mount so commits land cleanly.
+  // For Klaviyo-synced newsletters the simulator falls back to
+  // `item.title` / `item.newsletterPreviewText` / `item.contentBody`
+  // until an editor types something.
+  "newsletter",
+]);
+
 interface DetailResponse {
   item: ProductionItem;
   transcript: ItemTranscript | null;
@@ -1879,34 +1915,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const isYouTube = !!item.youtubeId;
   const isPublished = !!item.publishedLink;
   const isPrePublish = item.status !== "Published";
-  // Pre-publish "drafting surface" layout: simulator card on the left,
-  // form metadata on the right, no Instructions panel, no separate
-  // Preview tab. Wired post types are listed here; everything else
-  // keeps today's form-left/Instructions-right layout.
-  const INLINE_DRAFTING_POST_TYPES: ReadonlySet<string> = new Set([
-    "x",
-    "instagram_post",
-    "instagram_reel",
-    "instagram_story",
-    "linkedin",
-    "tiktok",
-    "youtube_community",
-    "youtube_shorts",
-    // Threads (2026-05-15) — ThreadsSimulator was wired in
-    // content-preview.tsx; the post type was just missed in this set,
-    // so Threads kept falling back to the form-left/Instructions-right
-    // layout. Pat shouldn't see editorial Instructions on a draftable
-    // post.
-    "threads",
-    // Newsletter (2026-05-15) — drafting surface for in-app newsletters.
-    // Subject + preview text + body editable inside the inbox mock; the
-    // draft auto-ensure machinery the other inline post types use creates
-    // an empty contentDrafts row on page mount so commits land cleanly.
-    // For Klaviyo-synced newsletters the simulator falls back to
-    // `item.title` / `item.newsletterPreviewText` / `item.contentBody`
-    // until an editor types something.
-    "newsletter",
-  ]);
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
   // Uploaded source recordings (and any item with archived video but no live

@@ -59,6 +59,19 @@ export async function GET(request: NextRequest) {
       timings[`report:${b}`] = -1;
     }
   }
+  // Production-pipeline report (the queue page SSRs this; 1.5-2.7s cold).
+  for (const b of brands.map((x) => x.slug)) {
+    const t = Date.now();
+    try {
+      const { getProductionReportCached } = await import(
+        "@/lib/services/production-report"
+      );
+      await getProductionReportCached(b, false);
+      timings[`production:${b}`] = Date.now() - t;
+    } catch {
+      timings[`production:${b}`] = -1;
+    }
+  }
   try {
     const t = Date.now();
     await Promise.all([

@@ -11,7 +11,11 @@ const HistoryQueueTable = dynamic(() => import("./history-queue-table").then((m)
 const SpokeQueueTable = dynamic(() => import("./spoke-queue-table").then((m) => m.SpokeQueueTable), { ssr: false });
 const RepostQueueTable = dynamic(() => import("./repost-queue-table").then((m) => m.RepostQueueTable), { ssr: false });
 const CrossPostQueueTable = dynamic(() => import("./cross-post-queue-table").then((m) => m.CrossPostQueueTable), { ssr: false });
-const IdeaQueueTable = dynamic(() => import("./idea-queue-table").then((m) => m.IdeaQueueTable), { ssr: false });
+// Static import ON PURPOSE: this is the default tab — dynamic() suspends
+// during SSR (fallback lands in the HTML instead of rows) and the page
+// cannot paint content before hydration. The other four tables stay lazy;
+// they only render behind tab clicks.
+import { IdeaQueueTable } from "./idea-queue-table";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 import type { CrossPostCandidatesResult } from "@/lib/services/cross-post-candidates";
@@ -48,6 +52,10 @@ export interface ClippableFormatTab {
 
 interface QueueViewProps {
   brand: string;
+  /** SSR'd production-report items (JSON-roundtripped). When present the
+   *  All tab paints immediately and the mount fetch is skipped; manual
+   *  refreshes/mutations still refetch via fetchQueue(). */
+  initialItems?: ProductionItem[];
   initialSource: QueueSource;
   /** When initialSource is a `clip:<formatId>` value, this is the human-
    *  readable format name to filter rows by (matches `production_items.format`).
@@ -75,6 +83,7 @@ const STATIC_SOURCE_TABS = [
 
 export function QueueView({
   brand,
+  initialItems,
   initialSource,
   initialClipFormatFilter = null,
   clippableFormats = [],
@@ -114,7 +123,7 @@ export function QueueView({
   void initialClipFormatFilter;
   const router = useRouter();
   const [items, setItems] = useState<ProductionItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialItems); // SSR path: rows are already in state — render them in the server HTML, not a spinner
   const [crossPostData, setCrossPostData] =
     useState<CrossPostCandidatesResult | null>(null);
   const [crossPostLoading, setCrossPostLoading] = useState(true);

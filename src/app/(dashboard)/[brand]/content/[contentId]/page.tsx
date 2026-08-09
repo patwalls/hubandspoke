@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import * as Sentry from "@sentry/nextjs";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -44,9 +45,16 @@ export default async function BrandContentDetailPage({
     getBrandStatuses(brand),
     auth(),
     // SSR the detail payload so the first paint carries data — no client
-    // shell->hydrate->fetch waterfall. Fail-open: a throw here must not
-    // 500 the page shell; the client falls back to its own fetch.
-    getProductionItemDetail(contentId).catch(() => null),
+    // shell->hydrate->fetch waterfall. Fail-open for the USER (the client
+    // falls back to its own fetch) but NEVER silent: the error goes to
+    // Sentry so the ops loop sees it. A swallowed catch here is how a
+    // broken SSR path would hide for days.
+    getProductionItemDetail(contentId).catch((err) => {
+      Sentry.captureException(err, {
+        tags: { surface: "detail-ssr", contentId },
+      });
+      return null;
+    }),
   ]);
   // JSON-roundtrip so the client receives EXACTLY the fetch-path shape
   // (Dates as ISO strings, undefined dropped) — one code path, no drift.
