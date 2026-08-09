@@ -6,6 +6,7 @@ import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable, type GroupDim } from "./period-table";
 import type { ContentReportData } from "@/types";
+import { rehydrateReportAccounts, type HydratedContentReportData } from "@/lib/report-hydrate";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { exportChannelSummaryCsv } from "@/lib/export-csv";
@@ -75,7 +76,7 @@ export function ContentReport({ brand }: { brand: string }) {
 
   useRememberListUrl({ brand, listKey: "dashboard" });
 
-  const [data, setData] = useState<ContentReportData | null>(null);
+  const [data, setData] = useState<HydratedContentReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [showExportConfirm, setShowExportConfirm] = useState(false);
@@ -161,7 +162,7 @@ export function ContentReport({ brand }: { brand: string }) {
         setFetchError(json?.error || `Report API returned HTTP ${res.status}`);
         return;
       }
-      setData(json as ContentReportData);
+      setData(rehydrateReportAccounts(json as ContentReportData));
     } catch (err) {
       console.error("Failed to fetch report:", err);
       setFetchError(err instanceof Error ? err.message : "Failed to fetch report");

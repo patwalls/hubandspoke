@@ -245,6 +245,85 @@ export interface FormatViewBar {
   cohortSize: number;
 }
 
+/**
+ * Fields STRIPPED from report items before they leave the server.
+ *
+ * The content report ships `items` for the dashboard table — but the full
+ * ProductionItem row is ~110 fields including multi-KB text columns
+ * (contentBody, newsletterBodyHtml, description…), which made the report
+ * payload ~2.7 MB. The report/table UI reads none of these; the DETAIL page
+ * (which does) fetches its own full row via /api/production-items/[id].
+ *
+ * This const is the single source of truth: `ReportItem` is derived from it
+ * (so any consumer that touches a stripped field is a COMPILE ERROR — the
+ * compiler is the audit), and getContentReport strips exactly these keys at
+ * its return boundary. To un-trim a field, delete it here; both the type and
+ * the runtime strip follow.
+ */
+export const REPORT_ITEM_TRIMMED_KEYS = [
+  // fat text
+  "description",
+  "contentBody",
+  "contentBodyFetchedAt",
+  "contentBodySource",
+  "contentMediaUrl",
+  "newsletterBodyHtml",
+  "newsletterPreviewText",
+  "newsletterRecipients",
+  "overlay",
+  "coverDescription",
+  // tool-integration internals (detail-page concerns)
+  "descriptProjectId",
+  "descriptProjectUrl",
+  "descriptCompositionId",
+  "descriptImportedAt",
+  "descriptPublishJobId",
+  "descriptPublishedAt",
+  "descriptPublishError",
+  "canvaAutofillJobId",
+  "canvaDesignId",
+  "canvaEditUrl",
+  "zernioPostId",
+  "zernioStatus",
+  "zernioScheduledAt",
+  "zernioSentAt",
+  "zernioError",
+  "klaviyoListId",
+  // enrichment/vision/prediction plumbing
+  "enrichmentError",
+  "hookSource",
+  "hookExtractor",
+  "hookExtractedAt",
+  "visionExtractedAt",
+  "predictedViewsSnapshot",
+  "predictedViewsSnapshotAt",
+  // author metadata (detail-page concerns)
+  "authorHandle",
+  "authorDisplayName",
+  "authorFollowerCount",
+  "authorVerified",
+  // media internals (UI uses thumbnail/posterUrl/mediaUrl)
+  "mediaS3Bucket",
+  "mediaSizeBytes",
+  "mediaContentType",
+] as const;
+
+/**
+ * `account` is also stripped: the same handful of account objects were being
+ * embedded into every one of ~1,200 items (~570 KB of pure duplication).
+ * The report instead ships `ContentReportData.accountsById` ONCE and the
+ * client rehydrates `item.account` right after fetch (see
+ * src/lib/report-hydrate.ts) — components downstream still see the full
+ * shape. The legacy matg report route still embeds `account` per item;
+ * rehydration passes those through untouched.
+ */
+export type ReportItem = Omit<
+  ProductionItem,
+  (typeof REPORT_ITEM_TRIMMED_KEYS)[number] | "account"
+> & { account?: ProductionItem["account"] };
+
+export type ReportAccount = NonNullable<ProductionItem["account"]>;
+
 export interface ContentReportData {
   periods: Period[];
   byPlatform: {
@@ -260,7 +339,7 @@ export interface ContentReportData {
     leads: MetricData;
     viewsPerPost: MetricData;
   };
-  items: ProductionItem[];
+  items: ReportItem[];
   weekProgress: { day: number; percent: number } | null;
   weekStartDay: number;
   platforms: string[];
@@ -272,6 +351,9 @@ export interface ContentReportData {
    *  inside `byPlatform.*`. When present the UI renders an
    *  AccountBadge instead of the raw text. */
   primaryRowMeta?: Record<string, PrimaryRowMeta>;
+  /** Deduplicated account objects, keyed by account id. Items carry only
+   *  `accountId`; the client rejoins via rehydrateReportAccounts(). */
+  accountsById?: Record<string, ReportAccount>;
   /** Per-(format, post_type) P75 view bar (cross-brand, last 90 days).
    *  Used by the Content table's "vs P75" column. Cohort is scoped by
    *  post_type so a tweet isn't compared against a YT short. Formats

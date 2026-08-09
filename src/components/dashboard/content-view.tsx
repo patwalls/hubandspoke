@@ -5,6 +5,7 @@ import { format, subDays } from "date-fns";
 import { FilterPills, SelectPill } from "./filter-pills";
 import { PerformanceTable } from "./performance-table";
 import type { ContentReportData } from "@/types";
+import { rehydrateReportAccounts, type HydratedContentReportData } from "@/lib/report-hydrate";
 import type { PickerAccount } from "@/components/ui/account-post-type-picker";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
@@ -73,7 +74,7 @@ export function ContentView({ brand }: ContentViewProps) {
   // can land the user back here with filters intact.
   useRememberListUrl({ brand, listKey: "content" });
 
-  const [data, setData] = useState<ContentReportData | null>(null);
+  const [data, setData] = useState<HydratedContentReportData | null>(null);
   const [loading, setLoading] = useState(true);
   // Fetched once per mount — the create-item dialog's account picker reads
   // this. Kept narrow (no filtering yet); add-form picker filters by
@@ -150,7 +151,7 @@ export function ContentView({ brand }: ContentViewProps) {
         setData(null);
         return;
       }
-      const json = JSON.parse(text);
+      const json = rehydrateReportAccounts(JSON.parse(text));
       setData(json);
     } catch (err) {
       console.error("Failed to fetch content:", err);

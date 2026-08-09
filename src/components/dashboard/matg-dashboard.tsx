@@ -6,6 +6,7 @@ import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
 import { PeriodTable } from "./period-table";
 import type { ContentReportData } from "@/types";
+import { rehydrateReportAccounts, type HydratedContentReportData } from "@/lib/report-hydrate";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { exportChannelSummaryCsv } from "@/lib/export-csv";
@@ -62,7 +63,7 @@ export function MATGDashboard() {
   useRememberListUrl({ brand: "matg", listKey: "dashboard" });
 
   // Data
-  const [data, setData] = useState<ContentReportData | null>(null);
+  const [data, setData] = useState<HydratedContentReportData | null>(null);
   const [accounts, setAccounts] = useState<FilterAccount[]>([]);
   const [showExportConfirm, setShowExportConfirm] = useState(false);
   useEffect(() => {
@@ -102,7 +103,7 @@ export function MATGDashboard() {
         provenOnly: provenOnly ? "1" : "0",
       });
       const res = await fetch(`/api/reports/matg?${params}`);
-      setData(await res.json());
+      setData(rehydrateReportAccounts(await res.json()));
     } catch (err) {
       console.error("Failed to fetch data:", err);
     }
