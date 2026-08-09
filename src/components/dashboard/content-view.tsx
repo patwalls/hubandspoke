@@ -165,7 +165,9 @@ export function ContentView({ brand }: ContentViewProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* flex-wrap: on phones the "Other" pill drops below the title instead
+          of squeezing beside it. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Content</h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">

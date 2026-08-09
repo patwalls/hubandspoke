@@ -178,3 +178,11 @@
 .tippy-content {
   padding: 0;
 }
+/* Hide scrollbars on horizontally-scrollable pill rows (mobile nav tabs).
+   Content still scrolls by touch/trackpad — this only hides the bar. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* WebKit */
+}

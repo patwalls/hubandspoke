@@ -60,7 +60,7 @@ export function SyncErrorsTable({ items }: { items: SyncErrorItem[] }) {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden">
+    <div className="rounded-lg border border-border bg-card overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>

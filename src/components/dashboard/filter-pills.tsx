@@ -153,7 +153,9 @@ function rangeLabel(startDate: string, endDate: string): string {
 }
 
 const PILL_TRIGGER_CLASSES =
-  "inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border bg-card text-sm hover:bg-accent transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  // whitespace-nowrap + shrink-0: pills keep their intrinsic width on phones
+  // instead of wrapping their label onto two lines inside the pill.
+  "inline-flex shrink-0 items-center gap-1.5 h-8 px-3 rounded-full border border-border bg-card text-sm whitespace-nowrap hover:bg-accent transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 function PillContent({
   label,

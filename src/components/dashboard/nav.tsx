@@ -399,18 +399,20 @@ export function SectionTabs({
       : null;
 
   return (
-    <div className="flex items-center gap-3">
+    // overflow-x-auto: on phones the tab row is wider than the viewport —
+    // it must scroll within itself, not pan (or clip) the whole page.
+    <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
       {backLink && (
         <BackLink
           brand={backLink.brand}
           listKey={backLink.listKey}
           fallbackHref={backLink.fallbackHref}
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="inline-flex shrink-0 items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           {backLink.label}
         </BackLink>
       )}
-      <div className="inline-flex items-center gap-1 rounded-lg bg-muted/60 p-1">
+      <div className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-muted/60 p-1">
         {tabs.map((tab) => {
           const isActive =
             pathname === tab.href ||
@@ -428,7 +430,7 @@ export function SectionTabs({
               href={tab.href}
               aria-current={isActive ? "page" : undefined}
               className={cn(
-                "px-3 py-1.5 rounded-md text-sm transition-colors",
+                "px-3 py-1.5 rounded-md text-sm transition-colors whitespace-nowrap shrink-0",
                 isActive
                   ? "bg-card text-foreground font-medium shadow-sm"
                   : "text-muted-foreground hover:text-foreground"

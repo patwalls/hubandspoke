@@ -181,7 +181,7 @@ export default async function CoveragePage() {
                 </div>
               </div>
             )}
-            <div className="rounded-lg border border-border overflow-hidden">
+            <div className="rounded-lg border border-border overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
                   <tr>

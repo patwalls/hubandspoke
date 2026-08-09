@@ -126,8 +126,13 @@ function getFreshness(item: ProductionItem): {
   return { color: "text-muted-foreground", label: `${Math.floor(days)}d ago`, dotClass: "bg-gray-400" };
 }
 
-export function PerformanceTable({ items, brand, formats, accounts, formatBars, onPostCreated }: PerformanceTableProps) {
+export function PerformanceTable({ items: itemsProp, brand, formats, accounts, formatBars, onPostCreated }: PerformanceTableProps) {
   const router = useRouter();
+  // Defensive: when the report API errors, callers can end up passing
+  // undefined — without this the whole dashboard client-crashes into a
+  // redbox ("Cannot read properties of undefined (reading 'some')",
+  // observed 2026-08-09) instead of rendering an empty table.
+  const items = itemsProp ?? [];
   const hasThumbnails = items.some((item) => coverImageUrl(item));
   const hasPerformanceSync = items.some((item) => item.lastPerformanceSyncAt);
   const [sortKey, setSortKey] = useState<SortKey>("publishedDate");
@@ -543,7 +548,9 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between gap-3">
+      {/* Stacks on phones: title/desc squeezing beside the search box left it
+          ~100px wide with the description wrapping through it. */}
+      <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-foreground">Content Performance</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -556,7 +563,7 @@ export function PerformanceTable({ items, brand, formats, accounts, formatBars, 
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search title, format, platform…"
-            className="h-8 w-48 sm:w-64 text-xs"
+            className="h-8 w-full min-w-0 flex-1 sm:flex-none sm:w-64 text-xs"
           />
           {/*
             Cross-brand /all view: hide the create-item entry point. New

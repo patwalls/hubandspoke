@@ -22,7 +22,9 @@ export function AccountsSidebarNav({ brand }: Props) {
   ];
 
   return (
-    <nav className="flex md:flex-col gap-1">
+    // On phones this renders as a horizontal pill row — it must scroll within
+    // itself (overflow-x-auto) instead of widening the page.
+    <nav className="flex md:flex-col gap-1 overflow-x-auto no-scrollbar">
       {items.map((s) => {
         const active = pathname === s.href;
         return (
@@ -30,7 +32,7 @@ export function AccountsSidebarNav({ brand }: Props) {
             key={s.href}
             href={s.href}
             className={cn(
-              "px-2 py-1.5 rounded-md text-sm transition-colors",
+              "px-2 py-1.5 rounded-md text-sm transition-colors whitespace-nowrap shrink-0",
               active
                 ? "bg-accent text-foreground font-medium"
                 : "text-muted-foreground hover:text-foreground hover:bg-accent"
