@@ -174,6 +174,7 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
           ...(settleMs > 0 ? { runAt: new Date(Date.now() + settleMs) } : {}),
           jobKey: `descript-publish:${payload.derivativeItemId}`,
           jobKeyMode: "replace",
+          queueName: "media-heavy",
         },
       );
     }

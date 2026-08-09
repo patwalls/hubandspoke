@@ -866,12 +866,22 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     },
   });
 
-  await enqueue("clip-idea-precise-cut", {
-    clipIdeaId: args.clipIdeaId,
-    triggerId: trigger.id,
-    derivativeItemId: productionItemId,
-    applyLayoutPack: args.applyLayoutPack,
-  });
+  await enqueue(
+    "clip-idea-precise-cut",
+    {
+      clipIdeaId: args.clipIdeaId,
+      triggerId: trigger.id,
+      derivativeItemId: productionItemId,
+      applyLayoutPack: args.applyLayoutPack,
+    },
+    // jobKey: at most one pending cut per clip; queueName serializes heavy
+    // media work — two concurrent ffmpeg cuts R15'd the worker (2026-08-09).
+    {
+      jobKey: `precise-cut:${args.clipIdeaId}`,
+      jobKeyMode: "replace",
+      queueName: "media-heavy",
+    },
+  );
 
   await db
     .update(clipIdeas)

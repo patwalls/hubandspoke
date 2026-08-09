@@ -131,6 +131,7 @@ export const descriptPublishAndArchiveTask: Task = async (
         runAt: new Date(Date.now() + POLL_INTERVAL_MS),
         jobKey: `descript-publish:${item.id}`,
         jobKeyMode: "replace",
+        queueName: "media-heavy",
       },
     );
     return;
@@ -170,6 +171,7 @@ export const descriptPublishAndArchiveTask: Task = async (
         runAt: new Date(Date.now() + POLL_INTERVAL_MS),
         jobKey: `descript-publish:${item.id}`,
         jobKeyMode: "replace",
+        queueName: "media-heavy",
       },
     );
     return;

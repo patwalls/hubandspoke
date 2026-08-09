@@ -98,7 +98,14 @@ export async function POST(request: Request, context: RouteContext) {
     },
     // jobKey: replaces any pending poll for this item instead of stacking a
     // second chain (see descript-publish-and-archive.ts).
-    { jobKey: `descript-publish:${id}`, jobKeyMode: "replace" },
+    {
+      jobKey: `descript-publish:${id}`,
+      jobKeyMode: "replace",
+      // Serialize with the other heavy media jobs — the final poll buffers
+      // the whole rendered MP4 in memory (archiveRemoteToS3); two at once
+      // exceeds the Basic dyno's quota.
+      queueName: "media-heavy",
+    },
   );
 
   return NextResponse.json({ ok: true }, { status: 202 });

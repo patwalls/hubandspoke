@@ -246,7 +246,16 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
     await helpers.addJob(
       "clip-idea-precise-cut",
       { ...payload, uploadJobId: importRes.job_id, deadlineAt },
-      { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+      // jobKey: at most one pending job per clip (2026-08-09 — duplicate
+      // chains ran the ffmpeg cut twice concurrently and R15'd the dyno).
+      // queueName serializes ALL heavy media work: one cut/render/archive
+      // at a time fits in the Basic dyno's 512MB; two do not.
+      {
+        runAt: new Date(Date.now() + POLL_INTERVAL_MS),
+        jobKey: `precise-cut:${payload.clipIdeaId}`,
+        jobKeyMode: "replace",
+        queueName: "media-heavy",
+      },
     );
   } finally {
     await safeUnlink(sourcePath);
@@ -424,7 +433,13 @@ async function pollUploadOnce(
         layoutJobId: agent.jobId,
         deadlineAt: Date.now() + DEADLINE_MS,
       },
-      { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+      // See the kickoff enqueue for the jobKey/queueName rationale.
+      {
+        runAt: new Date(Date.now() + POLL_INTERVAL_MS),
+        jobKey: `precise-cut:${payload.clipIdeaId}`,
+        jobKeyMode: "replace",
+        queueName: "media-heavy",
+      },
     );
     return;
   }
@@ -438,7 +453,13 @@ async function pollUploadOnce(
   await helpers.addJob(
     "clip-idea-precise-cut",
     { ...payload, deadlineAt },
-    { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+    // See the kickoff enqueue for the jobKey/queueName rationale.
+    {
+      runAt: new Date(Date.now() + POLL_INTERVAL_MS),
+      jobKey: `precise-cut:${payload.clipIdeaId}`,
+      jobKeyMode: "replace",
+      queueName: "media-heavy",
+    },
   );
 }
 
@@ -492,6 +513,7 @@ async function pollLayoutOnce(
         runAt: new Date(Date.now() + UNDERLORD_SETTLE_MS),
         jobKey: `descript-publish:${payload.derivativeItemId}`,
         jobKeyMode: "replace",
+        queueName: "media-heavy",
       },
     );
     return;
@@ -506,7 +528,13 @@ async function pollLayoutOnce(
   await helpers.addJob(
     "clip-idea-precise-cut",
     { ...payload, deadlineAt },
-    { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+    // See the kickoff enqueue for the jobKey/queueName rationale.
+    {
+      runAt: new Date(Date.now() + POLL_INTERVAL_MS),
+      jobKey: `precise-cut:${payload.clipIdeaId}`,
+      jobKeyMode: "replace",
+      queueName: "media-heavy",
+    },
   );
 }
 
