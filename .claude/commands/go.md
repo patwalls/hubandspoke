@@ -5,10 +5,11 @@ argument-hint: "[optional cadence like 30m/1h, and/or a focus, e.g. 'queue']"
 
 # /go — ignition
 
-`/go` starts the Hub & Spoke **ops loop**: run `/lap` (the health checklist in
-`.claude/commands/lap.md` — check, fix only known-safe things, report the rest loudly) on
-repeat until told to stop. Unlike slope/starter-story's build loops, this one **observes
-production and never commits or pushes** (pushes auto-deploy here).
+`/go` starts the Hub & Spoke **ops loop**: run `/lap` (the checklist in
+`.claude/commands/lap.md`) on repeat until told to stop. The loop **SELF-HEALS within the
+guardrails in lap.md** — ops runbooks freely; small, evidence-backed code fixes with at
+most ONE push per lap (pushes auto-deploy, so the bar is real verification); everything
+else escalates via a Sentry event on Pat's existing alerting.
 
 ## What to do
 
@@ -20,19 +21,23 @@ production and never commits or pushes** (pushes auto-deploy here).
    ```
 1. Parse `$ARGUMENTS`:
    - A token matching `\d+[smhd]` (e.g. `30m`, `1h`) is the **cadence** — one lap per
-     interval (default `30m`; health checks don't need slope's 20m).
+     interval (default `1h` — spend-conscious; the app's own alerting covers urgent gaps between laps).
    - Anything else is a **focus** handed to every lap (e.g. `queue` runs only that section).
 2. Launch the FRESH-CONTEXT RUNNER detached (the shared vehicle — NOT the `loop` skill /
    ScheduleWakeup, which dies with its session; see the vehicle guard in lap.md):
    ```bash
    # a focus-less /go deliberately clears any persisted focus:
    rm -f ~/.claude/hubandspoke-loop-focus   # only when /go was given NO focus
-   cd ~/code/hubandspoke && nohup ~/.claude/loop-runner.sh <cadence> <focus...> >> .loop.log 2>&1 & disown
+   cd ~/code/hubandspoke && nohup ~/.claude/loop-runner.sh <cadence, default 1h> <focus...> >> .loop.log 2>&1 & disown
    ```
-   The runner refuses to double-start (`.loop.pid` lock), honors
-   `LOOPS_PAUSED`/`LOOPS_THROTTLE`, stamps `~/.claude/hubandspoke-lap-stamp`, and persists
-   any focus to `~/.claude/hubandspoke-loop-focus`. (No crontab recovery here yet — the cx
-   tmux session keeps it alive across disconnects; a reboot needs a fresh `/go`.)
+   ALWAYS pass the cadence explicitly (the runner's own default is 20m — too hot for a
+   spend-conscious health loop; `/go` with no cadence token means `1h`). The runner refuses
+   to double-start (`.loop.pid` lock), honors `LOOPS_PAUSED`/`LOOPS_THROTTLE`, stamps
+   `~/.claude/hubandspoke-lap-stamp`, and persists any focus to
+   `~/.claude/hubandspoke-loop-focus`. Supervised by `home-machine/ops-loop-recovery.sh`
+   (system crontab, every 15m) — it relaunches a dead/wedged runner, so the loop survives
+   reboots and credit windows. If `crontab -l | grep hubandspoke-ops-loop` is empty,
+   install it once: `bash home-machine/ops-loop-recovery.sh --install`.
 3. Confirm it's running (`pgrep -fl loop-runner.sh` + `tail .loop.log`) and report: cadence,
    focus (if any), and where the health log lives (`~/.claude/hubandspoke-health.log`).
 

@@ -1,99 +1,146 @@
 ---
-description: Run ONE health lap of the Hub & Spoke ops loop — check Sentry, Heroku, job queue, archiver; fix only known-safe things; report loudly on the rest.
+description: Run ONE lap of the Hub & Spoke ops loop — check Sentry, Heroku, request times, job queue, archiver; SELF-HEAL within the guardrails; escalate what it can't fix.
 argument-hint: "[optional focus, e.g. 'queue' or 'sentry']"
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 ---
 
-## ⏸ Pause guard (check FIRST, before anything)
+## ⏸ Pause guard (FIRST)
 
-If `~/.claude/LOOPS_PAUSED` exists (`test -f ~/.claude/LOOPS_PAUSED`), Pat has paused all
-loops. Say "loops are paused — not running this lap" and STOP. No work, no wakeups.
+If `~/.claude/LOOPS_PAUSED` exists — say "loops are paused", STOP. No work, no wakeups.
 
-## 🚗 Vehicle guard — the runner owns cadence
+## 🚗 Vehicle guard
 
-This loop's vehicle is the fresh-context runner (`~/.claude/loop-runner.sh`, launched by
-`/go`). **NEVER pace laps with ScheduleWakeup:** if this lap arrived via `/loop` or a
-ScheduleWakeup firing, run NOTHING, call ScheduleWakeup with `stop: true`, and end. A
-`claude -p "/lap"` runner lap just ends normally; the runner sleeps and re-fires.
+The vehicle is the fresh-context runner (`~/.claude/loop-runner.sh`, launched by `/go`,
+resurrected by `home-machine/ops-loop-recovery.sh`). **Never pace laps with
+ScheduleWakeup** — if this lap arrived via `/loop` or a ScheduleWakeup firing, run nothing,
+ScheduleWakeup `stop: true`, end. A runner lap just ends; the runner sleeps and re-fires.
 
 ## 🐢 Throttle guard
 
-If `~/.claude/LOOPS_THROTTLE` exists, Pat is low on credits — do the two cheapest checks
-only (worker heartbeat + queue tripwire), log one line, end. The runner already stretches
-the sleep; schedule nothing.
+If `~/.claude/LOOPS_THROTTLE` exists: run ONLY the heartbeat + queue tripwire, one log
+line, end. No healing beyond a worker restart, no pushes.
 
-## 💸 Token discipline
+## 💸 Spend discipline (every lap)
 
-This is a MONITORING lap, not a build lap. It should normally cost almost nothing:
-- Run the checklist with as few Bash calls as possible (batch the queries).
-- **Green lap = one log line and DONE.** No narrative, no exploring, no "while I'm here."
-- Diagnose only what a check flags, and only deep enough to classify it (see Fix policy).
-- Never spin: an investigation that hasn't classified the problem after ~10 tool calls
-  gets written up as UNKNOWN with everything gathered, and the lap ends.
+Pat pays per lap — keep green laps NEAR-FREE:
+- Read the last ~5 lines of `~/.claude/hubandspoke-health.log` first; that IS the memory.
+- Batch the whole green-path checklist into 2–3 Bash calls. **All green → one log line,
+  END THE LAP.** No narrative, no exploration, no "while I'm here".
+- Only a flagged check earns more tool calls. An investigation that hasn't classified its
+  problem after ~12 tool calls gets logged UNKNOWN with evidence + a Sentry event, lap ends.
+- Never spin: same approach failing twice = stop, escalate. Third retries are banned.
 
-## 🚫 What this loop must NEVER do
+## The checklist
 
-- **Never `git commit` or `git push`** — pushes auto-deploy to Heroku. This loop observes
-  production; it does not ship code. (House rule: never commit/push without explicit
-  permission — a cron lap has none.)
-- Never scale dynos beyond the documented baseline (web=1, worker=1), change Heroku config
-  vars, run migrations, or DELETE data outside the exact runbook actions listed below.
-- Never touch other machines' loops (Pulse, Slope, yt-archive internals beyond the listed
-  kickstart).
+Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
 
-## The checklist (one lap)
+`git pull --rebase --autostash` first (docs/runbooks may have moved). Then, batched:
 
-Optional focus: **$ARGUMENTS** (if set, run only the matching section + the heartbeat).
+1. **Liveness (2 curls)** — `https://hubandspoke.starterstory.com/api/health/worker`
+   (`ok:true`, small ageSeconds) and `/login` (200, and note the response time).
+2. **Sentry** (org `pat-walls`, project `hubandspoke`; token in `~/.zshenv`):
+   unresolved issues, `statsPeriod=24h`. Only NEW issues (vs health log) or event-count
+   spikes matter.
+3. **Heroku (2 calls)** — `heroku ps` (web+worker `up`) + `heroku releases -n 1` (a
+   `release failed` = broken deploy pipeline, CRIT). Then one `heroku logs --num 300`
+   pass reused for BOTH memory errors (`R14|R15|H12|H13`) and **request times**: parse
+   router `service=NNNms`, ignoring media/upload routes (`/api/files`, `/api/uploads`,
+   `/api/media-proxy`, `/api/image-proxy`, `/_next/`).
+4. **Database sweep — ONE `heroku pg:psql` call** returning one row of named columns:
+   - queue: total jobs · **tripwire** `count(*)` vs `count(DISTINCT identifier)` on
+     `_private_tasks` · max rows per identifier · oldest due unlocked age ·
+     `attempts>=max_attempts` corpses · locks older than 4h;
+   - **cron liveness**: any `graphile_worker._private_known_crontabs` row whose
+     `last_execution` is older than ~2.5× its period (catches silently-dead crons —
+     notion-sync, performance-decay, the credit watches — without hitting their APIs);
+   - **stuck Descript renders** (this week's class): items with
+     `descript_publish_job_id IS NOT NULL AND descript_published_at IS NULL AND
+     descript_publish_error IS NULL AND updated_at < now()-interval '2 hours'`;
+   - **event-storm guard** (the "clip ready ×100" class): any single item with > 25
+     `content_events` rows in the last 24h;
+   - **sync failures**: `sync_logs` rows with `status='error'` in the last 24h (count +
+     newest sync_type);
+   - **exhausted YouTube downloads**: items at `youtube_download_attempts >= 3` still
+     missing media, published in the last 7 days;
+   - db size vs the 64 GB plan and connection count vs 200.
+5. **This Mac (one bash block)** — yt-archive last exit (`launchctl list`; decoder in
+   `docs/automation.md`; on nonzero read the log tail) · disk free on `/System/Volumes/Data`
+   (yt-archive needs tmp space) · swap free (persistent exhaustion = the ollama-contention
+   class; the archiver will be skipping) · the ops-loop recovery agent still loaded
+   (`launchctl list | grep ops-loop-recovery`).
 
-Sync docs first (read-only): `git pull --rebase --autostash 2>&1 | tail -1` — runbooks in
-`docs/automation.md` may have been updated. A pull conflict = log it, continue on stale.
+### Thresholds (Pat-tunable — edit here)
 
-Run these, batching aggressively (2–4 Bash calls total on a green lap):
+| signal | WARN | CRIT |
+|---|---|---|
+| request time (non-media) | any > 3s, or ~p95 > 2s | any H12/H13, or 3+ > 10s |
+| /login response | > 2s | non-200 |
+| memory | any R14 | any R15 |
+| deploy | — | latest release `failed` |
+| queue total | > 500 | > 5,000 or growing across 2 laps |
+| tasks tripwire | — | ANY divergence (2026-08-09 incident) |
+| one identifier pending | > 1,000 | > 10,000 |
+| oldest due job / stale locks | > 1h / any 4h+ lock | > 6h |
+| cron last-fired | > 2.5× its period | notion-sync or performance-decay dead > 6h |
+| stuck Descript renders | any ≥ 2h | ≥ 5 items, or any ≥ 12h |
+| event storm (one item/24h) | > 25 events | > 100 events |
+| sync_logs errors/24h | > 3 | > 10 or all-failing for one sync_type |
+| exhausted YT downloads (7d) | ≥ 3 items | ≥ 8 items |
+| DB size / connections | > 32 GB / > 120 | > 55 GB / > 180 |
+| Sentry issue events/24h | new issue | > 50 on one issue |
+| heartbeat | ageSeconds > threshold | 503 / unreachable |
+| Mac disk free / swap free | < 25 GB / < 1 GB sustained | < 10 GB |
+| recovery agent | — | not loaded in launchctl |
 
-1. **Worker heartbeat** — `curl -s https://hubandspoke.starterstory.com/api/health/worker`.
-   `ok:true` + small ageSeconds = healthy. 503/stale → check dynos (item 3).
-2. **Sentry** — unresolved issues, org `pat-walls`, project `hubandspoke`
-   (`$SENTRY_ACCESS_TOKEN` is in `~/.zshenv`, available to laps):
-   `curl -s -H "Authorization: Bearer $SENTRY_ACCESS_TOKEN" "https://sentry.io/api/0/projects/pat-walls/hubandspoke/issues/?query=is:unresolved&statsPeriod=24h&limit=10"`
-   Compare against the previous lap's log entry — only NEW issues or count spikes matter.
-3. **Heroku dynos + memory** — `heroku ps --app hubandspoke` (both `up`?) and
-   `heroku logs --app hubandspoke --num 150 | grep -cE "R14|R15|H12|H13"` (0 = clean).
-4. **Queue fatness** — one psql over `heroku pg:psql --app hubandspoke`:
-   - total jobs (`graphile_worker._private_jobs`) — healthy is < ~500;
-   - **corruption tripwire**: `count(*)` vs `count(DISTINCT identifier)` on
-     `graphile_worker._private_tasks` — ANY divergence is CRITICAL (see the 2026-08-09
-     incident in `docs/automation.md`: it means the pkey/unique constraints are gone and
-     every enqueue amplifies);
-   - any single identifier with > 1,000 pending rows;
-   - oldest due unlocked job older than 1h.
-5. **yt-archive (this Mac)** — `launchctl list | grep yt-archive` (2nd column = last exit;
-   0/2 fine, 6 = Heroku creds, 8 = host memory — decoder in `docs/automation.md`). If
-   nonzero, `tail -15 ~/Library/Logs/hubandspoke-yt-archive.log` to classify.
+## 🔧 Self-healing ladder — try, verify, escalate
 
-## Fix policy — narrow allowlist, everything else reports
+Work DOWN this ladder; every action gets logged with evidence; every CRIT that survives
+the lap gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, same DSN as
+`home-machine/yt-archive/wrapper.sh`) so Pat's alerting fires.
 
-**Allowed autonomous fixes** (each is an established runbook action, safe + reversible):
-- Worker dyno `crashed` → `heroku ps:restart worker --app hubandspoke` (once per lap; if
-  it's crashed again next lap, that's CRITICAL — report, don't restart-loop).
-- yt-archive last exit 8 with the log showing the eviction race → one
-  `launchctl kickstart -k gui/501/com.hubandspoke.yt-archive`, verify the log advances.
-- Sentry issues that are exact duplicates of an already-logged, already-reported finding →
-  note the recurrence, no new report.
+**Rung 1 — ops actions (no code):**
+- worker/web dyno crashed → `heroku ps:restart <dyno>` once; verify it comes back `up`.
+- yt-archive exit 8 + eviction-race log signature → one `launchctl kickstart`, verify.
+- Stale graphile locks held by dead workers → clear per the runbook.
+- **Stuck Descript render** with a still-live publish job → re-enqueue one keyed poll via
+  `graphile_worker.add_job` (jobKey `descript-publish:<id>`, queue `media-heavy` — the
+  exact recovery used 2026-08-09). Dead publish job ("No job found") → stamp
+  `descript_publish_error` so the UI shows Retry; never re-render automatically (that
+  spends Descript credits).
+- Dead cron (last_execution stale) → `GET /api/cron/tick?name=<task>` with
+  `Authorization: Bearer $CRON_SECRET` (from `heroku config:get CRON_SECRET`) fires one
+  catch-up run; if it's dead again next lap, that's CRIT.
+- Recovery agent unloaded → `launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.hubandspoke.ops-loop-recovery.plist`.
+- Any documented runbook in `docs/automation.md` whose trigger signature matches exactly —
+  including the queue-corruption runbook (pause worker → purge amplified rows → restore
+  `_private_tasks` constraints → resume) — executed with the evidence quoted in the log.
 
-**Everything else — queue tripwire firing, R14/R15 streaks, unknown Sentry spikes, growing
-queue, creds failures (exit 6 needs Pat's Heroku key) — is REPORT, not fix:**
-1. Append a full entry to the health log (below) with the evidence gathered.
-2. Raise it loudly: `curl` a Sentry store event (same DSN as the yt-archive wrapper — see
-   `home-machine/yt-archive/wrapper.sh` SENTRY_KEY/SENTRY_STORE_URL) with
-   `fingerprint: ["hubandspoke-health-loop"]` and a message naming the finding — that rides
-   Pat's existing Sentry alerting. One event per NEW finding, not per lap.
+**Rung 2 — code fixes (the "within reason" push authority):**
+Allowed when ALL hold:
+- The root cause is demonstrated (a Sentry stack trace, a reproduced error — not a hunch).
+- The fix is small: ≤ ~60 changed lines, ≤ 3 files, no schema/migrations, no new
+  dependencies, nothing touching auth, payments, credentials, or deploy infrastructure.
+- `npx tsc --noEmit` passes and `npm run test:unit` is no worse than before.
+- The CLAUDE.md doc rules are honored (jobs/services changes stage `docs/automation.md`).
+- Commit message states the production evidence and the verification run.
+**Limits: ONE push per lap, ever.** If the same error signature is back on the lap after a
+push, do NOT try again — Sentry CRIT with both attempts' evidence, hands off to Pat.
 
-## Log — the lap's only artifact
+**Rung 3 — escalate:** anything outside rungs 1–2 (creds, spend, schema, ambiguous root
+cause, repeated failures) → health-log entry + ONE Sentry event per new finding. That IS
+a successful lap outcome — self-healing includes knowing what not to touch.
 
-Append ONE entry to `~/.claude/hubandspoke-health.log` (local file, never committed):
+## Never, regardless of ladder
+
+Scale dynos beyond baseline (web=1, worker=1) · change Heroku config vars · run
+migrations · force-push · touch other machines' loops (Pulse/Slope) beyond the yt-archive
+kickstart · push twice in one lap · push when tests fail.
+
+## Log — one entry per lap, `~/.claude/hubandspoke-health.log`
+
 ```
-2026-08-09 14:30  OK  sentry=0new heroku=up/clean queue=18(tasks 55=55) yt=exit0
+2026-08-09 14:30  OK    sentry=0new heroku=up/clean req(max 1.8s p95~0.9s) queue=18(55=55) yt=exit0
+2026-08-09 15:30  HEAL  worker crashed -> restarted, verified up. rest green
+2026-08-09 16:30  CRIT  tripwire 61!=55 -> ran queue runbook (evidence...) -> 55=55; sentry event sent
 ```
-or on findings, the same line with `ATTN`/`CRIT` + a short indented block of evidence and
-what was done (fixed per allowlist / reported via Sentry). The previous entries ARE the
-memory between laps — read the last ~5 lines at lap start instead of re-deriving state.
+Findings get a short indented evidence block. The log is local — never committed.
