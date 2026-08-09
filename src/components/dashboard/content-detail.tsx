@@ -1473,7 +1473,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/production-items/${contentId}`);
+      // credentials:"include" matches the page-level preload hint — same-origin
+      // behavior is identical; only the cache-match algorithm cares.
+      const res = await fetch(`/api/production-items/${contentId}`, { credentials: "include" });
       if (!res.ok) {
         setData(null);
         return;

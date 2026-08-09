@@ -25,7 +25,10 @@ export default auth((req) => {
   // without a session cookie. Returns 200/503 based on observed state;
   // there's no sensitive data in the response.
   const isHealthApi = pathname.startsWith("/api/health");
-  if (isAuthApi || isCronApi || isWebhookApi || isInviteApi || isHealthApi)
+  // Boot-time cache warmer (scripts/boot-web.sh). Auth is per-route via
+  // Bearer CRON_SECRET — same contract as /api/cron/tick.
+  const isWarmApi = pathname === "/api/warm";
+  if (isAuthApi || isCronApi || isWebhookApi || isInviteApi || isHealthApi || isWarmApi)
     return NextResponse.next();
 
   const isPublic = PUBLIC_PAGES.has(pathname);

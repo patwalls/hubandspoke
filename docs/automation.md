@@ -1654,3 +1654,14 @@ has a row in `docs/features.md`'s cleanup backlog.
 - **No central status-transition state machine.** Validation logic lives in the UI, the PATCH route, and the Notion push-back independently. Adding a new status today requires touching all three.
 - **`/api/cron/*` routes** still exist. `tick` is debug; the others (`notion-sync`, `performance-sync`, `enrichment-sweep`) still run their underlying sync inline and are useful for manual re-runs. The old `/api/cron/youtube-sync` + `/api/sync/youtube` routes were removed alongside `matg-sync` — use `/api/cron/tick?name=account-content-sync-sweep` for a manual full-fleet sync.
 - **`assignees.ts` resolution chain** is consolidated under `resolveEditor()` — source item → format `editorNotionUserId` → brand `defaultEditorUserId` → global fallback. The producer role and its parallel chain were dropped 2026-05-14; every creation site (Notion sync, manual CRUD, derivative routes, threshold-monitor, account-content-sync) goes through this one function.
+
+### Web-dyno boot warmup (2026-08-10)
+- `Procfile` web = `bash scripts/boot-web.sh`: starts Next, then fires
+  `GET /api/warm` (Bearer `CRON_SECRET`, middleware-exempt like /api/cron)
+  once the port answers. The warmer imports the heavy server modules and
+  pre-populates the shared 60s report cache (`src/lib/db/queries-cached.ts`)
+  for every enabled brand + the credits banners — measured 892ms total.
+  Why: the first user after every deploy paid ~2.3s of lazy route-module
+  init PLUS cold caches on every dashboard route ("everything feels slow
+  right after a deploy" — 2026-08-09). Re-callable any time; safe noop
+  without the secret.
