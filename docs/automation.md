@@ -506,6 +506,32 @@ When the user clicks **Repost** or **Cross-post**, the route calls `enrichSingle
 
 Closes the loop on the clip-creation flow: when Descript finishes assembling a composition, render it to MP4, archive to our S3 bucket, and surface in the simulator on the clip's detail page. Auto-fires after every clip-creation path; can be re-triggered manually via the Actions dropdown to pull fresh edits.
 
+**2026-08-09 incident — 7.3M-row queue runaway; every enqueue of this task now
+carries `jobKey: descript-publish:<itemId>` + `jobKeyMode: "replace"` (all five
+sites: both self-polls, both auto-chain kickoffs, the manual route).** Root
+cause was NOT this task's logic: the May DB migration dropped
+`graphile_worker._private_tasks`' primary key and unique constraint (identity
+sequence also reset). graphile registers tasks with `ON CONFLICT DO NOTHING` —
+with no unique constraint the conflict never fires, so every worker boot
+re-inserted all ~55 identifiers (→7,473 rows), and because job inserts resolve
+task by identifier, **every single enqueue inserted one job row per duplicate
+task row** (~×3,974 by the end, +1 per enqueue). This task's 10s self-poll made
+it the dominant victim: 5.8M pending rows, each *worked* poll spawning ~4k
+more, ~490k rows/hour at peak. Fallout: repeated phase-1 re-kicks created real
+Descript publish jobs (the "clip ready in Descript ×hundreds" notifications),
+the dashboard's `descript-status` route seq-scanned the 2.9 GB table on every
+poll (H12 timeouts = "server crashing"), and cross-post enqueues drowned.
+Remediation: purged the queue (7.36M → 241 legit rows), rebuilt
+`_private_tasks` (55 rows, pkey + unique restored, ambiguous task_ids resolved
+by payload shape), `VACUUM FULL` (2,984 MB → 240 KB), and added the jobKeys as
+belt-and-braces. **Diagnostic that cracked it:** `SELECT count(*), count(DISTINCT
+identifier) FROM graphile_worker._private_tasks` — if those numbers ever
+diverge again, the constraints are gone again. A one-row-per-instant burst
+(`GROUP BY created_at ORDER BY count DESC`) shows the amplification factor.
+Note: the popular first guess "millions of *failed* jobs" was wrong — only 263
+jobs had failed; 7.17M had never been attempted because workers only fetch jobs
+whose task_id matches the task rows registered at their own boot.
+
 - **Files:**
   - `src/jobs/tasks/descript-publish-and-archive.ts` — self-polling task. Phase 1 calls `POST /jobs/publish` and stamps `descript_publish_job_id`. Phase 2 polls `GET /jobs/{id}` every 10s; on `job_state="stopped"` + `result.status="success"`, downloads the MP4 via `archiveRemoteToS3`, deletes prior Descript-published media rows (matched by `source_url LIKE 'https://production-273614-media-export.storage.googleapis.com/%'`, so manual uploads are preserved), **inserts the new `production_item_media` row at `index = 0`** (shifts every remaining row up by 1 first, via a two-pass negative-scratch UPDATE so the `(production_item_id, index)` unique constraint doesn't collide mid-renumber), mirrors the cover columns, and stamps `descript_published_at`. **Index-0 is the canonical slot for the rendered clip** — simulator `slides[0]` and the legacy `mediaS3Key` mirror (which picks the lowest-index row) both resolve to it. Inherited source media from `repost-seed` (which copies the parent's media preserving the parent's original index) gets pushed to index 1+ instead of squatting on index 0 and hiding the render. 15-minute deadline.
   - `src/jobs/tasks/descript-clip-resolve.ts` — auto-chains: after stamping `descript_composition_id` on the derivative item, enqueues `descript-publish-and-archive`. **Underlord settle delay (2026-05-20):** when the resolver finishes an agent path (`importMode=false`, i.e. Underlord just stopped), the publish enqueue runs with `runAt = now + DESCRIPT_UNDERLORD_SETTLE_MS` (default 60s). Descript flips the agent job to `stopped` as soon as instructions are dispatched, but the composition mutations (layout pack, captions, filler trims) can still be writing for ~30-60s afterwards; publishing immediately renders a pre-layout MP4. Cold-import (`importMode=true`) has no Underlord involved, so no delay. Same settle wait applies in `clip-idea-precise-cut.ts pollLayoutOnce` after the precise-cut layout-pack Underlord call stops. Override via env. Idempotent (no-op if already rendered).

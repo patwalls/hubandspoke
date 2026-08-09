@@ -90,10 +90,16 @@ export async function POST(request: Request, context: RouteContext) {
     })
     .where(eq(productionItems.id, id));
 
-  await enqueue("descript-publish-and-archive", {
-    productionItemId: id,
-    force: true, // skip the "already rendered" guard since the user explicitly asked
-  });
+  await enqueue(
+    "descript-publish-and-archive",
+    {
+      productionItemId: id,
+      force: true, // skip the "already rendered" guard since the user explicitly asked
+    },
+    // jobKey: replaces any pending poll for this item instead of stacking a
+    // second chain (see descript-publish-and-archive.ts).
+    { jobKey: `descript-publish:${id}`, jobKeyMode: "replace" },
+  );
 
   return NextResponse.json({ ok: true }, { status: 202 });
 }

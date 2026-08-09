@@ -120,7 +120,18 @@ export const descriptPublishAndArchiveTask: Task = async (
         deadlineAt: Date.now() + DEADLINE_MS,
         force: payload.force,
       },
-      { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+      // jobKey collapses the poll chain to at most ONE pending job per item.
+      // Without it (pre-2026-08-09), every chain accumulated a new row per
+      // poll — and when `_private_tasks` lost its unique constraint in the
+      // May restore, each of those enqueues was amplified ×N (one row per
+      // duplicate task row), snowballing to 5.8M pending jobs. The key is
+      // belt-and-braces on top of the restored constraint: even a re-kicked
+      // item can only ever have one pending poll.
+      {
+        runAt: new Date(Date.now() + POLL_INTERVAL_MS),
+        jobKey: `descript-publish:${item.id}`,
+        jobKeyMode: "replace",
+      },
     );
     return;
   }
@@ -154,7 +165,12 @@ export const descriptPublishAndArchiveTask: Task = async (
     await helpers.addJob(
       "descript-publish-and-archive",
       payload,
-      { runAt: new Date(Date.now() + POLL_INTERVAL_MS) },
+      // Same jobKey as the kickoff enqueue — see the comment there.
+      {
+        runAt: new Date(Date.now() + POLL_INTERVAL_MS),
+        jobKey: `descript-publish:${item.id}`,
+        jobKeyMode: "replace",
+      },
     );
     return;
   }

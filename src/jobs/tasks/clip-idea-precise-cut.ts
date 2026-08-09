@@ -486,7 +486,13 @@ async function pollLayoutOnce(
     await helpers.addJob(
       "descript-publish-and-archive",
       { productionItemId: payload.derivativeItemId },
-      { runAt: new Date(Date.now() + UNDERLORD_SETTLE_MS) },
+      // jobKey: one pending publish job per item, ever — a re-kick replaces
+      // any pending poll (see descript-publish-and-archive.ts).
+      {
+        runAt: new Date(Date.now() + UNDERLORD_SETTLE_MS),
+        jobKey: `descript-publish:${payload.derivativeItemId}`,
+        jobKeyMode: "replace",
+      },
     );
     return;
   }

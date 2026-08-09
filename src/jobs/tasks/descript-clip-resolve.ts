@@ -168,9 +168,13 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
       await helpers.addJob(
         "descript-publish-and-archive",
         { productionItemId: payload.derivativeItemId },
-        settleMs > 0
-          ? { runAt: new Date(Date.now() + settleMs) }
-          : undefined,
+        // jobKey: one pending publish job per item, ever — a re-kick replaces
+        // any pending poll (see descript-publish-and-archive.ts).
+        {
+          ...(settleMs > 0 ? { runAt: new Date(Date.now() + settleMs) } : {}),
+          jobKey: `descript-publish:${payload.derivativeItemId}`,
+          jobKeyMode: "replace",
+        },
       );
     }
     // Cold full-video import: stamp the pillar's seed_composition_id (NOT

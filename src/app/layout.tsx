@@ -20,6 +20,13 @@ export const metadata: Metadata = {
   description: "Content Command Center",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Edge-to-edge on notched iPhones — the app shell handles its own padding.
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -30,7 +37,11 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans">{children}</body>
+      {/* overflow-x-clip (not -hidden): kills page-level horizontal panning on
+          mobile without creating a scroll container, so position:sticky inside
+          keeps working. Every wide table already has its own overflow-x-auto
+          wrapper — nothing becomes unreachable. */}
+      <body className="min-h-full flex flex-col font-sans overflow-x-clip">{children}</body>
     </html>
   );
 }
