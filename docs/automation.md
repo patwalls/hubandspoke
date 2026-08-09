@@ -38,6 +38,15 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   */15 min   descript-credits-watch → email Pat + Sam when Descript jobs hit "Insufficient AI credits" (deduped 4h)
   *:45       yt-archive-watch       → Sentry issue + email Pat + Sam when YouTube items sit unarchived >12h (home-machine cron down; email deduped 6h)
   (home Mac, hourly) yt-archive launchd cron → archive-yt-local.ts: yt-dlp → prod S3 + prod DB. NOT on the worker dyno — see home-machine/yt-archive/
+  (home Mac, on-demand) H&S OPS LOOP — `/go` in a Claude session (usually via `cx hubandspoke --go`)
+    runs `.claude/commands/lap.md` on repeat through the shared fresh-context runner
+    (~/.claude/loop-runner.sh, one cold `claude -p "/lap"` per cadence tick, default 30m).
+    Each lap: worker heartbeat → Sentry (org pat-walls) → Heroku dynos/memory errors →
+    queue fatness + the _private_tasks corruption tripwire → yt-archive last exit. Fixes
+    only a narrow runbook allowlist (restart crashed worker once; kickstart yt-archive on
+    the known eviction race); everything else is reported via a Sentry event
+    (fingerprint hubandspoke-health-loop) + ~/.claude/hubandspoke-health.log. It NEVER
+    commits or pushes (pushes auto-deploy). Stop: kill $(cat .loop.pid) or /pause-loops.
 
 USER / API ENTRY POINTS
   POST /api/accounts/[id]/refresh?mode=async              → account-refresh

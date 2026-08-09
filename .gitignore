@@ -61,3 +61,7 @@ next-env.d.ts
 # Throwaway e2e specs spun up to verify a UI change when the MCP browser is down.
 # See CLAUDE.md → "When the MCP session is dead". Real specs live in tests/e2e/*.spec.ts.
 /tests/e2e/_scratch*.spec.ts
+
+# autonomous ops loop artifacts (runner lock/log — see .claude/commands/go.md)
+.loop.log
+.loop.pid
