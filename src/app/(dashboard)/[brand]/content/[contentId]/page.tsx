@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { preload } from "react-dom";
 import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -8,6 +7,7 @@ import { fetchBrandBySlug } from "@/lib/db/brands";
 import { getAccounts } from "@/lib/db/accounts";
 import { getBrandStatuses } from "@/lib/db/brand-statuses";
 import { ContentDetail } from "@/components/dashboard/content-detail";
+import { getProductionItemDetail } from "@/lib/services/production-item-detail";
 import { auth } from "@/lib/auth";
 
 interface ContentDetailPageProps {
@@ -39,22 +39,22 @@ export default async function BrandContentDetailPage({
   // Fetch accounts once on the server and thread through so the picker can
   // render without an extra round-trip. Keep the shape minimal — the picker
   // only needs id/brand/platform/handle/displayName.
-  //
-  // preload: the detail payload is fetched client-side after hydration —
-  // this <link rel=preload as=fetch> makes the browser START that request
-  // while the JS is still loading, cutting the serial
-  // shell -> hydrate -> fetch -> render waterfall (~3s felt) down by a full
-  // fetch leg. crossOrigin must match the client fetch's credentials mode
-  // (content-detail.tsx uses credentials:"include") or the preload is wasted.
-  preload(`/api/production-items/${contentId}`, {
-    as: "fetch",
-    crossOrigin: "use-credentials",
-  });
-  const [accountRows, statusRows, session] = await Promise.all([
+  const [accountRows, statusRows, session, detailPayload] = await Promise.all([
     getAccounts(),
     getBrandStatuses(brand),
     auth(),
+    // SSR the detail payload so the first paint carries data — no client
+    // shell->hydrate->fetch waterfall. Fail-open: a throw here must not
+    // 500 the page shell; the client falls back to its own fetch.
+    getProductionItemDetail(contentId).catch(() => null),
   ]);
+  // JSON-roundtrip so the client receives EXACTLY the fetch-path shape
+  // (Dates as ISO strings, undefined dropped) — one code path, no drift.
+  const initialData = detailPayload
+    ? (JSON.parse(JSON.stringify(detailPayload)) as Parameters<
+        typeof ContentDetail
+      >[0]["initialData"])
+    : null;
   const isAdmin = session?.user?.role === "admin";
   const accounts = accountRows.map((a) => ({
     id: a.id,
@@ -79,6 +79,11 @@ export default async function BrandContentDetailPage({
 
   return (
     <ContentDetail
+      // key: App Router reuses the client component across detail->detail
+      // navigations; keying by id forces a remount so useState(initialData)
+      // and the run-once hydrate effect are always for THIS item.
+      key={contentId}
+      initialData={initialData}
       brand={brand}
       contentId={contentId}
       accounts={accounts}

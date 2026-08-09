@@ -70,21 +70,32 @@ export async function GET(request: NextRequest) {
     timings["credits"] = -1;
   }
 
-  // Warm the lazy-loaded route MODULES for the hot interactive endpoints —
-  // importing runs module init (the ~2.3s the first caller otherwise pays)
-  // without executing any handler. Measured: detail API 2.28s cold ->
-  // 59ms warm; the module load IS the cold cost.
+  // EXECUTE the detail service for the most recent published item — bare
+  // route-module imports measured 6ms (the bundler folds them; nothing
+  // actually initializes). Running the service warms the real cost: module
+  // graph, pg pool, S3 presign client, and query plans. This is the same
+  // function the detail page SSRs, so the first human detail view after a
+  // deploy is served warm.
   {
     const t = Date.now();
-    await Promise.allSettled([
-      import("@/app/api/production-items/[id]/route"),
-      import("@/app/api/production-items/[id]/descript-status/route"),
-      import("@/app/api/spoke-queue/route"),
-      import("@/app/api/cross-post-queue/route"),
-      import("@/app/api/repost-queue/route"),
-      import("@/app/api/notifications/route"),
-    ]);
-    timings["route-modules"] = Date.now() - t;
+    try {
+      const { getProductionItemDetail } = await import(
+        "@/lib/services/production-item-detail"
+      );
+      const { db } = await import("@/lib/db");
+      const { productionItems } = await import("@/lib/db/schema");
+      const { desc, isNotNull } = await import("drizzle-orm");
+      const [recent] = await db
+        .select({ id: productionItems.id })
+        .from(productionItems)
+        .where(isNotNull(productionItems.publishedDate))
+        .orderBy(desc(productionItems.publishedDate))
+        .limit(1);
+      if (recent) await getProductionItemDetail(recent.id);
+      timings["detail-service"] = Date.now() - t;
+    } catch {
+      timings["detail-service"] = -1;
+    }
   }
 
   return NextResponse.json({ ok: true, totalMs: Date.now() - t0, timings });

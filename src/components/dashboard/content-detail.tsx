@@ -253,6 +253,11 @@ type StatusOption = {
 interface ContentDetailProps {
   brand: string;
   contentId: string;
+  /** SSR'd first payload (same shape the API returns, JSON-roundtripped by
+   *  the page). Present on normal navigations — the component renders data
+   *  on first paint with NO client fetch. Mutation refetches still go
+   *  through load()/the API route. */
+  initialData?: DetailResponse | null;
   /** Every account (across brands) for the picker dropdown. Loaded once
    *  on the server page; the picker grouping uses `brandLabel`. */
   accounts: PickerAccount[];
@@ -388,7 +393,7 @@ const DETAIL_TAB_VALUES = [
 ] as const;
 type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
-export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses, isAdmin }: ContentDetailProps) {
+export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses, isAdmin, initialData }: ContentDetailProps) {
   // Sorted dropdown order; palette map for quick chip-color lookup.
   // Published / Scheduled are filtered OUT of the dropdown — those two
   // transitions are reachable only through the PublishScheduleDialog
@@ -423,7 +428,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     [pathname, router, searchParams],
   );
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<DetailResponse | null>(null);
+  const [data, setData] = useState<DetailResponse | null>(initialData ?? null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<
@@ -1497,8 +1502,16 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   loadRef.current = load;
 
   useEffect(() => {
+    if (initialData) {
+      // SSR path: data is already in state — hydrate the derived item state
+      // exactly as load() would, without refetching.
+      applyItem(initialData.item, initialData.pillar ?? null, initialData.repostedFrom ?? null);
+      setLoading(false);
+      return;
+    }
     load();
-  }, [load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
 
   // Manual entry point for the Draft Algorithm. `force: true` because this
   // is an explicit operator click — bypass the "already-filled" idempotency
