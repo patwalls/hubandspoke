@@ -117,6 +117,12 @@ export function IdeaQueueTable({
     });
   }, [items, sortKey, sortDir]);
 
+  // First-paint cap: the All tab holds ~400 rows; painting them all blew
+  // the 1s content-visible budget. Sort/filter operate on the full set.
+  const RENDER_CAP = 150;
+  const [showAllRows, setShowAllRows] = useState(false);
+  const visibleQueueRows = showAllRows ? sortedItems : sortedItems.slice(0, RENDER_CAP);
+
   // Prune selection to ids that are still in the visible list — keeps selection
   // sane when the user changes filters or items refresh.
   useEffect(() => {
@@ -346,7 +352,7 @@ export function IdeaQueueTable({
               </tr>
             </thead>
             <tbody>
-              {sortedItems.map((item) => (
+              {visibleQueueRows.map((item) => (
                 <IdeaQueueRow
                   key={item.id}
                   item={item}
@@ -362,6 +368,15 @@ export function IdeaQueueTable({
                   }
                 />
               ))}
+              {sortedItems.length > visibleQueueRows.length && (
+                <tr>
+                  <td colSpan={99} className="px-4 py-3 text-center">
+                    <button type="button" onClick={() => setShowAllRows(true)} className="text-sm text-primary hover:underline">
+                      Show all {sortedItems.length.toLocaleString()} rows
+                    </button>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

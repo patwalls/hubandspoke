@@ -70,5 +70,22 @@ export async function GET(request: NextRequest) {
     timings["credits"] = -1;
   }
 
+  // Warm the lazy-loaded route MODULES for the hot interactive endpoints —
+  // importing runs module init (the ~2.3s the first caller otherwise pays)
+  // without executing any handler. Measured: detail API 2.28s cold ->
+  // 59ms warm; the module load IS the cold cost.
+  {
+    const t = Date.now();
+    await Promise.allSettled([
+      import("@/app/api/production-items/[id]/route"),
+      import("@/app/api/production-items/[id]/descript-status/route"),
+      import("@/app/api/spoke-queue/route"),
+      import("@/app/api/cross-post-queue/route"),
+      import("@/app/api/repost-queue/route"),
+      import("@/app/api/notifications/route"),
+    ]);
+    timings["route-modules"] = Date.now() - t;
+  }
+
   return NextResponse.json({ ok: true, totalMs: Date.now() - t0, timings });
 }

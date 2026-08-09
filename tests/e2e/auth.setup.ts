@@ -34,8 +34,18 @@ setup("authenticate", async ({ page }) => {
   }
 
   await page.goto("/login");
-  await page.getByLabel(/email/i).fill(email);
-  await page.getByLabel(/password/i).fill(password);
+  // Hydration guard: filling a controlled React input BEFORE hydration sets
+  // the DOM value but not React state — the form then submits empty and the
+  // test stays on /login (observed flake 2026-08-10). Wait for the page to
+  // go network-idle (hydration done), fill, and verify the value stuck;
+  // re-fill once if the first fill raced.
+  await page.waitForLoadState("networkidle");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.getByLabel(/email/i).fill(email);
+    await page.getByLabel(/password/i).fill(password);
+    if ((await page.getByLabel(/email/i).inputValue()) === email) break;
+    await page.waitForTimeout(1000);
+  }
   await page.getByRole("button", { name: /sign in/i }).click();
 
   // After login the app routes to its default brand landing page (e.g.

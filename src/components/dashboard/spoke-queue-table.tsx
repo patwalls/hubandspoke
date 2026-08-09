@@ -83,6 +83,11 @@ export function SpokeQueueTable({
     });
   }, [items, sortKey, sortDir]);
 
+  // First-paint cap — same budget rationale as idea-queue-table.
+  const RENDER_CAP = 150;
+  const [showAllRows, setShowAllRows] = useState(false);
+  const visibleQueueRows = showAllRows ? sortedItems : sortedItems.slice(0, RENDER_CAP);
+
   if (items.length === 0) {
     return (
       <div className="px-4 py-12 text-center text-muted-foreground text-sm border border-border rounded-lg bg-card">
@@ -174,7 +179,7 @@ export function SpokeQueueTable({
             </tr>
           </thead>
           <tbody>
-            {sortedItems.map((item) => (
+            {visibleQueueRows.map((item) => (
               <SpokeQueueRow
                 key={item.id}
                 item={item}
@@ -182,6 +187,13 @@ export function SpokeQueueTable({
                 onActioned={onMutate}
               />
             ))}
+            {sortedItems.length > visibleQueueRows.length && (
+              <tr><td colSpan={99} className="px-4 py-3 text-center">
+                <button type="button" onClick={() => setShowAllRows(true)} className="text-sm text-primary hover:underline">
+                  Show all {sortedItems.length.toLocaleString()} rows
+                </button>
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>

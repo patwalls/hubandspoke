@@ -525,6 +525,15 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
       : (bVal as number) - (aVal as number);
   }), [filtered, sortKey, sortDir, formatBars]);
 
+  // Initial render cap: painting all ~1,200 rows (~12k DOM nodes) took the
+  // page past the 1s content-visible budget. First paint shows the top 150;
+  // "Show all" renders the rest on demand. Search/sort/export always operate
+  // on the FULL dataset — only what's painted is capped.
+  const RENDER_CAP = 150;
+  const [showAllRows, setShowAllRows] = useState(false);
+  const visibleRows = showAllRows ? sorted : sorted.slice(0, RENDER_CAP);
+  const hiddenCount = sorted.length - visibleRows.length;
+
   function SortHeader({
     label,
     sortKeyName,
@@ -917,7 +926,7 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
             </tr>
           </thead>
           <tbody>
-            {sorted.map((item) => (
+            {visibleRows.map((item) => (
               <tr
                 key={item.id}
                 className="border-b border-border/50 hover:bg-accent/30 transition-colors"
@@ -1136,6 +1145,19 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
                 </td>
               </tr>
             ))}
+            {hiddenCount > 0 && (
+              <tr>
+                <td colSpan={hasPerformanceSync ? 13 : 12} className="px-4 py-3 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowAllRows(true)}
+                    className="text-sm text-primary hover:underline"
+                  >
+                    Show all {sorted.length.toLocaleString()} rows ({hiddenCount.toLocaleString()} more)
+                  </button>
+                </td>
+              </tr>
+            )}
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={hasPerformanceSync ? 13 : 12} className="px-4 py-12 text-center text-muted-foreground text-sm">

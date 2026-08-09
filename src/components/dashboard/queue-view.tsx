@@ -2,15 +2,16 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
-import { IdeaQueueTable } from "./idea-queue-table";
-import { CrossPostQueueTable } from "./cross-post-queue-table";
-import { RepostQueueTable } from "./repost-queue-table";
-import { SpokeQueueTable } from "./spoke-queue-table";
-import { HistoryQueueTable } from "./history-queue-table";
 import { SelectPill } from "./filter-pills";
+const HistoryQueueTable = dynamic(() => import("./history-queue-table").then((m) => m.HistoryQueueTable), { ssr: false });
+const SpokeQueueTable = dynamic(() => import("./spoke-queue-table").then((m) => m.SpokeQueueTable), { ssr: false });
+const RepostQueueTable = dynamic(() => import("./repost-queue-table").then((m) => m.RepostQueueTable), { ssr: false });
+const CrossPostQueueTable = dynamic(() => import("./cross-post-queue-table").then((m) => m.CrossPostQueueTable), { ssr: false });
+const IdeaQueueTable = dynamic(() => import("./idea-queue-table").then((m) => m.IdeaQueueTable), { ssr: false });
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 import type { CrossPostCandidatesResult } from "@/lib/services/cross-post-candidates";

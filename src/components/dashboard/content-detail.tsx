@@ -2,12 +2,12 @@
 
 import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { BackLink } from "./back-link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ChevronDownIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, GitBranchIcon, GitMerge, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
 import type { ProductionItem } from "@/types";
-import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import {
   ViewsSparkline,
   type ViewHistoryPoint,
@@ -58,8 +58,15 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
-import { CrossPostTriagePanel } from "./cross-post-triage-dialog";
-import { RepostTriagePanel } from "./repost-triage-dialog";
+const AttachDmKeywordDialog = dynamic(() => import("@/components/dashboard/attach-dm-keyword-dialog").then((m) => m.AttachDmKeywordDialog), { ssr: false });
+const TiktokDraftDialog = dynamic(() => import("./tiktok-draft-dialog").then((m) => m.TiktokDraftDialog), { ssr: false });
+const PublishScheduleDialog = dynamic(() => import("./publish-schedule-dialog").then((m) => m.PublishScheduleDialog), { ssr: false });
+const KillIdeaDialog = dynamic(() => import("./kill-idea-dialog").then((m) => m.KillIdeaDialog), { ssr: false });
+const ForkFormatDialog = dynamic(() => import("./fork-format-dialog").then((m) => m.ForkFormatDialog), { ssr: false });
+const MergeModal = dynamic(() => import("./merge-modal").then((m) => m.MergeModal), { ssr: false });
+const ClipIdeasPanel = dynamic(() => import("./clip-ideas-panel").then((m) => m.ClipIdeasPanel), { ssr: false });
+const RepostTriagePanel = dynamic(() => import("./repost-triage-dialog").then((m) => m.RepostTriagePanel), { ssr: false });
+const CrossPostTriagePanel = dynamic(() => import("./cross-post-triage-dialog").then((m) => m.CrossPostTriagePanel), { ssr: false });
 import type { BrandAccount } from "@/lib/services/cross-post-candidates";
 import { TranscriptButton } from "./transcript-dialog";
 import { EnrichmentButton, type EnrichmentMedia } from "./enrichment-dialog";
@@ -84,10 +91,7 @@ import {
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
-import { ClipIdeasPanel } from "./clip-ideas-panel";
 import { ContentPreview } from "./preview/content-preview";
-import { MergeModal } from "./merge-modal";
-import { ForkFormatDialog } from "./fork-format-dialog";
 import { PublishedEmbed } from "./preview/published-embed";
 import type { ContentDraftContent, FormatFieldSchema } from "@/lib/db/schema";
 import { runMultipartUpload } from "@/lib/client-multipart-upload";
@@ -107,9 +111,6 @@ export interface DraftRow {
 }
 
 export type FieldSaveState = "idle" | "saving" | "saved" | "error";
-import { KillIdeaDialog } from "./kill-idea-dialog";
-import { PublishScheduleDialog } from "./publish-schedule-dialog";
-import { TiktokDraftDialog } from "./tiktok-draft-dialog";
 import { TiktokDraftBanner } from "./tiktok-draft-banner";
 import { UserChip } from "./user-chip";
 import { renderInstructions } from "@/lib/utils/markdown";

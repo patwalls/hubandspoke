@@ -10,8 +10,11 @@ import type { PickerAccount } from "@/components/ui/account-post-type-picker";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
-import { BangersView } from "./bangers-view";
-import { DuplicatesView } from "./duplicates-view";
+import dynamic from "next/dynamic";
+// Lazy: these alternate views load only when selected via the "Other" pill —
+// keeping them out of the default content-list chunk.
+const BangersView = dynamic(() => import("./bangers-view").then((m) => m.BangersView), { ssr: false });
+const DuplicatesView = dynamic(() => import("./duplicates-view").then((m) => m.DuplicatesView), { ssr: false });
 
 interface ContentViewProps {
   brand: string;
