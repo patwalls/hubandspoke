@@ -29,11 +29,10 @@ interface CommentEditorProps {
   disabled?: boolean;
 }
 
-const EMPTY_HTML_RE = /^(\s|<p>\s*<\/p>|<br\s*\/?>)*$/i;
-
-export function isEditorEmpty(html: string): boolean {
-  return EMPTY_HTML_RE.test(html);
-}
+// Re-exported from the standalone module so existing imports keep working;
+// lightweight consumers should import from "@/lib/comments/editor-empty"
+// directly to avoid pulling TipTap into their chunk.
+export { isEditorEmpty } from "@/lib/comments/editor-empty";
 
 // Cached user list for @mention suggestions. Shared across editor instances on
 // the same page so the composer + an open edit box don't double-fetch.

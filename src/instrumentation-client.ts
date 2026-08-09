@@ -13,7 +13,10 @@ if (process.env.NODE_ENV === "production") {
     dsn: "https://cc94e45339b831a683f41991a90e811f@o174111.ingest.us.sentry.io/4511350981328896",
 
     // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
-    tracesSampleRate: 1,
+    // 10% perf-trace sampling (errors are still captured at 100% — this only
+    // affects performance traces). 1.0 was span-instrumenting every request
+    // on a Basic dyno and burning quota for traces nobody read.
+    tracesSampleRate: 0.1,
     // Enable logs to be sent to Sentry
     enableLogs: true,
 

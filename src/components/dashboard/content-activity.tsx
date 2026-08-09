@@ -37,7 +37,27 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { CommentEditor, isEditorEmpty } from "@/components/dashboard/comment-editor";
+import dynamic from "next/dynamic";
+import { isEditorEmpty } from "@/lib/comments/editor-empty";
+
+// Dynamic: the editor drags the whole TipTap/ProseMirror bundle (~900 KB
+// chunk) — loading it lazily takes it off the detail page's critical path.
+// ssr:false is correct anyway (ProseMirror is DOM-only). The placeholder
+// mirrors the editor's collapsed height so the comment box doesn't jump.
+const CommentEditor = dynamic(
+  () =>
+    import("@/components/dashboard/comment-editor").then(
+      (m) => m.CommentEditor,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="min-h-[38px] rounded-md border border-input bg-background px-3 py-2 text-sm text-muted-foreground">
+        Loading editor…
+      </div>
+    ),
+  },
+);
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { cn } from "@/lib/utils";
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useDeferredValue } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -456,8 +456,11 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
     }
   }
 
-  const query = search.trim().toLowerCase();
-  const filtered = query
+  // useDeferredValue: keystrokes update the input immediately; the 1,200-row
+  // filter+sort+render trails behind instead of blocking each keypress.
+  const deferredSearch = useDeferredValue(search);
+  const query = deferredSearch.trim().toLowerCase();
+  const filtered = useMemo(() => query
     ? items.filter((item) => {
         const title = item.title?.toLowerCase() ?? "";
         const format = item.format?.toLowerCase() ?? "";
@@ -468,7 +471,7 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
           platforms.includes(query)
         );
       })
-    : items;
+    : items, [items, query]);
 
   function vsP75For(item: ProductionItem): number | null {
     if (!item.format || !item.postType || item.views == null) return null;
@@ -477,7 +480,9 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
     return item.views / bar.p;
   }
 
-  const sorted = [...filtered].sort((a, b) => {
+  // Memoized: re-sorting 1,200 rows on every unrelated re-render (dialog
+  // opens, poll ticks) was the main interaction cost on this page.
+  const sorted = useMemo(() => [...filtered].sort((a, b) => {
     // Sorting by "Published" uses publishedAt when we have it (precise
     // platform timestamp or in-app publish moment) and falls back to
     // midnight of publishedDate for historic rows. The visible column
@@ -518,7 +523,7 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
     return sortDir === "asc"
       ? (aVal as number) - (bVal as number)
       : (bVal as number) - (aVal as number);
-  });
+  }), [filtered, sortKey, sortDir, formatBars]);
 
   function SortHeader({
     label,
