@@ -1,9 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { getContentReport } from "@/lib/db/queries";
 import { format, subDays, differenceInDays, parseISO } from "date-fns";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 
 const MAX_DATE_RANGE_DAYS = 730;
+
+// 60s shared cache. This is the dashboard's heaviest route (~2.7 MB payload,
+// 1.1–1.6s in prod) and it's hit constantly — brand-tab switches, back-nav,
+// several team members looking at the same report. The data is analytics
+// (views/likes roll in via background sweeps), so 60s staleness is invisible;
+// item EDITS flow through other routes and pages, not this report. Keyed by
+// the full param set so every filter combination caches independently.
+// Cache HITs return the JSON-roundtripped value (Dates as ISO strings) while
+// MISSes return live Drizzle rows — identical on the wire, since this route
+// JSON-serializes the result either way.
+const getContentReportCached = unstable_cache(
+  async (params: Parameters<typeof getContentReport>[0]) => getContentReport(params),
+  ["content-report"],
+  { revalidate: 60 },
+);
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -37,7 +53,7 @@ export async function GET(request: NextRequest) {
   };
 
   try {
-    const data = await getContentReport(params);
+    const data = await getContentReportCached(params);
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error generating content report:", error);
