@@ -201,12 +201,21 @@ ensure_memory_or_exit() {
 
     # Only evict an actual ollama model, and only if ollama is the thing eating
     # the box. Never kill processes we don't understand.
+    #
+    # Up to 3 eviction attempts: a single evict can lose the race with Slope's
+    # judge traffic — `ollama stop` returns, a judge call lands seconds later,
+    # and the model reloads (~6s cold) while we're still waiting for the
+    # kernel to reclaim. Observed 2026-08-09 02:25: "after eviction" showed
+    # the same 18.8GB llama-server still resident and the whole hour was
+    # skipped. Re-evicting inside the same run wins unless judge traffic is
+    # literally continuous — and if it is, exit 8 stays honest.
     if [[ "${YT_ARCHIVE_EVICT_OLLAMA:-1}" == "1" ]] \
-        && command -v ollama >/dev/null 2>&1 \
-        && [[ "$(top_consumer)" == *"llama-server"* ]]; then
-        LOADED_MODEL=$(ollama ps 2>/dev/null | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | awk 'NR==2 {print $1}')
-        if [[ -n "${LOADED_MODEL:-}" ]]; then
-            log "evicting ollama model '$LOADED_MODEL' for this run (it reloads on the next judge call)"
+        && command -v ollama >/dev/null 2>&1; then
+        for _attempt in 1 2 3; do
+            [[ "$(top_consumer)" == *"llama-server"* ]] || break
+            LOADED_MODEL=$(ollama ps 2>/dev/null | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | awk 'NR==2 {print $1}')
+            [[ -n "${LOADED_MODEL:-}" ]] || break
+            log "evicting ollama model '$LOADED_MODEL' (attempt $_attempt/3 — it reloads on the next judge call)"
             timeout 60 ollama stop "$LOADED_MODEL" >/dev/null 2>&1 || true
             # Reclamation isn't instant, and `ollama stop` returns before the
             # memory is actually released. Poll rather than guess.
@@ -215,8 +224,9 @@ ensure_memory_or_exit() {
                 read_mem
                 mem_is_starved || break
             done
-            log "after eviction: swap_free=${SWAP_FREE_MB}MB free_mem=${MEM_FREE_PCT}%"
-        fi
+            log "after eviction $_attempt: swap_free=${SWAP_FREE_MB}MB free_mem=${MEM_FREE_PCT}%"
+            mem_is_starved || break
+        done
     fi
 
     read_mem
