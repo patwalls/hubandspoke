@@ -2105,7 +2105,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
        *  page — keeps the full vertical space of this column for the
        *  title + metadata. */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="min-w-0 flex-1">
+        {/* min-w-[260px] on phones: without a real minimum, flex-1 (basis 0)
+            shrinks to fit beside the action buttons instead of wrapping — the
+            whole title + property block got squeezed into ~118px. sm:min-w-0
+            restores desktop truncation behavior. */}
+        <div className="flex-1 min-w-[260px] sm:min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <CoverImg
               src={coverImageUrl(item)}
@@ -3351,7 +3355,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       {/* Content detail tabs — pill style with HubSpot orange active state */}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DetailTab)}>
         <TabsList
-          className="flex h-auto w-full justify-start gap-1 rounded-none bg-transparent p-0 shadow-none"
+          // overflow-x-auto: items with many tabs (x posts get Derivatives +
+          // Cross-post + Repost + Clip Ideas) exceed a phone viewport — the
+          // strip scrolls within itself instead of widening the page.
+          className="flex h-auto w-full justify-start gap-1 rounded-none bg-transparent p-0 shadow-none overflow-x-auto no-scrollbar"
         >
           {availableTabs.map((tab) => (
             // Wrap disabled triggers in a span so the native tooltip fires on
