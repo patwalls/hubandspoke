@@ -33,6 +33,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Command,
@@ -84,10 +86,11 @@ function selectionKey(s: { accountId: string; postType: PostType | null }): stri
   return `${s.accountId}|${s.postType ?? ""}`;
 }
 
-interface AsanaMember {
-  gid: string;
-  name: string;
+interface AssignableUser {
+  id: string;
+  name: string | null;
   email: string;
+  avatarUrl: string | null;
 }
 
 interface FormatRow {
@@ -97,7 +100,6 @@ interface FormatRow {
   accountChannels: AccountChannelWithAccount[];
   viewThreshold: number | null;
   editor: string | null;
-  editorAsanaGid: string | null;
   instructions: string | null;
   parentFormatId: string | null;
   isClippableFormat: boolean;
@@ -246,7 +248,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [data, setData] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [allFormats, setAllFormats] = useState<FormatRow[]>([]);
-  const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [accounts, setAccounts] = useState<PickerAccount[]>([]);
 
   // Form state
@@ -254,7 +256,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [selections, setSelections] = useState<AccountChannelSelection[]>([]);
   const [viewThreshold, setViewThreshold] = useState("");
   const [editor, setEditor] = useState("");
-  const [editorAsanaGid, setEditorAsanaGid] = useState("");
   const [instructions, setInstructions] = useState("");
   const [preTemplateInstructions, setPreTemplateInstructions] = useState<string | null>(null);
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
@@ -275,6 +276,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     | { kind: "error"; message: string }
   >({ kind: "idle" });
   const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   // Update-format-on-row dialog state. Lets the editor reassign a content
   // row's format from this listing — used to fix mis-categorized posts in
@@ -299,7 +301,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [childSelections, setChildSelections] = useState<AccountChannelSelection[]>([]);
   const [childViewThreshold, setChildViewThreshold] = useState("");
   const [childEditor, setChildEditor] = useState("");
-  const [childEditorGid, setChildEditorGid] = useState("");
   const [childInstructions, setChildInstructions] = useState("");
   const [childEditorOpen, setChildEditorOpen] = useState(false);
   const [childChannelsOpen, setChildChannelsOpen] = useState(false);
@@ -342,7 +343,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
           accountChannels: childSelections,
           viewThreshold: childViewThreshold ? parseInt(childViewThreshold, 10) : null,
           editor: childEditor || null,
-          editorAsanaGid: childEditorGid || null,
           instructions: childInstructions || null,
           parentFormatId: formatId,
         }),
@@ -663,7 +663,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     );
     setViewThreshold(f.viewThreshold != null ? String(f.viewThreshold) : "");
     setEditor(f.editor || "");
-    setEditorAsanaGid(f.editorAsanaGid || "");
     setInstructions(f.instructions || "");
     setParentFormatId(f.parentFormatId ?? null);
     setIsClippableFormat(f.isClippableFormat ?? false);
@@ -722,17 +721,18 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   }, [brand, formatId, data?.format]);
 
   useEffect(() => {
-    async function loadMembers() {
+    async function loadAssignable() {
       try {
-        const res = await fetch("/api/asana-members");
+        const res = await fetch("/api/users/assignable");
         if (res.ok) {
-          setAsanaMembers(await res.json());
+          const json = await res.json();
+          setAssignableUsers(json.users || []);
         }
       } catch (err) {
-        console.error("Failed to fetch Asana members:", err);
+        console.error("Failed to fetch assignable users:", err);
       }
     }
-    loadMembers();
+    loadAssignable();
   }, []);
 
   useEffect(() => {
@@ -777,7 +777,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
         })),
         viewThreshold: child.viewThreshold ?? null,
         editor: child.editor ?? null,
-        editorAsanaGid: child.editorAsanaGid ?? null,
         instructions: child.instructions ?? null,
         parentFormatId: newParentId,
       }),
@@ -865,15 +864,21 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     [formatId, data, persistField],
   );
 
-  async function handleDelete() {
-    if (!confirm("Delete this format? This cannot be undone.")) return;
+  async function confirmDelete() {
     setDeleting(true);
+    setDeleteConfirmOpen(false);
     try {
-      await fetch("/api/formats", {
+      const res = await fetch("/api/formats", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: formatId }),
       });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+        toast.error(`Delete failed: ${error}`);
+        setDeleting(false);
+        return;
+      }
       router.push(`/${brand}/formats`);
     } catch (err) {
       console.error("Delete failed:", err);
@@ -1144,7 +1149,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuItem
                 disabled={deleting}
-                onClick={handleDelete}
+                onClick={() => setDeleteConfirmOpen(true)}
                 className="text-red-600 focus:text-red-700 focus:bg-red-50"
               >
                 <Trash2Icon className="size-3.5" />
@@ -1453,7 +1458,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                         <CommandItem
                           onSelect={() => {
                             setEditor("");
-                            setEditorAsanaGid("");
                             setEditorPopoverOpen(false);
                             void persistField({ editor: null });
                           }}
@@ -1462,25 +1466,24 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                           <span className="text-sm">Clear selection</span>
                         </CommandItem>
                       )}
-                      {asanaMembers.map((m) => (
+                      {assignableUsers.map((u) => (
                         <CommandItem
-                          key={m.gid}
-                          value={`${m.name} ${m.email}`}
+                          key={u.id}
+                          value={`${u.name ?? ""} ${u.email}`}
                           onSelect={() => {
-                            setEditor(m.name);
-                            setEditorAsanaGid(m.gid);
+                            setEditor(u.name ?? u.email);
                             setEditorPopoverOpen(false);
-                            void persistField({ editor: m.name });
+                            void persistField({ editor: u.name ?? u.email });
                           }}
-                          data-checked={editorAsanaGid === m.gid ? "true" : undefined}
+                          data-checked={editor === (u.name ?? u.email) ? "true" : undefined}
                         >
                           <span className="flex items-center gap-2">
                             <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
-                              {m.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                              {(u.name ?? u.email).split(" ").map((n) => n[0]).join("").slice(0, 2)}
                             </span>
                             <span className="flex flex-col">
-                              <span className="text-sm font-medium">{m.name}</span>
-                              <span className="text-xs text-muted-foreground">{m.email}</span>
+                              <span className="text-sm font-medium">{u.name ?? u.email}</span>
+                              <span className="text-xs text-muted-foreground">{u.email}</span>
                             </span>
                           </span>
                         </CommandItem>
@@ -1730,7 +1733,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               Derivatives
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Direct children in the repurpose tree. When a post in this format hits one of these children&apos;s thresholds, an Asana task is created for that child.
+              Direct children in the repurpose tree. When a post in this format hits one of these children&apos;s thresholds, a repurpose task is created for that child.
             </p>
           </div>
           <Button size="sm" onClick={openAddChild}>
@@ -2274,7 +2277,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                 placeholder="e.g. 50000"
               />
               <p className="text-xs text-muted-foreground">
-                When a &ldquo;{name}&rdquo; post hits this number of views, an Asana task is created for this derivative.
+                When a &ldquo;{name}&rdquo; post hits this number of views, a repurpose task is created for this derivative.
               </p>
             </div>
 
@@ -2312,23 +2315,23 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                             <span className="text-sm">Clear selection</span>
                           </CommandItem>
                         )}
-                        {asanaMembers.map((m) => (
+                        {assignableUsers.map((u) => (
                           <CommandItem
-                            key={m.gid}
-                            value={`${m.name} ${m.email}`}
+                            key={u.id}
+                            value={`${u.name ?? ""} ${u.email}`}
                             onSelect={() => {
-                              setChildEditor(m.name);
-                              setChildEditorGid(m.gid);
+                              setChildEditor(u.name ?? u.email);
                               setChildEditorOpen(false);
                             }}
+                            data-checked={childEditor === (u.name ?? u.email) ? "true" : undefined}
                           >
                             <span className="flex items-center gap-2">
                               <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
-                                {m.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                                {(u.name ?? u.email).split(" ").map((n) => n[0]).join("").slice(0, 2)}
                               </span>
                               <span className="flex flex-col">
-                                <span className="text-sm font-medium">{m.name}</span>
-                                <span className="text-xs text-muted-foreground">{m.email}</span>
+                                <span className="text-sm font-medium">{u.name ?? u.email}</span>
+                                <span className="text-xs text-muted-foreground">{u.email}</span>
                               </span>
                             </span>
                           </CommandItem>
@@ -2600,6 +2603,38 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               )}
             </CommandList>
           </Command>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete format confirmation */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={(o) => { if (!o) setDeleteConfirmOpen(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Delete format?</DialogTitle>
+            <DialogDescription className="pt-1 space-y-2">
+              <span className="block">
+                This will permanently delete <strong>{name}</strong> and all{" "}
+                <strong>{items.length} content item{items.length === 1 ? "" : "s"}</strong> associated with it.
+              </span>
+              <span className="block text-red-600 font-medium">This cannot be undone.</span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void confirmDelete()}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting…" : "Yes, delete everything"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

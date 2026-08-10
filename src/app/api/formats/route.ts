@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { formats, productionItems } from "@/lib/db/schema";
+import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import {
   getChannelsForFormats,
@@ -377,6 +377,39 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const { id } = await request.json();
+
+    const [format] = await db
+      .select({ name: formats.name, brand: formats.brand })
+      .from(formats)
+      .where(eq(formats.id, id))
+      .limit(1);
+
+    if (!format) {
+      return NextResponse.json({ error: "Format not found" }, { status: 404 });
+    }
+
+    // Delete all production items for this format. repurpose_triggers rows
+    // that reference these items via production_item_id cascade automatically.
+    await db
+      .delete(productionItems)
+      .where(
+        and(
+          eq(productionItems.brand, format.brand),
+          eq(productionItems.format, format.name)
+        )
+      );
+
+    // Nullify any repurpose_triggers that still reference this format by ID
+    // (from other items whose triggers point to this format as source/target).
+    await db
+      .update(repurposeTriggers)
+      .set({ sourceFormatId: null })
+      .where(eq(repurposeTriggers.sourceFormatId, id));
+    await db
+      .update(repurposeTriggers)
+      .set({ targetFormatId: null })
+      .where(eq(repurposeTriggers.targetFormatId, id));
+
     await db.delete(formats).where(eq(formats.id, id));
     return NextResponse.json({ success: true });
   } catch (error) {
