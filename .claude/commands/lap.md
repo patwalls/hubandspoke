@@ -24,6 +24,9 @@ line, end. No healing beyond a worker restart, no pushes.
 
 Pat pays per lap — keep green laps NEAR-FREE:
 - Read the last ~5 lines of `~/.claude/hubandspoke-health.log` first; that IS the memory.
+- Then one `npx tsx scripts/ops-escalate.ts status` — what's already raised on GitHub, what
+  is building toward it, and what a human has muted. A fresh-context lap has no other way
+  to know Pat already ruled on something; skipping this is how you re-raise a closed issue.
 - Batch the whole green-path checklist into 2–3 Bash calls. **All green → one log line,
   END THE LAP.** No narrative, no exploration, no "while I'm here".
 - Only a flagged check earns more tool calls. An investigation that hasn't classified its
@@ -92,10 +95,37 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
 | Mac disk free / swap free | < 25 GB / < 1 GB sustained | < 10 GB |
 | recovery agent | — | not loaded in launchctl |
 
+## 📣 What a human hears about — the hands-off contract
+
+**Pat does not want to hear about a problem you found and then fixed.** A successful
+self-heal is a log line and nothing else: no GitHub issue, no Sentry event, no summary
+addressed to him. The loop exists so that routine breakage stops being his problem.
+
+He hears from you in exactly one situation: **you are proposing something you did not do.**
+That reaches him as a GitHub issue — or, when you can write the fix but aren't allowed to
+merge it, a **draft PR with the code already in it**. GitHub, not the health log, because
+he is not the only person working on this app and the rest of the team can read, comment
+on, and close a GitHub artifact.
+
+Everything outbound goes through `scripts/ops-escalate.ts`. Never run `gh issue create`
+or `gh pr create` by hand — the script owns fingerprint dedup, the streak gate, the rate
+limiter, and the mute rules, and hand-rolled calls bypass all four.
+
+| situation | what happens |
+|---|---|
+| fixed it yourself (rung 1 or 2) | health-log line only — **silent** |
+| something's off but transient / unconfirmed | `report --severity attn` — tracked, never escalates |
+| can't fix it, no code would (creds, spend, vendor, account config) | `report --severity warn\|crit` → issue after 3 laps (2 for CRIT) |
+| could fix it in code, but it's outside rung 2's limits | write the fix on a branch, push the branch, `report … --branch <name>` → **draft PR** |
+| CRIT that needs a human tonight | escalate as above **and** one Sentry event |
+
+Sentry is now reserved for CRIT only. A `warn` finding must never fire a Sentry event —
+the 22-unresolved-issue backlog as of 2026-08-09 is what happens when everything pages.
+
 ## 🔧 Self-healing ladder — try, verify, escalate
 
-Work DOWN this ladder; every action gets logged with evidence; every CRIT that survives
-the lap gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, same DSN as
+Work DOWN this ladder; every action gets logged with evidence. Only a CRIT that survives
+the lap also gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, same DSN as
 `home-machine/yt-archive/wrapper.sh`) so Pat's alerting fires.
 
 **Rung 1 — ops actions (no code):**
@@ -144,15 +174,51 @@ Allowed when ALL hold:
 **Limits: ONE push per lap, ever.** If the same error signature is back on the lap after a
 push, do NOT try again — Sentry CRIT with both attempts' evidence, hands off to Pat.
 
-**Rung 3 — escalate:** anything outside rungs 1–2 (creds, spend, schema, ambiguous root
-cause, repeated failures) → health-log entry + ONE Sentry event per new finding. That IS
-a successful lap outcome — self-healing includes knowing what not to touch.
+**Rung 2.5 — propose the fix you're not allowed to make.** When a finding IS fixable in
+code but fails any rung-2 condition (needs a migration, > ~60 lines, touches auth/payments/
+credentials/deploy, needs a new dependency, or the root cause is clear but the *right* call
+is a judgment one) — write it anyway, on a branch, and hand it over as a draft PR:
+
+```bash
+git checkout -b ops/<short-slug>
+# …write the fix, run `npx tsc --noEmit` and `npm run test:unit`…
+git commit -am "proposal: <what and why, with the production evidence>"
+git push -u origin ops/<short-slug>
+npx tsx scripts/ops-escalate.ts report \
+  --fingerprint "<stable-key>" --severity warn \
+  --title "<what's broken>" --body-file <evidence.md> --branch ops/<short-slug>
+```
+
+Draft, never ready-for-review — a human opens it. **Never push the branch to `main`** and
+never merge it yourself; pushing `main` auto-deploys. Tests must pass before the push, same
+as rung 2. If you can't get the fix to compile or the tests green, drop the branch and file
+a plain issue instead — a broken proposal is worse than a described one.
+
+**Rung 3 — escalate:** anything no code can fix (credentials, spend, vendor outages,
+account misconfiguration, ambiguous root cause, repeated failures):
+
+```bash
+npx tsx scripts/ops-escalate.ts report \
+  --fingerprint "sync-error:linkedin:company-page-url" \
+  --severity warn --title "…" --body-file <evidence.md>
+```
+
+The **fingerprint is the contract** — a stable key describing the condition, not the
+moment (`sync-error:linkedin:company-page-url`, not `sync-error-2026-08-09`). Same
+condition next lap must produce the same string, or dedup fails and Pat gets spammed.
+Reuse the exact fingerprint you saw in `status`.
+
+Nothing else is needed: the script decides whether this is quiet enough to sit on, updates
+an existing issue silently, or opens a new one. Escalating IS a successful lap outcome —
+self-healing includes knowing what not to touch.
 
 ## Never, regardless of ladder
 
 Scale dynos beyond baseline (web=1, worker=1) · change Heroku config vars · run
 migrations · force-push · touch other machines' loops (Pulse/Slope) beyond the yt-archive
-kickstart · push twice in one lap · push when tests fail.
+kickstart · push twice in one lap · push when tests fail · push a proposal branch to
+`main` or mark a draft PR ready · open GitHub issues/PRs by hand instead of through
+`ops-escalate.ts` · reopen or re-raise anything a human closed.
 
 ## Log — one entry per lap, `~/.claude/hubandspoke-health.log`
 
@@ -160,5 +226,10 @@ kickstart · push twice in one lap · push when tests fail.
 2026-08-09 14:30  OK    sentry=0new heroku=up/clean req(max 1.8s p95~0.9s) queue=18(55=55) yt=exit0
 2026-08-09 15:30  HEAL  worker crashed -> restarted, verified up. rest green
 2026-08-09 16:30  CRIT  tripwire 61!=55 -> ran queue runbook (evidence...) -> 55=55; sentry event sent
+2026-08-09 17:30  WARN  sync-error:linkedin:company-page-url -> escalate report (2/3 laps, not yet raised)
+2026-08-09 19:30  WARN  sync-error:linkedin:company-page-url -> issue #12 opened (3 laps)
 ```
-Findings get a short indented evidence block. The log is local — never committed.
+Findings get a short indented evidence block. The log is local — never committed; it is
+the loop's own memory, not a channel anyone reads. Anything a human needs to act on
+belongs on GitHub via `ops-escalate.ts` — if it only exists in this file, it did not
+happen as far as the team is concerned.

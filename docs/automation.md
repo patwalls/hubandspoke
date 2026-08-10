@@ -1524,10 +1524,54 @@ UI equivalent: `/(dashboard)/settings/jobs` for queue status,
 
 ---
 
+## Ops-loop escalation → GitHub (2026-08-09)
+
+The health loop (`/lap`, driven by `~/.claude/loop-runner.sh`) runs hourly with fresh
+context each lap. It fixes what it is allowed to fix and says nothing about it. Anything
+it *can't* or *shouldn't* fix reaches humans as a **GitHub issue** — or, when it can write
+the fix but not merge it, a **draft PR with the code in it**.
+
+`scripts/ops-escalate.ts` is the only sanctioned path. Decision rules live in
+`src/lib/ops/escalation-policy.ts` (pure, unit-tested in `escalation-policy.test.ts`);
+the script owns the `gh` calls and the state file at
+`~/.claude/hubandspoke-ops-state.json`.
+
+```bash
+npx tsx scripts/ops-escalate.ts status     # open + building + muted (run at lap start)
+npx tsx scripts/ops-escalate.ts report --fingerprint <key> --severity warn|crit|attn \
+    --title <t> --body-file <evidence.md> [--branch <b>]   # --branch => draft PR
+npx tsx scripts/ops-escalate.ts resolve --fingerprint <key> [--note <why>]
+```
+
+**Why GitHub rather than a table in our own DB:** open/closed is acknowledgement,
+`wontfix` is a permanent mute, and a closed issue is how a human decision survives into a
+lap that has no memory of the conversation. The team sees the same queue Pat does.
+
+**Noise controls** (all enforced in the policy module, all unit-tested):
+
+| control | rule |
+|---|---|
+| streak gate | nothing is raised until it appears in 3 consecutive laps (2 for CRIT); `attn` never escalates |
+| silent updates | an already-open finding gets its **body edited** each lap — GitHub does not notify on edits |
+| comments | only when severity climbs, or when the loop auto-closes the finding |
+| rate limit | at most 2 new artifacts per 90 minutes, regardless of how bad the lap is |
+| auto-close | unreported for ~3.5h (≈3 missed laps) → closed with a comment |
+| mute | close the issue = quiet 7 days; close it with `wontfix` = never raised again |
+
+Identity is the **fingerprint**: a stable key for the *condition*, not the moment
+(`sync-error:linkedin:company-page-url`). It is written into the artifact body as
+`<!-- ops-fingerprint: … -->`, so dedup survives a lost state file or a new machine.
+
+Labels `ops-loop`, `ops:warn`, `ops:crit` are created on demand by the script.
+
 ## Error tracking (Sentry)
 
 Both dynos report unhandled errors to Sentry — org `pat-walls`, project
 `hubandspoke` (https://pat-walls.sentry.io/issues/?project=hubandspoke).
+
+**Sentry is reserved for CRIT.** The ops loop no longer files a Sentry event per finding
+— that practice produced a 22-issue unresolved backlog nobody triaged. Loop findings go
+to GitHub (above); Sentry fires only for a CRIT that should page someone.
 
 - **Web dyno:** Next.js auto-instrumentation via `@sentry/nextjs` (configs in
   `sentry.{server,edge}.config.ts`, `src/instrumentation.ts`,
