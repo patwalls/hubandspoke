@@ -701,6 +701,20 @@
       "when": 1785788278342,
       "tag": "0099_cooing_madame_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1786128483040,
+      "tag": "0100_giant_molly_hayes",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1786390087626,
+      "tag": "0101_unknown_rumiko_fujikawa",
+      "breakpoints": true
     }
   ]
 }

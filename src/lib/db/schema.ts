@@ -137,6 +137,7 @@ export const productionItems = pgTable(
       withTimezone: true,
     }),
     descriptPublishError: text("descript_publish_error"),
+    descriptAccount: text("descript_account"),
     // Canva "create copy" state. Fires when an instagram_post derivative is
     // created from a format whose Skill contains a canva.com/design link.
     // Three derivable states (same pattern as descriptPublish*):
@@ -1043,6 +1044,36 @@ export const formatChannels = pgTable(
     ),
     index("idx_format_channels_format").on(table.formatId),
     index("idx_format_channels_account").on(table.accountId),
+  ]
+);
+
+// Account-to-format trigger routing for the threshold-monitor-sweep.
+// One row = "published pillars from this source account automatically
+// trigger this target format when views cross formats.view_threshold."
+// Replaces the old pillar.format → parent/child format tree routing:
+// the sweep now keys on pillar.account_id instead of pillar.format.
+// viewThreshold always reads from formats.view_threshold — never stored here.
+export const formatTriggerSources = pgTable(
+  "format_trigger_sources",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    formatId: uuid("format_id")
+      .notNull()
+      .references(() => formats.id, { onDelete: "cascade" }),
+    sourceAccountId: uuid("source_account_id")
+      .notNull()
+      .references((): AnyPgColumn => accounts.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uniq_format_trigger_sources_format_account").on(
+      table.formatId,
+      table.sourceAccountId
+    ),
+    index("idx_format_trigger_sources_format").on(table.formatId),
+    index("idx_format_trigger_sources_account").on(table.sourceAccountId),
   ]
 );
 

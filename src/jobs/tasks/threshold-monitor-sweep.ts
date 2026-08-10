@@ -1,12 +1,12 @@
 import type { Task } from "graphile-worker";
-import { and, asc, eq, gt, isNotNull, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, gte, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   productionItems,
   formats,
   repurposeTriggers,
   formatChannels,
-  accounts,
+  formatTriggerSources,
 } from "@/lib/db/schema";
 import { resolveEditor } from "@/lib/services/assignees";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -17,12 +17,17 @@ import { recordItemCreated } from "@/lib/services/item-created";
  * Threshold monitor: scan all published items and automatically create
  * repurposed content items when view counts cross format thresholds.
  *
- * For each published item with views:
- * 1. Get its format's child formats (repurpose targets)
- * 2. Check if views exceed each child's viewThreshold
- * 3. If yes and no existing trigger, create a new production_items row
- *    with sourceType="repurposed", pillarContentItemId=parent, format=child
- * 4. Record the trigger to prevent re-queueing on future runs
+ * Routing is account-based: the sweep looks up which target formats are
+ * configured for the pillar's source account via `format_trigger_sources`,
+ * then checks each target format's `view_threshold`. This replaces the old
+ * pillar.format → parent/child format tree traversal.
+ *
+ * Dedup key: (productionItemId, targetFormatId). One triggered item per
+ * (pillar, target format) pair regardless of source format.
+ *
+ * Rollout gate: set TRIGGER_ROUTING_CUTOFF_ISO to an ISO timestamp to limit
+ * the first sweep to pillars published on or after that date. Remove via
+ * `heroku config:unset TRIGGER_ROUTING_CUTOFF_ISO` — no code deploy needed.
  */
 export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
   const start = Date.now();
@@ -33,84 +38,112 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
   let skippedDuplicate = 0;
   const errors: string[] = [];
 
+  // When set, only process pillars published on or after this date.
+  // Protects against retroactively triggering the full historical catalog
+  // on first deployment of the account-based routing. Unset = full history.
+  const cutoffIso = process.env.TRIGGER_ROUTING_CUTOFF_ISO;
+  const cutoffDate = cutoffIso ? new Date(cutoffIso) : null;
+
   try {
-    // 1. Get all published items with views and a format
+    // 1. Get all published items with views and a source account.
+    //    format is no longer required — routing is by account_id now.
     const publishedItems = await db
       .select({
         id: productionItems.id,
         title: productionItems.title,
         thumbnail: productionItems.thumbnail,
         views: productionItems.views,
-        format: productionItems.format,
         brand: productionItems.brand,
+        accountId: productionItems.accountId,
       })
       .from(productionItems)
       .where(
         and(
           eq(productionItems.status, "Published"),
-          isNotNull(productionItems.format),
-          gt(productionItems.views, 0)
+          isNotNull(productionItems.accountId),
+          gt(productionItems.views, 0),
+          cutoffDate
+            ? gte(productionItems.publishedAt, cutoffDate)
+            : undefined,
         )
       );
 
     itemsChecked = publishedItems.length;
     helpers.logger.info(`Found ${itemsChecked} published items with views`);
 
-    // 2. Get all formats and build index
-    const allFormats = await db.select().from(formats);
-    const formatByName = new Map(
-      allFormats.map((f) => [f.name.toLowerCase().trim(), f])
-    );
+    // 2. Load format_trigger_sources joined with their target format rows.
+    //    Build map: sourceAccountId → [target format descriptors].
+    const triggerSourceRows = await db
+      .select({
+        sourceAccountId: formatTriggerSources.sourceAccountId,
+        id: formats.id,
+        name: formats.name,
+        viewThreshold: formats.viewThreshold,
+        isClippableFormat: formats.isClippableFormat,
+        brand: formats.brand,
+      })
+      .from(formatTriggerSources)
+      .innerJoin(formats, eq(formats.id, formatTriggerSources.formatId));
 
-    const childrenByParent = new Map<string, typeof allFormats>();
-    for (const f of allFormats) {
-      if (!f.parentFormatId) continue;
-      const arr = childrenByParent.get(f.parentFormatId) ?? [];
-      arr.push(f);
-      childrenByParent.set(f.parentFormatId, arr);
+    const targetFormatsByAccount = new Map<
+      string,
+      Array<{
+        id: string;
+        name: string;
+        viewThreshold: number | null;
+        isClippableFormat: boolean;
+        brand: string;
+      }>
+    >();
+    for (const row of triggerSourceRows) {
+      const arr = targetFormatsByAccount.get(row.sourceAccountId) ?? [];
+      arr.push({
+        id: row.id,
+        name: row.name,
+        viewThreshold: row.viewThreshold,
+        isClippableFormat: row.isClippableFormat,
+        brand: row.brand,
+      });
+      targetFormatsByAccount.set(row.sourceAccountId, arr);
     }
 
-    // 3. Get existing triggers for dedup
+    // 3. Get existing triggers for dedup.
+    //    Key: (pillarId, targetFormatId) — covers both old-model rows
+    //    (sourceFormatId set) and new rows (sourceFormatId null).
     const existingTriggers = await db
       .select({
         productionItemId: repurposeTriggers.productionItemId,
-        sourceFormatId: repurposeTriggers.sourceFormatId,
         targetFormatId: repurposeTriggers.targetFormatId,
       })
       .from(repurposeTriggers);
 
     const triggerSet = new Set(
       existingTriggers.map(
-        (t) => `${t.productionItemId}|${t.sourceFormatId}|${t.targetFormatId}`
+        (t) => `${t.productionItemId}|${t.targetFormatId}`
       )
     );
 
-    // 4. Check each item against its format's children thresholds
+    // 4. Check each item against its source account's configured target formats.
     for (const item of publishedItems) {
-      if (!item.format || !item.views) continue;
+      if (!item.accountId || !item.views) continue;
 
-      const sourceFormat = formatByName.get(
-        item.format.toLowerCase().trim()
-      );
-      if (!sourceFormat) continue;
+      const targetFormats = targetFormatsByAccount.get(item.accountId) ?? [];
 
-      const children = childrenByParent.get(sourceFormat.id) ?? [];
-
-      for (const targetFormat of children) {
+      for (const targetFormat of targetFormats) {
         // Clippable formats are produced exclusively from the Clip Ideas
         // queue (one clip-idea agent run per is_clippable_format row), not
         // from the threshold/repurpose sweep. Skip them here so a pillar
-        // crossing a clippable child's viewThreshold doesn't double-create a
-        // repurposed Idea alongside the clip-idea-promoted Reel/Short.
+        // crossing a clippable target's viewThreshold doesn't double-create
+        // a repurposed Idea alongside the clip-idea-promoted Reel/Short.
         if (targetFormat.isClippableFormat) continue;
 
-        // Skip if no threshold set or views below threshold
+        // Skip if no threshold set or views below threshold.
         if (!targetFormat.viewThreshold || item.views < targetFormat.viewThreshold) {
           continue;
         }
 
-        // Dedup check
-        const dedupKey = `${item.id}|${sourceFormat.id}|${targetFormat.id}`;
+        // Dedup: one trigger per (pillar, target format) pair.
+        const dedupKey = `${item.id}|${targetFormat.id}`;
         if (triggerSet.has(dedupKey)) {
           skippedDuplicate++;
           continue;
@@ -123,11 +156,10 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
             format: targetFormat.name,
           });
 
-          // Look up the account and post_type for this format (if configured).
-          // A format can have multiple channels; pick the oldest-added one
-          // deterministically so the assigned account doesn't flip between
-          // sweep runs. Fan-out-to-all-channels is a larger behavior change
-          // and intentionally not done here.
+          // Look up the destination account and post_type for this target
+          // format. A format can have multiple channels; pick the
+          // oldest-added one deterministically so the assigned account
+          // doesn't flip between sweep runs.
           const [formatChannel] = await db
             .select({
               accountId: formatChannels.accountId,
@@ -138,9 +170,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
             .orderBy(asc(formatChannels.createdAt), asc(formatChannels.id))
             .limit(1);
 
-          // Create the repurposed production item
-          // Title follows the pattern: "SourceFormat → TargetFormat (OriginalTitle)"
-          const repurposedTitle = `${sourceFormat.name} → ${targetFormat.name} (${item.title})`;
+          const repurposedTitle = `${targetFormat.name}: ${item.title}`;
 
           const [created] = await db
             .insert(productionItems)
@@ -177,18 +207,19 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
               );
             }
 
-            // Record the trigger to prevent re-queueing
+            // Record the trigger for dedup. sourceFormatId is null under
+            // the new account-based routing model — dedup uses
+            // (productionItemId, targetFormatId) only.
             await db.insert(repurposeTriggers).values({
               productionItemId: item.id,
-              sourceFormatId: sourceFormat.id,
+              sourceFormatId: null,
               targetFormatId: targetFormat.id,
               viewsAtTrigger: item.views,
             });
 
             // Fire the Draft Algorithm so the editor lands on a populated
-            // form. Skips internally if the inherited postType isn't in V1
-            // supported set, or if the pillar has no transcript yet.
-            // Fire-and-forget — a failed enqueue mustn't fail the sweep.
+            // form. Skips internally if the inherited postType isn't in the
+            // V1 supported set, or if the pillar has no transcript yet.
             try {
               await enqueue("draft-algorithm-run", {
                 productionItemId: created.id,
