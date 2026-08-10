@@ -312,7 +312,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     setChildSelections([]);
     setChildViewThreshold("");
     setChildEditor("");
-    setChildEditorGid("");
     setChildInstructions("");
     setChildError(null);
     setAddChildOpen(true);
@@ -2307,8 +2306,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                           <CommandItem
                             onSelect={() => {
                               setChildEditor("");
-                              setChildEditorGid("");
-                              setChildEditorOpen(false);
+                                                        setChildEditorOpen(false);
                             }}
                             className="text-muted-foreground"
                           >

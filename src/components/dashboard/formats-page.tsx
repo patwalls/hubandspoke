@@ -54,12 +54,6 @@ import {
 import { ChevronDownIcon } from "lucide-react";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
 
-interface AsanaMember {
-  gid: string;
-  name: string;
-  email: string;
-}
-
 interface AssignableUser {
   id: string;
   email: string;
@@ -73,7 +67,6 @@ interface FormatRow {
   accountChannels: FormatChannelWithAccount[];
   viewThreshold: number | null;
   editor: string | null;
-  editorAsanaGid: string | null;
   instructions: string | null;
   parentFormatId: string | null;
   totalViews: number;
@@ -108,7 +101,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
 
   useRememberListUrl({ brand, listKey: "formats" });
 
-  const [asanaMembers, setAsanaMembers] = useState<AsanaMember[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
   const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
@@ -116,7 +108,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const [name, setName] = useState("");
   const [viewThreshold, setViewThreshold] = useState("");
   const [editor, setEditor] = useState("");
-  const [editorAsanaGid, setEditorAsanaGid] = useState("");
+  const [editorUserId, setEditorUserId] = useState("");
   const [instructions, setInstructions] = useState("");
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
 
@@ -136,20 +128,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     fetchFormats();
   }, [fetchFormats]);
 
-  useEffect(() => {
-    async function loadMembers() {
-      try {
-        const res = await fetch("/api/asana-members");
-        if (res.ok) {
-          const data = await res.json();
-          setAsanaMembers(data);
-        }
-      } catch (err) {
-        console.error("Failed to fetch Asana members:", err);
-      }
-    }
-    loadMembers();
-  }, []);
 
   useEffect(() => {
     async function loadAssignable() {
@@ -170,7 +148,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     setName("");
     setViewThreshold("");
     setEditor("");
-    setEditorAsanaGid("");
+    setEditorUserId("");
     setInstructions("");
     setParentFormatId(null);
     setDialogOpen(true);
@@ -182,7 +160,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
       brand,
       viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
       editor: editor || null,
-      editorAsanaGid: editorAsanaGid || null,
       instructions: instructions || null,
       parentFormatId,
     };
@@ -197,15 +174,15 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     fetchFormats();
   }
 
-  function selectEditor(member: AsanaMember) {
-    setEditor(member.name);
-    setEditorAsanaGid(member.gid);
+  function selectEditor(user: AssignableUser) {
+    setEditor(user.name ?? user.email);
+    setEditorUserId(user.id);
     setEditorPopoverOpen(false);
   }
 
   function clearEditor() {
     setEditor("");
-    setEditorAsanaGid("");
+    setEditorUserId("");
     setEditorPopoverOpen(false);
   }
 
@@ -571,24 +548,24 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                               <span className="text-sm">Clear selection</span>
                             </CommandItem>
                           )}
-                          {asanaMembers.map((member) => (
+                          {assignableUsers.map((u) => (
                             <CommandItem
-                              key={member.gid}
-                              value={`${member.name} ${member.email}`}
-                              onSelect={() => selectEditor(member)}
-                              data-checked={editorAsanaGid === member.gid ? "true" : undefined}
+                              key={u.id}
+                              value={`${u.name ?? ""} ${u.email}`}
+                              onSelect={() => selectEditor(u)}
+                              data-checked={editorUserId === u.id ? "true" : undefined}
                             >
                               <span className="flex items-center gap-2">
                                 <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
-                                  {member.name
+                                  {(u.name ?? u.email)
                                     .split(" ")
                                     .map((n) => n[0])
                                     .join("")
                                     .slice(0, 2)}
                                 </span>
                                 <span className="flex flex-col">
-                                  <span className="text-sm font-medium">{member.name}</span>
-                                  <span className="text-xs text-muted-foreground">{member.email}</span>
+                                  <span className="text-sm font-medium">{u.name ?? u.email}</span>
+                                  <span className="text-xs text-muted-foreground">{u.email}</span>
                                 </span>
                               </span>
                             </CommandItem>
