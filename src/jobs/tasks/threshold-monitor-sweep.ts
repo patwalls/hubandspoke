@@ -25,9 +25,13 @@ import { recordItemCreated } from "@/lib/services/item-created";
  * Dedup key: (productionItemId, targetFormatId). One triggered item per
  * (pillar, target format) pair regardless of source format.
  *
- * Rollout gate: set TRIGGER_ROUTING_CUTOFF_ISO to an ISO timestamp to limit
- * the first sweep to pillars published on or after that date. Remove via
- * `heroku config:unset TRIGGER_ROUTING_CUTOFF_ISO` — no code deploy needed.
+ * TRIGGER_ROUTING_MIN_PUBLISHED_AT (required): permanent lower bound on
+ * pillar published_at for account-based trigger evaluation. Set once at
+ * first deployment to 7 days prior (e.g. "2026-08-03T00:00:00Z") to allow
+ * a one-time catch-up window. Leave it set permanently — it is the guard
+ * that prevents the historical catalog from ever becoming eligible. If this
+ * env var is absent the sweep logs a warning and skips all trigger
+ * evaluation (safe lockout, not a pass-through). Never unset it.
  */
 export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
   const start = Date.now();
@@ -38,14 +42,23 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
   let skippedDuplicate = 0;
   const errors: string[] = [];
 
-  // When set, only process pillars published on or after this date.
-  // Protects against retroactively triggering the full historical catalog
-  // on first deployment of the account-based routing. Unset = full history.
-  const cutoffIso = process.env.TRIGGER_ROUTING_CUTOFF_ISO;
-  const cutoffDate = cutoffIso ? new Date(cutoffIso) : null;
+  // Required permanent lower bound. Absent = safety lockout (no triggers fire).
+  // Set once at deployment to (now - 7d); leave set forever so historical
+  // items can never become eligible without an explicit env var change.
+  const minPublishedAtIso = process.env.TRIGGER_ROUTING_MIN_PUBLISHED_AT;
+  if (!minPublishedAtIso) {
+    helpers.logger.warn(
+      "threshold-monitor-sweep: TRIGGER_ROUTING_MIN_PUBLISHED_AT is not set — " +
+        "skipping account-based trigger evaluation. " +
+        "Set this env var to enable (e.g. heroku config:set TRIGGER_ROUTING_MIN_PUBLISHED_AT=<iso>)."
+    );
+    return;
+  }
+  const minPublishedAt = new Date(minPublishedAtIso);
 
   try {
-    // 1. Get all published items with views and a source account.
+    // 1. Get all published items with views, a source account, and a
+    //    published_at on or after the permanent lower bound.
     //    format is no longer required — routing is by account_id now.
     const publishedItems = await db
       .select({
@@ -62,9 +75,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
           eq(productionItems.status, "Published"),
           isNotNull(productionItems.accountId),
           gt(productionItems.views, 0),
-          cutoffDate
-            ? gte(productionItems.publishedAt, cutoffDate)
-            : undefined,
+          gte(productionItems.publishedAt, minPublishedAt),
         )
       );
 
