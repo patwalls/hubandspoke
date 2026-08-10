@@ -50,6 +50,7 @@ export const DEFAULT_BRAND_STATUSES: ReadonlyArray<DefaultStatusSeed> = [
   { name: "Review", color: "yellow", isPipelineColumn: true },
   { name: "Final Review", color: "orange", isPipelineColumn: true },
   { name: "Ready To Publish", color: "pink", isPipelineColumn: true },
+  { name: "On Hold", color: "slate", isPipelineColumn: true },
   { name: "Scheduled", color: "blue", isProtected: true },
   { name: "Published", color: "pink", isProtected: true },
   { name: "Killed", color: "zinc", isProtected: true },
@@ -74,6 +75,7 @@ export const STARTER_STORY_LEGACY_STATUSES: ReadonlyArray<DefaultStatusSeed> = [
   { name: "Review", color: "yellow", isPipelineColumn: true },
   { name: "Final Review", color: "orange", isPipelineColumn: true },
   { name: "Ready To Publish", color: "pink", isPipelineColumn: true },
+  { name: "On Hold", color: "slate", isPipelineColumn: true },
   { name: "Published", color: "pink", isProtected: true },
   { name: "Killed", color: "zinc", isProtected: true },
 ];

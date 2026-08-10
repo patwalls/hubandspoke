@@ -62,6 +62,7 @@ export const STATUS_COLORS: Record<string, string> = {
   "Scoping Call Done": "bg-blue-100 text-blue-800 border-blue-200",
   "Final Review": "bg-orange-100 text-orange-800 border-orange-200",
   "Ready To Publish": "bg-pink-100 text-pink-800 border-pink-200",
+  "On Hold": "bg-slate-100 text-slate-700 border-slate-200",
   Published: "bg-pink-50 text-pink-700 border-pink-100",
   Killed: "bg-zinc-100 text-zinc-700 border-zinc-200",
   Assigned: "bg-pink-100 text-pink-800 border-pink-200",
