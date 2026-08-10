@@ -40,7 +40,7 @@ async function getPromotedClipFormat(sql, brand) {
   const rows = await sql`
     SELECT name
     FROM formats
-    WHERE brand = ${brand} AND is_clip_descript_format = true
+    WHERE brand = ${brand} AND is_clippable_format = true
     LIMIT 1
   `;
   return rows[0]?.name ?? null;

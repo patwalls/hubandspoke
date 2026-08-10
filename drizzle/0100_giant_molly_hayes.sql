@@ -1,0 +1,1 @@
+ALTER TABLE "production_items" ADD COLUMN "descript_account" text;
