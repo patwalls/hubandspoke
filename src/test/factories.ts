@@ -337,6 +337,11 @@ export interface CreateTestProductionItemOptions {
   descriptProjectUrl?: string | null;
   descriptCompositionId?: string | null;
   descriptSeedCompositionId?: string | null;
+  /** Publish-and-archive axis. `jobId set + publishedAt/error null` is the
+   *  "render in flight" state the detail-page pill spins on. */
+  descriptPublishJobId?: string | null;
+  descriptPublishedAt?: Date | null;
+  descriptPublishError?: string | null;
   mediaS3Bucket?: string | null;
   mediaS3Key?: string | null;
   contentBody?: string | null;
@@ -399,6 +404,9 @@ export async function createTestProductionItem(
       descriptProjectUrl: opts.descriptProjectUrl ?? null,
       descriptCompositionId: opts.descriptCompositionId ?? null,
       descriptSeedCompositionId: opts.descriptSeedCompositionId ?? null,
+      descriptPublishJobId: opts.descriptPublishJobId ?? null,
+      descriptPublishedAt: opts.descriptPublishedAt ?? null,
+      descriptPublishError: opts.descriptPublishError ?? null,
       mediaS3Bucket: opts.mediaS3Bucket ?? null,
       mediaS3Key: opts.mediaS3Key ?? null,
       contentBody: opts.contentBody ?? null,

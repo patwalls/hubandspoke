@@ -7,7 +7,11 @@ import {
   fetchDescriptJob,
   publishDescriptComposition,
 } from "@/lib/descript";
-import { archiveRemoteToS3 } from "@/lib/services/enrichment/shared";
+import {
+  archiveRemoteToS3,
+  MediaTooLargeError,
+  type ArchiveResult,
+} from "@/lib/services/enrichment/shared";
 import { bucketName } from "@/lib/s3";
 import {
   recordContentChanges,
@@ -28,6 +32,11 @@ export interface DescriptPublishAndArchivePayload {
 
 const POLL_INTERVAL_MS = 10_000;
 const DEADLINE_MS = 15 * 60 * 1000; // Descript publish jobs are typically ~2 min, generous cap
+
+/** Bytes → whole MB, for error copy an editor reads. */
+function toMb(bytes: number): number {
+  return Math.round(bytes / (1024 * 1024));
+}
 
 /**
  * Render a Descript composition to MP4, download the result, and archive
@@ -207,11 +216,52 @@ export const descriptPublishAndArchiveTask: Task = async (
 
   // Download the MP4. Outside the transaction because it can take
   // seconds and we don't want to hold a DB connection.
-  const archive = await archiveRemoteToS3(
-    item.id,
-    downloadUrl,
-    "descript-rendered.mp4",
-  );
+  //
+  // Every other failure branch above stamps `descript_publish_error`; this
+  // one used to throw straight through without touching the row. That left
+  // the item at `job_id set / published_at null / error null` — which every
+  // consumer reads as "in flight": the pill spins "Rendering MP4…" with no
+  // Retry button, and the ops sweep's stuck-render detector (which requires
+  // `descript_publish_error IS NULL`) can't distinguish it from a healthy
+  // render. The deadline can't save it either — that check only runs on the
+  // `job_state !== "stopped"` branch, and by here Descript has already
+  // reported success. Item 3b015853 sat exactly like this for ~24h on
+  // 2026-08-11 while its queue job quietly logged the same 242 MB failure
+  // 12 times.
+  let archive: ArchiveResult;
+  try {
+    archive = await archiveRemoteToS3(
+      item.id,
+      downloadUrl,
+      "descript-rendered.mp4",
+    );
+  } catch (err) {
+    const tooLarge = err instanceof MediaTooLargeError;
+    const msg = tooLarge
+      ? `Rendered MP4 is ${toMb(err.bytes)} MB — above the ${toMb(err.limit)} MB archive limit. Trim the clip shorter in Descript, then Retry.`
+      : `Failed to archive the rendered MP4: ${err instanceof Error ? err.message : String(err)}`;
+    await db
+      .update(productionItems)
+      .set({
+        descriptPublishError: msg.slice(0, 1000),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, item.id));
+
+    // Oversize is deterministic — the render is done and the file is that
+    // big, so 24 more retries re-download the same bytes and leave a corpse
+    // in the queue. Return instead of throwing: the job completes, and the
+    // editor now has a real error and a Retry button. Anything else (network
+    // blip, S3 hiccup) is genuinely transient, so rethrow and let
+    // graphile-worker retry with backoff.
+    if (tooLarge) {
+      helpers.logger.warn(
+        `descript-publish-and-archive: item=${item.id} ${msg}`,
+      );
+      return;
+    }
+    throw err;
+  }
 
   // In one transaction: delete prior Descript-published rows, insert the
   // new row, mirror legacy cover columns, stamp `descript_published_at`.

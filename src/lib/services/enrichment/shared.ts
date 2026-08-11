@@ -3,7 +3,32 @@ import { db } from "@/lib/db";
 import { productionItemMedia, transcripts } from "@/lib/db/schema";
 import { buildKey, bucketName, putObject } from "@/lib/s3";
 
-const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
+/** Defensive cap on anything we pull into memory. `archiveRemoteToS3`
+ *  buffers the whole asset via `arrayBuffer()` before uploading, so this is
+ *  bounded by the Basic dyno's 512 MB — raising it trades directly against
+ *  R14/R15. */
+export const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
+
+/**
+ * Thrown when a remote asset is larger than `MAX_MEDIA_BYTES`.
+ *
+ * Distinct from a generic download failure because it is *deterministic*:
+ * the same URL is the same size on every retry, so a caller that blindly
+ * rethrows burns its whole graphile-worker retry budget and ends as a queue
+ * corpse. Callers should surface this to a human instead. The message is
+ * unchanged from the pre-2026-08-11 inline `throw new Error(...)` so existing
+ * log and Sentry signatures still match.
+ */
+export class MediaTooLargeError extends Error {
+  readonly bytes: number;
+  readonly limit = MAX_MEDIA_BYTES;
+
+  constructor(bytes: number) {
+    super(`Remote media is ${bytes} bytes — above ${MAX_MEDIA_BYTES} limit`);
+    this.name = "MediaTooLargeError";
+    this.bytes = bytes;
+  }
+}
 
 function extFromContentType(ct: string): string {
   if (ct.startsWith("video/mp4")) return "mp4";
@@ -57,15 +82,11 @@ export async function archiveRemoteToS3(
   }
   const headerLen = Number(res.headers.get("content-length") ?? 0);
   if (headerLen && headerLen > MAX_MEDIA_BYTES) {
-    throw new Error(
-      `Remote media is ${headerLen} bytes — above ${MAX_MEDIA_BYTES} limit`
-    );
+    throw new MediaTooLargeError(headerLen);
   }
   const arr = await res.arrayBuffer();
   if (arr.byteLength > MAX_MEDIA_BYTES) {
-    throw new Error(
-      `Remote media is ${arr.byteLength} bytes — above ${MAX_MEDIA_BYTES} limit`
-    );
+    throw new MediaTooLargeError(arr.byteLength);
   }
   const contentType =
     res.headers.get("content-type") ?? fallbackContentType(remoteUrl);
