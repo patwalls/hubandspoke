@@ -551,7 +551,11 @@ async function postImportProjectMedia(
       "Content-Type": "application/json",
       Authorization: authHeader(account),
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(
+      account === "hubspot"
+        ? { ...body, workspace_name: "Hub & Spoke", team_access: "edit" }
+        : body,
+    ),
   });
   const json = await res.json();
   if (!res.ok) {
