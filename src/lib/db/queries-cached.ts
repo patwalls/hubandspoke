@@ -12,5 +12,5 @@ export const getContentReportCached = unstable_cache(
   async (params: Parameters<typeof getContentReport>[0]) =>
     getContentReport(params),
   ["content-report"],
-  { revalidate: 60 },
+  { revalidate: 60, tags: ["content-report"] },
 );

@@ -62,5 +62,5 @@ export const getProductionReportCached = unstable_cache(
   async (brand: string, excludeIdea: boolean) =>
     computeProductionReport(brand, excludeIdea),
   ["production-report"],
-  { revalidate: 60 },
+  { revalidate: 60, tags: ["production-report"] },
 );

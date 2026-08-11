@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { Client } from "@notionhq/client";
 import { db } from "@/lib/db";
 import {
@@ -376,6 +377,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    revalidateTag("production-report", "default");
+    revalidateTag("content-report", "default");
     return NextResponse.json({ ...created, autoFetched }, { status: 201 });
   } catch (error) {
     // 23505 = unique_violation. Catches the race where two concurrent POSTs
@@ -1113,6 +1116,8 @@ export async function PUT(request: NextRequest) {
       }
     }
 
+    revalidateTag("production-report", "default");
+    revalidateTag("content-report", "default");
     return NextResponse.json({
       ...updated,
       notionSyncWarning: warnings.length ? warnings.join("; ") : null,
@@ -1147,6 +1152,8 @@ export async function DELETE(request: NextRequest) {
       .delete(productionItems)
       .where(eq(productionItems.id, id));
 
+    revalidateTag("production-report", "default");
+    revalidateTag("content-report", "default");
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error deleting production item:", error);

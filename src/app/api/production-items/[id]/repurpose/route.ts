@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
@@ -251,5 +252,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
+  revalidateTag("production-report", "default");
+  revalidateTag("content-report", "default");
   return NextResponse.json({ id: created.id }, { status: 201 });
 }
