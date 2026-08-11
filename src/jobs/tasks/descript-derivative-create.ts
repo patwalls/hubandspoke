@@ -149,6 +149,7 @@ export const descriptDerivativeCreateTask: Task = async (
       descriptProjectUrl: productionItems.descriptProjectUrl,
       descriptCompositionId: productionItems.descriptCompositionId,
       descriptSeedCompositionId: productionItems.descriptSeedCompositionId,
+      descriptAccount: productionItems.descriptAccount,
       mediaS3Key: productionItems.mediaS3Key,
       pillarContentItemId: productionItems.pillarContentItemId,
     })
@@ -221,6 +222,7 @@ export const descriptDerivativeCreateTask: Task = async (
       crossPostRules: effectiveCrossPostRules,
       targetPostType,
       derivativeItemId: derivative.id,
+      account: source.descriptAccount,
     });
     await finishStamp({
       derivativeId: derivative.id,
@@ -228,6 +230,7 @@ export const descriptDerivativeCreateTask: Task = async (
       projectUrl: source.descriptProjectUrl ?? dup.projectUrl ?? null,
       dup,
       newCompositionName,
+      descriptAccount: source.descriptAccount,
     });
     helpers.logger.info(
       `descript-derivative-create ok (case 1: source-composition, mode=${mode}): derivative=${derivative.id} source=${source.id} composition_job=${dup.jobId}`,
@@ -259,6 +262,7 @@ export const descriptDerivativeCreateTask: Task = async (
         newCompositionName,
         caller: "descript-derivative-create-repost-duplicate",
         productionItemId: derivative.id,
+        account: target.row.descriptAccount,
       });
       await finishStamp({
         derivativeId: derivative.id,
@@ -266,6 +270,7 @@ export const descriptDerivativeCreateTask: Task = async (
         projectUrl: target.row.descriptProjectUrl ?? dup.projectUrl ?? null,
         dup,
         newCompositionName,
+        descriptAccount: target.row.descriptAccount,
       });
       helpers.logger.info(
         `descript-derivative-create ok (case 2 repost: seed-duplicate): derivative=${derivative.id} source=${source.id} composition_job=${dup.jobId}`,
@@ -310,6 +315,7 @@ export const descriptDerivativeCreateTask: Task = async (
       targetPostType,
       caller: "descript-derivative-create-cross-aspect-cut",
       productionItemId: derivative.id,
+      account: target.row.descriptAccount,
     });
     await finishStamp({
       derivativeId: derivative.id,
@@ -317,6 +323,7 @@ export const descriptDerivativeCreateTask: Task = async (
       projectUrl: target.row.descriptProjectUrl ?? dup.projectUrl ?? null,
       dup,
       newCompositionName,
+      descriptAccount: target.row.descriptAccount,
     });
     helpers.logger.info(
       `descript-derivative-create ok (case 2: target-cut): derivative=${derivative.id} target=${target.row.id} (${target.kind}) range=[${anchor.startSec.toFixed(1)},${anchor.endSec.toFixed(1)}]s job=${dup.jobId}`,
@@ -326,7 +333,7 @@ export const descriptDerivativeCreateTask: Task = async (
 
   // CASE 3 — Import target has media but no project. Cold-import + re-enqueue.
   if (target.row.mediaS3Key) {
-    const importRes = await coldImportPillar({ pillarId: target.row.id });
+    const importRes = await coldImportPillar({ pillarId: target.row.id, account: "hubspot" });
     if (importRes.imported) {
       const [trigger] = await db
         .insert(repurposeTriggers)
@@ -373,6 +380,7 @@ async function invokeRulesAwareDuplicate(args: {
   crossPostRules: string | null;
   targetPostType: string;
   derivativeItemId: string;
+  account?: string | null;
 }): Promise<{
   jobId: string;
   projectUrl: string;
@@ -386,6 +394,7 @@ async function invokeRulesAwareDuplicate(args: {
       newCompositionName: args.newCompositionName,
       caller: "descript-derivative-create-rules-aware-duplicate",
       productionItemId: args.derivativeItemId,
+      account: args.account,
     });
   }
   const safeName = args.newCompositionName.replace(/"/g, '\\"');
@@ -409,6 +418,7 @@ async function invokeRulesAwareDuplicate(args: {
     prompt,
     caller: "descript-derivative-create-rules-aware-duplicate",
     productionItemId: args.derivativeItemId,
+    account: args.account,
   });
   return { ...result, prompt };
 }
@@ -423,12 +433,14 @@ async function finishStamp(args: {
   projectUrl: string | null;
   dup: { jobId: string; projectUrl: string; prompt: string };
   newCompositionName: string;
+  descriptAccount?: string | null;
 }): Promise<void> {
   await db
     .update(productionItems)
     .set({
       descriptProjectId: args.dupProjectId,
       descriptProjectUrl: args.projectUrl ?? args.dup.projectUrl ?? null,
+      descriptAccount: args.descriptAccount ?? null,
       updatedAt: new Date(),
     })
     .where(eq(productionItems.id, args.derivativeId));

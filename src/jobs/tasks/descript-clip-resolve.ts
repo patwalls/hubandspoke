@@ -55,7 +55,20 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
   const payload = rawPayload as DescriptClipResolvePayload;
   const deadlineAt = payload.deadlineAt ?? Date.now() + DEADLINE_MS;
 
-  const job = await fetchDescriptJob(payload.jobId);
+  // Resolve which Descript account owns this job so we use the right token.
+  // Prefer the derivative item; fall back to the pillar for cold-import jobs.
+  let descriptAccount: string | null = null;
+  const resolveItemId = payload.derivativeItemId ?? payload.pillarItemId;
+  if (resolveItemId) {
+    const [acctRow] = await db
+      .select({ descriptAccount: productionItems.descriptAccount })
+      .from(productionItems)
+      .where(eq(productionItems.id, resolveItemId))
+      .limit(1);
+    descriptAccount = acctRow?.descriptAccount ?? null;
+  }
+
+  const job = await fetchDescriptJob(payload.jobId, descriptAccount);
   if (job.job_state === "stopped") {
     // Descript reports failures as stopped + result.status="error". Without
     // this guard the poller would write a NULL composition_id (or none for

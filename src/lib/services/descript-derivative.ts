@@ -10,6 +10,7 @@ export interface DescriptableSource {
   id: string;
   descriptProjectId: string | null;
   descriptCompositionId: string | null;
+  descriptAccount: string | null;
   mediaS3Key: string | null;
   pillarContentItemId: string | null;
 }
@@ -26,6 +27,7 @@ export interface DescriptablePillar {
   descriptProjectId: string | null;
   descriptProjectUrl: string | null;
   descriptSeedCompositionId: string | null;
+  descriptAccount: string | null;
   mediaS3Key: string | null;
 }
 
@@ -50,6 +52,7 @@ export interface ImportTarget {
     descriptProjectId: string | null;
     descriptProjectUrl: string | null;
     descriptSeedCompositionId: string | null;
+    descriptAccount: string | null;
     mediaS3Key: string | null;
   };
   /** Discriminator for diagnostics/logging. */
@@ -78,6 +81,7 @@ export function resolveImportTarget(
       descriptProjectId: source.descriptProjectId,
       descriptProjectUrl: null,
       descriptSeedCompositionId: null,
+      descriptAccount: source.descriptAccount,
       mediaS3Key: source.mediaS3Key,
     },
     kind: "source-as-pillar",
@@ -104,6 +108,7 @@ export function resolveImportTargetForRepost(
       descriptProjectId: source.descriptProjectId,
       descriptProjectUrl: null,
       descriptSeedCompositionId: source.descriptSeedCompositionId,
+      descriptAccount: source.descriptAccount,
       mediaS3Key: source.mediaS3Key,
     },
     kind: "source-as-pillar",
@@ -331,6 +336,7 @@ export async function loadPillarForSource(
       descriptProjectId: productionItems.descriptProjectId,
       descriptProjectUrl: productionItems.descriptProjectUrl,
       descriptSeedCompositionId: productionItems.descriptSeedCompositionId,
+      descriptAccount: productionItems.descriptAccount,
       mediaS3Key: productionItems.mediaS3Key,
     })
     .from(productionItems)
@@ -364,6 +370,7 @@ export interface ColdImportResult {
  */
 export async function coldImportPillar(args: {
   pillarId: string;
+  account?: string | null;
 }): Promise<ColdImportResult> {
   return await db.transaction(async (tx) => {
     const [pillar] = await tx
@@ -406,6 +413,7 @@ export async function coldImportPillar(args: {
     const importRes = await createDescriptProjectFromUrl({
       projectName,
       mediaUrl: presigned,
+      account: args.account,
     });
 
     await tx
@@ -413,6 +421,7 @@ export async function coldImportPillar(args: {
       .set({
         descriptProjectId: importRes.project_id,
         descriptProjectUrl: importRes.project_url,
+        descriptAccount: args.account ?? null,
         descriptImportedAt: sql`now()`,
         updatedAt: sql`now()`,
       })

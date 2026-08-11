@@ -172,15 +172,22 @@ export function buildLayoutPackPrompt(args: {
   ].join("\n");
 }
 
-function authHeader(): string {
-  const token = process.env.DESCRIPT_API_TOKEN;
-  if (!token) throw new Error("DESCRIPT_API_TOKEN not set");
+function authHeader(account?: string | null): string {
+  const token =
+    account === "hubspot"
+      ? process.env.DESCRIPT_API_TOKEN_HUBSPOT
+      : process.env.DESCRIPT_API_TOKEN;
+  if (!token)
+    throw new Error(
+      account === "hubspot" ? "DESCRIPT_API_TOKEN_HUBSPOT not set" : "DESCRIPT_API_TOKEN not set",
+    );
   return `Bearer ${token}`;
 }
 
 interface ImportProjectUrlArgs {
   projectName: string;
   mediaUrl: string;
+  account?: string | null;
 }
 
 interface ImportProjectResponse {
@@ -194,13 +201,16 @@ export async function createDescriptProjectFromUrl(
   args: ImportProjectUrlArgs
 ): Promise<ImportProjectResponse> {
   const mediaKey = "main";
-  return postImportProjectMedia({
-    project_name: args.projectName,
-    add_media: { [mediaKey]: { url: args.mediaUrl } },
-    add_compositions: [
-      { name: args.projectName, clips: [{ media: mediaKey }] },
-    ],
-  });
+  return postImportProjectMedia(
+    {
+      project_name: args.projectName,
+      add_media: { [mediaKey]: { url: args.mediaUrl } },
+      add_compositions: [
+        { name: args.projectName, clips: [{ media: mediaKey }] },
+      ],
+    },
+    args.account,
+  );
 }
 
 interface AgentResponse {
@@ -255,12 +265,12 @@ interface PublishCompositionArgs {
 }
 
 export async function publishDescriptComposition(
-  args: PublishCompositionArgs,
+  args: PublishCompositionArgs & { account?: string | null },
 ): Promise<{ jobId: string }> {
   const res = await fetch(`${BASE_URL}/jobs/publish`, {
     method: "POST",
     headers: {
-      Authorization: authHeader(),
+      Authorization: authHeader(args.account),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -293,10 +303,11 @@ export const DESCRIPT_EXPORT_URL_PREFIX =
   "https://production-273614-media-export.storage.googleapis.com/";
 
 export async function fetchDescriptJob(
-  jobId: string
+  jobId: string,
+  account?: string | null,
 ): Promise<DescriptJobResponse> {
   const res = await fetch(`${BASE_URL}/jobs/${jobId}`, {
-    headers: { Authorization: authHeader() },
+    headers: { Authorization: authHeader(account) },
   });
   const json = await res.json();
   if (!res.ok) {
@@ -353,6 +364,7 @@ export async function cutSegmentWithRules(args: {
   targetPostType: string;
   caller: string;
   productionItemId?: string | null;
+  account?: string | null;
 }): Promise<{
   jobId: string;
   projectUrl: string;
@@ -388,6 +400,7 @@ export async function cutSegmentWithRules(args: {
     prompt,
     caller: args.caller,
     productionItemId: args.productionItemId ?? null,
+    account: args.account,
   });
   return { ...result, prompt };
 }
@@ -398,6 +411,7 @@ export async function duplicateDescriptComposition(args: {
   newCompositionName: string;
   caller: string;
   productionItemId?: string | null;
+  account?: string | null;
 }): Promise<{ jobId: string; projectUrl: string; projectId: string; prompt: string }> {
   const safeName = args.newCompositionName.replace(/"/g, '\\"');
   const prompt = [
@@ -414,6 +428,7 @@ export async function duplicateDescriptComposition(args: {
     prompt,
     caller: args.caller,
     productionItemId: args.productionItemId ?? null,
+    account: args.account,
   });
   return { ...result, prompt };
 }
@@ -451,6 +466,7 @@ export async function invokeDescriptAgent(args: {
   caller: string;
   /** Set when the call ties to a specific derivative production item. */
   productionItemId?: string | null;
+  account?: string | null;
 }): Promise<{ jobId: string; projectUrl: string; projectId: string }> {
   await assertUnderlordBudget(args.caller);
 
@@ -473,7 +489,7 @@ export async function invokeDescriptAgent(args: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: authHeader(),
+        Authorization: authHeader(args.account),
       },
       body: JSON.stringify({
         project_id: args.projectId,
@@ -526,13 +542,14 @@ export function buildDescriptCompositionUrl(
 }
 
 async function postImportProjectMedia(
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  account?: string | null,
 ): Promise<ImportProjectResponse> {
   const res = await fetch(`${BASE_URL}/jobs/import/project_media`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: authHeader(),
+      Authorization: authHeader(account),
     },
     body: JSON.stringify(body),
   });

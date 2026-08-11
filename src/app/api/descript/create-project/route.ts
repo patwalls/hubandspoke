@@ -21,6 +21,7 @@ async function persistDescriptProject(
       .set({
         descriptProjectId: projectId,
         descriptProjectUrl: projectUrl,
+        descriptAccount: "hubspot",
         descriptImportedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -70,6 +71,7 @@ export async function POST(request: NextRequest) {
       const result = await createDescriptProjectFromUrl({
         projectName,
         mediaUrl: toGoogleDriveDirectUrl(rawUrl),
+        account: "hubspot",
       });
       await persistDescriptProject(itemId, result.project_id, result.project_url);
       return NextResponse.json({
@@ -103,6 +105,7 @@ export async function POST(request: NextRequest) {
     const result = await createDescriptProjectFromUrl({
       projectName,
       mediaUrl,
+      account: "hubspot",
     });
     await persistDescriptProject(itemId, result.project_id, result.project_url);
     return NextResponse.json({

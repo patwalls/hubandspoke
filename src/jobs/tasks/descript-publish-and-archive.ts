@@ -64,6 +64,7 @@ export const descriptPublishAndArchiveTask: Task = async (
       descriptCompositionId: productionItems.descriptCompositionId,
       descriptPublishJobId: productionItems.descriptPublishJobId,
       descriptPublishedAt: productionItems.descriptPublishedAt,
+      descriptAccount: productionItems.descriptAccount,
     })
     .from(productionItems)
     .where(eq(productionItems.id, payload.productionItemId))
@@ -99,6 +100,7 @@ export const descriptPublishAndArchiveTask: Task = async (
       compositionId: item.descriptCompositionId,
       resolution: "1080p",
       accessLevel: "unlisted",
+      account: item.descriptAccount,
     });
     await db
       .update(productionItems)
@@ -148,7 +150,7 @@ export const descriptPublishAndArchiveTask: Task = async (
     return;
   }
 
-  const job = await fetchDescriptJob(payload.publishJobId);
+  const job = await fetchDescriptJob(payload.publishJobId, item.descriptAccount);
 
   if (job.job_state !== "stopped") {
     // Still running. Keep polling until deadline.

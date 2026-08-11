@@ -226,6 +226,7 @@ interface ClipIdeaRow {
   sourceTitle: string | null;
   sourceBrand: string | null;
   descriptProjectId: string | null;
+  descriptAccount: string | null;
   mediaS3Key: string | null;
 }
 
@@ -248,6 +249,7 @@ async function loadAndGuardClipIdea(
       sourceTitle: productionItems.title,
       sourceBrand: productionItems.brand,
       descriptProjectId: productionItems.descriptProjectId,
+      descriptAccount: productionItems.descriptAccount,
       mediaS3Key: productionItems.mediaS3Key,
     })
     .from(clipIdeas)
@@ -691,6 +693,7 @@ export async function createClipIdeaInDescript(args: {
     prompt,
     caller: "clip-idea-promote-agent",
     productionItemId,
+    account: row.descriptAccount,
   });
 
   // Promote the pre-created draft production_item (the row that
@@ -712,6 +715,7 @@ export async function createClipIdeaInDescript(args: {
       editorUserId: args.actorUserId,
       descriptProjectId: row.descriptProjectId,
       descriptProjectUrl: agent.projectUrl,
+      descriptAccount: row.descriptAccount,
       updatedAt: new Date(),
     })
     .where(eq(productionItems.id, productionItemId));
@@ -837,6 +841,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
       hook: row.hook,
       contentBody: body,
       editorUserId: args.actorUserId,
+      descriptAccount: "hubspot",
       updatedAt: new Date(),
     })
     .where(eq(productionItems.id, productionItemId));
@@ -979,6 +984,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
       descriptProjectId: productionItems.descriptProjectId,
       descriptProjectUrl: productionItems.descriptProjectUrl,
       descriptSeedCompositionId: productionItems.descriptSeedCompositionId,
+      descriptAccount: productionItems.descriptAccount,
       mediaS3Key: productionItems.mediaS3Key,
     })
     .from(productionItems)
@@ -1005,6 +1011,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
       }),
       caller: "clip-idea-promote-full-video",
       productionItemId,
+      account: pillar.descriptAccount,
     });
     jobId = dup.jobId;
     projectId = dup.projectId;
@@ -1017,7 +1024,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
     // with project_id + project_url + descript_imported_at. The new
     // composition's id arrives async via descript-clip-resolve and is
     // written to the pillar's `descript_seed_composition_id`.
-    const importRes = await coldImportPillar({ pillarId: pillar.id });
+    const importRes = await coldImportPillar({ pillarId: pillar.id, account: "hubspot" });
     if (!importRes.imported) {
       // Race: another caller imported this pillar between our pillar read
       // and the helper's lock acquisition. Surface the conflict instead of
@@ -1050,6 +1057,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
       editorUserId: args.actorUserId,
       descriptProjectId: projectId,
       descriptProjectUrl: projectUrl,
+      descriptAccount: mode === "cold" ? "hubspot" : pillar.descriptAccount,
       updatedAt: new Date(),
     })
     .where(eq(productionItems.id, productionItemId));

@@ -223,6 +223,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
         productionItemId: payload.derivativeItemId,
       }),
       mediaUrl: presignedClipUrl,
+      account: "hubspot",
     });
     helpers.logger.info(
       `precise-cut descript-import enqueued clip=${clipIdeaId} job=${importRes.job_id}`,
@@ -240,6 +241,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
       .set({
         descriptProjectId: importRes.project_id,
         descriptProjectUrl: importRes.project_url,
+        descriptAccount: "hubspot",
       })
       .where(eq(productionItems.id, derivativeItemId));
 
@@ -269,7 +271,13 @@ async function pollUploadOnce(
   deadlineAt: number,
 ): Promise<void> {
   const uploadJobId = payload.uploadJobId!;
-  const job = await fetchDescriptJob(uploadJobId);
+  const [acctRow] = await db
+    .select({ descriptAccount: productionItems.descriptAccount })
+    .from(productionItems)
+    .where(eq(productionItems.id, payload.derivativeItemId))
+    .limit(1);
+  const descriptAccount = acctRow?.descriptAccount ?? null;
+  const job = await fetchDescriptJob(uploadJobId, descriptAccount);
   if (job.job_state === "stopped") {
     // Descript reports failures as stopped + result.status="error". Without
     // this guard the task would silently succeed (no composition_id ever
@@ -347,6 +355,7 @@ async function pollUploadOnce(
     const [row] = await db
       .select({
         descriptProjectId: productionItems.descriptProjectId,
+        descriptAccount: productionItems.descriptAccount,
         hook: productionItems.hook,
         compositionName: repurposeTriggers.compositionName,
         formatSkill: formats.instructions,
@@ -417,6 +426,7 @@ async function pollUploadOnce(
       prompt,
       caller: "clip-idea-promote-precise-layout",
       productionItemId: payload.derivativeItemId,
+      account: row.descriptAccount,
     });
     await db
       .update(repurposeTriggers)
@@ -469,7 +479,12 @@ async function pollLayoutOnce(
   deadlineAt: number,
 ): Promise<void> {
   const layoutJobId = payload.layoutJobId!;
-  const job = await fetchDescriptJob(layoutJobId);
+  const [acctRow] = await db
+    .select({ descriptAccount: productionItems.descriptAccount })
+    .from(productionItems)
+    .where(eq(productionItems.id, payload.derivativeItemId))
+    .limit(1);
+  const job = await fetchDescriptJob(layoutJobId, acctRow?.descriptAccount ?? null);
   if (job.job_state === "stopped") {
     if (job.result?.status === "error") {
       throw new Error(
