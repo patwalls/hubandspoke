@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { eq } from "drizzle-orm";
 import * as Sentry from "@sentry/nextjs";
 import { requireSession } from "@/lib/auth-guards";
@@ -342,5 +343,6 @@ export async function POST(request: Request, context: RouteContext) {
   // explicitly from the new row's detail page if they want a fresh Descript
   // composition.
 
+  invalidateReportCaches();
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

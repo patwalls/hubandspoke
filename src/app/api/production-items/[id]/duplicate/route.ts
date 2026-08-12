@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
@@ -88,5 +89,6 @@ export async function POST(_request: Request, context: RouteContext) {
     console.error("[api:duplicate] recordItemCreated failed", err);
   }
 
+  invalidateReportCaches();
   return NextResponse.json({ id: created.id }, { status: 201 });
 }
