@@ -103,6 +103,10 @@ import {
   type DraftAlgorithmRunPayload,
 } from "./draft-algorithm-run";
 import {
+  regenerateCtaForItemTask,
+  type RegenerateCtaForItemPayload,
+} from "./regenerate-cta-for-item";
+import {
   canvaCreateCopyTask,
   type CanvaCreateCopyPayload,
 } from "./canva-create-copy";
@@ -146,6 +150,7 @@ export interface TaskPayloads {
   "zernio-poll-publish": ZernioPollPublishPayload;
   "generate-instagram-caption": GenerateInstagramCaptionPayload;
   "draft-algorithm-run": DraftAlgorithmRunPayload;
+  "regenerate-cta-for-item": RegenerateCtaForItemPayload;
   "canva-create-copy": CanvaCreateCopyPayload;
   "canva-export-design": CanvaExportDesignPayload;
   "canva-export-page-video": CanvaExportPageVideoPayload;
@@ -205,6 +210,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "zernio-poll-publish": zernioPollPublishTask,
   "generate-instagram-caption": generateInstagramCaptionTask,
   "draft-algorithm-run": draftAlgorithmRunTask,
+  "regenerate-cta-for-item": regenerateCtaForItemTask,
   "canva-create-copy": canvaCreateCopyTask,
   "canva-export-design": canvaExportDesignTask,
   "canva-export-page-video": canvaExportPageVideoTask,

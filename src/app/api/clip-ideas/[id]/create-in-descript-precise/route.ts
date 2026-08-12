@@ -20,12 +20,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const actorUserId = guard.session.user.id as string;
   const applyLayoutPack = request.nextUrl.searchParams.get("ai") === "1";
+  const buffered = request.nextUrl.searchParams.get("buffered") === "1";
 
   try {
     const result = await createClipIdeaInDescriptPreciseCut({
       clipIdeaId: id,
       actorUserId,
       applyLayoutPack,
+      buffered,
     });
     return NextResponse.json({
       ok: true,

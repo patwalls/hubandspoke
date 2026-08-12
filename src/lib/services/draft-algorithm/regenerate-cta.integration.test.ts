@@ -105,4 +105,56 @@ describe("regenerateCtaForItem", () => {
     expect(result.reason).toBe("no_cta_field");
     expect(generateTrackedCta).not.toHaveBeenCalled();
   });
+
+  // Cross-post CTA seeding: cross-post route enqueues regenerate-cta-for-item
+  // (not draft-algorithm-run) so the caption is preserved while the CTA is
+  // generated. This test proves the function correctly reads the copy:source
+  // seeded caption as postBody and writes only the cta field.
+  it("generates CTA from a copy:source seeded caption without touching the caption", async () => {
+    const item = await createTestProductionItem({ postType: "x" });
+    // Seed a draft the way seedRepostContent does on cross-post creation.
+    const [draft] = await db
+      .insert(contentDrafts)
+      .values({
+        productionItemId: item.id,
+        version: 1,
+        isCurrent: true,
+        content: { tweet: "copied source caption from the original post" },
+        fieldSchemaSnapshot: { fields: [] } as never,
+        generatedBy: "copy:source",
+        promptVersion: null,
+        modelUsage: null,
+        createdByUserId: null,
+      })
+      .returning();
+    expect(draft.generatedBy).toBe("copy:source");
+
+    const result = await regenerateCtaForItem({
+      productionItemId: item.id,
+      actorUserId: null,
+    });
+
+    expect(result.status).toBe("generated");
+
+    // generateTrackedCta received the seeded caption as postBody — CTA is
+    // grounded in the actual caption the editor will see.
+    expect(generateTrackedCta.mock.calls[0][0]).toMatchObject({
+      channel: "x",
+      postBody: "copied source caption from the original post",
+    });
+
+    // New current draft is v2; caption field is preserved verbatim.
+    const [current] = await db
+      .select()
+      .from(contentDrafts)
+      .where(
+        and(
+          eq(contentDrafts.productionItemId, item.id),
+          eq(contentDrafts.isCurrent, true),
+        ),
+      );
+    const content = current.content as Record<string, string>;
+    expect(content.tweet).toBe("copied source caption from the original post");
+    expect(content.cta).toBe(MOCK_CTA);
+  });
 });

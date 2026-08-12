@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { and, eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
@@ -16,7 +17,7 @@ import { checkRepostReadiness } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { isNotionAuthoritative } from "@/lib/platform";
-import type { PostType } from "@/lib/platform-field-schemas";
+import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
 
 // Cross-post targets that get the same media-mirror + draft-seed treatment
 // as reposts. Without this the simulator on the redirect page lands in
@@ -387,18 +388,34 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
-  // After the seed tx commits, fire the Draft Algorithm. The algorithm
-  // skips internally for unsupported post types (e.g. youtube_long,
-  // newsletter), so we can enqueue unconditionally for any seeded target.
-  // Fire-and-forget; failure here doesn't block the redirect to the new
-  // item.
+  // Draft Algorithm intentionally NOT enqueued here (2026-08-07).
+  // seedRepostContent (above) already writes a v1 content_drafts row with
+  // the source's exact caption (generatedBy: "copy:source"). Auto-running
+  // the Draft Algorithm would overwrite that verbatim copy with an AI
+  // rewrite the editor didn't ask for and burns API credits unnecessarily.
+  // Editors who want a fresh AI caption can click "Regenerate caption" on
+  // the detail page (POST /api/production-items/[id]/draft?force=true).
+  //
+  // Instead, enqueue the CTA-only task for platforms that have a reply-CTA
+  // slot (X, LinkedIn, YouTube Community, Threads). It reads the seeded
+  // caption as its postBody — so the CTA is grounded in the actual caption
+  // the editor will see — and updates only the cta field, leaving the caption
+  // untouched. Platforms without a cta field (instagram, tiktok, youtube_shorts)
+  // get a no-op self-skip inside the task; enqueueing unconditionally is safe.
   if (CROSS_POST_SEEDED_TARGETS.has(targetPostType as PostType)) {
-    try {
-      await enqueue("draft-algorithm-run", {
-        productionItemId: created.id,
-      });
-    } catch (err) {
-      console.error("draft-algorithm-run enqueue (cross-post) failed:", err);
+    const hasCta =
+      PLATFORM_FIELD_MAP[targetPostType as PostType]?.cta != null;
+    if (hasCta) {
+      try {
+        await enqueue("regenerate-cta-for-item", {
+          productionItemId: created.id,
+        });
+      } catch (err) {
+        console.error(
+          "regenerate-cta-for-item enqueue (cross-post) failed:",
+          err,
+        );
+      }
     }
   }
 
@@ -412,5 +429,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // legacy `descript-derivative-create` task still exists for in-queue
   // jobs predating commit `e61a6d9`; no live route enqueues it.
 
+  invalidateReportCaches();
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

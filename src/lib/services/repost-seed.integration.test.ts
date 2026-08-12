@@ -1,12 +1,135 @@
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { productionItemMedia } from "@/lib/db/schema";
+import { contentDrafts, productionItemMedia } from "@/lib/db/schema";
 import {
   createTestProductionItem,
   getTestAccountId,
 } from "@/test/factories";
+import type { PostType } from "@/lib/platform-field-schemas";
 import { seedRepostContent } from "./repost-seed";
+
+// seedRepostContent seeds the source's caption verbatim into a v1
+// content_drafts row (generatedBy: "copy:source") so cross-posts land
+// with the original caption pre-filled rather than triggering AI
+// generation.
+describe("seedRepostContent — caption seeding", () => {
+  it("seeds the source caption into the correct platform field", async () => {
+    const accountId = await getTestAccountId();
+    const source = await createTestProductionItem({
+      postType: "x",
+      contentBody: "original tweet caption",
+      accountId,
+    });
+    const target = await createTestProductionItem({
+      postType: "instagram_reel",
+      sourceType: "cross_post",
+      repostedFromItemId: source.id,
+      accountId,
+    });
+
+    await db.transaction(async (tx) => {
+      await seedRepostContent(tx, {
+        sourceId: source.id,
+        repostId: target.id,
+        postType: "instagram_reel",
+        sourceContentBody: "original tweet caption",
+        sourceLegacyMedia: null,
+        actorUserId: target.editorUserId ?? "",
+      });
+    });
+
+    const [draft] = await db
+      .select()
+      .from(contentDrafts)
+      .where(eq(contentDrafts.productionItemId, target.id));
+
+    expect(draft).toBeDefined();
+    expect(draft.generatedBy).toBe("copy:source");
+    expect(draft.isCurrent).toBe(true);
+    expect(draft.version).toBe(1);
+    // IG Reel caption field is "caption" per PLATFORM_FIELD_MAP
+    expect((draft.content as Record<string, string>).caption).toBe(
+      "original tweet caption",
+    );
+  });
+
+  it("seeds into the correct field for each supported platform", async () => {
+    const accountId = await getTestAccountId();
+    const cases: Array<{ postType: PostType; expectedField: string }> = [
+      { postType: "x", expectedField: "tweet" },
+      { postType: "linkedin", expectedField: "body" },
+      { postType: "threads", expectedField: "post" },
+      { postType: "youtube_community", expectedField: "body" },
+    ];
+
+    for (const { postType, expectedField } of cases) {
+      const source = await createTestProductionItem({ postType: "x", accountId });
+      const target = await createTestProductionItem({
+        postType,
+        sourceType: "cross_post",
+        repostedFromItemId: source.id,
+        accountId,
+      });
+
+      await db.transaction(async (tx) => {
+        await seedRepostContent(tx, {
+          sourceId: source.id,
+          repostId: target.id,
+          postType,
+          sourceContentBody: `caption for ${postType}`,
+          sourceLegacyMedia: null,
+          actorUserId: target.editorUserId ?? "",
+        });
+      });
+
+      const [draft] = await db
+        .select()
+        .from(contentDrafts)
+        .where(eq(contentDrafts.productionItemId, target.id));
+
+      expect(draft.generatedBy).toBe("copy:source");
+      expect((draft.content as Record<string, string>)[expectedField]).toBe(
+        `caption for ${postType}`,
+      );
+    }
+  });
+
+  it("seeds empty string when source has no caption, without error", async () => {
+    const accountId = await getTestAccountId();
+    const source = await createTestProductionItem({
+      postType: "x",
+      accountId,
+    });
+    const target = await createTestProductionItem({
+      postType: "x",
+      sourceType: "cross_post",
+      repostedFromItemId: source.id,
+      accountId,
+    });
+
+    await expect(
+      db.transaction(async (tx) => {
+        await seedRepostContent(tx, {
+          sourceId: source.id,
+          repostId: target.id,
+          postType: "x",
+          sourceContentBody: null,
+          sourceLegacyMedia: null,
+          actorUserId: target.editorUserId ?? "",
+        });
+      }),
+    ).resolves.not.toThrow();
+
+    const [draft] = await db
+      .select()
+      .from(contentDrafts)
+      .where(eq(contentDrafts.productionItemId, target.id));
+
+    expect(draft).toBeDefined();
+    expect((draft.content as Record<string, string>).tweet).toBe("");
+  });
+});
 
 // seedRepostContent filters mirrored productionItemMedia rows by the
 // target platform's allowed media kinds (from platform-media-rules.ts).

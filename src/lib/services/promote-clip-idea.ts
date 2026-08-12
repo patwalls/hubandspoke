@@ -30,7 +30,7 @@ import { resolveClipAspectRatio } from "@/lib/db/formats";
  * shape that isn't `string[]` (legacy rows pre-extras, or future formats
  * whose extras schema doesn't include quotables).
  */
-function extractQuotablesFromExtras(
+export function extractQuotablesFromExtras(
   extras: Record<string, unknown> | null,
 ): string[] {
   if (!extras) return [];
@@ -580,7 +580,7 @@ export async function loadPromotedClipFormat(args: {
 }
 
 
-function buildDescriptPrompt(args: {
+export function buildDescriptPrompt(args: {
   skill: string;
   hook: string;
   startSec: number;
@@ -811,9 +811,12 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   actorUserId: string;
   /** When true, the worker invokes Underlord post-import to apply the
    *  configured layout pack to the imported composition. Set by the
-   *  "Precise cut + Underlord" button (or by the agent-path fall-through
-   *  when a Descript project doesn't exist yet). */
+   *  agent-path fall-through when a Descript project doesn't exist yet. */
   applyLayoutPack: boolean;
+  /** When true, ffmpeg trims to 60s before/after Claude's suggested range
+   *  instead of the exact timestamps, giving editors room to extend the clip.
+   *  The original startSec/endSec are preserved as Claude's recommendation. */
+  buffered?: boolean;
 }): Promise<CreateClipIdeaInDescriptPreciseCutResult> {
   const row = await loadAndGuardClipIdea(args.clipIdeaId);
   if (!row.mediaS3Key) {
@@ -856,18 +859,27 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     })
     .returning({ id: repurposeTriggers.id });
 
+  const BUFFER_SEC = 60;
+  const cutStartSec = args.buffered
+    ? Math.max(0, Number(row.startSec) - BUFFER_SEC)
+    : undefined;
+  const cutEndSec = args.buffered
+    ? Number(row.endSec) + BUFFER_SEC
+    : undefined;
+
   await recordToolAction({
     contentItemId: productionItemId,
     userId: args.actorUserId,
     tool: "descript",
     action: "kicking_off",
     status: "info",
-    label: args.applyLayoutPack
-      ? "Trimming clip locally + uploading to Descript… Underlord layout pack will follow."
+    label: args.buffered
+      ? "Trimming with 60-second buffer and uploading to Descript… new composition incoming."
       : "Trimming clip locally + uploading to Descript… new composition incoming.",
     meta: {
       importPath: "precise-cut",
       applyLayoutPack: args.applyLayoutPack ? 1 : 0,
+      buffered: args.buffered ? 1 : 0,
     },
   });
 
@@ -878,6 +890,8 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
       triggerId: trigger.id,
       derivativeItemId: productionItemId,
       applyLayoutPack: args.applyLayoutPack,
+      ...(cutStartSec !== undefined ? { cutStartSec } : {}),
+      ...(cutEndSec !== undefined ? { cutEndSec } : {}),
     },
     // jobKey: at most one pending cut per clip; queueName serializes heavy
     // media work — two concurrent ffmpeg cuts R15'd the worker (2026-08-09).

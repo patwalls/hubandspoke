@@ -327,7 +327,7 @@ export function ClipTriageDialog({
   );
 
   const runCreateInDescript = useCallback(
-    async (path: "agent" | "precise" | "precise-ai" | "full") => {
+    async (path: "agent" | "precise" | "buffered" | "full") => {
       if (!idea) return;
       setSaving(true);
       setError(null);
@@ -337,8 +337,8 @@ export function ClipTriageDialog({
             ? `/api/clip-ideas/${idea.id}/create-in-descript`
             : path === "precise"
               ? `/api/clip-ideas/${idea.id}/create-in-descript-precise`
-              : path === "precise-ai"
-                ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?ai=1`
+              : path === "buffered"
+                ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?buffered=1`
                 : `/api/clip-ideas/${idea.id}/create-in-descript-full`;
         const res = await fetch(url, { method: "POST" });
         const json = await res.json().catch(() => ({}));
@@ -350,21 +350,21 @@ export function ClipTriageDialog({
         const brandSlug: string = json?.sourceBrand ?? brand;
         const toastTitle =
           path === "agent"
-            ? "Cutting clip in Descript (Underlord)…"
+            ? "Creating clip with Underlord…"
             : path === "precise"
               ? "Trimming clip locally and uploading to Descript…"
-              : path === "precise-ai"
-                ? "Trimming locally, then applying ReelsLayout via Underlord…"
+              : path === "buffered"
+                ? "Trimming with 60-second buffer and uploading to Descript…"
                 : json?.mode === "cold"
                   ? "Uploading the full pillar to Descript…"
                   : "Duplicating the pillar composition in Descript…";
         const toastDesc =
           path === "agent"
-            ? "The new composition will appear on this item shortly."
+            ? "Underlord will create a styled clip from Claude's suggested timestamps."
             : path === "precise"
               ? "The new Descript project will appear on this item when the upload finishes."
-              : path === "precise-ai"
-                ? "Two-step: ffmpeg trim → Descript import → Underlord layout pack. The new composition will appear shortly."
+              : path === "buffered"
+                ? "60 seconds of buffer before and after Claude's suggested range. The new project will appear when the upload finishes."
                 : json?.mode === "cold"
                   ? "First clip from this pillar — uploading once. Future clips will be instant."
                   : "The new composition will appear on this item shortly.";
@@ -618,12 +618,11 @@ export function ClipTriageDialog({
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
-                          Full video — no AI
+                          Full Composition
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
-                          Reuses the pillar&apos;s Descript project (uploads
-                          once) and duplicates the composition. Editor trims
-                          manually — no Underlord call.
+                          Start from the entire pillar video and edit the
+                          clip manually.
                         </span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
@@ -632,12 +631,26 @@ export function ClipTriageDialog({
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
-                          Precise cut — no AI
+                          Precise Cut
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
-                          ffmpeg-trims the source to the exact range and
-                          uploads a new Descript project. Frame-accurate, no
-                          Underlord call.
+                          Use Claude&apos;s exact clip timestamps. Fast and
+                          focused, but no extra footage if the boundaries
+                          need adjusting.
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => void runCreateInDescript("buffered")}
+                        disabled={!packAttached}
+                        className="flex flex-col items-start gap-0.5 py-2"
+                      >
+                        <span className="font-medium">
+                          Buffered Cut — Recommended
+                        </span>
+                        <span className="text-[11px] text-muted-foreground leading-snug">
+                          Claude&apos;s suggested clip plus 60 seconds before
+                          and after, so you have room to fix the beginning
+                          or ending.
                         </span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
@@ -646,28 +659,11 @@ export function ClipTriageDialog({
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
-                          Full video + Underlord
+                          Underlord Edit
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
-                          Fast. New composition in the source project.
-                          Underlord cuts by transcript, applies the format&apos;s
-                          pack (9:16 + hook track + captions), and ignores
-                          filler words.
-                        </span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => void runCreateInDescript("precise-ai")}
-                        disabled={!packAttached}
-                        className="flex flex-col items-start gap-0.5 py-2"
-                      >
-                        <span className="font-medium">
-                          Precise cut + Underlord
-                        </span>
-                        <span className="text-[11px] text-muted-foreground leading-snug">
-                          ffmpeg-trims to the exact range, uploads a new
-                          Descript project, then Underlord applies the
-                          format&apos;s pack and ignores fillers. Two Descript
-                          jobs.
+                          Let Underlord turn Claude&apos;s suggested moment into
+                          a styled clip using the full pillar as context.
                         </span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>

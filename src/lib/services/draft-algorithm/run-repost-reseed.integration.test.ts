@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { contentDrafts } from "@/lib/db/schema";
+import { contentDrafts, productionItems } from "@/lib/db/schema";
 import { PLATFORM_FIELD_SCHEMAS } from "@/lib/platform-field-schemas";
 import {
   createTestProductionItem,
@@ -129,5 +129,67 @@ describe("runDraftAlgorithm — repost re-seed (force=true)", () => {
       status: "skipped",
       reason: "no_source_for_reseed",
     });
+  });
+});
+
+// Regression guard for the cross-post caption bug (2026-08-07).
+//
+// Unlike reposts (which return "repost_kept_verbatim" before any guard runs),
+// cross-posts have NO early-exit protection in runDraftAlgorithm. The
+// idempotency guard explicitly ALLOWS overwriting "copy:source" drafts —
+// `hasMeaningfulCaption && !isSeededCopy` is false when isSeededCopy=true,
+// so the guard passes through.
+//
+// This means: if draft-algorithm-run is ever re-added to the cross-post route,
+// the AI will silently overwrite the verbatim caption seed. The cross-post route
+// intentionally does NOT enqueue that job (see the comment there). This test
+// documents that removing the enqueue is necessary, not accidental.
+describe("runDraftAlgorithm — cross-post copy:source guard (regression)", () => {
+  it("cross-post copy:source draft does NOT trigger already_filled or repost_kept_verbatim", async () => {
+    const accountId = await getTestAccountId();
+    const source = await createTestProductionItem({ postType: "x", accountId });
+    const crossPost = await createTestProductionItem({
+      postType: "x",
+      sourceType: "cross_post",
+      repostedFromItemId: source.id,
+      accountId,
+    });
+
+    // Remove all substrate-resolving text from both items so the algorithm
+    // reaches no_substrate without calling the LLM. The idempotency guard
+    // check runs BEFORE substrate loading, so a no_substrate result proves
+    // the guard did NOT block execution (unlike already_filled or
+    // repost_kept_verbatim, which return before substrate loading).
+    await db
+      .update(productionItems)
+      .set({ title: null, contentBody: null })
+      .where(eq(productionItems.id, source.id));
+    await db
+      .update(productionItems)
+      .set({ title: null, contentBody: null })
+      .where(eq(productionItems.id, crossPost.id));
+
+    await db.insert(contentDrafts).values({
+      productionItemId: crossPost.id,
+      version: 1,
+      isCurrent: true,
+      content: { tweet: "copied source caption" },
+      fieldSchemaSnapshot: PLATFORM_FIELD_SCHEMAS.x,
+      generatedBy: "copy:source",
+    });
+
+    const result = await runDraftAlgorithm(crossPost.id);
+
+    // If either of these pass, it means the algorithm NOW protects
+    // copy:source cross-post drafts — the enqueue-removal comment in
+    // the route would need revisiting.
+    expect(result.reason).not.toBe("repost_kept_verbatim");
+    expect(result.reason).not.toBe("already_filled");
+
+    // The algorithm ran past the idempotency guard. It only stopped because
+    // there was no substrate. With a real source body or title (which is
+    // always the case for production cross-posts), it would reach
+    // generateDraft and overwrite the caption.
+    expect(result).toMatchObject({ status: "skipped", reason: "no_substrate" });
   });
 });

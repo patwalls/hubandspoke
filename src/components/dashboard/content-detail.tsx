@@ -45,6 +45,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -1619,6 +1622,39 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     }
   }, [actionPending, contentId, data?.item.mediaS3Key, data?.item.title, load]);
 
+  const handleSendToDescript = useCallback(
+    async (mode: "full" | "precise" | "buffered" | "agent") => {
+      if (actionPending) return;
+      setActionPending(true);
+      try {
+        const res = await fetch(
+          `/api/production-items/${contentId}/send-to-descript?mode=${mode}`,
+          { method: "POST" },
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(json?.error || `Failed (${res.status})`);
+          return;
+        }
+        const label =
+          mode === "buffered"
+            ? "Trimming with 60-second buffer and uploading to Descript…"
+            : mode === "precise"
+              ? "Trimming clip locally and uploading to Descript…"
+              : mode === "full"
+                ? "Sending full composition to Descript…"
+                : "Creating clip with Underlord…";
+        toast.success(label, { duration: 6000 });
+        load();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed");
+      } finally {
+        setActionPending(false);
+      }
+    },
+    [actionPending, contentId, load],
+  );
+
   // Sync the shared draft state with whatever the server returned on the
   // most recent load(). Only re-seeds when the server draft id changes or
   // the draft goes from absent to present (or vice versa) — mid-edit loads
@@ -3143,6 +3179,35 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
+                  {item.sourceClipIdeaId && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger disabled={actionPending}>
+                        <FilmIcon className="size-3.5" /> Send to Descript
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        <DropdownMenuItem
+                          onClick={() => void handleSendToDescript("buffered")}
+                        >
+                          Buffered Cut — Recommended
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => void handleSendToDescript("precise")}
+                        >
+                          Precise Cut
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => void handleSendToDescript("full")}
+                        >
+                          Full Composition
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => void handleSendToDescript("agent")}
+                        >
+                          Underlord Edit
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  )}
                   {!hasDescriptProject && item.mediaS3Key && (
                     <DropdownMenuItem
                       disabled={actionPending}

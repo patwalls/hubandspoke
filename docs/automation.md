@@ -83,9 +83,9 @@ USER / API ENTRY POINTS
   # promote buttons (see /api/clip-ideas/[id]/create-in-descript*).
   POST /api/descript/clip-out                             → descript-clip-resolve  (format-detail quick-clip only as of 2026-05-02)
   POST /api/clip-ideas/[id]/triage (action=assign)        → draft-algorithm-run (auto-fire after promote)
-  POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve + draft-algorithm-run (auto-fire)
-  POST /api/clip-ideas/[id]/create-in-descript-precise    → clip-idea-precise-cut + draft-algorithm-run (auto-fire)
-  POST /api/clip-ideas/[id]/create-in-descript-full       → descript-clip-resolve (importMode=true on cold path) + draft-algorithm-run (auto-fire)
+  POST /api/clip-ideas/[id]/create-in-descript            → descript-clip-resolve + draft-algorithm-run (auto-fire)  [UI: Underlord Edit]
+  POST /api/clip-ideas/[id]/create-in-descript-precise    → clip-idea-precise-cut + draft-algorithm-run (auto-fire)  [UI: Precise Cut (?buffered=1 → Buffered Cut, adds ±60s padding to ffmpeg range)]
+  POST /api/clip-ideas/[id]/create-in-descript-full       → descript-clip-resolve (importMode=true on cold path) + draft-algorithm-run (auto-fire)  [UI: Full Composition]
   POST /api/production-items (new row w/ link, no inline metrics) → refresh-item-metrics
   PUT  /api/production-items (→ Published w/ link, or link added on Published) → refresh-item-metrics
   POST /api/production-items, /comments, /clip-ideas/triage  → notification-send
@@ -1069,14 +1069,17 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Gating** (`createClipIdeaInDescript*` + clip-triage UI): all four "Create in Descript" buttons require `format.descript_pack_id` to resolve to a non-null pack. Service throws `FormatMissingDescriptPackError` (caught by all 3 routes → 400) when missing. UI dropdown shows "No Descript pack attached" with a link to the format edit page.
 - **Four promotion options surfaced in the clip-triage dropdown** (`src/components/dashboard/clip-triage-dialog.tsx`):
 
-  | Button | Service entrypoint | Underlord called? |
+  | UI Button | Service entrypoint | What editor receives |
   |---|---|---|
-  | Full video — no AI | `createClipIdeaInDescriptFullVideo` | no — pillar composition duplicated, manual trim |
-  | Precise cut — no AI | `createClipIdeaInDescriptPreciseCut({ applyLayoutPack: false })` | no — ffmpeg trim + import only |
-  | Full video + Underlord | `createClipIdeaInDescript` (agent path) | yes — agent cuts by transcript + applies pack in one call |
-  | Precise cut + Underlord | `createClipIdeaInDescriptPreciseCut({ applyLayoutPack: true })` | yes — ffmpeg trim + import, then Underlord applies the pack to the imported composition |
+  | Full Composition | `createClipIdeaInDescriptFullVideo` | Full pillar video as a new composition — editor trims manually |
+  | Precise Cut | `createClipIdeaInDescriptPreciseCut({ applyLayoutPack: false })` | New project with exactly Claude's startSec–endSec |
+  | Buffered Cut *(recommended)* | `createClipIdeaInDescriptPreciseCut({ buffered: true })` | New project with Claude's range ±60s padding; original timestamps preserved |
+  | Underlord Edit | `createClipIdeaInDescript` (agent path) | Short styled composition cut by Underlord from the full pillar project |
 
-- **Per-promotion opt-in:** the precise-cut layout-apply phase requires both an attached pack on the format AND a per-promotion `applyLayoutPack: true` flag. The flag is plumbed via `?ai=1` on `POST /api/clip-ideas/[id]/create-in-descript-precise` and through the task payload (`ClipIdeaPreciseCutPayload.applyLayoutPack`). The agent-path fall-through (when a clip-idea source has `mediaS3Key` but no Descript project yet) inherits `applyLayoutPack: true` since the user clicked the AI button.
+  Internal `descriptImportPath` values (`"full-video"`, `"precise-cut"`, `"agent"`) are unchanged — previously queued jobs continue to resolve correctly. Buffered Cut reuses `"precise-cut"` as its import path; the wider range is carried in `ClipIdeaPreciseCutPayload.cutStartSec`/`cutEndSec`.
+
+- **Buffered Cut range:** `cutStartSec = Math.max(0, startSec - 60)`, `cutEndSec = endSec + 60`. ffmpeg stops naturally at actual EOF if `cutEndSec` exceeds file length. Original `startSec`/`endSec` on the clip idea row are never overwritten.
+- **Agent-path fall-through:** when a clip-idea source has `mediaS3Key` but no Descript project yet, `createClipIdeaInDescript` transparently falls through to `createClipIdeaInDescriptPreciseCut({ applyLayoutPack: true })` — the precise-cut Underlord layout-apply path. This is an internal routing detail not visible in the UI.
 - **Pack management UI:** inline on the format detail page (`/<brand>/formats/<id>`). Picker + create / edit / attach / detach modal in `src/components/dashboard/format-detail.tsx` (`DescriptPackModal`). CRUD via `/api/descript-packs` + `/api/descript-packs/[id]`. Auto-attaches a freshly-created pack to the current format (most common intent).
 
 ### `youtube-download` — yt-dlp → S3 archive

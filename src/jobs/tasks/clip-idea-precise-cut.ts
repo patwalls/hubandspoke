@@ -51,6 +51,11 @@ export interface ClipIdeaPreciseCutPayload {
    *  ("Precise cut + Underlord" vs "Precise cut — no AI"). Undefined/false
    *  on existing in-flight payloads keeps them on the no-AI path. */
   applyLayoutPack?: boolean;
+  /** When set (Buffered Cut mode), ffmpeg trims to this range instead of the
+   *  clip idea's raw startSec/endSec. Preserves the original timestamps as
+   *  Claude's recommended core clip while giving editors extra context. */
+  cutStartSec?: number;
+  cutEndSec?: number;
   /** Epoch ms. Set on the first poll; carried forward across re-enqueues. */
   deadlineAt?: number;
 }
@@ -138,8 +143,11 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
 
   const startSec = Number(row.startSec);
   const endSec = Number(row.endSec);
-  if (!(endSec > startSec)) {
-    throw new Error(`invalid range: startSec=${startSec} endSec=${endSec}`);
+  // Buffered Cut mode supplies a wider range; precise-cut uses the raw timestamps.
+  const cutStartSec = payload.cutStartSec ?? startSec;
+  const cutEndSec = payload.cutEndSec ?? endSec;
+  if (!(cutEndSec > cutStartSec)) {
+    throw new Error(`invalid range: cutStartSec=${cutStartSec} cutEndSec=${cutEndSec}`);
   }
 
   // Prepend any spoken-footage hook(s) ahead of the body. Each hookSegments
@@ -150,7 +158,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
   const hookSegments = (row.hookSegments ?? []).filter(isValidSegment);
   const segments: ClipSegment[] = [
     ...hookSegments,
-    { startSec, endSec },
+    { startSec: cutStartSec, endSec: cutEndSec },
   ];
 
   const jobDir = tmpdir();
@@ -160,7 +168,10 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
 
   try {
     helpers.logger.info(
-      `precise-cut start clip=${clipIdeaId} range=${startSec}-${endSec}` +
+      `precise-cut start clip=${clipIdeaId} range=${cutStartSec}-${cutEndSec}` +
+        (cutStartSec !== startSec || cutEndSec !== endSec
+          ? ` (buffered; core=${startSec}-${endSec})`
+          : "") +
         (hookSegments.length
           ? ` +${hookSegments.length} hook segment(s): ${hookSegments
               .map((s) => `${s.startSec}-${s.endSec}`)
@@ -188,8 +199,8 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
         ffmpegPath: ffmpegInstaller.path,
         inputPath: sourcePath,
         outputPath: clipPath,
-        startSec,
-        endSec,
+        startSec: cutStartSec,
+        endSec: cutEndSec,
         logger: helpers.logger,
       });
     }
