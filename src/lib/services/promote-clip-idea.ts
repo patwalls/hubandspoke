@@ -226,6 +226,7 @@ interface ClipIdeaRow {
   sourceTitle: string | null;
   sourceBrand: string | null;
   descriptProjectId: string | null;
+  descriptSeedCompositionId: string | null;
   descriptAccount: string | null;
   mediaS3Key: string | null;
 }
@@ -249,6 +250,7 @@ async function loadAndGuardClipIdea(
       sourceTitle: productionItems.title,
       sourceBrand: productionItems.brand,
       descriptProjectId: productionItems.descriptProjectId,
+      descriptSeedCompositionId: productionItems.descriptSeedCompositionId,
       descriptAccount: productionItems.descriptAccount,
       mediaS3Key: productionItems.mediaS3Key,
     })
@@ -588,6 +590,11 @@ export function buildDescriptPrompt(args: {
   productionItemId: string;
   aspectRatio: "9:16" | "16:9";
   quotables: string[];
+  /** The full-length source composition to cut from. When present, the prompt
+   *  names it explicitly so Underlord doesn't guess among multiple compositions
+   *  in the project. Null = fall back to the ambiguous "main composition"
+   *  wording (back-compat for pillars where the seed hasn't been set). */
+  sourceCompositionId?: string | null;
 }): string {
   const duration = Math.max(0, Math.round(args.endSec - args.startSec));
   const start = formatTimestamp(args.startSec);
@@ -616,7 +623,9 @@ export function buildDescriptPrompt(args: {
   return [
     orientationLine,
     "",
-    `1. In the main composition, locate the transcript segment between ${start} and ${end} (duration ≈ ${duration}s). The time range is non-negotiable.`,
+    args.sourceCompositionId
+      ? `1. In the source composition (compositionId="${args.sourceCompositionId}"), locate the transcript segment between ${start} and ${end} (duration ≈ ${duration}s). The time range is non-negotiable. Do NOT edit or trim this source composition — only read from it.`
+      : `1. In the main composition, locate the transcript segment between ${start} and ${end} (duration ≈ ${duration}s). The time range is non-negotiable.`,
     `2. Create a NEW composition named "${safeHook}" containing only that segment. Do not include footage outside this range. The start must land on the first spoken word inside the range; the end must land on the last spoken word inside the range.`,
     "",
     "3. Apply the following format-specific instructions to the new composition:",
@@ -687,6 +696,7 @@ export async function createClipIdeaInDescript(args: {
     productionItemId,
     aspectRatio,
     quotables,
+    sourceCompositionId: row.descriptSeedCompositionId,
   });
   const agent = await invokeDescriptAgent({
     projectId: row.descriptProjectId,
