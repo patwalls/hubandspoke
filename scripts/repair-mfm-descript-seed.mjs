@@ -81,12 +81,13 @@ if (!seedCompositionId) {
   );
   console.log("  S3 presigned URL generated");
 
-  // Try importing into the EXISTING project (project_id instead of project_name).
-  // If Descript rejects project_id, it will either error or create a new project.
+  // Import into the EXISTING project using project_id.
+  // "main" is already taken (original import), so use a distinct media key.
+  const mediaKey = "seed_repair";
   const importBody = {
     project_id: PROJECT_ID,
-    add_media: { main: { url: presigned } },
-    add_compositions: [{ name: `${PILLAR_NAME} (seed)`, clips: [{ media: "main" }] }],
+    add_media: { [mediaKey]: { url: presigned } },
+    add_compositions: [{ name: `${PILLAR_NAME} (seed)`, clips: [{ media: mediaKey }] }],
   };
 
   const ir = await fetch(`${BASE}/jobs/import/project_media`, {
@@ -98,33 +99,13 @@ if (!seedCompositionId) {
   console.log("  Import response:", JSON.stringify(importData).slice(0, 400));
 
   if (!importData.job_id) {
-    // project_id not accepted — fall back to new-project import
-    console.log("  project_id not accepted; falling back to new project import");
-    const fbBody = {
-      project_name: `${PILLAR_NAME} (seed repair ${Date.now()})`,
-      add_media: { main: { url: presigned } },
-      add_compositions: [{ name: `${PILLAR_NAME} (seed)`, clips: [{ media: "main" }] }],
-    };
-    const fbr = await fetch(`${BASE}/jobs/import/project_media`, {
-      method: "POST",
-      headers: h,
-      body: JSON.stringify(fbBody),
-    });
-    const fbData = await fbr.json();
-    console.log("  Fallback import response:", JSON.stringify(fbData).slice(0, 400));
-    if (!fbData.job_id) {
-      console.error("  Both import attempts failed — aborting");
-      await pool.end();
-      process.exit(1);
-    }
-    importData.job_id = fbData.job_id;
-    importData.project_id = fbData.project_id;
-    importData.project_url = fbData.project_url;
+    console.error("  Import into existing project failed — aborting. Raw response:", JSON.stringify(importData));
+    await pool.end();
+    process.exit(1);
   }
 
   const jobId = importData.job_id;
-  const newProjectId = importData.project_id ?? PROJECT_ID;
-  console.log(`  Import job started: ${jobId}, project: ${newProjectId}`);
+  console.log(`  Import job started: ${jobId} into existing project ${PROJECT_ID}`);
 
   // Poll until done
   console.log("  Polling (up to 10 min)…");
@@ -142,28 +123,6 @@ if (!seedCompositionId) {
       }
       seedCompositionId = job.result?.created_compositions?.[0]?.id ?? null;
       console.log("  created_compositions:", JSON.stringify(job.result?.created_compositions));
-
-      // If a new project was created, update the pillar + derivatives
-      if (newProjectId !== PROJECT_ID) {
-        console.log(`  New project created: ${newProjectId} — updating pillar + derivatives`);
-        await pool.query(
-          `UPDATE production_items
-             SET descript_project_id   = $1,
-                 descript_project_url  = $2,
-                 updated_at            = now()
-           WHERE id = $3`,
-          [newProjectId, `https://web.descript.com/${newProjectId}`, PILLAR_ID],
-        );
-        await pool.query(
-          `UPDATE production_items
-             SET descript_project_id   = $1,
-                 descript_project_url  = $2,
-                 updated_at            = now()
-           WHERE pillar_content_item_id = $3
-             AND descript_project_id    = $4`,
-          [newProjectId, `https://web.descript.com/${newProjectId}`, PILLAR_ID, PROJECT_ID],
-        );
-      }
       break;
     }
   }
