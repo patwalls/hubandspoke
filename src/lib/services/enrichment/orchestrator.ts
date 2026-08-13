@@ -87,7 +87,7 @@ async function auditEnrichmentDiff(
  * rather than crash the task. The collision is a durable data condition, not a
  * transient fault, so it doesn't warrant a retry or a Sentry page.
  */
-async function persistEnrichmentUpdates(
+export async function persistEnrichmentUpdates(
   itemId: string,
   updates: Partial<typeof productionItems.$inferInsert>,
 ): Promise<void> {
@@ -102,8 +102,17 @@ async function persistEnrichmentUpdates(
       })
       .where(eq(productionItems.id, itemId));
   } catch (err) {
-    const code = (err as { code?: string })?.code;
-    const constraint = (err as { constraint_name?: string })?.constraint_name ?? "";
+    // Drizzle wraps the driver error ("Failed query: update ...") and puts
+    // the PostgresError on `cause` — code/constraint_name live THERE, not on
+    // the wrapper. Reading the wrapper meant this handler never fired and
+    // every collision retried to a 25/25 corpse (Sentry HUBANDSPOKE-1Y/-2M;
+    // fixed 2026-08-13). Unwrap one level, fall back to the error itself.
+    const pgErr =
+      err instanceof Error && err.cause && typeof err.cause === "object"
+        ? (err.cause as { code?: string; constraint_name?: string })
+        : (err as { code?: string; constraint_name?: string });
+    const code = pgErr?.code;
+    const constraint = pgErr?.constraint_name ?? "";
     const isPlatformIdCollision =
       code === "23505" &&
       "platformContentId" in updates &&
