@@ -1,6 +1,5 @@
-import type OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { randomUUID } from "node:crypto";
-import { openai } from "@/lib/openai";
 import type {
   ContentDraftContent,
   ContentDraftSlide,
@@ -17,12 +16,12 @@ import {
 } from "@/lib/services/draft-algorithm/prior-cross-post-examples";
 import { findInterestingTimestamps } from "@/lib/services/draft-algorithm/timestamp-finder";
 
-// gpt-4.1 (OpenAI flagship) for copywriting judgment. Short-form copy rewards
-// nuance more than speed — a weak hook sinks a post, and the cost delta vs a
-// mini model is trivial against the production value of a better tweet. Bump
+// Opus for copywriting judgment. Short-form copy rewards nuance more than
+// speed — a weak hook sinks a post, and the cost delta vs haiku is trivial
+// (~$0.03/draft) against the production value of a better tweet. Bump
 // PROMPT_VERSION when prompt structure changes so clip-ideas-style audits
 // can A/B the rows.
-const MODEL = "gpt-4.1";
+const MODEL = "claude-opus-4-7";
 // v4 (2026-05-08): added CTA RULES. Some platforms now ship a `cta` field
 // (reply tweet / LinkedIn comment / pinned YouTube Community comment); the
 // agent fills it only when the editorial notes include CTA guidance and
@@ -83,9 +82,9 @@ const MODEL = "gpt-4.1";
 // reply with the CTA..." placeholder. CTA RULES replaced with CTA BASELINE
 // TEMPLATE: fixed "If you want more stuff like this, check out\n\n<link>"
 // shape, with `utm_source` + `utm_campaign` paste-from-context UTMs. Format
-// Skill still wins when it specifies an explicit CTA pattern. OpenAI's
-// built-in `web_search` tool is registered (Responses API) so the agent can
-// find a published starterstory.com episode URL when the format
+// Skill still wins when it specifies an explicit CTA pattern. Anthropic
+// native `web_search_20250305` server tool registered (max_uses: 2) so the
+// agent can find a published starterstory.com episode URL when the format
 // calls for the episode rather than a lead magnet. CTA context (channel +
 // utmCampaign) rendered as a per-call payload block; no schema changes.
 // v13 (2026-05-20): platform-proximity rewrite directive. The v7 "rich vs
@@ -322,8 +321,8 @@ export interface GenerateDraftArgs {
    *  `cta` field (x / linkedin / youtube_community). When present, the agent
    *  is told to always write a reply CTA following the CTA BASELINE TEMPLATE
    *  (system prompt) and is given the literal channel + utmCampaign values
-   *  to paste into the link's UTMs. Also gates registration of OpenAI's
-   *  built-in `web_search` tool — the agent can look up the
+   *  to paste into the link's UTMs. Also gates registration of the
+   *  Anthropic `web_search_20250305` server tool — the agent can look up the
    *  pillar's published episode URL when the Skill calls for the episode
    *  rather than a lead magnet. Absent when the post type has no CTA slot
    *  (instagram_*, tiktok, threads, youtube_long/shorts) — same single-shot
@@ -573,7 +572,7 @@ function renderPastCaptions(
 // silently omit one.
 function buildToolSchema(
   fieldSchema: FormatFieldSchema,
-): Record<string, unknown> {
+): Anthropic.Tool["input_schema"] {
   const properties: Record<string, Record<string, unknown>> = {};
   const required: string[] = [];
   for (const field of fieldSchema.fields) {
@@ -741,29 +740,34 @@ function normalizeContent(
 }
 
 /**
- * Wrap `client.responses.create` with retries on OpenAI capacity errors
- * (429 rate-limit / 503 service-unavailable / 529 overloaded). Brief blips
- * during peak hours surface as "couldn't redraft" toasts otherwise; a short
- * backoff covers the common case where the next request lands on a
- * less-loaded shard.
+ * Wrap `client.messages.create` with retries on Anthropic 529
+ * (overloaded_error). Brief Anthropic capacity blips during peak hours
+ * surface as "couldn't redraft" toasts otherwise; a short backoff covers
+ * the common case where the next request lands on a less-loaded shard.
  *
  * Schedule: initial attempt + 2 retries at 1s then 3s (≤4s extra latency
- * worst case). Persistent overloads still fail fast — unbounded retry would
+ * worst case). 2026-05-19 bumped from 1 retry after a fresh 529 paged
+ * Sentry. Persistent overloads still fail fast — unbounded retry would
  * stack 30s/call latency for users staring at a spinner.
  */
 const OVERLOAD_RETRY_DELAYS_MS = [1000, 3000];
 
-async function createResponseWithOverloadRetry(
-  client: OpenAI,
-  params: OpenAI.Responses.ResponseCreateParamsNonStreaming,
-): Promise<OpenAI.Responses.Response> {
+async function createMessagesWithOverloadRetry(
+  client: Anthropic,
+  params: Anthropic.MessageCreateParamsNonStreaming,
+): Promise<Anthropic.Message> {
   for (let attempt = 0; attempt <= OVERLOAD_RETRY_DELAYS_MS.length; attempt++) {
     try {
-      return await client.responses.create(params);
+      return await client.messages.create(params);
     } catch (err) {
-      const status = (err as { status?: number })?.status;
       const isOverload =
-        status === 429 || status === 503 || status === 529;
+        err instanceof Anthropic.APIError &&
+        (err.status === 529 ||
+          ("error" in err &&
+            typeof (err as { error?: { type?: string } }).error?.type ===
+              "string" &&
+            (err as { error: { type: string } }).error.type ===
+              "overloaded_error"));
       if (!isOverload) throw err;
       if (attempt === OVERLOAD_RETRY_DELAYS_MS.length) {
         // Out of retries; let the caller surface this as a draft failure.
@@ -771,41 +775,42 @@ async function createResponseWithOverloadRetry(
       }
       const delay = OVERLOAD_RETRY_DELAYS_MS[attempt];
       console.warn(
-        `draft-agent: OpenAI ${status} overloaded — retry ${attempt + 1}/${OVERLOAD_RETRY_DELAYS_MS.length} after ${delay}ms`,
+        `draft-agent: Anthropic 529 overloaded — retry ${attempt + 1}/${OVERLOAD_RETRY_DELAYS_MS.length} after ${delay}ms`,
       );
       await new Promise((r) => setTimeout(r, delay));
     }
   }
   // Unreachable — the loop either returns or throws.
-  throw new Error("createResponseWithOverloadRetry: loop exited unexpectedly");
+  throw new Error("createMessagesWithOverloadRetry: loop exited unexpectedly");
 }
 
 export async function generateDraft(
   args: GenerateDraftArgs,
 ): Promise<GenerateDraftResult> {
-  const client = openai();
+  const client = new Anthropic();
 
-  const tools: OpenAI.Responses.Tool[] = [
+  const tools: Anthropic.Tool[] = [
     {
-      type: "function",
       name: "propose_draft",
       description:
         "Submit a complete draft with a value for every field in the target format's schema. Follow each field's per-field instruction exactly.",
-      parameters: buildToolSchema(args.fieldSchema),
-      // Non-strict: the platform field schema is dynamic (varies per format)
-      // and carries optional slots, so we don't want strict JSON-schema
-      // enforcement rejecting valid partial-but-complete drafts.
-      strict: false,
+      input_schema: buildToolSchema(args.fieldSchema),
     },
   ];
 
-  // v12: register OpenAI's built-in web_search tool when this draft has a CTA
-  // slot. The CTA BASELINE TEMPLATE tells the agent to use it ONLY when the
-  // format Skill or context implies "link to the actual episode" — most
-  // drafts will skip the search and pay nothing for the tool. OpenAI runs the
-  // search server-side within the same response, so no client round-trip.
+  // v12: register Anthropic's native web_search server tool when this draft
+  // has a CTA slot. The CTA BASELINE TEMPLATE tells the agent to call it
+  // ONLY when the format Skill or context implies "link to the actual
+  // episode" — most drafts will skip the call and pay nothing for the tool.
+  // max_uses caps the worst case at 2 searches per draft (one primary +
+  // one refinement). Cast through unknown because the SDK's `Tool` type may
+  // not yet cover server-tool variants in all versions; the API accepts it.
   if (args.cta) {
-    tools.push({ type: "web_search" });
+    tools.push({
+      type: "web_search_20250305",
+      name: "web_search",
+      max_uses: 2,
+    } as unknown as Anthropic.Tool);
   }
 
   // v1.5: register find_interesting_timestamps only when we actually have
@@ -818,12 +823,10 @@ export async function generateDraft(
       : null;
   if (transcriptSegments && transcriptSegments.length > 0) {
     tools.push({
-      type: "function",
-      strict: false,
       name: "find_interesting_timestamps",
       description:
         "Find N real timestamps from the pillar video's transcript matching an editorial focus. Use this when the format Skill calls for timestamps in the copy — never invent timestamps from your own scan of the transcript text. Returns an array of { mmss, label, reason } records with the start times of real segments. Multiple calls are fine when you need distinct lists.",
-      parameters: {
+      input_schema: {
         type: "object",
         properties: {
           focus: {
@@ -1018,28 +1021,26 @@ export async function generateDraft(
   // MAX_ITERATIONS is a safety net; in practice a normal draft is 1–2
   // iterations (zero or one timestamp call + the propose_draft call).
   const MAX_ITERATIONS = 5;
-  // Responses API: the first turn carries the full prompt; subsequent turns
-  // send ONLY the new function-call outputs and chain via previous_response_id
-  // (the model's prior output stays server-side). Stable preamble goes first
-  // so OpenAI's automatic prefix caching kicks in on Regenerate.
-  let input: OpenAI.Responses.ResponseInput = [
+  const messages: Anthropic.MessageParam[] = [
     {
       role: "user",
       content: [
-        { type: "input_text", text: stablePreamble },
-        { type: "input_text", text: perCallPayload },
+        {
+          type: "text",
+          text: stablePreamble,
+          cache_control: { type: "ephemeral" },
+        },
+        { type: "text", text: perCallPayload },
       ],
     },
   ];
-  let previousResponseId: string | undefined;
 
   // Cumulative token usage across iterations — modelUsage on the
   // resulting content_drafts row reports the full draft cost, not just
-  // the final iteration. OpenAI reports cached (read) tokens only; there
-  // is no separate cache-creation charge, so that column stays 0.
+  // the final iteration.
   let inputTokens = 0;
   let outputTokens = 0;
-  const cacheCreationTokens = 0;
+  let cacheCreationTokens = 0;
   let cacheReadTokens = 0;
 
   let proposeDraftInput: unknown = null;
@@ -1051,48 +1052,55 @@ export async function generateDraft(
   let emptyRequiredFieldRetried = false;
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    const response = await createResponseWithOverloadRetry(client, {
+    const response = await createMessagesWithOverloadRetry(client, {
       model: MODEL,
-      max_output_tokens: 4096,
-      // instructions are NOT inherited across previous_response_id, so pass
-      // the system prompt every turn. OpenAI auto-caches the stable prefix.
-      instructions: SYSTEM_PROMPT,
+      max_tokens: 4096,
+      system: [
+        {
+          type: "text",
+          text: SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
       tools,
-      tool_choice: "auto",
-      ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-      input,
+      tool_choice: { type: "auto" },
+      messages,
     });
 
-    previousResponseId = response.id;
-    inputTokens += response.usage?.input_tokens ?? 0;
-    outputTokens += response.usage?.output_tokens ?? 0;
-    cacheReadTokens += response.usage?.input_tokens_details?.cached_tokens ?? 0;
+    inputTokens += response.usage.input_tokens;
+    outputTokens += response.usage.output_tokens;
+    cacheCreationTokens += response.usage.cache_creation_input_tokens ?? 0;
+    cacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
 
-    // Function-call items from this turn. Built-in web_search runs
-    // server-side within the response, so it never surfaces here — only our
-    // custom tools (propose_draft / find_interesting_timestamps) do.
-    const functionCalls = response.output.filter(
-      (o): o is OpenAI.Responses.ResponseFunctionToolCall =>
-        o.type === "function_call",
+    if (response.stop_reason !== "tool_use") {
+      // Plain-text response with no tool call. Normally the system
+      // prompt forbids this but bail loud rather than silent.
+      throw new Error(
+        `draft-agent: model stopped without tool call (stop_reason=${response.stop_reason})`,
+      );
+    }
+
+    // Append the assistant's full response so the conversation history
+    // round-trips correctly to the next iteration. content blocks are
+    // already in the SDK's expected shape.
+    messages.push({ role: "assistant", content: response.content });
+
+    // Find any tool_use blocks. If propose_draft is present, that's
+    // terminal — extract it and exit. Otherwise run any other tool
+    // calls (currently just find_interesting_timestamps), build
+    // tool_result blocks, append, and loop.
+    const toolUses = response.content.filter(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
     );
-    const proposeCall = functionCalls.find((c) => c.name === "propose_draft");
-
-    if (proposeCall) {
-      let proposeArgs: unknown;
-      try {
-        proposeArgs = JSON.parse(proposeCall.arguments);
-      } catch {
-        throw new Error(
-          "draft-agent: propose_draft returned unparseable JSON arguments",
-        );
-      }
+    const proposeBlock = toolUses.find((b) => b.name === "propose_draft");
+    if (proposeBlock) {
       // v13: validate required fields before accepting the draft. If any
       // field marked `required: true` in the platform's field schema is
       // empty, ask the agent to try again ONCE with a pointed correction
       // message. After that, throw — silently writing an empty
       // youtube_community body is the original bug we're fixing here.
       const emptyFields = findEmptyRequiredFields(
-        proposeArgs,
+        proposeBlock.input,
         args.fieldSchema,
       );
       if (emptyFields.length === 0 || emptyRequiredFieldRetried) {
@@ -1103,11 +1111,13 @@ export async function generateDraft(
             { emptyFields },
           );
         }
-        proposeDraftInput = proposeArgs;
+        proposeDraftInput = proposeBlock.input;
         break;
       }
-      // Reject via a function_call_output on the propose call and re-instruct.
-      // Every function_call must get a matching output before the next turn.
+      // Build the corrective tool_result + user message. Every tool_use
+      // block must have a matching tool_result before the next API call,
+      // including the propose_draft block we're rejecting — Anthropic
+      // 400s otherwise.
       emptyRequiredFieldRetried = true;
       const fieldDetails = emptyFields
         .map((key) => {
@@ -1121,39 +1131,33 @@ export async function generateDraft(
       console.warn(
         `draft-agent v13: empty required field(s) ${emptyFields.join(", ")} — issuing one corrective retry`,
       );
-      input = [
-        {
-          type: "function_call_output",
-          call_id: proposeCall.call_id,
-          output: correctiveText,
-        },
-      ];
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: proposeBlock.id,
+            content: correctiveText,
+            is_error: true,
+          },
+        ],
+      });
       continue;
     }
 
-    if (functionCalls.length === 0) {
-      // The model produced only text / a web-search — no tool call. The
-      // system prompt forbids this; bail loud rather than silent.
-      throw new Error(
-        `draft-agent: model stopped without a tool call (status=${response.status})`,
-      );
+    if (toolUses.length === 0) {
+      // stop_reason was "tool_use" but no tool_use blocks. Shouldn't
+      // happen but bail rather than infinite-loop.
+      throw new Error("draft-agent: stop_reason=tool_use but no tool blocks");
     }
 
-    const toolOutputs: OpenAI.Responses.ResponseInputItem[] = [];
-    for (const fc of functionCalls) {
-      if (fc.name === "find_interesting_timestamps") {
-        let parsed: { focus?: unknown; count?: unknown } = {};
-        try {
-          parsed = JSON.parse(fc.arguments) as {
-            focus?: unknown;
-            count?: unknown;
-          };
-        } catch {
-          parsed = {};
-        }
-        const focus = typeof parsed.focus === "string" ? parsed.focus : "";
+    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    for (const tu of toolUses) {
+      if (tu.name === "find_interesting_timestamps") {
+        const input = (tu.input ?? {}) as { focus?: unknown; count?: unknown };
+        const focus = typeof input.focus === "string" ? input.focus : "";
         const rawCount =
-          typeof parsed.count === "number" ? Math.round(parsed.count) : 5;
+          typeof input.count === "number" ? Math.round(input.count) : 5;
         const count = Math.max(1, Math.min(10, rawCount));
         // v1.6: log the agent's intent (focus + count) before running
         // the tool. Pat can audit Skill adherence by checking that this
@@ -1170,8 +1174,8 @@ export async function generateDraft(
             focus: focus || "most interesting moments",
             count,
           });
-          // v1.6: the output carries structured counts so the agent can
-          // decide whether to retry (validatedCount < requestedCount).
+          // v1.6: tool_result carries structured counts so the agent
+          // can decide whether to retry (validatedCount < requestedCount).
           // The HONORING SKILL COUNTS rule in the system prompt tells it
           // to retry once with a broader focus before accepting fewer.
           resultBody = JSON.stringify({
@@ -1195,25 +1199,26 @@ export async function generateDraft(
             error: `find_interesting_timestamps failed: ${message}`,
           });
         }
-        toolOutputs.push({
-          type: "function_call_output",
-          call_id: fc.call_id,
-          output: resultBody,
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: resultBody,
         });
       } else {
         // Unknown tool — surface a clear error result so the agent can
         // recover (e.g. immediately call propose_draft).
-        toolOutputs.push({
-          type: "function_call_output",
-          call_id: fc.call_id,
-          output: JSON.stringify({
-            error: `Unknown tool: ${fc.name}. Call propose_draft now.`,
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: JSON.stringify({
+            error: `Unknown tool: ${tu.name}. Call propose_draft now.`,
           }),
+          is_error: true,
         });
       }
     }
 
-    input = toolOutputs;
+    messages.push({ role: "user", content: toolResults });
   }
 
   if (!proposeDraftInput) {

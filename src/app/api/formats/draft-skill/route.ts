@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import type OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { openai } from "@/lib/openai";
 import { formats, productionItems } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { buildForkUserText } from "../draft-skill-prompt";
 
-const MODEL = "gpt-4.1-mini";
+const MODEL = "claude-haiku-4-5-20251001";
 const MAX_DESCRIPTION_LEN = 800;
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB per image (Anthropic cap)
@@ -80,35 +79,32 @@ interface DraftedFormat {
   inheritedLabelsAsOriginal?: boolean;
 }
 
-const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+const tools: Anthropic.Tool[] = [
   {
-    type: "function",
-    function: {
-      name: "submit_format_draft",
-      description:
-        "Submit a complete draft of the format Skill + suggested metadata.",
-      parameters: {
-        type: "object" as const,
-        properties: {
-          name: {
-            type: "string",
-            description:
-              "Short format name in title case, e.g. 'Reel: Tech Stack With Hook'. Mirror the brand's existing naming conventions.",
-          },
-          instructions: {
-            type: "string",
-            description:
-              "Full markdown Skill — see the system prompt for required sections.",
-          },
-          suggestedPostType: {
-            type: "string",
-            enum: ALLOWED_POST_TYPES,
-            description:
-              "Best-guess production_items.post_type the operator can override.",
-          },
+    name: "submit_format_draft",
+    description:
+      "Submit a complete draft of the format Skill + suggested metadata.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        name: {
+          type: "string",
+          description:
+            "Short format name in title case, e.g. 'Reel: Tech Stack With Hook'. Mirror the brand's existing naming conventions.",
         },
-        required: ["name", "instructions", "suggestedPostType"],
+        instructions: {
+          type: "string",
+          description:
+            "Full markdown Skill — see the system prompt for required sections.",
+        },
+        suggestedPostType: {
+          type: "string",
+          enum: ALLOWED_POST_TYPES,
+          description:
+            "Best-guess production_items.post_type the operator can override.",
+        },
       },
+      required: ["name", "instructions", "suggestedPostType"],
     },
   },
 ];
@@ -380,29 +376,36 @@ export async function POST(request: NextRequest) {
       .join("\n");
   }
 
-  // OpenAI multimodal content parts: a text part plus a data-URI image part
-  // per attached screenshot (base64 images ride in as `data:` URLs).
-  const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
-    { type: "text", text: userText },
-  ];
+  type ContentBlock =
+    | { type: "text"; text: string }
+    | {
+        type: "image";
+        source: { type: "base64"; media_type: string; data: string };
+      };
+  const content: ContentBlock[] = [{ type: "text", text: userText }];
   for (const img of validatedImages) {
     content.push({
-      type: "image_url",
-      image_url: {
-        url: `data:${img.mediaType};base64,${img.dataB64}`,
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: img.mediaType,
+        data: img.dataB64,
       },
     });
   }
 
-  const client = openai();
-  const response = await client.chat.completions.create({
+  const client = new Anthropic();
+  const response = await client.messages.create({
     model: MODEL,
     max_tokens: 2048,
+    system: SYSTEM_PROMPT,
     tools,
-    tool_choice: { type: "function", function: { name: "submit_format_draft" } },
+    tool_choice: { type: "tool", name: "submit_format_draft" },
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content },
+      {
+        role: "user",
+        content: content as unknown as Anthropic.MessageParam["content"],
+      },
     ],
   });
 
@@ -412,13 +415,9 @@ export async function POST(request: NextRequest) {
     suggestedPostType?: string;
   };
   let drafted: DraftedInput | null = null;
-  for (const call of response.choices[0]?.message?.tool_calls ?? []) {
-    if (call.type === "function" && call.function.name === "submit_format_draft") {
-      try {
-        drafted = JSON.parse(call.function.arguments) as DraftedInput;
-      } catch {
-        drafted = null;
-      }
+  for (const block of response.content) {
+    if (block.type === "tool_use" && block.name === "submit_format_draft") {
+      drafted = block.input as DraftedInput;
       break;
     }
   }
@@ -427,7 +426,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: "drafter returned no usable result",
-        stopReason: response.choices[0]?.finish_reason,
+        stopReason: response.stop_reason,
       },
       { status: 502 },
     );

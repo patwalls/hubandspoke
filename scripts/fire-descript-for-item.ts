@@ -1,7 +1,7 @@
 /**
  * One-off: fire the Descript branch of the Draft Algorithm for a single
  * derivative item, bypassing the caption-regen step. Useful when an editor
- * clicked Redraft but the model provider is overloaded and the route bailed
+ * clicked Redraft but Anthropic is overloaded (529) and the route bailed
  * before reaching the Descript step.
  *
  * Usage:
