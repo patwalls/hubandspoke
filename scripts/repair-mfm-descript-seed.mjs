@@ -24,6 +24,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 const PILLAR_ID   = "a3080d43-7165-4e1f-adbf-c3e2d0d68a63";
 const PROJECT_ID  = "3b8ed8e9-7976-4e03-ad30-c59d67a3bdc5";
 const BAD_SEED    = "bd1e9d68-a457-4c20-aa58-add3770fb4fa";
+const S3_BUCKET   = "www.starterstory.com";
 const S3_KEY      = "hubandspoke/uploads/a3080d43-7165-4e1f-adbf-c3e2d0d68a63/957f7a46-a2e6-46b4-add7-c8983351c09a-ejji5olw-r4.mp4";
 const PILLAR_NAME = "2 drunk multi-millionaires brainstorm 9 business ideas";
 const BASE        = "https://descriptapi.com/v1";
@@ -70,11 +71,18 @@ if (r1.ok && Array.isArray(d1.compositions)) {
 if (!seedCompositionId) {
   console.log("\nPhase 2: no full-length composition found via API — re-importing from S3");
 
-  const s3 = new S3Client({ region: process.env.AWS_REGION ?? "us-east-1" });
+  // The bucket name (www.starterstory.com) contains dots — virtual-hosted style
+  // would produce www.starterstory.com.s3.amazonaws.com which fails SSL cert
+  // validation. forcePathStyle avoids the redirect that Descript's URL validator
+  // refuses to follow.
+  const s3 = new S3Client({
+    region: process.env.AWS_REGION ?? "us-east-1",
+    forcePathStyle: true,
+  });
   const presigned = await getSignedUrl(
     s3,
     new GetObjectCommand({
-      Bucket: process.env.AWS_S3_BUCKET ?? "hubandspoke",
+      Bucket: S3_BUCKET,
       Key: S3_KEY,
     }),
     { expiresIn: 3600 },
