@@ -125,6 +125,15 @@ export class ClipIdeaSourceMissingMediaError extends Error {
   }
 }
 
+export class ClipIdeaSeedCompositionMissingError extends Error {
+  constructor(pillarId: string) {
+    super(
+      `Pillar ${pillarId} has a Descript project but no seed composition ID — run scripts/repair-mfm-descript-seed.mjs (or equivalent) before promoting`,
+    );
+    this.name = "ClipIdeaSeedCompositionMissingError";
+  }
+}
+
 export class ClipIdeaProductionItemMissingError extends Error {
   constructor(clipIdeaId: string) {
     super(
@@ -668,6 +677,11 @@ export async function createClipIdeaInDescript(args: {
     }
     throw new ClipIdeaSourceMissingDescriptProjectError();
   }
+  // Project exists but seed is missing: Underlord would silently pick the wrong
+  // "main" composition as source. Fail loudly so the pillar can be repaired.
+  if (!row.descriptSeedCompositionId) {
+    throw new ClipIdeaSeedCompositionMissingError(row.sourceProductionItemId);
+  }
   const brand = row.sourceBrand ?? "starter-story";
   const editor = await loadEditor(args.actorUserId);
   const body = buildContentBody(row);
@@ -1023,6 +1037,13 @@ export async function createClipIdeaInDescriptFullVideo(args: {
   let descriptPrompt: string | null;
   let pillarItemIdToStamp: string | undefined;
   let importMode = false;
+
+  // Project imported but seed never captured (or was corrupted). The warm path
+  // needs both; the cold path would try to re-import and fail with a confusing
+  // "cold-imported concurrently" error. Fail clearly instead.
+  if (pillar.descriptProjectId && !pillar.descriptSeedCompositionId) {
+    throw new ClipIdeaSeedCompositionMissingError(pillar.id);
+  }
 
   if (pillar.descriptProjectId && pillar.descriptSeedCompositionId) {
     mode = "warm";
