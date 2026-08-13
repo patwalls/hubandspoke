@@ -87,9 +87,21 @@ export const descriptClipResolveTask: Task = async (rawPayload, helpers) => {
     // composition id inside `agent_response`.
     const importMode =
       payload.importMode ?? Boolean(job.result?.created_compositions?.length);
-    const compositionId = importMode
-      ? job.result?.created_compositions?.[0]?.id ?? null
-      : extractCompositionIdFromAgentResponse(job.result?.agent_response);
+
+    // Composition extraction: prefer structured created_compositions (present
+    // on all import jobs; may also be present on agent jobs). Fall back to
+    // the last compositionId="…" match in agent_response — last because
+    // Underlord narrates prior state before reporting the newly created one.
+    const compositionId =
+      job.result?.created_compositions?.[0]?.id ??
+      extractCompositionIdFromAgentResponse(job.result?.agent_response) ??
+      null;
+
+    if (compositionId === null && job.result?.agent_response !== undefined) {
+      helpers.logger.warn(
+        `descript-clip-resolve composition=none trigger=${payload.triggerId} agent_response=${JSON.stringify(job.result.agent_response).slice(0, 600)}`,
+      );
+    }
 
     // Cold-import + chained-agent path (Draft Algorithm V1.7 cold branch).
     // The import has produced the pillar's seed composition; instead of

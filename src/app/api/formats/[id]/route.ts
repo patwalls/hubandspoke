@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/schema";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
+import { buildDescriptCompositionUrl } from "@/lib/descript";
 import { getChannelsForFormats } from "@/lib/format-channels";
 import {
   computeProvenStatusForBrand,
@@ -172,6 +173,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         status: i.status,
         viewsEstimated: i.viewsEstimated ?? false,
         descriptProjectUrl: i.descriptProjectUrl,
+        descriptCompositionUrl:
+          i.descriptProjectId && i.descriptCompositionId
+            ? buildDescriptCompositionUrl(i.descriptProjectId, i.descriptCompositionId)
+            : null,
         accountId: i.accountId,
         postType: i.postType,
         account: i.accountId ? accountById.get(i.accountId) ?? null : null,

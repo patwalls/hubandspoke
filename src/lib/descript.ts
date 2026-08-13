@@ -321,8 +321,12 @@ export function extractCompositionIdFromAgentResponse(
   agentResponse: string | undefined
 ): string | null {
   if (!agentResponse) return null;
-  const m = agentResponse.match(/compositionId="([^"]+)"/);
-  return m ? m[1] : null;
+  // Use the LAST match — Underlord narrates prior/existing state before
+  // reporting what it just created. Grabbing the first match risks picking
+  // up an ID it merely mentioned (e.g. "I see composition bd1e9…") rather
+  // than the one it actually created at the end of the response.
+  const matches = [...agentResponse.matchAll(/compositionId="([^"]+)"/g)];
+  return matches.length > 0 ? matches[matches.length - 1][1] : null;
 }
 
 /**

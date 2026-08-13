@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildLayoutPackPrompt, substituteFormatPrompt } from "./descript";
+import { buildLayoutPackPrompt, substituteFormatPrompt, extractCompositionIdFromAgentResponse } from "./descript";
 
 // Pure unit test — no DB, no network. The Descript Underlord receives the
 // output of this function verbatim; getting the substitution rules wrong
@@ -51,6 +51,59 @@ describe("substituteFormatPrompt", () => {
     // include {{startTimestamp}} unconditionally and it just becomes "".
     const out = substituteFormatPrompt("[{{startTimestamp}}]", { hook: "x" });
     expect(out).toBe("[]");
+  });
+});
+
+describe("extractCompositionIdFromAgentResponse", () => {
+  it("returns null for undefined input", () => {
+    expect(extractCompositionIdFromAgentResponse(undefined)).toBeNull();
+  });
+
+  it("returns null when no compositionId pattern is present", () => {
+    expect(extractCompositionIdFromAgentResponse("I made the clip.")).toBeNull();
+  });
+
+  it("extracts the ID from a single match", () => {
+    const response = `Done. compositionId="abc-123-def"`;
+    expect(extractCompositionIdFromAgentResponse(response)).toBe("abc-123-def");
+  });
+
+  it("returns the LAST match when the response mentions multiple composition IDs", () => {
+    // Underlord narrates existing state before reporting the newly created
+    // composition — the correct ID is always the last one in the response.
+    const response = [
+      'I found the existing composition compositionId="bd1e9d68-old".',
+      "I created a new clip from the 01:00–01:30 range.",
+      'The new composition is compositionId="new-comp-uuid-789".',
+    ].join(" ");
+    expect(extractCompositionIdFromAgentResponse(response)).toBe("new-comp-uuid-789");
+  });
+
+  it("handles three composition IDs — still returns the last", () => {
+    const response =
+      'First compositionId="aaa" then compositionId="bbb" finally compositionId="ccc"';
+    expect(extractCompositionIdFromAgentResponse(response)).toBe("ccc");
+  });
+
+  it("two clips from the same pillar resolve to different composition IDs", () => {
+    // Simulates the resolver running independently for two agent jobs.
+    // Each job's response reports a distinct newly-created composition.
+    const responseClip1 = [
+      'I see the project has compositionId="seed-full-video".',
+      'Created new clip composition: compositionId="clip-1-uuid".',
+    ].join(" ");
+    const responseClip2 = [
+      'I see the project has compositionId="seed-full-video".',
+      'I also see compositionId="clip-1-uuid" from a prior cut.',
+      'Created new clip composition: compositionId="clip-2-uuid".',
+    ].join(" ");
+
+    const id1 = extractCompositionIdFromAgentResponse(responseClip1);
+    const id2 = extractCompositionIdFromAgentResponse(responseClip2);
+
+    expect(id1).toBe("clip-1-uuid");
+    expect(id2).toBe("clip-2-uuid");
+    expect(id1).not.toBe(id2);
   });
 });
 

@@ -129,6 +129,7 @@ interface ContentItem {
   status: string | null;
   viewsEstimated: boolean;
   descriptProjectUrl: string | null;
+  descriptCompositionUrl: string | null;
   accountId: string | null;
   postType: PostType | null;
   account: {
@@ -1985,13 +1986,13 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                               {item.status}
                             </span>
                           )}
-                          {item.descriptProjectUrl && (
+                          {item.descriptCompositionUrl && (
                             <a
-                              href={item.descriptProjectUrl}
+                              href={item.descriptCompositionUrl}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-1 text-[10px] font-medium text-purple-700 hover:underline mt-0.5"
-                              title="Open in Descript"
+                              title="Open composition in Descript"
                             >
                               <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
                               Descript →
