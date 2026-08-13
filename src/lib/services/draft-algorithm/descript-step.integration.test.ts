@@ -454,7 +454,7 @@ describe.skip("runDescriptStepForDerivative — {{hook}} substitution (enabled-p
         value: {
           hook: "He built one website that prints $40K/month 😲",
           source: "derivative-hook-v1",
-          extractor: "gpt-4.1-mini:derivative-hook:v1",
+          extractor: "claude-haiku-4-5-20251001:derivative-hook:v1",
           exemplarCount: 5,
         },
       });

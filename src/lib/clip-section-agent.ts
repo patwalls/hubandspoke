@@ -1,5 +1,4 @@
-import type OpenAI from "openai";
-import { openai } from "@/lib/openai";
+import Anthropic from "@anthropic-ai/sdk";
 import {
   findAnchorInWords,
   resolveAnchorForRange,
@@ -8,14 +7,14 @@ import {
   type TranscriptWord,
 } from "./clip-anchor-utils";
 
-// Splice v10 (2026-05-22): the section picker. Format-agnostic
+// Sonnet 4.6. Splice v10 (2026-05-22): the section picker. Format-agnostic
 // — picks 8-15 "interesting moments" from a pillar transcript with
 // cue-aligned windows + verbatim anchor quotes + topic/summary/theme tags.
-// Per-format hook variants are produced downstream by `clip-hook-agent.ts`,
-// reading these sections one at a time. Replaces the v9
+// Per-format hook variants are produced downstream by `clip-hook-agent.ts`
+// (Haiku 4.5), reading these sections one at a time. Replaces the v9
 // monolithic agent that picked sections AND wrote hooks AND emitted
-// per-format extras in a single call.
-const MODEL = "gpt-4.1";
+// per-format extras in a single Sonnet call.
+const MODEL = "claude-sonnet-4-6";
 export const SECTION_PROMPT_VERSION = 1;
 export const SECTION_GENERATED_BY = `${MODEL}:section-v${SECTION_PROMPT_VERSION}`;
 export const SECTION_ALGORITHM_NAME = "Splice";
@@ -108,69 +107,66 @@ interface SectionToolInput {
   }>;
 }
 
-const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+const tools: Anthropic.Tool[] = [
   {
-    type: "function",
-    function: {
-      name: "propose_clip_sections",
-      description:
-        "Submit 8-15 clip-worthy sections from the transcript. Sort highest to lowest estimatedViewsBaseline. Pass `sections` as a real JSON array of objects — never a JSON-encoded string.",
-      parameters: {
-        type: "object" as const,
-        properties: {
-          sections: {
-            type: "array",
-            description:
-              "Array of 8-15 section objects. Must be a real JSON array, not a string containing JSON.",
-            minItems: 8,
-            maxItems: 15,
-            items: {
-              type: "object",
-              properties: {
-                startSec: { type: "number" },
-                endSec: { type: "number" },
-                transcriptAnchorQuote: {
-                  type: "string",
-                  description:
-                    "Verbatim ≥ 8-word quote from the FULL TRANSCRIPT that IS the payoff moment. Must fall inside startSec/endSec.",
-                },
-                topic: {
-                  type: "string",
-                  description:
-                    "Neutral one-line description of what the section is about (~80 chars).",
-                },
-                summary: {
-                  type: "string",
-                  description:
-                    "Neutral 2-3 sentence rundown of the section's content (≤300 chars).",
-                },
-                themeTags: {
-                  type: "array",
-                  items: { type: "string" },
-                  description:
-                    "1-4 lower-snake-case classification tags (e.g. tech_stack, revenue_reveal, tactical_advice).",
-                  minItems: 1,
-                  maxItems: 4,
-                },
-                estimatedViewsBaseline: {
-                  type: "integer",
-                  minimum: 0,
-                },
+    name: "propose_clip_sections",
+    description:
+      "Submit 8-15 clip-worthy sections from the transcript. Sort highest to lowest estimatedViewsBaseline. Pass `sections` as a real JSON array of objects — never a JSON-encoded string.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        sections: {
+          type: "array",
+          description:
+            "Array of 8-15 section objects. Must be a real JSON array, not a string containing JSON.",
+          minItems: 8,
+          maxItems: 15,
+          items: {
+            type: "object",
+            properties: {
+              startSec: { type: "number" },
+              endSec: { type: "number" },
+              transcriptAnchorQuote: {
+                type: "string",
+                description:
+                  "Verbatim ≥ 8-word quote from the FULL TRANSCRIPT that IS the payoff moment. Must fall inside startSec/endSec.",
               },
-              required: [
-                "startSec",
-                "endSec",
-                "transcriptAnchorQuote",
-                "topic",
-                "summary",
-                "themeTags",
-                "estimatedViewsBaseline",
-              ],
+              topic: {
+                type: "string",
+                description:
+                  "Neutral one-line description of what the section is about (~80 chars).",
+              },
+              summary: {
+                type: "string",
+                description:
+                  "Neutral 2-3 sentence rundown of the section's content (≤300 chars).",
+              },
+              themeTags: {
+                type: "array",
+                items: { type: "string" },
+                description:
+                  "1-4 lower-snake-case classification tags (e.g. tech_stack, revenue_reveal, tactical_advice).",
+                minItems: 1,
+                maxItems: 4,
+              },
+              estimatedViewsBaseline: {
+                type: "integer",
+                minimum: 0,
+              },
             },
+            required: [
+              "startSec",
+              "endSec",
+              "transcriptAnchorQuote",
+              "topic",
+              "summary",
+              "themeTags",
+              "estimatedViewsBaseline",
+            ],
           },
         },
-        required: ["sections"],
       },
+      required: ["sections"],
     },
   },
 ];
@@ -314,7 +310,7 @@ function formatBenchLine(
 }
 
 /**
- * Run the section picker for one pillar. Single LLM call (Splice v10),
+ * Run the section picker for one pillar. Single Sonnet call (Splice v10),
  * cue-aligns the returned sections against the transcript, snaps anchors,
  * retries once on shape/anchor failures.
  *
@@ -325,7 +321,7 @@ function formatBenchLine(
 export async function generateClipSections(
   args: SectionGenerateArgs,
 ): Promise<SectionGenerationResult> {
-  const client = openai();
+  const client = new Anthropic();
 
   const benchBlock =
     args.benchHooks.length > 0
@@ -354,19 +350,14 @@ export async function generateClipSections(
     .filter(Boolean)
     .join("\n");
 
-  async function attempt(
-    extra?: string,
-  ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
-    return client.chat.completions.create({
+  async function attempt(extra?: string): Promise<Anthropic.Message> {
+    return client.messages.create({
       model: MODEL,
       max_tokens: 8192,
+      system: SYSTEM_PROMPT,
       tools,
-      tool_choice: {
-        type: "function",
-        function: { name: "propose_clip_sections" },
-      },
+      tool_choice: { type: "tool", name: "propose_clip_sections" },
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
           content: extra ? `${userMessage}\n\n${extra}` : userMessage,
@@ -376,32 +367,20 @@ export async function generateClipSections(
   }
 
   function extract(
-    response: OpenAI.Chat.Completions.ChatCompletion,
+    response: Anthropic.Message,
     label: string,
   ): { sections: ClipSection[]; shapeFailures: string[] } | null {
-    const finishReason = response.choices[0]?.finish_reason;
-    for (const call of response.choices[0]?.message?.tool_calls ?? []) {
+    for (const block of response.content) {
       if (
-        call.type === "function" &&
-        call.function.name === "propose_clip_sections"
+        block.type === "tool_use" &&
+        block.name === "propose_clip_sections"
       ) {
-        let parsed: { sections?: unknown };
-        try {
-          parsed = JSON.parse(call.function.arguments) as {
-            sections?: unknown;
-          };
-        } catch (err) {
-          console.warn(
-            `[clip-section-agent] ${label} JSON.parse failed on tool arguments: ${err instanceof Error ? err.message : String(err)}`,
-          );
-          return null;
-        }
-        let input: unknown = parsed.sections;
+        let input: unknown = (block.input as { sections?: unknown }).sections;
         if (typeof input === "string") {
           try {
             input = JSON.parse(input);
             console.warn(
-              `[clip-section-agent] ${label} recovered stringified sections array (model quirk)`,
+              `[clip-section-agent] ${label} recovered stringified sections array (Sonnet quirk)`,
             );
           } catch (err) {
             console.warn(
@@ -416,7 +395,7 @@ export async function generateClipSections(
         );
         if (!shape) {
           console.warn(
-            `[clip-section-agent] ${label} validation failed: finish_reason=${finishReason}`,
+            `[clip-section-agent] ${label} validation failed: stop_reason=${response.stop_reason}`,
           );
           return null;
         }
@@ -424,7 +403,7 @@ export async function generateClipSections(
       }
     }
     console.warn(
-      `[clip-section-agent] ${label} returned no tool call: finish_reason=${finishReason}`,
+      `[clip-section-agent] ${label} returned no tool_use block: stop_reason=${response.stop_reason}`,
     );
     return null;
   }
@@ -532,11 +511,12 @@ export async function generateClipSections(
         return {
           sections: retryResolved,
           modelUsage: {
-            input_tokens: response.usage?.prompt_tokens ?? 0,
-            output_tokens: response.usage?.completion_tokens ?? 0,
-            cache_creation_input_tokens: undefined,
+            input_tokens: response.usage.input_tokens,
+            output_tokens: response.usage.output_tokens,
+            cache_creation_input_tokens:
+              response.usage.cache_creation_input_tokens ?? undefined,
             cache_read_input_tokens:
-              response.usage?.prompt_tokens_details?.cached_tokens ?? undefined,
+              response.usage.cache_read_input_tokens ?? undefined,
           },
           diagnostics: retryDiag,
         };
@@ -553,11 +533,11 @@ export async function generateClipSections(
   return {
     sections: resolved,
     modelUsage: {
-      input_tokens: response.usage?.prompt_tokens ?? 0,
-      output_tokens: response.usage?.completion_tokens ?? 0,
-      cache_creation_input_tokens: undefined,
-      cache_read_input_tokens:
-        response.usage?.prompt_tokens_details?.cached_tokens ?? undefined,
+      input_tokens: response.usage.input_tokens,
+      output_tokens: response.usage.output_tokens,
+      cache_creation_input_tokens:
+        response.usage.cache_creation_input_tokens ?? undefined,
+      cache_read_input_tokens: response.usage.cache_read_input_tokens ?? undefined,
     },
     diagnostics,
   };

@@ -1,6 +1,6 @@
 // Stage-1 end-to-end smoke test. Exercises the real generate flow against
 // whichever item already has a transcript in the local DB — runs the
-// OpenAI call, performs the transactional demote+insert, regenerates, and
+// Anthropic call, performs the transactional demote+insert, regenerates, and
 // asserts the partial unique index holds.
 //
 // Costs ~$0.002 of Haiku tokens per run. Do not add to CI.

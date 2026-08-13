@@ -15,33 +15,19 @@ import { runScheduleReconcile, runScheduleNodateReconcile } from "./reconcile";
 
 const HOUR = 60 * 60 * 1000;
 
-// Minimal OpenAI stand-in: returns a single forced return_match tool call.
+// Minimal Anthropic stand-in: returns a single forced return_match tool call.
 function stubClient(matchIndex: number, confidence: number, reason = "stub") {
   return {
-    chat: {
-      completions: {
-        create: async () => ({
-          choices: [
-            {
-              message: {
-                tool_calls: [
-                  {
-                    type: "function",
-                    function: {
-                      name: "return_match",
-                      arguments: JSON.stringify({
-                        match_index: matchIndex,
-                        confidence,
-                        reason,
-                      }),
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        }),
-      },
+    messages: {
+      create: async () => ({
+        content: [
+          {
+            type: "tool_use",
+            name: "return_match",
+            input: { match_index: matchIndex, confidence, reason },
+          },
+        ],
+      }),
     },
   } as never;
 }

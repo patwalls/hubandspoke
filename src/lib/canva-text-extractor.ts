@@ -1,18 +1,17 @@
-import type OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { openai } from "@/lib/openai";
 import { productionItems } from "@/lib/db/schema";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 
-const MODEL = "gpt-4.1";
+const MODEL = "claude-opus-4-7";
 
 /**
  * The Tech Stack Slideshow Brand Template has three autofill-tagged text
  * fields: hook, stack_list, cta. This module turns a pillar production_item
  * into placeholder text for each of those fields.
  *
- * The extractor is intentionally narrow: a single OpenAI call returning
+ * The extractor is intentionally narrow: a single Anthropic call returning
  * a tool-use payload with the three strings. We do not run the full
  * draft-algorithm here — that produces post-caption copy, which is a
  * different job (caption text appears beside the post, the slideshow IS
@@ -47,32 +46,29 @@ RULES
 - Match the voice of the existing Starter Story Instagram captions: lowercase except for proper nouns, conversational, short sentences, em-dashes welcome.
 - Use the propose_canva_text tool with the three fields. Never respond with plain text.`;
 
-const TOOL_SCHEMA: OpenAI.Chat.Completions.ChatCompletionTool = {
-  type: "function",
-  function: {
-    name: "propose_canva_text",
-    description: "Submit the three text fields for the Canva Tech Stack Slideshow template.",
-    parameters: {
-      type: "object",
-      properties: {
-        hook: {
-          type: "string",
-          description: "Page 1 hook line. 80-120 chars. One sentence.",
-        },
-        stack_list: {
-          type: "string",
-          description:
-            "Page 2 body. Bulleted list ('• tool — purpose (cost)' per line). Last line is 'total estimated infra: ~$XYZ/mo' in bold via markdown asterisks.",
-        },
-        cta: {
-          type: "string",
-          description:
-            "Page 4 CTA. Two lines: 'curious what his X does?\\n\\ncomment TRIGGER and i\\'ll DM you the full video.'",
-        },
+const TOOL_SCHEMA: Anthropic.Tool = {
+  name: "propose_canva_text",
+  description: "Submit the three text fields for the Canva Tech Stack Slideshow template.",
+  input_schema: {
+    type: "object",
+    properties: {
+      hook: {
+        type: "string",
+        description: "Page 1 hook line. 80-120 chars. One sentence.",
       },
-      required: ["hook", "stack_list", "cta"],
-      additionalProperties: false,
+      stack_list: {
+        type: "string",
+        description:
+          "Page 2 body. Bulleted list ('• tool — purpose (cost)' per line). Last line is 'total estimated infra: ~$XYZ/mo' in bold via markdown asterisks.",
+      },
+      cta: {
+        type: "string",
+        description:
+          "Page 4 CTA. Two lines: 'curious what his X does?\\n\\ncomment TRIGGER and i\\'ll DM you the full video.'",
+      },
     },
+    required: ["hook", "stack_list", "cta"],
+    additionalProperties: false,
   },
 };
 
@@ -104,45 +100,42 @@ export async function extractCanvaSlideText(
     return fallback;
   }
 
-  const client = openai();
-  const response = await client.chat.completions.create({
+  const client = new Anthropic();
+  const response = await client.messages.create({
     model: MODEL,
     max_tokens: 2048,
+    system: SYSTEM_PROMPT,
     tools: [TOOL_SCHEMA],
-    tool_choice: { type: "function", function: { name: "propose_canva_text" } },
+    tool_choice: { type: "tool", name: "propose_canva_text" },
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
         content: [
-          `## PILLAR TITLE`,
-          item.title ?? "(no title)",
-          ``,
-          `## PILLAR TRANSCRIPT (segments)`,
-          transcript.segmentsMarkdown,
-        ].join("\n"),
+          {
+            type: "text",
+            text: [
+              `## PILLAR TITLE`,
+              item.title ?? "(no title)",
+              ``,
+              `## PILLAR TRANSCRIPT (segments)`,
+              transcript.segmentsMarkdown,
+            ].join("\n"),
+          },
+        ],
       },
     ],
   });
 
-  const toolCall = response.choices[0]?.message?.tool_calls?.find(
-    (c) => c.type === "function" && c.function.name === "propose_canva_text",
+  const toolUse = response.content.find(
+    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
   );
-  if (!toolCall || toolCall.type !== "function") {
+  if (!toolUse) {
     console.warn(
-      `canva-text-extractor: no tool call in model response for item ${productionItemId}`,
+      `canva-text-extractor: no tool_use in Claude response for item ${productionItemId}`,
     );
     return fallback;
   }
-  let input: Partial<CanvaSlideText>;
-  try {
-    input = JSON.parse(toolCall.function.arguments) as Partial<CanvaSlideText>;
-  } catch {
-    console.warn(
-      `canva-text-extractor: unparseable tool args for item ${productionItemId}`,
-    );
-    return fallback;
-  }
+  const input = toolUse.input as Partial<CanvaSlideText>;
   return {
     hook: input.hook?.trim() || fallback.hook,
     stack_list: input.stack_list?.trim() || fallback.stack_list,

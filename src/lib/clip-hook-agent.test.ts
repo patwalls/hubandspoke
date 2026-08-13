@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type OpenAI from "openai";
+import type Anthropic from "@anthropic-ai/sdk";
 import {
   writeFormatHookForSection,
   HOOK_GENERATED_BY,
@@ -15,8 +15,8 @@ import type { TranscriptWord, TranscriptSegment } from "./clip-anchor-utils";
 //   - an ineligible section never turns into a clip idea,
 //   - the format's subject rule actually reaches the system prompt,
 //   - a malformed eligible response can never produce a half-formed clip.
-// The OpenAI client is injected (HookGenerateArgs.client) so each test
-// scripts the exact tool call the model "returns".
+// The Anthropic client is injected (HookGenerateArgs.client) so each test
+// scripts the exact tool_use the model "returns".
 
 const ANCHOR = "we use bubble framer ghost and postgres for the whole stack";
 
@@ -36,11 +36,11 @@ function segments(): TranscriptSegment[] {
   return segs;
 }
 
-/** A scripted OpenAI client. Returns `inputs[i]` as the write_format_hook
- *  tool call on the i-th call (clamps to the last entry). Exposes the spy so
+/** A scripted Anthropic client. Returns `inputs[i]` as the write_format_hook
+ *  tool input on the i-th call (clamps to the last entry). Exposes the spy so
  *  tests can assert on the system prompt that was sent. */
 function makeClient(inputs: unknown[]): {
-  client: OpenAI;
+  client: Anthropic;
   create: ReturnType<typeof vi.fn>;
 } {
   let call = 0;
@@ -48,32 +48,19 @@ function makeClient(inputs: unknown[]): {
     const input = inputs[Math.min(call, inputs.length - 1)];
     call++;
     return {
-      id: "chatcmpl_test",
-      usage: { prompt_tokens: 50, completion_tokens: 30 },
-      choices: [
-        {
-          message: {
-            tool_calls: [
-              {
-                id: "tool_1",
-                type: "function",
-                function: {
-                  name: "write_format_hook",
-                  arguments: JSON.stringify(input),
-                },
-              },
-            ],
-          },
-        },
+      id: "msg_test",
+      type: "message",
+      role: "assistant",
+      model: "claude-haiku-4-5-test",
+      stop_reason: "tool_use",
+      stop_sequence: null,
+      usage: { input_tokens: 50, output_tokens: 30 },
+      content: [
+        { type: "tool_use", id: "tool_1", name: "write_format_hook", input },
       ],
     };
   });
-  return {
-    client: {
-      chat: { completions: { create } },
-    } as unknown as OpenAI,
-    create,
-  };
+  return { client: { messages: { create } } as unknown as Anthropic, create };
 }
 
 function baseArgs(overrides: Partial<HookGenerateArgs> = {}): HookGenerateArgs {
@@ -161,11 +148,8 @@ describe("writeFormatHookForSection — wiring", () => {
     ]);
     await writeFormatHookForSection(baseArgs({ client }));
 
-    const systemPrompt = (
-      create.mock.calls[0][0] as {
-        messages: { role: string; content: string }[];
-      }
-    ).messages.find((m) => m.role === "system")!.content;
+    const systemPrompt = (create.mock.calls[0][0] as { system: string })
+      .system;
     // The format's own eligibility rule reached the model...
     expect(systemPrompt).toContain("Only eligible when the founder names");
     expect(systemPrompt).toContain("from format Skill"); // not the default fallback block
@@ -183,11 +167,8 @@ describe("writeFormatHookForSection — wiring", () => {
       baseArgs({ client, formatSkillSection: null }),
     );
 
-    const systemPrompt = (
-      create.mock.calls[0][0] as {
-        messages: { role: string; content: string }[];
-      }
-    ).messages.find((m) => m.role === "system")!.content;
+    const systemPrompt = (create.mock.calls[0][0] as { system: string })
+      .system;
     expect(systemPrompt).toContain("default Reels-style fallback");
     // The anti-reframing rule lives in the shared base prompt, so even a
     // format with no Clip Idea Generation section still gets it.

@@ -11,15 +11,14 @@
 // specialized call grounded in the raw `segments[]` (not just the
 // rendered markdown) gives us auditable, post-validated timestamps.
 //
-// Cost: gpt-4.1 with max_tokens 1024 is cheap per call when invoked. The
+// Cost: Opus 4.7 with max_tokens 1024 ≈ $0.015/call when invoked. The
 // main draft call is ~$0.03, so a draft that triggers the tool is
-// modest total. We use the flagship (gpt-4.1) deliberately —
+// ~$0.045 total. Pat picked Opus over Sonnet/Haiku deliberately —
 // "what's interesting" is the editorial judgment we're paying for.
 
-import type OpenAI from "openai";
-import { openai } from "@/lib/openai";
+import Anthropic from "@anthropic-ai/sdk";
 
-const MODEL = "gpt-4.1";
+const MODEL = "claude-opus-4-7";
 
 export interface TranscriptSegment {
   startSec: number;
@@ -60,9 +59,9 @@ export interface FindTimestampsArgs {
   focus: string;
   /** How many timestamps to return. Clamped 1..10. */
   count: number;
-  /** Optional OpenAI client override (testing). Defaults to the shared
-   *  `openai()` client which reads the standard env var. */
-  client?: OpenAI;
+  /** Optional Anthropic client override (testing). Defaults to a fresh
+   *  `new Anthropic()` which reads the standard env var. */
+  client?: Anthropic;
 }
 
 const MMSS_RE = /^(\d{1,3}):(\d{2})$/;
@@ -97,44 +96,41 @@ RULES
 OUTPUT
 Call return_timestamps exactly once with the array. Never respond with plain text.`;
 
-const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+const TOOLS: Anthropic.Tool[] = [
   {
-    type: "function",
-    function: {
-      name: "return_timestamps",
-      description:
-        "Return the curated list of interesting timestamps with editor-voice labels.",
-      parameters: {
-        type: "object" as const,
-        properties: {
-          timestamps: {
-            type: "array",
-            minItems: 1,
-            items: {
-              type: "object",
-              properties: {
-                mmss: {
-                  type: "string",
-                  description:
-                    "MM:SS or M:SS format. Must correspond to the start of a real segment in the transcript.",
-                },
-                label: {
-                  type: "string",
-                  description:
-                    "Editor-voice headline for this moment, 3–10 words.",
-                },
-                reason: {
-                  type: "string",
-                  description:
-                    "One sentence on why a viewer would scrub here.",
-                },
+    name: "return_timestamps",
+    description:
+      "Return the curated list of interesting timestamps with editor-voice labels.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        timestamps: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            properties: {
+              mmss: {
+                type: "string",
+                description:
+                  "MM:SS or M:SS format. Must correspond to the start of a real segment in the transcript.",
               },
-              required: ["mmss", "label", "reason"],
+              label: {
+                type: "string",
+                description:
+                  "Editor-voice headline for this moment, 3–10 words.",
+              },
+              reason: {
+                type: "string",
+                description:
+                  "One sentence on why a viewer would scrub here.",
+              },
             },
+            required: ["mmss", "label", "reason"],
           },
         },
-        required: ["timestamps"],
       },
+      required: ["timestamps"],
     },
   },
 ];
@@ -161,44 +157,39 @@ export async function findInterestingTimestamps(
   args: FindTimestampsArgs,
 ): Promise<FoundTimestamp[]> {
   const count = Math.max(1, Math.min(10, args.count));
-  const client = args.client ?? openai();
+  const client = args.client ?? new Anthropic();
 
-  const userBlocks: string[] = [];
-  userBlocks.push(
-    `Editor's focus: ${args.focus}\nReturn exactly ${count} timestamps.`,
-  );
+  const userBlocks: Anthropic.TextBlockParam[] = [];
+  userBlocks.push({
+    type: "text",
+    text: `Editor's focus: ${args.focus}\nReturn exactly ${count} timestamps.`,
+  });
   if (args.formatInstructions && args.formatInstructions.trim().length > 0) {
-    userBlocks.push(
-      `## FORMAT SKILL (the editorial brief this draft will fill)\n${args.formatInstructions.trim()}`,
-    );
-  }
-  userBlocks.push(
-    `## TRANSCRIPT\nSegments are pre-sliced. Each line: [MM:SS] speaker?: text.\n\n${renderSegmentsForPrompt(args.segments)}`,
-  );
-
-  const response: OpenAI.Chat.Completions.ChatCompletion =
-    await client.chat.completions.create({
-      model: MODEL,
-      max_tokens: 1024,
-      tools: TOOLS,
-      tool_choice: { type: "function", function: { name: "return_timestamps" } },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userBlocks.join("\n\n") },
-      ],
+    userBlocks.push({
+      type: "text",
+      text: `## FORMAT SKILL (the editorial brief this draft will fill)\n${args.formatInstructions.trim()}`,
     });
+  }
+  userBlocks.push({
+    type: "text",
+    text: `## TRANSCRIPT\nSegments are pre-sliced. Each line: [MM:SS] speaker?: text.\n\n${renderSegmentsForPrompt(args.segments)}`,
+  });
+
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    system: SYSTEM_PROMPT,
+    tools: TOOLS,
+    tool_choice: { type: "tool", name: "return_timestamps" },
+    messages: [{ role: "user", content: userBlocks }],
+  });
 
   let raw: unknown = null;
-  for (const call of response.choices[0]?.message?.tool_calls ?? []) {
-    if (call.type !== "function" || call.function.name !== "return_timestamps") {
-      continue;
+  for (const block of response.content) {
+    if (block.type === "tool_use" && block.name === "return_timestamps") {
+      raw = block.input;
+      break;
     }
-    try {
-      raw = JSON.parse(call.function.arguments);
-    } catch {
-      raw = null;
-    }
-    break;
   }
   if (!raw || typeof raw !== "object") {
     console.warn("timestamp-finder: model returned no tool call");
