@@ -1135,6 +1135,7 @@ export async function runDraftAlgorithm(
         pillarItemId: item.pillarContentItemId ?? null,
         formatId: formatRow.id,
         formatName: item.format ?? "",
+        brand: item.brand,
         formatSkill: formatInstructions,
         compositionName,
         force,

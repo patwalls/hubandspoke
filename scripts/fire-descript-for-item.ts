@@ -83,6 +83,7 @@ async function main() {
     pillarItemId: item.pillarContentItemId ?? null,
     formatId: fmt.id,
     formatName: fmt.name,
+    brand: item.brand,
     formatSkill: fmt.instructions,
     compositionName,
     force: true,

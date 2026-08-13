@@ -40,6 +40,7 @@ interface RunDescriptStepArgs {
   pillarItemId: string | null;
   formatId: string;
   formatName: string;
+  brand: string;
   formatSkill: string | null;
   compositionName: string;
   /** True when the editor clicked Redraft — re-trigger even if a composition
@@ -175,6 +176,7 @@ export async function runDescriptStepForDerivative(
   if (skillUsesHookPlaceholder(descriptSkill)) {
     const result = await generateDerivativeHook({
       formatName: args.formatName,
+      brand: args.brand,
       derivativeItemId: args.derivativeItemId,
       pillarItemId: args.pillarItemId,
       skillSection: descriptSkill,
