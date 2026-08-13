@@ -336,7 +336,7 @@ export function ClipTriageDialog({
           path === "agent"
             ? `/api/clip-ideas/${idea.id}/create-in-descript`
             : path === "precise"
-              ? `/api/clip-ideas/${idea.id}/create-in-descript-precise`
+              ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?ai=1`
               : path === "buffered"
                 ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?buffered=1`
                 : `/api/clip-ideas/${idea.id}/create-in-descript-full`;
@@ -352,7 +352,7 @@ export function ClipTriageDialog({
           path === "agent"
             ? "Creating clip with Underlord…"
             : path === "precise"
-              ? "Trimming clip locally and uploading to Descript…"
+              ? "Trimming clip and uploading to Descript…"
               : path === "buffered"
                 ? "Trimming with 60-second buffer and uploading to Descript…"
                 : json?.mode === "cold"
@@ -362,7 +362,7 @@ export function ClipTriageDialog({
           path === "agent"
             ? "Underlord will create a styled clip from Claude's suggested timestamps."
             : path === "precise"
-              ? "The new Descript project will appear on this item when the upload finishes."
+              ? "Upload finishes first, then Underlord applies the layout pack."
               : path === "buffered"
                 ? "60 seconds of buffer before and after Claude's suggested range. The new project will appear when the upload finishes."
                 : json?.mode === "cold"
@@ -631,12 +631,12 @@ export function ClipTriageDialog({
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
-                          Precise Cut
+                          Precise Cut + Layout Pack
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
-                          Use Claude&apos;s exact clip timestamps. Fast and
-                          focused, but no extra footage if the boundaries
-                          need adjusting.
+                          Use Claude&apos;s exact clip timestamps, then apply
+                          the format layout (captions, hook, vertical). Fast,
+                          but no extra footage if boundaries need adjusting.
                         </span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
