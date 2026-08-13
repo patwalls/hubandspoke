@@ -533,16 +533,15 @@ export async function invokeDescriptAgent(args: {
   }
 }
 
-// Descript's web editor routes a composition as
-// https://web.descript.com/<projectId>/<5-char-prefix-of-compositionId>. The
-// suffix is the first 5 hex chars of the composition UUID (hyphens stripped).
-// Verified against live URLs: `f3854a2c-…` → `/f3854`, `78cba…` → `/78cba`.
+// Descript's web editor routes a composition via the full UUID:
+// https://web.descript.com/<projectId>/<compositionId>
+// The 5-char slug format that appeared in live URLs is a display alias —
+// constructing a link with the full UUID reliably opens the correct composition.
 export function buildDescriptCompositionUrl(
   projectId: string,
   compositionId: string,
 ): string {
-  const slug = compositionId.replace(/-/g, "").slice(0, 5);
-  return `https://web.descript.com/${projectId}/${slug}`;
+  return `https://web.descript.com/${projectId}/${compositionId}`;
 }
 
 async function postImportProjectMedia(

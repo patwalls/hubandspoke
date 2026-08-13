@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildLayoutPackPrompt, substituteFormatPrompt, extractCompositionIdFromAgentResponse } from "./descript";
+import { buildDescriptCompositionUrl, buildLayoutPackPrompt, substituteFormatPrompt, extractCompositionIdFromAgentResponse } from "./descript";
 
 // Pure unit test — no DB, no network. The Descript Underlord receives the
 // output of this function verbatim; getting the substitution rules wrong
@@ -104,6 +104,21 @@ describe("extractCompositionIdFromAgentResponse", () => {
     expect(id1).toBe("clip-1-uuid");
     expect(id2).toBe("clip-2-uuid");
     expect(id1).not.toBe(id2);
+  });
+});
+
+describe("buildDescriptCompositionUrl", () => {
+  it("uses the full composition UUID — not a short slug — so Descript routes to the right composition", () => {
+    const url = buildDescriptCompositionUrl(
+      "bf397ccc-450d-412f-b211-b06935fc1958",
+      "f7e51c4d-587e-442d-8f5d-1fd112028485",
+    );
+    expect(url).toBe(
+      "https://web.descript.com/bf397ccc-450d-412f-b211-b06935fc1958/f7e51c4d-587e-442d-8f5d-1fd112028485",
+    );
+    // Must contain the full UUID, not a 5-char truncated slug
+    expect(url).toContain("f7e51c4d-587e-442d-8f5d-1fd112028485");
+    expect(url).not.toMatch(/\/[0-9a-f]{5}$/);
   });
 });
 
