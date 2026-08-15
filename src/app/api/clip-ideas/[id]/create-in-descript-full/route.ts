@@ -13,17 +13,22 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-export async function POST(_request: NextRequest, context: RouteContext) {
+export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireSession();
   if (guard.response) return guard.response;
 
   const { id } = await context.params;
   const actorUserId = guard.session.user.id as string;
+  // `?range=1` trims the duplicated composition to the clip idea's
+  // timestamps; without it the editor gets the whole pillar. Mirrors the
+  // `?ai=1` / `?buffered=1` convention on the precise-cut route.
+  const trimToClipRange = request.nextUrl.searchParams.get("range") === "1";
 
   try {
     const result = await createClipIdeaInDescriptFullVideo({
       clipIdeaId: id,
       actorUserId,
+      trimToClipRange,
     });
     return NextResponse.json({
       ok: true,
@@ -32,6 +37,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       descriptProjectUrl: result.descriptProjectUrl,
       descriptJobId: result.descriptJobId,
       mode: result.mode,
+      rangeApplied: result.rangeApplied,
     });
   } catch (err) {
     if (err instanceof ClipIdeaNotFoundError) {

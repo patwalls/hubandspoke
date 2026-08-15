@@ -409,6 +409,61 @@ export async function cutSegmentWithRules(args: {
   return { ...result, prompt };
 }
 
+/**
+ * Build the Underlord prompt behind {@link duplicateDescriptComposition}.
+ * Exported so it can be unit-tested without a network call — the agent
+ * receives this string verbatim, so a wording regression silently changes
+ * what lands in the editor's project.
+ *
+ * Two shapes:
+ *   - no `rangeSec` — a byte-identical duplicate (the "Full Composition"
+ *     promote path: hand the editor the whole pillar).
+ *   - with `rangeSec` — duplicate, then trim the copy to [startSec, endSec]
+ *     (the "Duplicate + Set Range" path). Deliberately MECHANICAL: no layout
+ *     pack, no captions, no re-selection of the moment, and the project's
+ *     media is left whole so the editor can drag the boundaries back out.
+ */
+export function buildDuplicateCompositionPrompt(args: {
+  sourceCompositionId: string;
+  newCompositionName: string;
+  rangeSec?: { startSec: number; endSec: number } | null;
+}): string {
+  const safeName = args.newCompositionName.replace(/"/g, '\\"');
+  const opening = [
+    "Duplicate the existing main composition in this project — the one with",
+    `compositionId="${args.sourceCompositionId}".`,
+    `Name the new composition "${safeName}".`,
+  ];
+
+  if (!args.rangeSec) {
+    return [
+      ...opening,
+      "Do not modify the source composition. Do not change any media, transcript,",
+      "or timing. The duplicate should be byte-identical to the source except",
+      "for the name. Reply with the new compositionId in the form",
+      'compositionId="<uuid>".',
+    ].join(" ");
+  }
+
+  const start = formatTimestamp(args.rangeSec.startSec);
+  const end = formatTimestamp(args.rangeSec.endSec);
+  const duration = Math.max(
+    0,
+    Math.round(args.rangeSec.endSec - args.rangeSec.startSec),
+  );
+  return [
+    "Follow these instructions exactly and do not deviate.",
+    "",
+    `1. ${opening.join(" ")}`,
+    `2. In the NEW composition only, set the range to ${start}–${end} (duration ≈ ${duration}s) — the copy should begin at ${start} and end at ${end}. The time range is non-negotiable; do not re-select, re-judge, or "improve" the moment.`,
+    "3. Leave every piece of media in the project intact and fully available, so the editor can drag the range back out and recover the surrounding footage by hand. Trim the composition's range — do NOT delete, split, or re-import media.",
+    "4. Do NOT apply any styling: no layout pack, no captions, no hook text, no aspect-ratio change, no filler-word marking, no transitions. This is a mechanical duplicate-and-trim only.",
+    "5. Do not modify the source composition in any way.",
+    "",
+    'Reply with the new compositionId in the form compositionId="<uuid>".',
+  ].join("\n");
+}
+
 export async function duplicateDescriptComposition(args: {
   projectId: string;
   sourceCompositionId: string;
@@ -416,17 +471,15 @@ export async function duplicateDescriptComposition(args: {
   caller: string;
   productionItemId?: string | null;
   account?: string | null;
+  /** When set, the duplicate is trimmed to this range instead of being a
+   *  byte-identical copy. The project's media stays whole either way. */
+  rangeSec?: { startSec: number; endSec: number } | null;
 }): Promise<{ jobId: string; projectUrl: string; projectId: string; prompt: string }> {
-  const safeName = args.newCompositionName.replace(/"/g, '\\"');
-  const prompt = [
-    "Duplicate the existing main composition in this project — the one with",
-    `compositionId="${args.sourceCompositionId}".`,
-    `Name the new composition "${safeName}".`,
-    "Do not modify the source composition. Do not change any media, transcript,",
-    "or timing. The duplicate should be byte-identical to the source except",
-    "for the name. Reply with the new compositionId in the form",
-    'compositionId="<uuid>".',
-  ].join(" ");
+  const prompt = buildDuplicateCompositionPrompt({
+    sourceCompositionId: args.sourceCompositionId,
+    newCompositionName: args.newCompositionName,
+    rangeSec: args.rangeSec,
+  });
   const result = await invokeDescriptAgent({
     projectId: args.projectId,
     prompt,

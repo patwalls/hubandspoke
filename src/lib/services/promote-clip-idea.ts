@@ -974,6 +974,11 @@ export type CreateClipIdeaInDescriptFullVideoResult = AssignClipIdeaResult & {
    *  the first time. The cold path stamps the pillar so the next clip from
    *  the same pillar takes the warm path. */
   mode: "warm" | "cold";
+  /** True when the duplicated composition was trimmed to the clip idea's
+   *  [startSec, endSec]. Only the warm path can do this — a cold import
+   *  creates the composition asynchronously, so there is nothing to trim
+   *  yet and the caller is told so rather than being quietly ignored. */
+  rangeApplied: boolean;
 };
 
 /**
@@ -997,6 +1002,11 @@ export type CreateClipIdeaInDescriptFullVideoResult = AssignClipIdeaResult & {
 export async function createClipIdeaInDescriptFullVideo(args: {
   clipIdeaId: string;
   actorUserId: string;
+  /** Trim the duplicated composition to the clip idea's timestamps instead
+   *  of handing over the whole pillar. The media stays whole in the project,
+   *  so the editor can still drag the boundaries out by hand — that's the
+   *  point of this path versus the precise cut (which ffmpeg-trims bytes). */
+  trimToClipRange?: boolean;
 }): Promise<CreateClipIdeaInDescriptFullVideoResult> {
   const row = await loadAndGuardClipIdea(args.clipIdeaId);
   const editor = await loadEditor(args.actorUserId);
@@ -1037,6 +1047,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
   let descriptPrompt: string | null;
   let pillarItemIdToStamp: string | undefined;
   let importMode = false;
+  let rangeApplied = false;
 
   // Project imported but seed never captured (or was corrupted). The warm path
   // needs both; the cold path would try to re-import and fail with a confusing
@@ -1047,6 +1058,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
 
   if (pillar.descriptProjectId && pillar.descriptSeedCompositionId) {
     mode = "warm";
+    rangeApplied = args.trimToClipRange === true;
     const dup = await duplicateDescriptComposition({
       projectId: pillar.descriptProjectId,
       sourceCompositionId: pillar.descriptSeedCompositionId,
@@ -1054,9 +1066,14 @@ export async function createClipIdeaInDescriptFullVideo(args: {
         title: row.hook,
         productionItemId,
       }),
-      caller: "clip-idea-promote-full-video",
+      caller: rangeApplied
+        ? "clip-idea-promote-duplicate-range"
+        : "clip-idea-promote-full-video",
       productionItemId,
       account: pillar.descriptAccount,
+      rangeSec: rangeApplied
+        ? { startSec: Number(row.startSec), endSec: Number(row.endSec) }
+        : null,
     });
     jobId = dup.jobId;
     projectId = dup.projectId;
@@ -1116,7 +1133,7 @@ export async function createClipIdeaInDescriptFullVideo(args: {
       descriptProjectUrl: projectUrl,
       descriptPrompt,
       compositionName: row.hook,
-      descriptImportPath: "full-video",
+      descriptImportPath: rangeApplied ? "full-video-range" : "full-video",
     })
     .returning({ id: repurposeTriggers.id });
 
@@ -1129,9 +1146,14 @@ export async function createClipIdeaInDescriptFullVideo(args: {
     label:
       mode === "cold"
         ? "Uploading the full pillar to Descript… composition incoming."
-        : "Duplicating the pillar composition in Descript… composition incoming.",
+        : rangeApplied
+          ? "Duplicating the pillar composition and trimming it to the clip's range… composition incoming."
+          : "Duplicating the pillar composition in Descript… composition incoming.",
     url: projectUrl,
-    meta: { importPath: "full-video", mode },
+    meta: {
+      importPath: rangeApplied ? "full-video-range" : "full-video",
+      mode,
+    },
   });
 
   await enqueue("descript-clip-resolve", {
@@ -1181,5 +1203,6 @@ export async function createClipIdeaInDescriptFullVideo(args: {
     descriptProjectUrl: projectUrl,
     descriptJobId: jobId,
     mode,
+    rangeApplied,
   };
 }

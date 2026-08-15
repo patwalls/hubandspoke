@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildDescriptCompositionUrl, buildLayoutPackPrompt, substituteFormatPrompt, extractCompositionIdFromAgentResponse } from "./descript";
+import { buildDescriptCompositionUrl, buildDuplicateCompositionPrompt, buildLayoutPackPrompt, substituteFormatPrompt, extractCompositionIdFromAgentResponse } from "./descript";
 
 // Pure unit test — no DB, no network. The Descript Underlord receives the
 // output of this function verbatim; getting the substitution rules wrong
@@ -152,5 +152,84 @@ describe("buildLayoutPackPrompt", () => {
     // text) but is explicitly neutralized by the override.
     expect(out).toContain("only clip out the section");
     expect(out).toContain('compositionId="abc"');
+  });
+});
+
+describe("buildDuplicateCompositionPrompt", () => {
+  const SRC = "bf397ccc-450d-412f-b211-b06935fc1958";
+
+  describe("without a range (Full Composition path)", () => {
+    it("asks for a byte-identical duplicate, wording unchanged", () => {
+      // Pinned verbatim: this prompt has been driving the live "Full
+      // Composition" promote path, and Underlord is sensitive to rewording.
+      // Adding the range variant must not disturb it.
+      const prompt = buildDuplicateCompositionPrompt({
+        sourceCompositionId: SRC,
+        newCompositionName: "Clip — the tech stack",
+      });
+      expect(prompt).toBe(
+        `Duplicate the existing main composition in this project — the one with compositionId="${SRC}". ` +
+          `Name the new composition "Clip — the tech stack". ` +
+          "Do not modify the source composition. Do not change any media, transcript, " +
+          "or timing. The duplicate should be byte-identical to the source except " +
+          'for the name. Reply with the new compositionId in the form compositionId="<uuid>".',
+      );
+    });
+
+    it("escapes double-quotes in the composition name", () => {
+      const prompt = buildDuplicateCompositionPrompt({
+        sourceCompositionId: SRC,
+        newCompositionName: 'He said "no"',
+      });
+      expect(prompt).toContain('Name the new composition "He said \\"no\\"".');
+    });
+  });
+
+  describe("with a range (Duplicate + Set Range path)", () => {
+    const ranged = buildDuplicateCompositionPrompt({
+      sourceCompositionId: SRC,
+      newCompositionName: "Clip — the tech stack",
+      rangeSec: { startSec: 149, endSec: 188 },
+    });
+
+    it("pins the range as HH:MM:SS with a duration", () => {
+      expect(ranged).toContain("00:02:29–00:03:08");
+      expect(ranged).toContain("duration ≈ 39s");
+      expect(ranged).toContain("non-negotiable");
+    });
+
+    it("forbids re-selecting the moment — the timestamps are the editor's, not Underlord's", () => {
+      expect(ranged).toMatch(/do not re-select, re-judge, or "improve" the moment/);
+    });
+
+    it("keeps the source media whole so the editor can extend the range by hand", () => {
+      // This is the whole point of this path versus the precise cut, which
+      // ffmpeg-trims the bytes and leaves nothing to recover.
+      expect(ranged).toContain("fully available");
+      expect(ranged).toMatch(/do NOT delete, split, or re-import media/);
+    });
+
+    it("forbids every styling step — mechanical duplicate-and-trim only", () => {
+      for (const forbidden of [
+        "no layout pack",
+        "no captions",
+        "no hook text",
+        "no aspect-ratio change",
+        "no filler-word marking",
+        "no transitions",
+      ]) {
+        expect(ranged).toContain(forbidden);
+      }
+    });
+
+    it("leaves the source composition untouched", () => {
+      expect(ranged).toContain("Do not modify the source composition in any way.");
+    });
+
+    it("still asks for the new compositionId in the parseable form", () => {
+      // descript-clip-resolve extracts the id with /compositionId="([^"]+)"/.
+      expect(ranged).toContain('compositionId="<uuid>"');
+      expect(extractCompositionIdFromAgentResponse(ranged)).toBe("<uuid>");
+    });
   });
 });
