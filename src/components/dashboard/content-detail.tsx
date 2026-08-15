@@ -262,7 +262,8 @@ interface DetailResponse {
   item: ProductionItem;
   transcript: ItemTranscript | null;
   derivatives: DerivativeRow[];
-  descendantViewsTotal: number;
+  /** This post's own views + every derivative, repost, and cross-post. */
+  totalViews: number;
   formatNames: string[];
   formats: BrandFormat[];
   repurposeTargets: BrandFormat[];
@@ -3800,6 +3801,21 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Every downstream piece — pillar derivatives, reposts, and
                   cross-posts — across every status and format.
+                </p>
+              </div>
+              {/* The rolled-up reach of this pillar. Includes the post's own
+                  views, so it can never read lower than the Views card above —
+                  the subtitle spells that out because the old descendants-only
+                  version of this number did exactly that. */}
+              <div className="text-right shrink-0">
+                <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                  Total Views
+                </p>
+                <p className="text-lg font-semibold text-foreground tabular-nums leading-tight">
+                  {formatCompact(data.totalViews)}
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  This post + all downstream
                 </p>
               </div>
             </div>

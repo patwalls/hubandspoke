@@ -72,53 +72,6 @@ is mostly fixture-building.
 
 ---
 
-## Content detail: "Total Views" can be lower than "Views"
-
-**Symptom:** On a content detail page, the **Total Views** card can read
-*lower* than the **Views** card on the same item. Repro: Starter Story →
-"Thomas Mahoney: Pckgr" (`@starterstory`, YouTube Business Breakdown,
-published 2026-03-15) shows `Views 120K` and `Total Views 84K`. By
-definition Total Views must be ≥ Views — Total = the item's own views
-plus every derivative, repost, and cross-post.
-
-**Root cause:** the value rendered as "Total Views"
-(`content-detail.tsx:1891`) is `data.descendantViewsTotal` from
-`/api/production-items/[id]` (`src/app/api/production-items/[id]/route.ts:158`).
-The name is honest: it sums derivatives + reposts + cross-posts and
-*excludes the parent item's own `views`*. The UI then labels that
-descendants-only number "Total Views" with the subtitle "Across
-derivatives, reposts, and cross-posts" — which reads as "the total" to
-anyone looking at the card.
-
-**Fix (small):** add the parent's own `views` into the rollup on the API
-side and rename the field to `totalViews` so the contract matches the
-label.
-
-```ts
-// src/app/api/production-items/[id]/route.ts ~L158
-const totalViews =
-  (item.views ?? 0) +
-  derivatives.reduce((s, d) => s + (d.views ?? 0), 0) +
-  reposts.reduce((s, r) => s + (r.views ?? 0), 0) +
-  crossPosts.reduce((s, c) => s + (c.views ?? 0), 0);
-```
-
-Then update the response key, the consumer type in
-`content-detail.tsx:181`, and the render at `content-detail.tsx:1891`.
-
-**Also check:** any *other* surface that reads `descendantViewsTotal` or
-labels a descendants-only sum as "total" — grep `descendantViewsTotal`
-turns up only the one consumer today, but worth a sweep. Format-detail
-and formats-page also have "Total Views" cards (`format-detail.tsx:1006`,
-`formats-page.tsx:686`); confirm those are computed across the format's
-items the way operators expect (probably fine — formats aggregate by
-membership, not by parent/descendant — but verify).
-
-**Effort:** ~30 min including a sanity check on the other "Total Views"
-surfaces. No schema change, no migration.
-
----
-
 ## Audit other writers of `production_items.published_at`
 
 **Why:** the 2026-04-25 fix only addresses `account-content-sync`. The

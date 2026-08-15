@@ -29,6 +29,31 @@ import {
 
 const POSTER_URL_TTL_SECONDS = 60 * 60;
 
+/**
+ * Roll a post's own views up with every downstream piece that inherits from it
+ * (derivatives, reposts, cross-posts) into the number the detail page labels
+ * "Total Views".
+ *
+ * The invariant callers depend on: **the result is never lower than the post's
+ * own views**. This used to be `descendantViewsTotal` — a descendants-ONLY sum
+ * that excluded the parent — and the UI labelled it "Total Views" anyway, so a
+ * post with 120K views and 84K of derivatives read "Views 120K / Total Views
+ * 84K". Including `ownViews` in the sum makes the floor structural rather than
+ * a `Math.max` patch over a wrong number.
+ *
+ * Nulls count as zero: an unsynced view count is unknown, not negative.
+ */
+export function computeTotalViews(
+  ownViews: number | null | undefined,
+  descendantGroups: ReadonlyArray<ReadonlyArray<{ views: number | null }>>,
+): number {
+  return descendantGroups.reduce(
+    (total, group) =>
+      total + group.reduce((sum, row) => sum + (row.views ?? 0), 0),
+    ownViews ?? 0,
+  );
+}
+
 async function presignOrNull(
   key: string | null,
   bucket?: string,
@@ -169,14 +194,17 @@ export async function getProductionItemDetail(id: string) {
       (r) => r.sourceType === "cross_post"
     );
 
-    // Views across every downstream piece of content: pillar-linked
-    // derivatives, same-content reposts, and cross-platform syndications.
-    // These are disjoint in practice (a row is linked via either
-    // pillarContentItemId or repostedFromItemId, not both), so no dedupe.
-    const descendantViewsTotal =
-      derivatives.reduce((sum, d) => sum + (d.views ?? 0), 0) +
-      reposts.reduce((sum, r) => sum + (r.views ?? 0), 0) +
-      crossPosts.reduce((sum, c) => sum + (c.views ?? 0), 0);
+    // Views across THIS post plus every downstream piece of content:
+    // pillar-linked derivatives, same-content reposts, and cross-platform
+    // syndications. The descendants are disjoint in practice (a row is linked
+    // via either pillarContentItemId or repostedFromItemId, not both), so no
+    // dedupe. Including the item's own views is what makes this a "total" —
+    // see computeTotalViews for why that invariant matters.
+    const totalViews = computeTotalViews(item.views, [
+      derivatives,
+      reposts,
+      crossPosts,
+    ]);
 
     let repostedFrom:
       | {
@@ -727,7 +755,7 @@ export async function getProductionItemDetail(id: string) {
           }
         : null,
       prediction,
-      descendantViewsTotal,
+      totalViews,
       derivatives: derivatives.map((d) => ({
         ...d,
         ctrFirstHour: d.ctrFirstHour ? parseFloat(d.ctrFirstHour) : null,
