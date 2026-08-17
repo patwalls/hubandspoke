@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  extractClipCount,
   extractClipIdeaSection,
   extractCrossPostRulesSection,
   extractDescriptSection,
@@ -279,6 +280,26 @@ Anti-patterns: x, y, z.`;
     });
     expect(out).toBeNull();
     expect(errMsg).toContain("JSON object");
+  });
+});
+
+describe("extractClipCount", () => {
+  it("parses a valid clip-count block", () => {
+    const section = `Hook style: intro only.\n\n\`\`\`clip-count\n1\n\`\`\`\n\nAnti-patterns: x.`;
+    expect(extractClipCount(section)).toBe(1);
+  });
+
+  it("parses values greater than 1", () => {
+    const section = `\`\`\`clip-count\n3\n\`\`\``;
+    expect(extractClipCount(section)).toBe(3);
+  });
+
+  it("returns null when no clip-count block is present", () => {
+    expect(extractClipCount("Hook style only, no count limit.")).toBeNull();
+  });
+
+  it("returns null for zero (invalid)", () => {
+    expect(extractClipCount("`\`\`clip-count\n0\n\`\`\`")).toBeNull();
   });
 });
 

@@ -175,6 +175,7 @@ export function extractClipIdeaSection(skill: string): string | null {
 }
 
 const EXTRAS_SCHEMA_FENCE = /```extras-schema\s*\n([\s\S]*?)\n```/i;
+const CLIP_COUNT_FENCE = /```clip-count\s*\n(\d+)\s*\n```/i;
 
 /**
  * Pull the optional `extras-schema` fenced block out of a clip-idea section.
@@ -191,6 +192,26 @@ const EXTRAS_SCHEMA_FENCE = /```extras-schema\s*\n([\s\S]*?)\n```/i;
  * typo in the skill doesn't take down generation entirely; the failure is
  * surfaced via the `error` callback when one is provided).
  */
+/**
+ * Pull the optional `clip-count` fenced block out of a clip-idea section.
+ * When present, the service caps the number of clip ideas inserted for this
+ * format to the given integer (top N by estimated views). E.g.:
+ *
+ *   ```clip-count
+ *   1
+ *   ```
+ *
+ * Returns `null` when the block is absent (no cap — all eligible sections
+ * produce a clip idea). Returns `null` for invalid values (< 1).
+ */
+export function extractClipCount(clipIdeaSection: string): number | null {
+  const match = CLIP_COUNT_FENCE.exec(clipIdeaSection);
+  if (!match) return null;
+  const n = parseInt(match[1], 10);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n;
+}
+
 export function extractExtrasSchema(
   clipIdeaSection: string,
   onError?: (message: string) => void

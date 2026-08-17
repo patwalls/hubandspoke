@@ -15,6 +15,7 @@ import { recordItemCreated } from "@/lib/services/item-created";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import {
   extractClipIdeaSection,
+  extractClipCount,
   extractExtrasSchema,
 } from "@/lib/format-skill";
 import {
@@ -240,7 +241,7 @@ export async function generateClipIdeasForItem(
   const transcript = await getTranscriptForPrompt(productionItemId);
   if (!transcript) return { status: "skip", reason: "no-transcript" };
 
-  // Parse format skill section + extras schema.
+  // Parse format skill section + extras schema + optional clip count cap.
   const clipIdeaSection = extractClipIdeaSection(format.instructions ?? "");
   const extrasSchema = clipIdeaSection
     ? extractExtrasSchema(clipIdeaSection, (msg) => {
@@ -249,6 +250,7 @@ export async function generateClipIdeasForItem(
         );
       })
     : null;
+  const clipCountLimit = clipIdeaSection ? extractClipCount(clipIdeaSection) : null;
 
   // Reference hooks for THIS format. Top performers, with the rich payload
   // unused here — the hook writer just needs hooks + view counts.
@@ -327,6 +329,18 @@ export async function generateClipIdeasForItem(
         `[clip-idea-generate] section "${liveSections[i].topic}" skipped for format "${format.name}": ${c.reason}`,
       );
     }
+  }
+
+  // Apply per-format clip count cap (from `clip-count` block in skill).
+  // Sort highest estimated views first, then take only the top N.
+  if (clipCountLimit != null && eligible.length > clipCountLimit) {
+    eligible.sort(
+      (a, b) => (b.candidate.estimatedViews ?? 0) - (a.candidate.estimatedViews ?? 0),
+    );
+    eligible.splice(clipCountLimit);
+    console.info(
+      `[clip-idea-generate] format="${format.name}" clip-count cap=${clipCountLimit} applied, keeping top ${clipCountLimit} of eligible sections`,
+    );
   }
 
   if (eligible.length === 0) {
