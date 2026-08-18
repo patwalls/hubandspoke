@@ -1,5 +1,6 @@
 import type { Task } from "graphile-worker";
-import { and, asc, eq, gt, gte, isNotNull } from "drizzle-orm";
+import { and, asc, eq, gt, gte, isNotNull, isNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
   productionItems,
@@ -17,10 +18,21 @@ import { recordItemCreated } from "@/lib/services/item-created";
  * Threshold monitor: scan all published items and automatically create
  * repurposed content items when view counts cross format thresholds.
  *
- * Routing is account-based: the sweep looks up which target formats are
- * configured for the pillar's source account via `format_trigger_sources`,
- * then checks each target format's `view_threshold`. This replaces the old
- * pillar.format → parent/child format tree traversal.
+ * Two routing paths run in parallel and feed the same candidate map:
+ *
+ * 1. Root formats (no parentFormatId): routed via `format_trigger_sources`.
+ *    Any published item from a configured source account is eligible —
+ *    no post_type constraint. Same behavior as the original account-based
+ *    routing model.
+ *
+ * 2. Derivative formats (have parentFormatId): routed exclusively via the
+ *    direct parent format's `format_channels`. A production item is only
+ *    eligible if BOTH its accountId and postType match a row on the parent's
+ *    channels. `format_trigger_sources` entries for derivative formats are
+ *    completely ignored — they cannot broaden the eligible source accounts.
+ *    This means a Howfinity video cannot trigger a Futurepedia derivative
+ *    simply because someone added a trigger source row; the parent format's
+ *    channel config is the single source of truth.
  *
  * Dedup key: (productionItemId, targetFormatId). One triggered item per
  * (pillar, target format) pair regardless of source format.
@@ -68,6 +80,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
         views: productionItems.views,
         brand: productionItems.brand,
         accountId: productionItems.accountId,
+        postType: productionItems.postType,
       })
       .from(productionItems)
       .where(
@@ -82,9 +95,11 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
     itemsChecked = publishedItems.length;
     helpers.logger.info(`Found ${itemsChecked} published items with views`);
 
-    // 2. Load format_trigger_sources joined with their target format rows.
-    //    Build map: sourceAccountId → [target format descriptors].
-    const triggerSourceRows = await db
+    // 2. Build the routing map: sourceAccountId → [target format descriptors].
+    //    Two separate queries feed the same map — see the module docstring.
+
+    // 2a. Root formats: routed via format_trigger_sources (no post_type constraint).
+    const rootRows = await db
       .select({
         sourceAccountId: formatTriggerSources.sourceAccountId,
         id: formats.id,
@@ -94,7 +109,32 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
         brand: formats.brand,
       })
       .from(formatTriggerSources)
-      .innerJoin(formats, eq(formats.id, formatTriggerSources.formatId));
+      .innerJoin(
+        formats,
+        and(
+          eq(formats.id, formatTriggerSources.formatId),
+          isNull(formats.parentFormatId),
+        ),
+      );
+
+    // 2b. Derivative formats: routed via the direct parent's format_channels.
+    //     format_trigger_sources is ignored — the parent's channels are the
+    //     sole source of eligible (account, post_type) pairs.
+    const parentFormats = alias(formats, "parent_formats");
+    const derivativeRows = await db
+      .select({
+        sourceAccountId: formatChannels.accountId,
+        id: formats.id,
+        name: formats.name,
+        viewThreshold: formats.viewThreshold,
+        isClippableFormat: formats.isClippableFormat,
+        brand: formats.brand,
+        requiredSourcePostType: formatChannels.postType,
+      })
+      .from(formats)
+      .innerJoin(parentFormats, eq(parentFormats.id, formats.parentFormatId))
+      .innerJoin(formatChannels, eq(formatChannels.formatId, parentFormats.id))
+      .where(isNotNull(formats.parentFormatId));
 
     const targetFormatsByAccount = new Map<
       string,
@@ -104,9 +144,10 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
         viewThreshold: number | null;
         isClippableFormat: boolean;
         brand: string;
+        requiredSourcePostType: string | null;
       }>
     >();
-    for (const row of triggerSourceRows) {
+    for (const row of rootRows) {
       const arr = targetFormatsByAccount.get(row.sourceAccountId) ?? [];
       arr.push({
         id: row.id,
@@ -114,6 +155,19 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
         viewThreshold: row.viewThreshold,
         isClippableFormat: row.isClippableFormat,
         brand: row.brand,
+        requiredSourcePostType: null,
+      });
+      targetFormatsByAccount.set(row.sourceAccountId, arr);
+    }
+    for (const row of derivativeRows) {
+      const arr = targetFormatsByAccount.get(row.sourceAccountId) ?? [];
+      arr.push({
+        id: row.id,
+        name: row.name,
+        viewThreshold: row.viewThreshold,
+        isClippableFormat: row.isClippableFormat,
+        brand: row.brand,
+        requiredSourcePostType: row.requiredSourcePostType ?? null,
       });
       targetFormatsByAccount.set(row.sourceAccountId, arr);
     }
@@ -147,6 +201,20 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
         // crossing a clippable target's viewThreshold doesn't double-create
         // a repurposed Idea alongside the clip-idea-promoted Reel/Short.
         if (targetFormat.isClippableFormat) continue;
+
+        // Derivative formats carry a requiredSourcePostType from the parent's
+        // format_channels. Root formats carry null (no constraint). Skip items
+        // that don't match the required post_type.
+        if (
+          targetFormat.requiredSourcePostType &&
+          item.postType !== targetFormat.requiredSourcePostType
+        ) {
+          helpers.logger.debug(
+            `threshold-monitor-sweep skip item=${item.id} format=${targetFormat.name} ` +
+              `reason=post-type-mismatch required=${targetFormat.requiredSourcePostType} got=${item.postType ?? "null"}`,
+          );
+          continue;
+        }
 
         // Skip if no threshold set or views below threshold.
         if (!targetFormat.viewThreshold || item.views < targetFormat.viewThreshold) {
