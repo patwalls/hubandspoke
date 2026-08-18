@@ -45,6 +45,7 @@ import {
   formats,
   productionItems,
   productionItemMedia,
+  scCallLog,
   users,
   type ContentDraftContent,
 } from "@/lib/db/schema";
@@ -55,7 +56,8 @@ type CleanupTable =
   | "clipIdeas"
   | "accounts"
   | "productionItemMedia"
-  | "contentDrafts";
+  | "contentDrafts"
+  | "scCallLog";
 const created: Array<{ table: CleanupTable; id: string }> = [];
 
 afterEach(async () => {
@@ -81,6 +83,8 @@ afterEach(async () => {
           .where(eq(productionItemMedia.id, row.id));
       } else if (row.table === "contentDrafts") {
         await db.delete(contentDrafts).where(eq(contentDrafts.id, row.id));
+      } else if (row.table === "scCallLog") {
+        await db.delete(scCallLog).where(eq(scCallLog.id, row.id));
       }
     } catch (err) {
       console.error(
@@ -461,6 +465,51 @@ export async function createTestClipIdea(
  * tracked (i.e. afterEach hasn't fired yet, or cleanup failed mid-loop).
  * Mostly useful for sanity-checking that cleanup actually ran.
  */
+export interface CreateTestScCallLogOptions {
+  /** Who made the call. Defaults to a unique vitest marker. */
+  caller?: string;
+  /** Credits actually spent. 0 marks a call that bypassed SC's paid API
+   *  (Pulse-served); > 0 marks a billed call. This is what the credits
+   *  watcher's recency clear keys on. */
+  credits?: number;
+  ok?: boolean;
+  notes?: string | null;
+  platform?: string | null;
+  /** Explicit timestamp — pass a past Date to place the row inside the
+   *  watcher's 60-minute lookback window. */
+  createdAt?: Date;
+}
+
+/**
+ * Insert an `sc_call_log` row. Auto-cleans in afterEach.
+ *
+ * Defaults to a billed failure carrying SC's real "out of credits" text, so
+ * the common case (`createTestScCallLog({ createdAt })`) is one 402.
+ */
+export async function createTestScCallLog(
+  opts: CreateTestScCallLogOptions = {},
+): Promise<typeof scCallLog.$inferSelect> {
+  const ok = opts.ok ?? false;
+  const [row] = await db
+    .insert(scCallLog)
+    .values({
+      caller: opts.caller ?? `vitest-${randomSuffix()}`,
+      credits: opts.credits ?? 1,
+      ok,
+      notes:
+        opts.notes !== undefined
+          ? opts.notes
+          : ok
+            ? "ok"
+            : `SC /v1/twitter/user-tweets 402: {"success":false,"message":"Looks like you're out of credits :( You'll need to buy more to continue using the service."}`,
+      platform: opts.platform ?? null,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+    })
+    .returning();
+  trackCleanup("scCallLog", row.id);
+  return row;
+}
+
 export function pendingCleanupCount(): number {
   return created.length;
 }

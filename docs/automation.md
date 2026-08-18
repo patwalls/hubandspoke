@@ -834,6 +834,15 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   `src/lib/services/alert-recipients.ts` (`ALERT_RECIPIENTS`)
 - **Inputs:** `sc_call_log` rows in the last hour where `ok=false` and
   notes match `%out of credits%` or `%(402)%`.
+  - **Recency clear** — if a successful call landed after the newest 402,
+    credits are treated as flowing again (SC 402s transiently on top-up
+    races). Only **billed** successes (`credits > 0`) count. Pulse-served
+    calls are logged here with `credits = 0` because they bypass SC's paid
+    API, so they keep succeeding on an empty balance; counting them cleared
+    the alert on every tick and the watcher went permanently blind
+    (2026-08-18: 15 billed 402s masked by one free `capture-velocity-snapshot`
+    row 34s later, while X + YouTube content sync were fully down).
+    Regression coverage: `src/lib/services/sc-credits-watch.integration.test.ts`.
 - **Outputs:**
   - Email to every address in `ALERT_RECIPIENTS` (Pat + Sam). Updated
     2026-05-18 from the prior `daily_scorecard_email_enabled` opt-in

@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, ilike, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { scCallLog, syncLogs } from "@/lib/db/schema";
 import { sendScCreditsExhaustedEmail } from "@/lib/email";
@@ -36,6 +36,13 @@ export interface ScCreditsExhaustionState {
  * been known to return 402 transiently (top-up races, gateway hiccups)
  * and without this check the banner camps for a full hour after a 5-second
  * upstream glitch — a stale signal that trains editors to ignore it.
+ *
+ * **Billed-only recency clear (2026-08-18):** the clear counts only calls
+ * that actually spent a credit (`credits > 0`). Pulse-served calls land in
+ * this same table with `credits = 0` — they never reach SC's paid API, so
+ * they keep succeeding after the balance hits zero. Treating those as proof
+ * that credits flow made the clear fire on every tick, and the watch went
+ * permanently blind. See the note on the query below.
  */
 export async function getScCreditsExhaustionState(): Promise<ScCreditsExhaustionState> {
   const since = new Date(Date.now() - LOOKBACK_MINUTES * 60_000);
@@ -63,13 +70,28 @@ export async function getScCreditsExhaustionState(): Promise<ScCreditsExhaustion
     return { exhausted: false, failedCount: 0, sinceIso: null, sampleError: null };
   }
 
-  // Recency clear: any successful call after the latest 402 means SC is
-  // accepting our key again. The banner clears the moment the next sweep
-  // tick lands an OK row.
+  // Recency clear: any successful billed call after the latest 402 means
+  // SC is accepting our key again. The banner clears the moment the next
+  // sweep tick lands an OK row.
+  //
+  // `credits > 0` is load-bearing. Pulse-served calls are logged here with
+  // `credits = 0` because they bypass SC's paid API entirely, so they go on
+  // succeeding with an empty balance. Counting them cleared the alert on
+  // every tick: on 2026-08-18, 15 billed 402s in one hour (newest 22:01:35Z)
+  // were masked by a free `capture-velocity-snapshot` row at 22:02:09Z, and
+  // the 22:00 tick logged `no_alert_needed failedCount=0` while X and
+  // YouTube content sync were fully down. Only a call that actually spent a
+  // credit proves the balance is non-empty.
   const [latestOk] = await db
     .select({ createdAt: scCallLog.createdAt })
     .from(scCallLog)
-    .where(and(eq(scCallLog.ok, true), gte(scCallLog.createdAt, since)))
+    .where(
+      and(
+        eq(scCallLog.ok, true),
+        gt(scCallLog.credits, 0),
+        gte(scCallLog.createdAt, since),
+      ),
+    )
     .orderBy(desc(scCallLog.createdAt))
     .limit(1);
   const lastFailedIso = agg?.lastFailed ?? null;
