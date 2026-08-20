@@ -5,11 +5,13 @@ import { getClippableFormats } from "@/lib/db/formats";
 
 // Auto-generation costs real money (~$0.10 Sonnet sections + ~$0.003/Haiku
 // hook per (section, format) — ~$0.21 per pillar at 3 clippable formats), so
-// it's allowlisted per brand and capped by recency. The post-transcribe
-// auto-enqueue was removed globally 2026-05-03 over Sonnet spend; this is the
-// deliberately narrow reintroduction (2026-06-09): new Starter Story
-// long-form only.
-const DEFAULT_AUTO_BRANDS = ["starter-story"];
+// it's gated per brand and capped by recency. The post-transcribe
+// auto-enqueue was removed globally 2026-05-03 over Sonnet spend; it came
+// back 2026-06-09 behind an env allowlist, and since 2026-08-20 the default
+// gate is derived from the data instead: a brand is auto-enabled when it has
+// at least one clippable format (creating the format in the UI IS the
+// opt-in — no Heroku config edit per brand). AUTO_CLIP_IDEAS_BRANDS remains
+// as an override: set = explicit allowlist, empty string = kill switch.
 
 // Recency cap: anything published longer ago than this never auto-fires,
 // even when its transcript lands late. Protects against whisper *backfill*
@@ -19,9 +21,14 @@ const DEFAULT_AUTO_BRANDS = ["starter-story"];
 // outage like 2026-06-06.
 const DEFAULT_MAX_AGE_DAYS = 7;
 
-export function getAutoClipIdeaBrands(): string[] {
+/**
+ * null = no explicit allowlist; any brand with a clippable format is
+ * auto-enabled (the `no-clippable-formats` check in selectAutoClipIdeaJobs
+ * is the real gate). An array = explicit allowlist (empty = kill switch).
+ */
+export function getAutoClipIdeaBrands(): string[] | null {
   const env = process.env.AUTO_CLIP_IDEAS_BRANDS;
-  if (env === undefined) return DEFAULT_AUTO_BRANDS;
+  if (env === undefined) return null;
   // Explicitly-set empty string = kill switch (auto-generation off).
   return env.split(",").map((s) => s.trim()).filter(Boolean);
 }
@@ -44,7 +51,9 @@ export interface AutoClipIdeaGateInput {
  * Pure gate: should this item auto-generate clip ideas now that its
  * transcript exists? Mirrors the service's own backfill gate
  * (original + youtube_long) and adds the cost gates the service does NOT
- * have: brand allowlist, Published status, and the recency cap.
+ * have: brand gate (env allowlist when set; otherwise deferred to the
+ * clippable-formats check in selectAutoClipIdeaJobs), Published status,
+ * and the recency cap.
  *
  * source_recording items (uploaded interviews/podcasts not tied to a published
  * channel post) bypass the brand allowlist, Published-status, and recency
@@ -63,8 +72,11 @@ export function evaluateAutoClipIdeaGates(
   }
 
   const brands = getAutoClipIdeaBrands();
-  if (!item.brand || !brands.includes(item.brand)) {
-    return { eligible: false, reason: `brand-not-auto-enabled-${item.brand ?? "null"}` };
+  if (!item.brand) {
+    return { eligible: false, reason: "brand-not-auto-enabled-null" };
+  }
+  if (brands !== null && !brands.includes(item.brand)) {
+    return { eligible: false, reason: `brand-not-auto-enabled-${item.brand}` };
   }
   if (item.status !== "Published") {
     return { eligible: false, reason: `status-${item.status ?? "null"}` };

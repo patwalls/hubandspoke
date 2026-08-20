@@ -59,7 +59,7 @@ cd ~/code/hubandspoke/home-machine/yt-archive
 ```
 
 It will prompt for:
-- **BRANDS** — comma-separated brand slugs (e.g. `starter-story,matg`)
+- **BRANDS** — `auto` (recommended: every brand with an active YouTube account, resolved from the DB each run) or comma-separated brand slugs (e.g. `starter-story,matg`)
 - **HUBANDSPOKE_S3_BUCKET** — same bucket the prod worker uses
 - **AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION** — copy from
   your dev `.env.local`, or create a dedicated IAM user scoped to

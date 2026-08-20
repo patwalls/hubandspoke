@@ -144,7 +144,7 @@ else
     chmod 600 "$ENV_FILE"
 fi
 
-BRANDS_VAL="$(prompt_value BRANDS 'BRANDS (comma-separated brand slugs, e.g. starter-story,matg)')"
+BRANDS_VAL="$(prompt_value BRANDS 'BRANDS ("auto" = every brand with an active YouTube account, or comma-separated slugs e.g. starter-story,matg)')"
 [[ -n "$BRANDS_VAL" ]] || die "BRANDS is required"
 
 S3_BUCKET_VAL="$(prompt_value HUBANDSPOKE_S3_BUCKET 'HUBANDSPOKE_S3_BUCKET')"

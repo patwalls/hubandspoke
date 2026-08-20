@@ -26,15 +26,28 @@ describe("evaluateAutoClipIdeaGates", () => {
     expect(evaluateAutoClipIdeaGates(item(), NOW)).toEqual({ eligible: true });
   });
 
-  it("rejects brands outside the allowlist", () => {
-    const result = evaluateAutoClipIdeaGates(item({ brand: "matg" }), NOW);
-    expect(result).toMatchObject({ eligible: false, reason: "brand-not-auto-enabled-matg" });
+  it("passes any brand when AUTO_CLIP_IDEAS_BRANDS is unset (formats-derived gate)", () => {
+    // With no env allowlist, the pure gate defers the brand decision to the
+    // clippable-formats check in selectAutoClipIdeaJobs — a brand with no
+    // clippable formats still gets rejected there.
+    expect(evaluateAutoClipIdeaGates(item({ brand: "matg" }), NOW)).toEqual({ eligible: true });
+    expect(evaluateAutoClipIdeaGates(item({ brand: "hubspot-brasil" }), NOW)).toEqual({
+      eligible: true,
+    });
   });
 
-  it("honors the AUTO_CLIP_IDEAS_BRANDS env override", () => {
+  it("rejects a null brand even without an allowlist", () => {
+    const result = evaluateAutoClipIdeaGates(item({ brand: null }), NOW);
+    expect(result).toMatchObject({ eligible: false, reason: "brand-not-auto-enabled-null" });
+  });
+
+  it("honors the AUTO_CLIP_IDEAS_BRANDS env override as an explicit allowlist", () => {
     process.env.AUTO_CLIP_IDEAS_BRANDS = "matg";
     expect(evaluateAutoClipIdeaGates(item({ brand: "matg" }), NOW)).toEqual({ eligible: true });
-    expect(evaluateAutoClipIdeaGates(item(), NOW)).toMatchObject({ eligible: false });
+    expect(evaluateAutoClipIdeaGates(item(), NOW)).toMatchObject({
+      eligible: false,
+      reason: "brand-not-auto-enabled-starter-story",
+    });
   });
 
   it("treats an explicitly empty AUTO_CLIP_IDEAS_BRANDS as a kill switch", () => {

@@ -13,7 +13,12 @@
 //     npx tsx scripts/archive-yt-local.ts --brands=starter-story,matg --since=2025-04-23 --limit=200
 //
 // Flags:
-//   --brands=a,b       comma-separated brand list (required)
+//   --brands=a,b       comma-separated brand list (required). The literal
+//                      `auto` resolves the list from the DB instead: every
+//                      brand with an active YouTube account (and not
+//                      disabled). This is what the home-machine cron uses so
+//                      onboarding a brand in the UI is enough — no env edit
+//                      on the Mac per brand.
 //   --since=YYYY-MM-DD only items with published_date >= this (required unless --since-days)
 //   --since-days=N     equivalent to --since=<N days ago>; useful for cron wrappers
 //   --limit=N          cap candidates (default: 500)
@@ -414,6 +419,34 @@ async function main() {
     console.warn(`[pool] backend conn error (will reconnect): ${err.message}`);
   });
 
+  // `--brands=auto` → every brand with an active (non-deleted) YouTube
+  // account whose brand isn't disabled. Resolved fresh on every run, so a
+  // brand onboarded via the settings UI joins the archive rotation on the
+  // next hourly tick with zero config changes on this machine. Empty
+  // resolution is a hard error, not an empty batch: it can only mean the
+  // query or schema drifted, and failing loud keeps the wrapper's Sentry
+  // trap + yt-archive-watch honest instead of silently archiving nothing.
+  let brandList = BRANDS;
+  if (BRANDS.length === 1 && BRANDS[0] === "auto") {
+    const r = await pool.query<{ slug: string }>(
+      `SELECT DISTINCT b.slug
+         FROM brands b
+         JOIN accounts a ON a.brand_id = b.id
+        WHERE a.platform = 'youtube'
+          AND a.is_active
+          AND a.deleted_at IS NULL
+          AND NOT b.disabled
+        ORDER BY b.slug`,
+    );
+    brandList = r.rows.map((row) => row.slug);
+    if (brandList.length === 0) {
+      console.error("--brands=auto resolved zero brands — refusing to run");
+      await pool.end();
+      process.exit(1);
+    }
+    console.log(`auto brands: ${brandList.join(",")}`);
+  }
+
   let items: Array<{ id: string; youtube_id: string | null; youtube_url: string; title: string | null; brand: string | null }>;
 
   if (ID_LIST.length > 0) {
@@ -440,11 +473,12 @@ async function main() {
           AND media_s3_key IS NULL
           AND published_date >= $1::date
           AND brand = ANY($2::text[])
+          AND deleted_at IS NULL
           AND COALESCE(youtube_download_attempts, 0) < 3
           ${usePostTypeFilter ? `AND post_type = ANY($4::text[])` : ``}
         ORDER BY published_date DESC NULLS LAST
         LIMIT $3`,
-      usePostTypeFilter ? [SINCE, BRANDS, LIMIT, POST_TYPES] : [SINCE, BRANDS, LIMIT],
+      usePostTypeFilter ? [SINCE, brandList, LIMIT, POST_TYPES] : [SINCE, brandList, LIMIT],
     );
     items = r.rows;
   }
