@@ -2,7 +2,16 @@ import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    // Don't store dynamic pages (auth-gated routes) in the client-side router
+    // cache. Without this, navigating back to "In Production" or "Content"
+    // restores the old React component state instead of remounting and
+    // re-fetching, so mutations made on a detail page don't appear until a
+    // hard refresh.
+    staleTimes: {
+      dynamic: 0,
+    },
+  },
 };
 
 export default withSentryConfig(nextConfig, {
