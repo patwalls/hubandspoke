@@ -17,6 +17,23 @@
 
 import { SC_BASE, headers } from "@/lib/services/sc-client";
 
+// ─── Network budget ───────────────────────────────────────────────────────
+// Every fetch below is a bare outbound call to a third-party host, made from
+// the worker dyno — which, unlike the web dyno, has no router timeout to bail
+// it out. Without an explicit signal a stalled SC connection hangs the awaiting
+// job *forever*: on 2026-08-22 two consecutive hourly `performance-decay` runs
+// (19:00 and 20:00 UTC) never returned, and since the worker runs concurrency=2
+// the second hang wedged the whole dyno — no heartbeat, no jobs drained, 206
+// queued. Normal runs of that sweep finish in 52-452s, so a per-request budget
+// well above the slow tail still fails fast against a black hole.
+// Mirrors PULSE_TIMEOUT_MS in pulse-client.ts, the one fetch path that already
+// had a budget (and, notably, the one that never hung).
+const SC_TIMEOUT_MS = 30_000;
+
+function scSignal(): AbortSignal {
+  return AbortSignal.timeout(SC_TIMEOUT_MS);
+}
+
 // ─── Date helpers ─────────────────────────────────────────────────────────
 // Most SC endpoints carry the publish timestamp as either a unix-seconds
 // integer or a parseable date string. Normalize both to ISO-8601 here so
@@ -87,7 +104,7 @@ export interface SCPostMetrics {
 
 export async function fetchSingleVideo(videoUrl: string): Promise<SCVideoDetail> {
   const url = `${SC_BASE}/v1/youtube/video?url=${encodeURIComponent(videoUrl)}`;
-  const res = await fetch(url, { headers: headers() });
+  const res = await fetch(url, { headers: headers(), signal: scSignal() });
   if (!res.ok) throw new Error(`Video detail error (${res.status}): ${await res.text()}`);
   const data = await res.json();
   // SC returns publishedTime / publishDate depending on shape — accept either.
@@ -108,7 +125,7 @@ export async function fetchTweetByUrl(
   customHeaders: HeadersInit = headers()
 ): Promise<SCTweet | null> {
   const url = `${SC_BASE}/v1/twitter/tweet?url=${encodeURIComponent(tweetUrl)}`;
-  const res = await fetch(url, { headers: customHeaders });
+  const res = await fetch(url, { headers: customHeaders, signal: scSignal() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Twitter tweet error (${res.status}): ${await res.text()}`);
   const data = await res.json();
@@ -131,7 +148,7 @@ export async function fetchThreadsPostByUrl(
   customHeaders: HeadersInit = headers()
 ): Promise<SCPostMetrics | null> {
   const url = `${SC_BASE}/v1/threads/post?url=${encodeURIComponent(postUrl)}`;
-  const res = await fetch(url, { headers: customHeaders });
+  const res = await fetch(url, { headers: customHeaders, signal: scSignal() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Threads post error (${res.status}): ${await res.text()}`);
   const data = await res.json();
@@ -154,7 +171,7 @@ export async function fetchLinkedInPostByUrl(
   customHeaders: HeadersInit = headers()
 ): Promise<SCPostMetrics | null> {
   const url = `${SC_BASE}/v1/linkedin/post?url=${encodeURIComponent(postUrl)}`;
-  const res = await fetch(url, { headers: customHeaders });
+  const res = await fetch(url, { headers: customHeaders, signal: scSignal() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`LinkedIn post error (${res.status}): ${await res.text()}`);
   const data = await res.json();
@@ -182,7 +199,7 @@ export async function fetchTikTokVideoByUrl(
   customHeaders: HeadersInit = headers()
 ): Promise<SCPostMetrics | null> {
   const url = `${SC_BASE}/v2/tiktok/video?url=${encodeURIComponent(videoUrl)}`;
-  const res = await fetch(url, { headers: customHeaders });
+  const res = await fetch(url, { headers: customHeaders, signal: scSignal() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`TikTok video error (${res.status}): ${await res.text()}`);
   const data = await res.json();
@@ -205,7 +222,7 @@ export async function fetchYouTubeCommunityPostByUrl(
   customHeaders: HeadersInit = headers()
 ): Promise<SCPostMetrics | null> {
   const url = `${SC_BASE}/v1/youtube/community-post?url=${encodeURIComponent(postUrl)}`;
-  const res = await fetch(url, { headers: customHeaders });
+  const res = await fetch(url, { headers: customHeaders, signal: scSignal() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`YT community post error (${res.status}): ${await res.text()}`);
   const data = await res.json();
@@ -231,7 +248,7 @@ export async function fetchInstagramPostByUrl(
   customHeaders: HeadersInit = headers()
 ): Promise<SCInstagramPostMetrics | null> {
   const url = `${SC_BASE}/v1/instagram/post?url=${encodeURIComponent(postUrl)}`;
-  const res = await fetch(url, { headers: customHeaders });
+  const res = await fetch(url, { headers: customHeaders, signal: scSignal() });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`IG post error (${res.status}): ${await res.text()}`);
   const data = await res.json();
