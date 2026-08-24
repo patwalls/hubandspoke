@@ -207,11 +207,34 @@ export const descriptPublishAndArchiveTask: Task = async (
 
   // Download the MP4. Outside the transaction because it can take
   // seconds and we don't want to hold a DB connection.
-  const archive = await archiveRemoteToS3(
-    item.id,
-    downloadUrl,
-    "descript-rendered.mp4",
-  );
+  let archive: Awaited<ReturnType<typeof archiveRemoteToS3>>;
+  try {
+    archive = await archiveRemoteToS3(
+      item.id,
+      downloadUrl,
+      "descript-rendered.mp4",
+    );
+  } catch (err) {
+    // Every other failure path above stamps `descript_publish_error` so the
+    // UI can surface a Retry. Archiving was the one gap: a bare throw here
+    // just retried until the job hit max_attempts, leaving the item with
+    // BOTH `descript_published_at` and `descript_publish_error` NULL — i.e.
+    // silently never published, with no Retry affordance. Observed in prod
+    // 2026-08-24 on item 855d0ae1 (965 MB render vs the 200 MB
+    // `MAX_MEDIA_BYTES` cap in enrichment/shared.ts): 9 of 25 attempts
+    // burned on a failure that can never succeed, error column still null.
+    const msg = `Descript render archive failed: ${
+      err instanceof Error ? err.message : String(err)
+    }`;
+    await db
+      .update(productionItems)
+      .set({
+        descriptPublishError: msg.slice(0, 1000),
+        updatedAt: new Date(),
+      })
+      .where(eq(productionItems.id, item.id));
+    throw err;
+  }
 
   // In one transaction: delete prior Descript-published rows, insert the
   // new row, mirror legacy cover columns, stamp `descript_published_at`.
