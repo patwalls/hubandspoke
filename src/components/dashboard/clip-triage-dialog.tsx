@@ -327,7 +327,7 @@ export function ClipTriageDialog({
   );
 
   const runCreateInDescript = useCallback(
-    async (path: "agent" | "precise" | "buffered" | "full" | "full-range") => {
+    async (path: "agent" | "precise" | "buffered" | "full") => {
       if (!idea) return;
       setSaving(true);
       setError(null);
@@ -339,9 +339,7 @@ export function ClipTriageDialog({
               ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?ai=1`
               : path === "buffered"
                 ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?buffered=1&ai=1`
-                : path === "full-range"
-                  ? `/api/clip-ideas/${idea.id}/create-in-descript-full?range=1`
-                  : `/api/clip-ideas/${idea.id}/create-in-descript-full`;
+                : `/api/clip-ideas/${idea.id}/create-in-descript-full`;
         const res = await fetch(url, { method: "POST" });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -359,9 +357,7 @@ export function ClipTriageDialog({
                 ? "Trimming with 60-second buffer and uploading to Descript…"
                 : json?.mode === "cold"
                   ? "Uploading the full pillar to Descript…"
-                  : json?.rangeApplied
-                    ? "Duplicating the composition and setting its range…"
-                    : "Duplicating the pillar composition in Descript…";
+                  : "Duplicating the pillar composition in Descript…";
         const toastDesc =
           path === "agent"
             ? "Underlord will create a styled clip from Claude's suggested timestamps."
@@ -370,12 +366,8 @@ export function ClipTriageDialog({
               : path === "buffered"
                 ? "60 seconds of buffer before and after Claude's suggested range. Upload finishes first, then Underlord applies the layout pack."
                 : json?.mode === "cold"
-                  ? path === "full-range"
-                    ? "First clip from this pillar — uploading the whole video once, so the range isn't set this time. Future clips will be trimmed instantly."
-                    : "First clip from this pillar — uploading once. Future clips will be instant."
-                  : json?.rangeApplied
-                    ? "Trimmed to the clip's timestamps, with the full source still in the project so you can extend it."
-                    : "The new composition will appear on this item shortly.";
+                  ? "First clip from this pillar — uploading once. Future clips will be instant."
+                  : "The new composition will appear on this item shortly.";
         toast.success(toastTitle, {
           duration: 6000,
           description: toastDesc,
@@ -631,20 +623,6 @@ export function ClipTriageDialog({
                         <span className="text-[11px] text-muted-foreground leading-snug">
                           Start from the entire pillar video and edit the
                           clip manually.
-                        </span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => void runCreateInDescript("full-range")}
-                        disabled={!packAttached || introActive}
-                        className="flex flex-col items-start gap-0.5 py-2"
-                      >
-                        <span className="font-medium">
-                          Duplicate + Set Range
-                        </span>
-                        <span className="text-[11px] text-muted-foreground leading-snug">
-                          Copy the pillar composition and set it to
-                          Claude&apos;s timestamps. No trim, no layout pack —
-                          the whole source stays available to edit by hand.
                         </span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
