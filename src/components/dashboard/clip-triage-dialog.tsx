@@ -338,7 +338,7 @@ export function ClipTriageDialog({
             : path === "precise"
               ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?ai=1`
               : path === "buffered"
-                ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?buffered=1`
+                ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?buffered=1&ai=1`
                 : path === "full-range"
                   ? `/api/clip-ideas/${idea.id}/create-in-descript-full?range=1`
                   : `/api/clip-ideas/${idea.id}/create-in-descript-full`;
@@ -368,7 +368,7 @@ export function ClipTriageDialog({
             : path === "precise"
               ? "Upload finishes first, then Underlord applies the layout pack."
               : path === "buffered"
-                ? "60 seconds of buffer before and after Claude's suggested range. The new project will appear when the upload finishes."
+                ? "60 seconds of buffer before and after Claude's suggested range. Upload finishes first, then Underlord applies the layout pack."
                 : json?.mode === "cold"
                   ? path === "full-range"
                     ? "First clip from this pillar — uploading the whole video once, so the range isn't set this time. Future clips will be trimmed instantly."
@@ -667,7 +667,7 @@ export function ClipTriageDialog({
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
-                          Buffered Cut — Recommended
+                          Buffered Cut + Layout Pack (Recommended)
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
                           Claude&apos;s suggested clip plus 60 seconds before
