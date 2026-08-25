@@ -319,11 +319,10 @@ const FALLBACK_STATUS_OPTIONS: StatusOption[] = [
   { id: "fb-idea", name: "Idea", color: "zinc", position: 0 },
   { id: "fb-assigned", name: "Assigned", color: "pink", position: 1 },
   { id: "fb-review", name: "Review", color: "yellow", position: 2 },
-  { id: "fb-final", name: "Final Review", color: "orange", position: 3 },
-  { id: "fb-rtp", name: "Ready To Publish", color: "pink", position: 4 },
-  { id: "fb-onhold", name: "On Hold", color: "slate", position: 5 },
-  { id: "fb-pub", name: "Published", color: "pink", position: 6 },
-  { id: "fb-killed", name: "Killed", color: "zinc", position: 7 },
+  { id: "fb-rtp", name: "Ready To Publish", color: "pink", position: 3 },
+  { id: "fb-onhold", name: "On Hold", color: "slate", position: 4 },
+  { id: "fb-pub", name: "Published", color: "pink", position: 5 },
+  { id: "fb-killed", name: "Killed", color: "zinc", position: 6 },
 ];
 
 function formatCompact(n: number | null | undefined): string {

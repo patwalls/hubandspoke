@@ -67,8 +67,7 @@ type PipelineStatus = {
 // excluded — those live in Notion (filtered via isNotionAuthoritative
 // below). Idea-stage triage moved to /[brand]/queue.
 const FALLBACK_PIPELINE_STATUSES: PipelineStatus[] = [
-  { id: "fb-rtp", name: "Ready To Publish", color: "pink", position: 4 },
-  { id: "fb-fr", name: "Final Review", color: "orange", position: 3 },
+  { id: "fb-rtp", name: "Ready To Publish", color: "pink", position: 3 },
   { id: "fb-r", name: "Review", color: "yellow", position: 2 },
   { id: "fb-a", name: "Assigned", color: "pink", position: 1 },
 ];
@@ -216,8 +215,8 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
         const json = await res.json();
         if (cancelled) return;
         // Sort by position descending so late-stage statuses (Ready To
-        // Publish, Final Review) surface at the top — this view answers
-        // "what's almost done?", not "what's earliest in the pipeline?".
+        // Publish) surface at the top — this view answers "what's almost
+        // done?", not "what's earliest in the pipeline?".
         const list: PipelineStatus[] = (json.statuses ?? [])
           .map((s: PipelineStatus) => ({
             id: s.id,

@@ -11,7 +11,7 @@ import { getAllStatusPalettes } from "@/lib/db/brand-statuses";
 export const dynamic = "force-dynamic";
 
 // Active editorial statuses — anything that needs an editor's attention.
-const MY_TURN = ["Assigned", "Ready To Publish", "Review", "Final Review"];
+const MY_TURN = ["Assigned", "Ready To Publish", "Review"];
 const TERMINAL = ["Published", "Killed"];
 
 export default async function MyWorkPage() {

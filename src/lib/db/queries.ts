@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
-import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts, viewSnapshots } from "@/lib/db/schema";
+import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts, viewSnapshots, contentEvents } from "@/lib/db/schema";
 import { aliasedTable } from "drizzle-orm";
-import { and, eq, gte, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, lte, isNotNull, isNull, inArray, sql, min } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
 import {
@@ -14,7 +14,6 @@ import {
 // per-brand list takes precedence — see `resolveInFlightStatuses` below.
 const FALLBACK_PIPELINE_STATUSES = [
   "Ready To Publish",
-  "Final Review",
   "Review",
   "Assigned",
   "Idea",
@@ -69,6 +68,11 @@ type UserExtras = {
   pillarContentTitle?: string | null;
   /** Published date of the pillar production_item ("YYYY-MM-DD"). */
   pillarPublishedDate?: string | null;
+  /** Timestamp of the first `content_changed` event for this item. When
+   *  present, used instead of `item.createdAt` so auto-generated items
+   *  (clip-idea pipeline) show when work actually started, not when the
+   *  automation inserted the row. */
+  firstEditAt?: Date | null;
 };
 
 function mapProductionItem(
@@ -129,7 +133,7 @@ function mapProductionItem(
     predictedViewsSnapshot: item.predictedViewsSnapshot,
     predictedViewsSnapshotAt:
       item.predictedViewsSnapshotAt?.toISOString() ?? null,
-    createdAt: item.createdAt.toISOString(),
+    createdAt: (extras.firstEditAt ?? item.createdAt).toISOString(),
     updatedAt: item.updatedAt.toISOString(),
   };
 }
@@ -973,6 +977,31 @@ export async function getProductionPipeline(
     }
   }
 
+  // For each item, find when the first real edit happened (first
+  // content_changed event). Auto-generated items (clip-idea pipeline) have a
+  // created_at that reflects the automation run, not when an editor picked
+  // them up — using the first edit timestamp shows something meaningful.
+  const itemIds = rows.map((r) => r.item.id);
+  const firstEditById = new Map<string, Date>();
+  if (itemIds.length > 0) {
+    const firstEditRows = await db
+      .select({
+        contentItemId: contentEvents.contentItemId,
+        firstEditAt: min(contentEvents.createdAt),
+      })
+      .from(contentEvents)
+      .where(
+        and(
+          inArray(contentEvents.contentItemId, itemIds),
+          eq(contentEvents.eventType, "content_changed")
+        )
+      )
+      .groupBy(contentEvents.contentItemId);
+    for (const row of firstEditRows) {
+      if (row.firstEditAt) firstEditById.set(row.contentItemId, row.firstEditAt);
+    }
+  }
+
   return rows.map((r) =>
     mapProductionItem(r.item, {
       editorUserName: r.editorUserName,
@@ -1000,6 +1029,7 @@ export async function getProductionPipeline(
       pillarPublishedDate: r.item.pillarContentItemId
         ? pillarPublishedDateById.get(r.item.pillarContentItemId) ?? null
         : null,
+      firstEditAt: firstEditById.get(r.item.id) ?? null,
     })
   );
 }
