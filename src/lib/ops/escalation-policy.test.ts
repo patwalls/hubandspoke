@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  AUTO_CLOSED_LABEL,
+  classifyClose,
   DEFAULT_POLICY,
   decideReport,
   decideSweep,
@@ -259,5 +261,27 @@ describe("fingerprint marker", () => {
   it("returns null for an unrelated body", () => {
     expect(parseFingerprint("just a normal issue")).toBeNull();
     expect(parseFingerprint(null)).toBeNull();
+  });
+});
+
+describe("classifyClose", () => {
+  it("treats the loop's own auto-close as auto, never as a human decision", () => {
+    // Regression: PR #15 was closed by the loop's own sweep on 2026-08-25, then
+    // read back as a human close, which muted a still-live finding for 7 days.
+    expect(classifyClose([{ name: "ops-loop" }, { name: AUTO_CLOSED_LABEL }])).toBe(
+      "auto",
+    );
+  });
+
+  it("keeps wontfix winning over the auto-close stamp", () => {
+    expect(classifyClose([{ name: AUTO_CLOSED_LABEL }, { name: "wontfix" }])).toBe(
+      "wontfix",
+    );
+  });
+
+  it("treats an unlabelled close as a human decision", () => {
+    expect(classifyClose([{ name: "ops-loop" }])).toBe("human");
+    expect(classifyClose([])).toBe("human");
+    expect(classifyClose(undefined)).toBe("human");
   });
 });

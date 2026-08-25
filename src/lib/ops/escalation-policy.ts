@@ -244,6 +244,28 @@ export function parseFingerprint(body: string | null | undefined): string | null
   return match ? match[1] : null;
 }
 
+/**
+ * Label the loop stamps on an artifact it closes itself (condition stopped being
+ * reported). Without it, the loop cannot tell its own close apart from a human's:
+ * both are authored by the token owner, so `closedBy` is useless here.
+ */
+export const AUTO_CLOSED_LABEL = "ops:auto-closed";
+
+/**
+ * Why a tracked artifact is not OPEN. `wontfix` is a standing human decline,
+ * `human` is a plain human close (mute for a cooldown), and `auto` is the loop's
+ * own sweep — which must NOT mute anything, or a finding the loop auto-resolved
+ * can never be raised again when it recurs.
+ */
+export function classifyClose(
+  labels: Array<{ name: string }> | null | undefined,
+): "wontfix" | "auto" | "human" {
+  const names = (labels ?? []).map((l) => l.name);
+  if (names.includes("wontfix")) return "wontfix";
+  if (names.includes(AUTO_CLOSED_LABEL)) return "auto";
+  return "human";
+}
+
 export function severityLabel(severity: Severity): string {
   return `ops:${severity}`;
 }

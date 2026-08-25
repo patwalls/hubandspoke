@@ -48,6 +48,8 @@ import {
   type FindingState,
   type OpsState,
   type Severity,
+  AUTO_CLOSED_LABEL,
+  classifyClose,
 } from "../src/lib/ops/escalation-policy";
 
 const STATE_PATH = join(homedir(), ".claude", "hubandspoke-ops-state.json");
@@ -99,6 +101,7 @@ function ensureLabels(): void {
     [OPS_LABEL, "5319e7", "Raised by the automated ops loop"],
     [severityLabel("warn"), "fbca04", "Ops loop: degraded, not urgent"],
     [severityLabel("crit"), "b60205", "Ops loop: needs attention now"],
+    [AUTO_CLOSED_LABEL, "c5def5", "Closed by the ops loop itself, not by a human"],
   ];
   for (const [name, color, description] of specs) {
     try {
@@ -221,9 +224,19 @@ function cmdReport(args: Args): void {
         ? { state: "OPEN", labels: [] as Array<{ name: string }> }
         : viewArtifact(action.kind, action.number);
       if (live.state !== "OPEN") {
-        const wontfix = live.labels.some((l) => l.name === "wontfix");
+        const closedBy = classifyClose(live.labels);
         const next: FindingState = { ...finding, escalation: undefined };
-        if (wontfix) next.suppressedForever = true;
+        if (closedBy === "auto") {
+          // The loop closed this itself when the condition went quiet, and the
+          // condition is back. Forget the artifact and let the next report open a
+          // fresh one — muting here would make any auto-resolved finding unraisable.
+          commit(next);
+          console.log(
+            `reopening: ${fingerprint} — #${action.number} was auto-closed by the loop, condition is back`,
+          );
+          return;
+        }
+        if (closedBy === "wontfix") next.suppressedForever = true;
         else
           next.cooldownUntil = new Date(
             now.getTime() + COOLDOWN_DAYS * 24 * 3_600_000,
@@ -231,7 +244,9 @@ function cmdReport(args: Args): void {
         commit(next);
         console.log(
           `suppressed: ${fingerprint} — #${action.number} closed by a human` +
-            (wontfix ? " as wontfix (permanent)" : ` (quiet ${COOLDOWN_DAYS}d)`),
+            (closedBy === "wontfix"
+              ? " as wontfix (permanent)"
+              : ` (quiet ${COOLDOWN_DAYS}d)`),
         );
         return;
       }
@@ -291,8 +306,10 @@ function cmdReport(args: Args): void {
         console.log(`adopted: ${fingerprint} — existing #${existing.number}`);
         return;
       }
-      if (existing && existing.state !== "OPEN") {
-        const wontfix = existing.labels.some((l) => l.name === "wontfix");
+      // A previously auto-closed artifact is not a decision — fall through and open
+      // a fresh one. Only a human close (or `wontfix`) mutes the fingerprint.
+      if (existing && existing.state !== "OPEN" && classifyClose(existing.labels) !== "auto") {
+        const wontfix = classifyClose(existing.labels) === "wontfix";
         const next: FindingState = { ...finding };
         if (wontfix) next.suppressedForever = true;
         else
@@ -375,6 +392,14 @@ function closeArtifact(kind: Kind, number: number, note: string): void {
     [kind, "comment", String(number), "--body-file", "-"],
     `Resolved automatically by the ops loop — ${note}`,
   );
+  // Stamp before closing: this is the only durable record that the close was the
+  // loop's own sweep and not a human decision (both are authored by the same token).
+  ensureLabels();
+  try {
+    gh([kind, "edit", String(number), "--add-label", AUTO_CLOSED_LABEL]);
+  } catch {
+    // Labelling is best-effort; failing to label must not leave the artifact open.
+  }
   gh([kind, "close", String(number)]);
 }
 
