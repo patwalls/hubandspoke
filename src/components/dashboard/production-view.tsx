@@ -16,6 +16,11 @@ import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface ProductionViewProps {
   brand: string;
@@ -350,8 +355,62 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
           <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
             In Production
           </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1 flex items-center gap-1.5">
             Track content moving through the pipeline.
+            <Popover>
+              <PopoverTrigger className="inline-flex items-center gap-1 text-primary hover:text-primary/80 transition-colors">
+                <svg
+                  className="w-3.5 h-3.5 shrink-0"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-2.5a.75.75 0 0 1 .75.75v5a.75.75 0 0 1-1.5 0v-5A.75.75 0 0 1 8 5.5Zm0-2.25a.875.875 0 1 0 0 1.75.875.875 0 0 0 0-1.75Z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <span className="text-xs underline underline-offset-2 decoration-dotted">
+                  How statuses work
+                </span>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-4" align="start">
+                <h3 className="text-sm font-semibold text-foreground mb-3">
+                  How statuses work
+                </h3>
+                <div className="space-y-2 mb-4">
+                  {[
+                    { token: "pink", name: "Assigned", desc: "Editor is working" },
+                    { token: "yellow", name: "Review", desc: "Producer reviews or editor revises" },
+                    { token: "pink", name: "Ready To Publish", desc: "Content ready to go live" },
+                    { token: "green", name: "Scheduled / Published", desc: "Update status in Content page before it goes live" },
+                  ].map(({ token, name, desc }) => (
+                    <div key={name} className="flex items-start gap-3">
+                      <span
+                        className={cn(
+                          "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border shrink-0 mt-0.5",
+                          statusClassFromToken(token)
+                        )}
+                      >
+                        {name}
+                      </span>
+                      <span className="text-xs text-muted-foreground leading-tight pt-0.5">
+                        {desc}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-foreground mb-1.5">
+                    At each status change:
+                  </p>
+                  <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+                    <li>Update assignee to whoever owns the next step</li>
+                    <li>Tag them in the comments when needed</li>
+                  </ul>
+                </div>
+              </PopoverContent>
+            </Popover>
           </p>
         </div>
         <Input
