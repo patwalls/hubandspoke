@@ -1151,9 +1151,22 @@ export async function syncAccountContent(
       }
       case "linkedin": {
         if (!row.url || !row.url.includes("/company/")) {
-          throw new Error(
-            "LinkedIn content sync requires a company page URL (linkedin.com/company/...) — personal profiles aren't supported"
-          );
+          // Personal LinkedIn profiles have no public posts API. Skip content
+          // sync but keep (or restore) the account active so it appears in
+          // routing dropdowns. Not a permanent error — no deactivation.
+          await db
+            .update(accounts)
+            .set({
+              lastContentSyncAt: new Date(),
+              lastContentSyncError:
+                "LinkedIn personal profiles don't support content sync — account available for routing only",
+              ...(row.isActive === false ? { isActive: true } : {}),
+              updatedAt: new Date(),
+            })
+            .where(eq(accounts.id, accountId));
+          result.errorMessage =
+            "LinkedIn personal profiles don't support content sync — account available for routing only";
+          return result;
         }
         const r = await fetchLinkedInCompanyPostsPaged(row.url, maxPages);
         fetched.push(...r.items);
