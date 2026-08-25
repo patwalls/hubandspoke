@@ -1,9 +1,13 @@
+import { Readable } from "stream";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItemMedia, transcripts } from "@/lib/db/schema";
-import { buildKey, bucketName, putObject } from "@/lib/s3";
+import { buildKey, bucketName, putObject, putObjectFromStream } from "@/lib/s3";
 
 const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
+// Hard stop above which we refuse even a streaming upload. Keeps the task
+// from hanging indefinitely on a pathologically large file.
+const MAX_STREAM_BYTES = 500 * 1024 * 1024;
 
 function extFromContentType(ct: string): string {
   if (ct.startsWith("video/mp4")) return "mp4";
@@ -41,7 +45,10 @@ export interface ArchiveResult {
 
 /**
  * Fetch a remote URL into our S3 bucket under a key tied to the item.
- * Defensive 200 MB cap prevents a runaway download from blowing the box.
+ * Files under 200 MB are buffered in memory. Files between 200 MB and 500 MB
+ * are streamed directly to S3 via Node.js Readable (requires Content-Length
+ * header from the server — CDNs like Descript always provide it). Files above
+ * 500 MB are rejected outright.
  * Throws on download or upload failure — callers decide whether to swallow.
  */
 export async function archiveRemoteToS3(
@@ -56,17 +63,12 @@ export async function archiveRemoteToS3(
     );
   }
   const headerLen = Number(res.headers.get("content-length") ?? 0);
-  if (headerLen && headerLen > MAX_MEDIA_BYTES) {
+  if (headerLen && headerLen > MAX_STREAM_BYTES) {
     throw new Error(
-      `Remote media is ${headerLen} bytes — above ${MAX_MEDIA_BYTES} limit`
+      `Remote media is ${headerLen} bytes — above ${MAX_STREAM_BYTES} absolute limit`
     );
   }
-  const arr = await res.arrayBuffer();
-  if (arr.byteLength > MAX_MEDIA_BYTES) {
-    throw new Error(
-      `Remote media is ${arr.byteLength} bytes — above ${MAX_MEDIA_BYTES} limit`
-    );
-  }
+
   const contentType =
     res.headers.get("content-type") ?? fallbackContentType(remoteUrl);
   const ext = extFromContentType(contentType);
@@ -74,6 +76,24 @@ export async function archiveRemoteToS3(
     ? fileNameHint
     : `${fileNameHint}.${ext}`;
   const key = buildKey(productionItemId, safeName);
+
+  // Large files (200–500 MB): stream directly to S3 so we never load the full
+  // body into a Buffer. ContentLength from the header is required; servers that
+  // omit it fall through to the arrayBuffer() path below and hit the 200 MB cap.
+  if (headerLen && headerLen > MAX_MEDIA_BYTES) {
+    const nodeStream = Readable.fromWeb(
+      res.body as Parameters<typeof Readable.fromWeb>[0]
+    );
+    await putObjectFromStream(key, nodeStream, contentType, headerLen);
+    return { key, size: headerLen, contentType };
+  }
+
+  const arr = await res.arrayBuffer();
+  if (arr.byteLength > MAX_MEDIA_BYTES) {
+    throw new Error(
+      `Remote media is ${arr.byteLength} bytes — above ${MAX_MEDIA_BYTES} limit`
+    );
+  }
   await putObject(key, Buffer.from(arr), contentType);
   return { key, size: arr.byteLength, contentType };
 }

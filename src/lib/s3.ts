@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { createReadStream } from "fs";
 import { stat } from "fs/promises";
+import { Readable } from "stream";
 import {
   S3Client,
   PutObjectCommand,
@@ -142,6 +143,30 @@ export async function putObjectFromFile(
       Body: createReadStream(filePath),
       ContentType: contentType,
       ContentLength: fileSize,
+    })
+  );
+}
+
+/**
+ * Stream a Node.js Readable directly to S3. Use this for large remote files
+ * that exceed the safe in-memory buffer threshold — it never loads the body
+ * into a Buffer, so it won't blow the Heroku Basic dyno's 512 MB RAM cap.
+ * `contentLength` must come from the HTTP Content-Length header; S3 requires
+ * it for non-multipart PutObject requests.
+ */
+export async function putObjectFromStream(
+  key: string,
+  stream: Readable,
+  contentType: string,
+  contentLength: number
+): Promise<void> {
+  await s3Client().send(
+    new PutObjectCommand({
+      Bucket: bucketName(),
+      Key: key,
+      Body: stream,
+      ContentType: contentType,
+      ContentLength: contentLength,
     })
   );
 }
