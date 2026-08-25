@@ -20,6 +20,7 @@ import {
 import { AccountAvatar } from "@/components/ui/account-avatar";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { UserChip } from "./user-chip";
+import { UserCombobox } from "./user-combobox";
 import {
   PLATFORM_META,
   POST_TYPE_SHORT_LABEL,
@@ -832,36 +833,14 @@ export function CrossPostTriagePanel({
           <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
             Assign to
           </div>
-          <Select
+          <UserCombobox
             value={assigneeUserId || ""}
-            onValueChange={(v) => setAssigneeUserId(v ?? "")}
+            onValueChange={(v) => setAssigneeUserId(v)}
+            users={assignableUsers}
             disabled={busy}
-          >
-            <SelectTrigger
-              aria-label="Assignee"
-              className="h-10 [&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1"
-            >
-              {assigneeUserId ? (
-                (() => {
-                  const u = assignableUsers.find((x) => x.id === assigneeUserId);
-                  return u ? (
-                    <UserChip user={u} />
-                  ) : (
-                    <SelectValue placeholder="Select an editor" />
-                  );
-                })()
-              ) : (
-                <span className="text-muted-foreground">Select an editor…</span>
-              )}
-            </SelectTrigger>
-            <SelectContent>
-              {assignableUsers.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
-                  <UserChip user={u} />
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            triggerClassName="h-10 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:border-ring"
+            placeholder="Select an editor…"
+          />
         </section>
 
         {gateFailures.length > 0 && (

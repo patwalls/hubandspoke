@@ -116,6 +116,7 @@ export interface DraftRow {
 export type FieldSaveState = "idle" | "saving" | "saved" | "error";
 import { TiktokDraftBanner } from "./tiktok-draft-banner";
 import { UserChip } from "./user-chip";
+import { UserCombobox } from "./user-combobox";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
@@ -2403,40 +2404,17 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
             {/* Editor chip — avatar + name; click opens the user picker
              *  (same options the sidebar Editor Select used to mount). */}
-            <Select
+            <UserCombobox
               value={editorUserId || ""}
               onValueChange={(v) => {
-                if (!v) return;
                 setEditorUserId(v);
                 void persistField({ editorUserId: v });
               }}
-            >
-              <SelectTrigger
-                aria-label="Editor"
-                size="sm"
-                className={cn(
-                  CHIP_A_BASE,
-                  "w-auto [&>span]:flex [&>span]:items-center [&>span]:min-w-0",
-                )}
-              >
-                {editorUser ? (
-                  // xs avatar (w-5 h-5) so the chip stays the same h-7
-                  // height as Format/Status/Account. The "sm" default
-                  // (w-6 h-6) pushes it ~4px taller and breaks the
-                  // chip-row alignment.
-                  <UserChip user={editorUser} size="xs" />
-                ) : (
-                  <span className="text-muted-foreground">Select editor</span>
-                )}
-              </SelectTrigger>
-              <SelectContent>
-                {assignableUsers.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    <UserChip user={u} />
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              users={assignableUsers}
+              chipSize="xs"
+              triggerClassName={cn(CHIP_A_BASE, "w-auto")}
+              placeholder="Select editor"
+            />
 
             {/* Status chip — colored pill matching the current status
              *  palette; click opens the same filtered list of status
