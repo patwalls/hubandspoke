@@ -204,6 +204,16 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Dedupe across overlapping ticks via jobKey
   - Per-item retry caps lives in [`enrich-item`](#enrich-item--enrich-one-item)
 
+### `hook-dispatch` — one item's unified hook pick (LLM)
+- **Trigger:** fan-out child of cron `hook-dispatch-sweep` (every 5 min), `jobKey: hook-dispatch-{id}`
+- **Files:** `src/jobs/tasks/hook-dispatch.ts`, `src/lib/services/hook-extract/dispatcher.ts` (`dispatchHookForItem`, `callLLM`)
+- **Inputs:** items with `hookExtractedAt IS NULL` and at least one signal (title, caption/body, transcript, poster). One LLM call sees all of them.
+- **Outputs:** stamps `hookExtractedAt` + `hookExtractor`; writes `hook`/`hookSource` (and `overlay` when the source is overlay), `coverDescription`/`visionExtractedAt` when a poster was sent
+- **Rules:**
+  - Supersedes the per-item `extract-hook` / `hook-fallback` / `vision-extract` tasks (still registered for back-compat, no longer fanned out)
+  - `hookSource IN ('clip_idea','manual')` is untouchable; re-running requires clearing `hookExtractedAt`
+  - **OpenAI 400s fail soft, they do not retry.** A 400 is a permanent rejection of a body we built, so all 25 graphile attempts would fail identically. On 400 the dispatcher retries once without the poster image (the common cause — a `.jpg` key holding HEIC bytes); if that also 400s, or the 400 was raised with no poster in play, it returns a skipped result with `reasoning: openai-400:<stage>:<msg>` and the caller still stamps `hookExtractedAt` so the item leaves the sweep. Non-400 errors still throw and retry normally. Matched on HTTP status, not only `instanceof BadRequestError`.
+
 ### `hook-extract-sweep` — fan-out parent (LLM)
 - **Trigger:** cron `40 * * * *` (every hour at :40)
 - **Files:** `src/jobs/tasks/scheduled.ts:74-88`, `src/lib/services/hook-extract/orchestrator.ts` (`selectHookCandidates`)
