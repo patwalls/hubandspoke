@@ -617,12 +617,10 @@ export function ClipTriageDialog({
                         disabled={!packAttached || introActive}
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
-                        <span className="font-medium">
-                          Full Composition
-                        </span>
+                        <span className="font-medium">Full Video</span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
-                          Start from the entire pillar video and edit the
-                          clip manually.
+                          Import the entire pillar video so you can cut and
+                          edit it manually. No AI is used.
                         </span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
@@ -635,8 +633,7 @@ export function ClipTriageDialog({
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
                           Use Claude&apos;s exact clip timestamps, then apply
-                          the format layout (captions, hook, vertical). Fast,
-                          but no extra footage if boundaries need adjusting.
+                          the format layout.
                         </span>
                       </DropdownMenuItem>
                       <DropdownMenuItem
@@ -648,22 +645,9 @@ export function ClipTriageDialog({
                           Buffered Cut + Layout Pack (Recommended)
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
-                          Claude&apos;s suggested clip plus 60 seconds before
-                          and after, so you have room to fix the beginning
-                          or ending.
-                        </span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => void runCreateInDescript("agent")}
-                        disabled={!packAttached || introActive}
-                        className="flex flex-col items-start gap-0.5 py-2"
-                      >
-                        <span className="font-medium">
-                          Underlord Edit
-                        </span>
-                        <span className="text-[11px] text-muted-foreground leading-snug">
-                          Let Underlord turn Claude&apos;s suggested moment into
-                          a styled clip using the full pillar as context.
+                          Use Claude&apos;s suggested clip plus 60 seconds
+                          before and after, then apply the format layout
+                          without trimming the extra footage.
                         </span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>

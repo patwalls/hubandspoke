@@ -142,16 +142,20 @@ export function buildLayoutPackPrompt(args: {
       : `Apply the following format-specific instructions to the composition with compositionId="${args.compositionId}":`;
 
   if (args.preserveAllFootage) {
+    // Framing must follow the format's resolved aspect ratio, NOT a fixed
+    // vertical default — a 16:9 format (e.g. X Quotables) must stay
+    // horizontal. Defaults to 9:16 only when the caller omits aspectRatio.
+    const framing = `${args.aspectRatio ?? "9:16"} framing`;
     // The format Skill below still contains its "only clip out the section…"
     // selection instruction; we can't surgically strip it from free-form
     // Skill text, so we override it explicitly — first AND last, where models
     // weight instructions most.
     return [
       `CRITICAL — READ FIRST, THIS OVERRIDES ANYTHING BELOW THAT CONFLICTS:`,
-      `This composition is ALREADY the exact, final clip the editor assembled — a prepended intro followed by the target section, precisely cut. The footage selection is DONE.`,
+      `This composition is ALREADY the exact, final clip the editor assembled — precisely cut. The footage selection is DONE.`,
       `Do NOT clip, trim, shorten, re-clip, cut down, remove, or re-select ANY footage. Keep every second from the first frame to the last.`,
-      `IGNORE any instruction below that says to "only clip out", "clip out the section", or otherwise select/extract a portion — re-clipping would DELETE the intro the editor added.`,
-      `Your ONLY job: apply the layout pack (9:16 framing, hook-text track, captions) and mark filler words as ignored (strike-through, never delete). Do not shorten the clip.`,
+      `IGNORE any instruction below that says to "only clip out", "clip out the section", or otherwise select/extract a portion — re-clipping would DELETE footage the editor deliberately kept.`,
+      `Your ONLY job: apply the layout pack (${framing}, hook-text track, captions) and mark filler words as ignored (strike-through, never delete). Do not shorten the clip.`,
       ``,
       orientationLine,
       "",

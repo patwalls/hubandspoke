@@ -170,7 +170,11 @@ export async function reprocessProductionItemInDescript(args: {
         clipIdeaId: clipIdea.id,
         triggerId: trigger.id,
         derivativeItemId: args.productionItemId,
-        applyLayoutPack: false,
+        // Both Precise Cut and Buffered Cut apply the format/skill's layout
+        // pack (the "+ Layout Pack" options). The worker re-checks the format
+        // actually has a skill/pack and skips styling if not. Full Video and
+        // Underlord Edit don't reach this branch. Only precise/buffered do.
+        applyLayoutPack: true,
         ...(cutStartSec !== undefined ? { cutStartSec } : {}),
         ...(cutEndSec !== undefined ? { cutEndSec } : {}),
       },

@@ -413,10 +413,13 @@ async function pollUploadOnce(
             (v): v is string => typeof v === "string" && v.trim() !== "",
           )
         : [];
-    // When the cut prepended an intro (hookSegments), the composition is
-    // already the exact intro+body clip — the layout pack must NOT re-clip it
-    // down to the format's target section, or it deletes the intro. Tell
-    // Underlord to preserve all footage and only style it.
+    // The layout pack must NEVER re-clip the composition. This task always
+    // imports a composition ffmpeg has already trimmed to a deliberate range —
+    // an exact Precise Cut, a ±60s Buffered Cut, or an intro+body assembly.
+    // Re-clipping would trim a Precise Cut below Claude's exact range, strip a
+    // Buffered Cut's buffer, or delete a prepended intro (and Underlord's
+    // free-form re-selection has been observed grabbing a garbage segment).
+    // Underlord's only job here is styling — hence the no-trim override.
     const hasPrependedIntro =
       Array.isArray(row.clipHookSegments) && row.clipHookSegments.length > 0;
     const prompt = buildLayoutPackPrompt({
@@ -425,13 +428,13 @@ async function pollUploadOnce(
       hookText,
       aspectRatio,
       quotables,
-      preserveAllFootage: hasPrependedIntro,
+      preserveAllFootage: true,
     });
-    if (hasPrependedIntro) {
-      helpers.logger.info(
-        `precise-cut layout preserve-footage clip=${payload.clipIdeaId} (intro prepended — no re-clip)`,
-      );
-    }
+    helpers.logger.info(
+      `precise-cut layout preserve-footage clip=${payload.clipIdeaId} (${
+        hasPrependedIntro ? "intro prepended" : "pre-trimmed cut"
+      } — no re-clip)`,
+    );
     const agent = await invokeDescriptAgent({
       projectId: row.descriptProjectId,
       prompt,

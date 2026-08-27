@@ -3164,24 +3164,39 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent>
                         <DropdownMenuItem
-                          onClick={() => void handleSendToDescript("buffered")}
+                          onClick={() => void handleSendToDescript("full")}
+                          className="flex flex-col items-start gap-0.5 py-2"
                         >
-                          Buffered Cut — Recommended
+                          <span className="font-medium">Full Video</span>
+                          <span className="text-[11px] text-muted-foreground leading-snug">
+                            Import the entire pillar video so you can cut and
+                            edit it manually. No AI is used.
+                          </span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => void handleSendToDescript("precise")}
+                          className="flex flex-col items-start gap-0.5 py-2"
                         >
-                          Precise Cut
+                          <span className="font-medium">
+                            Precise Cut + Layout Pack
+                          </span>
+                          <span className="text-[11px] text-muted-foreground leading-snug">
+                            Use Claude&apos;s exact clip timestamps, then apply
+                            the format layout.
+                          </span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => void handleSendToDescript("full")}
+                          onClick={() => void handleSendToDescript("buffered")}
+                          className="flex flex-col items-start gap-0.5 py-2"
                         >
-                          Full Composition
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void handleSendToDescript("agent")}
-                        >
-                          Underlord Edit
+                          <span className="font-medium">
+                            Buffered Cut + Layout Pack (Recommended)
+                          </span>
+                          <span className="text-[11px] text-muted-foreground leading-snug">
+                            Use Claude&apos;s suggested clip plus 60 seconds
+                            before and after, then apply the format layout
+                            without trimming the extra footage.
+                          </span>
                         </DropdownMenuItem>
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>

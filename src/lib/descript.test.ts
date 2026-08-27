@@ -153,6 +153,44 @@ describe("buildLayoutPackPrompt", () => {
     expect(out).toContain("only clip out the section");
     expect(out).toContain('compositionId="abc"');
   });
+
+  // Regression: the no-trim override used to hardcode "9:16 framing", which
+  // told Underlord to make a 16:9 format (e.g. X Quotables) vertical. Framing
+  // must follow the format's resolved aspect ratio.
+  it("uses 16:9 framing (not 9:16) for a horizontal buffered format", () => {
+    const out = buildLayoutPackPrompt({
+      skill: SKILL,
+      compositionId: "abc",
+      hookText: "Hook",
+      aspectRatio: "16:9",
+      preserveAllFootage: true,
+    });
+    expect(out).toContain("16:9 framing");
+    expect(out).not.toContain("9:16 framing");
+    expect(out).toContain("horizontal 16:9 composition");
+  });
+
+  it("uses 9:16 framing for a vertical buffered format", () => {
+    const out = buildLayoutPackPrompt({
+      skill: SKILL,
+      compositionId: "abc",
+      hookText: "Hook",
+      aspectRatio: "9:16",
+      preserveAllFootage: true,
+    });
+    expect(out).toContain("9:16 framing");
+    expect(out).not.toContain("16:9 framing");
+  });
+
+  it("defaults to 9:16 framing when aspectRatio is omitted", () => {
+    const out = buildLayoutPackPrompt({
+      skill: SKILL,
+      compositionId: "abc",
+      hookText: "Hook",
+      preserveAllFootage: true,
+    });
+    expect(out).toContain("9:16 framing");
+  });
 });
 
 describe("buildDuplicateCompositionPrompt", () => {
