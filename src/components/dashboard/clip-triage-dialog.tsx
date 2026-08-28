@@ -338,7 +338,7 @@ export function ClipTriageDialog({
             : path === "precise"
               ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?ai=1`
               : path === "buffered"
-                ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?buffered=1&ai=1`
+                ? `/api/clip-ideas/${idea.id}/create-in-descript-precise?buffered=1`
                 : `/api/clip-ideas/${idea.id}/create-in-descript-full`;
         const res = await fetch(url, { method: "POST" });
         const json = await res.json().catch(() => ({}));
@@ -364,7 +364,7 @@ export function ClipTriageDialog({
             : path === "precise"
               ? "Upload finishes first, then Underlord applies the layout pack."
               : path === "buffered"
-                ? "60 seconds of buffer before and after Claude's suggested range. Upload finishes first, then Underlord applies the layout pack."
+                ? "60 seconds of buffer before and after Claude's suggested range. Imports as-is — no Underlord, no layout pack."
                 : json?.mode === "cold"
                   ? "First clip from this pillar — uploading once. Future clips will be instant."
                   : "The new composition will appear on this item shortly.";
@@ -638,16 +638,15 @@ export function ClipTriageDialog({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => void runCreateInDescript("buffered")}
-                        disabled={!packAttached}
                         className="flex flex-col items-start gap-0.5 py-2"
                       >
                         <span className="font-medium">
-                          Buffered Cut + Layout Pack (Recommended)
+                          Buffered Cut (No Underlord)
                         </span>
                         <span className="text-[11px] text-muted-foreground leading-snug">
-                          Use Claude&apos;s suggested clip plus 60 seconds
-                          before and after, then apply the format layout
-                          without trimming the extra footage.
+                          Claude&apos;s clip plus 60 seconds before and after
+                          for editing room. Imports as-is — no AI, no layout
+                          pack. Trim and style it yourself in Descript.
                         </span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>

@@ -170,11 +170,13 @@ export async function reprocessProductionItemInDescript(args: {
         clipIdeaId: clipIdea.id,
         triggerId: trigger.id,
         derivativeItemId: args.productionItemId,
-        // Both Precise Cut and Buffered Cut apply the format/skill's layout
-        // pack (the "+ Layout Pack" options). The worker re-checks the format
-        // actually has a skill/pack and skips styling if not. Full Video and
-        // Underlord Edit don't reach this branch. Only precise/buffered do.
-        applyLayoutPack: true,
+        // Precise Cut applies the format/skill's layout pack (the worker
+        // re-checks the format actually has a skill/pack and skips if not).
+        // Buffered Cut is a plain trim with NO Underlord call — its whole
+        // purpose is editing room, so it imports as-is (source orientation)
+        // and the editor styles it after finalizing the trim. Only
+        // precise/buffered reach this branch.
+        applyLayoutPack: args.mode === "precise",
         ...(cutStartSec !== undefined ? { cutStartSec } : {}),
         ...(cutEndSec !== undefined ? { cutEndSec } : {}),
       },

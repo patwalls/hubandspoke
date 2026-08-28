@@ -3190,12 +3190,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                           className="flex flex-col items-start gap-0.5 py-2"
                         >
                           <span className="font-medium">
-                            Buffered Cut + Layout Pack (Recommended)
+                            Buffered Cut (No Underlord)
                           </span>
                           <span className="text-[11px] text-muted-foreground leading-snug">
-                            Use Claude&apos;s suggested clip plus 60 seconds
-                            before and after, then apply the format layout
-                            without trimming the extra footage.
+                            Claude&apos;s clip plus 60 seconds before and after
+                            for editing room. Imports as-is — no AI, no layout
+                            pack. Trim and style it yourself in Descript.
                           </span>
                         </DropdownMenuItem>
                       </DropdownMenuSubContent>

@@ -529,6 +529,10 @@ interface PromotedClipFormat {
 export async function loadPromotedClipFormat(args: {
   brand: string;
   targetFormatName: string | null;
+  /** When false, don't throw `FormatMissingSkillError` for a format with no
+   *  Skill/pack — used by Buffered Cut, which never runs Underlord and so
+   *  doesn't need one. Defaults to true (the styling paths require a Skill). */
+  requireSkill?: boolean;
 }): Promise<PromotedClipFormat> {
   const cols = {
     id: formats.id,
@@ -577,14 +581,14 @@ export async function loadPromotedClipFormat(args: {
   }
 
   if (!row) throw new NoClippableFormatForBrandError(args.brand);
-  if (!row.skill || !row.skill.trim()) {
+  if ((args.requireSkill ?? true) && (!row.skill || !row.skill.trim())) {
     throw new FormatMissingSkillError(row.id, row.name, row.brand);
   }
   return {
     id: row.id,
     name: row.name,
     brand: row.brand,
-    skill: row.skill,
+    skill: row.skill ?? "",
     clipAspectRatio: row.clipAspectRatio,
     clipTargetPostType: row.clipTargetPostType,
   };
@@ -851,13 +855,16 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
 
-  // Throws FormatMissingDescriptPackError if the format has no pack
-  // attached, before any side effects. Worker re-loads the pack later
-  // (precise-cut layout-apply phase) — keeping the gate here too prevents
-  // accidentally enqueuing a job that would no-op.
+  // Precise Cut requires a Skill/pack (throws FormatMissingDescriptPackError
+  // before any side effects — the worker re-loads the pack for the layout
+  // phase, and the gate here prevents enqueuing a job that would no-op).
+  // Buffered Cut runs no Underlord call, so it works for formats with no
+  // pack (e.g. X Quotables) — we still load the format for its id/aspect,
+  // just don't require a Skill.
   const format = await loadPromotedClipFormat({
     brand,
     targetFormatName: row.targetFormat,
+    requireSkill: !args.buffered,
   });
 
   await db
@@ -891,6 +898,12 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     ? Number(row.endSec) + BUFFER_SEC
     : undefined;
 
+  // Buffered Cut never runs the Underlord layout-pack call — it's a plain
+  // trim that imports as-is (source orientation) so the editor has room to
+  // finalize the boundaries and style it themselves. Enforced here at the
+  // service layer so it doesn't depend on the route passing `ai=1` or not.
+  const effectiveApplyLayoutPack = args.buffered ? false : args.applyLayoutPack;
+
   await recordToolAction({
     contentItemId: productionItemId,
     userId: args.actorUserId,
@@ -902,7 +915,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
       : "Trimming clip locally + uploading to Descript… new composition incoming.",
     meta: {
       importPath: "precise-cut",
-      applyLayoutPack: args.applyLayoutPack ? 1 : 0,
+      applyLayoutPack: effectiveApplyLayoutPack ? 1 : 0,
       buffered: args.buffered ? 1 : 0,
     },
   });
@@ -913,7 +926,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
       clipIdeaId: args.clipIdeaId,
       triggerId: trigger.id,
       derivativeItemId: productionItemId,
-      applyLayoutPack: args.applyLayoutPack,
+      applyLayoutPack: effectiveApplyLayoutPack,
       ...(cutStartSec !== undefined ? { cutStartSec } : {}),
       ...(cutEndSec !== undefined ? { cutEndSec } : {}),
     },
