@@ -245,6 +245,47 @@ describe("escalation policy — blast radius", () => {
     expect(decideSweep(state, hoursLater(4))).toHaveLength(1);
   });
 
+  it("does not sweep the whole backlog on the first lap after the loop was down", () => {
+    // 2026-08-28: the runner was down ~24h. Every finding went stale at the same
+    // instant, so the first `status` back closed draft PRs #16 and #17 at once.
+    const state: OpsState = {
+      findings: {
+        fp: {
+          streak: 59,
+          firstSeenAt: T0.toISOString(),
+          lastSeenAt: T0.toISOString(),
+          severity: "warn",
+          escalation: {
+            kind: "pr",
+            number: 16,
+            severity: "warn",
+            createdAt: T0.toISOString(),
+          },
+        },
+      },
+      creations: [],
+      lastLapAt: T0.toISOString(),
+    };
+    expect(decideSweep(state, hoursLater(24))).toEqual([]);
+  });
+
+  it("still sweeps a cleared finding while laps are running normally", () => {
+    const state: OpsState = {
+      findings: {
+        fp: {
+          streak: 5,
+          firstSeenAt: T0.toISOString(),
+          lastSeenAt: T0.toISOString(),
+          severity: "warn",
+        },
+      },
+      creations: [],
+      // A lap ran 12 minutes ago, so the gap is the finding's, not the loop's.
+      lastLapAt: hoursLater(3.8).toISOString(),
+    };
+    expect(decideSweep(state, hoursLater(4)).map((x) => x.fingerprint)).toEqual(["fp"]);
+  });
+
   it("keeps the default gates conservative", () => {
     expect(DEFAULT_POLICY.maxCreationsPerWindow).toBeLessThanOrEqual(2);
     expect(DEFAULT_POLICY.escalateAfterLaps.warn).toBeGreaterThanOrEqual(2);

@@ -422,7 +422,10 @@ function cmdStatus(args: Args): void {
     }
     delete state.findings[fingerprint];
   }
-  if (stale.length && !dryRun) saveState(state);
+  // Stamp every status run, swept or not: this is the heartbeat `decideSweep` reads to
+  // tell "the condition stopped happening" apart from "the loop stopped looking".
+  state.lastLapAt = now.toISOString();
+  if (!dryRun) saveState(state);
 
   const entries = Object.entries(state.findings);
   if (entries.length === 0) {
