@@ -95,13 +95,33 @@ export const descriptPublishAndArchiveTask: Task = async (
       return;
     }
 
-    const { jobId } = await publishDescriptComposition({
-      projectId: item.descriptProjectId,
-      compositionId: item.descriptCompositionId,
-      resolution: "1080p",
-      accessLevel: "unlisted",
-      account: item.descriptAccount,
-    });
+    // Stamp kickoff failures the same way every Phase-2 path does. Without
+    // this, a permanent Descript error here (deleted composition, revoked
+    // project access) just throws: the row keeps its stale publish job id
+    // with no error, so it reads as `rendering` forever and the pill never
+    // offers Retry. Item 78b7cc20 sat that way from 2026-08-12 until its
+    // job exhausted 25/25 attempts on 2026-08-29 ("No composition matching
+    // '2cb30f27…' found in project 249c22bb…").
+    let jobId: string;
+    try {
+      ({ jobId } = await publishDescriptComposition({
+        projectId: item.descriptProjectId,
+        compositionId: item.descriptCompositionId,
+        resolution: "1080p",
+        accessLevel: "unlisted",
+        account: item.descriptAccount,
+      }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await db
+        .update(productionItems)
+        .set({
+          descriptPublishError: msg.slice(0, 1000),
+          updatedAt: new Date(),
+        })
+        .where(eq(productionItems.id, item.id));
+      throw err;
+    }
     await db
       .update(productionItems)
       .set({
