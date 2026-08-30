@@ -223,6 +223,17 @@ async function callLLM(signals: ItemSignals): Promise<DispatchResult> {
     return c;
   };
 
+  const request = (withImage: boolean) => ({
+    model: MODEL,
+    max_tokens: 512,
+    tools,
+    tool_choice: { type: "function" as const, function: { name: "return_hook" } },
+    messages: [
+      { role: "system" as const, content: SYSTEM_PROMPT },
+      { role: "user" as const, content: buildContent(withImage) },
+    ],
+  });
+
   // First attempt: send the poster image when we have one. OpenAI
   // occasionally rejects on bytes-level format even when the S3 key's
   // extension passed `isLikelyImageKey` — e.g. a `.jpg` key whose
@@ -231,32 +242,50 @@ async function callLLM(signals: ItemSignals): Promise<DispatchResult> {
   // still drive a hook and `hookExtractedAt` gets stamped — otherwise
   // every sweep re-tries the same item and we burn the queue. See
   // HUBANDSPOKE-V (237 events, 2026-05-15).
+  //
+  // A 400 that survives the image-less retry — or one raised for any reason
+  // other than the poster — is a PERMANENT rejection of a body we built.
+  // Rethrowing it makes graphile-worker burn all 25 attempts on a request
+  // that can never succeed (2026-08-25: two `hook-dispatch` jobs sat at
+  // attempt 8/25 for 70min on `400 Invalid body: failed to parse JSON
+  // value`, both LinkedIn items with clean sub-3KB text and a valid poster).
+  // Fail soft instead, exactly as `hook-extract/vision.ts` already does:
+  // return a skipped result so the caller stamps `hookExtractedAt` and the
+  // item stops being re-swept.
+  //
+  // Match on the HTTP status, not only `instanceof BadRequestError` — the
+  // production trace rethrew from the `else` branch with a poster present,
+  // which means the class check itself did not hold for a 400 the SDK raised
+  // through `APIError.generate`. Every `APIError` carries `.status`.
+  const isPermanentBadRequest = (e: unknown): boolean =>
+    e instanceof BadRequestError ||
+    (typeof e === "object" &&
+      e !== null &&
+      (e as { status?: number }).status === 400);
+
+  const skippedOn400 = (err: unknown, stage: string): DispatchResult => ({
+    status: "skipped",
+    hook: null,
+    source: "none",
+    coverDescription: null,
+    reasoning: `openai-400:${stage}:${
+      err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)
+    }`,
+    inputTokens: 0,
+    outputTokens: 0,
+  });
+
   let response;
   try {
-    response = await openai().chat.completions.create({
-      model: MODEL,
-      max_tokens: 512,
-      tools,
-      tool_choice: { type: "function", function: { name: "return_hook" } },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildContent(true) },
-      ],
-    });
+    response = await openai().chat.completions.create(request(true));
   } catch (err) {
-    if (err instanceof BadRequestError && signals.posterImageUrl) {
-      response = await openai().chat.completions.create({
-        model: MODEL,
-        max_tokens: 512,
-        tools,
-        tool_choice: { type: "function", function: { name: "return_hook" } },
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: buildContent(false) },
-        ],
-      });
-    } else {
-      throw err;
+    if (!isPermanentBadRequest(err)) throw err;
+    if (!signals.posterImageUrl) return skippedOn400(err, "text");
+    try {
+      response = await openai().chat.completions.create(request(false));
+    } catch (retryErr) {
+      if (!isPermanentBadRequest(retryErr)) throw retryErr;
+      return skippedOn400(retryErr, "retry-no-image");
     }
   }
 
