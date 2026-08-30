@@ -1584,8 +1584,9 @@ lap that has no memory of the conversation. The team sees the same queue Pat doe
 | silent updates | an already-open finding gets its **body edited** each lap — GitHub does not notify on edits |
 | comments | only when severity climbs, or when the loop auto-closes the finding |
 | rate limit | at most 2 new artifacts per 90 minutes, regardless of how bad the lap is |
-| auto-close | unreported for ~3.5h (≈3 missed laps) → closed with a comment |
+| auto-close | unreported for ~3.5h (≈3 missed laps) → labelled `ops:auto-closed`, then closed with a comment |
 | mute | close the issue = quiet 7 days; close it with `wontfix` = never raised again |
+| re-raise | a closed artifact carrying `ops:auto-closed` was the loop's own sweep, not a decision — the condition recurring opens a fresh artifact and mutes nothing |
 
 Identity is the **fingerprint**: a stable key for the *condition*, not the moment
 (`sync-error:linkedin:company-page-url`). It is written into the artifact body as

@@ -44,6 +44,12 @@ export interface OpsState {
   findings: Record<string, FindingState>;
   /** ISO timestamps of GitHub artifacts created, for the rate limiter. */
   creations: string[];
+  /**
+   * When a lap last ran the sweep. The sweep infers "condition cleared" from a
+   * finding going unreported, which is only meaningful if laps were actually
+   * running — see `decideSweep`.
+   */
+  lastLapAt?: string;
 }
 
 export interface PolicyConfig {
@@ -225,6 +231,21 @@ export function decideSweep(
   now: Date,
   config: PolicyConfig = DEFAULT_POLICY,
 ): Array<{ fingerprint: string; finding: FindingState }> {
+  // "Unreported" only means "cleared" if laps were running to do the reporting. When
+  // the runner itself is down, every finding goes stale at the same moment and the
+  // first lap back would close the loop's entire open backlog — which is exactly what
+  // happened 2026-08-28: a ~24h runner gap closed draft PRs #16 and #17 in one status
+  // call. Skip the sweep on the first lap after a gap and let the next lap, which has
+  // a live baseline to measure against, decide.
+  const lastLapAt = state.lastLapAt ? Date.parse(state.lastLapAt) : undefined;
+  if (
+    lastLapAt !== undefined &&
+    !Number.isNaN(lastLapAt) &&
+    now.getTime() - lastLapAt > config.staleAfterMs
+  ) {
+    return [];
+  }
+
   const cutoff = now.getTime() - config.staleAfterMs;
   return Object.entries(state.findings)
     .filter(([, f]) => Date.parse(f.lastSeenAt) < cutoff)
@@ -242,6 +263,28 @@ export function fingerprintMarker(fingerprint: string): string {
 export function parseFingerprint(body: string | null | undefined): string | null {
   const match = /<!--\s*ops-fingerprint:\s*(.+?)\s*-->/.exec(body ?? "");
   return match ? match[1] : null;
+}
+
+/**
+ * Label the loop stamps on an artifact it closes itself (condition stopped being
+ * reported). Without it, the loop cannot tell its own close apart from a human's:
+ * both are authored by the token owner, so `closedBy` is useless here.
+ */
+export const AUTO_CLOSED_LABEL = "ops:auto-closed";
+
+/**
+ * Why a tracked artifact is not OPEN. `wontfix` is a standing human decline,
+ * `human` is a plain human close (mute for a cooldown), and `auto` is the loop's
+ * own sweep — which must NOT mute anything, or a finding the loop auto-resolved
+ * can never be raised again when it recurs.
+ */
+export function classifyClose(
+  labels: Array<{ name: string }> | null | undefined,
+): "wontfix" | "auto" | "human" {
+  const names = (labels ?? []).map((l) => l.name);
+  if (names.includes("wontfix")) return "wontfix";
+  if (names.includes(AUTO_CLOSED_LABEL)) return "auto";
+  return "human";
 }
 
 export function severityLabel(severity: Severity): string {
