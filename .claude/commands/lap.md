@@ -87,13 +87,29 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
 | cron last-fired | > 2.5× its period | notion-sync or performance-decay dead > 6h |
 | stuck Descript renders | any ≥ 2h | ≥ 5 items, or any ≥ 12h |
 | event storm (one item/24h) | > 25 events | > 100 events |
-| sync_logs errors/24h | > 3 | > 10 or all-failing for one sync_type |
+| sync_logs errors/24h | > 25 | > 60 or all-failing for one sync_type |
 | exhausted YT downloads (7d) | ≥ 3 items | ≥ 8 items |
 | DB size / connections | > 32 GB / > 120 | > 55 GB / > 180 |
 | Sentry issue events/24h | new issue | > 50 on one issue |
 | heartbeat | ageSeconds > threshold | 503 / unreachable |
 | Mac disk free / swap free | < 25 GB / < 1 GB sustained | < 10 GB |
 | recovery agent | — | not loaded in launchctl |
+
+**Why `sync_logs errors/24h` is set at 25, not 3.** The per-account content sweep makes
+~1,400 ScrapeCreators calls a day and SC returns a bare `500 Internal Server Error` on
+roughly 0.5% of them. Measured at a fixed hour across 2026-08-21 → 08-30 the count was
+4/6/7/9/6/12/7/8/15/4 — a noise floor of ~8, with no trend. The old `> 3` threshold sat
+*below* that floor, so it fired essentially every lap: issue #18 stayed open for 86 laps
+describing normal vendor jitter. Do not lower it back without re-measuring the floor.
+
+These 5xx are self-healing and need no action. `runAccountContentSync` classifies a 5xx
+as `transient` (`account-content-sync.ts` — the `isPermanentSyncFailure` branch), leaves
+the account active, and the next hourly `account-content-sync-sweep` retries. `latest`
+mode re-reads one page of the timeline with no persisted cursor and dedups on
+`(account_id, platform_content_id)`, so a failed run loses nothing — the account's
+metrics are just up to 2h stale instead of 1h. The signal that *does* matter is the CRIT
+clause: **all-failing for one sync_type** — that is a dead API key, a revoked account, or
+a real SC outage.
 
 ## 📣 What a human hears about — the hands-off contract
 
@@ -130,6 +146,10 @@ the lap also gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, sa
 
 **Rung 1 — ops actions (no code):**
 - worker/web dyno crashed → `heroku ps:restart <dyno>` once; verify it comes back `up`.
+  *Crashed* means `ps` shows it down. A worker that is `up` with a frozen heartbeat and
+  long-locked jobs is usually BUSY, not hung — check progress first (`sync_logs` rows or
+  `items_fetched` climbing for that job). Restarting it kills the in-flight run, and the
+  orphaned lock reads as the next lap's "hang" (2026-08-22: two restarts, both retracted).
 - yt-archive exit 8 + eviction-race log signature → one `launchctl kickstart`, verify.
 - Stale graphile locks held by dead workers → clear per the runbook.
 - **Stuck Descript render** with a still-live publish job → re-enqueue one keyed poll via
@@ -233,3 +253,31 @@ Findings get a short indented evidence block. The log is local — never committ
 the loop's own memory, not a channel anyone reads. Anything a human needs to act on
 belongs on GitHub via `ops-escalate.ts` — if it only exists in this file, it did not
 happen as far as the team is concerned.
+
+## Report to `loops` — the LAST action of every lap
+
+One command, so the birds-eye view (loops.walls.sh) shows this lap's actual findings
+instead of the runner's mechanical bookends. `--loop hubandspoke` is REQUIRED — never
+rely on auto-detection from inside a lap:
+
+```bash
+loops emit --loop hubandspoke --status waiting --quiet \
+  --inspected "<the one-line health-log entry, e.g. 'sentry=0new heroku=up queue=55=55'>" \
+  --did       "<the headline: what this lap healed/shipped/found — 'all green' if OK>" \
+  --verified  "<the check that proves it>" \
+  --next      "<what the next lap should watch>" \
+  --metric sentry_new=<n> --metric queue=<n>
+```
+
+No `--wake-in` (the runner owns the schedule and closes the lap) and no `--keep-report`
+(this report should REPLACE last lap's). CRIT/WARN one-liners belong in `--did`; a
+still-open escalation is a `--blocked` line (repeatable) written so Pat can act on it in
+one read: the action first, then the consequence — `--blocked "Review and merge PR #16
+(stops the bot reopening tickets a human meant to close); open as draft 10 laps"` — not
+a bare issue tag like `"issue #16 (10 laps, re-fed)"`.
+
+**A service logged Pat out / a token expired (401, "session expired", invalid key):**
+that is never your finding to narrate — run
+`loops cred expired <service> --fix "<the exact re-login step>" --stalls "<one line on what stops>"`
+(one clear email to Pat, deduped) and `loops cred ok <service>` on your next successful
+auth. Applies to every external credential: Heroku, Sentry, Brave, Mezmo, LinkedIn, npm.
