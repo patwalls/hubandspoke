@@ -1,7 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
-import { getClippableFormats } from "@/lib/db/formats";
+import {
+  getClippableFormats,
+  getClippableFormatsForSourceAccount,
+} from "@/lib/db/formats";
 
 // Auto-generation costs real money (~$0.10 Sonnet sections + ~$0.003/Haiku
 // hook per (section, format) — ~$0.21 per pillar at 3 clippable formats), so
@@ -119,6 +122,7 @@ export async function selectAutoClipIdeaJobs(productionItemId: string): Promise<
       sourceType: productionItems.sourceType,
       publishedAt: productionItems.publishedAt,
       publishedDate: productionItems.publishedDate,
+      accountId: productionItems.accountId,
     })
     .from(productionItems)
     .where(eq(productionItems.id, productionItemId))
@@ -132,9 +136,23 @@ export async function selectAutoClipIdeaJobs(productionItemId: string): Promise<
     return gate;
   }
 
-  const clippable = await getClippableFormats(item.brand!);
+  // Account-aware routing: a pillar only fans out to clippable formats wired
+  // to ITS source account (root → format_trigger_sources; derivative →
+  // parent's format_channels, matched on account + post_type). This stops a
+  // sibling channel on the same brand (e.g. @Howfinity) from spawning another
+  // channel's clip ideas (e.g. @futurepedia_io). Accountless items — some
+  // uploaded source_recordings carry no channel to route by — fall back to a
+  // brand-wide fan-out, since the upload itself is the intent signal.
+  const clippable = item.accountId
+    ? await getClippableFormatsForSourceAccount(item.accountId, item.postType)
+    : await getClippableFormats(item.brand!);
   if (clippable.length === 0) {
-    return { eligible: false, reason: "no-clippable-formats" };
+    return {
+      eligible: false,
+      reason: item.accountId
+        ? "no-clippable-formats-for-account"
+        : "no-clippable-formats",
+    };
   }
 
   return {

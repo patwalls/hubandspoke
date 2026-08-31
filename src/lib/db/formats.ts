@@ -1,6 +1,7 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, isNotNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
-import { formats } from "@/lib/db/schema";
+import { formats, formatTriggerSources, formatChannels } from "@/lib/db/schema";
 
 export interface ClippableFormatRow {
   id: string;
@@ -59,6 +60,104 @@ export async function getClippableFormats(
         : null,
     clipAspectRatio: r.clipAspectRatio,
   }));
+}
+
+/**
+ * Account-aware clippable-format routing. Returns the clippable formats a
+ * pillar published from `accountId` (with post_type `postType`) should
+ * generate clip ideas for. Mirrors the threshold-monitor-sweep's routing so
+ * the two auto-creation paths stay consistent:
+ *   - Root clippable formats (no parentFormatId) are eligible when the
+ *     account appears in `format_trigger_sources`.
+ *   - Derivative clippable formats are eligible when the account matches a
+ *     row on the DIRECT PARENT's `format_channels`, and — when that channel
+ *     pins a post_type — the pillar's post_type matches too. A derivative's
+ *     own `format_trigger_sources` rows are ignored (parent channels are the
+ *     sole source of truth).
+ *
+ * A clippable format that isn't wired to this account via either path is
+ * excluded — no brand-wide fan-out — so a sibling channel on the same brand
+ * (e.g. @Howfinity) can't spawn another channel's clip ideas (e.g.
+ * @futurepedia_io). Callers that hit an accountless item fall back to
+ * `getClippableFormats(brand)` themselves.
+ */
+export async function getClippableFormatsForSourceAccount(
+  accountId: string,
+  postType: string | null,
+): Promise<ClippableFormatRow[]> {
+  const rootRows = await db
+    .select({
+      id: formats.id,
+      name: formats.name,
+      clipTargetPostType: formats.clipTargetPostType,
+      clipTargetPlatform: formats.clipTargetPlatform,
+      clipAspectRatio: formats.clipAspectRatio,
+    })
+    .from(formatTriggerSources)
+    .innerJoin(
+      formats,
+      and(
+        eq(formats.id, formatTriggerSources.formatId),
+        isNull(formats.parentFormatId),
+        eq(formats.isClippableFormat, true),
+      ),
+    )
+    .where(eq(formatTriggerSources.sourceAccountId, accountId));
+
+  const parentFormats = alias(formats, "clip_source_parent_formats");
+  const derivativeRows = await db
+    .select({
+      id: formats.id,
+      name: formats.name,
+      clipTargetPostType: formats.clipTargetPostType,
+      clipTargetPlatform: formats.clipTargetPlatform,
+      clipAspectRatio: formats.clipAspectRatio,
+      requiredSourcePostType: formatChannels.postType,
+    })
+    .from(formats)
+    .innerJoin(parentFormats, eq(parentFormats.id, formats.parentFormatId))
+    .innerJoin(formatChannels, eq(formatChannels.formatId, parentFormats.id))
+    .where(
+      and(
+        isNotNull(formats.parentFormatId),
+        eq(formats.isClippableFormat, true),
+        eq(formatChannels.accountId, accountId),
+      ),
+    );
+
+  const byId = new Map<string, ClippableFormatRow>();
+  const add = (r: {
+    id: string;
+    name: string;
+    clipTargetPostType: string | null;
+    clipTargetPlatform: string[] | null;
+    clipAspectRatio: string | null;
+  }) => {
+    if (byId.has(r.id)) return;
+    byId.set(r.id, {
+      id: r.id,
+      name: r.name,
+      slug: formatNameToSlug(r.name),
+      clipTargetPostType: r.clipTargetPostType,
+      clipTargetPlatform:
+        Array.isArray(r.clipTargetPlatform) && r.clipTargetPlatform.length > 0
+          ? (r.clipTargetPlatform as string[])
+          : null,
+      clipAspectRatio: r.clipAspectRatio,
+    });
+  };
+
+  for (const r of rootRows) add(r);
+  for (const r of derivativeRows) {
+    // A parent channel that pins a post_type constrains which source items
+    // route through it (e.g. youtube_long only). A null post_type = no
+    // constraint (account-only routing).
+    if (r.requiredSourcePostType && r.requiredSourcePostType !== postType) {
+      continue;
+    }
+    add(r);
+  }
+  return [...byId.values()];
 }
 
 /**

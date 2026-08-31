@@ -5,7 +5,10 @@ import { productionItems } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import { enqueue } from "@/jobs/enqueue";
-import { getClippableFormats } from "@/lib/db/formats";
+import {
+  getClippableFormats,
+  getClippableFormatsForSourceAccount,
+} from "@/lib/db/formats";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -51,7 +54,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const [item] = await db
-    .select({ id: productionItems.id, brand: productionItems.brand })
+    .select({
+      id: productionItems.id,
+      brand: productionItems.brand,
+      accountId: productionItems.accountId,
+      postType: productionItems.postType,
+    })
     .from(productionItems)
     .where(eq(productionItems.id, id))
     .limit(1);
@@ -69,20 +77,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // Resolve the set of target formats. With body.targetFormatId we run
-  // for that one format only; without it we fan out across every
-  // clippable format on the brand. Empty fan-out = no clippable formats
-  // configured for the brand — surface a clear 400 so the operator knows
-  // to flip the checkbox somewhere.
+  // Resolve the set of target formats. With body.targetFormatId we run for
+  // that one format only (operator override — no routing check). Without it we
+  // fan out account-aware: only clippable formats wired to this pillar's
+  // source account (root → format_trigger_sources; derivative → parent's
+  // format_channels), matching the auto path so Regenerate can't re-introduce
+  // the cross-account leak. Accountless items (some source_recordings) fall
+  // back to the brand-wide fan-out. Empty fan-out = nothing routes here —
+  // surface a clear 400 so the operator knows to wire up the source account.
   let targetFormatIds: string[];
   if (body.targetFormatId) {
     targetFormatIds = [body.targetFormatId];
   } else {
-    const clippable = await getClippableFormats(item.brand);
+    const clippable = item.accountId
+      ? await getClippableFormatsForSourceAccount(item.accountId, item.postType)
+      : await getClippableFormats(item.brand);
     if (clippable.length === 0) {
       return NextResponse.json(
         {
-          error: `No clippable formats configured for brand "${item.brand}". Tick "Clippable format" on at least one format in /${item.brand}/formats.`,
+          error: item.accountId
+            ? `No clippable formats route from this item's account. Wire a clippable format's parent to this account (or add a trigger source for a root clippable format) in /${item.brand}/formats.`
+            : `No clippable formats configured for brand "${item.brand}". Tick "Clippable format" on at least one format in /${item.brand}/formats.`,
         },
         { status: 400 },
       );

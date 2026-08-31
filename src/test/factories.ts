@@ -43,6 +43,8 @@ import {
   clipIdeas,
   contentDrafts,
   formats,
+  formatChannels,
+  formatTriggerSources,
   productionItems,
   productionItemMedia,
   users,
@@ -52,6 +54,8 @@ import {
 type CleanupTable =
   | "productionItems"
   | "formats"
+  | "formatChannels"
+  | "formatTriggerSources"
   | "clipIdeas"
   | "accounts"
   | "productionItemMedia"
@@ -71,6 +75,12 @@ afterEach(async () => {
           .where(eq(productionItems.id, row.id));
       } else if (row.table === "formats") {
         await db.delete(formats).where(eq(formats.id, row.id));
+      } else if (row.table === "formatChannels") {
+        await db.delete(formatChannels).where(eq(formatChannels.id, row.id));
+      } else if (row.table === "formatTriggerSources") {
+        await db
+          .delete(formatTriggerSources)
+          .where(eq(formatTriggerSources.id, row.id));
       } else if (row.table === "clipIdeas") {
         await db.delete(clipIdeas).where(eq(clipIdeas.id, row.id));
       } else if (row.table === "accounts") {
@@ -304,6 +314,49 @@ export async function createTestFormat(
     })
     .returning();
   trackCleanup("formats", row.id);
+  return row;
+}
+
+/**
+ * Attach a publishing/source channel to a format. Both auto-creation paths
+ * (threshold sweep + clip-idea routing) treat a derivative format's DIRECT
+ * PARENT's channels as the set of eligible source (account, post_type) pairs,
+ * so tests that exercise account-aware routing add the channel to the PARENT.
+ */
+export async function createTestFormatChannel(opts: {
+  formatId: string;
+  accountId: string;
+  postType?: string | null;
+}): Promise<typeof formatChannels.$inferSelect> {
+  const [row] = await db
+    .insert(formatChannels)
+    .values({
+      formatId: opts.formatId,
+      accountId: opts.accountId,
+      postType: opts.postType ?? null,
+    })
+    .returning();
+  trackCleanup("formatChannels", row.id);
+  return row;
+}
+
+/**
+ * Register a source account as a trigger source for a ROOT format. Root
+ * (no-parent) formats route via `format_trigger_sources` in both the
+ * threshold sweep and clip-idea routing.
+ */
+export async function createTestFormatTriggerSource(opts: {
+  formatId: string;
+  sourceAccountId: string;
+}): Promise<typeof formatTriggerSources.$inferSelect> {
+  const [row] = await db
+    .insert(formatTriggerSources)
+    .values({
+      formatId: opts.formatId,
+      sourceAccountId: opts.sourceAccountId,
+    })
+    .returning();
+  trackCleanup("formatTriggerSources", row.id);
   return row;
 }
 
