@@ -41,7 +41,7 @@ import type { PostType } from "@/lib/platform-field-schemas";
 const CANDIDATE_WINDOW_DAYS = 21;
 const DISMISSAL_TTL_DAYS = 30;
 const HOTNESS_THRESHOLD = 1.0;
-const PERCENTILE = 0.6; // P60 — looser than P75 to compensate for age bias.
+const PERCENTILE = 0.5; // P50 — surface ideas that beat the median, not just P60.
 const COHORT_WINDOW_DAYS = 90;
 
 /** Source types eligible for the cross-post queue. Excludes `cross_post`
