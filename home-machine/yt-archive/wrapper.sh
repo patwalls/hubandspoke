@@ -255,6 +255,28 @@ fi
 # so every failure logged a useless "rc=0" — which it did on 2026-08-06.
 HEROKU_RC=0
 PROD_DB_URL="$(timeout 120 heroku config:get DATABASE_URL --app hubandspoke 2>/tmp/yt-archive-heroku.err)" || HEROKU_RC=$?
+
+# A 120s timeout here is the host-starvation signature, not a heroku problem
+# (2026-08-07, 2026-08-16, 2026-09-01 — every occurrence in this log). The
+# memory guard that exists to fix exactly this is `ensure_memory_or_exit`,
+# but it is called at the --count-only gate BELOW, because counting candidates
+# needs the DATABASE_URL we are fetching right here. So a starved host dies at
+# this line with exit 6 and never reaches its own eviction path: on 2026-09-01
+# `git pull` had already degraded 1s -> 17s and swap free was under 1.4 GB.
+#
+# Run the guard and retry once, but ONLY on rc=124. A healthy host never times
+# out on this call, so gating on the timeout preserves the property the guard
+# was written for -- no evictions on a quiet day (see the --count-only note
+# above). If the host is genuinely exhausted, ensure_memory_or_exit exits 8
+# ("skipping run"), which attributes the hour correctly instead of blaming the
+# heroku CLI.
+if [[ $HEROKU_RC -eq 124 ]]; then
+    log "heroku config:get timed out after 120s — running memory guard, then retrying once"
+    ensure_memory_or_exit
+    HEROKU_RC=0
+    PROD_DB_URL="$(timeout 120 heroku config:get DATABASE_URL --app hubandspoke 2>/tmp/yt-archive-heroku.err)" || HEROKU_RC=$?
+fi
+
 if [[ $HEROKU_RC -ne 0 ]]; then
     HEROKU_ERR="$(tail -c 400 /tmp/yt-archive-heroku.err 2>/dev/null)"
     if [[ $HEROKU_RC -eq 124 ]]; then
