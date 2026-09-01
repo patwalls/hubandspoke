@@ -8,6 +8,7 @@ import {
   uploadCanvaAssetAndWait,
 } from "@/lib/canva";
 import { extractCanvaSlideText } from "@/lib/canva-text-extractor";
+import { extractCanvaTmzText } from "@/lib/canva-tmz-extractor";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { recordToolAction } from "@/lib/services/content-events";
 
@@ -61,6 +62,7 @@ export const canvaCreateCopyTask: Task = async (rawPayload, helpers) => {
       .select({
         id: productionItems.id,
         title: productionItems.title,
+        format: productionItems.format,
         pillarContentItemId: productionItems.pillarContentItemId,
       })
       .from(productionItems)
@@ -76,17 +78,29 @@ export const canvaCreateCopyTask: Task = async (rawPayload, helpers) => {
       ? `${item.title} — IG Post`
       : "IG Post (Canva autofill)";
 
+    // Which extractor to run depends on the target template's tagged fields,
+    // which differ per format. TMZ = one `headline` field; the Tech Stack
+    // Slideshow = hook/stack_list/cta. Keyed off the format name since that
+    // is what maps 1:1 to a brand template.
     let textFields = payload.textFields;
     if (!textFields) {
-      const extracted = await extractCanvaSlideText(payload.productionItemId);
-      textFields = {
-        hook: extracted.hook,
-        stack_list: extracted.stack_list,
-        cta: extracted.cta,
-      };
-      helpers.logger.info(
-        `canva-create-copy extracted text for item=${payload.productionItemId} hookChars=${extracted.hook.length}`,
-      );
+      if (item.format === "TMZ") {
+        const extracted = await extractCanvaTmzText(payload.productionItemId);
+        textFields = { headline: extracted.headline };
+        helpers.logger.info(
+          `canva-create-copy extracted TMZ headline for item=${payload.productionItemId} chars=${extracted.headline.length}`,
+        );
+      } else {
+        const extracted = await extractCanvaSlideText(payload.productionItemId);
+        textFields = {
+          hook: extracted.hook,
+          stack_list: extracted.stack_list,
+          cta: extracted.cta,
+        };
+        helpers.logger.info(
+          `canva-create-copy extracted text for item=${payload.productionItemId} hookChars=${extracted.hook.length}`,
+        );
+      }
     }
 
     // Hero image (page 1 background). Try sources in priority order:
