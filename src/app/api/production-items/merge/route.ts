@@ -18,7 +18,7 @@ interface MergeRequest {
  *
  * Smart merge behavior:
  * - Primary item keeps: editor metadata, sourceType, format, title, comments, history
- * - Primary item receives: platformContentId, publishedLink, and summed metrics from secondary
+ * - Primary item receives: platformContentId, publishedLink, and the higher view count of the two
  * - Secondary item is soft-deleted
  * - Future API syncs will find and update the primary item
  *

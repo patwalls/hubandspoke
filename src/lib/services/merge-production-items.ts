@@ -222,11 +222,11 @@ export async function mergeProductionItems(
       }
     }
 
-    // 4. Merge: Sum view counts and transfer platformContentId if keeper lacks it
-    // This ensures the API can find and update the merged item in future syncs
+    // 4. Merge: Take the higher view count (both rows reflect the same real post —
+    // summing would double-count). Transfer platformContentId if keeper lacks it.
     const primaryViews = primary.views || 0;
     const secondaryViews = secondary.views || 0;
-    const combinedViews = primaryViews + secondaryViews;
+    const combinedViews = Math.max(primaryViews, secondaryViews);
 
     // 5. Clear secondary's platformContentId FIRST (before updating primary)
     // This removes the unique constraint conflict since soft-deletes don't free up UNIQUE constraints
