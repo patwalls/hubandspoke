@@ -238,14 +238,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // task does the slow work — Claude-extracts hook/stack_list/cta from the
   // pillar transcript, then calls the Canva autofill API and polls until
   // done. Fire-and-forget so the create response stays fast.
+  console.log(
+    `canva-check: format=${target.name} isCanvaFormat=${target.isCanvaFormat} hasInstructions=${!!target.instructions}`,
+  );
   if (target.isCanvaFormat && target.instructions) {
     const brandTemplateId = extractCanvaTemplateId(target.instructions);
+    console.log(`canva-check: brandTemplateId=${brandTemplateId}`);
     if (brandTemplateId) {
       try {
         await enqueue("canva-create-copy", {
           productionItemId: created.id,
           brandTemplateId,
         });
+        console.log(
+          `canva-create-copy enqueued for item=${created.id} brandTemplate=${brandTemplateId}`,
+        );
       } catch (err) {
         console.error("canva-create-copy enqueue (repurpose) failed:", err);
       }
