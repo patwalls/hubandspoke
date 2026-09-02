@@ -59,6 +59,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       sourceType: productionItems.sourceType,
       sourceClipIdeaId: productionItems.sourceClipIdeaId,
       pillarContentItemId: productionItems.pillarContentItemId,
+      repostedFromItemId: productionItems.repostedFromItemId,
     })
     .from(productionItems)
     .where(eq(productionItems.id, id))
@@ -104,13 +105,20 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   if (!itemHasDescriptContext && !hasQueuedClipPromoteJob) {
     return NextResponse.json({
       status: "not_started" as const,
-      detail: "Not a Descript clip.",
+      detail: item.sourceType === "cross_post"
+        ? "No Descript work started. Click 'Create in Descript' to re-aspect for this platform."
+        : "Not a Descript clip.",
+      blockedReason: null,
+      pillarItemId: item.pillarContentItemId,
+      repostedFromItemId: item.repostedFromItemId,
       compositionId: null,
       compositionUrl: null,
       projectId: null,
       projectUrl: null,
       queueJob: null,
       trigger: null,
+      redriveAvailable: false,
+      startOverAvailable: false,
       publish: { state: "idle" as const, jobId: null, publishedAt: null, error: null },
     });
   }
@@ -368,6 +376,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
      *  can deep-link to "open pillar" without a second fetch. Null when
      *  this item IS the pillar (or has no pillar lineage). */
     pillarItemId: item.pillarContentItemId,
+    /** Source item for cross-posts (the Reel that was cross-posted from).
+     *  Null for all other source types. Used by the UI to show a
+     *  "Create in Descript" button when no Descript work has been done yet. */
+    repostedFromItemId: item.repostedFromItemId,
     compositionId,
     compositionUrl,
     projectId,

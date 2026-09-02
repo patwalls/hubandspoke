@@ -5175,6 +5175,9 @@ interface DescriptStatusResponse {
   /** Pillar id when this item is a derivative (null when item IS the
    *  pillar). Used by the blocked-state pill to deep-link to the pillar. */
   pillarItemId: string | null;
+  /** Source Reel id for cross-posts. Non-null means a "Create in Descript"
+   *  button should appear when status is "not_started". */
+  repostedFromItemId: string | null;
   compositionId: string | null;
   compositionUrl: string | null;
   projectId: string | null;
@@ -5293,6 +5296,7 @@ function DescriptStatusPill({
   const [loading, setLoading] = useState(true);
   const [redriving, setRedriving] = useState(false);
   const [startingOver, setStartingOver] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -5408,11 +5412,35 @@ function DescriptStatusPill({
     }
   }, [productionItemId, pathname, router]);
 
+  const handleCreateInDescript = useCallback(async () => {
+    setCreating(true);
+    try {
+      const res = await fetch(
+        `/api/production-items/${productionItemId}/descript-derivative-create`,
+        { method: "POST" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error("Failed to start Descript", {
+          description: json?.error || `HTTP ${res.status}`,
+        });
+        return;
+      }
+      toast.success("Creating in Descript…", {
+        description: "The worker will pick this up shortly. Status will refresh automatically.",
+      });
+      await fetchStatus();
+    } finally {
+      setCreating(false);
+    }
+  }, [productionItemId, fetchStatus]);
+
   if (loading || !data) return null;
   // Hide entirely for items with no Descript context (e.g. an Original
-  // post that never had a clip path). Editors don't need a "not started"
-  // pill on every row that doesn't apply.
-  if (data.status === "not_started" && !data.trigger && !data.projectId)
+  // post that never had a clip path). Cross-posts with a source item are
+  // the exception — they get a "Create in Descript" button even before
+  // any Descript work has started.
+  if (data.status === "not_started" && !data.trigger && !data.projectId && !data.repostedFromItemId)
     return null;
 
   const baseStyle = DESCRIPT_STATUS_STYLES[data.status];
@@ -5595,10 +5623,20 @@ function DescriptStatusPill({
             variant="outline"
             size="sm"
             onClick={() => void fetchStatus()}
-            disabled={redriving || startingOver}
+            disabled={redriving || startingOver || creating}
           >
             Refresh
           </Button>
+          {data.status === "not_started" && data.repostedFromItemId && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void handleCreateInDescript()}
+              disabled={creating}
+            >
+              {creating ? "Starting…" : "Create in Descript"}
+            </Button>
+          )}
           {data.startOverAvailable && (
             <Button
               type="button"

@@ -59,6 +59,11 @@ export interface SeedRepostContentInput {
     posterS3Key: string | null;
   } | null;
   actorUserId: string;
+  /** When true, limits mirrored media to the first video row (index 0) when
+   *  the source has multiple video rows. Image rows are unaffected. Cross-posts
+   *  of video clips should never inherit a second "full pillar video" slide
+   *  that the draft algorithm may have attached to the source. */
+  primaryVideoOnly?: boolean;
 }
 
 export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
@@ -69,6 +74,7 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
     sourceContentBody,
     sourceLegacyMedia,
     actorUserId,
+    primaryVideoOnly = false,
   } = input;
 
   // 1. Mirror carousel media. The (production_item_id, index) unique index
@@ -133,6 +139,20 @@ export async function seedRepostContent(tx: Tx, input: SeedRepostContentInput) {
       : sourceMediaAll.length > 0
         ? "clean"
         : "none";
+  }
+
+  // Cross-post guard: when the source clip has multiple video rows (e.g. the
+  // draft algorithm mistakenly attached the full pillar video), only keep the
+  // first video row so the cross-post doesn't inherit a carousel of videos.
+  // Image rows are untouched so IG-carousel cross-posts still mirror all slides.
+  if (primaryVideoOnly) {
+    const videoRows = sourceMedia.filter((m) => m.kind === "video");
+    if (videoRows.length > 1) {
+      const firstVideoIndex = Math.min(...videoRows.map((m) => m.index));
+      sourceMedia = sourceMedia.filter(
+        (m) => m.kind !== "video" || m.index === firstVideoIndex,
+      );
+    }
   }
 
   const mediaChanges: ContentChange[] = [];

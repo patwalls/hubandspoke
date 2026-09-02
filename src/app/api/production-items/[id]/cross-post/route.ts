@@ -327,6 +327,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         repostId: row.id,
         postType: targetPostType as PostType,
         sourceContentBody: seededBody,
+        primaryVideoOnly: true,
         sourceLegacyMedia: source.mediaS3Key
           ? {
               s3Bucket: source.mediaS3Bucket,

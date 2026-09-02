@@ -1,6 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  brands,
   clipIdeas,
   contentDrafts,
   formats,
@@ -584,6 +585,13 @@ export async function runDraftAlgorithm(
     .limit(1);
   if (!item) return { status: "skipped", reason: "item_not_found" };
 
+  const [brandRow] = await db
+    .select({ language: brands.language })
+    .from(brands)
+    .where(eq(brands.slug, item.brand))
+    .limit(1);
+  const brandLanguage = brandRow?.language ?? "en";
+
   // Source-type branch. The algorithm fires on items that need a new
   // first draft grounded in the pillar transcript + view-ranked exemplars.
   // Repost is the one explicit skip — same content, same platform, the
@@ -937,6 +945,7 @@ export async function runDraftAlgorithm(
     cta: undefined,
     priorCrossPostExamples,
     editorialContext,
+    language: brandLanguage,
   });
 
   // v2 smart tracked CTA: draft the reply CTA from the freshly-generated body,
@@ -1061,7 +1070,10 @@ export async function runDraftAlgorithm(
     //   3. The action is fulfillable: pillar has the requested asset AND
     //      the platform rule accepts the implied kind. Belt-and-braces with
     //      the prompt — if the model misjudges, we silently skip here.
-    if (result.mediaAction !== "none" && pillar) {
+    //   4. Not a cross-post — cross-posts already have the source clip
+    //      mirrored as their media via seedRepostContent; adding pillar
+    //      media on top creates unwanted carousel slides on X/LinkedIn.
+    if (result.mediaAction !== "none" && pillar && item.sourceType !== "cross_post") {
       const [hasMedia] = await tx
         .select({ id: productionItemMedia.id })
         .from(productionItemMedia)
@@ -1138,6 +1150,7 @@ export async function runDraftAlgorithm(
         brand: item.brand,
         formatSkill: formatInstructions,
         compositionName,
+        language: brandLanguage,
         force,
       });
       descriptStep = step.status;
