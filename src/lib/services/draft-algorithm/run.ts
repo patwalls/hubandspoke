@@ -1,7 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
-  brands,
   clipIdeas,
   contentDrafts,
   formats,
@@ -585,13 +584,6 @@ export async function runDraftAlgorithm(
     .limit(1);
   if (!item) return { status: "skipped", reason: "item_not_found" };
 
-  const [brandRow] = await db
-    .select({ language: brands.language })
-    .from(brands)
-    .where(eq(brands.slug, item.brand))
-    .limit(1);
-  const brandLanguage = brandRow?.language ?? "en";
-
   // Source-type branch. The algorithm fires on items that need a new
   // first draft grounded in the pillar transcript + view-ranked exemplars.
   // Repost is the one explicit skip — same content, same platform, the
@@ -945,7 +937,6 @@ export async function runDraftAlgorithm(
     cta: undefined,
     priorCrossPostExamples,
     editorialContext,
-    language: brandLanguage,
   });
 
   // v2 smart tracked CTA: draft the reply CTA from the freshly-generated body,
@@ -1150,7 +1141,6 @@ export async function runDraftAlgorithm(
         brand: item.brand,
         formatSkill: formatInstructions,
         compositionName,
-        language: brandLanguage,
         force,
       });
       descriptStep = step.status;
