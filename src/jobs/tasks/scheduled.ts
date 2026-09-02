@@ -340,7 +340,7 @@ export const scheduleNodateSweepTask: Task = async (_payload, helpers) => {
  * then sends one email per opted-in user. Recipients are gated on
  * `users.daily_scorecard_email_enabled = true` — a column flipped via the
  * settings UI. Sends inline (no fan-out) since the recipient list is tiny;
- * each send is wrapped so a single Postmark failure doesn't starve the rest.
+ * each send is wrapped so a single email-send failure doesn't starve the rest.
  */
 export const dailyScorecardEmailTask: Task = async (_payload, helpers) => {
   const start = Date.now();

@@ -1,19 +1,48 @@
-import { ServerClient } from "postmark";
+import nodemailer, { type Transporter } from "nodemailer";
 import {
   renderDailyScorecardEmail,
 } from "@/lib/email-templates/daily-scorecard";
 import type { ScorecardData } from "@/lib/services/scorecard";
 
-const token = process.env.POSTMARK_TOKEN;
 const from = process.env.EMAIL_FROM || "Hub & Spoke <pat@starterstory.com>";
 
-let client: ServerClient | null = null;
-function getClient(): ServerClient {
-  if (!token) {
-    throw new Error("POSTMARK_TOKEN is not set");
+// HubSpot transactional SMTP — same provider (and same token pair) as the
+// Starter Story Rails app. 587 + STARTTLS is HubSpot's documented pairing.
+// The credentials are a token pair generated in-app (Settings > Marketing >
+// Email > SMTP > Generate token), NOT through the public API — API-minted
+// tokens expire after 12 months and are then deleted; UI-generated ones don't.
+let transporter: Transporter | null = null;
+function getTransporter(): Transporter {
+  const user = process.env.HUBSPOT_SMTP_USER;
+  const pass = process.env.HUBSPOT_SMTP_PASSWORD;
+  if (!user || !pass) {
+    throw new Error("HUBSPOT_SMTP_USER / HUBSPOT_SMTP_PASSWORD are not set");
   }
-  if (!client) client = new ServerClient(token);
-  return client;
+  if (!transporter) {
+    transporter = nodemailer.createTransport({
+      host: process.env.HUBSPOT_SMTP_HOST || "smtp.hubapi.com",
+      port: Number(process.env.HUBSPOT_SMTP_PORT || 587),
+      secure: false,
+      requireTLS: true,
+      auth: { user, pass },
+    });
+  }
+  return transporter;
+}
+
+function sendMail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}) {
+  return getTransporter().sendMail({
+    from,
+    to: opts.to,
+    subject: opts.subject,
+    text: opts.text,
+    html: opts.html,
+  });
 }
 
 export async function sendPasswordResetEmail(opts: {
@@ -22,11 +51,10 @@ export async function sendPasswordResetEmail(opts: {
   name?: string | null;
 }) {
   const greeting = opts.name ? `Hi ${opts.name},` : "Hi,";
-  return getClient().sendEmail({
-    From: from,
-    To: opts.to,
-    Subject: "Reset your Hub & Spoke password",
-    TextBody: [
+  return sendMail({
+    to: opts.to,
+    subject: "Reset your Hub & Spoke password",
+    text: [
       greeting,
       "",
       "We got a request to reset your Hub & Spoke password. Click the link below to set a new one (the link expires in 1 hour):",
@@ -37,7 +65,7 @@ export async function sendPasswordResetEmail(opts: {
       "",
       "— Hub & Spoke",
     ].join("\n"),
-    HtmlBody: `
+    html: `
       <p>${greeting}</p>
       <p>We got a request to reset your Hub &amp; Spoke password. Click the button below to set a new one (the link expires in 1 hour):</p>
       <p><a href="${opts.resetUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Reset password</a></p>
@@ -45,7 +73,6 @@ export async function sendPasswordResetEmail(opts: {
       <p style="color:#999;font-size:12px;">If you didn't ask for this, you can ignore this email.</p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,
-    MessageStream: "outbound",
   });
 }
 
@@ -60,11 +87,10 @@ export async function sendAssignmentEmail(opts: {
   const title = opts.itemTitle || "(Untitled)";
   const assigner = opts.assignedByName || "A teammate";
   const subject = `You were assigned to "${title}"`;
-  return getClient().sendEmail({
-    From: from,
-    To: opts.to,
-    Subject: subject,
-    TextBody: [
+  return sendMail({
+    to: opts.to,
+    subject: subject,
+    text: [
       greeting,
       "",
       `${assigner} assigned you to:`,
@@ -75,7 +101,7 @@ export async function sendAssignmentEmail(opts: {
       "",
       "— Hub & Spoke",
     ].join("\n"),
-    HtmlBody: `
+    html: `
       <p>${greeting}</p>
       <p><strong>${escapeHtml(assigner)}</strong> assigned you to:</p>
       <p style="margin:16px 0;padding:12px 14px;border-left:3px solid #16a34a;background:#f6fbf7;font-weight:500;">${escapeHtml(title)}</p>
@@ -83,7 +109,6 @@ export async function sendAssignmentEmail(opts: {
       <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.itemUrl}">${opts.itemUrl}</a></p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,
-    MessageStream: "outbound",
   });
 }
 
@@ -102,11 +127,10 @@ export async function sendCommentEmail(opts: {
     ? opts.commentBody.slice(0, 400) + "…"
     : opts.commentBody;
   const subject = `${author} commented on "${title}"`;
-  return getClient().sendEmail({
-    From: from,
-    To: opts.to,
-    Subject: subject,
-    TextBody: [
+  return sendMail({
+    to: opts.to,
+    subject: subject,
+    text: [
       greeting,
       "",
       `${author} commented on "${title}":`,
@@ -117,7 +141,7 @@ export async function sendCommentEmail(opts: {
       "",
       "— Hub & Spoke",
     ].join("\n"),
-    HtmlBody: `
+    html: `
       <p>${greeting}</p>
       <p><strong>${escapeHtml(author)}</strong> commented on <strong>${escapeHtml(title)}</strong>:</p>
       <blockquote style="margin:16px 0;padding:10px 14px;border-left:3px solid #d4d4d4;background:#fafafa;color:#333;white-space:pre-wrap;">${escapeHtmlWithBreaks(excerpt)}</blockquote>
@@ -125,7 +149,6 @@ export async function sendCommentEmail(opts: {
       <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.itemUrl}">${opts.itemUrl}</a></p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,
-    MessageStream: "outbound",
   });
 }
 
@@ -144,11 +167,10 @@ export async function sendMentionEmail(opts: {
     ? opts.commentBody.slice(0, 400) + "…"
     : opts.commentBody;
   const subject = `${author} mentioned you on "${title}"`;
-  return getClient().sendEmail({
-    From: from,
-    To: opts.to,
-    Subject: subject,
-    TextBody: [
+  return sendMail({
+    to: opts.to,
+    subject: subject,
+    text: [
       greeting,
       "",
       `${author} mentioned you on "${title}":`,
@@ -159,7 +181,7 @@ export async function sendMentionEmail(opts: {
       "",
       "— Hub & Spoke",
     ].join("\n"),
-    HtmlBody: `
+    html: `
       <p>${greeting}</p>
       <p><strong>${escapeHtml(author)}</strong> mentioned you on <strong>${escapeHtml(title)}</strong>:</p>
       <blockquote style="margin:16px 0;padding:10px 14px;border-left:3px solid #16a34a;background:#f6fbf7;color:#333;white-space:pre-wrap;">${escapeHtmlWithBreaks(excerpt)}</blockquote>
@@ -167,7 +189,6 @@ export async function sendMentionEmail(opts: {
       <p style="color:#666;font-size:12px;">Or paste this link into your browser: <br/><a href="${opts.itemUrl}">${opts.itemUrl}</a></p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,
-    MessageStream: "outbound",
   });
 }
 
@@ -203,11 +224,10 @@ export async function sendInviteEmail(opts: {
     day: "numeric",
     year: "numeric",
   });
-  return getClient().sendEmail({
-    From: from,
-    To: opts.to,
-    Subject: "You're invited to Hub & Spoke",
-    TextBody: [
+  return sendMail({
+    to: opts.to,
+    subject: "You're invited to Hub & Spoke",
+    text: [
       "Hi,",
       "",
       `${inviter} invited you to join Hub & Spoke as ${roleLabel}.`,
@@ -220,7 +240,7 @@ export async function sendInviteEmail(opts: {
       "",
       "— Hub & Spoke",
     ].join("\n"),
-    HtmlBody: `
+    html: `
       <p>Hi,</p>
       <p><strong>${inviter}</strong> invited you to join Hub &amp; Spoke as <strong>${roleLabel}</strong>.</p>
       <p><a href="${opts.inviteUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Accept invite</a></p>
@@ -228,7 +248,6 @@ export async function sendInviteEmail(opts: {
       <p style="color:#999;font-size:12px;">This invite expires ${expiresDate}. If you weren't expecting this, you can ignore this email.</p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,
-    MessageStream: "outbound",
   });
 }
 
@@ -237,13 +256,11 @@ export async function sendDailyScorecardEmail(opts: {
   data: ScorecardData;
 }) {
   const { subject, text, html } = renderDailyScorecardEmail(opts.data);
-  return getClient().sendEmail({
-    From: from,
-    To: opts.to,
-    Subject: subject,
-    TextBody: text,
-    HtmlBody: html,
-    MessageStream: "outbound",
+  return sendMail({
+    to: opts.to,
+    subject: subject,
+    text: text,
+    html: html,
   });
 }
 
@@ -270,12 +287,11 @@ export async function sendDescriptCreditsExhaustedEmail(opts: {
     "",
     "— Hub & Spoke",
   ];
-  return getClient().sendEmail({
-    From: from,
-    To: opts.to,
-    Subject: subject,
-    TextBody: lines.join("\n"),
-    HtmlBody: `
+  return sendMail({
+    to: opts.to,
+    subject: subject,
+    text: lines.join("\n"),
+    html: `
       <p>Heads up — Descript is rejecting our agent calls because the AI credit budget is out:</p>
       <blockquote style="margin:0 0 12px;padding:8px 12px;border-left:3px solid #dc2626;background:#fef2f2;color:#991b1b;font-family:ui-monospace,Menlo,monospace;font-size:12px;">${opts.sampleError.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</blockquote>
       <p><strong>${opts.failedCount}</strong> Descript job attempt${opts.failedCount === 1 ? "" : "s"} ${sinceText}. Until you top up, every cross-post, repost, and clip-promotion that needs a new Descript composition will sit stuck in the queue — and the affected detail pages will show "Insufficient AI credits" in the Descript Status popover.</p>
@@ -283,7 +299,6 @@ export async function sendDescriptCreditsExhaustedEmail(opts: {
       <p style="color:#666;font-size:12px;">Once credits are back the queued jobs retry automatically — graphile-worker's exponential backoff caps at 60 min, so the longest-stuck job clears within an hour with no manual rerun needed.</p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,
-    MessageStream: "outbound",
   });
 }
 
@@ -310,12 +325,11 @@ export async function sendScCreditsExhaustedEmail(opts: {
     "",
     "— Hub & Spoke",
   ];
-  return getClient().sendEmail({
-    From: from,
-    To: opts.to,
-    Subject: subject,
-    TextBody: lines.join("\n"),
-    HtmlBody: `
+  return sendMail({
+    to: opts.to,
+    subject: subject,
+    text: lines.join("\n"),
+    html: `
       <p>Heads up — Scrape Creators is rejecting our metric-sync calls with HTTP 402:</p>
       <blockquote style="margin:0 0 12px;padding:8px 12px;border-left:3px solid #dc2626;background:#fef2f2;color:#991b1b;font-family:ui-monospace,Menlo,monospace;font-size:12px;">${opts.sampleError.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</blockquote>
       <p><strong>${opts.failedCount}</strong> sync attempts have failed ${sinceText}. Until you top up, no platform metrics (TikTok / IG / X / YouTube / Threads / LinkedIn) will refresh — items show "—" and the dashboard banner stays red.</p>
@@ -323,7 +337,6 @@ export async function sendScCreditsExhaustedEmail(opts: {
       <p style="color:#666;font-size:12px;">Once credits are back, the next hourly performance-decay sweep will catch every stuck row automatically — no code or manual backfill needed.</p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,
-    MessageStream: "outbound",
   });
 }
 
@@ -374,12 +387,11 @@ export async function sendYtArchiveBehindEmail(opts: {
     "",
     "— Hub & Spoke",
   ];
-  return getClient().sendEmail({
-    From: from,
-    To: opts.to,
-    Subject: subject,
-    TextBody: lines.join("\n"),
-    HtmlBody: `
+  return sendMail({
+    to: opts.to,
+    subject: subject,
+    text: lines.join("\n"),
+    html: `
       <p>Heads up — <strong>${opts.staleCount}</strong> published YouTube item(s) have had <strong>zero download attempts</strong> for over 12 hours (${oldestText}). The home-machine hourly archiver is <strong>not completing its runs</strong>; the cause is in the log on the Mac.</p>
       <ul style="color:#374151;font-size:13px;">${sampleLinesHtml}</ul>
       <p>Check on the designated Mac:</p>
@@ -395,6 +407,5 @@ launchctl list | grep yt-archive   # 2nd column = last exit code</pre>
       <p style="color:#666;font-size:12px;">The in-dyno youtube-download-sweep is a deliberate noop in production (YouTube bot-blocks datacenter IPs), so nothing else picks this up — once the cron is healthy again it backfills automatically on its next hourly tick.</p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `,
-    MessageStream: "outbound",
   });
 }

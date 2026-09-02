@@ -153,7 +153,7 @@ export async function maybeAlertDescriptCreditsExhausted(): Promise<{
       });
       sent++;
     } catch {
-      // One Postmark failure shouldn't starve the other recipient. The
+      // One email-send failure shouldn't starve the other recipient. The
       // dedupe window reopens in 4h.
     }
   }

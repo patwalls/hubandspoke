@@ -185,7 +185,7 @@ export async function maybeAlertYtArchiveBehind(): Promise<{
       });
       sent++;
     } catch {
-      // Don't block other recipients on one Postmark failure. The next
+      // Don't block other recipients on one email-send failure. The next
       // dedupe window opens in 6h; if all sends failed, we'll retry.
     }
   }

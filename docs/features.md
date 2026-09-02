@@ -138,7 +138,7 @@ removing, or deprecating anything.
 | Feature | Status | Entry points | Backing tables | Notes |
 |---|---|---|---|---|
 | Email/password sign-in | Active | `/(auth)/login`, `POST\|GET /api/auth/[...nextauth]` | `users` (passwordHash) | Auth.js v5 + Credentials + JWT sessions + bcrypt |
-| Forgot / reset password | Active | `/(auth)/forgot-password`, `/(auth)/reset-password`, `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` | `passwordResetTokens` | Postmark email |
+| Forgot / reset password | Active | `/(auth)/forgot-password`, `/(auth)/reset-password`, `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` | `passwordResetTokens` | HubSpot SMTP email |
 | Accept invite | Active | `/(auth)/accept-invite`, `POST /api/invites/accept` | `invites`, `users` | Sets password on accept |
 
 ---

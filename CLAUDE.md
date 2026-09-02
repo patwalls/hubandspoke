@@ -25,7 +25,7 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 - Auth.js v5 (Credentials provider, JWT sessions, bcrypt)
 - Heroku Postgres (PG 17)
 - Drizzle ORM
-- Postmark for transactional email
+- HubSpot transactional SMTP for email (smtp.hubapi.com, same token pair as Starter Story)
 - Graphile Worker (Postgres-backed background job queue)
 - Deployed on Heroku (auto-deploy on push to `main` via GitHub Actions)
   - Two dynos: `web` (Basic) + `worker` (Basic) — see `Procfile`
@@ -173,7 +173,7 @@ typed helper `enqueue(name, payload)`; the worker picks them up within ~1ms
 via LISTEN/NOTIFY.
 
 **Why this exists:** Heroku's router has a hard 30s timeout. Any route that
-would take longer — polling a Descript publish job, sending a Postmark email,
+would take longer — polling a Descript publish job, sending an email,
 running an hourly sync — belongs on the queue so it survives dyno restarts,
 gets retries with backoff, and doesn't block HTTP responses.
 
@@ -296,7 +296,7 @@ Notes:
 - `src/lib/db/queries.ts` - Report aggregation logic
 - `src/components/dashboard/` - Dashboard UI components
 - `src/lib/auth.ts` - Auth.js config
-- `src/lib/email.ts` - Postmark client
+- `src/lib/email.ts` - Mail client (HubSpot SMTP via nodemailer)
 - `src/jobs/` - Graphile Worker: task registry + enqueue helper + worker entrypoint + crontab
 
 ## Cron / Scheduled Jobs

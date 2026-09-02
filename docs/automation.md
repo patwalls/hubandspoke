@@ -33,7 +33,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   (per-post) capture-velocity-snapshot → scheduled at publish+{15m,30m,1h,2h,4h,8h,24h,48h} per item; writes one view_snapshots row each
   (live)     cross-post candidate queue → GET /api/cross-post-queue, no scheduled job — runs on every page load of /[brand]/queue Cross-post tab
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
-  13:00      daily-scorecard-email → Postmark (per opted-in user). 9am EDT / 8am EST in winter.
+  13:00      daily-scorecard-email → HubSpot SMTP (per opted-in user). 9am EDT / 8am EST in winter.
   */15 min   sc-credits-watch       → email Pat + Sam when SC returns HTTP 402 (deduped 4h)
   */15 min   descript-credits-watch → email Pat + Sam when Descript jobs hit "Insufficient AI credits" (deduped 4h)
   *:45       yt-archive-watch       → Sentry issue + email Pat + Sam when YouTube items sit unarchived >12h (home-machine cron down; email deduped 6h)
@@ -831,16 +831,16 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Inputs:** rolling 7-day publish counts (`publishedDate` in [today−7, today)
   vs [today−14, today−7)). Recipients = users with
   `daily_scorecard_email_enabled = true`.
-- **Outputs:** one Postmark `outbound` send per recipient. No DB writes.
+- **Outputs:** one HubSpot SMTP send per recipient. No DB writes.
 - **Downstream:** none.
 - **Preview / dogfood:** admin-only `GET /api/admin/scorecard-email/preview`
   renders the HTML in-browser; append `?send=me` to send the rendered
-  email to the logged-in admin's address (real Postmark hit).
+  email to the logged-in admin's address (real email send).
 - **Recipient gate:** the column is the source of truth — `role='admin'`
   is not re-checked at send time. If a non-admin gets the flag set, they
   get the email. Toggle from `/settings/users` (admin-only UI) or via
   direct SQL.
-- **Failure mode:** each send is wrapped; one Postmark failure increments
+- **Failure mode:** each send is wrapped; one email-send failure increments
   the `failed` counter and logs but does not starve the rest of the batch.
   The whole task is retried by graphile-worker on uncaught exceptions
   (e.g. DB unavailable), but a per-recipient failure does not retry.
@@ -867,8 +867,8 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   returning 200s again — no manual reset needed.
 - **Why every 15 min and not the 60s the banner polls:** the banner is
   the user-facing surface (instant visibility); the cron's only job is
-  to send one Postmark on state transition, where 15-min granularity is
-  fine and avoids hammering Postmark on flapping.
+  to send one email on state transition, where 15-min granularity is
+  fine and avoids hammering the mail provider on flapping.
 
 ### `descript-credits-watch` — Descript AI-credit exhaustion alert
 - **Trigger:** cron `*/15 * * * *` (every 15 minutes). Added 2026-05-18.
@@ -1317,7 +1317,7 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
 - **Trigger:** enqueued by `enqueueNotification()` after a `notifications` row is inserted (comments, mentions, assignments)
 - **Files:** `src/jobs/tasks/notification-send.ts`, `src/lib/services/notifications.ts` (`sendEmailForNotification`)
 - **Inputs:** `{ notificationId }` — payload kept tiny, task re-fetches the row
-- **Outputs:** Postmark email send; `notifications.emailedAt` stamp
+- **Outputs:** HubSpot SMTP email send; `notifications.emailedAt` stamp
 - **Downstream:** none
 - **Rules:**
   - Skips self-notifications (actor == recipient)
@@ -1452,7 +1452,7 @@ Comment / mention / assignment / item creation
   → enqueueNotification() inserts notifications row
   → enqueues notification-send
     → re-fetches row (payload is just the id)
-    → sendEmailForNotification() via Postmark
+    → sendEmailForNotification() via HubSpot SMTP
     → stamps notifications.emailedAt
 ```
 
@@ -1535,7 +1535,7 @@ Routing contract is pinned by `src/lib/s3.test.ts`.
 | Anthropic (Claude Sonnet 4.6) | `generate-clip-ideas` | The Splice clip-idea algorithm; ~$0.10 per pillar |
 | Anthropic (Claude Opus 4.7) | draft-gen | Per-platform draft copywriting; ~$0.03 per draft |
 | Notion | `notion-sync` (bi-directional) | Rate-limited; bulk push via service |
-| Postmark | `notification-send`, password reset, invite emails | |
+| HubSpot SMTP | `notification-send`, password reset, invite emails, credit/archiver alerts, daily scorecard | Same token pair as Starter Story (`HUBSPOT_SMTP_USER`/`HUBSPOT_SMTP_PASSWORD`); host smtp.hubapi.com:587 |
 | AWS S3 | `youtube-download` (write), `transcribe-whisper` (read video + write extracted audio), `clip-idea-precise-cut` (read), uploads route (write) | Long-term archive |
 | PostgreSQL | everything | See connection budget above |
 

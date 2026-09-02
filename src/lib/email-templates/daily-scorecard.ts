@@ -1,5 +1,5 @@
 /**
- * Daily scorecard email template — pure rendering, no Postmark.
+ * Daily scorecard email template — pure rendering, no mail client.
  * `src/lib/email.ts` provides the send wrapper; the preview route calls
  * the renderer directly to display HTML in a browser without sending.
  */

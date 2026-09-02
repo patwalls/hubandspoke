@@ -152,7 +152,7 @@ export async function maybeAlertScCreditsExhausted(): Promise<{
       });
       sent++;
     } catch {
-      // Don't block other recipients on one Postmark failure. The next
+      // Don't block other recipients on one email-send failure. The next
       // dedupe window opens in 4h; if all sends failed, we'll retry.
     }
   }

@@ -6,7 +6,7 @@ export interface NotificationSendPayload {
 }
 
 /**
- * Re-fetches the notification row and dispatches the matching Postmark email.
+ * Re-fetches the notification row and dispatches the matching email.
  * Payload stays tiny (one id) so the queue doesn't hold stale copies of
  * comment bodies.
  */
