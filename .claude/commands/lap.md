@@ -279,5 +279,8 @@ a bare issue tag like `"issue #16 (10 laps, re-fed)"`.
 **A service logged Pat out / a token expired (401, "session expired", invalid key):**
 that is never your finding to narrate — run
 `loops cred expired <service> --fix "<the exact re-login step>" --stalls "<one line on what stops>"`
-(one clear email to Pat, deduped) and `loops cred ok <service>` on your next successful
-auth. Applies to every external credential: Heroku, Sentry, Brave, Mezmo, LinkedIn, npm.
+(one clear email to Pat, deduped). The page does NOT clear itself — not when you close the
+issue, not when someone else fixes the creds: every lap, if `loops alerts list` shows
+`cred/<service>` firing and the service authenticates now, run `loops cred ok <service>`
+(canva stayed "Log back in" for hours on 2026-09-02 after the fix was verified and issue #20
+closed). Applies to every external credential: Heroku, Sentry, Brave, Mezmo, LinkedIn, npm.
