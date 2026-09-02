@@ -256,6 +256,12 @@ export function decideSweep(
 }
 
 /** Body marker that ties a GitHub artifact back to a fingerprint. */
+/**
+ * Opening words of the footer `composeBody` appends. Shared so the composer and
+ * `stripComposedBody` can never drift apart on what a footer looks like.
+ */
+export const FOOTER_LEAD = "<sub>Raised by the Hub & Spoke ops loop";
+
 export function fingerprintMarker(fingerprint: string): string {
   return `<!-- ops-fingerprint: ${fingerprint} -->`;
 }
@@ -289,4 +295,36 @@ export function classifyClose(
 
 export function severityLabel(severity: Severity): string {
   return `ops:${severity}`;
+}
+
+/**
+ * Strip a previously-composed header/footer off an evidence body.
+ *
+ * A refresh usually feeds the artifact's own description back in as evidence
+ * (that is the only way to keep a body from being blanked when the caller has
+ * no fresh evidence file). Without this, every lap wraps the last lap's
+ * wrapper: on 2026-09-02 PR #19 and issue #20 had each accumulated three
+ * stacked `<!-- ops-fingerprint -->` + `**WARN** … seen in N consecutive laps`
+ * headers, so the newest lap count was buried under two stale ones.
+ *
+ * Composing is idempotent once evidence goes through here:
+ * compose(strip(compose(x))) === compose(x).
+ */
+export function stripComposedBody(evidence: string): string {
+  let out = evidence.replace(/\r\n/g, "\n");
+
+  const footerAt = out.indexOf(FOOTER_LEAD);
+  if (footerAt !== -1) {
+    out = out.slice(0, footerAt).replace(/\n*-{3,}[ \t]*\n*$/, "");
+  }
+
+  // Header block = the fingerprint marker, plus the severity/streak line that
+  // follows it. The severity line is optional so a hand-written body carrying
+  // only the marker still cleans up.
+  out = out.replace(
+    /<!--\s*ops-fingerprint:[^>]*-->[ \t]*\n*(?:\*\*(?:ATTN|WARN|CRIT)\*\*[^\n]*\n*)?/gi,
+    "",
+  );
+
+  return out.trim();
 }
