@@ -6,6 +6,7 @@ import {
   invokeDescriptAgent,
   substituteFormatPrompt,
 } from "@/lib/descript";
+import { NEW_DESCRIPT_PROJECT_ACCOUNT } from "@/lib/services/descript-account";
 import { extractDescriptSection } from "@/lib/format-skill";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { enqueue } from "@/jobs/enqueue";
@@ -156,6 +157,7 @@ export async function runDescriptStepForDerivative(
       title: productionItems.title,
       descriptProjectId: productionItems.descriptProjectId,
       descriptProjectUrl: productionItems.descriptProjectUrl,
+      descriptAccount: productionItems.descriptAccount,
       mediaS3Key: productionItems.mediaS3Key,
       mediaS3Bucket: productionItems.mediaS3Bucket,
     })
@@ -219,6 +221,7 @@ export async function runDescriptStepForDerivative(
     const importRes = await createDescriptProjectFromUrl({
       projectName,
       mediaUrl: presigned,
+      account: NEW_DESCRIPT_PROJECT_ACCOUNT,
     });
 
     await db
@@ -226,6 +229,7 @@ export async function runDescriptStepForDerivative(
       .set({
         descriptProjectId: importRes.project_id,
         descriptProjectUrl: importRes.project_url,
+        descriptAccount: NEW_DESCRIPT_PROJECT_ACCOUNT,
         descriptImportedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -236,6 +240,7 @@ export async function runDescriptStepForDerivative(
       .set({
         descriptProjectId: importRes.project_id,
         descriptProjectUrl: importRes.project_url,
+        descriptAccount: NEW_DESCRIPT_PROJECT_ACCOUNT,
         descriptCompositionId: null,
         descriptPublishJobId: null,
         descriptPublishedAt: null,
@@ -273,12 +278,14 @@ export async function runDescriptStepForDerivative(
     };
   }
 
-  // WARM PATH: pillar already in Descript — invoke the agent directly.
+  // WARM PATH: pillar already in Descript — invoke the agent directly, in
+  // whichever account owns the pillar's project (NULL stamp = legacy).
   const agent = await invokeDescriptAgent({
     projectId: pillar.descriptProjectId!,
     prompt,
     caller: "draft-algorithm-descript-step",
     productionItemId: args.derivativeItemId,
+    account: pillar.descriptAccount,
   });
 
   await db
@@ -286,6 +293,7 @@ export async function runDescriptStepForDerivative(
     .set({
       descriptProjectId: pillar.descriptProjectId,
       descriptProjectUrl: pillar.descriptProjectUrl ?? agent.projectUrl,
+      descriptAccount: pillar.descriptAccount,
       // Clear any previous composition so the UI shows "Rendering…" until
       // the resolver writes the new one. Force=true (Redraft) reuses this
       // path; we want the new comp to replace the old, not be ignored.

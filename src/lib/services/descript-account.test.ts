@@ -1,33 +1,10 @@
 import { describe, it, expect } from "vitest";
-import {
-  descriptAccountFromPayload,
-  resolveDescriptAccountForActor,
-} from "./descript-account";
-
-describe("resolveDescriptAccountForActor", () => {
-  it("routes Pat's promotions to the legacy account (NULL)", () => {
-    expect(resolveDescriptAccountForActor("patrickswalls@gmail.com")).toBeNull();
-  });
-
-  it("is case-insensitive on the email", () => {
-    expect(resolveDescriptAccountForActor("PatrickSWalls@Gmail.com")).toBeNull();
-  });
-
-  it("routes everyone else to the HubSpot workspace", () => {
-    expect(resolveDescriptAccountForActor("sam@starterstory.com")).toBe(
-      "hubspot",
-    );
-  });
-
-  it("defaults to HubSpot when the actor has no email", () => {
-    expect(resolveDescriptAccountForActor(null)).toBe("hubspot");
-  });
-});
+import { descriptAccountFromPayload } from "./descript-account";
 
 describe("descriptAccountFromPayload", () => {
   // Regression (2026-09-03): the task used `payload.descriptAccount ?? "hubspot"`,
-  // which collapsed the MEANINGFUL null (legacy account) into "hubspot" and
-  // sent Pat's promotions to the HubSpot workspace anyway.
+  // which collapsed a MEANINGFUL null (legacy account) into "hubspot" and
+  // rerouted legacy-account jobs to the HubSpot workspace.
   it("preserves explicit null (legacy account)", () => {
     expect(descriptAccountFromPayload(null)).toBeNull();
   });

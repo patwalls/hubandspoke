@@ -38,10 +38,11 @@ export interface ClipIdeaPreciseCutPayload {
   clipIdeaId: string;
   triggerId: string;
   derivativeItemId: string;
-  /** Which Descript workspace to import the clip into, resolved from the
-   *  promoting user (see resolveDescriptAccountForActor). `null` = legacy
-   *  account. Undefined (payloads enqueued before this field existed)
-   *  falls back to "hubspot", the previous hardcoded behavior. */
+  /** Which Descript workspace to import the clip into, set at promotion
+   *  time (currently always NEW_DESCRIPT_PROJECT_ACCOUNT). `null` = legacy
+   *  account, honored for jobs enqueued while per-actor routing existed
+   *  (v837–v839, 2026-09-03). Undefined (payloads from before the field
+   *  existed) falls back to "hubspot". */
   descriptAccount?: string | null;
   /** Set once the upload has been handed to Descript; subsequent runs only poll. */
   uploadJobId?: string;
