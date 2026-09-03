@@ -916,6 +916,33 @@ export const contentDrafts = pgTable(
   ],
 );
 
+// Registry of Descript layout packs the Underlord prompts may reference.
+// Descript exposes NO listing API for packs — the agent's own
+// `query_layout_packs` tool returns an empty list inside API-created
+// projects (verified 2026-09-03) — so this table is the source of truth,
+// and every row is validated at insert time via the probe in
+// `/api/descript-layout-packs`: `GET /v1/projects/{descriptId}` answers
+// 422 "Template projects are not supported" for a real, reachable pack
+// (packs ARE template projects), 200 for a regular project (not a pack),
+// 403/404 for something the token can't reach. Prompts must tell the
+// agent to apply the pack BY ID and not give up on the empty query tool.
+export const descriptLayoutPacks = pgTable("descript_layout_packs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  // Human name as it appears in Descript's templates UI ("Reels Layout").
+  name: text("name").notNull(),
+  // The pack's template-project UUID — the part of its
+  // web.descript.com/<uuid>/<slug> page URL the agent applies by.
+  descriptId: uuid("descript_id").notNull().unique(),
+  // Full pack page URL (includes the short slug), for humans and prompts.
+  pageUrl: text("page_url"),
+  // Which API token can reach it: 'hubspot' | NULL (legacy account).
+  // Matches production_items.descript_account semantics.
+  descriptAccount: text("descript_account"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export const formats = pgTable(
   "formats",
   {
@@ -966,6 +993,17 @@ export const formats = pgTable(
     // in this format. Null = derive from post_type (Reel/Shorts/TikTok →
     // 9:16; X / YouTube long → 16:9). Author can override per-format.
     clipAspectRatio: text("clip_aspect_ratio"),
+    // Which Descript layout pack Underlord applies to clips in this format.
+    // Structured replacement (2026-09-03) for the "Apply the layout pack …"
+    // prose that used to live inside the Skill: the prompt builders inject a
+    // canonical apply-by-id instruction from the referenced registry row, so
+    // the pack reference can't drift from what the Descript API can reach.
+    // NULL = no pack instruction injected; any pack prose still in the Skill
+    // text is left as-is (legacy fallback).
+    descriptLayoutPackId: uuid("descript_layout_pack_id").references(
+      () => descriptLayoutPacks.id,
+      { onDelete: "set null" }
+    ),
     // Marks this format as a Canva-autofill target. When true AND the Skill
     // contains a canva.com/brand/brand-templates/<id> URL, the repurpose
     // route enqueues canva-create-copy to produce an autofilled design.

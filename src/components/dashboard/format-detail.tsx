@@ -108,8 +108,16 @@ interface FormatRow {
   clipTargetPlatform: string[] | null;
   clipTargetPostType: string | null;
   clipAspectRatio: string | null;
+  descriptLayoutPackId: string | null;
   proven?: boolean;
   provenStatus?: FormatProvenStatus | null;
+}
+
+interface DescriptLayoutPack {
+  id: string;
+  name: string;
+  descriptId: string;
+  pageUrl: string | null;
 }
 
 interface ContentItem {
@@ -266,6 +274,13 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [clipTargetPostType, setClipTargetPostType] = useState<string>("");
   const [clipTargetPlatform, setClipTargetPlatform] = useState<string[]>([]);
   const [clipAspectRatio, setClipAspectRatio] = useState<string>("");
+  const [descriptLayoutPackId, setDescriptLayoutPackId] = useState<string | null>(null);
+  const [layoutPacks, setLayoutPacks] = useState<DescriptLayoutPack[]>([]);
+  const [addPackOpen, setAddPackOpen] = useState(false);
+  const [newPackName, setNewPackName] = useState("");
+  const [newPackUrl, setNewPackUrl] = useState("");
+  const [addPackBusy, setAddPackBusy] = useState(false);
+  const [addPackError, setAddPackError] = useState<string | null>(null);
 
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
   const [channelsPopoverOpen, setChannelsPopoverOpen] = useState(false);
@@ -671,8 +686,55 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
       Array.isArray(f.clipTargetPlatform) ? f.clipTargetPlatform : [],
     );
     setClipAspectRatio(f.clipAspectRatio ?? "");
+    setDescriptLayoutPackId(f.descriptLayoutPackId ?? null);
     setIsCanvaFormat(f.isCanvaFormat ?? false);
     setLabelsAsOriginal(f.labelsAsOriginal ?? false);
+  }
+
+  const loadLayoutPacks = useCallback(async () => {
+    try {
+      const res = await fetch("/api/descript-layout-packs");
+      if (!res.ok) return;
+      const json = (await res.json()) as { packs?: DescriptLayoutPack[] };
+      setLayoutPacks(json.packs ?? []);
+    } catch {
+      // Non-fatal — the dropdown just shows "None" until a reload.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLayoutPacks();
+  }, [loadLayoutPacks]);
+
+  async function addLayoutPack() {
+    if (!newPackName.trim() || !newPackUrl.trim() || addPackBusy) return;
+    setAddPackBusy(true);
+    setAddPackError(null);
+    try {
+      const res = await fetch("/api/descript-layout-packs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newPackName.trim(), url: newPackUrl.trim() }),
+      });
+      const json = (await res.json()) as {
+        pack?: DescriptLayoutPack;
+        error?: string;
+      };
+      if (!res.ok || !json.pack) {
+        setAddPackError(json.error || "Failed to register pack");
+        return;
+      }
+      await loadLayoutPacks();
+      // Select the new pack on this format immediately — registering from
+      // here means "use it here".
+      setDescriptLayoutPackId(json.pack.id);
+      void persistField({ descriptLayoutPackId: json.pack.id });
+      setAddPackOpen(false);
+      setNewPackName("");
+      setNewPackUrl("");
+    } finally {
+      setAddPackBusy(false);
+    }
   }
 
   const load = useCallback(async () => {
@@ -1660,6 +1722,81 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     <p className="text-[11px] text-muted-foreground">
                       Drives the Descript composition layout for clips in this format. Blank = 9:16 for Reel/Shorts/TikTok, 16:9 for X / YouTube long.
                     </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="descript-layout-pack" className="text-xs">
+                      Descript layout pack
+                    </Label>
+                    <select
+                      id="descript-layout-pack"
+                      value={descriptLayoutPackId ?? ""}
+                      onChange={(e) => {
+                        const next = e.target.value || null;
+                        setDescriptLayoutPackId(next);
+                        void persistField({ descriptLayoutPackId: next });
+                      }}
+                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                    >
+                      <option value="">— none (use Skill text as-is) —</option>
+                      {layoutPacks.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-muted-foreground">
+                      When set, Underlord prompts get a canonical apply-by-id instruction for this pack (it supersedes any pack link written in the Skill). Packs are validated against the Descript API when registered.
+                    </p>
+                    {!addPackOpen ? (
+                      <button
+                        type="button"
+                        className="text-[11px] text-primary underline underline-offset-2"
+                        onClick={() => setAddPackOpen(true)}
+                      >
+                        Register a new pack…
+                      </button>
+                    ) : (
+                      <div className="mt-1 space-y-1.5 rounded border border-border p-2">
+                        <Input
+                          value={newPackName}
+                          onChange={(e) => setNewPackName(e.target.value)}
+                          placeholder='Pack name exactly as in Descript, e.g. "Reels Layout"'
+                          className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                        />
+                        <Input
+                          value={newPackUrl}
+                          onChange={(e) => setNewPackUrl(e.target.value)}
+                          placeholder="Pack page URL, e.g. https://web.descript.com/4ffdace6-…/5d5a7"
+                          className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                        />
+                        {addPackError && (
+                          <p className="text-[11px] text-destructive">{addPackError}</p>
+                        )}
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={addPackBusy || !newPackName.trim() || !newPackUrl.trim()}
+                            onClick={() => void addLayoutPack()}
+                          >
+                            {addPackBusy ? "Validating…" : "Validate & add"}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs"
+                            onClick={() => {
+                              setAddPackOpen(false);
+                              setAddPackError(null);
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

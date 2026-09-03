@@ -30,7 +30,9 @@ import {
 import {
   extractCrossPostRulesSection,
   extractDescriptSection,
+  injectLayoutPackInstruction,
 } from "@/lib/format-skill";
+import { loadLayoutPackRef } from "@/lib/services/layout-pack";
 import { buildCompositionName } from "@/lib/services/descript-composition";
 import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
 import { getTopPerformingCaptions } from "./exemplars";
@@ -695,16 +697,19 @@ export async function runDraftAlgorithm(
   let formatRow: {
     id: string;
   } | null = null;
+  let formatLayoutPackId: string | null = null;
   if (item.format) {
     const [fmt] = await db
       .select({
         id: formats.id,
         instructions: formats.instructions,
+        descriptLayoutPackId: formats.descriptLayoutPackId,
       })
       .from(formats)
       .where(and(eq(formats.brand, item.brand), eq(formats.name, item.format)))
       .limit(1);
     formatInstructions = fmt?.instructions ?? null;
+    formatLayoutPackId = fmt?.descriptLayoutPackId ?? null;
     formatRow = fmt ? { id: fmt.id } : null;
   }
 
@@ -1116,15 +1121,24 @@ export async function runDraftAlgorithm(
   // promoted-format lookup started returning whichever row Postgres
   // happened to emit first. The Skill section is the right signal: it's
   // per-format, explicit, and means "the Skill knows what to clip."
+  // Splice the registry-backed layout-pack instruction into the Skill for
+  // the Descript branch ONLY — `formatInstructions` itself keeps feeding
+  // the caption prompts untouched. A format with a pack selected but no
+  // Descript heading gets the section appended, so the dropdown alone is
+  // enough to activate the branch.
+  const descriptSkill = injectLayoutPackInstruction(
+    formatInstructions,
+    await loadLayoutPackRef(formatLayoutPackId),
+  );
   const formatHasDescriptSection =
-    extractDescriptSection(formatInstructions ?? "").trim().length > 0 &&
+    extractDescriptSection(descriptSkill ?? "").trim().length > 0 &&
     // `extractDescriptSection` falls back to the WHOLE skill when no
     // `### Descript Clip & Pack Info` heading exists (back-compat for
     // legacy unsectioned skills). We don't want to fire on every format
     // that has any Skill text — only when the section heading is
     // actually present.
     /^[ \t]*##{1,2}[ \t]+Descript Clip & Pack Info[ \t]*$/im.test(
-      formatInstructions ?? "",
+      descriptSkill ?? "",
     );
   let descriptStep: DescriptStepStatus | undefined;
   if (formatRow && formatHasDescriptSection) {
@@ -1139,7 +1153,7 @@ export async function runDraftAlgorithm(
         formatId: formatRow.id,
         formatName: item.format ?? "",
         brand: item.brand,
-        formatSkill: formatInstructions,
+        formatSkill: descriptSkill,
         compositionName,
         force,
       });

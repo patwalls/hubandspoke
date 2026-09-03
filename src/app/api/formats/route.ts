@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
+import {
+  descriptLayoutPacks,
+  formats,
+  productionItems,
+  repurposeTriggers,
+} from "@/lib/db/schema";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import {
   getChannelsForFormats,
@@ -245,6 +250,7 @@ export async function PUT(request: NextRequest) {
       clipTargetPostType?: string | null;
       clipTargetPlatform?: string[] | null;
       clipAspectRatio?: string | null;
+      descriptLayoutPackId?: string | null;
     };
     const { id, accountChannels, parentFormatId } = body;
 
@@ -334,6 +340,21 @@ export async function PUT(request: NextRequest) {
           : null;
     if (body.clipAspectRatio !== undefined)
       updateData.clipAspectRatio = body.clipAspectRatio || null;
+    if (body.descriptLayoutPackId !== undefined) {
+      if (body.descriptLayoutPackId) {
+        const [pack] = await db
+          .select({ id: descriptLayoutPacks.id })
+          .from(descriptLayoutPacks)
+          .where(eq(descriptLayoutPacks.id, body.descriptLayoutPackId));
+        if (!pack) {
+          return NextResponse.json(
+            { error: "Layout pack not found" },
+            { status: 400 },
+          );
+        }
+      }
+      updateData.descriptLayoutPackId = body.descriptLayoutPackId || null;
+    }
 
     // A rename updates formats.name AND cascades to every string reference.
     // Wrap both in one transaction so a partial failure can't leave a format

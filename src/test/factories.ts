@@ -42,6 +42,7 @@ import {
   brands,
   clipIdeas,
   contentDrafts,
+  descriptLayoutPacks,
   formats,
   formatChannels,
   formatTriggerSources,
@@ -54,6 +55,7 @@ import {
 type CleanupTable =
   | "productionItems"
   | "formats"
+  | "descriptLayoutPacks"
   | "formatChannels"
   | "formatTriggerSources"
   | "clipIdeas"
@@ -75,6 +77,10 @@ afterEach(async () => {
           .where(eq(productionItems.id, row.id));
       } else if (row.table === "formats") {
         await db.delete(formats).where(eq(formats.id, row.id));
+      } else if (row.table === "descriptLayoutPacks") {
+        await db
+          .delete(descriptLayoutPacks)
+          .where(eq(descriptLayoutPacks.id, row.id));
       } else if (row.table === "formatChannels") {
         await db.delete(formatChannels).where(eq(formatChannels.id, row.id));
       } else if (row.table === "formatTriggerSources") {
@@ -290,6 +296,7 @@ export interface CreateTestFormatOptions {
   parentFormatId?: string | null;
   instructions?: string | null;
   viewThreshold?: number | null;
+  descriptLayoutPackId?: string | null;
 }
 
 /**
@@ -311,9 +318,30 @@ export async function createTestFormat(
       parentFormatId: opts.parentFormatId ?? null,
       instructions: opts.instructions ?? null,
       viewThreshold: opts.viewThreshold ?? null,
+      descriptLayoutPackId: opts.descriptLayoutPackId ?? null,
     })
     .returning();
   trackCleanup("formats", row.id);
+  return row;
+}
+
+/**
+ * Insert a `descript_layout_packs` registry row. Auto-cleans in afterEach.
+ * descriptId is randomized — registry uniqueness is on descript_id.
+ */
+export async function createTestLayoutPack(
+  opts: { name?: string; pageUrl?: string | null } = {},
+): Promise<typeof descriptLayoutPacks.$inferSelect> {
+  const [row] = await db
+    .insert(descriptLayoutPacks)
+    .values({
+      name: opts.name ?? `vitest-pack-${randomSuffix()}`,
+      descriptId: randomUUID(),
+      pageUrl: opts.pageUrl ?? null,
+      descriptAccount: "hubspot",
+    })
+    .returning();
+  trackCleanup("descriptLayoutPacks", row.id);
   return row;
 }
 

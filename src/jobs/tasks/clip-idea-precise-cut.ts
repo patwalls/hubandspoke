@@ -21,6 +21,8 @@ import {
 } from "@/lib/descript";
 import { getPresignedGetUrl, putObjectFromFile } from "@/lib/s3";
 import { descriptAccountFromPayload } from "@/lib/services/descript-account";
+import { injectLayoutPackInstruction } from "@/lib/format-skill";
+import { loadLayoutPackRef } from "@/lib/services/layout-pack";
 import { recordToolAction } from "@/lib/services/content-events";
 import {
   assertCompositionUnique,
@@ -377,6 +379,7 @@ async function pollUploadOnce(
         hook: productionItems.hook,
         compositionName: repurposeTriggers.compositionName,
         formatSkill: formats.instructions,
+        formatLayoutPackId: formats.descriptLayoutPackId,
         formatName: formats.name,
         clipAspectRatio: formats.clipAspectRatio,
         clipTargetPostType: formats.clipTargetPostType,
@@ -398,7 +401,13 @@ async function pollUploadOnce(
       );
       return;
     }
-    if (!row.formatSkill || !row.formatSkill.trim()) {
+    // Structured pack reference first: splice the registry-backed apply-by-id
+    // instruction into the Skill (supersedes any pack prose still in there).
+    const formatSkill = injectLayoutPackInstruction(
+      row.formatSkill,
+      await loadLayoutPackRef(row.formatLayoutPackId ?? null),
+    );
+    if (!formatSkill || !formatSkill.trim()) {
       helpers.logger.info(
         `precise-cut layout-skip clip=${payload.clipIdeaId} reason=no_skill`,
       );
@@ -430,7 +439,7 @@ async function pollUploadOnce(
     const hasPrependedIntro =
       Array.isArray(row.clipHookSegments) && row.clipHookSegments.length > 0;
     const prompt = buildLayoutPackPrompt({
-      skill: row.formatSkill,
+      skill: formatSkill,
       compositionId,
       hookText,
       aspectRatio,

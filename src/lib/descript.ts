@@ -590,6 +590,50 @@ export async function invokeDescriptAgent(args: {
   }
 }
 
+export type LayoutPackProbe =
+  | { ok: true }
+  | { ok: false; reason: "regular_project" | "not_accessible" | "unexpected"; detail: string };
+
+/**
+ * Verify a Descript id refers to a REAL layout pack the given account's
+ * token can reach. Descript has no pack-listing endpoint, but packs are
+ * template projects, and `GET /v1/projects/{id}` classifies an id
+ * unambiguously (verified 2026-09-03):
+ *   422 "Template projects are not supported" → a reachable template
+ *       project, i.e. a layout pack → valid.
+ *   200 → a regular project — NOT a pack (agents can't apply it).
+ *   403/404 → not reachable from this account's token.
+ * This is what keeps the descript_layout_packs registry honest: rows only
+ * exist for ids Underlord can actually apply.
+ */
+export async function probeDescriptLayoutPack(
+  descriptId: string,
+  account?: string | null,
+): Promise<LayoutPackProbe> {
+  const res = await fetch(`${BASE_URL}/projects/${descriptId}`, {
+    headers: { Authorization: authHeader(account) },
+  });
+  const text = await res.text();
+  if (res.status === 422 && /template projects are not supported/i.test(text)) {
+    return { ok: true };
+  }
+  if (res.ok) {
+    return {
+      ok: false,
+      reason: "regular_project",
+      detail: "That id is a regular Descript project, not a layout pack — Underlord cannot apply it.",
+    };
+  }
+  if (res.status === 403 || res.status === 404) {
+    return {
+      ok: false,
+      reason: "not_accessible",
+      detail: `The ${account === "hubspot" ? "HubSpot" : "legacy"} Descript token cannot reach that id (HTTP ${res.status}). Is the pack in this account?`,
+    };
+  }
+  return { ok: false, reason: "unexpected", detail: `HTTP ${res.status}: ${text.slice(0, 200)}` };
+}
+
 // Descript's web editor routes a composition via the full UUID:
 // https://web.descript.com/<projectId>/<compositionId>
 // The 5-char slug format that appeared in live URLs is a display alias —

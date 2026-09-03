@@ -715,6 +715,13 @@
       "when": 1786390087626,
       "tag": "0101_unknown_rumiko_fujikawa",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1788458190257,
+      "tag": "0102_faithful_hedge_knight",
+      "breakpoints": true
     }
   ]
 }

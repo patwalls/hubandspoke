@@ -21,7 +21,11 @@ import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { recordToolAction } from "@/lib/services/content-events";
-import { extractDescriptSection } from "@/lib/format-skill";
+import {
+  extractDescriptSection,
+  injectLayoutPackInstruction,
+} from "@/lib/format-skill";
+import { loadLayoutPackRef } from "@/lib/services/layout-pack";
 import { resolveClipAspectRatio } from "@/lib/db/formats";
 
 /**
@@ -542,6 +546,7 @@ export async function loadPromotedClipFormat(args: {
     skill: formats.instructions,
     clipAspectRatio: formats.clipAspectRatio,
     clipTargetPostType: formats.clipTargetPostType,
+    descriptLayoutPackId: formats.descriptLayoutPackId,
   };
   const brandClippable = and(
     eq(formats.brand, args.brand),
@@ -582,14 +587,24 @@ export async function loadPromotedClipFormat(args: {
   }
 
   if (!row) throw new NoClippableFormatForBrandError(args.brand);
-  if ((args.requireSkill ?? true) && (!row.skill || !row.skill.trim())) {
+
+  // Splice the structured layout-pack instruction into the Skill so every
+  // downstream prompt (agent path, precise-cut layout, reprocess) carries
+  // it without knowing about the registry. A format with a pack selected
+  // but an empty Skill still gets a usable Descript section this way.
+  const skill = injectLayoutPackInstruction(
+    row.skill,
+    await loadLayoutPackRef(row.descriptLayoutPackId),
+  );
+
+  if ((args.requireSkill ?? true) && (!skill || !skill.trim())) {
     throw new FormatMissingSkillError(row.id, row.name, row.brand);
   }
   return {
     id: row.id,
     name: row.name,
     brand: row.brand,
-    skill: row.skill ?? "",
+    skill: skill ?? "",
     clipAspectRatio: row.clipAspectRatio,
     clipTargetPostType: row.clipTargetPostType,
   };

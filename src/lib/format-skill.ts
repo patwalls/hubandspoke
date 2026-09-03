@@ -14,7 +14,7 @@ Describe how posts in this format are structured. e.g. "This is a one-liner twee
 - [e.g. For bullet points, use >]
 
 ## Descript Clip & Pack Info
-Apply the layout pack at [PASTE_PACK_URL_HERE] to this composition. The pack handles [e.g. vertical 9:16 framing, the hook-text track, and the captions slot] — use it instead of manually setting aspect ratio or adding caption tracks.
+The layout pack is chosen in the format settings ("Descript layout pack" dropdown) — do NOT paste pack URLs here; the prompt gets a validated apply-by-id instruction automatically. The pack handles [e.g. vertical 9:16 framing, the hook-text track, and the captions slot] — use it instead of manually setting aspect ratio or adding caption tracks.
 
 Set the hook text track at the top of the composition to: "{{hook}}". Replace whatever placeholder or default text the layout pack provides — do not append; replace.
 
@@ -99,6 +99,57 @@ const ANY_HEADING_AT_LEVEL_OR_HIGHER = /^[ \t]*##{0,2}[ \t]+\S/m;
  * been re-organized into sections yet (graceful degradation, never
  * blocks a clip from being made).
  */
+/** The registry row shape the pack instruction is built from — matches
+ *  `descript_layout_packs` columns. */
+export interface DescriptLayoutPackRef {
+  name: string;
+  descriptId: string;
+  pageUrl: string | null;
+}
+
+/**
+ * The canonical Underlord instruction for applying a layout pack. Two
+ * hard-won rules baked in (2026-09-03):
+ *  - Reference the pack by NAME AND ID, and tell the agent its
+ *    `query_layout_packs` tool may lie (it returns an empty list inside
+ *    API-created projects) — without the "do NOT stop there" the agent
+ *    gives up and skips framing/hook/captions.
+ *  - Declare that this instruction supersedes any pack URL still lingering
+ *    in Skill prose, so a stale hand-written reference can't fight it.
+ */
+export function buildLayoutPackInstruction(pack: DescriptLayoutPackRef): string {
+  const page = pack.pageUrl ? ` (page: ${pack.pageUrl})` : "";
+  return (
+    `Apply the layout pack named "${pack.name}" — its id is ${pack.descriptId}${page}. ` +
+    `Your query_layout_packs tool may return an empty list — do NOT stop there; ` +
+    `apply the pack directly by its id/URL with whatever layout tool accepts an identifier. ` +
+    `This instruction supersedes any other layout-pack link or name mentioned elsewhere in this prompt.`
+  );
+}
+
+/**
+ * Splice the canonical pack instruction into a format Skill so every
+ * downstream consumer of `extractDescriptSection` picks it up. Inserted
+ * immediately below the `### Descript Clip & Pack Info` heading; when the
+ * Skill has no such heading (or is empty), a new section is appended so
+ * selecting a pack in the dropdown is sufficient to activate the Descript
+ * branch. No pack → input returned unchanged.
+ */
+export function injectLayoutPackInstruction(
+  instructions: string | null,
+  pack: DescriptLayoutPackRef | null | undefined,
+): string | null {
+  if (!pack) return instructions;
+  const instruction = buildLayoutPackInstruction(pack);
+  const skill = instructions ?? "";
+  const match = DESCRIPT_SECTION_HEADING.exec(skill);
+  if (!match) {
+    return `${skill.trimEnd()}\n\n## Descript Clip & Pack Info\n\n${instruction}\n`.trimStart();
+  }
+  const insertAt = match.index + match[0].length;
+  return `${skill.slice(0, insertAt)}\n\n${instruction}\n${skill.slice(insertAt)}`;
+}
+
 export function extractDescriptSection(skill: string): string {
   const match = DESCRIPT_SECTION_HEADING.exec(skill);
   if (!match) return skill;

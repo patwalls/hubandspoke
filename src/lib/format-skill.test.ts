@@ -5,6 +5,7 @@ import {
   extractCrossPostRulesSection,
   extractDescriptSection,
   extractExtrasSchema,
+  injectLayoutPackInstruction,
 } from "./format-skill";
 
 // `formats.instructions` (the Skill) is structured for two audiences:
@@ -321,5 +322,57 @@ describe("extractCrossPostRulesSection — multi-consumer behavior", () => {
     expect(out).toContain(
       "use the source's on-screen hook as the tweet body, verbatim",
     );
+  });
+});
+
+describe("injectLayoutPackInstruction — registry-backed pack reference", () => {
+  const PACK = {
+    name: "Reels Layout",
+    descriptId: "4ffdace6-835d-4ca1-a337-02e1a7e66b0a",
+    pageUrl: "https://web.descript.com/4ffdace6-835d-4ca1-a337-02e1a7e66b0a/5d5a7",
+  };
+
+  it("returns the input unchanged when no pack is selected", () => {
+    expect(injectLayoutPackInstruction("## Descript Clip & Pack Info\nHi", null)).toBe(
+      "## Descript Clip & Pack Info\nHi",
+    );
+    expect(injectLayoutPackInstruction(null, null)).toBeNull();
+  });
+
+  it("inserts right below the Descript heading so extractDescriptSection carries it", () => {
+    const skill = [
+      "## Caption formatting",
+      "- no em dashes",
+      "",
+      "## Descript Clip & Pack Info",
+      "",
+      "Set the hook text track to: \"{{hook}}\".",
+      "",
+      "## Cross Post Rules",
+      "- vertical everywhere",
+    ].join("\n");
+    const out = injectLayoutPackInstruction(skill, PACK)!;
+    const section = extractDescriptSection(out);
+    expect(section).toContain('named "Reels Layout"');
+    expect(section).toContain(PACK.descriptId);
+    // The don't-give-up clause is the load-bearing part — Underlord's
+    // query_layout_packs returns an empty list in API-created projects.
+    expect(section).toContain("do NOT stop there");
+    expect(section).toContain('Set the hook text track to: "{{hook}}".');
+    // Editorial sections stay out of the Descript section.
+    expect(section).not.toContain("no em dashes");
+    expect(section).not.toContain("vertical everywhere");
+  });
+
+  it("appends a Descript section when the Skill has no heading (dropdown alone activates the branch)", () => {
+    const out = injectLayoutPackInstruction("Just prose, no headings.", PACK)!;
+    expect(out).toMatch(/^Just prose, no headings\./);
+    expect(out).toContain("## Descript Clip & Pack Info");
+    expect(extractDescriptSection(out)).toContain(PACK.descriptId);
+  });
+
+  it("builds a usable section from an empty Skill", () => {
+    const out = injectLayoutPackInstruction(null, PACK)!;
+    expect(extractDescriptSection(out)).toContain('named "Reels Layout"');
   });
 });
