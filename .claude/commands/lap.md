@@ -283,4 +283,4 @@ that is never your finding to narrate — run
 issue, not when someone else fixes the creds: every lap, if `loops alert list` shows
 `cred/<service>` firing and the service authenticates now, run `loops cred ok <service>`
 (canva stayed "Log back in" for hours on 2026-09-02 after the fix was verified and issue #20
-closed). Applies to every external credential: Heroku, Sentry, Brave, Mezmo, LinkedIn, npm.
+closed). Applies to every external credential: Heroku, Sentry, Brave, Mezmo, LinkedIn, npm. A metered plan that ran dry (402, "credits exhausted") is the same channel with `--reason out-of-credit`, so the subject says "Top up:" instead of "Log back in:" (brave paged as a login on 2026-09-03 while its own body said it was billing).
