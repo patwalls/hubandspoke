@@ -20,7 +20,12 @@ import {
 } from "@/lib/services/promote-clip-idea";
 import { resolveClipAspectRatio } from "@/lib/db/formats";
 
-export type ReprocessMode = "full" | "precise" | "buffered" | "agent";
+export type ReprocessMode =
+  | "full"
+  | "precise"
+  | "buffered"
+  | "buffered-pack"
+  | "agent";
 
 export class ReprocessMissingClipIdeaError extends Error {
   constructor() {
@@ -139,13 +144,24 @@ export async function reprocessProductionItemInDescript(args: {
   // 6. Dispatch based on mode. Existing Descript fields on the production
   //    item are NOT cleared here — they stay valid until the worker (or the
   //    synchronous call below) overwrites them on success.
-  if (args.mode === "precise" || args.mode === "buffered") {
-    const cutStartSec =
-      args.mode === "buffered"
-        ? Math.max(0, startSec - BUFFER_SEC)
-        : undefined;
-    const cutEndSec =
-      args.mode === "buffered" ? endSec + BUFFER_SEC : undefined;
+  if (
+    args.mode === "precise" ||
+    args.mode === "buffered" ||
+    args.mode === "buffered-pack"
+  ) {
+    // "buffered" and "buffered-pack" both add the ±60s editing buffer to the
+    // ffmpeg range. The pack (Underlord) runs for "precise" and "buffered-pack";
+    // plain "buffered" imports as-is with no Underlord call. When the pack runs
+    // on a buffered clip, the worker's layout phase preserves all footage, so
+    // the buffer survives.
+    const isBuffered =
+      args.mode === "buffered" || args.mode === "buffered-pack";
+    const applyPack =
+      args.mode === "precise" || args.mode === "buffered-pack";
+    const cutStartSec = isBuffered
+      ? Math.max(0, startSec - BUFFER_SEC)
+      : undefined;
+    const cutEndSec = isBuffered ? endSec + BUFFER_SEC : undefined;
 
     await recordToolAction({
       contentItemId: args.productionItemId,
@@ -153,13 +169,13 @@ export async function reprocessProductionItemInDescript(args: {
       tool: "descript",
       action: "kicking_off",
       status: "info",
-      label:
-        args.mode === "buffered"
-          ? "Trimming with 60-second buffer and uploading to Descript… new composition incoming."
-          : "Trimming clip locally + uploading to Descript… new composition incoming.",
+      label: isBuffered
+        ? "Trimming with 60-second buffer and uploading to Descript… new composition incoming."
+        : "Trimming clip locally + uploading to Descript… new composition incoming.",
       meta: {
         importPath: "precise-cut",
-        buffered: args.mode === "buffered" ? 1 : 0,
+        buffered: isBuffered ? 1 : 0,
+        applyLayoutPack: applyPack ? 1 : 0,
         reprocess: 1,
       },
     });
@@ -170,13 +186,7 @@ export async function reprocessProductionItemInDescript(args: {
         clipIdeaId: clipIdea.id,
         triggerId: trigger.id,
         derivativeItemId: args.productionItemId,
-        // Precise Cut applies the format/skill's layout pack (the worker
-        // re-checks the format actually has a skill/pack and skips if not).
-        // Buffered Cut is a plain trim with NO Underlord call — its whole
-        // purpose is editing room, so it imports as-is (source orientation)
-        // and the editor styles it after finalizing the trim. Only
-        // precise/buffered reach this branch.
-        applyLayoutPack: args.mode === "precise",
+        applyLayoutPack: applyPack,
         ...(cutStartSec !== undefined ? { cutStartSec } : {}),
         ...(cutEndSec !== undefined ? { cutEndSec } : {}),
       },

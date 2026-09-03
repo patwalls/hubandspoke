@@ -12,7 +12,13 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-const VALID_MODES: ReprocessMode[] = ["full", "precise", "buffered", "agent"];
+const VALID_MODES: ReprocessMode[] = [
+  "full",
+  "precise",
+  "buffered",
+  "buffered-pack",
+  "agent",
+];
 
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireSession();

@@ -872,16 +872,14 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
   const descriptAccount = NEW_DESCRIPT_PROJECT_ACCOUNT;
 
-  // Precise Cut requires a Skill/pack (throws FormatMissingDescriptPackError
-  // before any side effects — the worker re-loads the pack for the layout
-  // phase, and the gate here prevents enqueuing a job that would no-op).
-  // Buffered Cut runs no Underlord call, so it works for formats with no
-  // pack (e.g. X Quotables) — we still load the format for its id/aspect,
-  // just don't require a Skill.
+  // Require a Skill only when we'll actually run the Underlord layout pack
+  // (Precise Cut, or Buffered Cut + Layout Pack). A plain Buffered Cut with
+  // no pack runs no Underlord call, so it works for formats with no Skill/
+  // pack (e.g. X Quotables) — we still load the format for its id/aspect.
   const format = await loadPromotedClipFormat({
     brand,
     targetFormatName: row.targetFormat,
-    requireSkill: !args.buffered,
+    requireSkill: args.applyLayoutPack,
   });
 
   await db
@@ -915,11 +913,12 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
     ? Number(row.endSec) + BUFFER_SEC
     : undefined;
 
-  // Buffered Cut never runs the Underlord layout-pack call — it's a plain
-  // trim that imports as-is (source orientation) so the editor has room to
-  // finalize the boundaries and style it themselves. Enforced here at the
-  // service layer so it doesn't depend on the route passing `ai=1` or not.
-  const effectiveApplyLayoutPack = args.buffered ? false : args.applyLayoutPack;
+  // Whether Underlord applies the layout pack is driven purely by the caller
+  // (route's `ai=1`): plain Buffered Cut (`?buffered=1`) → false → a bare trim
+  // in source orientation; Buffered Cut + Layout Pack (`?buffered=1&ai=1`) or
+  // Precise Cut (`?ai=1`) → true. The worker's layout phase preserves all
+  // footage, so the ±60s buffer survives even when the pack is applied.
+  const effectiveApplyLayoutPack = args.applyLayoutPack;
 
   await recordToolAction({
     contentItemId: productionItemId,
