@@ -234,7 +234,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
         productionItemId: payload.derivativeItemId,
       }),
       mediaUrl: presignedClipUrl,
-      account: "hubspot",
+      account: null, // TEST: using Starter Story token to isolate HubSpot account issue
     });
     helpers.logger.info(
       `precise-cut descript-import enqueued clip=${clipIdeaId} job=${importRes.job_id}`,
@@ -252,7 +252,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
       .set({
         descriptProjectId: importRes.project_id,
         descriptProjectUrl: importRes.project_url,
-        descriptAccount: "hubspot",
+        descriptAccount: null, // TEST: using Starter Story token to isolate HubSpot account issue
       })
       .where(eq(productionItems.id, derivativeItemId));
 
