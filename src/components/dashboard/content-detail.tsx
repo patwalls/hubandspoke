@@ -1624,7 +1624,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   }, [actionPending, contentId, data?.item.mediaS3Key, data?.item.title, load]);
 
   const handleSendToDescript = useCallback(
-    async (mode: "full" | "precise" | "buffered" | "agent") => {
+    async (
+      mode: "full" | "precise" | "buffered" | "buffered-pack" | "agent",
+    ) => {
       if (actionPending) return;
       setActionPending(true);
       try {
@@ -1638,13 +1640,15 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           return;
         }
         const label =
-          mode === "buffered"
-            ? "Trimming with 60-second buffer and uploading to Descript…"
-            : mode === "precise"
-              ? "Trimming clip locally and uploading to Descript…"
-              : mode === "full"
-                ? "Sending full composition to Descript…"
-                : "Creating clip with Underlord…";
+          mode === "buffered-pack"
+            ? "Trimming with 60-second buffer + applying layout pack…"
+            : mode === "buffered"
+              ? "Trimming with 60-second buffer and uploading to Descript…"
+              : mode === "precise"
+                ? "Trimming clip locally and uploading to Descript…"
+                : mode === "full"
+                  ? "Sending full composition to Descript…"
+                  : "Creating clip with Underlord…";
         toast.success(label, { duration: 6000 });
         load();
       } catch (err) {
@@ -1666,7 +1670,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     setLiveContent(loadedDraft?.content ?? null);
     setFieldSaves({});
     setFieldErrors({});
-  }, [loadedDraft?.id, loadedDraft]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedDraft?.id]);
 
   // Auto-trigger publish-and-archive when we land on a clip whose
   // composition is ready but the MP4 hasn't been rendered yet (the
@@ -3183,6 +3188,21 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                           <span className="text-[11px] text-muted-foreground leading-snug">
                             Use Claude&apos;s exact clip timestamps, then apply
                             the format layout.
+                          </span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            void handleSendToDescript("buffered-pack")
+                          }
+                          className="flex flex-col items-start gap-0.5 py-2"
+                        >
+                          <span className="font-medium">
+                            Buffered Cut + Layout Pack
+                          </span>
+                          <span className="text-[11px] text-muted-foreground leading-snug">
+                            Claude&apos;s clip plus 60 seconds before and after,
+                            then apply the format layout pack (hook, aspect
+                            ratio, captions) — keeping the extra footage.
                           </span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
