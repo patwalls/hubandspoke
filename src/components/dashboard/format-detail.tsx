@@ -276,6 +276,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [clipAspectRatio, setClipAspectRatio] = useState<string>("");
   const [descriptLayoutPackId, setDescriptLayoutPackId] = useState<string | null>(null);
   const [layoutPacks, setLayoutPacks] = useState<DescriptLayoutPack[]>([]);
+  const [packPopoverOpen, setPackPopoverOpen] = useState(false);
   const [addPackOpen, setAddPackOpen] = useState(false);
   const [newPackName, setNewPackName] = useState("");
   const [newPackUrl, setNewPackUrl] = useState("");
@@ -730,6 +731,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
       setDescriptLayoutPackId(json.pack.id);
       void persistField({ descriptLayoutPackId: json.pack.id });
       setAddPackOpen(false);
+      setPackPopoverOpen(false);
       setNewPackName("");
       setNewPackUrl("");
     } finally {
@@ -1556,6 +1558,115 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               </PopoverContent>
             </Popover>
             </PropertyRow>
+            <PropertyRow label="Descript layout pack" tooltip="The layout pack Underlord applies to this format's Descript compositions (framing, hook-text track, captions). Prompts get a canonical apply-by-id instruction from the pack registry — it supersedes any pack link written in the Skill. New packs are validated against the Descript API before they can be selected.">
+            <Popover
+              open={packPopoverOpen}
+              onOpenChange={(open) => {
+                setPackPopoverOpen(open);
+                if (!open) {
+                  setAddPackOpen(false);
+                  setAddPackError(null);
+                }
+              }}
+            >
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
+                {(() => {
+                  const selected = layoutPacks.find((p) => p.id === descriptLayoutPackId);
+                  return selected ? (
+                    <span className="truncate">{selected.name}</span>
+                  ) : (
+                    <span className="text-muted-foreground">Select layout pack…</span>
+                  );
+                })()}
+                <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search layout packs…" />
+                  <CommandList>
+                    <CommandEmpty>No matching pack.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        onSelect={() => {
+                          setDescriptLayoutPackId(null);
+                          setPackPopoverOpen(false);
+                          void persistField({ descriptLayoutPackId: null });
+                        }}
+                      >
+                        <span className="text-sm text-muted-foreground">None — use Skill text as-is</span>
+                      </CommandItem>
+                      {layoutPacks.map((p) => (
+                        <CommandItem
+                          key={p.id}
+                          value={p.name}
+                          onSelect={() => {
+                            setDescriptLayoutPackId(p.id);
+                            setPackPopoverOpen(false);
+                            void persistField({ descriptLayoutPackId: p.id });
+                          }}
+                          data-checked={descriptLayoutPackId === p.id ? "true" : undefined}
+                        >
+                          <span className="text-sm">{p.name}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+                <div className="border-t border-border p-2">
+                  {!addPackOpen ? (
+                    <button
+                      type="button"
+                      className="text-xs text-primary underline underline-offset-2"
+                      onClick={() => setAddPackOpen(true)}
+                    >
+                      Register a new pack…
+                    </button>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <Input
+                        value={newPackName}
+                        onChange={(e) => setNewPackName(e.target.value)}
+                        placeholder='Pack name, e.g. "Reels Layout"'
+                        className="h-8 text-xs"
+                      />
+                      <Input
+                        value={newPackUrl}
+                        onChange={(e) => setNewPackUrl(e.target.value)}
+                        placeholder="Paste the pack page link"
+                        className="h-8 text-xs"
+                      />
+                      {addPackError && (
+                        <p className="text-[11px] text-destructive">{addPackError}</p>
+                      )}
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={addPackBusy || !newPackName.trim() || !newPackUrl.trim()}
+                          onClick={() => void addLayoutPack()}
+                        >
+                          {addPackBusy ? "Validating…" : "Validate & add"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            setAddPackOpen(false);
+                            setAddPackError(null);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+            </PropertyRow>
           </PropertyRowGroup>
 
           <PropertyRowSolo>
@@ -1725,86 +1836,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                   </div>
                 </div>
               )}
-            </div>
-          </PropertyRowSolo>
-
-          <PropertyRowSolo>
-            <div className="px-3 py-3 space-y-2">
-              <div className="space-y-1">
-                <Label htmlFor="descript-layout-pack" className="text-sm font-medium">
-                  Descript layout pack
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  The layout pack Underlord applies to this format&apos;s Descript compositions (framing, hook-text track, captions). When set, prompts get a canonical apply-by-id instruction from the pack registry — it supersedes any pack link written in the Skill. Packs are validated against the Descript API when registered.
-                </p>
-                <select
-                  id="descript-layout-pack"
-                  value={descriptLayoutPackId ?? ""}
-                  onChange={(e) => {
-                    const next = e.target.value || null;
-                    setDescriptLayoutPackId(next);
-                    void persistField({ descriptLayoutPackId: next });
-                  }}
-                  className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs max-w-md")}
-                >
-                  <option value="">— none (use Skill text as-is) —</option>
-                  {layoutPacks.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-                {!addPackOpen ? (
-                  <button
-                    type="button"
-                    className="block text-[11px] text-primary underline underline-offset-2"
-                    onClick={() => setAddPackOpen(true)}
-                  >
-                    Register a new pack…
-                  </button>
-                ) : (
-                  <div className="mt-1 max-w-md space-y-1.5 rounded border border-border p-2">
-                    <Input
-                      value={newPackName}
-                      onChange={(e) => setNewPackName(e.target.value)}
-                      placeholder='Pack name exactly as in Descript, e.g. "Reels Layout"'
-                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                    />
-                    <Input
-                      value={newPackUrl}
-                      onChange={(e) => setNewPackUrl(e.target.value)}
-                      placeholder="Paste the pack page link, e.g. https://web.descript.com/4ffdace6-…/5d5a7"
-                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                    />
-                    {addPackError && (
-                      <p className="text-[11px] text-destructive">{addPackError}</p>
-                    )}
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="h-7 text-xs"
-                        disabled={addPackBusy || !newPackName.trim() || !newPackUrl.trim()}
-                        onClick={() => void addLayoutPack()}
-                      >
-                        {addPackBusy ? "Validating…" : "Validate & add"}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs"
-                        onClick={() => {
-                          setAddPackOpen(false);
-                          setAddPackError(null);
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           </PropertyRowSolo>
 
