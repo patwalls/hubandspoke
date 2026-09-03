@@ -20,6 +20,7 @@ import {
   invokeDescriptAgent,
 } from "@/lib/descript";
 import { getPresignedGetUrl, putObjectFromFile } from "@/lib/s3";
+import { descriptAccountFromPayload } from "@/lib/services/descript-account";
 import { recordToolAction } from "@/lib/services/content-events";
 import {
   assertCompositionUnique,
@@ -239,7 +240,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
         productionItemId: payload.derivativeItemId,
       }),
       mediaUrl: presignedClipUrl,
-      account: payload.descriptAccount ?? "hubspot",
+      account: descriptAccountFromPayload(payload.descriptAccount),
     });
     helpers.logger.info(
       `precise-cut descript-import enqueued clip=${clipIdeaId} job=${importRes.job_id}`,
@@ -257,7 +258,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
       .set({
         descriptProjectId: importRes.project_id,
         descriptProjectUrl: importRes.project_url,
-        descriptAccount: payload.descriptAccount ?? "hubspot",
+        descriptAccount: descriptAccountFromPayload(payload.descriptAccount),
       })
       .where(eq(productionItems.id, derivativeItemId));
 

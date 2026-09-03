@@ -23,3 +23,17 @@ export function resolveDescriptAccountForActor(
   }
   return "hubspot";
 }
+
+/**
+ * Interpret the `descriptAccount` field of a task payload. `null` is a
+ * MEANINGFUL value (the legacy account) — only a genuinely absent field
+ * (payloads enqueued before the field existed) falls back to "hubspot",
+ * the behavior those jobs were created under. Never use `??` for this:
+ * it collapses null into the fallback and silently reroutes legacy-account
+ * jobs to HubSpot (shipped bug, 2026-09-03).
+ */
+export function descriptAccountFromPayload(
+  value: string | null | undefined,
+): string | null {
+  return value === undefined ? "hubspot" : value;
+}
