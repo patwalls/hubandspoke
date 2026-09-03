@@ -1723,83 +1723,88 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                       Drives the Descript composition layout for clips in this format. Blank = 9:16 for Reel/Shorts/TikTok, 16:9 for X / YouTube long.
                     </p>
                   </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="descript-layout-pack" className="text-xs">
-                      Descript layout pack
-                    </Label>
-                    <select
-                      id="descript-layout-pack"
-                      value={descriptLayoutPackId ?? ""}
-                      onChange={(e) => {
-                        const next = e.target.value || null;
-                        setDescriptLayoutPackId(next);
-                        void persistField({ descriptLayoutPackId: next });
-                      }}
-                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                    >
-                      <option value="">— none (use Skill text as-is) —</option>
-                      {layoutPacks.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[11px] text-muted-foreground">
-                      When set, Underlord prompts get a canonical apply-by-id instruction for this pack (it supersedes any pack link written in the Skill). Packs are validated against the Descript API when registered.
-                    </p>
-                    {!addPackOpen ? (
-                      <button
-                        type="button"
-                        className="text-[11px] text-primary underline underline-offset-2"
-                        onClick={() => setAddPackOpen(true)}
-                      >
-                        Register a new pack…
-                      </button>
-                    ) : (
-                      <div className="mt-1 space-y-1.5 rounded border border-border p-2">
-                        <Input
-                          value={newPackName}
-                          onChange={(e) => setNewPackName(e.target.value)}
-                          placeholder='Pack name exactly as in Descript, e.g. "Reels Layout"'
-                          className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                        />
-                        <Input
-                          value={newPackUrl}
-                          onChange={(e) => setNewPackUrl(e.target.value)}
-                          placeholder="Pack page URL, e.g. https://web.descript.com/4ffdace6-…/5d5a7"
-                          className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                        />
-                        {addPackError && (
-                          <p className="text-[11px] text-destructive">{addPackError}</p>
-                        )}
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="h-7 text-xs"
-                            disabled={addPackBusy || !newPackName.trim() || !newPackUrl.trim()}
-                            onClick={() => void addLayoutPack()}
-                          >
-                            {addPackBusy ? "Validating…" : "Validate & add"}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-xs"
-                            onClick={() => {
-                              setAddPackOpen(false);
-                              setAddPackError(null);
-                            }}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
+            </div>
+          </PropertyRowSolo>
+
+          <PropertyRowSolo>
+            <div className="px-3 py-3 space-y-2">
+              <div className="space-y-1">
+                <Label htmlFor="descript-layout-pack" className="text-sm font-medium">
+                  Descript layout pack
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  The layout pack Underlord applies to this format&apos;s Descript compositions (framing, hook-text track, captions). When set, prompts get a canonical apply-by-id instruction from the pack registry — it supersedes any pack link written in the Skill. Packs are validated against the Descript API when registered.
+                </p>
+                <select
+                  id="descript-layout-pack"
+                  value={descriptLayoutPackId ?? ""}
+                  onChange={(e) => {
+                    const next = e.target.value || null;
+                    setDescriptLayoutPackId(next);
+                    void persistField({ descriptLayoutPackId: next });
+                  }}
+                  className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs max-w-md")}
+                >
+                  <option value="">— none (use Skill text as-is) —</option>
+                  {layoutPacks.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                {!addPackOpen ? (
+                  <button
+                    type="button"
+                    className="block text-[11px] text-primary underline underline-offset-2"
+                    onClick={() => setAddPackOpen(true)}
+                  >
+                    Register a new pack…
+                  </button>
+                ) : (
+                  <div className="mt-1 max-w-md space-y-1.5 rounded border border-border p-2">
+                    <Input
+                      value={newPackName}
+                      onChange={(e) => setNewPackName(e.target.value)}
+                      placeholder='Pack name exactly as in Descript, e.g. "Reels Layout"'
+                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                    />
+                    <Input
+                      value={newPackUrl}
+                      onChange={(e) => setNewPackUrl(e.target.value)}
+                      placeholder="Paste the pack page link, e.g. https://web.descript.com/4ffdace6-…/5d5a7"
+                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                    />
+                    {addPackError && (
+                      <p className="text-[11px] text-destructive">{addPackError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 text-xs"
+                        disabled={addPackBusy || !newPackName.trim() || !newPackUrl.trim()}
+                        onClick={() => void addLayoutPack()}
+                      >
+                        {addPackBusy ? "Validating…" : "Validate & add"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          setAddPackOpen(false);
+                          setAddPackError(null);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </PropertyRowSolo>
 
