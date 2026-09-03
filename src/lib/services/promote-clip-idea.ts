@@ -14,6 +14,7 @@ import {
   invokeDescriptAgent,
   substituteFormatPrompt,
 } from "@/lib/descript";
+import { resolveDescriptAccountForActor } from "@/lib/services/descript-account";
 import { buildCompositionName } from "@/lib/services/descript-composition";
 import { coldImportPillar } from "@/lib/services/descript-derivative";
 import { enqueue } from "@/jobs/enqueue";
@@ -854,6 +855,9 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
   const editor = await loadEditor(args.actorUserId);
   const body = buildContentBody(row);
   const productionItemId = await loadClipProductionItemId(args.clipIdeaId);
+  // Which workspace the new Descript project lands in follows the clicker,
+  // not a global default — see resolveDescriptAccountForActor.
+  const descriptAccount = resolveDescriptAccountForActor(editor.email);
 
   // Precise Cut requires a Skill/pack (throws FormatMissingDescriptPackError
   // before any side effects — the worker re-loads the pack for the layout
@@ -875,7 +879,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
       hook: row.hook,
       contentBody: body,
       editorUserId: args.actorUserId,
-      descriptAccount: "hubspot",
+      descriptAccount,
       updatedAt: new Date(),
     })
     .where(eq(productionItems.id, productionItemId));
@@ -926,6 +930,7 @@ export async function createClipIdeaInDescriptPreciseCut(args: {
       clipIdeaId: args.clipIdeaId,
       triggerId: trigger.id,
       derivativeItemId: productionItemId,
+      descriptAccount,
       applyLayoutPack: effectiveApplyLayoutPack,
       ...(cutStartSec !== undefined ? { cutStartSec } : {}),
       ...(cutEndSec !== undefined ? { cutEndSec } : {}),

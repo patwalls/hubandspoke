@@ -37,6 +37,11 @@ export interface ClipIdeaPreciseCutPayload {
   clipIdeaId: string;
   triggerId: string;
   derivativeItemId: string;
+  /** Which Descript workspace to import the clip into, resolved from the
+   *  promoting user (see resolveDescriptAccountForActor). `null` = legacy
+   *  account. Undefined (payloads enqueued before this field existed)
+   *  falls back to "hubspot", the previous hardcoded behavior. */
+  descriptAccount?: string | null;
   /** Set once the upload has been handed to Descript; subsequent runs only poll. */
   uploadJobId?: string;
   /** Set after the import finishes when the user opted into the AI layout
@@ -234,7 +239,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
         productionItemId: payload.derivativeItemId,
       }),
       mediaUrl: presignedClipUrl,
-      account: "hubspot",
+      account: payload.descriptAccount ?? "hubspot",
     });
     helpers.logger.info(
       `precise-cut descript-import enqueued clip=${clipIdeaId} job=${importRes.job_id}`,
@@ -252,7 +257,7 @@ export const clipIdeaPreciseCutTask: Task = async (rawPayload, helpers) => {
       .set({
         descriptProjectId: importRes.project_id,
         descriptProjectUrl: importRes.project_url,
-        descriptAccount: "hubspot",
+        descriptAccount: payload.descriptAccount ?? "hubspot",
       })
       .where(eq(productionItems.id, derivativeItemId));
 
