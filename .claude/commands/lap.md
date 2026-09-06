@@ -27,6 +27,10 @@ Pat pays per lap — keep green laps NEAR-FREE:
 - Then one `npx tsx scripts/ops-escalate.ts status` — what's already raised on GitHub, what
   is building toward it, and what a human has muted. A fresh-context lap has no other way
   to know Pat already ruled on something; skipping this is how you re-raise a closed issue.
+- And one `loops policy --loop hubandspoke` — its `blocked` list is Pat's board as it stands:
+  each line this loop has already asked of him, and how long he has waited. Those lines go
+  back on this lap's emit byte for byte (see the report section); a fresh context has no
+  other way to know what Pat still owes.
 - Batch the whole green-path checklist into 2–3 Bash calls. **All green → one log line,
   END THE LAP.** No narrative, no exploration, no "while I'm here".
 - Only a flagged check earns more tool calls. An investigation that hasn't classified its
@@ -275,6 +279,21 @@ still-open escalation is a `--blocked` line (repeatable) written so Pat can act 
 one read: the action first, then the consequence — `--blocked "Review and merge PR #16
 (stops the bot reopening tickets a human meant to close); open as draft 10 laps"` — not
 a bare issue tag like `"issue #16 (10 laps, re-fed)"`.
+
+**A standing ask goes on every emit, until the lap it actually clears — copied from
+`loops policy --loop hubandspoke`, not retyped.** The emit replaces the board wholesale, so
+a lap that emits with no `--blocked` has told Pat the ask is cleared: the line leaves his
+board, and when a later lap hands it back it returns as a new item, minutes old. Measured
+2026-09-06 by the `loops` meta-loop, laps 536–544: Canva issue #22 was on the board for
+four laps in four different wordings ("Review Canva issue #22 (autofill still fails…",
+"Review and close or fix issue #22…", "Review and close or act on issue #22…", "Review
+Canva issue #22 (brand template EAHT_O access denied…") and off it for the other five,
+while the issue stood the whole time — so Pat saw the ask one lap in two and never older
+than a lap. `loops policy` returns `blocked` as `[{text, since_utc, waiting}]`: hand each
+`text` back to `--blocked` unchanged, one ask per line. Add a line when something new needs
+Pat; drop a line when its condition clears (the issue closed, the human acted); change a
+line's wording only when the ask itself changed. Rewriting it from memory makes it a new
+item to the ledger.
 
 **A service logged Pat out / a token expired (401, "session expired", invalid key):**
 that is never your finding to narrate — run
