@@ -43,6 +43,8 @@ import {
   decideSweep,
   emptyState,
   fingerprintMarker,
+  stripComposedBody,
+  FOOTER_LEAD,
   parseFingerprint,
   severityLabel,
   type FindingState,
@@ -172,11 +174,11 @@ function composeBody(opts: {
     `**${severity.toUpperCase()}** · first seen ${fmt(finding.firstSeenAt)} · ` +
       `seen in ${finding.streak} consecutive laps · last ${fmt(finding.lastSeenAt)}`,
     "",
-    evidence.trim(),
+    stripComposedBody(evidence),
     "",
     "---",
     "",
-    "<sub>Raised by the Hub & Spoke ops loop (`/lap`). It re-checks this every lap and " +
+    `${FOOTER_LEAD} (\`/lap\`). It re-checks this every lap and ` +
       "updates this description silently — it will comment only if severity rises, and " +
       "will close this on its own if the condition clears. **Close it to mute for " +
       `${COOLDOWN_DAYS} days; close it with the \`wontfix\` label to mute it permanently.**</sub>`,
@@ -221,7 +223,7 @@ function cmdReport(args: Args): void {
       // Check GitHub before writing: the artifact may have been closed by a human
       // since the last lap, and that decision has to win.
       const live = dryRun
-        ? { state: "OPEN", labels: [] as Array<{ name: string }> }
+        ? { state: "OPEN", body: "", labels: [] as Array<{ name: string }> }
         : viewArtifact(action.kind, action.number);
       if (live.state !== "OPEN") {
         const closedBy = classifyClose(live.labels);
@@ -251,7 +253,15 @@ function cmdReport(args: Args): void {
         return;
       }
 
-      const body = composeBody({ fingerprint, severity, finding, evidence });
+      // A refresh with no fresh evidence means "still true", not "nothing to
+      // report" — carry the artifact's current text forward instead of blanking
+      // it. `composeBody` strips the old wrapper, so this does not stack.
+      const body = composeBody({
+        fingerprint,
+        severity,
+        finding,
+        evidence: evidence.trim() ? evidence : (live.body ?? ""),
+      });
       if (dryRun) {
         console.log(`[dry-run] ${action.type} #${action.number}\n${body}`);
         return;

@@ -10,6 +10,8 @@ import {
   fingerprintMarker,
   type OpsState,
   type Severity,
+  stripComposedBody,
+  FOOTER_LEAD,
 } from "./escalation-policy";
 
 const T0 = new Date("2026-08-09T12:00:00.000Z");
@@ -324,5 +326,51 @@ describe("classifyClose", () => {
     expect(classifyClose([{ name: "ops-loop" }])).toBe("human");
     expect(classifyClose([])).toBe("human");
     expect(classifyClose(undefined)).toBe("human");
+  });
+});
+
+describe("stripComposedBody", () => {
+  const compose = (evidence: string, streak: number) =>
+    [
+      fingerprintMarker("yt-archive:memory-guard"),
+      "",
+      `**WARN** · first seen 2026-09-01 17:59 UTC · seen in ${streak} consecutive laps · last 2026-09-02 09:18 UTC`,
+      "",
+      stripComposedBody(evidence),
+      "",
+      "---",
+      "",
+      `${FOOTER_LEAD} (\`/lap\`). It re-checks this every lap.</sub>`,
+    ].join("\n");
+
+  const EVIDENCE = "### What's broken\n\nThe guard runs after the enqueue.";
+
+  it("leaves a plain evidence body alone", () => {
+    expect(stripComposedBody(EVIDENCE)).toBe(EVIDENCE);
+  });
+
+  it("makes composing idempotent when a body is fed back in", () => {
+    // The 2026-09-02 bug: refreshing PR #19 by passing its own description back
+    // stacked a new header on top of the old one, every lap, three deep.
+    const once = compose(EVIDENCE, 13);
+    const twice = compose(once, 13);
+    expect(twice).toBe(once);
+    expect(twice.split("ops-fingerprint:").length - 1).toBe(1);
+  });
+
+  it("keeps only the newest header across repeated refreshes", () => {
+    let body = compose(EVIDENCE, 1);
+    for (let streak = 2; streak <= 5; streak++) body = compose(body, streak);
+    expect(body.split("ops-fingerprint:").length - 1).toBe(1);
+    expect(body.split(FOOTER_LEAD).length - 1).toBe(1);
+    expect(body).toContain("seen in 5 consecutive laps");
+    expect(body).not.toContain("seen in 4 consecutive laps");
+    expect(body).toContain("The guard runs after the enqueue.");
+  });
+
+  it("strips a bare marker with no severity line", () => {
+    expect(stripComposedBody(`${fingerprintMarker("x:y")}\n\n${EVIDENCE}`)).toBe(
+      EVIDENCE,
+    );
   });
 });
