@@ -980,6 +980,18 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
     loaded ollama model, waits for reclamation, and runs. Only exits **8**
     (→ Sentry) if memory is still exhausted afterwards.
 
+    **Ordering gap (proposed fix 2026-09-01, `ops/yt-archive-memory-guard-before-heroku`).**
+    Because the preflight is only reached once `--count-only` has run, and
+    `--count-only` needs the `DATABASE_URL` from `heroku config:get`, a host
+    starved *before* that call dies at it (`exit 6`, 120s timeout) and never
+    reaches its own eviction path. Seen 2026-08-07, 2026-08-16 and 2026-09-01 —
+    on the last, `git pull` had already degraded from 1s to 17s and swap free
+    was under 1.4 GB. The fix retries `heroku config:get` once, after running
+    `ensure_memory_or_exit`, and **only on rc=124** — a healthy host never times
+    out on this call, so the "no evictions on a quiet day" property is kept. A
+    genuinely exhausted host then exits **8** ("skipping run") instead of **6**,
+    which attributes the lost hour to memory rather than to the heroku CLI.
+
     **Why eviction and not just skipping:** skipping alone was tried first and
     failed — Slope's judge holds `qwen3:30b-a3b` (~18.8 GB) resident 24/7 on
     this 32 GB box, so the preflight skipped **24 consecutive hourly ticks** and
