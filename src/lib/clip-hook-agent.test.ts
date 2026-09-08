@@ -142,6 +142,32 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(candidate.endSec).toBeGreaterThan(candidate.startSec);
   });
 
+  it("accepts a blueprint anchor that differs from the reference only in typography (smart quote / em-dash)", async () => {
+    // The reference library carries the ORIGINAL typography (smart apostrophe +
+    // em-dash) because sanitizeHookText doesn't normalize it. Claude echoes the
+    // line but "corrects" ’→' and —→-. Pre-fix this failed the verbatim match,
+    // retried once, gave up ineligible — and dropped EVERY clip idea (the
+    // futurepedia / hubspot-brasil regression: refs use — and ’).
+    const referenceSmart =
+      "Stop wasting time on irrelevant info—here’s how to laser-focus your research";
+    const anchorStraight =
+      "Stop wasting time on irrelevant info-here's how to laser-focus your research";
+    const { client, create } = makeClient([
+      { ...ELIGIBLE_INPUT, blueprintAnchorHook: anchorStraight },
+    ]);
+    const { candidate } = await writeFormatHookForSection(
+      baseArgs({
+        client,
+        referenceHooks: [{ hook: referenceSmart, views: 500_000 }],
+      }),
+    );
+
+    // Passes on the FIRST call — no corrective retry needed.
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(candidate.eligible).toBe(true);
+    expect(candidate.hook).toBe(ELIGIBLE_INPUT.hook);
+  });
+
   it("sends the format's subject rule AND the strict anti-reframing language in the system prompt", async () => {
     const { client, create } = makeClient([
       { eligible: false, reason: "n/a" },

@@ -234,6 +234,27 @@ function formatReferenceLibrary(
   };
 }
 
+/** Fold a hook down to a punctuation-insensitive key for the blueprint-anchor
+ *  match. The writer (Claude Haiku, since the 2026-08-13 switch back to
+ *  Anthropic) faithfully echoes most of a reference line but silently
+ *  "corrects" its typography — smart quotes → straight, em/en-dash → hyphen,
+ *  ellipsis char → "...". `sanitizeHookText` doesn't strip those, so the
+ *  reference library still carries the originals; a copy that differs only in
+ *  those characters used to fail the exact-match check and drop EVERY clip idea
+ *  (the futurepedia / hubspot-brasil regression whose refs use — and ’).
+ *  Canonicalizing both sides lets a faithful copy through while still blocking
+ *  a genuinely invented anchor. */
+function canonicalizeForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, "-")
+    .replace(/…/g, "...")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function validate(
   raw: unknown,
   args: HookGenerateArgs,
@@ -297,10 +318,8 @@ function validate(
   // Blueprint anchor must match the reference library when one exists.
   let blueprintAnchor: string | null = null;
   if (allowedHooks.length > 0) {
-    const allowedSet = new Set(
-      allowedHooks.map((h) => h.toLowerCase().replace(/\s+/g, " ").trim()),
-    );
-    const norm = blueprintAnchorRaw.toLowerCase().replace(/\s+/g, " ").trim();
+    const allowedSet = new Set(allowedHooks.map(canonicalizeForMatch));
+    const norm = canonicalizeForMatch(blueprintAnchorRaw);
     if (!norm || !allowedSet.has(norm)) {
       return {
         error: `blueprintAnchorHook "${blueprintAnchorRaw.slice(0, 60)}…" not in REFERENCE LIBRARY`,
