@@ -64,6 +64,17 @@ export interface SCTweet {
       media?: Array<{ media_url_https: string }>;
     };
   };
+  /** Author of the tweet. For a plain retweet, SC dereferences to the
+   *  original tweet, so this is the ORIGINAL author's handle — the signal
+   *  the account-content sync uses to skip retweets of accounts we don't
+   *  own. A quote tweet's top-level author is the quoter, so quotes keep
+   *  their own handle here. Same shape parsed in `enrichment/twitter.ts`
+   *  and `post-metadata.ts`. */
+  core?: {
+    user_results?: {
+      result?: { legacy?: { screen_name?: string } };
+    };
+  };
   views?: { count?: string; state?: string };
 }
 

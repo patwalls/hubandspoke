@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { normalizeLinkedInCompanyPost } from "./account-content-sync";
+import {
+  isForeignRetweet,
+  normalizeLinkedInCompanyPost,
+} from "./account-content-sync";
+import type { SCTweet } from "./sc-fetchers";
 
 // Real shape returned by `/v1/linkedin/company/posts` (verified live 2026-06-17
 // against linkedin.com/company/starterstory123 and /shopify): lean post objects
@@ -74,5 +78,73 @@ describe("normalizeLinkedInCompanyPost", () => {
     expect(item!.contentBody).toBeNull();
     expect(item!.publishedAt).toBeNull();
     expect(item!.publishedDate).toBeNull();
+  });
+});
+
+// Regression for the tibo/saj_adib incident (2026-09): a retweet by
+// @saj_adib of @thsottiaux was ingested as saj's own original post. SC
+// dereferences a plain retweet to the ORIGINAL tweet, so the row carried
+// tibo's tweet ID — and Twitter's embed widget resolves by ID (ignoring
+// the handle in the URL), rendering tibo's tweet on a saj_adib page.
+describe("isForeignRetweet", () => {
+  function tweet(opts: {
+    author?: string;
+    fullText?: string;
+  }): SCTweet {
+    return {
+      __typename: "Tweet",
+      rest_id: "2089082893804896524",
+      url: "https://x.com/saj_adib/status/2089082893804896524",
+      legacy: {
+        full_text: opts.fullText ?? "some tweet body",
+        created_at: "Sun Aug 16 12:00:00 +0000 2026",
+        favorite_count: 0,
+        retweet_count: 0,
+        reply_count: 0,
+        bookmark_count: 0,
+        id_str: "2089082893804896524",
+      },
+      core: opts.author
+        ? { user_results: { result: { legacy: { screen_name: opts.author } } } }
+        : undefined,
+    };
+  }
+
+  it("skips a retweet of an account we don't own (author != synced handle)", () => {
+    expect(isForeignRetweet(tweet({ author: "thsottiaux" }), "saj_adib")).toBe(
+      true,
+    );
+  });
+
+  it("keeps our own original post (author == synced handle)", () => {
+    expect(isForeignRetweet(tweet({ author: "saj_adib" }), "saj_adib")).toBe(
+      false,
+    );
+  });
+
+  it("keeps a quote tweet — its top-level author is us, not the quoted account", () => {
+    // A quote's body is our own commentary (no `RT @` prefix) and its
+    // top-level author is the quoter.
+    expect(
+      isForeignRetweet(
+        tweet({ author: "saj_adib", fullText: "this is a great point 👇" }),
+        "saj_adib",
+      ),
+    ).toBe(false);
+  });
+
+  it("normalizes @ prefix and case when comparing handles", () => {
+    expect(isForeignRetweet(tweet({ author: "Saj_Adib" }), "@saj_adib")).toBe(
+      false,
+    );
+  });
+
+  it("falls back to the RT @ marker when the author block is missing", () => {
+    expect(
+      isForeignRetweet(
+        tweet({ fullText: "RT @thsottiaux: original tweet body" }),
+        "saj_adib",
+      ),
+    ).toBe(true);
   });
 });

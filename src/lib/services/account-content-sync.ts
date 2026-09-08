@@ -634,13 +634,49 @@ async function fetchLinkedInCompanyPostsPaged(
   return { items, credits };
 }
 
+/** Normalize an X handle for comparison: strip a leading @ and lowercase.
+ *  Twitter handles are case-insensitive. */
+function normalizeXHandle(handle: string): string {
+  return handle.replace(/^@/, "").toLowerCase();
+}
+
+/** True when a tweet in a user's timeline is a retweet of an account we
+ *  don't own — i.e. the tweet's author isn't the handle we're syncing.
+ *
+ *  SC dereferences a plain retweet to the ORIGINAL tweet, so its
+ *  `rest_id`, body, metrics, and `core.user_results` author all belong to
+ *  the retweeted account. Ingesting that as our own post records the wrong
+ *  tweet ID (embeds resolve by ID, not by the handle in the URL, so the
+ *  page renders the original author's tweet — the tibo/saj_adib incident,
+ *  2026-09) plus the wrong body and metrics.
+ *
+ *  Quote tweets are kept: their top-level author is the quoter (us), and
+ *  the quoted tweet is nested — so `core.user_results` matches our handle
+ *  and the `RT @` prefix is absent. */
+export function isForeignRetweet(t: SCTweet, syncedHandle: string): boolean {
+  const author = t.core?.user_results?.result?.legacy?.screen_name;
+  if (author && normalizeXHandle(author) !== normalizeXHandle(syncedHandle)) {
+    return true;
+  }
+  // Belt-and-suspenders: the classic retweet marker, in case the author
+  // block is missing on a given payload.
+  return /^RT @/.test(t.legacy?.full_text ?? "");
+}
+
 async function fetchXTweetsLatest(
   handle: string
 ): Promise<{ items: NormalizedItem[]; credits: number }> {
   const data = await scGetJson("/v1/twitter/user-tweets", { handle });
   const tweets: SCTweet[] = data.tweets || [];
-  const items: NormalizedItem[] = tweets
-    .filter((t) => t.rest_id && t.url && t.legacy)
+  const eligible = tweets.filter((t) => t.rest_id && t.url && t.legacy);
+  const own = eligible.filter((t) => !isForeignRetweet(t, handle));
+  const skippedRetweets = eligible.length - own.length;
+  if (skippedRetweets > 0) {
+    console.info(
+      `[x-sync] handle=${handle} skipped ${skippedRetweets} retweet(s) of accounts we don't own (kept ${own.length})`
+    );
+  }
+  const items: NormalizedItem[] = own
     .map((t) => {
       const fullText = t.legacy.full_text || "";
       const thumbnail = t.legacy.entities?.media?.[0]?.media_url_https ?? null;

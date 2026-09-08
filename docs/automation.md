@@ -408,6 +408,13 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   (homepage, "Twitter Post", reused Klaviyo links) appear thousands of
   times in legitimate rows; `scripts/backfill-find-duplicates.mjs` surfaces
   URL-level collisions for manual audit instead.
+- **X retweet skip:** the X path (`fetchXTweetsLatest`) skips retweets of
+  accounts we don't own — SC dereferences a plain retweet to the ORIGINAL
+  tweet, so ingesting it records the retweeted account's tweet ID/body/metrics
+  as our own post (embeds resolve by ID, not the handle in the URL — the
+  tibo/saj_adib incident, 2026-09). `isForeignRetweet` skips a tweet whose
+  author (`core.user_results…screen_name`) ≠ the synced handle, or that carries
+  the `RT @` marker. Quote tweets are KEPT (their top-level author is us).
 - **Downstream:** none directly — the newly-synced items enter the normal
   enrichment / hook / transcript lifecycle on the next sweep
 - **Per-platform pagination:**
