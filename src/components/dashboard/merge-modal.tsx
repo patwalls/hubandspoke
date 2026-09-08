@@ -217,7 +217,7 @@ export function MergeModal({
               <p className="font-medium">What will happen:</p>
               <ul className="text-xs space-y-1 text-muted-foreground">
                 <li>✓ Keep "{primaryItem.title}" with all your comments and history</li>
-                <li>✓ Transfer view data: {(primaryItem.views || 0).toLocaleString()} + {(selectedSecondaryItem.views || 0).toLocaleString()} = {((primaryItem.views || 0) + (selectedSecondaryItem.views || 0)).toLocaleString()} views</li>
+                <li>✓ Keep view data: {Math.max(primaryItem.views || 0, selectedSecondaryItem.views || 0).toLocaleString()} views (higher of the two, no double-counting)</li>
                 <li>✓ Future view updates will sync automatically</li>
                 <li>✓ Archive the duplicate "{selectedSecondaryItem.title}"</li>
               </ul>
