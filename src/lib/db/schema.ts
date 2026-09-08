@@ -836,6 +836,37 @@ export const clipSections = pgTable(
   ]
 );
 
+// One row per (pillar, clippable format) that `clip-idea-drought-watch` has
+// already emailed about. Its whole job is de-dup: the watcher alerts exactly
+// ONCE per gap (a freshly-processed pillar that routed to a clippable format,
+// had sections detected, but produced zero clip ideas — the silent-failure
+// fingerprint), never a daily repeat. If the gap is later fixed and
+// regenerated, the row simply stays; no further alert is possible for that
+// pair. Rows are cascade-deleted with the pillar or format.
+export const clipIdeaDroughtAlerts = pgTable(
+  "clip_idea_drought_alerts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    pillarId: uuid("pillar_id")
+      .references((): AnyPgColumn => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    formatId: uuid("format_id")
+      .references((): AnyPgColumn => formats.id, { onDelete: "cascade" })
+      .notNull(),
+    /** Denormalized for the alert body / audit without a join. */
+    formatName: text("format_name").notNull(),
+    alertedAt: timestamp("alerted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_clip_idea_drought_pillar_format").on(
+      table.pillarId,
+      table.formatId,
+    ),
+  ]
+);
+
 // Schema describing the fields a draft contains. Keyed by *platform* (where
 // the post lives) — see `src/lib/platform-field-schemas.ts` for the
 // authoritative map. The `prompt` on each field is the AI directive used at

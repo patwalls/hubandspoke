@@ -722,6 +722,13 @@
       "when": 1788458190257,
       "tag": "0102_faithful_hedge_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1788892702802,
+      "tag": "0103_silent_living_lightning",
+      "breakpoints": true
     }
   ]
 }

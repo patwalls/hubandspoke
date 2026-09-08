@@ -68,6 +68,7 @@ import {
   scCreditsWatchTask,
   descriptCreditsWatchTask,
   ytArchiveWatchTask,
+  clipIdeaDroughtWatchTask,
 } from "./scheduled";
 import { thresholdMonitorSweepTask } from "./threshold-monitor-sweep";
 import {
@@ -176,6 +177,7 @@ export interface TaskPayloads {
   "sc-credits-watch": Record<string, never>;
   "descript-credits-watch": Record<string, never>;
   "yt-archive-watch": Record<string, never>;
+  "clip-idea-drought-watch": Record<string, never>;
   "worker-heartbeat": Record<string, never>;
   "klaviyo-sync-sweep": Record<string, never>;
 }
@@ -235,6 +237,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "sc-credits-watch": scCreditsWatchTask,
   "descript-credits-watch": descriptCreditsWatchTask,
   "yt-archive-watch": ytArchiveWatchTask,
+  "clip-idea-drought-watch": clipIdeaDroughtWatchTask,
   "worker-heartbeat": workerHeartbeatTask,
   "klaviyo-sync-sweep": klaviyoSyncSweepTask,
 };

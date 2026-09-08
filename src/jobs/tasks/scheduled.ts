@@ -18,6 +18,7 @@ import type { ExtractPosterPayload } from "./extract-poster";
 import { maybeAlertScCreditsExhausted } from "@/lib/services/sc-credits-watch";
 import { maybeAlertDescriptCreditsExhausted } from "@/lib/services/descript-credits-watch";
 import { maybeAlertYtArchiveBehind } from "@/lib/services/yt-archive-watch";
+import { maybeAlertClipIdeaDrought } from "@/lib/services/clip-idea-drought-watch";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
 import { sendDailyScorecardEmail } from "@/lib/email";
@@ -448,6 +449,34 @@ export const ytArchiveWatchTask: Task = async (_payload, helpers) => {
   } catch (err) {
     helpers.logger.error(
       `yt-archive-watch failed (${Date.now() - start}ms): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    throw err;
+  }
+};
+
+/**
+ * Watchdog for silent clip-idea generation failures. A freshly-published
+ * pillar that the pipeline fully processed (transcript + detected sections)
+ * yet produced ZERO clip ideas for a format it routes to is the fingerprint of
+ * a broken generator — exactly the reference-library punctuation bug that
+ * silently zeroed out futurepedia / hubspot-brasil for ~2 weeks in Sep 2026.
+ * Emails ALERT_RECIPIENTS once per (pillar, format) gap (de-duped via the
+ * `clip_idea_drought_alerts` table — never a daily repeat) and captures a
+ * grouped Sentry event. Cheap: one routing query, read-only, no LLM calls.
+ */
+export const clipIdeaDroughtWatchTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("clip-idea-drought-watch start");
+  try {
+    const result = await maybeAlertClipIdeaDrought();
+    helpers.logger.info(
+      `clip-idea-drought-watch ${result.reason} sent=${result.sent} gapCount=${result.gapCount} (${Date.now() - start}ms)`,
+    );
+  } catch (err) {
+    helpers.logger.error(
+      `clip-idea-drought-watch failed (${Date.now() - start}ms): ${
         err instanceof Error ? err.message : String(err)
       }`,
     );

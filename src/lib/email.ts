@@ -409,3 +409,75 @@ launchctl list | grep yt-archive   # 2nd column = last exit code</pre>
     `,
   });
 }
+
+export async function sendClipIdeaDroughtEmail(opts: {
+  to: string;
+  gapCount: number;
+  gaps: Array<{
+    pillarId: string;
+    title: string | null;
+    brand: string | null;
+    sourceChannel: string | null;
+    publishedDate: string | null;
+    formatName: string;
+    sectionCount: number;
+  }>;
+}) {
+  const baseUrl =
+    process.env.NEXTAUTH_URL?.replace(/\/$/, "") || "http://localhost:3000";
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const itemUrl = (brand: string | null, id: string) =>
+    `${baseUrl}/${brand ?? "unknown"}/content/${id}?tab=clip-ideas`;
+
+  const subject = `[Hub & Spoke] Clip-idea drought: ${opts.gapCount} video/format gap${opts.gapCount === 1 ? "" : "s"}`;
+
+  const linesText = opts.gaps
+    .map(
+      (g) =>
+        `  - [${g.brand ?? "?"} / ${g.sourceChannel ?? "?"}] "${g.title ?? g.pillarId}" (published ${g.publishedDate ?? "?"}): ${g.sectionCount} sections detected, 0 ideas for "${g.formatName}"\n    ${itemUrl(g.brand, g.pillarId)}`,
+    )
+    .join("\n");
+  const linesHtml = opts.gaps
+    .map(
+      (g) =>
+        `<li style="margin-bottom:8px;">[${esc(g.brand ?? "?")} / ${esc(g.sourceChannel ?? "?")}] <a href="${itemUrl(g.brand, g.pillarId)}">${esc(g.title ?? g.pillarId)}</a> (published ${g.publishedDate ?? "?"}) — <strong>${g.sectionCount}</strong> sections detected, <strong>0 ideas</strong> for <em>${esc(g.formatName)}</em></li>`,
+    )
+    .join("");
+
+  // States the fingerprint plainly, not a cause. "Sections detected but 0
+  // ideas" means the pipeline ran and the per-section hook writer came up
+  // empty — most often a reference-library / eligibility issue, occasionally a
+  // format genuinely unfit for the video. The link is where to look.
+  const lines = [
+    `${opts.gapCount} recently-published video/format pair(s) were fully processed (transcript + clip sections detected) but produced ZERO clip ideas for a format they route to. This is the silent-failure fingerprint — the pipeline ran and came up empty.`,
+    "",
+    linesText,
+    "",
+    "Where to look:",
+    "  - Open the video's Clip Ideas tab (link above) and hit Regenerate to see what happens.",
+    "  - Worker logs for the reason each section was skipped:",
+    "      heroku logs --app hubandspoke --dyno worker | grep clip-hook-agent",
+    "",
+    "You'll only get this once per (video, format) — it won't repeat daily.",
+    "",
+    "— Hub & Spoke",
+  ];
+
+  return sendMail({
+    to: opts.to,
+    subject,
+    text: lines.join("\n"),
+    html: `
+      <p><strong>${opts.gapCount}</strong> recently-published video/format pair(s) were fully processed (transcript + clip sections detected) but produced <strong>zero clip ideas</strong> for a format they route to. This is the silent-failure fingerprint — the pipeline ran and came up empty.</p>
+      <ul style="color:#374151;font-size:13px;">${linesHtml}</ul>
+      <p style="margin:0 0 6px;">Where to look:</p>
+      <ul style="color:#374151;font-size:13px;">
+        <li>Open the video's Clip Ideas tab (linked above) and hit <strong>Regenerate</strong>.</li>
+        <li>Worker logs for the per-section skip reason: <code>heroku logs --app hubandspoke --dyno worker | grep clip-hook-agent</code></li>
+      </ul>
+      <p style="color:#666;font-size:12px;">You'll only get this once per (video, format) — it won't repeat daily.</p>
+      <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
+    `,
+  });
+}

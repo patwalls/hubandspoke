@@ -37,6 +37,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   */15 min   sc-credits-watch       → email Pat + Sam when SC returns HTTP 402 (deduped 4h)
   */15 min   descript-credits-watch → email Pat + Sam when Descript jobs hit "Insufficient AI credits" (deduped 4h)
   *:45       yt-archive-watch       → Sentry issue + email Pat + Sam when YouTube items sit unarchived >12h (home-machine cron down; email deduped 6h)
+  15:30 UTC  clip-idea-drought-watch → Sentry warning + email Pat + Sam when a freshly-published, transcribed, sectioned video routes to a clippable format but produced 0 clip ideas (deduped per pillar+format, never repeats)
   (home Mac, hourly) yt-archive launchd cron → archive-yt-local.ts: yt-dlp → prod S3 + prod DB. NOT on the worker dyno — see home-machine/yt-archive/. Runs `--brands=auto` (2026-08-20): brand list resolved from the DB each run = every brand with an active YouTube account, so onboarding a brand in the settings UI is enough
   (home Mac, hourly) H&S OPS LOOP — `/go` (usually via `cx hubandspoke --go`) runs
     `.claude/commands/lap.md` on repeat through the shared fresh-context runner
@@ -953,6 +954,35 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   `yt-archive-behind` alert, confirm against
   `~/Library/Logs/hubandspoke-yt-archive.log` before concluding the cron is
   down** — attempts=0 is now trustworthy, but the log is authoritative.
+### `clip-idea-drought-watch` — silent clip-idea generation failure alert
+- **Trigger:** cron `30 15 * * *` (daily at 15:30 UTC ≈ 11:30am ET). Added
+  2026-09-08 after futurepedia's "Repackage Section w/ Hook" ideas silently
+  stopped for 14 days (root cause: Haiku normalised smart-quote apostrophes on
+  echo, causing all blueprint-anchor matches to fail; fixed in
+  `clip-hook-agent.ts` the same day).
+- **Files:** `src/jobs/tasks/scheduled.ts` (`clipIdeaDroughtWatchTask`),
+  `src/lib/services/clip-idea-drought-watch.ts` (detection + dedupe),
+  `src/lib/email.ts` (`sendClipIdeaDroughtEmail`),
+  `src/lib/services/alert-recipients.ts`,
+  `src/lib/db/schema.ts` (`clipIdeaDroughtAlerts`)
+- **Inputs:** `productionItems` (youtube_long, Published, not deleted) published
+  within the last 7 days that have a transcript AND ≥1 live `clip_sections` row,
+  route to ≥1 clippable format under `getClippableFormatsForSourceAccount` rules
+  (root via `format_trigger_sources`, derivative via parent's `format_channels`),
+  but have **zero** `clip_ideas` rows for that format — meaning the pipeline ran
+  and came up empty, not "video not yet processed".
+- **Dedup:** one row per `(pillar_id, format_id)` in `clip_idea_drought_alerts`.
+  Once a gap is recorded it never re-alerts, even if the gap persists. If
+  ideas are later regenerated, the row stays — no false-positive repeat.
+- **Outputs:**
+  - **Sentry warning** (fingerprint `clip-idea-drought`) with gap count + 5-row
+    sample.
+  - Email to `ALERT_RECIPIENTS` (Pat + Sam), one email per drought-watch run
+    (not per gap). Recording to `clip_idea_drought_alerts` is gated on ≥1
+    successful send — if all sends fail, the next run retries the same gaps.
+- **Downstream:** none. The alert names the pillar + format + section count so
+  the operator can manually trigger `generate-clip-ideas` or investigate the
+  blueprint-anchor / hook-writer logs.
 - **Brand scope:** the home cron only archives the brands in its env file
   (`BRANDS` in `~/.config/hubandspoke/yt-archive.env`). The watchdog mirrors
   that list in `DEFAULT_WATCH_BRANDS`, overridable without a deploy via the
