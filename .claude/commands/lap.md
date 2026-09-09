@@ -29,8 +29,8 @@ Pat pays per lap — keep green laps NEAR-FREE:
   to know Pat already ruled on something; skipping this is how you re-raise a closed issue.
 - And one `loops policy --loop hubandspoke` — its `blocked` list is Pat's board as it stands:
   each line this loop has already asked of him, and how long he has waited. Those lines go
-  back on this lap's emit byte for byte (see the report section); a fresh context has no
-  other way to know what Pat still owes.
+  back on this lap's emit — the action byte for byte, the evidence after it refreshed (see
+  the report section); a fresh context has no other way to know what Pat still owes.
 - Batch the whole green-path checklist into 2–3 Bash calls. **All green → one log line,
   END THE LAP.** No narrative, no exploration, no "while I'm here".
 - Only a flagged check earns more tool calls. An investigation that hasn't classified its
@@ -294,6 +294,17 @@ than a lap. `loops policy` returns `blocked` as `[{text, since_utc, waiting}]`: 
 Pat; drop a line when its condition clears (the issue closed, the human acted); change a
 line's wording only when the ask itself changed. Rewriting it from memory makes it a new
 item to the ledger.
+
+Copying is not freezing. The action is the opening clause; everything after it — the
+parenthetical, the `open N laps` tail — is evidence, and evidence goes stale while the ask
+stands. Measured 2026-09-09 by the `loops` meta-loop: the Canva line still read "open 87
+laps" at lap 603, a count that was true at lap 544 when the paragraph above was written
+and had been handed back unchanged for 60 laps since — a true ask carrying a stale number,
+which reads to Pat as "nothing has moved". Each lap, read the evidence half against the
+issue; when it is no longer true, rewrite THAT half with this lap's facts (the lap count,
+what still fails) and keep the opening clause byte for byte. The ledger matches on the
+opening clause and masks numbers, so a refreshed count inherits the wait; only a rewritten
+action resets it.
 
 **A service logged Pat out / a token expired (401, "session expired", invalid key):**
 that is never your finding to narrate — run
