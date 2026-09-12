@@ -98,6 +98,11 @@ export async function findStaleYtItems(limit = 50): Promise<
         eq(productionItems.status, "Published"),
         isNotNull(productionItems.youtubeId),
         isNull(productionItems.mediaS3Key),
+        // The home cron's candidate query filters `deleted_at IS NULL`
+        // (scripts/archive-yt-local.ts), so a soft-deleted item is never
+        // archived by design and its attempts stay 0 forever — without this
+        // it camps in the alert for the whole LOOKBACK_DAYS window.
+        isNull(productionItems.deletedAt),
         sql`COALESCE(${productionItems.youtubeDownloadAttempts}, 0) = 0`,
         inArray(productionItems.brand, brands),
         gte(productionItems.publishedDate, lookbackDate),

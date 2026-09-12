@@ -43,6 +43,16 @@ describe("yt-archive-watch findStaleYtItems", () => {
     expect(await staleIds()).not.toContain(item.id);
   });
 
+  it("ignores soft-deleted items (the home cron skips them too)", async () => {
+    const item = await createTestProductionItem({
+      postType: "youtube_long",
+      youtubeId: "auto",
+      publishedAt: new Date(Date.now() - 24 * HOURS),
+      deletedAt: new Date(Date.now() - 23 * HOURS),
+    });
+    expect(await staleIds()).not.toContain(item.id);
+  });
+
   it("ignores items still inside the grace window", async () => {
     const item = await createTestProductionItem({
       postType: "youtube_long",

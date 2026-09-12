@@ -917,7 +917,8 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   `src/lib/email.ts` (`sendYtArchiveBehindEmail`),
   `src/lib/services/alert-recipients.ts`
 - **Inputs:** `productionItems` where `status='Published' AND youtube_id IS
-  NOT NULL AND media_s3_key IS NULL AND COALESCE(youtube_download_attempts,0)=0`,
+  NOT NULL AND media_s3_key IS NULL AND deleted_at IS NULL AND
+  COALESCE(youtube_download_attempts,0)=0`,
   brand in the watched set, published more than 12h ago (grace window) and
   within the last 30 days (the home cron's own look-back).
 - **Outputs:**
@@ -954,6 +955,18 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   `yt-archive-behind` alert, confirm against
   `~/Library/Logs/hubandspoke-yt-archive.log` before concluding the cron is
   down** — attempts=0 is now trustworthy, but the log is authoritative.
+- **`deleted_at IS NULL` is load-bearing (added 2026-09-12).** The home cron's
+  candidate query filters soft-deleted rows (`scripts/archive-yt-local.ts`), so
+  a deleted item is never archived *by design* — its `youtube_download_attempts`
+  stays 0 forever. Without the matching filter here, one soft-deleted item trips
+  the watchdog every tick for the full 30-day look-back: a Sentry event hourly
+  plus an email to Pat + Sam every 6h, all describing a cron that is running
+  fine. Caught in production by item `48b994d6` (brand futurepedia, published
+  2026-09-11 18:30Z, deleted 20 minutes later at 18:50Z) — the archiver logged
+  `0 candidates` on every hourly tick while `yt-archive-behind` fired. **Any
+  predicate added to the home cron's candidate query has to be mirrored here**,
+  or the watchdog alarms on work the archiver was never going to do.
+
 ### `clip-idea-drought-watch` — silent clip-idea generation failure alert
 - **Trigger:** cron `30 15 * * *` (daily at 15:30 UTC ≈ 11:30am ET). Added
   2026-09-08 after futurepedia's "Repackage Section w/ Hook" ideas silently

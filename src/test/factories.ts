@@ -424,6 +424,8 @@ export interface CreateTestProductionItemOptions {
   /** youtube_id has a unique index — factories randomize when set to "auto". */
   youtubeId?: string | null;
   youtubeDownloadAttempts?: number;
+  /** Soft-delete marker — set to prove deleted rows are excluded. */
+  deletedAt?: Date | null;
 }
 
 /**
@@ -486,6 +488,7 @@ export async function createTestProductionItem(
       youtubeId:
         opts.youtubeId === "auto" ? `vitest-${randomSuffix()}` : (opts.youtubeId ?? null),
       youtubeDownloadAttempts: opts.youtubeDownloadAttempts ?? 0,
+      deletedAt: opts.deletedAt ?? null,
     })
     .returning();
   trackCleanup("productionItems", row.id);
