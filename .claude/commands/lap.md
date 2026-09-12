@@ -291,7 +291,8 @@ Canva issue #22 (brand template EAHT_O access denied…") and off it for the oth
 while the issue stood the whole time — so Pat saw the ask one lap in two and never older
 than a lap. `loops policy` returns `blocked` as `[{text, since_utc, waiting}]`: hand each
 `text` back to `--blocked` unchanged, one ask per line. Add a line when something new needs
-Pat; drop a line when its condition clears (the issue closed, the human acted); change a
+Pat; drop a line when its condition clears (the issue closed, the human acted, or a firing
+`cred/*` page already asks it); change a
 line's wording only when the ask itself changed. Rewriting it from memory makes it a new
 item to the ledger.
 
@@ -314,3 +315,12 @@ issue, not when someone else fixes the creds: every lap, if `loops alert list` s
 `cred/<service>` firing and the service authenticates now, run `loops cred ok <service>`
 (canva stayed "Log back in" for hours on 2026-09-02 after the fix was verified and issue #20
 closed). Applies to every external credential: Heroku, Sentry, Brave, Mezmo, LinkedIn, npm. A metered plan that ran dry (402, "credits exhausted") is the same channel with `--reason out-of-credit`, so the subject says "Top up:" instead of "Log back in:" (brave paged as a login on 2026-09-03 while its own body said it was billing).
+
+**The cred page is the whole escalation — never also hand the same item to `--blocked`.**
+Pat's needs-you board already shows a firing `cred/*` row with its true age, so a blocker
+twin is a second row with a younger clock. Measured 2026-09-08 by the `loops` meta-loop: the
+board carried the Brave top-up three times — the page at 5d04h, home's line at 2d11h,
+starter-story's at 1d06h — and starter-story's line, written a minute after that same lap had
+re-fired the page with the right words, still called the page's wording wrong thirty hours
+later. If `loops policy` hands you a standing line that asks what a firing `cred/*` row
+already asks, drop it and say so in `--did`.
