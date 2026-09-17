@@ -16,6 +16,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { ClipEditDoc } from "@/lib/clip-editor/doc";
 
 export const productionItems = pgTable(
   "production_items",
@@ -760,6 +761,101 @@ export const clipIdeas = pgTable(
       table.targetFormat
     ),
     index("idx_clip_ideas_clip_section_id").on(table.clipSectionId),
+  ]
+);
+
+/**
+ * In-app clip editor (feature-flagged `clipEditor`, 2026-09-17). One row per
+ * clip idea being edited in Hub & Spoke instead of Descript.
+ *
+ * `doc` is a versioned ClipEditDoc (src/lib/clip-editor/doc.ts) — the
+ * editor's intent: which source ranges play, what was removed and why, and
+ * the overlay layers. Nothing derivable is stored; the preview and the export
+ * both re-derive their timeline from this one document.
+ *
+ * `revision` is an optimistic-concurrency counter: every save sends the
+ * revision it loaded and the UPDATE only lands if it still matches, so two
+ * tabs can't silently overwrite each other's edits.
+ */
+export const clipEdits = pgTable(
+  "clip_edits",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    clipIdeaId: uuid("clip_idea_id")
+      .references((): AnyPgColumn => clipIdeas.id, { onDelete: "cascade" })
+      .notNull(),
+    doc: jsonb("doc").$type<ClipEditDoc>().notNull(),
+    revision: integer("revision").notNull().default(1),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [uniqueIndex("clip_edits_clip_idea_uniq").on(table.clipIdeaId)]
+);
+
+/**
+ * One row per export of a clip edit. Append-only history: re-exporting
+ * inserts a new row rather than mutating the old one.
+ *
+ * `doc` is a SNAPSHOT of the edit at export time, so a render is reproducible
+ * from its own row and immune to edits made while it runs. The worker task
+ * (`clip-render`) reads only this row.
+ *
+ * Status: queued → rendering → done | failed | superseded. `superseded`
+ * means a newer export for the same item started before this one finished.
+ * `heartbeatAt` ticks with progress so a render whose worker died (no
+ * exception to catch) reads as stalled instead of "rendering" forever — the
+ * failure mode that stranded Descript publishes for weeks (see
+ * docs/automation.md → Descript publish + archive).
+ */
+export const clipRenders = pgTable(
+  "clip_renders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    clipEditId: uuid("clip_edit_id")
+      .references(() => clipEdits.id, { onDelete: "cascade" })
+      .notNull(),
+    // The clip's own production item (the queue-side row pre-created for the
+    // idea) — where the rendered MP4 lands as media index 0.
+    productionItemId: uuid("production_item_id")
+      .references((): AnyPgColumn => productionItems.id, {
+        onDelete: "cascade",
+      })
+      .notNull(),
+    doc: jsonb("doc").$type<ClipEditDoc>().notNull(),
+    status: text("status").notNull().default("queued"),
+    /** 0–100. */
+    progress: integer("progress").notNull().default(0),
+    error: text("error"),
+    outputS3Bucket: text("output_s3_bucket"),
+    outputS3Key: text("output_s3_key"),
+    outputSizeBytes: bigint("output_size_bytes", { mode: "number" }),
+    durationSec: decimal("duration_sec"),
+    /** Wall-clock seconds the ffmpeg pass took — the number to watch when
+     *  deciding whether renders need their own dyno. */
+    renderSeconds: decimal("render_seconds"),
+    requestedByUserId: uuid("requested_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_clip_renders_item_created").on(
+      table.productionItemId,
+      table.createdAt
+    ),
+    index("idx_clip_renders_edit").on(table.clipEditId),
   ]
 );
 
@@ -1642,7 +1738,7 @@ export type ContentChangeSource =
         | "cross-post-classifier"
         | "enrichment";
     }
-  | { kind: "tool"; tool: "descript" | "canva" | "typefully" }
+  | { kind: "tool"; tool: "descript" | "canva" | "typefully" | "clip-editor" }
   | { kind: "sync"; system: "notion" | "account-content" | "metrics" }
   | { kind: "import" }
   | { kind: "api" };

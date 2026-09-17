@@ -149,7 +149,7 @@ type ToolActionPayload = {
 type ContentChangeSource =
   | { kind: "user" }
   | { kind: "algorithm"; name: string }
-  | { kind: "tool"; tool: "descript" | "canva" | "typefully" }
+  | { kind: "tool"; tool: "descript" | "canva" | "typefully" | "clip-editor" }
   | { kind: "sync"; system: "notion" | "account-content" | "metrics" }
   | { kind: "import" }
   | { kind: "api" };
@@ -220,6 +220,7 @@ const TOOL_REGISTRY: Record<
   { label: string; Icon: LucideIcon; accent: string }
 > = {
   descript: { label: "Descript", Icon: FilmIcon, accent: "text-purple-600" },
+  "clip-editor": { label: "Clip Editor", Icon: ScissorsIcon, accent: "text-indigo-600" },
   typefully: { label: "Typefully", Icon: SendIcon, accent: "text-blue-600" },
   zernio: { label: "TikTok", Icon: SendIcon, accent: "text-rose-600" },
 };

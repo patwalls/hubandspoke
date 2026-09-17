@@ -206,6 +206,34 @@ account also cascades the flag to every production item linked to it.
   WHERE id = '…';`. If a restore UI is ever needed it's a small addition to
   the Accounts page.
 
+## Feature flags — shipping unfinished work to production
+
+When a feature should be live in production for a few named people only, use
+`src/lib/feature-flags.ts`. A flag is a hardcoded allowlist of emails; there is
+no percentage rollout, table, or admin UI on purpose.
+
+1. Add the flag to `FLAGS` with its allowlist and a `FEATURE_<NAME>_EMAILS`
+   env var name. The env var can only **extend** the allowlist (e.g. to let
+   `e2e@local.test` through on a dev server) — never replace it.
+2. **Gate the server first.** Every route behind the flag calls
+   `requireFeature("<flag>")` from `src/lib/auth-guards.ts`, which 404s for
+   everyone else. Hiding UI is not a gate.
+3. In client code, read `useFeatureFlags()` and treat `null` (loading or
+   failed) as "off" — a slow or broken flags request must only ever show the
+   existing UI. Lazy-load the flagged component with `next/dynamic` so other
+   users never download it.
+4. **Keep the unflagged path byte-for-byte what it was.** The pattern used by
+   the clip editor: rename the existing component (`ClassicClipTriageDialog`),
+   leave it untouched, and export a thin wrapper under the old name that picks
+   between the two. Callers don't change.
+5. Migrations still ship to everyone — keep them additive (new tables/nullable
+   columns) so the flag is the only thing standing between users and the
+   feature.
+6. Cover both sides in e2e (`tests/e2e/clip-editor.spec.ts` is the template:
+   one test per side, each skipping when the signed-in user is on the other).
+7. When the feature graduates, delete the flag and every branch that reads it
+   — don't leave it on at 100%.
+
 ## Removing a feature
 
 1. Mark the feature `Planned-removal` in `docs/features.md` with a short note

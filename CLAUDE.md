@@ -298,6 +298,8 @@ Notes:
 - `src/lib/auth.ts` - Auth.js config
 - `src/lib/email.ts` - Mail client (HubSpot SMTP via nodemailer)
 - `src/jobs/` - Graphile Worker: task registry + enqueue helper + worker entrypoint + crontab
+- `src/lib/feature-flags.ts` - Per-user feature flags (email allowlists; `requireFeature()` gates routes). See `docs/conventions.md` → Feature flags
+- `src/lib/clip-editor/` + `src/components/clip-editor/` - In-app clip editor (flag `clipEditor`): edit doc model → render plan → browser preview / ffmpeg export. Read the header of `doc.ts` before extending
 
 ## Cron / Scheduled Jobs
 Scheduled work runs via **graphile-worker's crontab** on the worker dyno.

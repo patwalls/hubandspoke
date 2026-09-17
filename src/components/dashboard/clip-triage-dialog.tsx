@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -30,6 +31,17 @@ import {
 } from "lucide-react";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { SocialEmbedHeader } from "./preview/social-embed-header";
+import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
+
+// Lazy: the editor bundle (player, stage, font metrics, zustand) is only ever
+// fetched by a browser whose user has the `clipEditor` flag AND opens a clip.
+const ClipEditorDialog = dynamic(
+  () =>
+    import("@/components/clip-editor/clip-editor-dialog").then(
+      (m) => m.ClipEditorDialog,
+    ),
+  { ssr: false },
+);
 
 interface ClipIdeaSummary {
   id: string;
@@ -111,7 +123,36 @@ function fmtTs(sec: number): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-export function ClipTriageDialog({
+/**
+ * Entry point for the queue's clip modal. For users with the `clipEditor`
+ * feature flag it opens the in-app clip editor; for everyone else — and
+ * whenever the editor can't handle the idea (no archived video, no
+ * transcript, already decided through Descript) — it is exactly the classic
+ * dialog below, unchanged. Flags still loading or failed to load = classic.
+ */
+export function ClipTriageDialog(props: Props) {
+  const flags = useFeatureFlags();
+  // Idea ids the editor bounced this session, so we fall back without
+  // re-asking every time the row is reopened.
+  const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
+  const ideaId = props.idea?.id ?? null;
+
+  if (flags?.clipEditor && ideaId && !unsupported.has(ideaId)) {
+    return (
+      <ClipEditorDialog
+        open={props.open}
+        onOpenChange={props.onOpenChange}
+        clipIdeaId={ideaId}
+        brand={props.brand}
+        onDone={props.onDone}
+        onUnsupported={() => setUnsupported((prev) => new Set(prev).add(ideaId))}
+      />
+    );
+  }
+  return <ClassicClipTriageDialog {...props} />;
+}
+
+function ClassicClipTriageDialog({
   open,
   onOpenChange,
   idea,

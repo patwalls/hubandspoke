@@ -61,6 +61,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
+import { ClipRenderStatusPill } from "./clip-render-status-pill";
 const AttachDmKeywordDialog = dynamic(() => import("@/components/dashboard/attach-dm-keyword-dialog").then((m) => m.AttachDmKeywordDialog), { ssr: false });
 const TiktokDraftDialog = dynamic(() => import("./tiktok-draft-dialog").then((m) => m.TiktokDraftDialog), { ssr: false });
 const PublishScheduleDialog = dynamic(() => import("./publish-schedule-dialog").then((m) => m.PublishScheduleDialog), { ssr: false });
@@ -2718,6 +2719,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               </button>
             )}
             <DescriptStatusPill productionItemId={item.id} variant="chip" />
+            <ClipRenderStatusPill
+              productionItemId={item.id}
+              brand={item.brand ?? "starter-story"}
+              onRendered={() => void load()}
+            />
             <CanvaStatusPill productionItemId={item.id} initialItem={item} variant="chip" />
             <TranscriptButton
               itemId={item.id}

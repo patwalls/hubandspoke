@@ -37,9 +37,11 @@ import { afterEach } from "vitest";
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
+import { createDefaultDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import {
   accounts,
   brands,
+  clipEdits,
   clipIdeas,
   contentDrafts,
   descriptLayoutPacks,
@@ -552,3 +554,30 @@ export function pendingCleanupCount(): number {
 // Re-export the table types so test files don't need a second drizzle
 // import when they want to assert on column shapes.
 export { formats, productionItems, clipIdeas, isNotNull };
+
+export interface CreateTestClipEditOptions {
+  clipIdeaId: string;
+  doc?: ClipEditDoc;
+  createdByUserId?: string | null;
+}
+
+/**
+ * Insert a `clip_edits` row (the in-app clip editor's document for one clip
+ * idea). Not tracked for cleanup on its own: it cascades from its clip idea,
+ * which IS tracked — and `clip_renders` cascade from it in turn.
+ */
+export async function createTestClipEdit(
+  opts: CreateTestClipEditOptions,
+): Promise<typeof clipEdits.$inferSelect> {
+  const [row] = await db
+    .insert(clipEdits)
+    .values({
+      clipIdeaId: opts.clipIdeaId,
+      doc:
+        opts.doc ??
+        createDefaultDoc({ startSec: 0, endSec: 30, hook: "vitest clip hook" }),
+      createdByUserId: opts.createdByUserId ?? null,
+    })
+    .returning();
+  return row;
+}

@@ -220,7 +220,7 @@ function formatTimestamp(sec: number): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-interface ClipIdeaRow {
+export interface ClipIdeaRow {
   id: string;
   status: string;
   hook: string;
@@ -245,8 +245,12 @@ interface ClipIdeaRow {
   mediaS3Key: string | null;
 }
 
-async function loadAndGuardClipIdea(
+export async function loadAndGuardClipIdea(
   clipIdeaId: string,
+  /** `allowDecided` skips the already-decided guard — the in-app clip editor
+   *  re-exports an idea it already promoted. Every Descript path leaves it
+   *  off. */
+  opts: { allowDecided?: boolean } = {},
 ): Promise<ClipIdeaRow> {
   const [row] = await db
     .select({
@@ -278,9 +282,10 @@ async function loadAndGuardClipIdea(
 
   if (!row) throw new ClipIdeaNotFoundError();
   if (
-    row.status === "killed" ||
-    row.status === "accepted" ||
-    row.status === "assigned"
+    !opts.allowDecided &&
+    (row.status === "killed" ||
+      row.status === "accepted" ||
+      row.status === "assigned")
   ) {
     throw new ClipIdeaAlreadyDecidedError(row.status);
   }
@@ -295,7 +300,7 @@ async function loadAndGuardClipIdea(
  * so the caller can surface a "run the backfill" error rather than silently
  * creating a duplicate that bypasses the queue pre-creation invariant.
  */
-async function loadClipProductionItemId(clipIdeaId: string): Promise<string> {
+export async function loadClipProductionItemId(clipIdeaId: string): Promise<string> {
   const [row] = await db
     .select({ id: productionItems.id })
     .from(productionItems)
@@ -305,7 +310,7 @@ async function loadClipProductionItemId(clipIdeaId: string): Promise<string> {
   return row.id;
 }
 
-function buildContentBody(row: ClipIdeaRow): string {
+export function buildContentBody(row: ClipIdeaRow): string {
   const startSec = Number(row.startSec);
   const endSec = Number(row.endSec);
   const duration = Math.max(0, Math.round(endSec - startSec));
@@ -320,7 +325,7 @@ function buildContentBody(row: ClipIdeaRow): string {
   ].join("\n");
 }
 
-async function loadEditor(
+export async function loadEditor(
   editorUserId: string,
 ): Promise<{ name: string | null; email: string | null }> {
   const [editor] = await db
@@ -346,7 +351,7 @@ function escapeHtml(s: string): string {
  * panel. Fire-and-forget — a comment-insert failure must never break the
  * promote path. Caller should `void` this.
  */
-async function postClipPromotionComment(args: {
+export async function postClipPromotionComment(args: {
   productionItemId: string;
   actorUserId: string;
   row: ClipIdeaRow;
