@@ -410,7 +410,17 @@ function closeArtifact(kind: Kind, number: number, note: string): void {
   } catch {
     // Labelling is best-effort; failing to label must not leave the artifact open.
   }
-  gh([kind, "close", String(number)]);
+  try {
+    gh([kind, "close", String(number)]);
+  } catch (err) {
+    // A merged PR (or an already-closed issue) is resolved by definition, but gh
+    // refuses to close it again and throws. Letting that escape aborts cmdResolve —
+    // and the cmdStatus sweep — BEFORE the finding is dropped from state, stranding
+    // it as permanently tracked. 2026-09-17: PR #27 was merged by a human, `resolve`
+    // died on "can't be closed because it was already merged", and the finding stayed
+    // on the board with no way to clear it.
+    if (!/already merged|already closed/i.test(String(err))) throw err;
+  }
 }
 
 function cmdStatus(args: Args): void {
