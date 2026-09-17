@@ -28,12 +28,23 @@ const SWITCH_LEAD_SEC = 0.02;
 /** Two segments this close in source time are continuous — don't swap. */
 const CONTIGUOUS_EPSILON_SEC = 0.02;
 
+/**
+ * "clip" plays the edit (the plan's segments, cuts skipped). "preview" plays
+ * the RAW source linearly from wherever the user pointed — footage that is
+ * not in the edit (the rest of the video, or words that were cut). The two
+ * must never be confusable, so the mode rides on every snapshot and every
+ * surface styles itself from it.
+ */
+export type EngineMode = "clip" | "preview";
+
 export interface EngineSnapshot {
+  mode: EngineMode;
   playing: boolean;
   outSec: number;
   durationSec: number;
   /** Source time under the playhead (for the source-time trim strip). */
   sourceSec: number | null;
+  /** -1 in preview mode: the playhead isn't in any segment of the edit. */
   segmentIndex: number;
 }
 
@@ -52,6 +63,10 @@ export class PlaybackEngine {
    *  old frame stays on screen until the new one can actually paint. */
   private pendingReveal = false;
   private primed = false;
+  private mode: EngineMode = "clip";
+  /** Where the clip playhead was when preview began — "Back to clip" and the
+   *  frozen scrub bar both use it. */
+  private heldOutSec = 0;
 
   attach(a: HTMLVideoElement, b: HTMLVideoElement): void {
     this.els = [a, b];
@@ -74,8 +89,18 @@ export class PlaybackEngine {
   }
 
   snapshot(): EngineSnapshot {
-    const seg = this.segments[this.segIndex];
     const el = this.els?.[this.active];
+    if (this.mode === "preview") {
+      return {
+        mode: "preview",
+        playing: this.playing,
+        outSec: this.heldOutSec,
+        durationSec: this.durationSec,
+        sourceSec: el ? el.currentTime : null,
+        segmentIndex: -1,
+      };
+    }
+    const seg = this.segments[this.segIndex];
     let outSec = 0;
     let sourceSec: number | null = null;
     if (seg && el) {
@@ -86,6 +111,7 @@ export class PlaybackEngine {
       outSec = seg.outStartSec + (sourceSec - seg.sourceStartSec);
     }
     return {
+      mode: "clip",
       playing: this.playing,
       outSec,
       durationSec: this.durationSec,
@@ -101,6 +127,16 @@ export class PlaybackEngine {
    * mid-playback doesn't stop the video.
    */
   setPlan(plan: RenderPlan): void {
+    if (this.mode === "preview") {
+      // An edit made while auditioning (typically "Add to clip" on the words
+      // being previewed) must not yank the playhead. Keep playing the source;
+      // the tick loop hands off to clip mode if we're now inside the edit.
+      this.segments = plan.segments;
+      this.durationSec = plan.durationSec;
+      this.heldOutSec = Math.min(this.heldOutSec, plan.durationSec);
+      this.emit();
+      return;
+    }
     const before = this.snapshot();
     const prevSeg = this.segments[this.segIndex];
     this.segments = plan.segments;
@@ -129,9 +165,12 @@ export class PlaybackEngine {
 
   play(): void {
     const el = this.els?.[this.active];
-    if (!el || this.segments.length === 0) return;
-    // Pressing play at the very end restarts from the top.
-    if (this.snapshot().outSec >= this.durationSec - 0.05) this.seek(0);
+    if (!el) return;
+    if (this.mode === "clip") {
+      if (this.segments.length === 0) return;
+      // Pressing play at the very end restarts from the top.
+      if (this.snapshot().outSec >= this.durationSec - 0.05) this.seek(0);
+    }
     this.prime();
     this.playing = true;
     void this.els![this.active].play().catch(() => {
@@ -155,7 +194,34 @@ export class PlaybackEngine {
     else this.play();
   }
 
+  /**
+   * Audition the raw source from `sourceSec` — footage that is not in the
+   * edit. Plays linearly (no cuts skipped, because nothing here is "the
+   * edit") until paused, or until it runs into a segment of the clip, where
+   * it hands off to clip mode mid-playback: click a few words before the
+   * clip's first word and you hear the lead-in flow straight into the clip.
+   */
+  preview(sourceSec: number, opts: { autoplay?: boolean } = {}): void {
+    if (!this.els) return;
+    if (this.mode === "clip") this.heldOutSec = this.snapshot().outSec;
+    this.mode = "preview";
+    const el = this.els[this.active];
+    this.els[1 - this.active].pause();
+    el.currentTime = Math.max(0, sourceSec);
+    this.emit();
+    if (opts.autoplay ?? true) this.play();
+  }
+
+  /** Leave preview and return to where the clip playhead was. */
+  exitPreview(): void {
+    if (this.mode !== "preview") return;
+    // Deliberately doesn't resume playback: leaving preview is a stop.
+    this.pause();
+    this.seek(this.heldOutSec);
+  }
+
   seek(outSec: number): void {
+    this.mode = "clip";
     if (!this.els || this.segments.length === 0) {
       this.emit();
       return;
@@ -199,6 +265,25 @@ export class PlaybackEngine {
   private tick = (): void => {
     if (!this.playing || !this.els) return;
     const el = this.els[this.active];
+    if (this.mode === "preview") {
+      const t = el.currentTime;
+      const into = this.segments.findIndex(
+        (s) => t >= s.sourceStartSec && t < s.sourceEndSec - SWITCH_LEAD_SEC,
+      );
+      if (into >= 0) {
+        // Ran into the edit: same element, same instant — only the mode (and
+        // from here on, cut-skipping) changes. No seek, so no hitch.
+        this.mode = "clip";
+        this.segIndex = into;
+        this.cueStandby();
+      } else if (el.ended) {
+        this.pause();
+        return;
+      }
+      this.emit();
+      if (this.playing) this.raf = requestAnimationFrame(this.tick);
+      return;
+    }
     const seg = this.segments[this.segIndex];
     if (!seg) {
       this.pause();

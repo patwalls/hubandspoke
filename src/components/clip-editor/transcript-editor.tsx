@@ -104,6 +104,8 @@ export function TranscriptEditor({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
+  /** A mousedown on a not-in-edit word that may still turn into a drag. */
+  const clickRef = useRef<{ pos: number; sourceSec: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [editingPos, setEditingPos] = useState<number | null>(null);
   const [toolbar, setToolbar] = useState<{ top: number; left: number; below: boolean } | null>(null);
@@ -129,19 +131,26 @@ export function TranscriptEditor({
     }
     return map;
   }, [view]);
-  const liveRef = useRef({ keptBySection, plan });
+  const liveRef = useRef({ keptBySection, plan, words: view.words });
   useEffect(() => {
-    liveRef.current = { keptBySection, plan };
-  }, [keptBySection, plan]);
+    liveRef.current = { keptBySection, plan, words: view.words };
+  }, [keptBySection, plan, view]);
 
   useEffect(() => {
     let activeEl: Element | null = null;
     return engine.subscribe((snap) => {
       const seg = liveRef.current.plan.segments[snap.segmentIndex];
       let next: Element | null = null;
-      if (seg && snap.sourceSec !== null) {
-        const list = liveRef.current.keptBySection.get(seg.sectionId) ?? [];
-        // Binary search: last kept word that has started by now.
+      // In preview the playhead is on raw source, so ANY word can be the
+      // current one; in clip mode only kept words of the playing section.
+      const list =
+        snap.mode === "preview"
+          ? liveRef.current.words
+          : seg
+            ? (liveRef.current.keptBySection.get(seg.sectionId) ?? [])
+            : [];
+      if (list.length > 0 && snap.sourceSec !== null) {
+        // Binary search: last word that has started by now.
         let a = 0;
         let b = list.length - 1;
         let hit = -1;
@@ -157,9 +166,13 @@ export function TranscriptEditor({
           next = scrollRef.current?.querySelector(`[data-pos="${list[hit].pos}"]`) ?? null;
         }
       }
-      if (next !== activeEl) {
+      // "true" = playing the edit (blue); "preview" = auditioning footage
+      // that is NOT in the edit (amber). Same word can flip between the two
+      // at the hand-off, so compare the value too.
+      const flag = snap.mode === "preview" ? "preview" : "true";
+      if (next !== activeEl || (next && next.getAttribute("data-active") !== flag)) {
         activeEl?.removeAttribute("data-active");
-        next?.setAttribute("data-active", "true");
+        next?.setAttribute("data-active", flag);
         activeEl = next;
         // Follow playback, but never yank the view while the user is parked.
         if (next && snap.playing) next.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -201,9 +214,16 @@ export function TranscriptEditor({
     if (e.shiftKey && selection) setSelection({ anchor: selection.anchor, focus: pos });
     else setSelection({ anchor: pos, focus: pos });
     const w = view.words[pos];
-    if (w && !e.shiftKey && w.state !== "outside") {
+    clickRef.current = null;
+    if (!w || e.shiftKey) return;
+    if (w.state === "kept") {
       const out = sourceToOutput(plan, w.word.startSec + 0.001, w.sectionId ?? undefined);
       if (out !== null) engine.seek(out);
+    } else {
+      // Not in the edit (rest of the video, or a cut word): audition it. But
+      // only on a plain CLICK — decided at mouseup — so dragging a highlight
+      // across dim words to add them doesn't start the video blaring.
+      clickRef.current = { pos, sourceSec: w.word.startSec };
     }
   };
 
@@ -211,6 +231,7 @@ export function TranscriptEditor({
     if (!draggingRef.current || !selection) return;
     const pos = posFromEvent(e);
     if (pos !== null && pos !== selection.focus) {
+      clickRef.current = null; // it became a drag
       setSelection({ anchor: selection.anchor, focus: pos });
     }
   };
@@ -220,10 +241,13 @@ export function TranscriptEditor({
       if (!draggingRef.current) return;
       draggingRef.current = false;
       setDragging(false);
+      const click = clickRef.current;
+      clickRef.current = null;
+      if (click) engine.preview(click.sourceSec);
     };
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
-  }, []);
+  }, [engine]);
 
   const onDoubleClick = (e: MouseEvent) => {
     if (readOnly) return;
@@ -341,7 +365,7 @@ export function TranscriptEditor({
           ? "This clip was changed in another tab — reload to keep editing."
           : actions
             ? `${actions.wordCount} word${actions.wordCount === 1 ? "" : "s"} selected`
-            : "Highlight words to remove them. Dim text is the rest of the video — highlight it to add it to the clip."}
+            : "Highlight words to remove them. Dim text is the rest of the video — click it to preview, highlight it to add it to the clip."}
       </div>
 
       <div
@@ -507,7 +531,7 @@ const TranscriptChunk = memo(function TranscriptChunk({
             <span
               data-pos={t.pos}
               className={cn(
-                "cursor-pointer rounded-sm px-px py-[3px] transition-colors data-[active=true]:bg-sky-500 data-[active=true]:text-white",
+                "cursor-pointer rounded-sm px-px py-[3px] transition-colors data-[active=true]:bg-sky-500 data-[active=true]:text-white data-[active=preview]:bg-amber-400 data-[active=preview]:!text-black data-[active=preview]:no-underline",
                 t.state === "kept" && "text-foreground hover:bg-muted",
                 t.state === "outside" && "text-muted-foreground/45 hover:text-muted-foreground",
                 t.state === "removed" && "line-through decoration-2",

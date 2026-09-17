@@ -65,17 +65,21 @@ function stateFor(doc: ClipEditDoc, savedDoc: ClipEditDoc, current: SaveState): 
 }
 
 export function createEditorStore(init: {
+  /** What the server has. */
   doc: ClipEditDoc;
   revision: number;
+  /** Unsaved edits recovered from this browser (local-backup.ts). The editor
+   *  opens on them, already dirty, so the normal autosave sends them up. */
+  recoveredDoc?: ClipEditDoc | null;
 }): StoreApi<EditorState> {
   return createStore<EditorState>((set, get) => ({
-    doc: init.doc,
+    doc: init.recoveredDoc ?? init.doc,
     past: [],
     future: [],
     lastChange: { key: null, at: 0 },
     revision: init.revision,
     savedDoc: init.doc,
-    saveState: "saved",
+    saveState: init.recoveredDoc ? "dirty" : "saved",
     wordSelection: null,
     stageSelection: null,
 

@@ -38,6 +38,7 @@ import { buildTranscriptView } from "@/lib/clip-editor/transcript-view";
 import { findSilences, rangeForWordRun } from "@/lib/clip-editor/words";
 import type { ClipEditorSession } from "@/lib/services/clip-editor/session";
 import { Inspector } from "./inspector";
+import { clearBackup, takeBackup, writeBackup } from "./local-backup";
 import { PlaybackEngine } from "./playback-engine";
 import { Stage } from "./stage";
 import {
@@ -126,10 +127,21 @@ function EditorRoot(props: {
   onDone: () => void;
   onClose: () => void;
 }) {
-  const store = useMemo(
-    () => createEditorStore({ doc: props.session.edit.doc, revision: props.session.edit.revision }),
-    [props.session],
-  );
+  const [{ store, recovered }] = useState(() => {
+    const { clipIdea, edit } = props.session;
+    const recoveredDoc = takeBackup(clipIdea.id, edit.revision, edit.doc);
+    return {
+      store: createEditorStore({ doc: edit.doc, revision: edit.revision, recoveredDoc }),
+      recovered: recoveredDoc !== null,
+    };
+  });
+  useEffect(() => {
+    if (recovered) {
+      toast.message("Recovered unsaved changes", {
+        description: "Edits that hadn't reached the server were restored from this browser.",
+      });
+    }
+  }, [recovered]);
   return (
     <EditorStoreContext.Provider value={store}>
       <EditorWorkspace {...props} />
@@ -225,6 +237,60 @@ function EditorWorkspace({
 
   // Closing the dialog unmounts us — don't lose the last second of edits.
   useEffect(() => () => void save(), [save]);
+
+  // ── Not losing work ─────────────────────────────────────────────────────
+  // 1. While the server doesn't have the current doc, keep a copy in this
+  //    browser (restored on next open — see local-backup.ts).
+  useEffect(() => {
+    if (saveState === "saved") return clearBackup(session.clipIdea.id);
+    if (saveState === "conflict") return;
+    const { revision } = storeApi.getState();
+    const t = setTimeout(() => writeBackup(session.clipIdea.id, revision, doc), 250);
+    return () => clearTimeout(t);
+  }, [doc, saveState, session.clipIdea.id, storeApi]);
+
+  // 2. Leaving the page with unsaved edits: send them with `keepalive` (the
+  //    request outlives the page) and, if the tab is being closed outright,
+  //    let the browser ask first.
+  useEffect(() => {
+    const flush = () => {
+      const { doc: current, savedDoc, revision, saveState: state } = storeApi.getState();
+      if (current === savedDoc || state === "conflict") return;
+      void fetch(`/api/clip-ideas/${session.clipIdea.id}/editor`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision, doc: current }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+    const onHide = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      const { doc: current, savedDoc } = storeApi.getState();
+      if (current === savedDoc) return;
+      flush();
+      e.preventDefault();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [session.clipIdea.id, storeApi]);
+
+  const saveAndClose = async () => {
+    if (!(await save()) && storeApi.getState().saveState !== "conflict") {
+      toast.error("Couldn't save your draft", {
+        description: "Your edits are kept in this browser — check your connection and try again.",
+      });
+      return;
+    }
+    onClose();
+  };
 
   // ── Keyboard ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -532,8 +598,14 @@ function EditorWorkspace({
           </button>
         )}
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" onClick={onClose} disabled={busy === "export"}>
-            Close
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void saveAndClose()}
+            disabled={busy === "export"}
+            title="Your edits save automatically as a draft — reopen this idea from the queue to keep going"
+          >
+            {isReExport ? "Close" : "Save draft & close"}
           </Button>
           <Button
             type="button"
@@ -582,13 +654,13 @@ function SaveIndicator({
     <span className="mr-2 flex items-center gap-1 text-xs text-muted-foreground">
       {state === "saved" ? (
         <>
-          <CheckIcon className="size-3" /> Saved
+          <CheckIcon className="size-3" /> Draft saved
         </>
       ) : state === "conflict" ? (
         "Out of date"
       ) : (
         <>
-          <Loader2Icon className="size-3 animate-spin" /> Saving…
+          <Loader2Icon className="size-3 animate-spin" /> Saving draft…
         </>
       )}
     </span>

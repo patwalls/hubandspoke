@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { TriageDialog } from "./triage-dialog";
 import { ClipTriageDialog } from "./clip-triage-dialog";
+import { ClipDraftBadge } from "@/components/clip-editor/drafts";
 import { BulkKillDialog } from "./bulk-kill-dialog";
 import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
@@ -614,6 +615,8 @@ function IdeaQueueRow({
           >
             {item.title || "(Untitled)"}
           </button>
+          {/* Renders nothing without the `clipEditor` feature flag. */}
+          <ClipDraftBadge clipIdeaId={item.sourceClipIdeaId} />
         </div>
       </td>
       <td className="px-3 py-2 text-sm text-muted-foreground max-w-[220px]">
@@ -697,6 +700,7 @@ function IdeaQueueRow({
             open={open}
             onOpenChange={setOpen}
             idea={visibleClipIdea}
+            ideaId={item.sourceClipIdeaId}
             onDone={onDone}
             brand={brand}
           />

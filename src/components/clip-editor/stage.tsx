@@ -60,6 +60,14 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
   const [scale, setScale] = useState(0);
   const [sourceAspect, setSourceAspect] = useState(16 / 9);
 
+  // Only the MODE is React state here (it flips a couple of times a session);
+  // the clock itself never is.
+  const [previewing, setPreviewing] = useState(false);
+  useEffect(
+    () => engine.subscribe((snap) => setPreviewing(snap.mode === "preview")),
+    [engine],
+  );
+
   const apply = useEditor((s) => s.apply);
   const selection = useEditor((s) => s.stageSelection);
   const setSelection = useEditor((s) => s.setStageSelection);
@@ -157,7 +165,12 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
     >
       <style dangerouslySetInnerHTML={{ __html: fontFaceCss() }} />
       <div
-        className="relative shrink-0 overflow-hidden rounded-lg shadow-xl ring-1 ring-black/20"
+        className={cn(
+          "relative shrink-0 overflow-hidden rounded-lg shadow-xl ring-1 ring-black/20 transition-shadow",
+          // Amber = "this is not your clip". Same colour as the transcript's
+          // preview word and the transport, so the three read as one state.
+          previewing && "ring-4 ring-amber-400",
+        )}
         style={{ width: W * scale, height: H * scale, visibility: scale ? "visible" : "hidden" }}
       >
         <div
@@ -203,6 +216,12 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
             />
           </div>
 
+          {/* Hook + captions belong to the EDIT. Over footage that isn't in
+              the edit they'd be a lie (captions don't even exist for it), so
+              they fade back while previewing. */}
+          <div
+            className={cn("transition-opacity duration-200", previewing && "pointer-events-none opacity-20")}
+          >
           {scene.textBlocks.map((block) => (
             <TextBlock
               key={block.layer.id}
@@ -236,7 +255,15 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
               onPointerDown={(e) => dragLayerY(e, scene.captions!.layer)}
             />
           )}
+          </div>
         </div>
+        {previewing && (
+          <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
+            <span className="rounded-full bg-amber-400 px-3 py-1 text-[11px] font-semibold text-black shadow">
+              Previewing source · not in your clip
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

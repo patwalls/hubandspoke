@@ -24,6 +24,13 @@ function fmt(sec: number): string {
   return `${m}:${(t - m * 60).toFixed(1).padStart(4, "0")}`;
 }
 
+/** How far `t` is from a section (0 when inside it). */
+function distanceTo(section: Section, t: number): number {
+  if (t < section.startSec) return section.startSec - t;
+  if (t > section.endSec) return t - section.endSec;
+  return 0;
+}
+
 /** Shortest clip the trim handles will allow. */
 const MIN_CLIP_SEC = 1;
 
@@ -64,8 +71,19 @@ export function Transport({
     window.addEventListener("pointerup", up);
   };
 
+  const previewing = snap.mode === "preview";
   const playingSectionId = plan.segments[snap.segmentIndex]?.sectionId;
+  // While previewing, show the part of the clip NEAREST the preview playhead
+  // — auditioning the lead-in to a part is the common case, and this keeps
+  // both the playhead and that part's handles on screen together.
+  const nearest =
+    previewing && snap.sourceSec !== null
+      ? [...sections].sort(
+          (a, b) => distanceTo(a, snap.sourceSec!) - distanceTo(b, snap.sourceSec!),
+        )[0]
+      : undefined;
   const focus =
+    nearest ??
     sections.find((s) => s.id === playingSectionId) ??
     [...sections].sort((a, b) => b.endSec - b.startSec - (a.endSec - a.startSec))[0] ??
     null;
@@ -80,7 +98,10 @@ export function Transport({
           type="button"
           onClick={() => engine.toggle()}
           aria-label={snap.playing ? "Pause" : "Play"}
-          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-transform hover:scale-105"
+          className={cn(
+            "flex size-9 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-105",
+            previewing ? "bg-amber-400 text-black" : "bg-foreground text-background",
+          )}
         >
           {snap.playing ? (
             <PauseIcon className="size-4" fill="currentColor" />
@@ -89,13 +110,26 @@ export function Transport({
           )}
         </button>
         <span className="w-24 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-          {fmt(snap.outSec)} / {fmt(plan.durationSec)}
+          {previewing ? (
+            <span className="text-amber-700 dark:text-amber-400">
+              source {fmt(snap.sourceSec ?? 0)}
+            </span>
+          ) : (
+            <>
+              {fmt(snap.outSec)} / {fmt(plan.durationSec)}
+            </>
+          )}
         </span>
 
         <div
           ref={scrubRef}
           onPointerDown={onScrubDown}
-          className="relative h-6 flex-1 cursor-pointer touch-none"
+          className={cn(
+            "relative h-6 flex-1 cursor-pointer touch-none transition-opacity",
+            // This bar is the CLIP's timeline. While previewing, the playhead
+            // isn't on it — so it dims, parked where you left the clip.
+            previewing && "opacity-35",
+          )}
         >
           <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-muted">
             <div className="h-full bg-sky-500/80" style={{ width: pct(snap.outSec) }} />
@@ -113,9 +147,19 @@ export function Transport({
             style={{ left: pct(snap.outSec) }}
           />
         </div>
-        <span className="shrink-0 text-[11px] text-muted-foreground">
-          {plan.segments.length - 1} cut{plan.segments.length - 1 === 1 ? "" : "s"}
-        </span>
+        {previewing ? (
+          <button
+            type="button"
+            onClick={() => engine.exitPreview()}
+            className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+          >
+            Back to clip
+          </button>
+        ) : (
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {plan.segments.length - 1} cut{plan.segments.length - 1 === 1 ? "" : "s"}
+          </span>
+        )}
       </div>
 
       {focus && (
@@ -132,6 +176,7 @@ export function Transport({
           }}
           words={words}
           playheadSourceSec={snap.sourceSec}
+          previewing={previewing}
           partLabel={
             sections.length > 1
               ? `Part ${[...sections].sort((a, b) => a.startSec - b.startSec).indexOf(focus) + 1}/${sections.length}`
@@ -150,6 +195,7 @@ function TrimStrip({
   context,
   words,
   playheadSourceSec,
+  previewing,
   partLabel,
   readOnly,
 }: {
@@ -158,6 +204,7 @@ function TrimStrip({
   context: TimeRange;
   words: EditorWord[];
   playheadSourceSec: number | null;
+  previewing: boolean;
   partLabel: string;
   readOnly: boolean;
 }) {
@@ -262,7 +309,10 @@ function TrimStrip({
         ))}
         {playheadSourceSec !== null && playheadSourceSec >= lo && playheadSourceSec <= hi && (
           <div
-            className="pointer-events-none absolute inset-y-[-3px] w-0.5 bg-sky-600"
+            className={cn(
+              "pointer-events-none absolute inset-y-[-3px] w-0.5",
+              previewing ? "bg-amber-500" : "bg-sky-600",
+            )}
             style={{ left: left(playheadSourceSec) }}
           />
         )}

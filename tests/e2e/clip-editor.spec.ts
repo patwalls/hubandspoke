@@ -71,7 +71,9 @@ test("flag on → editor opens; cutting a word is undoable and autosaves", async
 
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(cuts).toBe(before);
-  await expect(page.getByText("Saved", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Draft saved", { exact: true })).toBeVisible({ timeout: 10_000 });
+  // The open editor is in the URL, so a reload lands back in it.
+  expect(page.url()).toContain("clip=");
 
   // Highlighting words surfaces the action AT the highlight: Remove for
   // words in the clip, Add to clip for the (dim) rest of the video.
@@ -86,5 +88,18 @@ test("flag on → editor opens; cutting a word is undoable and autosaves", async
     await firstWord.click();
     await expect(toolbar.getByRole("button", { name: "Add to clip" })).toBeVisible();
   }
-  // (No Escape here to clear the selection — Escape closes the dialog.)
+
+  // Clicking a word that ISN'T in the edit auditions the raw source, and says
+  // so — it must never look like the clip is playing.
+  const dim = page.locator("[data-pos]:not(.text-foreground):not(.line-through)").first();
+  await dim.scrollIntoViewIfNeeded();
+  await dim.click();
+  await expect(page.getByText("Previewing source · not in your clip")).toBeVisible();
+  await page.getByRole("button", { name: "Back to clip" }).click();
+  await expect(page.getByText("Previewing source · not in your clip")).toBeHidden();
+
+  // (the dialog's own ✕ is also named "Close" — take the footer button)
+  await page.getByRole("button", { name: /Save draft & close|^Close$/ }).last().click();
+  await expect(page.getByText("Editor beta")).toBeHidden();
+  expect(page.url()).not.toContain("clip=");
 });

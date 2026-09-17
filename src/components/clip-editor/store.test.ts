@@ -70,3 +70,14 @@ describe("editor store", () => {
     expect(store.getState().saveState).toBe("conflict");
   });
 });
+
+describe("recovered edits", () => {
+  it("opens on the recovered doc, already dirty, with the server doc as the save baseline", () => {
+    const serverDoc = createDefaultDoc({ startSec: 100, endSec: 110, hook: "h" });
+    const recoveredDoc = cut(serverDoc);
+    const store = createEditorStore({ doc: serverDoc, revision: 7, recoveredDoc });
+    expect(store.getState()).toMatchObject({ saveState: "dirty", revision: 7 });
+    expect(store.getState().doc).toBe(recoveredDoc);
+    expect(store.getState().savedDoc).toBe(serverDoc);
+  });
+});

@@ -32,6 +32,11 @@ import {
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { SocialEmbedHeader } from "./preview/social-embed-header";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
+import {
+  readClipParam,
+  refreshClipDrafts,
+  writeClipParam,
+} from "@/components/clip-editor/drafts";
 
 // Lazy: the editor bundle (player, stage, font metrics, zustand) is only ever
 // fetched by a browser whose user has the `clipEditor` flag AND opens a clip.
@@ -114,6 +119,10 @@ interface Props {
    *  without the per-source clip-ideas fetch); those callers see the
    *  same "attach a pack" gating until they're upgraded. */
   promotionFormat?: PromotionFormat | null;
+  /** The clip idea's id, known BEFORE `idea` has been fetched. Lets the
+   *  in-app editor open instantly and restore itself from `?clip=<id>` after
+   *  a reload. Ignored by the classic dialog. */
+  ideaId?: string | null;
 }
 
 function fmtTs(sec: number): string {
@@ -135,9 +144,30 @@ export function ClipTriageDialog(props: Props) {
   // Idea ids the editor bounced this session, so we fall back without
   // re-asking every time the row is reopened.
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
-  const ideaId = props.idea?.id ?? null;
+  const ideaId = props.ideaId ?? props.idea?.id ?? null;
+  const useEditor = !!flags?.clipEditor && !!ideaId && !unsupported.has(ideaId);
+  const { open, onOpenChange } = props;
 
-  if (flags?.clipEditor && ideaId && !unsupported.has(ideaId)) {
+  // The open editor lives in the URL (`?clip=<id>`), so a reload — or a
+  // crash — lands back in it instead of on the bare queue. Restore runs once
+  // per mount, and only for the row whose idea the URL names.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (!useEditor || restored.current) return;
+    restored.current = true;
+    if (!open && readClipParam() === ideaId) onOpenChange(true);
+  }, [useEditor, ideaId, open, onOpenChange]);
+
+  useEffect(() => {
+    if (!useEditor) return;
+    if (open) writeClipParam(ideaId);
+    else if (readClipParam() === ideaId) {
+      writeClipParam(null);
+      refreshClipDrafts(); // closing may have just created / updated a draft
+    }
+  }, [useEditor, ideaId, open]);
+
+  if (useEditor) {
     return (
       <ClipEditorDialog
         open={props.open}
@@ -145,7 +175,7 @@ export function ClipTriageDialog(props: Props) {
         clipIdeaId={ideaId}
         brand={props.brand}
         onDone={props.onDone}
-        onUnsupported={() => setUnsupported((prev) => new Set(prev).add(ideaId))}
+        onUnsupported={() => setUnsupported((prev) => new Set(prev).add(ideaId!))}
       />
     );
   }
