@@ -16,6 +16,7 @@ describe("hasDescriptableMedia", () => {
       id: "s",
       descriptProjectId: "p1",
       descriptCompositionId: "c1",
+      descriptAccount: null,
       mediaS3Key: null,
       pillarContentItemId: null,
     };
@@ -27,6 +28,7 @@ describe("hasDescriptableMedia", () => {
       id: "s",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: "video.mp4",
       pillarContentItemId: null,
     };
@@ -38,6 +40,7 @@ describe("hasDescriptableMedia", () => {
       id: "s",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: null,
       pillarContentItemId: "pillar",
     };
@@ -47,6 +50,7 @@ describe("hasDescriptableMedia", () => {
       descriptProjectId: "p",
       descriptProjectUrl: null,
       descriptSeedCompositionId: "seed",
+      descriptAccount: null,
       mediaS3Key: null,
     };
     expect(hasDescriptableMedia(source, pillar)).toBe(true);
@@ -57,6 +61,7 @@ describe("hasDescriptableMedia", () => {
       id: "s",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: null,
       pillarContentItemId: "pillar",
     };
@@ -66,6 +71,7 @@ describe("hasDescriptableMedia", () => {
       descriptProjectId: null,
       descriptProjectUrl: null,
       descriptSeedCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: "pillar.mp4",
     };
     expect(hasDescriptableMedia(source, pillar)).toBe(true);
@@ -76,6 +82,7 @@ describe("hasDescriptableMedia", () => {
       id: "s",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: null,
       pillarContentItemId: null,
     };
@@ -87,6 +94,7 @@ describe("hasDescriptableMedia", () => {
       id: "s",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: null,
       pillarContentItemId: "pillar",
     };
@@ -96,6 +104,7 @@ describe("hasDescriptableMedia", () => {
       descriptProjectId: "p",
       descriptProjectUrl: null,
       descriptSeedCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: null,
     };
     expect(hasDescriptableMedia(source, pillar)).toBe(false);
@@ -114,6 +123,7 @@ describe("hasDescriptableMedia", () => {
       id: "reel",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: "final-reel-9-16.mp4",
       pillarContentItemId: "pillar",
     };
@@ -123,6 +133,7 @@ describe("hasDescriptableMedia", () => {
       descriptProjectId: null,
       descriptProjectUrl: null,
       descriptSeedCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: null,
     };
     expect(hasDescriptableMedia(source, pillar)).toBe(false);
@@ -135,6 +146,7 @@ describe("resolveImportTarget", () => {
       id: "reel",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: "final-reel.mp4",
       pillarContentItemId: "pillar",
     };
@@ -144,6 +156,7 @@ describe("resolveImportTarget", () => {
       descriptProjectId: null,
       descriptProjectUrl: null,
       descriptSeedCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: "podcast.mp4",
     };
     const target = resolveImportTarget(source, pillar);
@@ -158,6 +171,7 @@ describe("resolveImportTarget", () => {
       id: "yt-video",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: "raw-podcast.mp4",
       pillarContentItemId: null,
     };
@@ -173,6 +187,7 @@ describe("resolveImportTarget", () => {
       id: "reel",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: null,
       pillarContentItemId: "pillar",
     };
@@ -187,6 +202,7 @@ describe("checkRepostReadiness", () => {
         id: "s",
         descriptProjectId: "p",
         descriptCompositionId: "c",
+        descriptAccount: null,
         mediaS3Key: null,
         pillarContentItemId: null,
       }),
@@ -199,6 +215,7 @@ describe("checkRepostReadiness", () => {
         id: "s",
         descriptProjectId: null,
         descriptCompositionId: null,
+        descriptAccount: null,
         mediaS3Key: "reel.mp4",
         pillarContentItemId: null,
       }),
@@ -215,6 +232,7 @@ describe("checkRepostReadiness", () => {
         id: "reel",
         descriptProjectId: null,
         descriptCompositionId: null,
+        descriptAccount: null,
         mediaS3Key: "final-reel-9-16.mp4",
         pillarContentItemId: "pillar-with-no-media",
       }),
@@ -226,6 +244,7 @@ describe("checkRepostReadiness", () => {
       id: "s",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: null,
       pillarContentItemId: "pillar",
     });
@@ -245,6 +264,7 @@ describe("checkRepostReadiness", () => {
         id: "carousel-source",
         descriptProjectId: null,
         descriptCompositionId: null,
+        descriptAccount: null,
         mediaS3Key: null,
         pillarContentItemId: null,
       },
@@ -260,6 +280,7 @@ describe("checkRepostReadiness", () => {
       id: "no-media",
       descriptProjectId: null,
       descriptCompositionId: null,
+      descriptAccount: null,
       mediaS3Key: null,
       pillarContentItemId: null,
     });
@@ -274,6 +295,7 @@ describe("hasDescriptableMediaForRepost", () => {
         id: "s",
         descriptProjectId: "p",
         descriptCompositionId: "c",
+        descriptAccount: null,
         mediaS3Key: null,
         pillarContentItemId: null,
       }),
@@ -286,6 +308,7 @@ describe("hasDescriptableMediaForRepost", () => {
         id: "s",
         descriptProjectId: null,
         descriptCompositionId: null,
+        descriptAccount: null,
         mediaS3Key: "reel.mp4",
         pillarContentItemId: null,
       }),
@@ -298,6 +321,7 @@ describe("hasDescriptableMediaForRepost", () => {
         id: "s",
         descriptProjectId: null,
         descriptCompositionId: null,
+        descriptAccount: null,
         mediaS3Key: null,
         pillarContentItemId: "pillar",
       }),
@@ -315,6 +339,7 @@ describe("resolveImportTargetForRepost", () => {
       descriptProjectId: "p1",
       descriptCompositionId: null,
       descriptSeedCompositionId: "seed1",
+      descriptAccount: null,
       mediaS3Key: "reel.mp4",
       pillarContentItemId: "pillar-irrelevant",
     });
