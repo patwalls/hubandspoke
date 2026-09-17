@@ -16,12 +16,19 @@ import {
   RefreshCwIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { TranscriptSpeaker } from "@/lib/diarization/types";
+import {
+  TranscriptSpeakers,
+  speakerColor,
+  type SpeakerDetectionStatus,
+} from "./transcript-speakers";
 
 interface TranscriptSegment {
   startSec: number;
   endSec: number;
   text: string;
   speaker?: string;
+  speakerId?: string;
 }
 
 interface TranscriptPayload {
@@ -34,6 +41,8 @@ interface TranscriptPayload {
   wordCount: number | null;
   durationSec: number | null;
   fetchedAt: string;
+  speakers: TranscriptSpeaker[] | null;
+  speakerDetection: SpeakerDetectionStatus;
 }
 
 interface Props {
@@ -156,6 +165,46 @@ export function TranscriptButton({
       });
     }
   }, [itemId, transcript]);
+
+  // ── Speakers ─────────────────────────────────────────────────────────────
+  const [detectStarting, setDetectStarting] = useState(false);
+  const detectionRunning = transcript?.speakerDetection?.status === "running";
+
+  const handleDetectSpeakers = useCallback(async () => {
+    setDetectStarting(true);
+    try {
+      const res = await fetch(`/api/production-items/${itemId}/transcript/speakers`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as { error?: string } | null;
+        setFetchState({ kind: "error", message: json?.error || `Couldn't start (${res.status})` });
+        return;
+      }
+      await load();
+    } finally {
+      setDetectStarting(false);
+    }
+  }, [itemId, load]);
+
+  // The job runs for minutes on the worker; poll while the dialog is open.
+  useEffect(() => {
+    if (!open || !detectionRunning) return;
+    const t = setInterval(() => void load(), 8000);
+    return () => clearInterval(t);
+  }, [open, detectionRunning, load]);
+
+  const handleRenameSpeaker = useCallback(
+    async (speakerId: string, name: string) => {
+      const res = await fetch(`/api/production-items/${itemId}/transcript/speakers`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ speakerId, name }),
+      });
+      if (res.ok) await load(); // segments carry the display name too
+    },
+    [itemId, load],
+  );
 
   const handleCopy = useCallback(async () => {
     if (!transcript) return;
@@ -302,6 +351,16 @@ export function TranscriptButton({
           )}
         </div>
 
+        {transcript && (
+          <TranscriptSpeakers
+            speakers={transcript.speakers}
+            detection={transcript.speakerDetection}
+            starting={detectStarting}
+            onDetect={() => void handleDetectSpeakers()}
+            onRename={handleRenameSpeaker}
+          />
+        )}
+
         {fetchState.kind === "error" && (
           <p className="text-xs text-red-600">{fetchState.message}</p>
         )}
@@ -311,24 +370,38 @@ export function TranscriptButton({
             <p className="text-xs text-muted-foreground">Loading…</p>
           ) : transcript ? (
             <div className="space-y-1.5">
-              {transcript.segments.map((s, i) => (
-                <div
-                  key={i}
-                  className="flex items-baseline gap-2 text-[13px] leading-snug"
-                >
-                  <span className="font-mono text-[11px] text-muted-foreground shrink-0 w-12">
-                    {fmtTs(s.startSec)}
-                  </span>
-                  <span className="flex-1 text-foreground">
-                    {s.speaker && (
-                      <span className="font-medium text-muted-foreground">
-                        {s.speaker}:{" "}
-                      </span>
+              {transcript.segments.map((s, i) => {
+                // A speaker's name is printed where their turn STARTS, not on
+                // every line — a conversation reads as turns, and the colour
+                // carries identity in between.
+                const prev = transcript.segments[i - 1];
+                const newTurn = !!s.speaker && (i === 0 || prev?.speaker !== s.speaker);
+                const speakerIndex = s.speakerId
+                  ? (transcript.speakers ?? []).findIndex((sp) => sp.id === s.speakerId)
+                  : -1;
+                const color = speakerIndex >= 0 ? speakerColor(speakerIndex) : null;
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      "flex items-baseline gap-2 text-[13px] leading-snug",
+                      newTurn && i > 0 && "pt-2",
                     )}
-                    {s.text}
-                  </span>
-                </div>
-              ))}
+                  >
+                    <span className="font-mono text-[11px] text-muted-foreground shrink-0 w-12">
+                      {fmtTs(s.startSec)}
+                    </span>
+                    <span className="flex-1 text-foreground">
+                      {newTurn && (
+                        <span className={cn("font-semibold", color?.text ?? "text-muted-foreground")}>
+                          {s.speaker}:{" "}
+                        </span>
+                      )}
+                      {s.text}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">

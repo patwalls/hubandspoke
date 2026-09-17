@@ -474,6 +474,11 @@ export async function transcribeFromS3Audio(
           audioChunks: manifest,
           fetchedAt: startedAt,
           error: null,
+          // New words carry no speaker labels, so detection must run again.
+          // `speakers` is deliberately KEPT: ids are assigned in order of
+          // first appearance, so on the same audio a user's rename ("S2 is
+          // Ken") still lands on the right voice after the re-run.
+          diarizedAt: null,
           updatedAt: sql`now()`,
         },
       })

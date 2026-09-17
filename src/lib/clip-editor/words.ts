@@ -12,12 +12,15 @@ export interface EditorWord {
   text: string;
   startSec: number;
   endSec: number;
+  /** Who says it, when speaker detection has run (multi-speaker audio). */
+  speakerId?: string;
 }
 
 interface TranscriptWord {
   word: string;
   startSec: number;
   endSec: number;
+  speakerId?: string;
 }
 
 interface TranscriptSegment {
@@ -46,6 +49,7 @@ export function resolveTranscriptWords(transcript: {
           text: w.word.trim(),
           startSec: w.startSec,
           endSec: Math.max(w.endSec, w.startSec),
+          ...(w.speakerId ? { speakerId: w.speakerId } : {}),
         }))
         .filter((w) => w.text.length > 0),
     };

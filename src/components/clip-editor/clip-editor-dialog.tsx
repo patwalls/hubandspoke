@@ -48,7 +48,8 @@ import {
   useEditor,
   useEditorStoreApi,
 } from "./store";
-import { TranscriptEditor } from "./transcript-editor";
+import { TranscriptEditor, type SpeakerLabels } from "./transcript-editor";
+import { speakerColor, speakerLabel } from "@/components/dashboard/transcript-speakers";
 import { Transport } from "./transport";
 
 const AUTOSAVE_DELAY_MS = 900;
@@ -183,6 +184,13 @@ function EditorWorkspace({
   const plan = useMemo(() => compileRenderPlan(doc, session.words), [doc, session.words]);
   const scene = useMemo(() => resolveScene(plan), [plan]);
   const view = useMemo(() => buildTranscriptView(doc, session.words), [doc, session.words]);
+  const speakerLabels = useMemo<SpeakerLabels>(() => {
+    const list = session.speakers ?? [];
+    if (list.length < 2) return {}; // one voice → labels are noise
+    return Object.fromEntries(
+      list.map((s, i) => [s.id, { label: speakerLabel(s, i), className: speakerColor(i).text }]),
+    );
+  }, [session.speakers]);
   const locked = saveState === "conflict";
   const isReExport = session.clipIdea.status !== "suggested";
 
@@ -555,7 +563,14 @@ function EditorWorkspace({
               approximate. Re-run the transcript for frame-accurate edits.
             </p>
           )}
-          <TranscriptEditor view={view} doc={doc} plan={plan} engine={engine} readOnly={locked} />
+          <TranscriptEditor
+            view={view}
+            doc={doc}
+            plan={plan}
+            engine={engine}
+            speakers={speakerLabels}
+            readOnly={locked}
+          />
         </div>
 
         <div

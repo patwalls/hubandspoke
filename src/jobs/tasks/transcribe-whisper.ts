@@ -1,4 +1,5 @@
 import type { JobHelpers, Task } from "graphile-worker";
+import { maybeEnqueueDiarize } from "@/lib/services/diarization/enqueue";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { transcripts } from "@/lib/db/schema";
@@ -66,6 +67,20 @@ export const transcribeWhisperTask: Task = async (rawPayload, helpers) => {
         helpers.logger,
       );
       await maybeAutoEnqueueClipIdeas(productionItemId, helpers);
+      // Speaker detection runs AFTER, on its own queue: it takes minutes per
+      // 10-min chunk and nothing downstream should wait on it. `force`
+      // because these words are brand new — any earlier labels are stale.
+      // Never allowed to fail the transcription that just succeeded.
+      try {
+        const result = await maybeEnqueueDiarize(productionItemId, { force: true });
+        helpers.logger.info(
+          `transcribe-whisper item=${productionItemId} diarize ${result.enqueued ? "enqueued" : `skipped (${result.reason})`}`,
+        );
+      } catch (err) {
+        helpers.logger.warn(
+          `transcribe-whisper item=${productionItemId} diarize enqueue failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       return;
     }
 

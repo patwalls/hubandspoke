@@ -25,6 +25,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       wordCount: transcripts.wordCount,
       durationSec: transcripts.durationSec,
       fetchedAt: transcripts.fetchedAt,
+      speakers: transcripts.speakers,
+      diarization: transcripts.diarization,
+      diarizedAt: transcripts.diarizedAt,
+      hasAudio: transcripts.audioS3Key,
     })
     .from(transcripts)
     .where(eq(transcripts.productionItemId, id))
@@ -34,10 +38,20 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ transcript: null });
   }
 
+  const { diarization, hasAudio, ...rest } = row;
   return NextResponse.json({
     transcript: {
-      ...row,
+      ...rest,
       durationSec: row.durationSec ? Number(row.durationSec) : null,
+      // The raw speaker turns stay server-side — the dialog only needs to
+      // know where the job is.
+      speakerDetection: {
+        available: row.source === "whisper" && !!hasAudio,
+        status: diarization?.status ?? null,
+        chunksDone: diarization?.chunksDone ?? 0,
+        chunksTotal: diarization?.chunksTotal ?? 0,
+        error: diarization?.status === "failed" ? diarization.error : null,
+      },
     },
   });
 }

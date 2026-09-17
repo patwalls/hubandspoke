@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { ClipEditDoc } from "@/lib/clip-editor/doc";
+import type { DiarizationState, TranscriptSpeaker } from "@/lib/diarization/types";
 
 export const productionItems = pgTable(
   "production_items",
@@ -574,16 +575,36 @@ export const transcripts = pgTable("transcripts", {
   // are the canonical shape.
   rawVtt: text("raw_vtt"),
   fullText: text("full_text").notNull(),
+  // `speaker` is the DISPLAY name (what prompts and the UI print);
+  // `speakerId` is the stable id it came from (see `speakers` below). Both
+  // are absent until speaker detection has run, and on single-speaker audio.
   segments: jsonb("segments")
-    .$type<Array<{ startSec: number; endSec: number; text: string; speaker?: string }>>()
+    .$type<
+      Array<{
+        startSec: number;
+        endSec: number;
+        text: string;
+        speaker?: string;
+        speakerId?: string;
+      }>
+    >()
     .notNull(),
   // Word-level timestamps, populated by Whisper's `timestamp_granularities:
   // ["word"]`. Null on `scrape_creators_*` rows that only carry segment-level
   // captions; clip-idea generation gates on `source_type='original' AND
   // post_type='youtube_long'` so those rows never feed V7 anchor matching.
   words: jsonb("words").$type<
-    Array<{ word: string; startSec: number; endSec: number }>
+    Array<{ word: string; startSec: number; endSec: number; speakerId?: string }>
   >(),
+  // Speaker detection (2026-09-17). `speakers` = who is in this recording
+  // (stable ids, display names — LLM-guessed or user-set — roles, talk time);
+  // null until detection has run. `diarization` = job state + the raw speaker
+  // turns, kept so a re-transcription can be re-labelled without paying to
+  // diarize again. See src/lib/diarization/types.ts and docs/automation.md →
+  // `diarize-transcript`.
+  speakers: jsonb("speakers").$type<TranscriptSpeaker[]>(),
+  diarization: jsonb("diarization").$type<DiarizationState>(),
+  diarizedAt: timestamp("diarized_at", { withTimezone: true }),
   wordCount: integer("word_count"),
   durationSec: decimal("duration_sec"),
   // Model identifier, e.g. "whisper-1". Null on `scrape_creators_*` rows.

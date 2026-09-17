@@ -54,7 +54,14 @@ export interface ViewMarker {
   endSec: number;
 }
 
-export type ViewToken = ViewWord | ViewGap | ViewMarker;
+/** Marks a change of speaker, inline — only present on multi-speaker audio. */
+export interface ViewSpeakerChange {
+  kind: "speaker";
+  key: string;
+  speakerId: string;
+}
+
+export type ViewToken = ViewWord | ViewGap | ViewMarker | ViewSpeakerChange;
 
 export interface TranscriptView {
   tokens: ViewToken[];
@@ -78,7 +85,12 @@ export function buildTranscriptView(
     return s && mid >= s.startSec ? s : null;
   };
 
+  let lastSpeaker: string | undefined;
   words.forEach((word, i) => {
+    if (word.speakerId && word.speakerId !== lastSpeaker) {
+      tokens.push({ kind: "speaker", key: `s:${i}`, speakerId: word.speakerId });
+      lastSpeaker = word.speakerId;
+    }
     const mid = (word.startSec + word.endSec) / 2;
     const section = sectionFor(mid);
     const removal = section ? removalAt(section, mid) : null;

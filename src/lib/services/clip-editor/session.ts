@@ -17,6 +17,7 @@ import { resolveClipAspectRatio } from "@/lib/db/formats";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { createDefaultDoc, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
+import type { TranscriptSpeaker } from "@/lib/diarization/types";
 import { toRenderStatus, type ClipRenderStatus } from "./render-status";
 
 export class ClipEditorIdeaNotFoundError extends Error {
@@ -71,6 +72,8 @@ export interface ClipEditorSession {
   };
   /** Every word of the source transcript, in order. */
   words: EditorWord[];
+  /** Detected speakers (null until speaker detection has run). */
+  speakers: TranscriptSpeaker[] | null;
   /** True when word timings were interpolated from caption segments. */
   wordsSynthetic: boolean;
   latestRender: ClipRenderStatus | null;
@@ -117,6 +120,7 @@ export async function loadClipEditorSession(args: {
       words: transcripts.words,
       segments: transcripts.segments,
       durationSec: transcripts.durationSec,
+      speakers: transcripts.speakers,
     })
     .from(transcripts)
     .where(eq(transcripts.productionItemId, row.sourceProductionItemId))
@@ -186,6 +190,7 @@ export async function loadClipEditorSession(args: {
       durationSec: transcript.durationSec ? Number(transcript.durationSec) : null,
     },
     words,
+    speakers: transcript.speakers ?? null,
     wordsSynthetic: synthetic,
     latestRender: render ? toRenderStatus(render) : null,
   };

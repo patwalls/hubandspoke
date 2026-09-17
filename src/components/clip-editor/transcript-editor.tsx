@@ -85,14 +85,19 @@ function chunkTokens(tokens: ViewToken[]): Chunk[] {
   return chunks;
 }
 
+/** id → { label, colour class } for the inline speaker names. */
+export type SpeakerLabels = Record<string, { label: string; className: string }>;
+
 export function TranscriptEditor({
   view,
   doc,
   plan,
   engine,
+  speakers,
   readOnly,
 }: {
   view: TranscriptView;
+  speakers: SpeakerLabels;
   doc: ClipEditDoc;
   plan: RenderPlan;
   engine: PlaybackEngine;
@@ -391,6 +396,7 @@ export function TranscriptEditor({
                   : null
               }
               readOnly={readOnly}
+              speakers={speakers}
               onToggleGap={toggleGap}
               onCorrect={commitCorrection}
             />
@@ -466,10 +472,12 @@ const TranscriptChunk = memo(function TranscriptChunk({
   selHi,
   editingPos,
   readOnly,
+  speakers,
   onToggleGap,
   onCorrect,
 }: {
   chunk: Chunk;
+  speakers: SpeakerLabels;
   selLo: number;
   selHi: number;
   editingPos: number | null;
@@ -493,6 +501,21 @@ const TranscriptChunk = memo(function TranscriptChunk({
               title={`Part ${t.index} of the clip`}
             >
               {fmt(t.startSec)}–{fmt(t.endSec)}
+            </span>
+          );
+        }
+        if (t.kind === "speaker") {
+          const sp = speakers[t.speakerId];
+          if (!sp) return null;
+          return (
+            <span
+              key={t.key}
+              className={cn(
+                "mr-1 select-none align-baseline text-[11px] font-bold uppercase tracking-wide",
+                sp.className,
+              )}
+            >
+              {sp.label}:
             </span>
           );
         }
