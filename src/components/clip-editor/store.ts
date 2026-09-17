@@ -13,12 +13,8 @@ import { createContext, useContext } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
 import type { ClipEditDoc, Layer, RemovalReason, Section } from "@/lib/clip-editor/doc";
 import { wordEditKey } from "@/lib/clip-editor/doc";
-import {
-  addRemoval,
-  restoreRange,
-  restoreReason,
-  retimeSection,
-} from "@/lib/clip-editor/removals";
+import { addRemoval, restoreRange, restoreReason } from "@/lib/clip-editor/removals";
+import { includeRange, retimeSectionInDoc } from "@/lib/clip-editor/sections";
 import type { TimeRange } from "@/lib/clip-editor/doc";
 
 const HISTORY_LIMIT = 200;
@@ -204,26 +200,14 @@ export const commands = {
     sections: doc.sections.map((s) => restoreReason(s, reason)),
   }),
 
+  /** Move a section's in/out points (clamped to its neighbours). */
   retime: (sectionId: string, window: TimeRange) => (doc: ClipEditDoc) =>
-    mapSection(doc, sectionId, (s) => retimeSection(s, window)),
+    retimeSectionInDoc(doc, sectionId, window),
 
-  setIntro: (range: TimeRange | null) => (doc: ClipEditDoc) => {
-    const withoutIntro = doc.sections.filter((s) => s.role !== "intro");
-    if (!range) return { ...doc, sections: withoutIntro };
-    return {
-      ...doc,
-      sections: [
-        {
-          id: "intro-1",
-          role: "intro" as const,
-          startSec: range.startSec,
-          endSec: range.endSec,
-          removals: [],
-        },
-        ...withoutIntro,
-      ],
-    };
-  },
+  /** Add source ranges to the clip — new sections, or extensions of the
+   *  sections they touch. */
+  include: (ranges: TimeRange[]) => (doc: ClipEditDoc) =>
+    ranges.reduce<ClipEditDoc>((d, r) => includeRange(d, r), doc),
 
   patchLayer:
     <L extends Layer>(layerId: string, patch: (l: L) => L) =>

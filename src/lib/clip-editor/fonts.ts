@@ -41,6 +41,15 @@ export interface FontDefinition {
 
 const metrics = metricsJson as Record<FontId, FontMetrics>;
 
+/**
+ * Order here is the order of the font picker. `assFamily` must be a family
+ * name libass can resolve from the file's name table — for a weight that
+ * ships as its own family ("Poppins ExtraBold") use that name with
+ * assBold=false; for a true Bold of a base family use the base name with
+ * assBold=true. Verify a new font with the calibration check in
+ * `scripts/clip-editor-font-calibration.ts` (cap height + baseline measured
+ * on a real libass render).
+ */
 export const FONTS: Record<FontId, FontDefinition> = {
   "montserrat-extrabold": {
     id: "montserrat-extrabold",
@@ -60,6 +69,78 @@ export const FONTS: Record<FontId, FontDefinition> = {
     assBold: true,
     metrics: metrics["montserrat-bold"],
   },
+  "poppins-extrabold": {
+    id: "poppins-extrabold",
+    label: "Poppins ExtraBold",
+    cssFamily: "ClipEditor Poppins ExtraBold",
+    cssWeight: 800,
+    assFamily: "Poppins ExtraBold",
+    assBold: false,
+    metrics: metrics["poppins-extrabold"],
+  },
+  "poppins-semibold": {
+    id: "poppins-semibold",
+    label: "Poppins SemiBold",
+    cssFamily: "ClipEditor Poppins SemiBold",
+    cssWeight: 600,
+    assFamily: "Poppins SemiBold",
+    assBold: false,
+    metrics: metrics["poppins-semibold"],
+  },
+  "archivo-black": {
+    id: "archivo-black",
+    label: "Archivo Black",
+    cssFamily: "ClipEditor Archivo Black",
+    cssWeight: 400,
+    assFamily: "Archivo Black",
+    assBold: false,
+    metrics: metrics["archivo-black"],
+  },
+  "anton": {
+    id: "anton",
+    label: "Anton",
+    cssFamily: "ClipEditor Anton",
+    cssWeight: 400,
+    assFamily: "Anton",
+    assBold: false,
+    metrics: metrics["anton"],
+  },
+  "bebas-neue": {
+    id: "bebas-neue",
+    label: "Bebas Neue",
+    cssFamily: "ClipEditor Bebas Neue",
+    cssWeight: 400,
+    assFamily: "Bebas Neue",
+    assBold: false,
+    metrics: metrics["bebas-neue"],
+  },
+  "bangers": {
+    id: "bangers",
+    label: "Bangers",
+    cssFamily: "ClipEditor Bangers",
+    cssWeight: 400,
+    assFamily: "Bangers",
+    assBold: false,
+    metrics: metrics["bangers"],
+  },
+  "dm-serif-display": {
+    id: "dm-serif-display",
+    label: "DM Serif Display",
+    cssFamily: "ClipEditor DM Serif Display",
+    cssWeight: 400,
+    assFamily: "DM Serif Display",
+    assBold: false,
+    metrics: metrics["dm-serif-display"],
+  },
+  "permanent-marker": {
+    id: "permanent-marker",
+    label: "Permanent Marker",
+    cssFamily: "ClipEditor Permanent Marker",
+    cssWeight: 400,
+    assFamily: "Permanent Marker",
+    assBold: false,
+    metrics: metrics["permanent-marker"],
+  },
 };
 
 export const FONT_PUBLIC_DIR = "/fonts/clip-editor";
@@ -69,7 +150,12 @@ export function fontFaceCss(): string {
   return Object.values(FONTS)
     .map(
       (f) =>
-        `@font-face{font-family:"${f.cssFamily}";src:url("${FONT_PUBLIC_DIR}/${f.metrics.file}") format("truetype");font-weight:${f.cssWeight};font-style:normal;font-display:block;}`,
+        // ascent/descent/line-gap overrides pin the metrics the browser lays
+        // text out with. Without them Chrome uses hhea on macOS but OS/2 win
+        // metrics on Windows — and for a font like Bangers those differ by
+        // half an em, which would move the preview's baseline (but not the
+        // export's) depending on who opened the editor.
+        `@font-face{font-family:"${f.cssFamily}";src:url("${FONT_PUBLIC_DIR}/${f.metrics.file}") format("truetype");font-weight:${f.cssWeight};font-style:normal;font-display:block;ascent-override:${(f.metrics.hheaAscentEm * 100).toFixed(2)}%;descent-override:${(f.metrics.hheaDescentEm * 100).toFixed(2)}%;line-gap-override:0%;}`,
     )
     .join("\n");
 }

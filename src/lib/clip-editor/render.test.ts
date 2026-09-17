@@ -6,6 +6,7 @@ import { assEscape, assTime, buildAssScript } from "./ass";
 import { buildFilterGraph, buildRenderArgs, parseProgressSeconds } from "./ffmpeg-args";
 import { addRemoval } from "./removals";
 import { layoutTextBlock, textToLayoutWords } from "./layout";
+import { parseSourceDimensions, resolveVideoBox } from "./video-box";
 import type { EditorWord } from "./words";
 
 const words: EditorWord[] = ["so", "this", "works"].map((text, i) => ({
@@ -121,14 +122,56 @@ describe("buildFilterGraph", () => {
     expect(graph).toContain("ass=filename='/tmp/o.ass':fontsdir='/app/fonts'");
   });
 
-  it("letterboxes for contain and crops for cover", () => {
+  it("without a probed source size, falls back to aspect expressions", () => {
     expect(buildFilterGraph(planFor(), { assPath: null, fontsDir: "/f" })).toMatch(/pad=1080:1920/);
     const cover = buildFilterGraph(
-      planFor((doc) => { doc.video = { fit: "cover", yPct: 50, panXPct: 25 }; }),
+      planFor((doc) => { doc.video = { ...doc.video, fit: "cover", panXPct: 25 }; }),
       { assPath: null, fontsDir: "/f" },
     );
     expect(cover).toContain("crop=1080:1920:'(iw-1080)*25/100'");
     expect(cover).not.toContain("pad=");
+  });
+
+  const HD = { width: 1920, height: 1080 };
+
+  it("with a source size, places the video at exact pixels", () => {
+    const fit = buildFilterGraph(planFor(), { assPath: null, fontsDir: "/f", sourceSize: HD });
+    expect(fit).toContain("scale=1080:608:flags=lanczos");
+    expect(fit).toContain("pad=1080:1920:0:656:color=0x000000");
+
+    const cover = buildFilterGraph(
+      planFor((doc) => { doc.video = { ...doc.video, fit: "cover", panXPct: 25 }; }),
+      { assPath: null, fontsDir: "/f", sourceSize: HD },
+    );
+    expect(cover).toContain("scale=3414:1920");
+    expect(cover).toContain("crop=1080:1920:584:0"); // 25% of the 2334px overflow
+  });
+
+  it("insets the video when scaled below fit", () => {
+    const g = buildFilterGraph(
+      planFor((doc) => { doc.video = { ...doc.video, scalePct: 90 }; }),
+      { assPath: null, fontsDir: "/f", sourceSize: HD },
+    );
+    expect(g).toContain("scale=972:546");
+    expect(g).toContain("pad=1080:1920:54:687"); // centered: (1080-972)/2, 960-273
+  });
+
+  it("rounds corners with a one-frame looped alpha mask, not per-frame geq", () => {
+    const g = buildFilterGraph(
+      planFor((doc) => { doc.video = { ...doc.video, scalePct: 90, radiusPct: 10 }; }),
+      { assPath: "/tmp/o.ass", fontsDir: "/f", sourceSize: HD },
+    );
+    expect(g).toContain("s=972x546");
+    expect(g).toContain("trim=end_frame=1");
+    expect(g).toContain("loop=loop=-1:size=1");
+    // every generated stream is bounded to the clip length — an unbounded
+    // mask/background makes ffmpeg encode forever (it did, in development)
+    expect(g.match(/trim=end_frame=300/g)).toHaveLength(2);
+    expect(g).toContain("alphamerge");
+    expect(g).toContain("overlay=x=54:y=687:shortest=1");
+    expect(g).toMatch(/clip\(55\+0\.5-hypot/); // radius = 10% of the 546px short side
+    // text is burned in AFTER compositing, so it is never masked
+    expect(g.indexOf("ass=")).toBeGreaterThan(g.indexOf("overlay="));
   });
 
   it("concats one input per section", () => {
@@ -200,5 +243,78 @@ describe("createDefaultDoc hook auto-fit", () => {
     const block = resolveScene(plan).textBlocks[0].layout;
     expect(block.top).toBeGreaterThanOrEqual(0); // on canvas
     expect(block.bottom).toBeLessThanOrEqual(1920 * 0.31 + 1);
+  });
+});
+
+describe("resolveVideoBox", () => {
+  const canvas = { width: 1080, height: 1920 };
+  const base = { fit: "contain" as const, yPct: 50, panXPct: 50, scalePct: 100, radiusPct: 0 };
+
+  it("always yields even dimensions (yuv420 / libx264 reject odd ones)", () => {
+    for (const scalePct of [100, 97, 93, 61, 33]) {
+      const box = resolveVideoBox(canvas, { ...base, scalePct }, { width: 1920, height: 1080 });
+      expect(box.width % 2).toBe(0);
+      expect(box.height % 2).toBe(0);
+    }
+  });
+
+  it("keeps an inset video on the canvas when dragged to an edge", () => {
+    const top = resolveVideoBox(canvas, { ...base, scalePct: 80, yPct: 0 }, { width: 1920, height: 1080 });
+    const bottom = resolveVideoBox(canvas, { ...base, scalePct: 80, yPct: 100 }, { width: 1920, height: 1080 });
+    expect(top.y).toBe(0);
+    expect(bottom.y + bottom.height).toBe(1920);
+  });
+
+  it("fits a portrait source by height", () => {
+    const box = resolveVideoBox({ width: 1920, height: 1080 }, base, { width: 1080, height: 1920 });
+    expect(box).toMatchObject({ height: 1080, width: 608, x: 656 });
+  });
+
+  it("never rounds a cover video — it fills the canvas", () => {
+    const box = resolveVideoBox(canvas, { ...base, fit: "cover", radiusPct: 30 }, { width: 1920, height: 1080 });
+    expect(box.radius).toBe(0);
+  });
+});
+
+describe("parseSourceDimensions", () => {
+  it("reads the first video stream from an ffmpeg banner", () => {
+    const banner = `Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'https://s3/x.mp4':
+  Duration: 00:08:44.11, start: 0.000000, bitrate: 1493 kb/s
+    Stream #0:0(und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 128 kb/s (default)
+    Stream #0:1(und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709), 1920x1080 [SAR 1:1 DAR 16:9], 1357 kb/s, 29.97 fps, 29.97 tbr, 30k tbn, 59.94 tbc (default)
+At least one output file must be specified`;
+    expect(parseSourceDimensions(banner)).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it("swaps dimensions for a rotated phone clip, in both banner dialects", () => {
+    const modern = `    Stream #0:0(eng): Video: hevc (Main) (hvc1 / 0x31637668), yuv420p(tv), 1920x1080, 8000 kb/s, 30 fps (default)
+    Side data:
+      displaymatrix: rotation of -90.00 degrees
+    Stream #0:1(eng): Audio: aac`;
+    const old = `    Stream #0:0(eng): Video: h264 (High), yuv420p, 1920x1080, 30 fps (default)
+    Metadata:
+      rotate          : 90
+    Stream #0:1(eng): Audio: aac`;
+    expect(parseSourceDimensions(modern)).toEqual({ width: 1080, height: 1920 });
+    expect(parseSourceDimensions(old)).toEqual({ width: 1080, height: 1920 });
+  });
+
+  it("does not read a later stream's rotation, or hex codec tags, as the size", () => {
+    const banner = `    Stream #0:0: Video: h264 (avc1 / 0x31637661), yuv420p, 1280x720 [SAR 1:1 DAR 16:9], 25 fps
+    Stream #0:1: Video: mjpeg, yuvj420p, 90x160 (attached pic)
+      displaymatrix: rotation of 90.00 degrees`;
+    expect(parseSourceDimensions(banner)).toEqual({ width: 1280, height: 720 });
+    expect(parseSourceDimensions("no streams here")).toBeNull();
+  });
+});
+
+describe("saved docs from before video inset/rounding existed", () => {
+  it("still parse, defaulting to fit with square corners", () => {
+    const doc = JSON.parse(JSON.stringify(createDefaultDoc({ startSec: 1, endSec: 2, hook: "h" })));
+    delete doc.video.scalePct;
+    delete doc.video.radiusPct;
+    const parsed = parseDoc(doc);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.doc.video).toMatchObject({ scalePct: 100, radiusPct: 0 });
   });
 });

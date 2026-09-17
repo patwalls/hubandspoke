@@ -27,18 +27,19 @@ function fmt(sec: number): string {
 /** Shortest clip the trim handles will allow. */
 const MIN_CLIP_SEC = 1;
 
+/** Source shown either side of the focused section on the trim strip. */
+const STRIP_PAD_SEC = 45;
+
 export function Transport({
   plan,
   engine,
-  body,
-  context,
+  sections,
   words,
   readOnly,
 }: {
   plan: RenderPlan;
   engine: PlaybackEngine;
-  body: Section | null;
-  context: TimeRange;
+  sections: Section[];
   words: EditorWord[];
   readOnly: boolean;
 }) {
@@ -62,6 +63,12 @@ export function Transport({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+
+  const playingSectionId = plan.segments[snap.segmentIndex]?.sectionId;
+  const focus =
+    sections.find((s) => s.id === playingSectionId) ??
+    [...sections].sort((a, b) => b.endSec - b.startSec - (a.endSec - a.startSec))[0] ??
+    null;
 
   const pct = (sec: number) =>
     plan.durationSec > 0 ? `${(sec / plan.durationSec) * 100}%` : "0%";
@@ -111,13 +118,24 @@ export function Transport({
         </span>
       </div>
 
-      {body && (
+      {focus && (
         <TrimStrip
-          body={body}
-          context={context}
+          // The strip is a zoomed view of ONE part of the clip: whichever
+          // part the playhead is in (a clip can have several — an intro
+          // pulled from minute one plus the body from minute five can't
+          // share a useful scale).
+          body={focus}
+          neighbours={sections.filter((s) => s.id !== focus.id)}
+          context={{
+            startSec: Math.max(0, focus.startSec - STRIP_PAD_SEC),
+            endSec: focus.endSec + STRIP_PAD_SEC,
+          }}
           words={words}
-          playheadSourceSec={
-            plan.segments[snap.segmentIndex]?.sectionId === body.id ? snap.sourceSec : null
+          playheadSourceSec={snap.sourceSec}
+          partLabel={
+            sections.length > 1
+              ? `Part ${[...sections].sort((a, b) => a.startSec - b.startSec).indexOf(focus) + 1}/${sections.length}`
+              : "Source"
           }
           readOnly={readOnly}
         />
@@ -128,15 +146,19 @@ export function Transport({
 
 function TrimStrip({
   body,
+  neighbours,
   context,
   words,
   playheadSourceSec,
+  partLabel,
   readOnly,
 }: {
   body: Section;
+  neighbours: Section[];
   context: TimeRange;
   words: EditorWord[];
   playheadSourceSec: number | null;
+  partLabel: string;
   readOnly: boolean;
 }) {
   const apply = useEditor((s) => s.apply);
@@ -153,6 +175,7 @@ function TrimStrip({
     let best = sec;
     let bestDist = 0.25; // only snap when a boundary is this close
     for (const w of words) {
+      if (w.endSec < lo || w.startSec > hi) continue;
       const candidate = edge === "start" ? w.startSec : w.endSec;
       const d = Math.abs(candidate - sec);
       if (d < bestDist) {
@@ -204,9 +227,22 @@ function TrimStrip({
   return (
     <div className="flex items-center gap-3">
       <span className="w-[8.25rem] shrink-0 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Source
+        {partLabel}
       </span>
       <div ref={ref} className="relative h-7 flex-1 touch-none rounded bg-muted/60">
+        {/* other parts of the clip that fall inside this view */}
+        {neighbours
+          .filter((n) => n.endSec > lo && n.startSec < hi)
+          .map((n) => (
+            <div
+              key={n.id}
+              className="absolute inset-y-0 rounded-sm bg-sky-500/10 ring-1 ring-inset ring-sky-500/25"
+              style={{
+                left: left(Math.max(n.startSec, lo)),
+                width: width(Math.max(n.startSec, lo), Math.min(n.endSec, hi)),
+              }}
+            />
+          ))}
         {/* the clip window */}
         <div
           className="absolute inset-y-0 rounded-sm bg-sky-500/25 ring-1 ring-inset ring-sky-500/50"
@@ -224,7 +260,7 @@ function TrimStrip({
             style={{ left: left(r.startSec), width: width(r.startSec, r.endSec) }}
           />
         ))}
-        {playheadSourceSec !== null && (
+        {playheadSourceSec !== null && playheadSourceSec >= lo && playheadSourceSec <= hi && (
           <div
             className="pointer-events-none absolute inset-y-[-3px] w-0.5 bg-sky-600"
             style={{ left: left(playheadSourceSec) }}

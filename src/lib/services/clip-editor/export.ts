@@ -15,7 +15,13 @@
  */
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clipEdits, clipIdeas, clipRenders, productionItems } from "@/lib/db/schema";
+import {
+  clipEdits,
+  clipIdeas,
+  clipRenders,
+  contentComments,
+  productionItems,
+} from "@/lib/db/schema";
 import { enqueue } from "@/jobs/enqueue";
 import { recordToolAction } from "@/lib/services/content-events";
 import {
@@ -24,9 +30,8 @@ import {
   buildContentBody,
   loadAndGuardClipIdea,
   loadClipProductionItemId,
-  postClipPromotionComment,
 } from "@/lib/services/promote-clip-idea";
-import { findHookLayer, parseDoc } from "@/lib/clip-editor/doc";
+import { findHookLayer, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
 
 export class ClipEditNotFoundError extends Error {
@@ -163,10 +168,11 @@ export async function exportClipEdit(args: {
       })
       .where(eq(clipIdeas.id, args.clipIdeaId));
 
-    await postClipPromotionComment({
+    await postClipCreatedComment({
       productionItemId,
       actorUserId: args.actorUserId,
-      row: { ...row, hook },
+      doc,
+      hook,
     });
 
     // Same fire-and-forget the Descript paths do: drafts the post copy from
@@ -179,4 +185,55 @@ export async function exportClipEdit(args: {
   }
 
   return { renderId: render.id, productionItemId, brand, reExport };
+}
+
+function mmss(sec: number): string {
+  const t = Math.max(0, Math.floor(sec));
+  return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** The activity-feed comment body for a clip made in the editor. Exported
+ *  for the test; the feed prefixes the author's name, so this reads as
+ *  "Pat Walls: Created a clip from the queue · 04:22–05:07 (40s)". */
+export function buildClipCreatedComment(doc: ClipEditDoc, hook: string): string {
+  const startSec = Math.min(...doc.sections.map((s) => s.startSec));
+  const endSec = Math.max(...doc.sections.map((s) => s.endSec));
+  // What actually plays, after cuts — not the span it was taken from.
+  const durationSec = Math.round(compileRenderPlan(doc, []).durationSec);
+  return [
+    `<p>Created a clip from the queue · <strong>${mmss(startSec)}–${mmss(endSec)}</strong> (${durationSec}s)</p>`,
+    `<blockquote>${escapeHtml(hook)}</blockquote>`,
+  ].join("\n");
+}
+
+/**
+ * Deliberately terse compared with the Descript paths' promotion comment
+ * (which pastes the rationale and the whole transcript excerpt for an editor
+ * who is about to go cut the clip in another tool). Here the clip is already
+ * cut — range + hook is the whole story. Best-effort: a failed comment must
+ * never fail an export.
+ */
+async function postClipCreatedComment(args: {
+  productionItemId: string;
+  actorUserId: string;
+  doc: ClipEditDoc;
+  hook: string;
+}): Promise<void> {
+  try {
+    await db.insert(contentComments).values({
+      contentItemId: args.productionItemId,
+      userId: args.actorUserId,
+      body: buildClipCreatedComment(args.doc, args.hook),
+    });
+  } catch (err) {
+    console.error("clip-editor export: activity comment failed:", err);
+  }
 }

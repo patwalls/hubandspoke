@@ -93,12 +93,30 @@ const videoPlacementSchema = z.object({
   /** Horizontal pan across the cropped overflow, 0 = left … 100 = right
    *  (cover only). */
   panXPct: pct,
+  /** Size relative to "fit", 100 = touches the canvas edges; lower insets the
+   *  video so the background shows around it (contain only). Defaulted so
+   *  docs saved before this field existed still parse. */
+  scalePct: z.number().finite().min(30).max(100).default(100),
+  /** Corner radius as % of the video's shorter side; 50 = fully round ends
+   *  (contain only). */
+  radiusPct: z.number().finite().min(0).max(50).default(0),
 });
 export type VideoPlacement = z.infer<typeof videoPlacementSchema>;
 
 // ─── Overlay layers ─────────────────────────────────────────────────────────
 
-export const FONT_IDS = ["montserrat-extrabold", "montserrat-bold"] as const;
+export const FONT_IDS = [
+  "montserrat-extrabold",
+  "montserrat-bold",
+  "poppins-extrabold",
+  "poppins-semibold",
+  "archivo-black",
+  "anton",
+  "bebas-neue",
+  "bangers",
+  "dm-serif-display",
+  "permanent-marker",
+] as const;
 export type FontId = (typeof FONT_IDS)[number];
 
 const textStyleSchema = z.object({
@@ -249,7 +267,13 @@ export function createDefaultDoc(args: {
     version: CLIP_EDIT_DOC_VERSION,
     canvas,
     sections,
-    video: { fit: vertical ? "contain" : "cover", yPct: 50, panXPct: 50 },
+    video: {
+      fit: vertical ? "contain" : "cover",
+      yPct: 50,
+      panXPct: 50,
+      scalePct: 100,
+      radiusPct: 0,
+    },
     layers: [
       {
         id: "hook",

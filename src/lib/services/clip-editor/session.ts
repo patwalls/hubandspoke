@@ -15,22 +15,9 @@ import {
 } from "@/lib/db/schema";
 import { resolveClipAspectRatio } from "@/lib/db/formats";
 import { getPresignedGetUrl } from "@/lib/s3";
-import {
-  createDefaultDoc,
-  parseDoc,
-  type ClipEditDoc,
-  type TimeRange,
-} from "@/lib/clip-editor/doc";
-import {
-  resolveTranscriptWords,
-  wordsInWindows,
-  type EditorWord,
-} from "@/lib/clip-editor/words";
+import { createDefaultDoc, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
+import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
 import { toRenderStatus, type ClipRenderStatus } from "./render-status";
-
-/** Transcript loaded either side of the idea's range, so the editor can
- *  extend the clip past Claude's suggested in/out points. */
-export const EDITOR_CONTEXT_PAD_SEC = 45;
 
 export class ClipEditorIdeaNotFoundError extends Error {
   constructor() {
@@ -82,41 +69,11 @@ export interface ClipEditorSession {
     videoUrl: string;
     durationSec: number | null;
   };
+  /** Every word of the source transcript, in order. */
   words: EditorWord[];
   /** True when word timings were interpolated from caption segments. */
   wordsSynthetic: boolean;
-  /** The source window `words` covers around the body. */
-  context: TimeRange;
-  /** The source's opening — what "Include intro" prepends. Null if none. */
-  intro: TimeRange | null;
   latestRender: ClipRenderStatus | null;
-}
-
-/**
- * The source's natural intro: its first ~24 caption segments plus ~15s of
- * lead-in, ending on a whole segment so it never stops mid-sentence. Same
- * window the classic triage dialog's "Include intro at top" prepends
- * (src/app/api/clip-ideas/[id]/preview/route.ts) — kept identical so an idea
- * reads the same in both UIs.
- */
-export function computeIntroRange(
-  segments: Array<{ startSec: number; endSec: number }>,
-): TimeRange | null {
-  const INTRO_WINDOW = 24;
-  const INTRO_PAD_SEC = 15;
-  const MAX_INTRO_SEGMENTS = 40;
-  let count = Math.min(INTRO_WINDOW, segments.length);
-  if (count === 0) return null;
-  const targetEnd = segments[count - 1].endSec + INTRO_PAD_SEC;
-  for (let i = count; i < segments.length && i < MAX_INTRO_SEGMENTS; i++) {
-    count = i + 1;
-    if (segments[i].endSec >= targetEnd) break;
-  }
-  const range = {
-    startSec: segments[0].startSec,
-    endSec: segments[count - 1].endSec,
-  };
-  return range.endSec > range.startSec ? range : null;
 }
 
 export async function loadClipEditorSession(args: {
@@ -192,23 +149,10 @@ export async function loadClipEditorSession(args: {
       }),
   });
 
-  const { words: allWords, synthetic } = resolveTranscriptWords(transcript);
-  const intro = computeIntroRange(transcript.segments);
-  const context: TimeRange = {
-    startSec: Math.max(
-      0,
-      Math.min(startSec, ...edit.doc.sections.filter((s) => s.role === "body").map((s) => s.startSec)) -
-        EDITOR_CONTEXT_PAD_SEC,
-    ),
-    endSec:
-      Math.max(endSec, ...edit.doc.sections.filter((s) => s.role === "body").map((s) => s.endSec)) +
-      EDITOR_CONTEXT_PAD_SEC,
-  };
-  const windows: TimeRange[] = [
-    context,
-    ...(intro ? [intro] : []),
-    ...edit.doc.sections.map((s) => ({ startSec: s.startSec, endSec: s.endSec })),
-  ];
+  // The WHOLE transcript: the editor shows the full source so any part of it
+  // can be edited into the clip. (~60 bytes/word — an hour-long podcast is
+  // well under 1 MB before gzip.)
+  const { words, synthetic } = resolveTranscriptWords(transcript);
 
   const videoUrl = await getPresignedGetUrl(row.mediaS3Key, 4 * 3600, {
     bucket: row.mediaS3Bucket ?? undefined,
@@ -241,10 +185,8 @@ export async function loadClipEditorSession(args: {
       videoUrl,
       durationSec: transcript.durationSec ? Number(transcript.durationSec) : null,
     },
-    words: wordsInWindows(allWords, windows),
+    words,
     wordsSynthetic: synthetic,
-    context,
-    intro,
     latestRender: render ? toRenderStatus(render) : null,
   };
 }

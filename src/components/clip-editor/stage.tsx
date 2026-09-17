@@ -18,6 +18,7 @@ import type { CaptionsLayer, ClipEditDoc, TextLayer, TextStyle } from "@/lib/cli
 import { FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
 import type { TextBlockLayout } from "@/lib/clip-editor/layout";
 import type { RenderPlan } from "@/lib/clip-editor/plan";
+import { resolveVideoBox } from "@/lib/clip-editor/video-box";
 import { activeCaptionAt, type Scene } from "@/lib/clip-editor/scene";
 import type { PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
@@ -83,26 +84,13 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
     return () => engine.detach();
   }, [engine]);
 
-  // Where the video sits — must match ffmpeg-args.ts (scale + pad | crop).
-  const videoBox = useMemo(() => {
-    const canvasAspect = W / H;
-    if (plan.video.fit === "contain") {
-      const wide = sourceAspect > canvasAspect;
-      const w = wide ? W : H * sourceAspect;
-      const h = wide ? W / sourceAspect : H;
-      const top = Math.max(0, Math.min(H - h, (H * plan.video.yPct) / 100 - h / 2));
-      return { left: (W - w) / 2, top, width: w, height: h };
-    }
-    const wide = sourceAspect > canvasAspect;
-    const w = wide ? H * sourceAspect : W;
-    const h = wide ? H : W / sourceAspect;
-    return {
-      left: -((w - W) * plan.video.panXPct) / 100,
-      top: -(h - H) / 2,
-      width: w,
-      height: h,
-    };
-  }, [W, H, sourceAspect, plan.video]);
+  // Same geometry function the exporter uses — see video-box.ts. The source
+  // size only matters as a ratio here, so any multiple of the aspect works.
+  const box = useMemo(
+    () => resolveVideoBox(plan.canvas, plan.video, { width: sourceAspect * 1080, height: 1080 }),
+    [plan.canvas, plan.video, sourceAspect],
+  );
+  const videoBox = { left: box.x, top: box.y, width: box.width, height: box.height };
 
   /** Start a drag that maps pointer movement (in canvas px) to a doc change. */
   const startDrag = (
@@ -183,10 +171,10 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
         >
           <div
             className={cn(
-              "absolute cursor-grab active:cursor-grabbing",
+              "absolute cursor-grab overflow-hidden active:cursor-grabbing",
               selection?.kind === "video" && "outline-dashed outline-[6px] outline-sky-400",
             )}
-            style={videoBox}
+            style={{ ...videoBox, borderRadius: box.radius }}
             onPointerDown={dragVideo}
           >
             {/* Two elements on one source — see playback-engine.ts. */}

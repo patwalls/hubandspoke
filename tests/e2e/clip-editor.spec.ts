@@ -6,7 +6,8 @@ import { test, expect } from "@playwright/test";
  * Guards BOTH sides of the flag, because the promise of the flag is "nothing
  * changes for anyone else":
  *   - flag off → the classic triage dialog, with its Create ▾ dropdown
- *   - flag on  → the in-app editor; cutting a word adds a cut, undo removes it
+ *   - flag on  → the in-app editor; cutting a word adds a cut, undo removes it;
+ *                highlighting words offers Remove / Add to clip at the highlight
  *
  * Which side runs depends on the signed-in e2e user. To exercise the editor
  * locally, start the dev server with
@@ -71,4 +72,19 @@ test("flag on → editor opens; cutting a word is undoable and autosaves", async
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(cuts).toBe(before);
   await expect(page.getByText("Saved", { exact: true })).toBeVisible({ timeout: 10_000 });
+
+  // Highlighting words surfaces the action AT the highlight: Remove for
+  // words in the clip, Add to clip for the (dim) rest of the video.
+  await page.locator("[data-pos].text-foreground").nth(6).click();
+  const toolbar = page.getByRole("toolbar", { name: "Selected words" });
+  await expect(toolbar.getByRole("button", { name: "Remove" })).toBeVisible();
+  // The transcript is the WHOLE source, so word 0 exists even when the clip
+  // starts minutes in.
+  const firstWord = page.locator("[data-pos='0']");
+  await firstWord.scrollIntoViewIfNeeded();
+  if (await firstWord.evaluate((el) => !el.classList.contains("text-foreground"))) {
+    await firstWord.click();
+    await expect(toolbar.getByRole("button", { name: "Add to clip" })).toBeVisible();
+  }
+  // (No Escape here to clear the selection — Escape closes the dialog.)
 });

@@ -1,16 +1,16 @@
 /**
- * The transcript as the editor displays it: every word tagged with whether
- * it plays, was removed (and why), or sits outside the clip — plus the pauses
- * between words, which are editable too.
+ * The transcript as the editor displays it: EVERY word of the source, each
+ * tagged with whether it plays, was removed (and why), or sits outside the
+ * clip — plus the pauses between kept words, which are editable too.
  *
  * Pure derivation from (doc, words). The transcript UI renders this and turns
- * selections back into time ranges with `selectionActions`; it never reasons
- * about removals itself.
+ * selections back into edits with `selectionActions`; it never reasons about
+ * sections or removals itself.
  */
 import type { ClipEditDoc, RemovalReason, Section, TimeRange } from "./doc";
 import { wordEditKey } from "./doc";
 import { removalAt } from "./removals";
-import { isWordInRange, rangeForWordRun, type EditorWord } from "./words";
+import { rangeForWordRun, type EditorWord } from "./words";
 
 /** Pauses at least this long get their own chip in the transcript. */
 export const GAP_CHIP_MIN_SEC = 0.6;
@@ -27,7 +27,8 @@ export interface ViewWord {
   /** Caption text: the correction if there is one, else the transcript. */
   text: string;
   corrected: boolean;
-  sectionId: string;
+  /** The section this word belongs to; null when outside the clip. */
+  sectionId: string | null;
   state: WordState;
   reason: RemovalReason | null;
 }
@@ -42,158 +43,184 @@ export interface ViewGap {
   removed: boolean;
 }
 
-export interface ViewSection {
-  section: Section;
-  tokens: Array<ViewWord | ViewGap>;
+/** Marks where a section of the clip begins, inline in the transcript. */
+export interface ViewMarker {
+  kind: "marker";
+  key: string;
+  sectionId: string;
+  /** 1-based play order. */
+  index: number;
+  startSec: number;
+  endSec: number;
 }
 
+export type ViewToken = ViewWord | ViewGap | ViewMarker;
+
 export interface TranscriptView {
-  sections: ViewSection[];
-  /** Every word of every section, in display order. */
+  tokens: ViewToken[];
+  /** Every word of the source, in order. */
   words: ViewWord[];
 }
 
 export function buildTranscriptView(
   doc: ClipEditDoc,
   words: EditorWord[],
-  /** Source window shown around body sections so the clip can be extended. */
-  context: TimeRange,
 ): TranscriptView {
+  const sections = [...doc.sections].sort((a, b) => a.startSec - b.startSec);
+  const tokens: ViewToken[] = [];
   const flat: ViewWord[] = [];
-  const sections = doc.sections.map((section): ViewSection => {
-    const window: TimeRange =
-      section.role === "body"
-        ? {
-            startSec: Math.min(context.startSec, section.startSec),
-            endSec: Math.max(context.endSec, section.endSec),
-          }
-        : section;
-    const tokens: Array<ViewWord | ViewGap> = [];
-    const sectionWords = words.filter((w) => isWordInRange(w, window));
+  const marked = new Set<string>();
+  let si = 0;
 
-    sectionWords.forEach((word, i) => {
-      const inside = isWordInRange(word, section);
-      const removal = inside
-        ? removalAt(section, (word.startSec + word.endSec) / 2)
-        : null;
-      const correction = doc.wordEdits[wordEditKey(word.startSec)];
-      const view: ViewWord = {
-        kind: "word",
-        pos: flat.length,
-        word,
-        text: correction ?? word.text,
-        corrected: correction != null,
-        sectionId: section.id,
-        state: !inside ? "outside" : removal ? "removed" : "kept",
-        reason: removal?.reason ?? null,
-      };
-      flat.push(view);
-      tokens.push(view);
+  const sectionFor = (mid: number): Section | null => {
+    while (si < sections.length && mid >= sections[si].endSec) si++;
+    const s = sections[si];
+    return s && mid >= s.startSec ? s : null;
+  };
 
-      const next = sectionWords[i + 1];
-      if (!next) return;
-      const gap = next.startSec - word.endSec;
-      if (gap < GAP_CHIP_MIN_SEC) return;
-      const range = {
-        startSec: word.endSec + GAP_KEEP_SEC,
-        endSec: next.startSec - GAP_KEEP_SEC,
-      };
-      // Only pauses fully inside the clip are editable.
-      if (range.startSec < section.startSec || range.endSec > section.endSec) return;
+  words.forEach((word, i) => {
+    const mid = (word.startSec + word.endSec) / 2;
+    const section = sectionFor(mid);
+    const removal = section ? removalAt(section, mid) : null;
+    const correction = doc.wordEdits[wordEditKey(word.startSec)];
+
+    if (section && !marked.has(section.id)) {
+      marked.add(section.id);
       tokens.push({
-        kind: "gap",
-        key: `${section.id}:${Math.round(word.endSec * 1000)}`,
+        kind: "marker",
+        key: `m:${section.id}`,
         sectionId: section.id,
-        range,
-        durationSec: gap,
-        removed: removalAt(section, (range.startSec + range.endSec) / 2) != null,
+        index: sections.indexOf(section) + 1,
+        startSec: section.startSec,
+        endSec: section.endSec,
       });
+    }
+
+    const view: ViewWord = {
+      kind: "word",
+      pos: flat.length,
+      word,
+      text: correction ?? word.text,
+      corrected: correction != null,
+      sectionId: section?.id ?? null,
+      state: !section ? "outside" : removal ? "removed" : "kept",
+      reason: removal?.reason ?? null,
+    };
+    flat.push(view);
+    tokens.push(view);
+
+    // A pause chip, only for pauses wholly inside one section.
+    const next = words[i + 1];
+    if (!section || !next) return;
+    const gap = next.startSec - word.endSec;
+    if (gap < GAP_CHIP_MIN_SEC) return;
+    const range = {
+      startSec: word.endSec + GAP_KEEP_SEC,
+      endSec: next.startSec - GAP_KEEP_SEC,
+    };
+    if (range.startSec < section.startSec || range.endSec > section.endSec) return;
+    tokens.push({
+      kind: "gap",
+      key: `g:${section.id}:${Math.round(word.endSec * 1000)}`,
+      sectionId: section.id,
+      range,
+      durationSec: gap,
+      removed: removalAt(section, (range.startSec + range.endSec) / 2) != null,
     });
-    return { section, tokens };
   });
-  return { sections, words: flat };
+
+  return { tokens, words: flat };
 }
 
 export interface SelectionActions {
-  /** Per-section source ranges the selected in-clip words cover. */
+  wordCount: number;
+  /** Source ranges covered by the selected words that are INSIDE the clip —
+   *  what Remove / Restore act on. */
   ranges: Array<{ sectionId: string; range: TimeRange }>;
   /** True when every selected in-clip word is already removed. */
   allRemoved: boolean;
-  /** Selected words outside the clip → the window that would include them. */
-  extend: { sectionId: string; window: TimeRange } | null;
-  /** Trim the clip to start / end at the selection. Null when N/A. */
+  /** Source ranges covered by selected words OUTSIDE the clip — what "Add to
+   *  clip" includes. A run that starts right after (or ends right before) an
+   *  existing section is stretched to touch it, so the two fuse into one
+   *  section instead of leaving a sliver of a cut between them. */
+  include: TimeRange[];
+  /** Trim a section to start / end at the selection. Null when N/A. */
   startHere: { sectionId: string; window: TimeRange } | null;
   endHere: { sectionId: string; window: TimeRange } | null;
-  wordCount: number;
 }
 
 /** What can be done with the words at positions [lo, hi]. */
 export function selectionActions(
   view: TranscriptView,
+  doc: ClipEditDoc,
   lo: number,
   hi: number,
 ): SelectionActions {
-  const selected = view.words.slice(lo, hi + 1);
+  const all = view.words;
+  const plain = all.map((w) => w.word);
+  const sectionById = new Map(doc.sections.map((s) => [s.id, s]));
   const ranges: SelectionActions["ranges"] = [];
-  let allRemoved = selected.some((w) => w.state !== "outside");
-  let extend: SelectionActions["extend"] = null;
+  const include: TimeRange[] = [];
+  let sawInside = false;
+  let allRemoved = true;
 
-  for (const vs of view.sections) {
-    const sectionWords = vs.tokens.filter((t): t is ViewWord => t.kind === "word");
-    const picked = sectionWords.filter((w) => w.pos >= lo && w.pos <= hi);
-    if (picked.length === 0) continue;
-
-    const inside = picked.filter((w) => w.state !== "outside");
-    if (inside.length > 0) {
-      if (inside.some((w) => w.state === "kept")) allRemoved = false;
-      const first = sectionWords.indexOf(inside[0]);
-      const last = sectionWords.indexOf(inside[inside.length - 1]);
-      const range = rangeForWordRun(
-        sectionWords.map((w) => w.word),
-        first,
-        last,
-      );
-      if (range) ranges.push({ sectionId: vs.section.id, range });
+  // Walk the selection as maximal runs of words sharing a section (or all
+  // outside), so a selection spanning clip + not-clip splits cleanly.
+  let runStart = lo;
+  for (let p = lo; p <= hi + 1; p++) {
+    const sameRun =
+      p <= hi && all[p] && all[p].sectionId === all[runStart]?.sectionId;
+    if (sameRun) continue;
+    const first = all[runStart];
+    const last = all[p - 1];
+    if (first && last) {
+      if (first.sectionId) {
+        sawInside = true;
+        for (let q = runStart; q < p; q++) if (all[q].state === "kept") allRemoved = false;
+        const range = rangeForWordRun(plain, runStart, p - 1);
+        if (range) ranges.push({ sectionId: first.sectionId, range });
+      } else {
+        const before = all[runStart - 1];
+        const after = all[p];
+        const prevSection = before?.sectionId ? sectionById.get(before.sectionId) : undefined;
+        const nextSection = after?.sectionId ? sectionById.get(after.sectionId) : undefined;
+        include.push({
+          startSec: prevSection
+            ? Math.min(prevSection.endSec, first.word.startSec)
+            : first.word.startSec,
+          endSec: nextSection
+            ? Math.max(nextSection.startSec, last.word.endSec)
+            : last.word.endSec,
+        });
+      }
     }
-
-    const outside = picked.filter((w) => w.state === "outside");
-    if (outside.length > 0 && !extend) {
-      extend = {
-        sectionId: vs.section.id,
-        window: {
-          startSec: Math.min(vs.section.startSec, outside[0].word.startSec),
-          endSec: Math.max(
-            vs.section.endSec,
-            outside[outside.length - 1].word.endSec,
-          ),
-        },
-      };
-    }
+    runStart = p;
   }
 
-  const first = selected.find((w) => w.state !== "outside");
-  const last = [...selected].reverse().find((w) => w.state !== "outside");
-  const sectionOf = (id: string) => view.sections.find((s) => s.section.id === id)!.section;
-  const startHere =
-    first && first.word.startSec > sectionOf(first.sectionId).startSec + 0.01
-      ? {
-          sectionId: first.sectionId,
-          window: {
-            startSec: first.word.startSec,
-            endSec: sectionOf(first.sectionId).endSec,
-          },
-        }
-      : null;
-  const endHere =
-    last && last.word.endSec < sectionOf(last.sectionId).endSec - 0.01
-      ? {
-          sectionId: last.sectionId,
-          window: {
-            startSec: sectionOf(last.sectionId).startSec,
-            endSec: last.word.endSec,
-          },
-        }
-      : null;
+  const selected = all.slice(lo, hi + 1);
+  const firstIn = selected.find((w) => w.sectionId);
+  const lastIn = [...selected].reverse().find((w) => w.sectionId);
+  const startSection = firstIn?.sectionId ? sectionById.get(firstIn.sectionId) : undefined;
+  const endSection = lastIn?.sectionId ? sectionById.get(lastIn.sectionId) : undefined;
 
-  return { ranges, allRemoved, extend, startHere, endHere, wordCount: selected.length };
+  return {
+    wordCount: selected.length,
+    ranges,
+    allRemoved: sawInside && allRemoved,
+    include,
+    startHere:
+      firstIn && startSection && firstIn.word.startSec > startSection.startSec + 0.01
+        ? {
+            sectionId: startSection.id,
+            window: { startSec: firstIn.word.startSec, endSec: startSection.endSec },
+          }
+        : null,
+    endHere:
+      lastIn && endSection && lastIn.word.endSec < endSection.endSec - 0.01
+        ? {
+            sectionId: endSection.id,
+            window: { startSec: endSection.startSec, endSec: lastIn.word.endSec },
+          }
+        : null,
+  };
 }

@@ -7,7 +7,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clipIdeas, clipRenders, productionItemMedia, productionItems } from "@/lib/db/schema";
+import {
+  clipIdeas,
+  clipRenders,
+  contentComments,
+  productionItemMedia,
+  productionItems,
+} from "@/lib/db/schema";
 import {
   createTestClipEdit,
   createTestClipIdea,
@@ -23,7 +29,8 @@ const enqueue = vi.fn();
 vi.mock("@/jobs/enqueue", () => ({ enqueue: (...args: unknown[]) => enqueue(...args) }));
 
 // Imported after the mock so the services bind to the mocked enqueue.
-const { exportClipEdit, ClipEditEmptyError, ClipEditNotFoundError } = await import("./export");
+const { exportClipEdit, buildClipCreatedComment, ClipEditEmptyError, ClipEditNotFoundError } =
+  await import("./export");
 const { installRenderedClipMedia, CLIP_EDITOR_SOURCE_PREFIX } = await import("./install-rendered-media");
 const { saveClipEdit } = await import("./save");
 const { toRenderStatus, RENDER_STALL_MS } = await import("./render-status");
@@ -80,6 +87,27 @@ describe("exportClipEdit", () => {
       expect.objectContaining({ jobKey: `clip-render:${edit.id}`, queueName: "media-heavy" }),
     );
     expect(enqueue).toHaveBeenCalledWith("draft-algorithm-run", { productionItemId: queueItem.id });
+
+    // One terse activity comment: range + hook, none of the Descript paths'
+    // rationale / transcript dump.
+    const comments = await db
+      .select({ body: contentComments.body, userId: contentComments.userId })
+      .from(contentComments)
+      .where(eq(contentComments.contentItemId, queueItem.id));
+    expect(comments).toHaveLength(1);
+    expect(comments[0].userId).toBe(userId);
+    expect(comments[0].body).toContain("Created a clip from the queue");
+    expect(comments[0].body).toContain("01:40–02:10</strong> (30s)");
+    expect(comments[0].body).toContain("<blockquote>edited hook</blockquote>");
+    expect(comments[0].body).not.toMatch(/viral|Transcript|vitest rationale/i);
+  });
+
+  it("the comment reports what PLAYS after cuts, and escapes the hook", async () => {
+    const d = createDefaultDoc({ startSec: 100, endSec: 130, hook: "x" });
+    d.sections[0] = addRemoval(d.sections[0], { startSec: 110, endSec: 120 }, "manual");
+    const body = buildClipCreatedComment(d, `5 < 6 & "quotes"`);
+    expect(body).toContain("01:40–02:10</strong> (20s)");
+    expect(body).toContain("5 &lt; 6 &amp; &quot;quotes&quot;");
   });
 
   it("re-export supersedes the in-flight render and skips the one-time promotion steps", async () => {

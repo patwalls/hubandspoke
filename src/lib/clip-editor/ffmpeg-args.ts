@@ -17,6 +17,7 @@
  * both streams — sync cannot drift (see plan.ts, "Frame grid").
  */
 import type { PlanSegment, RenderPlan } from "./plan";
+import { resolveVideoBox } from "./video-box";
 
 export const AUDIO_SAMPLE_RATE = 48000;
 
@@ -58,7 +59,13 @@ function hexToFfmpegColor(hex: string): string {
 
 export function buildFilterGraph(
   plan: RenderPlan,
-  opts: { assPath: string | null; fontsDir: string },
+  opts: {
+    assPath: string | null;
+    fontsDir: string;
+    /** Display size of the source (see `parseSourceDimensions`). Without it
+     *  the graph falls back to aspect expressions and cannot inset/round. */
+    sourceSize?: { width: number; height: number } | null;
+  },
 ): string {
   const { width: W, height: H, fps } = plan.canvas;
   if (plan.inputs.length === 0 || plan.totalFrames === 0) {
@@ -93,28 +100,58 @@ export function buildFilterGraph(
     chains.push(`[a0]anull[aout]`);
   }
 
-  // Canvas aspect as a literal so ffmpeg's `a` (input aspect) compares to it.
-  const canvasAspect = (W / H).toFixed(6);
-  const layout: string[] = [];
-  if (plan.video.fit === "contain") {
-    layout.push(
-      `scale=w='if(gt(a,${canvasAspect}),${W},-2)':h='if(gt(a,${canvasAspect}),-2,${H})':flags=lanczos`,
-      `pad=${W}:${H}:'(ow-iw)/2':'max(0,min(oh-ih,oh*${plan.video.yPct}/100-ih/2))':color=${hexToFfmpegColor(plan.canvas.background)}`,
+  const burnIn = opts.assPath
+    ? `,ass=filename=${quote(opts.assPath)}:fontsdir=${quote(opts.fontsDir)}`
+    : "";
+  const bg = hexToFfmpegColor(plan.canvas.background);
+
+  if (!opts.sourceSize) {
+    // Dimension-free fallback (source couldn't be probed): ffmpeg works the
+    // fit out itself from the input aspect `a`. Cannot inset or round the
+    // video — both need the exact box — so those settings are ignored here.
+    const canvasAspect = (W / H).toFixed(6);
+    const place =
+      plan.video.fit === "contain"
+        ? `scale=w='if(gt(a,${canvasAspect}),${W},-2)':h='if(gt(a,${canvasAspect}),-2,${H})':flags=lanczos,pad=${W}:${H}:'(ow-iw)/2':'max(0,min(oh-ih,oh*${plan.video.yPct}/100-ih/2))':color=${bg}`
+        : `scale=w='if(gt(a,${canvasAspect}),-2,${W})':h='if(gt(a,${canvasAspect}),${H},-2)':flags=lanczos,crop=${W}:${H}:'(iw-${W})*${plan.video.panXPct}/100':'(ih-${H})/2'`;
+    chains.push(`[vcat]${place},setsar=1${burnIn},format=yuv420p[vout]`);
+    return chains.join(";\n");
+  }
+
+  // Exact placement from the same geometry the preview uses (video-box.ts).
+  const box = resolveVideoBox(plan.canvas, plan.video, opts.sourceSize);
+  const scaled = `scale=${box.width}:${box.height}:flags=lanczos,setsar=1`;
+
+  if (plan.video.fit === "cover") {
+    chains.push(
+      `[vcat]${scaled},crop=${W}:${H}:${-box.x}:${-box.y}${burnIn},format=yuv420p[vout]`,
+    );
+  } else if (box.radius === 0) {
+    chains.push(
+      `[vcat]${scaled},pad=${W}:${H}:${box.x}:${box.y}:color=${bg}${burnIn},format=yuv420p[vout]`,
     );
   } else {
-    layout.push(
-      `scale=w='if(gt(a,${canvasAspect}),-2,${W})':h='if(gt(a,${canvasAspect}),${H},-2)':flags=lanczos`,
-      `crop=${W}:${H}:'(iw-${W})*${plan.video.panXPct}/100':'(ih-${H})/2'`,
+    // Rounded corners = an alpha mask. The mask is a rounded-rect distance
+    // field evaluated by `geq` for ONE frame, then looped forever — running
+    // geq per video frame would be ~100× slower than the encode itself.
+    // `+0.5`/`clip` gives a 1px anti-aliased edge instead of a staircase.
+    const R = box.radius;
+    const mask =
+      `color=c=black:s=${box.width}x${box.height}:r=${fps},trim=end_frame=1,format=gray,` +
+      `geq=lum='255*clip(${R}+0.5-hypot(max(max(${R}-X-0.5,0),X+0.5-(W-${R})),max(max(${R}-Y-0.5,0),Y+0.5-(H-${R}))),0,1)',` +
+      // Bounded to the clip's exact frame count: an unbounded looped mask
+      // makes alphamerge (and so the whole encode) run forever.
+      `loop=loop=-1:size=1:start=0,setpts=N/${fps}/TB,trim=end_frame=${plan.totalFrames}[mask]`;
+    chains.push(mask);
+    chains.push(`[vcat]${scaled},format=yuv420p[vs]`);
+    chains.push(`[vs][mask]alphamerge[vr]`);
+    chains.push(
+      `color=c=${bg}:s=${W}x${H}:r=${fps},trim=end_frame=${plan.totalFrames}[bg]`,
+    );
+    chains.push(
+      `[bg][vr]overlay=x=${box.x}:y=${box.y}:shortest=1:format=yuv420,setsar=1${burnIn},format=yuv420p[vout]`,
     );
   }
-  layout.push("setsar=1");
-  if (opts.assPath) {
-    layout.push(
-      `ass=filename=${quote(opts.assPath)}:fontsdir=${quote(opts.fontsDir)}`,
-    );
-  }
-  layout.push("format=yuv420p");
-  chains.push(`[vcat]${layout.join(",")}[vout]`);
 
   return chains.join(";\n");
 }

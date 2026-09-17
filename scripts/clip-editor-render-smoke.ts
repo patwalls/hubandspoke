@@ -44,6 +44,8 @@ const doc = createDefaultDoc({
 const body = doc.sections.findIndex((s) => s.role === "body");
 doc.sections[body] = addRemoval(doc.sections[body], { startSec: 12, endSec: 13.5 }, "filler");
 doc.sections[body] = addRemoval(doc.sections[body], { startSec: 16.2, endSec: 17 }, "silence");
+// Inset + rounded corners: exercises the alpha-mask compositing path.
+doc.video = { ...doc.video, scalePct: 88, radiusPct: 12 };
 
 const texts = "so basically I built this thing in a weekend and it just kept growing every single month".split(" ");
 const words: EditorWord[] = texts.map((text, i) => ({
@@ -60,6 +62,8 @@ writeFileSync(assPath, buildAssScript(plan, scene));
 writeFileSync(filterPath, buildFilterGraph(plan, {
   assPath,
   fontsDir: path.resolve("public/fonts/clip-editor"),
+  // The synthetic source is 1280x720; pass a real size for a real file.
+  sourceSize: { width: 1280, height: 720 },
 }));
 const argv = buildRenderArgs({ plan, input: source, filterScriptPath: filterPath, outputPath });
 console.log(`plan: ${plan.segments.length} segments, ${plan.durationSec.toFixed(2)}s, ${plan.captions?.cues.length ?? 0} cues`);

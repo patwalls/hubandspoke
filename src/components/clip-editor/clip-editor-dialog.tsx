@@ -166,15 +166,11 @@ function EditorWorkspace({
   const [engine] = useState(() => new PlaybackEngine());
   const [busy, setBusy] = useState<null | "fillers" | "export" | "kill">(null);
   const [killOpen, setKillOpen] = useState(false);
-  const [whyOpen, setWhyOpen] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   const plan = useMemo(() => compileRenderPlan(doc, session.words), [doc, session.words]);
   const scene = useMemo(() => resolveScene(plan), [plan]);
-  const view = useMemo(
-    () => buildTranscriptView(doc, session.words, session.context),
-    [doc, session.words, session.context],
-  );
-  const body = doc.sections.find((s) => s.role === "body") ?? null;
+  const view = useMemo(() => buildTranscriptView(doc, session.words), [doc, session.words]);
   const locked = saveState === "conflict";
   const isReExport = session.clipIdea.status !== "suggested";
 
@@ -287,25 +283,26 @@ function EditorWorkspace({
       let found = 0;
       apply((d) => {
         let next: ClipEditDoc = d;
-        for (const vs of view.sections) {
-          const sectionWords = vs.tokens.flatMap((t) => (t.kind === "word" ? [t] : []));
-          const plain = sectionWords.map((w) => w.word);
-          // Consecutive fillers become ONE cut, so "um, uh, like" is a single
-          // clean removal rather than three slivers.
-          let runStart = -1;
-          for (let i = 0; i <= sectionWords.length; i++) {
-            const w = sectionWords[i];
-            const isFiller = !!w && w.state === "kept" && fillers.has(w.word.index);
-            if (isFiller && runStart < 0) runStart = i;
-            if (!isFiller && runStart >= 0) {
-              const range = rangeForWordRun(plain, runStart, i - 1);
-              if (range) {
-                next = commands.remove(vs.section.id, [range], "filler")(next);
-                found += i - runStart;
-              }
-              runStart = -1;
+        const plain = view.words.map((w) => w.word);
+        // Consecutive fillers become ONE cut, so "um, uh, like" is a single
+        // clean removal rather than three slivers. A run never crosses from
+        // one part of the clip into another.
+        let runStart = -1;
+        for (let i = 0; i <= view.words.length; i++) {
+          const w = view.words[i];
+          const prev = view.words[i - 1];
+          const isFiller = !!w && w.state === "kept" && fillers.has(w.word.index);
+          const continues = isFiller && runStart >= 0 && prev?.sectionId === w.sectionId;
+          if (runStart >= 0 && !continues) {
+            const range = rangeForWordRun(plain, runStart, i - 1);
+            const sectionId = view.words[runStart].sectionId;
+            if (range && sectionId) {
+              next = commands.remove(sectionId, [range], "filler")(next);
+              found += i - runStart;
             }
+            runStart = -1;
           }
+          if (isFiller && runStart < 0) runStart = i;
         }
         return next;
       });
@@ -331,6 +328,7 @@ function EditorWorkspace({
   // ── Export / kill ────────────────────────────────────────────────────────
   const exportClip = async () => {
     setBusy("export");
+    let navigating = false;
     try {
       if (!(await save())) {
         toast.error("Couldn't save your edits — export cancelled");
@@ -348,16 +346,28 @@ function EditorWorkspace({
         toast.error(json.error ?? `Export failed (${res.status})`);
         return;
       }
-      toast.success("Exporting your clip…", {
-        duration: 6000,
-        description:
-          "Rendering on our servers — usually about a minute. It'll appear on this item when it's ready.",
-      });
-      onDone();
-      onClose();
-      router.push(`/${json.brand ?? brand}/content/${json.productionItemId}`);
+      // Straight to the clip's page. Deliberately NOT closing the dialog or
+      // refreshing the queue first: both re-render the queue underneath and
+      // read as "bounced back to the queue" while the next page loads. The
+      // editor stays up (with a "Opening your clip…" cover) until the route
+      // change unmounts it. The content page's status chip takes over from
+      // here — it shows the render progress.
+      const target = `/${json.brand ?? brand}/content/${json.productionItemId}`;
+      if (window.location.pathname === target) {
+        // Re-export from the clip's own page: there is nowhere to go, and a
+        // push to the current URL would never unmount us (the cover would
+        // hang). Just close; the page's status chip picks up the new render.
+        onDone();
+        onClose();
+        return;
+      }
+      navigating = true;
+      setLeaving(true);
+      router.push(target);
     } finally {
-      setBusy(null);
+      // Keep the button busy while the next page loads — re-enabling it would
+      // invite a second export.
+      if (!navigating) setBusy(null);
     }
   };
 
@@ -444,20 +454,6 @@ function EditorWorkspace({
         )}
       >
         <div className="flex min-h-0 min-w-0 flex-col">
-          <button
-            type="button"
-            onClick={() => setWhyOpen((v) => !v)}
-            className="mb-2 flex items-center gap-1.5 self-start text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          >
-            <span className={cn("transition-transform", whyOpen && "rotate-90")}>▸</span>
-            Why it&apos;ll go viral
-          </button>
-          {whyOpen && (
-            <p className="mb-3 rounded-md bg-muted/50 p-2.5 text-[13px] leading-relaxed text-foreground/90">
-              {session.clipIdea.rationale}
-            </p>
-          )}
-
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <h3 className="mr-auto text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Transcript
@@ -493,7 +489,7 @@ function EditorWorkspace({
               approximate. Re-run the transcript for frame-accurate edits.
             </p>
           )}
-          <TranscriptEditor view={view} plan={plan} engine={engine} readOnly={locked} />
+          <TranscriptEditor view={view} doc={doc} plan={plan} engine={engine} readOnly={locked} />
         </div>
 
         <div
@@ -503,15 +499,14 @@ function EditorWorkspace({
           <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} />
         </div>
 
-        <Inspector doc={doc} intro={session.intro} disabled={locked} />
+        <Inspector doc={doc} disabled={locked} />
       </div>
 
       <div className="shrink-0 px-5">
         <Transport
           plan={plan}
           engine={engine}
-          body={body}
-          context={session.context}
+          sections={doc.sections}
           words={session.words}
           readOnly={locked}
         />
@@ -550,6 +545,13 @@ function EditorWorkspace({
           </Button>
         </div>
       </div>
+
+      {leaving && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 rounded-xl bg-background/85 backdrop-blur-sm">
+          <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+          <span className="text-sm font-medium">Opening your clip…</span>
+        </div>
+      )}
 
       <KillIdeaDialog
         open={killOpen}

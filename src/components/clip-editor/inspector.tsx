@@ -5,28 +5,21 @@
  * writes through `apply(commands.…)`, so it is undoable and autosaved like
  * any other edit. Sliders pass a coalesce key so one drag = one undo step.
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { ChevronDownIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { CaptionsLayer, ClipEditDoc, TextLayer, TimeRange } from "@/lib/clip-editor/doc";
-import { findCaptionsLayer, findHookLayer } from "@/lib/clip-editor/doc";
+import type { CaptionsLayer, ClipEditDoc, FontId, TextLayer } from "@/lib/clip-editor/doc";
+import { FONT_IDS, findCaptionsLayer, findHookLayer } from "@/lib/clip-editor/doc";
+import { FONTS } from "@/lib/clip-editor/fonts";
 import { commands, useEditor } from "./store";
 
 const HIGHLIGHTS = ["#FFE14D", "#4ADE80", "#38BDF8", "#FB7185", "#FFFFFF"];
 
-export function Inspector({
-  doc,
-  intro,
-  disabled,
-}: {
-  doc: ClipEditDoc;
-  intro: TimeRange | null;
-  disabled: boolean;
-}) {
+export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boolean }) {
   const apply = useEditor((s) => s.apply);
   const selection = useEditor((s) => s.stageSelection);
   const hook = findHookLayer(doc);
   const captions = findCaptionsLayer(doc);
-  const hasIntro = doc.sections.some((s) => s.role === "intro");
   const vertical = doc.canvas.height > doc.canvas.width;
 
   const patchHook = (patch: (l: TextLayer) => TextLayer, key?: string) =>
@@ -52,6 +45,10 @@ export function Inspector({
             onKeyDown={(e) => e.stopPropagation()}
             placeholder="The line that stops the scroll"
             className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-[13px] font-medium leading-snug outline-none focus:ring-2 focus:ring-ring"
+          />
+          <FontPicker
+            value={hook.style.fontId}
+            onChange={(fontId) => patchHook((l) => ({ ...l, style: { ...l.style, fontId } }))}
           />
           <Slider
             label="Size"
@@ -91,6 +88,12 @@ export function Inspector({
             onChange: (visible) => patchCaptions((l) => ({ ...l, visible })),
           }}
         >
+          <FontPicker
+            value={captions.style.fontId}
+            onChange={(fontId) =>
+              patchCaptions((l) => ({ ...l, style: { ...l.style, fontId } }))
+            }
+          />
           <Slider
             label="Size"
             value={captions.style.sizePct}
@@ -189,17 +192,38 @@ export function Inspector({
           ))}
         </div>
         {doc.video.fit === "contain" ? (
-          vertical && (
+          <>
             <Slider
-              label="Position"
-              hint="or drag the video"
-              value={doc.video.yPct}
-              min={0}
+              label="Size"
+              hint="below 100 leaves a margin"
+              value={doc.video.scalePct}
+              min={50}
               max={100}
-              step={0.5}
-              onChange={(yPct) => apply(commands.patchVideo({ yPct }), "video-y")}
+              step={1}
+              format={(v) => `${Math.round(v)}%`}
+              onChange={(scalePct) => apply(commands.patchVideo({ scalePct }), "video-scale")}
             />
-          )
+            <Slider
+              label="Rounded corners"
+              value={doc.video.radiusPct}
+              min={0}
+              max={25}
+              step={0.5}
+              format={(v) => (v === 0 ? "Off" : v.toFixed(1))}
+              onChange={(radiusPct) => apply(commands.patchVideo({ radiusPct }), "video-radius")}
+            />
+            {(vertical || doc.video.scalePct < 100) && (
+              <Slider
+                label="Position"
+                hint="or drag the video"
+                value={doc.video.yPct}
+                min={0}
+                max={100}
+                step={0.5}
+                onChange={(yPct) => apply(commands.patchVideo({ yPct }), "video-y")}
+              />
+            )}
+          </>
         ) : (
           <Slider
             label="Pan"
@@ -213,20 +237,6 @@ export function Inspector({
         )}
       </Panel>
 
-      {intro && (
-        <Panel title="Intro">
-          <Check
-            label="Include the source's intro at the top"
-            checked={hasIntro}
-            onChange={(on) => apply(commands.setIntro(on ? intro : null))}
-          />
-          <p className="text-[11px] leading-snug text-muted-foreground">
-            Prepends the opening of the source video ahead of the clip. It
-            shows up in the transcript, where you can trim it like anything
-            else.
-          </p>
-        </Panel>
-      )}
     </fieldset>
   );
 }
@@ -277,6 +287,63 @@ function Panel({
       </div>
       {!hidden && <div className="mt-2.5 flex flex-col gap-2.5">{children}</div>}
     </section>
+  );
+}
+
+/**
+ * Collapsed to one row (the current font, drawn in its own face); opens into
+ * a grid of every registered font. Inline rather than a popover so it can't
+ * be clipped by the dialog. The @font-face rules are already on the page (the
+ * stage injects them), so previewing each face costs nothing extra.
+ */
+function FontPicker({ value, onChange }: { value: FontId; onChange: (id: FontId) => void }) {
+  const [open, setOpen] = useState(false);
+  const face = (id: FontId) => ({
+    fontFamily: `"${FONTS[id].cssFamily}"`,
+    fontWeight: FONTS[id].cssWeight,
+  });
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[11px] text-muted-foreground">Font</span>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between rounded-md border border-border px-2 py-1.5 text-left text-[14px] leading-tight transition-colors hover:bg-muted"
+      >
+        <span className="truncate" style={face(value)}>
+          {FONTS[value].label}
+        </span>
+        <ChevronDownIcon
+          className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && (
+        <div className="grid grid-cols-2 gap-1">
+          {FONT_IDS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              title={FONTS[id].label}
+              aria-pressed={value === id}
+              onClick={() => {
+                onChange(id);
+                setOpen(false);
+              }}
+              className={cn(
+                "truncate rounded-md border px-2 py-1.5 text-left text-[13px] leading-tight transition-colors",
+                value === id
+                  ? "border-sky-500 bg-sky-50 text-foreground dark:bg-sky-950"
+                  : "border-border text-foreground/80 hover:bg-muted",
+              )}
+              style={face(id)}
+            >
+              {FONTS[id].label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -26,6 +26,7 @@ import {
   parseProgressSeconds,
 } from "@/lib/clip-editor/ffmpeg-args";
 import { resolveTranscriptWords } from "@/lib/clip-editor/words";
+import { parseSourceDimensions } from "@/lib/clip-editor/video-box";
 import { downloadToFile } from "./descript-upload-helpers";
 
 export interface ClipRenderPayload {
@@ -123,19 +124,29 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
     const hasOverlays = scene.textBlocks.length > 0 || scene.captions !== null;
     const assPath = hasOverlays ? path.join(workDir, "overlay.ass") : null;
     if (assPath) await writeFile(assPath, buildAssScript(plan, scene));
+    const sourceUrl = await getPresignedGetUrl(source.mediaS3Key, 3600, {
+      bucket: source.mediaS3Bucket ?? undefined,
+    });
+
+    // Exact placement (inset, rounded corners) needs the source's pixel size.
+    // A failed probe isn't fatal: the graph falls back to aspect expressions
+    // and just can't inset/round.
+    const sourceSize = await probeSourceSize(sourceUrl);
+    if (!sourceSize) {
+      helpers.logger.warn(`clip-render: couldn't probe source size for render=${render.id}; using aspect fallback`);
+    }
+
     const filterScriptPath = path.join(workDir, "graph.txt");
     await writeFile(
       filterScriptPath,
       buildFilterGraph(plan, {
         assPath,
         fontsDir: path.join(process.cwd(), "public", "fonts", "clip-editor"),
+        sourceSize,
       }),
     );
     const outputPath = path.join(workDir, "clip.mp4");
 
-    const sourceUrl = await getPresignedGetUrl(source.mediaS3Key, 3600, {
-      bucket: source.mediaS3Bucket ?? undefined,
-    });
     helpers.logger.info(
       `clip-render start render=${render.id} item=${render.productionItemId} segments=${plan.segments.length} duration=${plan.durationSec.toFixed(2)}s`,
     );
@@ -220,6 +231,26 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
     await rm(workDir, { recursive: true, force: true });
   }
 };
+
+/** `ffmpeg -i <url>` with no output: exits non-zero by design, but prints
+ *  the stream banner to stderr first — a ranged read of just the header. */
+function probeSourceSize(input: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegInstaller.path, ["-hide_banner", "-i", input], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    const timer = setTimeout(() => proc.kill("SIGKILL"), 30_000);
+    proc.stderr.on("data", (c: Buffer) => {
+      stderr = (stderr + c.toString()).slice(-20_000);
+    });
+    proc.on("error", () => resolve(null));
+    proc.on("close", () => {
+      clearTimeout(timer);
+      resolve(parseSourceDimensions(stderr));
+    });
+  });
+}
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

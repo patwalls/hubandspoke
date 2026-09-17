@@ -21,6 +21,14 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FONTS = {
   "montserrat-extrabold": "Montserrat-ExtraBold.ttf",
   "montserrat-bold": "Montserrat-Bold.ttf",
+  "poppins-extrabold": "Poppins-ExtraBold.ttf",
+  "poppins-semibold": "Poppins-SemiBold.ttf",
+  "archivo-black": "ArchivoBlack-Regular.ttf",
+  "anton": "Anton-Regular.ttf",
+  "bebas-neue": "BebasNeue-Regular.ttf",
+  "bangers": "Bangers-Regular.ttf",
+  "dm-serif-display": "DMSerifDisplay-Regular.ttf",
+  "permanent-marker": "PermanentMarker-Regular.ttf",
 };
 
 // Latin + Latin-1/Extended-A, general punctuation, currency, arrows.
