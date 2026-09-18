@@ -62,7 +62,7 @@ interface IGSidecarEdge {
   node?: IGSidecarNode;
 }
 
-interface IGMedia {
+export interface IGMedia {
   is_video?: boolean;
   product_type?: string;
   display_url?: string;
@@ -76,7 +76,7 @@ interface IGMedia {
   edge_sidecar_to_children?: { edges?: IGSidecarEdge[] };
 }
 
-interface IGDownloadEntry {
+export interface IGDownloadEntry {
   post_id?: string;
   cdn_url?: string;
   type?: "image" | "video" | string;
@@ -101,6 +101,55 @@ interface IGTranscriptResponse {
 function captionFrom(media: IGMedia | undefined): string | null {
   const text = media?.edge_media_to_caption?.edges?.[0]?.node?.text;
   return text && text.length > 0 ? text : null;
+}
+
+/**
+ * The slides to archive for a post, from the shapes SC returns:
+ *   - Carousel (2–10 mixed slides) → `edge_sidecar_to_children.edges[]`, one
+ *     node per slide with its own `display_url` / `video_url` / `is_video`.
+ *     Present on the plain 1-credit response, so carousels are ALWAYS
+ *     archived. SC's flat `download_media_urls[]` for the same post only
+ *     lists the videos (sometimes just the first), so it's never used here.
+ *   - Single photo / video / reel → `download_media_urls[]` (only populated
+ *     when the call was made with `download_media=true`, i.e. `withMedia`).
+ * Video slides use the IG CDN `video_url` directly — fresh at fetch time,
+ * `archiveRemoteToS3` downloads it before it rotates.
+ */
+export function carouselSlidesFrom(
+  media: IGMedia,
+  downloadUrls: IGDownloadEntry[] | undefined,
+  shortcode: string,
+  opts: { withMedia: boolean }
+): CarouselSlide[] {
+  const sidecarEdges = media.edge_sidecar_to_children?.edges ?? [];
+  if (sidecarEdges.length > 0) {
+    return sidecarEdges
+      .map((edge): CarouselSlide | null => {
+        const n = edge.node;
+        if (!n) return null;
+        if (n.is_video && n.video_url) {
+          return {
+            url: n.video_url,
+            kind: "video",
+            posterUrl: n.display_url,
+            fileNameHint: shortcode,
+          };
+        }
+        if (!n.is_video && n.display_url) {
+          return { url: n.display_url, kind: "image", fileNameHint: shortcode };
+        }
+        return null;
+      })
+      .filter((s): s is CarouselSlide => !!s);
+  }
+  if (!opts.withMedia) return [];
+  return (downloadUrls ?? [])
+    .filter((e): e is IGDownloadEntry & { cdn_url: string } => !!e.cdn_url)
+    .map((e) => ({
+      url: e.cdn_url,
+      kind: e.type === "video" ? "video" : "image",
+      fileNameHint: shortcode,
+    }));
 }
 
 interface EnrichOptions {
@@ -246,68 +295,28 @@ export async function enrichInstagramItem(
   // ------------------------------------------------------------------
   // Step 3: archive primary media + every carousel slide to S3.
   //
-  // The shape SC returns depends on the post type:
-  //   - Single photo / single video / reel → one entry in
-  //     `download_media_urls[]` with a `cdn_url` we can archive directly.
-  //   - Carousel (2–10 mixed slides)      → `edge_sidecar_to_children.edges[]`
-  //     has one node per slide with its own `display_url` / `video_url` /
-  //     `is_video`. SC's `download_media_urls[]` for the same post only
-  //     contains the videos (sometimes just the first one), so image
-  //     slides are silently dropped if we read the flat list. Build the
-  //     slide array from the sidecar instead and fall through to the
-  //     flat list only for non-carousel posts.
-  //
-  // Video slides use the IG CDN `video_url` directly — the URL is fresh at
-  // fetch time and `archiveRemoteToS3` downloads it before it rotates.
+  // Carousel slides (`edge_sidecar_to_children`) come back on the plain
+  // 1-credit call with per-slide image AND video URLs, so they're archived
+  // on every run — gating them behind `withMedia` (the 10-credit
+  // `download_media=true` variant) is what left our own published PLAYBOOK
+  // carousels with a poster and no slides (2026-09-17). Only single-media
+  // posts need the paid flat list. See `carouselSlidesFrom`.
   // `archiveCarouselMedia` is idempotent by (itemId, index, sourceUrl).
   // ------------------------------------------------------------------
-  if (needsMediaArchive) {
-    const sidecarEdges = media.edge_sidecar_to_children?.edges ?? [];
-    let slides: CarouselSlide[];
-    if (sidecarEdges.length > 0) {
-      slides = sidecarEdges
-        .map((edge): CarouselSlide | null => {
-          const n = edge.node;
-          if (!n) return null;
-          if (n.is_video && n.video_url) {
-            return {
-              url: n.video_url,
-              kind: "video",
-              posterUrl: n.display_url,
-              fileNameHint: shortcode,
-            };
-          }
-          if (!n.is_video && n.display_url) {
-            return {
-              url: n.display_url,
-              kind: "image",
-              fileNameHint: shortcode,
-            };
-          }
-          return null;
-        })
-        .filter((s): s is CarouselSlide => !!s);
-    } else {
-      slides = (data.download_media_urls ?? [])
-        .filter((e): e is IGDownloadEntry & { cdn_url: string } => !!e.cdn_url)
-        .map((e) => ({
-          url: e.cdn_url,
-          kind: e.type === "video" ? "video" : "image",
-          fileNameHint: shortcode,
-        }));
-    }
-    if (slides.length > 0) {
-      const res = await archiveCarouselMedia(itemId, slides);
-      if (res.primary) {
-        result.updates.mediaS3Bucket = item.mediaS3Bucket ?? bucketName();
-        result.updates.mediaS3Key = res.primary.key;
-        result.updates.mediaS3UploadedAt = new Date();
-        result.updates.mediaSizeBytes = res.primary.size;
-        result.updates.mediaContentType = res.primary.contentType;
-        // The ephemeral URL is now stale data — clear it.
-        result.updates.contentMediaUrl = null;
-        result.fields.mediaArchived = res.archived > 0;
-      }
+  const slides = carouselSlidesFrom(media, data.download_media_urls, shortcode, {
+    withMedia: needsMediaArchive,
+  });
+  if (slides.length > 0) {
+    const res = await archiveCarouselMedia(itemId, slides);
+    if (res.primary) {
+      result.updates.mediaS3Bucket = item.mediaS3Bucket ?? bucketName();
+      result.updates.mediaS3Key = res.primary.key;
+      result.updates.mediaS3UploadedAt = new Date();
+      result.updates.mediaSizeBytes = res.primary.size;
+      result.updates.mediaContentType = res.primary.contentType;
+      // The ephemeral URL is now stale data — clear it.
+      result.updates.contentMediaUrl = null;
+      result.fields.mediaArchived = res.archived > 0;
     }
   }
 

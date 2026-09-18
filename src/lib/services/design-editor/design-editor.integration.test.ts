@@ -53,7 +53,7 @@ describe("exportDesign", () => {
   it("never overwrites a caption a person wrote, and re-export supersedes the earlier render", async () => {
     const userId = await getTestUserId();
     const { item, design } = await seed("Assigned");
-    await db.insert(contentDrafts).values({ productionItemId: item.id, version: 1, isCurrent: true, content: { caption: "Human wrote this" }, fieldSchemaSnapshot: {}, generatedBy: "user:edit" });
+    await db.insert(contentDrafts).values({ productionItemId: item.id, version: 1, isCurrent: true, content: { caption: "Human wrote this" }, fieldSchemaSnapshot: { version: 1, fields: [] }, generatedBy: "user:edit" });
     await exportDesign({ productionItemId: item.id, actorUserId: userId });
     await exportDesign({ productionItemId: item.id, actorUserId: userId });
     const [draft] = await db.select().from(contentDrafts).where(and(eq(contentDrafts.productionItemId, item.id), eq(contentDrafts.isCurrent, true)));
