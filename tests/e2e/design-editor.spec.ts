@@ -50,6 +50,20 @@ test("flag on → AI draft opens; a drag is undoable and autosaves", async ({ pa
   await expect(page.getByText("Headline", { exact: true })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+z");
   await expect(page.getByText("Draft saved")).toBeVisible({ timeout: 10_000 });
+
+  // Four slides: cover, notes, and two video slides with a transport and
+  // rolling captions (the source has a video + transcript).
+  await expect(page.getByText("Page 1 of 4")).toBeVisible();
+  const thumbs = page.locator("button:has(div.shrink-0.overflow-hidden)");
+  await thumbs.nth(2).click();
+  await expect(page.getByText("Video slide · exports as an mp4")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Play clip" })).toBeVisible();
+  await expect(page.getByText("Captions", { exact: true })).toBeVisible(); // the toolbar tool on a video page
+  // The cover's picture panel offers the video's frames (filmstrip may still be pending without a worker).
+  await thumbs.nth(0).click();
+  await page.mouse.click(box.x + 60 * s, box.y + 60 * s);
+  await expect(page.locator("section").filter({ hasText: /Swap picture|Page 1/ }).first()).toBeVisible();
+
   await page.getByRole("button", { name: "Save draft & close" }).click();
   await expect(page.getByText("Editor beta")).toBeHidden();
 });

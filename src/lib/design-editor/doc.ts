@@ -78,14 +78,55 @@ const imageSourceSchema = z.discriminatedUnion("kind", [
 ]);
 export type DesignImageSource = z.infer<typeof imageSourceSchema>;
 
+/** How a `cover`-fitted picture sits in its box: the focal point (0–1 of the
+ *  picture's own width/height) that stays centred, and extra zoom on top of
+ *  the cover scale. `{0.5, 0.5, 1}` is plain object-fit: cover. Ignored for
+ *  `contain`. Geometry in layout.ts → `coverGeometry`. */
+const cropSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  zoom: z.number().min(1).max(4),
+});
+export type DesignCrop = z.infer<typeof cropSchema>;
+export const DEFAULT_CROP: DesignCrop = { x: 0.5, y: 0.5, zoom: 1 };
+
 const imageElementSchema = z.object({
   ...elementBase,
   type: z.literal("image"),
   src: imageSourceSchema,
   fit: z.enum(["cover", "contain"]),
   radius: px.min(0),
+  crop: cropSchema.default(DEFAULT_CROP),
 });
 export type DesignImageElement = z.infer<typeof imageElementSchema>;
+
+/** A clip of the source video. A page with one of these is a VIDEO slide:
+ *  the exporter renders it as an mp4 whose length is `endSec - startSec`,
+ *  with everything below it in z-order baked under the footage and
+ *  everything above it baked over. One per page. */
+const videoElementSchema = z.object({
+  ...elementBase,
+  type: z.literal("video"),
+  src: z.object({ kind: z.literal("s3"), bucket: z.string().nullable(), key: z.string().min(1) }),
+  startSec: z.number().min(0),
+  endSec: z.number().min(0),
+  fit: z.enum(["cover", "contain"]),
+  radius: px.min(0),
+  crop: cropSchema.default(DEFAULT_CROP),
+});
+export type DesignVideoElement = z.infer<typeof videoElementSchema>;
+
+/** Rolling transcript captions for the page's video: shows what is being
+ *  said, cue by cue, in this box and style. Text comes from the transcript
+ *  at render time (never stored) — see captions.ts. */
+const captionsElementSchema = z.object({
+  ...elementBase,
+  type: z.literal("captions"),
+  style: textStyleSchema,
+  /** Longest cue before it splits (sentences split at punctuation anyway). */
+  maxWordsPerCue: z.number().int().min(2).max(30),
+});
+export type DesignCaptionsElement = z.infer<typeof captionsElementSchema>;
 
 const rectElementSchema = z.object({
   ...elementBase,
@@ -103,13 +144,18 @@ export const designElementSchema = z.discriminatedUnion("type", [
   textElementSchema,
   imageElementSchema,
   rectElementSchema,
+  videoElementSchema,
+  captionsElementSchema,
 ]);
 export type DesignElement = z.infer<typeof designElementSchema>;
 
 const pageSchema = z.object({
   id: z.string().min(1),
   background: hexColor,
-  elements: z.array(designElementSchema).max(100),
+  elements: z
+    .array(designElementSchema)
+    .max(100)
+    .refine((els) => els.filter((e) => e.type === "video").length <= 1, { message: "A page can hold one video" }),
 });
 export type DesignPage = z.infer<typeof pageSchema>;
 
@@ -140,6 +186,17 @@ export function parseDesignDoc(
     };
   }
   return { ok: true, doc: result.data };
+}
+
+/** The clip a page plays, if it is a video slide. */
+export function pageVideo(page: DesignPage): DesignVideoElement | null {
+  for (const el of page.elements) if (el.type === "video") return el;
+  return null;
+}
+
+export function pageDurationSec(page: DesignPage): number {
+  const v = pageVideo(page);
+  return v ? Math.max(0, v.endSec - v.startSec) : 0;
 }
 
 export function spansToText(spans: DesignSpan[]): string {

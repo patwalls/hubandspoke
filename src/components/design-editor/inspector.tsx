@@ -2,15 +2,43 @@
 
 /** Properties of the selected element (or the page). Every control writes
  *  through `apply(commands.…)` — undoable, autosaved. */
-import { ArrowDownIcon, ArrowUpIcon, CopyIcon, LockIcon, Trash2Icon, UnlockIcon } from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, Loader2Icon, LockIcon, Trash2Icon, UnlockIcon, UploadIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
 import { FONTS } from "@/lib/clip-editor/fonts";
-import type { DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignTextElement } from "@/lib/design-editor/doc";
+import type { DesignCaptionsElement, DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignTextElement, DesignVideoElement } from "@/lib/design-editor/doc";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
+import type { DesignFrame, DesignFramesState } from "@/lib/services/design-editor/frames";
 import { commands, useDesign } from "./store";
 
-export function Inspector({ doc, images, onPickImage }: { doc: DesignDoc; images: ImageCandidate[]; onPickImage: (elementId: string, c: ImageCandidate) => void }) {
+export interface InspectorProps {
+  doc: DesignDoc;
+  images: ImageCandidate[];
+  frames: DesignFramesState;
+  source: { videoUrl: string; title: string | null } | null;
+  onPickImage: (elementId: string, c: ImageCandidate) => void;
+  /** Grab a frame of the source at `sec` and put it in this element when it lands. */
+  onGrabFrame: (elementId: string | null, sec: number) => void;
+  onUpload: (elementId: string | null, file: File) => Promise<void>;
+  /** Enter adjust (pan/zoom) mode on this picture or clip. */
+  onAdjust: (elementId: string) => void;
+  /** Jump the page's clip preview to this clip time. */
+  onSeekClip: (clipSec: number) => void;
+}
+
+export function frameCandidate(f: DesignFrame): ImageCandidate | null {
+  if (!f.src || !f.previewUrl) return null;
+  return { label: `Frame at ${formatSec(f.sec)}`, src: f.src, previewUrl: f.previewUrl };
+}
+
+export function formatSec(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export function Inspector({ doc, images, frames, source, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip }: InspectorProps) {
   const apply = useDesign((s) => s.apply);
   const selection = useDesign((s) => s.selection);
   const select = useDesign((s) => s.select);
@@ -23,7 +51,10 @@ export function Inspector({ doc, images, onPickImage }: { doc: DesignDoc; images
     return (
       <Panel title={`Page ${pi + 1}`}>
         <Color label="Background" value={page.background} onChange={(v) => apply(commands.setPageBackground(pi, v), "page-bg")} />
-        <p className="text-[11px] leading-snug text-muted-foreground">Click anything on the page to edit it. Double-click text to type.</p>
+        <p className="text-[11px] leading-snug text-muted-foreground">Click anything on the page to edit it. Double-click text to type, double-click a picture to reposition it.</p>
+        {page.elements.some((e) => e.type === "video") && (
+          <p className="text-[11px] leading-snug text-muted-foreground">This is a video slide — it exports as an mp4 of the clip, with everything on the page baked in.</p>
+        )}
       </Panel>
     );
   }
@@ -68,28 +99,179 @@ export function Inspector({ doc, images, onPickImage }: { doc: DesignDoc; images
           <Slider label="Rounded corners" value={el.radius} min={0} max={200} step={2} format={(v) => `${v}`} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, radius: v }), "radius")} />
         </Panel>
       )}
-      {el.type === "image" && (
-        <Panel title="Image">
+      {(el.type === "image" || el.type === "video") && (
+        <Panel title={el.type === "image" ? "Picture" : "Clip"}>
+          {el.type === "video" && <ClipTrim el={el} patch={(fn, key) => patch<DesignVideoElement>(fn, key)} onSeekClip={onSeekClip} />}
           <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-0.5 text-xs">
             {(["cover", "contain"] as const).map((fit) => (
-              <button key={fit} type="button" onClick={() => patch<DesignImageElement>((e) => ({ ...e, fit }))} className={cn("rounded px-2 py-1 font-medium", el.fit === fit ? "bg-background shadow-sm" : "text-muted-foreground")}>
+              <button key={fit} type="button" onClick={() => patch<DesignImageElement | DesignVideoElement>((e) => ({ ...e, fit }))} className={cn("rounded px-2 py-1 font-medium", el.fit === fit ? "bg-background shadow-sm" : "text-muted-foreground")}>
                 {fit === "cover" ? "Fill" : "Fit"}
               </button>
             ))}
           </div>
-          <Slider label="Rounded corners" value={el.radius} min={0} max={200} step={2} format={(v) => `${v}`} onChange={(v) => patch<DesignImageElement>((e) => ({ ...e, radius: v }), "radius")} />
-          <span className="text-[11px] text-muted-foreground">Swap picture</span>
+          {el.fit === "cover" && (
+            <>
+              <Slider label="Zoom" value={el.crop.zoom} min={1} max={3} step={0.02} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => patch<DesignImageElement | DesignVideoElement>((e) => ({ ...e, crop: { ...e.crop, zoom: v } }), "zoom")} />
+              <button type="button" onClick={() => onAdjust(el.id)} className="inline-flex items-center gap-1.5 self-start rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted">
+                <CropIcon className="size-3" /> Reposition (or double-click it)
+              </button>
+            </>
+          )}
+          <Slider label="Rounded corners" value={el.radius} min={0} max={200} step={2} format={(v) => `${v}`} onChange={(v) => patch<DesignImageElement | DesignVideoElement>((e) => ({ ...e, radius: v }), "radius")} />
+        </Panel>
+      )}
+      {el.type === "image" && (
+        <PicturePicker title="Swap picture" images={images} frames={frames} source={source} onPick={(c) => onPickImage(el.id, c)} onGrabFrame={(sec) => onGrabFrame(el.id, sec)} onUpload={(file) => onUpload(el.id, file)} />
+      )}
+      {el.type === "captions" && <CaptionsPanel el={el} patch={(fn, key) => patch<DesignCaptionsElement>(fn, key)} />}
+    </div>
+  );
+}
+
+/** Where a clip starts and ends in the source, with a scrubber that also
+ *  drives the page's preview. */
+function ClipTrim({ el, patch, onSeekClip }: { el: DesignVideoElement; patch: (fn: (e: DesignVideoElement) => DesignVideoElement, key?: string) => void; onSeekClip: (clipSec: number) => void }) {
+  const len = Math.max(0, el.endSec - el.startSec);
+  const num = (label: string, key: "startSec" | "endSec") => (
+    <label className="flex flex-col gap-0.5 text-[10px] uppercase text-muted-foreground">
+      {label}
+      <input
+        type="number" step={0.1} min={0} value={Math.round(el[key] * 10) / 10}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (!Number.isFinite(v)) return;
+          patch((cur) => (key === "startSec" ? { ...cur, startSec: Math.max(0, Math.min(v, cur.endSec - 1)) } : { ...cur, endSec: Math.max(cur.startSec + 1, v) }), `trim-${key}`);
+        }}
+        className="rounded border border-border bg-background px-1 py-0.5 text-[12px] text-foreground"
+      />
+    </label>
+  );
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/40 p-2">
+      <div className="grid grid-cols-2 gap-1">
+        {num("Start (s)", "startSec")}
+        {num("End (s)", "endSec")}
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        <button type="button" onClick={() => patch((c) => ({ ...c, startSec: Math.max(0, c.startSec - 2) }), "trim-startSec")} className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-muted">Start −2s</button>
+        <button type="button" onClick={() => patch((c) => ({ ...c, startSec: Math.min(c.endSec - 1, c.startSec + 2) }), "trim-startSec")} className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-muted">Start +2s</button>
+        <button type="button" onClick={() => patch((c) => ({ ...c, endSec: Math.max(c.startSec + 1, c.endSec - 2) }), "trim-endSec")} className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-muted">End −2s</button>
+        <button type="button" onClick={() => patch((c) => ({ ...c, endSec: c.endSec + 2 }), "trim-endSec")} className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-muted">End +2s</button>
+      </div>
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <span>{formatSec(el.startSec)} → {formatSec(el.endSec)}</span>
+        <span className="font-mono">{len.toFixed(1)}s</span>
+      </div>
+      <button type="button" onClick={() => onSeekClip(0)} className="rounded border border-border px-2 py-1 text-[11px] hover:bg-muted">Preview from the start</button>
+    </div>
+  );
+}
+
+/**
+ * Every picture the design can use: the video's frames (filmstrip, with the
+ * AI's pick starred), a scrubber to grab any exact moment, the source's own
+ * pictures + wordmarks, and an upload.
+ */
+export function PicturePicker({ title, images, frames, source, onPick, onGrabFrame, onUpload }: {
+  title: string; images: ImageCandidate[]; frames: DesignFramesState; source: { videoUrl: string } | null;
+  onPick: (c: ImageCandidate) => void; onGrabFrame: (sec: number) => void; onUpload: (file: File) => Promise<void>;
+}) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const doneFrames = frames.frames.filter((f) => f.status === "done");
+  return (
+    <Panel title={title}>
+      {(doneFrames.length > 0 || frames.pending) && (
+        <>
+          <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            From the video {frames.pending && <Loader2Icon className="size-3 animate-spin" />}
+          </span>
+          <div className="grid grid-cols-3 gap-1">
+            {frames.frames.map((f) => {
+              const c = frameCandidate(f);
+              return (
+                <button key={f.id} type="button" title={c?.label ?? `Frame at ${formatSec(f.sec)}`} disabled={!c} onClick={() => c && onPick(c)} className={cn("relative aspect-square overflow-hidden rounded border bg-black/80 hover:ring-2 hover:ring-sky-400", f.isPick ? "border-amber-400" : "border-border")}>
+                  {c ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={c.previewUrl} alt={c.label} className="h-full w-full object-cover" />
+                  ) : f.status === "failed" ? (
+                    <span className="flex h-full items-center justify-center text-[10px] text-red-400">failed</span>
+                  ) : (
+                    <span className="flex h-full items-center justify-center"><Loader2Icon className="size-3 animate-spin text-white/60" /></span>
+                  )}
+                  <span className="absolute bottom-0 left-0 rounded-tr bg-black/70 px-1 text-[9px] text-white">{formatSec(f.sec)}</span>
+                  {f.isPick && <span className="absolute right-0 top-0 rounded-bl bg-amber-400 px-1 text-[9px] font-semibold text-black">AI pick</span>}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+      {source && <FrameScrubber videoUrl={source.videoUrl} onGrab={onGrabFrame} />}
+      {images.length > 0 && (
+        <>
+          <span className="text-[11px] text-muted-foreground">Other pictures</span>
           <div className="grid grid-cols-3 gap-1">
             {images.map((c) => (
-              <button key={c.label + c.previewUrl} type="button" title={c.label} onClick={() => onPickImage(el.id, c)} className="aspect-square overflow-hidden rounded border border-border bg-black/80 hover:ring-2 hover:ring-sky-400">
+              <button key={c.label + c.previewUrl} type="button" title={c.label} onClick={() => onPick(c)} className="aspect-square overflow-hidden rounded border border-border bg-black/80 hover:ring-2 hover:ring-sky-400">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={c.previewUrl} alt={c.label} className="h-full w-full object-contain" />
               </button>
             ))}
           </div>
-        </Panel>
+        </>
       )}
+      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+        setUploading(true);
+        try { await onUpload(file); } finally { setUploading(false); }
+      }} />
+      <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()} className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-[11px] font-medium hover:bg-muted disabled:opacity-50">
+        {uploading ? <Loader2Icon className="size-3 animate-spin" /> : <UploadIcon className="size-3" />} Upload a picture
+      </button>
+    </Panel>
+  );
+}
+
+/** Scrub the source video and grab the exact frame you're looking at. */
+function FrameScrubber({ videoUrl, onGrab }: { videoUrl: string; onGrab: (sec: number) => void }) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  const [duration, setDuration] = useState(0);
+  const [sec, setSec] = useState(0);
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/40 p-2">
+      <span className="text-[11px] text-muted-foreground">Grab any moment</span>
+      <video ref={ref} src={videoUrl} muted playsInline preload="metadata" onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)} className="w-full rounded bg-black" />
+      <input type="range" min={0} max={duration || 1} step={0.1} value={sec} onChange={(e) => { const v = Number(e.target.value); setSec(v); if (ref.current) ref.current.currentTime = v; }} className="h-1 w-full cursor-pointer accent-sky-500" />
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[11px] text-muted-foreground">{formatSec(sec)} / {formatSec(duration)}</span>
+        <button type="button" onClick={() => onGrab(sec)} className="inline-flex items-center gap-1 rounded-md bg-foreground px-2 py-1 text-[11px] font-medium text-background">
+          <CameraIcon className="size-3" /> Use this frame
+        </button>
+      </div>
     </div>
+  );
+}
+
+function CaptionsPanel({ el, patch }: { el: DesignCaptionsElement; patch: (fn: (e: DesignCaptionsElement) => DesignCaptionsElement, key?: string) => void }) {
+  const style = (p: Partial<DesignCaptionsElement["style"]>, key?: string) => patch((e) => ({ ...e, style: { ...e.style, ...p } }), key);
+  return (
+    <Panel title="Captions">
+      <p className="text-[11px] leading-snug text-muted-foreground">Shows what&apos;s being said in the clip, cue by cue, from the transcript.</p>
+      <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+        Font
+        <select value={el.style.fontId} onChange={(e) => style({ fontId: e.target.value as DesignCaptionsElement["style"]["fontId"] })} className="rounded-md border border-border bg-background px-2 py-1.5 text-[13px] text-foreground">
+          {FONT_IDS.map((id) => (<option key={id} value={id}>{FONTS[id].label}</option>))}
+        </select>
+      </label>
+      <Slider label="Size" value={el.style.sizePx} min={12} max={120} step={1} format={(v) => `${Math.round(v)}px`} onChange={(v) => style({ sizePx: v }, "size")} />
+      <Color label="Colour" value={el.style.color} onChange={(v) => style({ color: v }, "color")} />
+      <Slider label="Words per cue" value={el.maxWordsPerCue} min={3} max={24} step={1} format={(v) => `${v}`} onChange={(v) => patch((e) => ({ ...e, maxWordsPerCue: Math.round(v) }), "cue-words")} />
+      <Check label="ALL CAPS" checked={el.style.uppercase} onChange={(uppercase) => style({ uppercase })} />
+      <Check label="Shadow" checked={!!el.style.shadow} onChange={(on) => style({ shadow: on ? { color: "#000000", alpha: 0.8, blur: 12, x: 0, y: 4 } : null })} />
+    </Panel>
   );
 }
 

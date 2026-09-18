@@ -14,6 +14,7 @@ import { and, eq, isNull, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, productionItems, repurposeTriggers } from "@/lib/db/schema";
 import { enqueue } from "@/jobs/enqueue";
+import { requestAutoFrames } from "./frames";
 import { getChannelsForFormats, pickBestAccountForFormat } from "@/lib/format-channels";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
@@ -105,5 +106,8 @@ export async function findOrCreateDesignItem(args: {
   } catch (err) {
     console.error("draft-algorithm-run enqueue (design-editor) failed:", err);
   }
+  // Start pulling cover-photo frames now, so they're ready when the editor
+  // opens (the AI brief takes ~17s on the web side).
+  await requestAutoFrames(created.id, source.id).catch((err) => console.error("design-frames enqueue (design-editor) failed:", err));
   return { productionItemId: created.id, created: true };
 }

@@ -5,14 +5,18 @@
  *   page 1 — the founder's photo, a huge revenue stat, an all-caps headline
  *            with a phrase or two highlighted red/green, the Starter Story ·
  *            HubSpot Media wordmark, "See his 3-Phase playbook→" footer;
- *   page 2 — the playbook itself, styled as an iOS Notes screenshot.
+ *   page 2 — the playbook itself, styled as an iOS Notes screenshot;
+ *   pages 3–4 — two clips of the interview, each dressed as a YouTube card
+ *            (spoken line above, the clip in a rounded 16:9 box, the video's
+ *            title + channel row below, a purple "<PLAYBOOK>" pill) so the
+ *            carousel ends by sending people to the full video.
  *
  * The brief is CONTENT only (what the stat is, what the phases say). This
  * file owns the design. Everything it emits is ordinary elements the editor
  * can move, restyle or delete — there is nothing template-specific left in
  * the document once it's built.
  */
-import { IG_SQUARE, newElementId, type DesignDoc, type DesignElement, type DesignImageSource, type DesignPage, type DesignSpan, type DesignTextElement, type DesignTextStyle } from "./doc";
+import { DEFAULT_CROP, IG_SQUARE, newElementId, type DesignDoc, type DesignElement, type DesignImageSource, type DesignPage, type DesignSpan, type DesignTextElement, type DesignTextStyle } from "./doc";
 import { layoutDesignText } from "./layout";
 
 export interface PlaybookBrief {
@@ -28,6 +32,18 @@ export interface PlaybookBrief {
   notesTitle: string;
   phases: Array<{ heading: string; body: string }>;
   caption: string;
+  /** Two moments of the interview for the video slides, in SOURCE seconds. */
+  clips: Array<{ startSec: number; endSec: number; label: string }>;
+  /** The purple pill on the video slides: "CUSTOMER CALLS PLAYBOOK". */
+  pillLabel: string;
+}
+
+/** What the template needs beyond the brief: the founder's picture and the
+ *  source video (for the video slides). */
+export interface PlaybookContext {
+  photo: DesignImageSource | null;
+  source: { bucket: string | null; key: string; title: string | null } | null;
+  channel: { name: string; subscribers: string };
 }
 
 export const PLAYBOOK_TEMPLATE = "playbook-v1";
@@ -35,6 +51,8 @@ export const PLAYBOOK_TEMPLATE = "playbook-v1";
 const RED = "#FF3B3B";
 const GREEN = "#22E07A";
 const WORDMARK: DesignImageSource = { kind: "asset", path: "/watermarks/starter-story-hubspot-media-white.png" };
+const WORDMARK_DARK: DesignImageSource = { kind: "asset", path: "/watermarks/starter-story-hubspot-media-black.png" };
+const PILL_PURPLE = "#6B5BFF";
 
 const baseText = (over: Partial<DesignTextStyle>): DesignTextStyle => ({
   fontId: "inter-regular",
@@ -84,18 +102,23 @@ function text(name: string, box: { x: number; y: number; w: number; h: number },
   return { id: newElementId("t"), name, type: "text", ...box, opacity: 1, locked: false, spans, style };
 }
 
+/** The full-bleed founder photo — also what `ensureCoverPhoto` inserts when
+ *  the frames arrive after the first draft. */
+export function coverPhotoElement(photo: DesignImageSource): DesignElement {
+  const { width: W, height: H } = IG_SQUARE;
+  return { id: newElementId("img"), name: "Photo", type: "image", x: 0, y: 0, w: W, h: H, opacity: 1, locked: false, src: photo, fit: "cover", radius: 0, crop: { ...DEFAULT_CROP } };
+}
+
 export function buildCoverPage(brief: PlaybookBrief, photo: DesignImageSource | null): DesignPage {
   const { width: W, height: H } = IG_SQUARE;
   const elements: DesignElement[] = [];
-  if (photo) {
-    elements.push({ id: newElementId("img"), name: "Photo", type: "image", x: 0, y: 0, w: W, h: H, opacity: 1, locked: false, src: photo, fit: "cover", radius: 0 });
-  }
+  if (photo) elements.push(coverPhotoElement(photo));
   elements.push({
     id: newElementId("r"), name: "Shade", type: "rect", x: 0, y: 380, w: W, h: H - 380, opacity: 1, locked: false,
     fill: { color: "#000000", alpha: 0 }, gradientTo: { color: "#000000", alpha: 0.92 }, radius: 0,
   });
   // 2249×519 wordmark at 300 wide.
-  elements.push({ id: newElementId("img"), name: "Logo", type: "image", x: W - 40 - 300, y: 40, w: 300, h: 69, opacity: 1, locked: false, src: WORDMARK, fit: "contain", radius: 0 });
+  elements.push({ id: newElementId("img"), name: "Logo", type: "image", x: W - 40 - 300, y: 40, w: 300, h: 69, opacity: 1, locked: false, src: WORDMARK, fit: "contain", radius: 0, crop: { ...DEFAULT_CROP } });
   elements.push(
     text("Stat", { x: 300, y: 120, w: 740, h: 260 }, [{ text: brief.stat }], baseText({
       fontId: "anton", sizePx: 230, lineHeight: 1, align: "right", valign: "bottom", autoFit: true, minSizePx: 90,
@@ -165,11 +188,65 @@ function todayLabel(): string {
   return `${date} at ${time}`;
 }
 
-export function buildPlaybookDoc(brief: PlaybookBrief, photo: DesignImageSource | null): DesignDoc {
+/**
+ * A video slide: the exemplar posts' "YouTube card" — spoken line up top,
+ * the clip in a rounded 16:9 box, the video's title with a YouTube badge and
+ * the channel row under it, and the playbook pill over the footage.
+ */
+export function buildVideoPage(clip: PlaybookBrief["clips"][number], brief: PlaybookBrief, ctx: PlaybookContext): DesignPage {
+  if (!ctx.source) throw new Error("buildVideoPage needs a source video");
+  const { width: W } = IG_SQUARE;
+  const M = 30;
+  const boxW = W - 2 * M;
+  const boxH = Math.round((boxW * 9) / 16);
+  const boxY = 214;
+  const elements: DesignElement[] = [];
+  elements.push({
+    id: newElementId("v"), name: "Clip", type: "video", x: M, y: boxY, w: boxW, h: boxH, opacity: 1, locked: false,
+    src: { kind: "s3", bucket: ctx.source.bucket, key: ctx.source.key }, startSec: clip.startSec, endSec: clip.endSec, fit: "cover", radius: 28, crop: { ...DEFAULT_CROP },
+  });
+  // Pill over the footage (above it in z-order).
+  const pillW = Math.min(boxW - 80, Math.max(360, 44 + brief.pillLabel.length * 26));
+  const pillX = Math.round((W - pillW) / 2);
+  const pillY = boxY + boxH - 96;
+  elements.push({ id: newElementId("r"), name: "Pill", type: "rect", x: pillX, y: pillY, w: pillW, h: 64, opacity: 1, locked: false, fill: { color: PILL_PURPLE, alpha: 1 }, gradientTo: null, radius: 14 });
+  elements.push(text("Pill label", { x: pillX, y: pillY, w: pillW, h: 64 }, [{ text: brief.pillLabel }], baseText({ fontId: "montserrat-extrabold", sizePx: 30, lineHeight: 1, color: "#FFFFFF", align: "center", valign: "middle", uppercase: true, autoFit: true, minSizePx: 16 })));
+  // Captions above the clip.
+  elements.push({
+    id: newElementId("c"), name: "Captions", type: "captions", x: 60, y: 60, w: W - 120, h: 130, opacity: 1, locked: false, maxWordsPerCue: 12,
+    style: baseText({ fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, color: "#5C5C5C", align: "center", valign: "middle", autoFit: true, minSizePx: 20 }),
+  });
+  // Title + YouTube badge + channel row under the clip.
+  const titleY = boxY + boxH + 34;
+  elements.push(text("Video title", { x: M, y: titleY, w: boxW - 190, h: 100 }, [{ text: ctx.source.title ?? brief.notesTitle }], baseText({ fontId: "inter-bold", sizePx: 40, lineHeight: 1.15, color: "#0F0F0F", align: "left", valign: "top", autoFit: true, minSizePx: 24 })));
+  elements.push({ id: newElementId("r"), name: "YouTube badge", type: "rect", x: W - M - 160, y: titleY + 2, w: 160, h: 46, opacity: 1, locked: false, fill: { color: "#FF0000", alpha: 1 }, gradientTo: null, radius: 10 });
+  elements.push(text("YouTube", { x: W - M - 160, y: titleY + 2, w: 160, h: 46 }, [{ text: "▶ YouTube" }], baseText({ fontId: "inter-bold", sizePx: 24, lineHeight: 1, color: "#FFFFFF", align: "center", valign: "middle" })));
+  const rowY = titleY + 116;
+  elements.push({ id: newElementId("r"), name: "Channel avatar", type: "rect", x: M, y: rowY, w: 68, h: 68, opacity: 1, locked: false, fill: { color: "#111111", alpha: 1 }, gradientTo: null, radius: 34 });
+  elements.push(text("Avatar letter", { x: M, y: rowY, w: 68, h: 68 }, [{ text: ctx.channel.name.slice(0, 1).toUpperCase() }], baseText({ fontId: "anton", sizePx: 40, lineHeight: 1, color: "#FFFFFF", align: "center", valign: "middle" })));
+  elements.push(text("Channel", { x: M + 84, y: rowY - 2, w: 600, h: 38 }, [{ text: `${ctx.channel.name} ✓` }], baseText({ fontId: "inter-semibold", sizePx: 28, lineHeight: 1.2, color: "#0F0F0F" })));
+  elements.push(text("Subscribers", { x: M + 84, y: rowY + 36, w: 600, h: 30 }, [{ text: ctx.channel.subscribers }], baseText({ fontId: "inter-regular", sizePx: 22, lineHeight: 1.2, color: "#606060" })));
+  elements.push({ id: newElementId("img"), name: "Wordmark", type: "image", x: W - M - 260, y: rowY + 6, w: 260, h: 60, opacity: 0.9, locked: false, src: WORDMARK_DARK, fit: "contain", radius: 0, crop: { ...DEFAULT_CROP } });
+  return { id: newElementId("page"), background: "#FFFFFF", elements };
+}
+
+export function buildPlaybookDoc(brief: PlaybookBrief, ctx: PlaybookContext): DesignDoc {
+  const pages: DesignPage[] = [buildCoverPage(brief, ctx.photo), buildNotesPage(brief)];
+  if (ctx.source) for (const clip of brief.clips.slice(0, 2)) pages.push(buildVideoPage(clip, brief, ctx));
   return {
     version: 1,
     canvas: { ...IG_SQUARE },
     template: PLAYBOOK_TEMPLATE,
-    pages: [buildCoverPage(brief, photo), buildNotesPage(brief)],
+    pages,
   };
+}
+
+/** If the cover has no picture yet (the frames weren't ready when the AI
+ *  drafted it), put `photo` under everything on page 1. */
+export function ensureCoverPhoto(doc: DesignDoc, photo: DesignImageSource): DesignDoc | null {
+  const cover = doc.pages[0];
+  if (!cover) return null;
+  const hasPhoto = cover.elements.some((el) => el.type === "image" && el.w >= doc.canvas.width * 0.6 && el.h >= doc.canvas.height * 0.6);
+  if (hasPhoto) return null;
+  return { ...doc, pages: [{ ...cover, elements: [coverPhotoElement(photo), ...cover.elements] }, ...doc.pages.slice(1)] };
 }

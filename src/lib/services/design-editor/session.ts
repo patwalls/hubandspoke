@@ -3,13 +3,16 @@
  * production item. On first open there is no document yet: the AI writes a
  * brief from the source transcript and the template builds the first draft.
  */
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { designDocs, designRenders, productionItems } from "@/lib/db/schema";
-import { parseDesignDoc, type DesignDoc } from "@/lib/design-editor/doc";
-import { buildPlaybookDoc, type PlaybookBrief } from "@/lib/design-editor/playbook-template";
+import { accounts, brands, designDocs, designRenders, productionItems, transcripts } from "@/lib/db/schema";
+import { parseDesignDoc, type DesignDoc, type DesignImageSource } from "@/lib/design-editor/doc";
+import { buildPlaybookDoc, ensureCoverPhoto, type PlaybookBrief, type PlaybookContext } from "@/lib/design-editor/playbook-template";
+import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
+import { getPresignedGetUrl } from "@/lib/s3";
 import { generatePlaybookBrief } from "./brief";
 import { BRAND_WORDMARKS, previewUrlFor, sourceImageCandidates, type ImageCandidate } from "./assets";
+import { listFrames, pickedFrame, requestAutoFrames, type DesignFramesState } from "./frames";
 import { toDesignRenderStatus, type DesignRenderStatus } from "./render-status";
 
 import { DESIGN_TEMPLATES } from "@/lib/design-editor/templates";
@@ -50,6 +53,13 @@ export interface DesignEditorSession {
   imageUrls: Record<string, string>;
   /** Pictures available to place. */
   images: ImageCandidate[];
+  /** Frames grabbed from the source video (+ whether more are coming). */
+  frames: DesignFramesState;
+  /** The source video, for video slides and the frame scrubber. */
+  source: { videoUrl: string; bucket: string | null; key: string; title: string | null } | null;
+  /** The source transcript's words — captions on video slides are cut from
+   *  these in the browser exactly as the exporter cuts them. */
+  words: EditorWord[];
   latestRender: DesignRenderStatus | null;
 }
 
@@ -61,6 +71,10 @@ export async function loadDesignEditorSession(args: {
   const template = item.format ? DESIGN_TEMPLATES[item.format] : undefined;
   if (!template) throw new DesignUnsupportedError("no_template");
 
+  // Kick the filmstrip off first — it runs on the worker while the AI writes
+  // the brief, so the first draft usually already has a real photo.
+  await requestAutoFrames(item.id, item.sourceItemId).catch((err) => console.error("design-frames enqueue failed:", err));
+
   let design = await selectDesign(item.id);
   if (!design) {
     const draft = await draftDoc(item.id, item.sourceItemId, null);
@@ -70,6 +84,18 @@ export async function loadDesignEditorSession(args: {
       .onConflictDoNothing({ target: designDocs.productionItemId });
     design = await selectDesign(item.id);
     if (!design) throw new Error("Failed to create design");
+  } else {
+    // The pick landed after the draft was made (or the last editor closed
+    // before it did): put it on the cover now, before anyone holds the doc.
+    const pick = await pickedFrame(item.id);
+    const patched = pick?.src ? ensureCoverPhoto(design.doc, pick.src) : null;
+    if (patched) {
+      await db
+        .update(designDocs)
+        .set({ doc: patched, revision: sql`${designDocs.revision} + 1`, updatedAt: new Date() })
+        .where(and(eq(designDocs.id, design.id), eq(designDocs.revision, design.revision)));
+      design = (await selectDesign(item.id)) ?? design;
+    }
   }
 
   return finishSession(item, design);
@@ -109,8 +135,83 @@ async function draftDoc(itemId: string, sourceItemId: string, instruction: strin
     if (result.failure.reason === "no-transcript") throw new DesignUnsupportedError("no_transcript");
     throw new DesignUnsupportedError("ai_failed", result.failure.message ?? result.failure.reason);
   }
-  const images = await sourceImageCandidates(sourceItemId);
-  return { brief: result.brief, doc: buildPlaybookDoc(result.brief, images[0]?.src ?? null) };
+  const source = await loadSource(sourceItemId);
+  const words = await loadWords(sourceItemId);
+  const brief: PlaybookBrief = { ...result.brief, clips: result.brief.clips.map((c) => snapClipToWords(c, words)) };
+  // The cover photo: the AI's pick from the video's frames. If the frames
+  // aren't in yet, leave the cover empty — the editor fills it the moment
+  // the pick lands (ensureCoverPhoto). Falling back to the platform
+  // thumbnail here is worse than nothing: it's usually a YouTube thumbnail
+  // with its own text baked in. Only image-only sources use their pictures.
+  const pick = await pickedFrame(itemId);
+  const images = source ? [] : await sourceImageCandidates(sourceItemId);
+  const photo: DesignImageSource | null = pick?.src ?? images[0]?.src ?? null;
+  const ctx: PlaybookContext = {
+    photo,
+    source: source ? { bucket: source.bucket, key: source.key, title: source.title } : null,
+    channel: await loadChannel(itemId),
+  };
+  return { brief, doc: buildPlaybookDoc(brief, ctx) };
+}
+
+/** Move a clip's edges to word boundaries so it never starts mid-word, and
+ *  keep it inside the transcript. Pure; exported for tests. */
+export function snapClipToWords(clip: { startSec: number; endSec: number; label: string }, words: EditorWord[]) {
+  if (words.length === 0) return clip;
+  let start = clip.startSec;
+  let end = clip.endSec;
+  // First word starting at/after the requested start (or the last one before it).
+  const firstAfter = words.find((w) => w.startSec >= start - 0.3);
+  if (firstAfter && Math.abs(firstAfter.startSec - start) <= 3) start = Math.max(0, firstAfter.startSec - 0.15);
+  // Last word ending at/before the requested end.
+  let lastBefore: EditorWord | undefined;
+  for (const w of words) {
+    if (w.endSec <= end + 0.3) lastBefore = w;
+    else break;
+  }
+  if (lastBefore && Math.abs(lastBefore.endSec - end) <= 3) end = lastBefore.endSec + 0.25;
+  const lastWordEnd = words[words.length - 1].endSec;
+  end = Math.min(end, lastWordEnd + 0.5);
+  if (end - start < 3) return clip;
+  return { ...clip, startSec: Math.round(start * 100) / 100, endSec: Math.round(end * 100) / 100 };
+}
+
+async function loadSource(sourceItemId: string) {
+  const [row] = await db
+    .select({ key: productionItems.mediaS3Key, bucket: productionItems.mediaS3Bucket, title: productionItems.title })
+    .from(productionItems)
+    .where(eq(productionItems.id, sourceItemId))
+    .limit(1);
+  if (!row?.key || !/\.(mp4|mov|m4v|webm)$/i.test(row.key)) return null;
+  return { key: row.key, bucket: row.bucket, title: row.title };
+}
+
+async function loadWords(sourceItemId: string): Promise<EditorWord[]> {
+  const [t] = await db
+    .select({ words: transcripts.words, segments: transcripts.segments })
+    .from(transcripts)
+    .where(eq(transcripts.productionItemId, sourceItemId))
+    .limit(1);
+  if (!t) return [];
+  return resolveTranscriptWords({ words: t.words, segments: t.segments ?? [] }).words;
+}
+
+/** The channel row on video slides: the brand's YouTube account. */
+async function loadChannel(itemId: string): Promise<PlaybookContext["channel"]> {
+  const fallback = { name: "Starter Story", subscribers: "" };
+  const [item] = await db.select({ brand: productionItems.brand }).from(productionItems).where(eq(productionItems.id, itemId)).limit(1);
+  if (!item?.brand) return fallback;
+  const [acct] = await db
+    .select({ displayName: accounts.displayName, handle: accounts.handle, followerCount: accounts.followerCount, label: brands.label })
+    .from(accounts)
+    .innerJoin(brands, eq(brands.id, accounts.brandId))
+    .where(and(eq(brands.slug, item.brand), eq(accounts.platform, "youtube")))
+    .orderBy(desc(accounts.followerCount))
+    .limit(1);
+  if (!acct) return fallback;
+  const n = acct.followerCount ?? 0;
+  const subs = n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 < 50_000 ? 0 : 1)}M subscribers` : n >= 1000 ? `${Math.round(n / 1000)}K subscribers` : n > 0 ? `${n} subscribers` : "";
+  return { name: acct.displayName ?? acct.label ?? acct.handle ?? fallback.name, subscribers: subs };
 }
 
 async function loadItem(id: string) {
@@ -157,11 +258,15 @@ async function selectDesign(productionItemId: string) {
 async function finishSession(item: Awaited<ReturnType<typeof loadItem>>, design: NonNullable<Awaited<ReturnType<typeof selectDesign>>>): Promise<DesignEditorSession> {
   const imageUrls = await resolveImageUrls(design.doc);
   const [render] = await db.select().from(designRenders).where(eq(designRenders.designDocId, design.id)).orderBy(desc(designRenders.createdAt)).limit(1);
+  const source = await loadSource(item.sourceItemId);
   return {
     item,
     design,
     imageUrls,
     images: [...(await sourceImageCandidates(item.sourceItemId)), ...BRAND_WORDMARKS],
+    frames: await listFrames(item.id),
+    source: source ? { ...source, videoUrl: await getPresignedGetUrl(source.key, 4 * 3600, { bucket: source.bucket ?? undefined }) } : null,
+    words: await loadWords(item.sourceItemId),
     latestRender: render ? toDesignRenderStatus(render) : null,
   };
 }

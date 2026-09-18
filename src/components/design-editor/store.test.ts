@@ -5,8 +5,8 @@ import { commands, createDesignStore } from "./store";
 
 const doc = () =>
   buildPlaybookDoc(
-    { stat: "$1K", statUnit: "/mo", headline: "hello world", highlights: [], footer: "f", notesTitle: "t", phases: [{ heading: "h", body: "b" }], caption: "" },
-    null,
+    { stat: "$1K", statUnit: "/mo", headline: "hello world", highlights: [], footer: "f", notesTitle: "t", phases: [{ heading: "h", body: "b" }], caption: "", clips: [], pillLabel: "P" },
+    { photo: null, source: null, channel: { name: "S", subscribers: "" } },
   );
 
 describe("design store commands", () => {

@@ -9,12 +9,30 @@
  * `interactive` adds selection, drag-to-move, resize handles and inline text
  * editing. Without it the same component is the page thumbnail.
  */
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "@/lib/utils";
 import { FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
-import type { DesignDoc, DesignElement, DesignPage, DesignSpan, DesignTextElement, Rgba } from "@/lib/design-editor/doc";
-import { layoutDesignText } from "@/lib/design-editor/layout";
+import type { EditorWord } from "@/lib/clip-editor/words";
+import type { DesignCaptionsElement, DesignDoc, DesignElement, DesignImageElement, DesignPage, DesignSpan, DesignTextElement, DesignVideoElement, Rgba } from "@/lib/design-editor/doc";
+import { pageVideo } from "@/lib/design-editor/doc";
+import { activeCue, buildDesignCaptionCues, layoutCaptionCue } from "@/lib/design-editor/captions";
+import { coverGeometry, cropForOffset, layoutDesignText } from "@/lib/design-editor/layout";
 import { commands, useDesign } from "./store";
+
+/**
+ * Playback of the page's clip, shared by the <video> (which owns the clock)
+ * and the captions (which read it). Time is CLIP seconds. Thumbnails run on
+ * the inert default.
+ */
+export interface PlaybackState {
+  timeSec: number;
+  playing: boolean;
+  setTime: (sec: number) => void;
+  setPlaying: (on: boolean) => void;
+  /** Reload the <video> at this clip time (after a trim edit / scrub). */
+  seekRequest: { sec: number; nonce: number } | null;
+}
+export const PlaybackContext = createContext<PlaybackState>({ timeSec: 0, playing: false, setTime: () => {}, setPlaying: () => {}, seekRequest: null });
 
 function rgba(c: Rgba): string {
   const r = parseInt(c.color.slice(1, 3), 16);
@@ -31,6 +49,8 @@ export function PageCanvas({
   page,
   pageIndex,
   imageUrls,
+  videoUrl,
+  words,
   scale,
   interactive,
   className,
@@ -39,6 +59,10 @@ export function PageCanvas({
   page: DesignPage;
   pageIndex: number;
   imageUrls: Record<string, string>;
+  /** Browser-loadable URL of the source video (video slides). */
+  videoUrl: string | null;
+  /** Source transcript words (captions on video slides). */
+  words: EditorWord[];
   scale: number;
   interactive: boolean;
   className?: string;
@@ -50,6 +74,18 @@ export function PageCanvas({
   const setEditing = useDesign((s) => s.setEditing);
   const apply = useDesign((s) => s.apply);
   const selectedId = interactive && selection.pageIndex === pageIndex ? selection.elementId : null;
+  /** Pixel size of each picture/clip once loaded — the crop needs it. */
+  const naturalSizes = useRef<Record<string, { width: number; height: number }>>({});
+  const video = pageVideo(page);
+  /** Repositioning a picture/clip: everything else on the page goes inert
+   *  so a drag anywhere over it pans the picture, not the text on top. */
+  const adjustingId = interactive && editingId
+    ? (page.elements.find((el) => el.id === editingId && (el.type === "image" || el.type === "video"))?.id ?? null)
+    : null;
+  const cues = useMemo(() => {
+    const cap = page.elements.find((el) => el.type === "captions");
+    return video && cap && cap.type === "captions" ? buildDesignCaptionCues(words, video, cap.maxWordsPerCue) : [];
+  }, [page.elements, video, words]);
 
   /** Pointer drag mapped to canvas px. */
   const startDrag = (
@@ -73,7 +109,25 @@ export function PageCanvas({
 
   const onElementDown = (e: ReactPointerEvent, el: DesignElement) => {
     if (!interactive || el.locked) return;
-    if (editingId === el.id) return; // typing inside it
+    if (editingId === el.id) {
+      if (el.type === "text") return; // typing inside it
+      // Adjust mode on a picture/clip: dragging pans the crop, not the box.
+      if ((el.type === "image" || el.type === "video") && el.fit === "cover") {
+        const natural = naturalSizes.current[el.id];
+        if (!natural) return;
+        const g = coverGeometry(natural, { w: el.w, h: el.h }, el.crop);
+        startDrag(
+          e,
+          (dx, dy) =>
+            commands.patchElement<DesignImageElement | DesignVideoElement>(pageIndex, el.id, (cur) => ({
+              ...cur,
+              crop: cropForOffset(natural, { w: cur.w, h: cur.h }, cur.crop, { left: g.left + dx, top: g.top + dy }),
+            })),
+          `pan-${el.id}`,
+        );
+      }
+      return;
+    }
     select({ pageIndex, elementId: el.id });
     const start = { x: el.x, y: el.y };
     startDrag(
@@ -125,20 +179,33 @@ export function PageCanvas({
         {page.elements.map((el) => (
           <ElementView
             key={el.id}
+            inert={adjustingId !== null && adjustingId !== el.id}
             el={el}
             imageUrl={imageUrls[el.id]}
+            videoUrl={videoUrl}
+            cues={cues}
             selected={selectedId === el.id}
             editing={interactive && editingId === el.id}
             interactive={interactive}
+            onNaturalSize={(size) => {
+              naturalSizes.current[el.id] = size;
+            }}
             onPointerDown={(e) => onElementDown(e, el)}
-            onDoubleClick={() => interactive && el.type === "text" && !el.locked && setEditing(el.id)}
+            onDoubleClick={() => {
+              if (!interactive || el.locked) return;
+              if (el.type === "text") setEditing(el.id);
+              else if ((el.type === "image" || el.type === "video") && el.fit === "cover") setEditing(el.id);
+            }}
             onCommitText={(spans) => {
               apply(commands.patchElement<DesignTextElement>(pageIndex, el.id, (cur) => ({ ...cur, spans })));
               setEditing(null);
             }}
+            onZoom={(zoom) => apply(commands.patchElement<DesignImageElement | DesignVideoElement>(pageIndex, el.id, (cur) => ({ ...cur, crop: { ...cur.crop, zoom } })), `zoom-${el.id}`)}
+            onDoneAdjust={() => setEditing(null)}
           />
         ))}
         {selectedId &&
+          !adjustingId &&
           (() => {
             const el = page.elements.find((x) => x.id === selectedId);
             if (!el || el.locked) return null;
@@ -169,23 +236,35 @@ export function PageCanvas({
 }
 
 function ElementView({
+  inert,
   el,
   imageUrl,
+  videoUrl,
+  cues,
   selected,
   editing,
   interactive,
+  onNaturalSize,
   onPointerDown,
   onDoubleClick,
   onCommitText,
+  onZoom,
+  onDoneAdjust,
 }: {
+  inert: boolean;
   el: DesignElement;
   imageUrl: string | undefined;
+  videoUrl: string | null;
+  cues: ReturnType<typeof buildDesignCaptionCues>;
   selected: boolean;
   editing: boolean;
   interactive: boolean;
+  onNaturalSize: (size: { width: number; height: number }) => void;
   onPointerDown: (e: ReactPointerEvent) => void;
   onDoubleClick: () => void;
   onCommitText: (spans: DesignSpan[]) => void;
+  onZoom: (zoom: number) => void;
+  onDoneAdjust: () => void;
 }) {
   const base: React.CSSProperties = {
     position: "absolute",
@@ -195,6 +274,7 @@ function ElementView({
     height: el.h,
     opacity: el.opacity,
     cursor: interactive && !el.locked ? "move" : "default",
+    ...(inert ? { pointerEvents: "none" as const } : {}),
   };
   const hover = interactive && !selected && !el.locked ? "hover:outline hover:outline-[3px] hover:outline-sky-300/70" : "";
 
@@ -215,18 +295,169 @@ function ElementView({
   }
   if (el.type === "image") {
     return (
-      <div className={hover} onPointerDown={onPointerDown} style={{ ...base, borderRadius: el.radius, overflow: "hidden" }}>
-        {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- canvas-px sized, drawn to match the exporter
-          <img src={imageUrl} alt="" draggable={false} className="pointer-events-none h-full w-full" style={{ objectFit: el.fit }} />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-muted text-[28px] text-muted-foreground">image</div>
-        )}
-      </div>
+      <ImageView el={el} imageUrl={imageUrl} base={base} hover={hover} editing={editing} onNaturalSize={onNaturalSize} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} onZoom={onZoom} onDoneAdjust={onDoneAdjust} />
     );
+  }
+  if (el.type === "video") {
+    return (
+      <VideoView el={el} videoUrl={videoUrl} base={base} hover={hover} editing={editing} interactive={interactive} onNaturalSize={onNaturalSize} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} onZoom={onZoom} onDoneAdjust={onDoneAdjust} />
+    );
+  }
+  if (el.type === "captions") {
+    return <CaptionsView el={el} cues={cues} base={base} hover={hover} interactive={interactive} onPointerDown={onPointerDown} />;
   }
   return (
     <TextView el={el} base={base} hover={hover} editing={editing} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} onCommitText={onCommitText} />
+  );
+}
+
+/**
+ * A picture in its box. `cover` pictures are positioned by coverGeometry
+ * (pan + zoom from `crop`), exactly as the exporter does. In adjust mode
+ * (double-click) dragging pans and a floating slider zooms.
+ */
+function ImageView({ el, imageUrl, base, hover, editing, onNaturalSize, onPointerDown, onDoubleClick, onZoom, onDoneAdjust }: {
+  el: DesignImageElement; imageUrl: string | undefined; base: React.CSSProperties; hover: string; editing: boolean;
+  onNaturalSize: (size: { width: number; height: number }) => void; onPointerDown: (e: ReactPointerEvent) => void; onDoubleClick: () => void; onZoom: (zoom: number) => void; onDoneAdjust: () => void;
+}) {
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const g = natural ? coverGeometry(natural, { w: el.w, h: el.h }, el.crop, el.fit) : null;
+  return (
+    <div className={cn(hover, editing && "outline outline-[4px] outline-amber-400")} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} style={{ ...base, borderRadius: el.radius, overflow: "hidden", cursor: editing ? "grab" : base.cursor }}>
+      {imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- canvas-px sized, drawn to match the exporter
+        <img
+          src={imageUrl}
+          alt=""
+          draggable={false}
+          onLoad={(e) => {
+            const size = { width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight };
+            setNatural(size);
+            onNaturalSize(size);
+          }}
+          className="pointer-events-none absolute max-w-none"
+          style={g ? { left: g.left, top: g.top, width: g.width, height: g.height } : { left: 0, top: 0, width: el.w, height: el.h, objectFit: el.fit }}
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-muted text-[28px] text-muted-foreground">image</div>
+      )}
+      {editing && <AdjustBar el={el} onZoom={onZoom} onDone={onDoneAdjust} />}
+    </div>
+  );
+}
+
+/** Zoom slider + Done for adjust mode, floating above the element. */
+function AdjustBar({ el, onZoom, onDone }: { el: DesignImageElement | DesignVideoElement; onZoom: (zoom: number) => void; onDone: () => void }) {
+  return (
+    <div
+      className="absolute left-1/2 top-4 z-10 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-popover/95 px-4 py-2 text-[20px] shadow-lg"
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <span className="text-muted-foreground">Drag to reposition · Zoom</span>
+      <input type="range" min={1} max={3} step={0.02} value={el.crop.zoom} onChange={(e) => onZoom(Number(e.target.value))} className="h-1 w-56 cursor-pointer accent-sky-500" />
+      <span className="font-mono text-[18px]">{el.crop.zoom.toFixed(2)}×</span>
+      <button type="button" onClick={onDone} className="rounded bg-foreground px-3 py-1 font-semibold text-background">Done</button>
+    </div>
+  );
+}
+
+/**
+ * The page's clip: a <video> of the source, sized by coverGeometry from its
+ * pixel size, kept inside [startSec, endSec] and driving PlaybackContext's
+ * clock. Preloads metadata only; `#t=` puts the poster at the clip start.
+ */
+function VideoView({ el, videoUrl, base, hover, editing, interactive, onNaturalSize, onPointerDown, onDoubleClick, onZoom, onDoneAdjust }: {
+  el: DesignVideoElement; videoUrl: string | null; base: React.CSSProperties; hover: string; editing: boolean; interactive: boolean;
+  onNaturalSize: (size: { width: number; height: number }) => void; onPointerDown: (e: ReactPointerEvent) => void; onDoubleClick: () => void; onZoom: (zoom: number) => void; onDoneAdjust: () => void;
+}) {
+  const playback = useContext(PlaybackContext);
+  const ref = useRef<HTMLVideoElement | null>(null);
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const g = natural ? coverGeometry(natural, { w: el.w, h: el.h }, el.crop, el.fit) : null;
+  const { startSec, endSec } = el;
+  const { playing, setPlaying, setTime, seekRequest } = playback;
+
+  // Play/pause follows the shared state; time reports back in clip seconds.
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || !interactive) return;
+    if (playing) {
+      if (v.currentTime < startSec || v.currentTime >= endSec) v.currentTime = startSec;
+      void v.play().catch(() => setPlaying(false));
+    } else v.pause();
+  }, [playing, startSec, endSec, interactive, setPlaying]);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || !seekRequest) return;
+    v.currentTime = startSec + seekRequest.sec;
+    setTime(seekRequest.sec);
+  }, [seekRequest, startSec, setTime]);
+  // Trim edits move the poster frame too.
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || playing) return;
+    v.currentTime = startSec;
+    setTime(0);
+  }, [startSec, playing, setTime]);
+
+  return (
+    <div className={cn(hover, editing && "outline outline-[4px] outline-amber-400")} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} style={{ ...base, borderRadius: el.radius, overflow: "hidden", background: "#000", cursor: editing ? "grab" : base.cursor }}>
+      {videoUrl ? (
+        <video
+          ref={ref}
+          src={`${videoUrl}#t=${startSec.toFixed(2)}`}
+          preload="metadata"
+          playsInline
+          muted={!interactive}
+          onLoadedMetadata={(e) => {
+            const size = { width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight };
+            setNatural(size);
+            onNaturalSize(size);
+          }}
+          onTimeUpdate={(e) => {
+            const v = e.currentTarget;
+            if (v.currentTime >= endSec) {
+              v.pause();
+              v.currentTime = startSec;
+              setPlaying(false);
+              setTime(0);
+            } else setTime(Math.max(0, v.currentTime - startSec));
+          }}
+          onEnded={() => setPlaying(false)}
+          className="pointer-events-none absolute max-w-none"
+          style={g ? { left: g.left, top: g.top, width: g.width, height: g.height } : { left: 0, top: 0, width: el.w, height: el.h, objectFit: el.fit }}
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-[28px] text-white/70">video</div>
+      )}
+      {editing && <AdjustBar el={el} onZoom={onZoom} onDone={onDoneAdjust} />}
+    </div>
+  );
+}
+
+/** What is being said right now, laid out like text. Without a clip on the
+ *  page (or before the words load) it shows a placeholder so it can still
+ *  be moved. */
+function CaptionsView({ el, cues, base, hover, interactive, onPointerDown }: {
+  el: DesignCaptionsElement; cues: ReturnType<typeof buildDesignCaptionCues>; base: React.CSSProperties; hover: string; interactive: boolean; onPointerDown: (e: ReactPointerEvent) => void;
+}) {
+  const { timeSec } = useContext(PlaybackContext);
+  const cue = activeCue(cues, timeSec) ?? cues[0] ?? null;
+  const text = cue?.text ?? (interactive ? "Captions follow the clip" : "");
+  const layout = useMemo(() => layoutCaptionCue(el, text), [el, text]);
+  const font = FONTS[el.style.fontId];
+  const shadow = el.style.shadow
+    ? `${el.style.shadow.x}px ${el.style.shadow.y}px ${el.style.shadow.blur}px ${rgba({ color: el.style.shadow.color, alpha: el.style.shadow.alpha })}`
+    : undefined;
+  return (
+    <div className={cn(hover, interactive && "outline-dashed outline-1 outline-sky-300/40")} onPointerDown={onPointerDown} style={{ ...base, opacity: cue ? el.opacity : el.opacity * 0.5 }}>
+      {layout.lines.map((line, i) => (
+        <div key={i} className="absolute flex whitespace-pre" style={{ left: line.x - el.x, top: line.y - el.y, height: layout.linePitchPx, lineHeight: `${layout.linePitchPx}px`, fontSize: layout.fontSizePx, fontFamily: `"${font.cssFamily}"`, fontWeight: font.cssWeight, color: el.style.color, ...(shadow ? { textShadow: shadow } : {}) }}>
+          {line.words.map((w, wi) => <span key={wi}>{(wi > 0 ? " " : "") + w.text}</span>)}
+        </div>
+      ))}
+    </div>
   );
 }
 

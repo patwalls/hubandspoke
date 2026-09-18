@@ -20,6 +20,7 @@ import {
 } from "./clip-idea-precise-cut";
 import { clipRenderTask, type ClipRenderPayload } from "./clip-render";
 import { designRenderTask, type DesignRenderPayload } from "./design-render";
+import { designFramesTask, type DesignFramesPayload } from "./design-frames";
 import {
   diarizeTranscriptTask,
   type DiarizeTranscriptPayload,
@@ -139,6 +140,7 @@ export interface TaskPayloads {
   "clip-idea-precise-cut": ClipIdeaPreciseCutPayload;
   "clip-render": ClipRenderPayload;
   "design-render": DesignRenderPayload;
+  "design-frames": DesignFramesPayload;
   "diarize-transcript": DiarizeTranscriptPayload;
   "descript-derivative-create": DescriptDerivativeCreatePayload;
   "transcribe-whisper": TranscribeWhisperPayload;
@@ -203,6 +205,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "clip-idea-precise-cut": clipIdeaPreciseCutTask,
   "clip-render": clipRenderTask,
   "design-render": designRenderTask,
+  "design-frames": designFramesTask,
   "diarize-transcript": diarizeTranscriptTask,
   "descript-derivative-create": descriptDerivativeCreateTask,
   "transcribe-whisper": transcribeWhisperTask,

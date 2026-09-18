@@ -18,13 +18,13 @@ const { saveDesignDoc } = await import("./save");
 
 beforeEach(() => enqueue.mockReset());
 
-const brief = { stat: "$1K", statUnit: "/mo", headline: "hello", highlights: [], footer: "f", notesTitle: "t", phases: [{ heading: "h", body: "b" }], caption: "The AI caption" };
+const brief = { stat: "$1K", statUnit: "/mo", headline: "hello", highlights: [], footer: "f", notesTitle: "t", phases: [{ heading: "h", body: "b" }], caption: "The AI caption", clips: [], pillLabel: "P" };
 
 async function seed(status = "Idea") {
   const item = await createTestProductionItem({ status, sourceType: "repurposed", postType: "instagram_post", format: "Instagram PLAYBOOK" });
   const [design] = await db
     .insert(designDocs)
-    .values({ productionItemId: item.id, doc: buildPlaybookDoc(brief, null), brief })
+    .values({ productionItemId: item.id, doc: buildPlaybookDoc(brief, { photo: null, source: null, channel: { name: "S", subscribers: "" } }), brief })
     .returning();
   return { item, design };
 }
@@ -68,15 +68,22 @@ describe("installDesignMedia", () => {
     const item = await createTestProductionItem({});
     await createTestMedia({ productionItemId: item.id, index: 0, s3Key: "vitest/manual.jpg", kind: "image" });
     const args = { productionItemId: item.id, s3Bucket: "vitest-bucket" };
-    await installDesignMedia({ ...args, renderId: "r1", pages: [{ s3Key: "vitest/p1.png", sizeBytes: 1 }, { s3Key: "vitest/p2.png", sizeBytes: 1 }] });
-    await installDesignMedia({ ...args, renderId: "r2", pages: [{ s3Key: "vitest/q1.png", sizeBytes: 1 }, { s3Key: "vitest/q2.png", sizeBytes: 1 }, { s3Key: "vitest/q3.png", sizeBytes: 1 }] });
+    const png = (s3Key: string) => ({ s3Key, sizeBytes: 1, kind: "image" as const, contentType: "image/png", posterS3Key: null });
+    await installDesignMedia({ ...args, renderId: "r1", pages: [png("vitest/p1.png"), png("vitest/p2.png")] });
+    await installDesignMedia({
+      ...args,
+      renderId: "r2",
+      pages: [png("vitest/q1.png"), png("vitest/q2.png"), { s3Key: "vitest/q3.mp4", sizeBytes: 9, kind: "video", contentType: "video/mp4", posterS3Key: "vitest/q3-poster.jpg" }],
+    });
     const media = await db
-      .select({ index: productionItemMedia.index, s3Key: productionItemMedia.s3Key, sourceUrl: productionItemMedia.sourceUrl })
+      .select({ index: productionItemMedia.index, s3Key: productionItemMedia.s3Key, sourceUrl: productionItemMedia.sourceUrl, kind: productionItemMedia.kind, posterS3Key: productionItemMedia.posterS3Key })
       .from(productionItemMedia)
       .where(eq(productionItemMedia.productionItemId, item.id))
       .orderBy(asc(productionItemMedia.index));
-    expect(media.map((m) => [m.index, m.s3Key])).toEqual([[0, "vitest/q1.png"], [1, "vitest/q2.png"], [2, "vitest/q3.png"], [3, "vitest/manual.jpg"]]);
+    expect(media.map((m) => [m.index, m.s3Key])).toEqual([[0, "vitest/q1.png"], [1, "vitest/q2.png"], [2, "vitest/q3.mp4"], [3, "vitest/manual.jpg"]]);
     expect(media[0].sourceUrl).toBe(`${DESIGN_EDITOR_SOURCE_PREFIX}r2`);
+    // A video slide keeps its kind and poster so the carousel can show a thumb.
+    expect(media[2]).toMatchObject({ kind: "video", posterS3Key: "vitest/q3-poster.jpg" });
     const [row] = await db.select({ key: productionItems.mediaS3Key }).from(productionItems).where(eq(productionItems.id, item.id));
     expect(row.key).toBe("vitest/q1.png");
   });
@@ -85,7 +92,7 @@ describe("installDesignMedia", () => {
 describe("saveDesignDoc", () => {
   it("rejects a stale revision", async () => {
     const { item } = await seed();
-    const doc = buildPlaybookDoc(brief, null);
+    const doc = buildPlaybookDoc(brief, { photo: null, source: null, channel: { name: "S", subscribers: "" } });
     expect(await saveDesignDoc({ productionItemId: item.id, expectedRevision: 1, doc })).toEqual({ ok: true, revision: 2 });
     expect(await saveDesignDoc({ productionItemId: item.id, expectedRevision: 1, doc })).toEqual({ ok: false, reason: "conflict", currentRevision: 2 });
   });

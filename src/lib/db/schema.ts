@@ -955,6 +955,43 @@ export const designRenders = pgTable(
 );
 
 /**
+ * Still frames pulled from a design item's SOURCE video for the design
+ * editor's cover photo (design-frames task). A row is inserted `pending` when
+ * the grab is requested — so the editor can show the slot — and filled in by
+ * the worker. `isPick` marks the frame the AI chose as the best founder shot;
+ * `sec` < 0 never happens, and (item, sec) is unique so re-requests dedupe.
+ */
+export const designFrames = pgTable(
+  "design_frames",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    productionItemId: uuid("production_item_id")
+      .notNull()
+      .references(() => productionItems.id, { onDelete: "cascade" }),
+    /** Position in the source video, seconds (rounded to 0.01). */
+    sec: decimal("sec", { precision: 10, scale: 2 }).notNull(),
+    status: text("status").notNull().default("pending"), // pending | done | failed
+    s3Bucket: text("s3_bucket"),
+    s3Key: text("s3_key"),
+    width: integer("width"),
+    height: integer("height"),
+    /** "auto" (evenly spaced on first open) or "user" (grabbed at a time). */
+    origin: text("origin").notNull().default("auto"),
+    isPick: boolean("is_pick").notNull().default(false),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("design_frames_item_sec_uniq").on(table.productionItemId, table.sec),
+  ]
+);
+
+/**
  * V2 (Splice v10, 2026-05-22): format-agnostic section detection. The
  * section picker runs once per pillar — Sonnet 4.6 reads the transcript
  * and picks 8-15 "interesting moments," each one a cue-aligned window

@@ -15,7 +15,7 @@ export async function installDesignMedia(args: {
   productionItemId: string;
   renderId: string;
   s3Bucket: string;
-  pages: Array<{ s3Key: string; sizeBytes: number }>;
+  pages: Array<{ s3Key: string; sizeBytes: number; kind: "image" | "video"; contentType: string; posterS3Key: string | null }>;
 }): Promise<void> {
   const sourceUrl = `${DESIGN_EDITOR_SOURCE_PREFIX}${args.renderId}`;
   await db.transaction(async (tx) => {
@@ -51,12 +51,12 @@ export async function installDesignMedia(args: {
         args.pages.map((p, i) => ({
           productionItemId: args.productionItemId,
           index: i,
-          kind: "image",
+          kind: p.kind,
           s3Bucket: args.s3Bucket,
           s3Key: p.s3Key,
-          contentType: "image/png",
+          contentType: p.contentType,
           sizeBytes: p.sizeBytes,
-          posterS3Key: null,
+          posterS3Key: p.posterS3Key,
           sourceUrl,
         })),
       )
@@ -64,7 +64,7 @@ export async function installDesignMedia(args: {
 
     const changes: ContentChange[] = [
       ...prior.map((p): ContentChange => ({ target: { kind: "media_removed", mediaId: p.id, index: p.index, mediaKind: p.kind as "image" | "video", s3Key: p.s3Key, posterS3Key: p.posterS3Key ?? null } })),
-      ...inserted.map((m): ContentChange => ({ target: { kind: "media_added", mediaId: m.id, index: m.index, mediaKind: "image", s3Key: m.s3Key, posterS3Key: null } })),
+      ...inserted.map((m): ContentChange => ({ target: { kind: "media_added", mediaId: m.id, index: m.index, mediaKind: m.kind as "image" | "video", s3Key: m.s3Key, posterS3Key: m.posterS3Key ?? null } })),
     ];
     await recordContentChanges({ tx, contentItemId: args.productionItemId, userId: null, source: { kind: "tool", tool: "design-editor" }, changes });
 

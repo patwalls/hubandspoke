@@ -10,7 +10,8 @@ import path from "node:path";
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
 import { buildPlaybookDoc } from "../src/lib/design-editor/playbook-template";
-import { fontsUsed, pageToSatoriTree } from "../src/lib/design-editor/render-tree";
+import { imageSize } from "image-size";
+import { fontsUsed, pageToSatoriTree, type ResolvedImages } from "../src/lib/design-editor/render-tree";
 
 const out = path.resolve(process.argv[2] ?? "/tmp/design-smoke");
 mkdirSync(out, { recursive: true });
@@ -28,17 +29,25 @@ const doc = buildPlaybookDoc(
       { heading: "Phase 3: Customer Success — Track & Identify Power Users", body: "Use analytics tools like PostHog to track usage and identify the users who engage with the platform the most. Get on calls with power users to understand specifically how the platform is delivering value." },
     ],
     caption: "…",
+    clips: [{ startSec: 60, endSec: 90, label: "Phase 1" }],
+    pillLabel: "CUSTOMER CALLS PLAYBOOK",
   },
-  { kind: "url", url: "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg" },
+  {
+    photo: { kind: "url", url: "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg" },
+    source: { bucket: null, key: "x/source.mp4", title: "How This SaaS Hit $69K/Month In Just 2 Months" },
+    channel: { name: "Starter Story", subscribers: "800K subscribers" },
+  },
 );
 (async () => {
   for (const [i, page] of doc.pages.entries()) {
-    const images: Record<string, string> = {};
+    const images: ResolvedImages = {};
     for (const el of page.elements) {
       if (el.type !== "image") continue;
       if (el.src.kind === "asset") {
-        images[el.id] = `data:image/png;base64,${readFileSync(path.join("public", el.src.path)).toString("base64")}`;
-      } else if (el.src.kind === "url") images[el.id] = el.src.url;
+        const buf = readFileSync(path.join("public", el.src.path));
+        const dims = imageSize(buf);
+        images[el.id] = { src: `data:image/png;base64,${buf.toString("base64")}`, width: dims.width, height: dims.height };
+      } else if (el.src.kind === "url") images[el.id] = { src: el.src.url, width: 1280, height: 720 };
     }
     const t0 = Date.now();
     const svg = await satori(pageToSatoriTree(page, doc.canvas, images) as never, {

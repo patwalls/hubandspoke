@@ -16,9 +16,13 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   AlertTriangleIcon,
+  CaptionsIcon,
   CheckIcon,
+  ClapperboardIcon,
   ImageIcon,
   Loader2Icon,
+  PauseIcon,
+  PlayIcon,
   PlusIcon,
   Redo2Icon,
   SparklesIcon,
@@ -29,14 +33,17 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { newElementId, type DesignDoc } from "@/lib/design-editor/doc";
+import { DEFAULT_CROP, newElementId, pageDurationSec, pageVideo, type DesignDoc } from "@/lib/design-editor/doc";
+import { ensureCoverPhoto } from "@/lib/design-editor/playbook-template";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
+import type { DesignFramesState } from "@/lib/services/design-editor/frames";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
-import { Inspector } from "./inspector";
-import { PageCanvas } from "./page-canvas";
+import { Inspector, PicturePicker, formatSec, frameCandidate } from "./inspector";
+import { PageCanvas, PlaybackContext, type PlaybackState } from "./page-canvas";
 import { DesignStoreContext, commands, createDesignStore, useDesign, useDesignStoreApi } from "./store";
 
 const AUTOSAVE_DELAY_MS = 900;
+const FRAMES_POLL_MS = 2500;
 
 export interface DesignEditorDialogProps {
   open: boolean;
@@ -120,6 +127,10 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
   const editingId = useDesign((s) => s.editingElementId);
 
   const [imageUrls, setImageUrls] = useState<Record<string, string>>(session.imageUrls);
+  const [images, setImages] = useState<ImageCandidate[]>(session.images);
+  const [frames, setFrames] = useState<DesignFramesState>(session.frames);
+  /** A frame grab the user asked for; swapped in when the worker delivers it. */
+  const pendingGrab = useRef<{ elementId: string | null; pageIndex: number; sec: number } | null>(null);
   const [busy, setBusy] = useState<null | "regen" | "export">(null);
   const [leaving, setLeaving] = useState(false);
   const [instruction, setInstruction] = useState(session.design.briefInstruction ?? "");
@@ -129,6 +140,19 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
   const page = doc.pages[selection.pageIndex] ?? doc.pages[0];
   const pageIndex = doc.pages.indexOf(page);
   const locked = saveState === "conflict";
+  const pageClip = pageVideo(page);
+  const clipLen = pageDurationSec(page);
+
+  // ── Clip playback (video slides) ─────────────────────────────────────────
+  const [timeSec, setTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [seekRequest, setSeekRequest] = useState<PlaybackState["seekRequest"]>(null);
+  const seekClip = useCallback((sec: number) => setSeekRequest({ sec, nonce: Date.now() }), []);
+  const playback = useMemo<PlaybackState>(() => ({ timeSec, playing, setTime, setPlaying, seekRequest }), [timeSec, playing, seekRequest]);
+  useEffect(() => {
+    setPlaying(false);
+    setTime(0);
+  }, [pageIndex]);
   const scale = useMemo(
     () => (stageBox.w && stageBox.h ? Math.min((stageBox.w - 32) / doc.canvas.width, (stageBox.h - 32) / doc.canvas.height) : 0),
     [stageBox, doc.canvas],
@@ -211,6 +235,72 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
     return () => window.removeEventListener("keydown", onKey);
   }, [apply, undo, redo, select, storeApi, editingId]);
 
+  // ── Frames from the video ────────────────────────────────────────────────
+  // Poll while the worker is still grabbing; when the AI's pick lands and the
+  // cover has no photo yet, put it there. When a frame the user grabbed
+  // lands, put it in the element they grabbed it for.
+  useEffect(() => {
+    if (!frames.pending) return;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/production-items/${session.item.id}/design/frames`);
+        if (res.ok) setFrames((await res.json()) as DesignFramesState);
+      } catch {
+        /* next tick */
+      }
+    }, FRAMES_POLL_MS);
+    return () => clearTimeout(t);
+  }, [frames, session.item.id]);
+  useEffect(() => {
+    const pick = frames.frames.find((f) => f.isPick && f.status === "done");
+    const c = pick ? frameCandidate(pick) : null;
+    if (c) {
+      const { doc: cur } = storeApi.getState();
+      const patched = ensureCoverPhoto(cur, c.src);
+      if (patched) {
+        const photo = patched.pages[0].elements[0];
+        setImageUrls((m) => ({ ...m, [photo.id]: c.previewUrl }));
+        apply(() => patched);
+      }
+    }
+    const grab = pendingGrab.current;
+    if (grab) {
+      const f = frames.frames.find((x) => Math.abs(x.sec - grab.sec) < 0.02);
+      if (f?.status === "done") {
+        const fc = frameCandidate(f);
+        pendingGrab.current = null;
+        if (fc) {
+          if (grab.elementId) swapImage(grab.elementId, fc, grab.pageIndex);
+          else addImage(fc);
+        }
+        toast.success(`Frame at ${formatSec(f.sec)} is in`);
+      } else if (f?.status === "failed") {
+        pendingGrab.current = null;
+        toast.error("Couldn't grab that frame");
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frames]);
+
+  const grabFrame = async (elementId: string | null, sec: number) => {
+    pendingGrab.current = { elementId, pageIndex, sec: Math.round(sec * 100) / 100 };
+    const res = await fetch(`/api/production-items/${session.item.id}/design/frames`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ atSec: sec }) });
+    if (!res.ok) return void toast.error("Couldn't request that frame");
+    setFrames((f) => ({ ...f, pending: true }));
+    toast("Grabbing that frame…", { description: "A few seconds. It'll drop in automatically." });
+  };
+
+  const upload = async (elementId: string | null, file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    const res = await fetch(`/api/production-items/${session.item.id}/design/upload`, { method: "POST", body });
+    const json = (await res.json().catch(() => ({}))) as { image?: ImageCandidate; error?: string };
+    if (!res.ok || !json.image) return void toast.error(json.error ?? "Upload failed");
+    setImages((list) => [json.image!, ...list]);
+    if (elementId) swapImage(elementId, json.image);
+    else addImage(json.image);
+  };
+
   // ── Adding things ────────────────────────────────────────────────────────
   const addText = () => {
     const id = newElementId("t");
@@ -231,12 +321,25 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
   const addImage = (c: ImageCandidate) => {
     const id = newElementId("img");
     setImageUrls((m) => ({ ...m, [id]: c.previewUrl }));
-    apply(commands.addElement(pageIndex, { id, name: c.label, type: "image", x: 140, y: 140, w: 800, h: 800, opacity: 1, locked: false, src: c.src, fit: "cover", radius: 0 }));
+    apply(commands.addElement(pageIndex, { id, name: c.label, type: "image", x: 140, y: 140, w: 800, h: 800, opacity: 1, locked: false, src: c.src, fit: "cover", radius: 0, crop: { ...DEFAULT_CROP } }));
     select({ pageIndex, elementId: id });
   };
-  const swapImage = (elementId: string, c: ImageCandidate) => {
+  const swapImage = (elementId: string, c: ImageCandidate, onPage = pageIndex) => {
     setImageUrls((m) => ({ ...m, [elementId]: c.previewUrl }));
-    apply(commands.patchElement(pageIndex, elementId, (el) => (el.type === "image" ? { ...el, src: c.src, name: c.label } : el)));
+    apply(commands.patchElement(onPage, elementId, (el) => (el.type === "image" ? { ...el, src: c.src, name: c.label, crop: { ...DEFAULT_CROP } } : el)));
+  };
+  const addClip = () => {
+    if (!session.source || pageClip) return;
+    const id = newElementId("v");
+    const W = doc.canvas.width;
+    apply(commands.addElement(pageIndex, { id, name: "Clip", type: "video", x: 30, y: 214, w: W - 60, h: Math.round(((W - 60) * 9) / 16), opacity: 1, locked: false, src: { kind: "s3", bucket: session.source.bucket, key: session.source.key }, startSec: 0, endSec: 20, fit: "cover", radius: 28, crop: { ...DEFAULT_CROP } }));
+    select({ pageIndex, elementId: id });
+  };
+  const addCaptions = () => {
+    const id = newElementId("c");
+    const dark = page.background.toLowerCase() === "#ffffff" || page.background === "#F7F5EF";
+    apply(commands.addElement(pageIndex, { id, name: "Captions", type: "captions", x: 60, y: 60, w: doc.canvas.width - 120, h: 130, opacity: 1, locked: false, maxWordsPerCue: 12, style: { fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, color: dark ? "#5C5C5C" : "#FFFFFF", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 20 } }));
+    select({ pageIndex, elementId: id });
   };
 
   // ── AI / export ──────────────────────────────────────────────────────────
@@ -309,9 +412,10 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
           {doc.pages.map((p, i) => (
             <div key={p.id} className="group relative">
               <button type="button" onClick={() => select({ pageIndex: i, elementId: null })} className={cn("w-full overflow-hidden rounded-md ring-2 ring-transparent transition-shadow", i === pageIndex ? "ring-sky-500" : "hover:ring-sky-300")}>
-                <PageCanvas doc={doc} page={p} pageIndex={i} imageUrls={imageUrls} scale={126 / doc.canvas.width} interactive={false} />
+                <PageCanvas doc={doc} page={p} pageIndex={i} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} scale={126 / doc.canvas.width} interactive={false} />
               </button>
               <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] font-semibold text-white">{i + 1}</span>
+              {pageVideo(p) && <span className="absolute right-1 top-1 rounded bg-black/60 px-1 text-[9px] font-semibold uppercase text-white">▶ {Math.round(pageDurationSec(p))}s</span>}
               <div className="mt-1 flex justify-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                 <Tiny onClick={() => apply(commands.movePage(i, -1))} disabled={i === 0}>↑</Tiny>
                 <Tiny onClick={() => apply(commands.movePage(i, 1))} disabled={i === doc.pages.length - 1}>↓</Tiny>
@@ -333,28 +437,37 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
             <div className="relative">
               <details className="group">
                 <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[12px] font-medium hover:bg-muted">
-                  <ImageIcon className="size-3.5" /> Image
+                  <ImageIcon className="size-3.5" /> Picture
                 </summary>
-                <div className="absolute left-0 top-full z-20 mt-1 grid w-72 grid-cols-3 gap-1 rounded-lg border border-border bg-popover p-2 shadow-lg">
-                  {session.images.map((c) => (
-                    <button key={c.label + c.previewUrl} type="button" title={c.label} onClick={(e) => { addImage(c); (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; }} className="aspect-square overflow-hidden rounded border border-border bg-black/80 hover:ring-2 hover:ring-sky-400">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={c.previewUrl} alt={c.label} className="h-full w-full object-contain" />
-                    </button>
-                  ))}
+                <div className="absolute left-0 top-full z-20 mt-1 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg" onClick={(e) => { if ((e.target as HTMLElement).closest("button[title]")) (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; }}>
+                  <PicturePicker title="Add a picture" images={images} frames={frames} source={session.source} onPick={addImage} onGrabFrame={(sec) => void grabFrame(null, sec)} onUpload={(file) => upload(null, file)} />
                 </div>
               </details>
             </div>
+            {session.source && <Tool onClick={addClip} disabled={locked || !!pageClip}><ClapperboardIcon className="size-3.5" /> Clip</Tool>}
+            {pageClip && <Tool onClick={addCaptions} disabled={locked}><CaptionsIcon className="size-3.5" /> Captions</Tool>}
             <span className="ml-auto text-[11px] text-muted-foreground">Page {pageIndex + 1} of {doc.pages.length} · double-click text to edit · ⌫ deletes · arrows nudge</span>
           </div>
-          <div ref={stageRef} className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
-            {scale > 0 && (
-              <PageCanvas doc={doc} page={page} pageIndex={pageIndex} imageUrls={imageUrls} scale={scale} interactive={!locked} className="shadow-xl ring-1 ring-black/20" />
-            )}
-          </div>
+          <PlaybackContext.Provider value={playback}>
+            <div ref={stageRef} className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
+              {scale > 0 && (
+                <PageCanvas doc={doc} page={page} pageIndex={pageIndex} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} scale={scale} interactive={!locked} className="shadow-xl ring-1 ring-black/20" />
+              )}
+            </div>
+          </PlaybackContext.Provider>
+          {pageClip && (
+            <div className="flex items-center gap-3 rounded-md border border-border bg-background px-3 py-1.5">
+              <button type="button" aria-label={playing ? "Pause" : "Play clip"} onClick={() => setPlaying(!playing)} className="flex size-7 items-center justify-center rounded-full bg-foreground text-background">
+                {playing ? <PauseIcon className="size-3.5" /> : <PlayIcon className="size-3.5" />}
+              </button>
+              <input type="range" min={0} max={Math.max(0.1, clipLen)} step={0.05} value={Math.min(timeSec, clipLen)} onChange={(e) => seekClip(Number(e.target.value))} className="h-1 min-w-0 flex-1 cursor-pointer accent-sky-500" />
+              <span className="font-mono text-[11px] text-muted-foreground">{formatSec(timeSec)} / {formatSec(clipLen)}</span>
+              <span className="text-[11px] text-muted-foreground">Video slide · exports as an mp4</span>
+            </div>
+          )}
         </div>
 
-        <Inspector doc={doc} images={session.images} onPickImage={swapImage} />
+        <Inspector doc={doc} images={images} frames={frames} source={session.source} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} />
       </div>
 
       {/* AI bar */}
@@ -375,6 +488,7 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
 
       <div className="flex shrink-0 items-center justify-between border-t border-border px-5 py-3">
         <span className="text-xs text-muted-foreground">
+          {doc.pages.some((p) => pageVideo(p)) ? "Video slides render on the worker — allow a minute or two. " : ""}
           {session.design.brief?.caption ? "Export also writes the AI caption into the post draft (if the caption is still empty)." : ""}
         </span>
         <div className="flex items-center gap-2">

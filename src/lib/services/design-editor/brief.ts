@@ -34,7 +34,7 @@ export type GenerateBriefResult =
 
 const SYSTEM_PROMPT = `You write Starter Story's "Instagram PLAYBOOK" carousel posts.
 
-The post has two images. IMAGE 1 is the hook: the founder's photo, one huge revenue/traction NUMBER, and an all-caps headline where one or two phrases are highlighted (red for the pain/contrast, green for the win/number). IMAGE 2 looks like a screenshot of an iPhone Notes page: a titled playbook with 3–5 numbered phases, each a bold heading plus a dense, specific paragraph.
+The post is a 4-slide carousel. SLIDE 1 is the hook: the founder's photo, one huge revenue/traction NUMBER, and an all-caps headline where one or two phrases are highlighted (red for the pain/contrast, green for the win/number). SLIDE 2 looks like a screenshot of an iPhone Notes page: a titled playbook with 3–5 numbered phases, each a bold heading plus a dense, specific paragraph. SLIDES 3 and 4 are two short CLIPS of the interview, each dressed as a YouTube card with the spoken words captioned above and a purple pill naming the playbook — they send people to the full video.
 
 You are given the full transcript of the source video (speakers labelled when known), the format's Skill, and the brand's best-performing past posts of this format as the style anchor.
 
@@ -45,6 +45,8 @@ RULES
 - The playbook must be actionable: each phase is a step a reader could do this week, with the specific tools/tactics/thresholds the founder described. Bodies are 40–90 words. Headings follow "Phase N: <what> — <how>".
 - notesTitle names the playbook: "The 3-Phase Customer Call Playbook". footer references it: "See his 3-Phase playbook→" (use her/their to match the founder).
 - caption: 2–4 short paragraphs in the brand's voice from the past captions, ends with a CTA to the full video. No hashtags unless the past captions use them.
+- clips: exactly two moments from the transcript, 20–60 seconds each, where the founder explains a tactic from the playbook in their own words (concrete, quotable, self-contained — a viewer who sees only this clip still learns something). Start at the beginning of a sentence. Use the [MM:SS] timestamps: startSec/endSec are seconds from the start of the video. The two clips must not overlap and should cover different phases. label = which phase it shows.
+- pillLabel: 2–4 words, the playbook's name as a badge: "CUSTOMER CALLS PLAYBOOK", "PRICING PLAYBOOK".
 - Match the past posts' voice, punctuation and energy. Plain ASCII apostrophes and quotes.
 
 Never respond with plain text. Always call write_playbook_brief exactly once.`;
@@ -82,8 +84,23 @@ const TOOL: Anthropic.Tool = {
         },
       },
       caption: { type: "string" },
+      clips: {
+        type: "array",
+        minItems: 2,
+        maxItems: 2,
+        items: {
+          type: "object",
+          properties: {
+            startSec: { type: "number", description: "Seconds from the start of the video, at a sentence start." },
+            endSec: { type: "number", description: "Seconds from the start of the video; 20–60s after startSec." },
+            label: { type: "string", description: "Which phase this clip shows." },
+          },
+          required: ["startSec", "endSec", "label"],
+        },
+      },
+      pillLabel: { type: "string", description: 'Badge text, 2–4 words, e.g. "CUSTOMER CALLS PLAYBOOK".' },
     },
-    required: ["stat", "statUnit", "headline", "highlights", "footer", "notesTitle", "phases", "caption"],
+    required: ["stat", "statUnit", "headline", "highlights", "footer", "notesTitle", "phases", "caption", "clips", "pillLabel"],
   },
 };
 
@@ -158,7 +175,17 @@ export function buildBriefPrompt(args: {
   return blocks;
 }
 
-function coerceBrief(raw: unknown): PlaybookBrief | null {
+const MIN_CLIP_SEC = 12;
+const MAX_CLIP_SEC = 75;
+
+/** "12:34" / "1:02:03" / "83" → seconds (models sometimes answer in MM:SS). */
+export function parseTimestamp(v: string): number | null {
+  const parts = v.trim().split(":").map(Number);
+  if (parts.some((n) => !Number.isFinite(n))) return null;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
+}
+
+export function coerceBrief(raw: unknown): PlaybookBrief | null {
   const b = raw as Partial<Record<keyof PlaybookBrief, unknown>>;
   const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
   const phases = Array.isArray(b.phases)
@@ -173,6 +200,22 @@ function coerceBrief(raw: unknown): PlaybookBrief | null {
         .filter((h) => h.phrase)
         .slice(0, 4)
     : [];
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" ? parseTimestamp(v) : null);
+  const clips = Array.isArray(b.clips)
+    ? b.clips
+        .map((c) => {
+          const start = num((c as { startSec?: unknown }).startSec);
+          const end = num((c as { endSec?: unknown }).endSec);
+          if (start === null || end === null) return null;
+          const s0 = Math.max(0, start);
+          // Keep the model honest about length without throwing the pick away.
+          const e0 = Math.min(Math.max(end, s0 + MIN_CLIP_SEC), s0 + MAX_CLIP_SEC);
+          return { startSec: s0, endSec: e0, label: str((c as { label?: unknown }).label, 80) };
+        })
+        .filter((c): c is NonNullable<typeof c> => !!c)
+        .sort((a, b2) => a.startSec - b2.startSec)
+        .slice(0, 2)
+    : [];
   const brief: PlaybookBrief = {
     stat: str(b.stat, 16),
     statUnit: str(b.statUnit, 40),
@@ -183,6 +226,8 @@ function coerceBrief(raw: unknown): PlaybookBrief | null {
     notesTitle: str(b.notesTitle, 90),
     phases,
     caption: str(b.caption, 2200),
+    clips,
+    pillLabel: (str(b.pillLabel, 40) || "PLAYBOOK").toUpperCase(),
   };
   if (!brief.stat || !brief.headline || !brief.notesTitle || brief.phases.length < 2) return null;
   return brief;

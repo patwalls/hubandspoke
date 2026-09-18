@@ -7,11 +7,12 @@
  */
 import { FONTS } from "@/lib/clip-editor/fonts";
 import type { DesignElement, DesignPage, DesignTextElement, Rgba } from "./doc";
-import { layoutDesignText } from "./layout";
+import { coverGeometry, layoutDesignText } from "./layout";
 
 type Node = { type: string; props: Record<string, unknown> };
 
-export type ResolvedImages = Record<string, string>; // element id → src
+/** Element id → the picture, with its pixel size (the crop needs it). */
+export type ResolvedImages = Record<string, { src: string; width: number; height: number }>;
 
 function rgba(c: Rgba): string {
   const r = parseInt(c.color.slice(1, 3), 16);
@@ -80,22 +81,37 @@ function elementNodes(el: DesignElement, images: ResolvedImages): Node[] {
       },
     ];
   }
-  const src = images[el.id];
-  if (!src) return [];
+  // Video and captions are drawn by ffmpeg (see design-ffmpeg.ts); the
+  // satori pass only bakes what sits under and over them.
+  if (el.type !== "image") return [];
+  const img = images[el.id];
+  if (!img) return [];
+  // Same trick as the stage: a clipping box with the picture positioned
+  // inside it by coverGeometry — satori has no object-position.
+  const g = coverGeometry({ width: img.width, height: img.height }, { w: el.w, h: el.h }, el.crop, el.fit);
   return [
     {
-      type: "img",
+      type: "div",
       props: {
-        src,
         style: {
           position: "absolute",
           left: el.x,
           top: el.y,
           width: el.w,
           height: el.h,
-          objectFit: el.fit,
           borderRadius: el.radius,
           opacity: el.opacity,
+          overflow: "hidden",
+          display: "flex",
+        },
+        children: {
+          type: "img",
+          props: {
+            src: img.src,
+            width: g.width,
+            height: g.height,
+            style: { position: "absolute", left: g.left, top: g.top, width: g.width, height: g.height },
+          },
         },
       },
     },
@@ -106,6 +122,7 @@ export function pageToSatoriTree(
   page: DesignPage,
   canvas: { width: number; height: number },
   images: ResolvedImages,
+  opts: { transparent?: boolean } = {},
 ): Node {
   return {
     type: "div",
@@ -115,11 +132,25 @@ export function pageToSatoriTree(
         display: "flex",
         width: canvas.width,
         height: canvas.height,
-        backgroundColor: page.background,
+        ...(opts.transparent ? {} : { backgroundColor: page.background }),
         overflow: "hidden",
       },
       children: page.elements.flatMap((el) => elementNodes(el, images)),
     },
+  };
+}
+
+/**
+ * A video slide is baked as two stills around the footage: everything below
+ * the video element in z-order (on the page background) and everything above
+ * it (transparent). ffmpeg stacks under → video → over → captions.
+ */
+export function videoPageLayers(page: DesignPage): { under: DesignPage; over: DesignPage } {
+  const vi = page.elements.findIndex((el) => el.type === "video");
+  const idx = vi < 0 ? page.elements.length : vi;
+  return {
+    under: { ...page, elements: page.elements.slice(0, idx) },
+    over: { ...page, elements: page.elements.slice(idx + 1) },
   };
 }
 

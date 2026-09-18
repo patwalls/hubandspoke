@@ -5,7 +5,7 @@
  */
 import { layoutTextBlock, type LaidOutWord } from "@/lib/clip-editor/layout";
 import { LINE_HEIGHT_EM } from "@/lib/clip-editor/layout";
-import type { DesignSpan, DesignTextElement } from "./doc";
+import type { DesignCrop, DesignSpan, DesignTextElement } from "./doc";
 
 export interface DesignLine {
   /** Each word with its colour (from its span) — drawn as one run each. */
@@ -115,4 +115,44 @@ export function layoutDesignText(el: DesignTextElement): DesignTextLayout {
     layout = layoutAt(el, size);
   }
   return layout;
+}
+
+/**
+ * Where a `cover`-fitted picture (or video) is drawn inside its box, in box
+ * px: scaled so it covers the box times `crop.zoom`, then panned so the focal
+ * point sits at the box centre — clamped so the box never shows a gap. The
+ * stage's <img>/<video>, satori's <img> and ffmpeg's scale+crop all take
+ * their numbers from here.
+ */
+export function coverGeometry(
+  natural: { width: number; height: number },
+  box: { w: number; h: number },
+  crop: DesignCrop,
+  fit: "cover" | "contain" = "cover",
+): { left: number; top: number; width: number; height: number } {
+  if (natural.width <= 0 || natural.height <= 0) return { left: 0, top: 0, width: box.w, height: box.h };
+  const base = fit === "cover" ? Math.max(box.w / natural.width, box.h / natural.height) : Math.min(box.w / natural.width, box.h / natural.height);
+  const scale = base * (fit === "cover" ? crop.zoom : 1);
+  const width = natural.width * scale;
+  const height = natural.height * scale;
+  if (fit === "contain") return { left: (box.w - width) / 2, top: (box.h - height) / 2, width, height };
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  const left = clamp(box.w / 2 - crop.x * width, Math.min(0, box.w - width), 0);
+  const top = clamp(box.h / 2 - crop.y * height, Math.min(0, box.h - height), 0);
+  return { left, top, width, height };
+}
+
+/** Inverse of `coverGeometry`'s pan: the crop that puts the picture at
+ *  (left, top) — how dragging inside a picture becomes a focal point. */
+export function cropForOffset(
+  natural: { width: number; height: number },
+  box: { w: number; h: number },
+  crop: DesignCrop,
+  offset: { left: number; top: number },
+): DesignCrop {
+  const g = coverGeometry(natural, box, crop);
+  const x = g.width > 0 ? (box.w / 2 - offset.left) / g.width : 0.5;
+  const y = g.height > 0 ? (box.h / 2 - offset.top) / g.height : 0.5;
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  return { ...crop, x: clamp01(x), y: clamp01(y) };
 }

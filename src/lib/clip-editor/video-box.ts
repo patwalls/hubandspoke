@@ -89,3 +89,10 @@ export function parseSourceDimensions(
   }
   return width > 0 && height > 0 ? { width, height } : null;
 }
+
+/** "Duration: 00:10:12.34" from the same `ffmpeg -i` banner. */
+export function parseSourceDuration(ffmpegStderr: string): number | null {
+  const m = /Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/.exec(ffmpegStderr);
+  if (!m) return null;
+  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+}
