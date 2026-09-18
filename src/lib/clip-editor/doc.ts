@@ -116,6 +116,11 @@ export const FONT_IDS = [
   "bangers",
   "dm-serif-display",
   "permanent-marker",
+  "montserrat-semibold",
+  "montserrat-medium",
+  "inter-bold",
+  "inter-semibold",
+  "inter-regular",
 ] as const;
 export type FontId = (typeof FONT_IDS)[number];
 

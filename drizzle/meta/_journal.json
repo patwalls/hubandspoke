@@ -743,6 +743,13 @@
       "when": 1789686866382,
       "tag": "0105_spicy_garia",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1789688395696,
+      "tag": "0106_swift_human_fly",
+      "breakpoints": true
     }
   ]
 }

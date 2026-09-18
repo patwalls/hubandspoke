@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { ClipEditDoc } from "@/lib/clip-editor/doc";
+import type { DesignDoc } from "@/lib/design-editor/doc";
 import type { DiarizationState, TranscriptSpeaker } from "@/lib/diarization/types";
 
 export const productionItems = pgTable(
@@ -877,6 +878,79 @@ export const clipRenders = pgTable(
       table.createdAt
     ),
     index("idx_clip_renders_edit").on(table.clipEditId),
+  ]
+);
+
+/**
+ * In-app design editor (feature-flagged `designEditor`, 2026-09-17) — the
+ * Canva counterpart of the clip editor, for image-post formats such as
+ * "Instagram PLAYBOOK". One row per production item being designed.
+ *
+ * `doc` is a versioned DesignDoc (src/lib/design-editor/doc.ts). `brief` is
+ * the AI's content brief the doc was built from (kept for "regenerate" and
+ * for the caption). `revision` = optimistic concurrency, as on clip_edits.
+ */
+export const designDocs = pgTable(
+  "design_docs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    productionItemId: uuid("production_item_id")
+      .references((): AnyPgColumn => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    doc: jsonb("doc").$type<DesignDoc>().notNull(),
+    brief: jsonb("brief").$type<Record<string, unknown>>(),
+    /** The instruction the user gave the AI for the last (re)generation. */
+    briefInstruction: text("brief_instruction"),
+    revision: integer("revision").notNull().default(1),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [uniqueIndex("design_docs_item_uniq").on(table.productionItemId)]
+);
+
+/** One row per export of a design — same shape and lifecycle as
+ *  clip_renders (queued → rendering → done | failed | superseded). */
+export const designRenders = pgTable(
+  "design_renders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    designDocId: uuid("design_doc_id")
+      .references(() => designDocs.id, { onDelete: "cascade" })
+      .notNull(),
+    productionItemId: uuid("production_item_id")
+      .references((): AnyPgColumn => productionItems.id, {
+        onDelete: "cascade",
+      })
+      .notNull(),
+    doc: jsonb("doc").$type<DesignDoc>().notNull(),
+    status: text("status").notNull().default("queued"),
+    progress: integer("progress").notNull().default(0),
+    error: text("error"),
+    /** S3 keys of the rendered pages, in order. */
+    outputKeys: jsonb("output_keys").$type<string[]>(),
+    renderSeconds: decimal("render_seconds"),
+    requestedByUserId: uuid("requested_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_design_renders_item_created").on(
+      table.productionItemId,
+      table.createdAt
+    ),
   ]
 );
 
@@ -1759,7 +1833,7 @@ export type ContentChangeSource =
         | "cross-post-classifier"
         | "enrichment";
     }
-  | { kind: "tool"; tool: "descript" | "canva" | "typefully" | "clip-editor" }
+  | { kind: "tool"; tool: "descript" | "canva" | "typefully" | "clip-editor" | "design-editor" }
   | { kind: "sync"; system: "notion" | "account-content" | "metrics" }
   | { kind: "import" }
   | { kind: "api" };

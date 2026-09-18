@@ -1,6 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
+import { hasDesignTemplate } from "@/lib/design-editor/templates";
+
+// Lazy: only a browser whose user has the `designEditor` flag AND opens a
+// designable candidate ever downloads the editor.
+const DesignEditorDialog = dynamic(
+  () => import("@/components/design-editor/design-editor-dialog").then((m) => m.DesignEditorDialog),
+  { ssr: false },
+);
 import Link from "next/link";
 import { ExternalLinkIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -40,7 +50,97 @@ function formatCompact(n: number | null | undefined): string {
   return n.toLocaleString();
 }
 
-export function SpokeTriageDialog({
+/**
+ * Entry point for the Repurposed (SPOKE) queue's modal. With the
+ * `designEditor` flag, a candidate whose format has a design template opens
+ * the in-app design editor: the derivative item is created (or reused) first
+ * — the same item "Assign editor" would create — and the editor opens on it.
+ * Everyone else, and every other format, gets the classic dialog below.
+ */
+export function SpokeTriageDialog(props: SpokeTriageDialogProps) {
+  const flags = useFeatureFlags();
+  const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
+  const useDesigner =
+    !!flags?.designEditor &&
+    hasDesignTemplate(props.candidate.format.name) &&
+    !unsupported.has(props.candidate.id);
+  if (useDesigner) {
+    return (
+      <DesignFromCandidate
+        {...props}
+        onUnsupported={(message) => {
+          if (message) toast.message("Opening the classic view", { description: message });
+          setUnsupported((prev) => new Set(prev).add(props.candidate.id));
+        }}
+      />
+    );
+  }
+  return <ClassicSpokeTriageDialog {...props} />;
+}
+
+/** Resolves the candidate to a production item, then hands off to the
+ *  design editor. */
+function DesignFromCandidate({
+  open,
+  onOpenChange,
+  candidate,
+  brand,
+  onActioned,
+  onUnsupported,
+}: SpokeTriageDialogProps & { onUnsupported: (message?: string) => void }) {
+  const [itemId, setItemId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) {
+      setItemId(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/design/from-candidate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pillarId: candidate.pillar.id, targetFormatId: candidate.format.id }),
+        });
+        const json = (await res.json().catch(() => ({}))) as { productionItemId?: string; error?: string };
+        if (cancelled) return;
+        if (!res.ok || !json.productionItemId) return onUnsupported(json.error);
+        setItemId(json.productionItemId);
+      } catch {
+        if (!cancelled) onUnsupported();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, candidate.pillar.id, candidate.format.id]);
+
+  if (!itemId) {
+    // Creating the item takes well under a second; the editor's own
+    // "Drafting your post…" screen follows.
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] items-center justify-center p-0 sm:max-w-[min(1600px,97vw)]">
+          <DialogTitle className="sr-only">Design</DialogTitle>
+          <span className="text-sm text-muted-foreground">Preparing…</span>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+  return (
+    <DesignEditorDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      productionItemId={itemId}
+      brand={brand}
+      onDone={onActioned}
+      onUnsupported={onUnsupported}
+    />
+  );
+}
+
+function ClassicSpokeTriageDialog({
   open,
   onOpenChange,
   candidate,

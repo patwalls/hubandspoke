@@ -29,6 +29,11 @@ const FONTS = {
   "bangers": "Bangers-Regular.ttf",
   "dm-serif-display": "DMSerifDisplay-Regular.ttf",
   "permanent-marker": "PermanentMarker-Regular.ttf",
+  "montserrat-semibold": "Montserrat-SemiBold.ttf",
+  "montserrat-medium": "Montserrat-Medium.ttf",
+  "inter-bold": "Inter-Bold.ttf",
+  "inter-semibold": "Inter-SemiBold.ttf",
+  "inter-regular": "Inter-Regular.ttf",
 };
 
 // Latin + Latin-1/Extended-A, general punctuation, currency, arrows.

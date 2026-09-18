@@ -1,6 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
+import { hasDesignTemplate } from "@/lib/design-editor/templates";
+
+// Lazy: only a browser whose user has the `designEditor` flag AND opens a
+// designable item ever downloads the editor.
+const DesignEditorDialog = dynamic(
+  () => import("@/components/design-editor/design-editor-dialog").then((m) => m.DesignEditorDialog),
+  { ssr: false },
+);
 import Link from "next/link";
 import { ExternalLinkIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -114,7 +124,41 @@ function showTriageToast(
   }
 }
 
-export function TriageDialog({
+/**
+ * Entry point for the queue's item modal. For users with the `designEditor`
+ * flag, on formats that have a design template, it opens the in-app design
+ * editor (AI-drafted carousel); for everyone else — and whenever the editor
+ * can't handle the item — it is exactly the classic dialog below, unchanged.
+ */
+export function TriageDialog(props: TriageDialogProps) {
+  const flags = useFeatureFlags();
+  const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
+  const { item } = props;
+  const useDesigner =
+    !!flags?.designEditor &&
+    item.sourceType === "repurposed" &&
+    hasDesignTemplate(item.format) &&
+    !unsupported.has(item.id);
+
+  if (useDesigner) {
+    return (
+      <DesignEditorDialog
+        open={props.open}
+        onOpenChange={props.onOpenChange}
+        productionItemId={item.id}
+        brand={props.brand}
+        onDone={props.onDone}
+        onUnsupported={(message) => {
+          if (message) toast.message("Opening the classic view", { description: message });
+          setUnsupported((prev) => new Set(prev).add(item.id));
+        }}
+      />
+    );
+  }
+  return <ClassicTriageDialog {...props} />;
+}
+
+function ClassicTriageDialog({
   open,
   onOpenChange,
   item,

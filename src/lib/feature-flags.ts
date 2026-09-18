@@ -37,6 +37,15 @@ const FLAGS = {
     emails: ["patrickswalls@gmail.com"],
     envVar: "FEATURE_CLIP_EDITOR_EMAILS",
   },
+  /**
+   * In-app design editor: the Repurposed queue's modal becomes an AI-drafted,
+   * Canva-like carousel editor for image-post formats (Instagram PLAYBOOK),
+   * rendered on our own worker. See docs/features.md → "Design editor".
+   */
+  designEditor: {
+    emails: ["patrickswalls@gmail.com"],
+    envVar: "FEATURE_DESIGN_EDITOR_EMAILS",
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FeatureFlag = keyof typeof FLAGS;
