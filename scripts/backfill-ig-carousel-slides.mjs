@@ -13,7 +13,12 @@
  * with no media rows yet. Reels (`/reel/`) are single-media and unaffected.
  *
  *   heroku run --app hubandspoke -- node scripts/backfill-ig-carousel-slides.mjs
- *   heroku run --app hubandspoke -- node scripts/backfill-ig-carousel-slides.mjs --apply [--limit N]
+ *   heroku run --app hubandspoke -- node scripts/backfill-ig-carousel-slides.mjs --apply [--limit N] [--all]
+ *
+ * By default only OUR carousel posts (format set, not "Instagram Reel") —
+ * the inspiration/competitor items from the account sync have no format,
+ * and old reels linked as /p/ are single videos the 1-credit call can't
+ * archive anyway. `--all` includes everything (~1,400 rows, 1 credit each).
  */
 import postgres from "postgres";
 import pg from "pg";
@@ -23,6 +28,7 @@ const args = process.argv.slice(2);
 const apply = args.includes("--apply");
 const limitIdx = args.indexOf("--limit");
 const limit = limitIdx >= 0 ? Number(args[limitIdx + 1]) : 500;
+const all = args.includes("--all");
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -38,6 +44,7 @@ async function main() {
     FROM production_items p
     WHERE p.status = 'Published'
       AND p.published_link ~* 'instagram\\.com/p/'
+      AND (${all} OR (p.format IS NOT NULL AND p.format <> 'Instagram Reel'))
       AND NOT EXISTS (SELECT 1 FROM production_item_media m WHERE m.production_item_id = p.id)
     ORDER BY p.published_at DESC NULLS LAST
     LIMIT ${limit}
