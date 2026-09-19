@@ -270,9 +270,9 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
               {block.layout.lines.map((line, i) => (
                 <div
                   key={i}
-                  className="absolute -translate-x-1/2"
+                  className="absolute"
                   style={{
-                    left: block.layout.centerX,
+                    left: line.x,
                     top: line.topY,
                     ...textCss(block.layer.style, block.layout),
                   }}
@@ -329,7 +329,9 @@ function TextBlock({
   children: React.ReactNode;
 }) {
   const pad = 16;
-  const width = Math.max(layout.widthPx, 120) + pad * 2;
+  const contentW = Math.max(layout.right - layout.left, 120);
+  const width = contentW + pad * 2;
+  const boxLeft = (layout.left + layout.right) / 2 - width / 2;
   return (
     <>
       {children}
@@ -339,7 +341,7 @@ function TextBlock({
           selected && "outline-dashed outline-[6px] outline-sky-400",
         )}
         style={{
-          left: layout.centerX - width / 2,
+          left: boxLeft,
           top: layout.top - pad,
           width,
           height: layout.bottom - layout.top + pad * 2,
@@ -395,9 +397,9 @@ function CaptionOverlay({
       {shown.layout.lines.map((line, i) => (
         <div
           key={i}
-          className="absolute -translate-x-1/2"
+          className="absolute"
           style={{
-            left: shown.layout.centerX,
+            left: line.x,
             top: line.topY,
             ...textCss(layer.style, shown.layout),
             opacity: ghost ? (selected ? 0.35 : 0) : 1,

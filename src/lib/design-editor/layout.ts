@@ -62,6 +62,7 @@ function layoutAt(el: DesignTextElement, fontSizePx: number): DesignTextLayout {
       outlinePct: 0,
       outlineColor: "#000000",
       uppercase: false, // already applied
+      align: "center", // the design engine aligns lines itself below
     },
     canvas,
     xPct: 50,

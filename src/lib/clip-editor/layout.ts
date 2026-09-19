@@ -36,18 +36,22 @@ export interface LaidOutLine {
   /** Baseline Y in canvas px (what libass positions by). */
   baselineY: number;
   widthPx: number;
+  /** Left edge of the line in canvas px, after alignment. */
+  x: number;
 }
 
 export interface TextBlockLayout {
   fontSizePx: number;
   /** Line box height in canvas px — CSS `line-height`. */
   linePitchPx: number;
-  /** Horizontal center in canvas px. */
+  /** Horizontal center of the wrap box in canvas px. */
   centerX: number;
   lines: LaidOutLine[];
   /** Bounding box of the block in canvas px (for hit-testing / drag). */
   top: number;
   bottom: number;
+  left: number;
+  right: number;
   widthPx: number;
 }
 
@@ -115,6 +119,7 @@ export function layoutTextBlock(args: {
   const maxWidth = (args.widthPct / 100) * args.canvas.width;
   const centerX = (args.xPct / 100) * args.canvas.width;
   const anchorY = (args.yPct / 100) * args.canvas.height;
+  const align = args.style.align ?? "center";
 
   const display = (t: string) => (args.style.uppercase ? t.toUpperCase() : t);
   const words = args.words.map((w) => ({ ...w, text: display(w.text) }));
@@ -149,15 +154,20 @@ export function layoutTextBlock(args: {
     const widthPx =
       idxs.reduce((n, i) => n + widths[i], 0) +
       spaceWidth * Math.max(0, idxs.length - 1);
+    const x =
+      align === "left" ? centerX - maxWidth / 2 : align === "right" ? centerX + maxWidth / 2 - widthPx : centerX - widthPx / 2;
     return {
       words: lineWords,
       text: lineWords.map((w) => w.text).join(" "),
       topY: top + li * pitch,
       baselineY: top + li * pitch + baselineInLine,
       widthPx,
+      x,
     };
   });
 
+  const left = lines.length ? Math.min(...lines.map((l) => l.x)) : centerX;
+  const right = lines.length ? Math.max(...lines.map((l) => l.x + l.widthPx)) : centerX;
   return {
     fontSizePx,
     linePitchPx: pitch,
@@ -165,6 +175,8 @@ export function layoutTextBlock(args: {
     lines,
     top,
     bottom: top + blockHeight,
+    left,
+    right,
     widthPx: lines.reduce((m, l) => Math.max(m, l.widthPx), 0),
   };
 }

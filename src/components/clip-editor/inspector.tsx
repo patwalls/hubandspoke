@@ -6,9 +6,9 @@
  * any other edit. Sliders pass a coalesce key so one drag = one undo step.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { ChevronDownIcon } from "lucide-react";
+import { AlignCenterIcon, AlignLeftIcon, AlignRightIcon, ChevronDownIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { CaptionsLayer, ClipEditDoc, FontId, TextLayer } from "@/lib/clip-editor/doc";
+import type { CaptionsLayer, ClipEditDoc, FontId, TextAlign, TextLayer } from "@/lib/clip-editor/doc";
 import { FONT_IDS, findCaptionsLayer, findHookLayer } from "@/lib/clip-editor/doc";
 import { FONTS } from "@/lib/clip-editor/fonts";
 import { colorsInClipDoc } from "@/lib/clip-editor/colors";
@@ -72,6 +72,7 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
             step={0.5}
             onChange={(yPct) => patchHook((l) => ({ ...l, yPct }), "hook-y")}
           />
+          <AlignPicker value={hook.style.align} onChange={(align) => patchHook((l) => ({ ...l, style: { ...l.style, align } }))} />
           <Check
             label="ALL CAPS"
             checked={hook.style.uppercase}
@@ -166,6 +167,7 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
           </div>
           <ColorRow usedColors={usedColors} label="Colour" value={captions.style.color} onChange={(color) => patchCaptions((l) => ({ ...l, style: { ...l.style, color } }), "cap-color")} />
           <ColorRow usedColors={usedColors} label="Outline" value={captions.style.outlineColor} onChange={(outlineColor) => patchCaptions((l) => ({ ...l, style: { ...l.style, outlineColor, outlinePct: l.style.outlinePct || 8 } }), "cap-outline")} />
+          <AlignPicker value={captions.style.align} onChange={(align) => patchCaptions((l) => ({ ...l, style: { ...l.style, align } }))} />
           <Check
             label="ALL CAPS"
             checked={captions.style.uppercase}
@@ -353,6 +355,26 @@ function FontPicker({ value, onChange }: { value: FontId; onChange: (id: FontId)
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function AlignPicker({ value, onChange }: { value: TextAlign; onChange: (align: TextAlign) => void }) {
+  const options: Array<{ v: TextAlign; icon: ReactNode; label: string }> = [
+    { v: "left", icon: <AlignLeftIcon className="size-3.5" />, label: "Align left" },
+    { v: "center", icon: <AlignCenterIcon className="size-3.5" />, label: "Align centre" },
+    { v: "right", icon: <AlignRightIcon className="size-3.5" />, label: "Align right" },
+  ];
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-[11px] text-muted-foreground">Align</span>
+      <div className="grid grid-cols-3 gap-0.5 rounded-md bg-muted p-0.5">
+        {options.map((o) => (
+          <button key={o.v} type="button" title={o.label} aria-label={o.label} aria-pressed={value === o.v} onClick={() => onChange(o.v)} className={cn("flex h-6 w-8 items-center justify-center rounded", value === o.v ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+            {o.icon}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

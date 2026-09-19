@@ -82,6 +82,8 @@ function posY(style: TextStyle, layout: TextBlockLayout, line: LaidOutLine) {
   return line.baselineY - font.metrics.winAscentEm * layout.fontSizePx;
 }
 
+/** libass anchors: 7 = top-left, 8 = top-centre, 9 = top-right. The line's
+ *  left/centre/right edge (per its alignment) goes at \pos. */
 function event(
   start: number,
   end: number,
@@ -90,9 +92,15 @@ function event(
   y: number,
   text: string,
   layer: number,
+  align: TextStyle["align"] = "center",
 ): string {
-  const pos = `{\\an8\\q2\\pos(${x.toFixed(1)},${y.toFixed(1)})}`;
+  const an = align === "left" ? 7 : align === "right" ? 9 : 8;
+  const pos = `{\\an${an}\\q2\\pos(${x.toFixed(1)},${y.toFixed(1)})}`;
   return `Dialogue: ${layer},${assTime(start)},${assTime(end)},${styleName},,0,0,0,,${pos}${text}`;
+}
+
+function lineAnchorX(line: LaidOutLine, align: TextStyle["align"]): number {
+  return align === "left" ? line.x : align === "right" ? line.x + line.widthPx : line.x + line.widthPx / 2;
 }
 
 export function buildAssScript(plan: RenderPlan, scene: Scene): string {
@@ -108,10 +116,11 @@ export function buildAssScript(plan: RenderPlan, scene: Scene): string {
           0,
           plan.durationSec + 1,
           name,
-          block.layout.centerX,
+          lineAnchorX(line, block.layer.style.align),
           posY(block.layer.style, block.layout, line),
           assEscape(line.text),
           10 + bi,
+          block.layer.style.align,
         ),
       );
     }
@@ -146,10 +155,11 @@ export function buildAssScript(plan: RenderPlan, scene: Scene): string {
               iv.start,
               iv.end,
               "Captions",
-              layout.centerX,
+              lineAnchorX(line, layer.style.align),
               posY(layer.style, layout, line),
               text,
               5,
+              layer.style.align,
             ),
           );
         }

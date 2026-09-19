@@ -27,3 +27,34 @@ describe("clip look (a format's template for new edits)", () => {
     expect(hook && hook.type === "text" ? hook.style.sizePct : 99).toBeLessThanOrEqual(look.layers.find((l) => l.type === "text")!.type === "text" ? (look.layers.find((l) => l.type === "text") as { style: { sizePct: number } }).style.sizePct : 0);
   });
 });
+
+import { layoutTextBlock } from "./layout";
+import { buildAssScript } from "./ass";
+import { compileRenderPlan } from "./plan";
+import { resolveScene } from "./scene";
+
+describe("text alignment", () => {
+  const base = { words: [{ text: "short", ref: 0 }, { text: "a", ref: 1 }, { text: "much", ref: 2 }, { text: "longer", ref: 3 }, { text: "line", ref: 4 }], canvas: { width: 1080, height: 1920 }, xPct: 50, yPct: 30, anchor: "bottom" as const, widthPct: 80, balance: false };
+  const style = { fontId: "montserrat-extrabold" as const, sizePct: 6, color: "#FFF", outlinePct: 0, outlineColor: "#000", uppercase: false };
+  it("left/right lines share an edge with the wrap box; centre lines are centred on xPct", () => {
+    const left = layoutTextBlock({ ...base, style: { ...style, align: "left" } });
+    expect(left.lines.length).toBeGreaterThan(1);
+    expect(new Set(left.lines.map((l) => Math.round(l.x))).size).toBe(1);
+    expect(Math.round(left.lines[0].x)).toBe(540 - 432); // box left
+    const right = layoutTextBlock({ ...base, style: { ...style, align: "right" } });
+    expect(new Set(right.lines.map((l) => Math.round(l.x + l.widthPx))).size).toBe(1);
+    expect(Math.round(right.lines[0].x + right.lines[0].widthPx)).toBe(540 + 432);
+    const centre = layoutTextBlock({ ...base, style: { ...style, align: "center" } });
+    for (const l of centre.lines) expect(Math.round(l.x + l.widthPx / 2)).toBe(540);
+    expect(centre.right - centre.left).toBeCloseTo(centre.widthPx, 3);
+  });
+  it("the ASS script anchors left-aligned lines with an7 at the line's left edge", () => {
+    const doc = createDefaultDoc({ startSec: 0, endSec: 10, hook: "a hook that wraps onto two lines for sure" });
+    const hook = doc.layers.find((l) => l.type === "text")!;
+    if (hook.type === "text") hook.style.align = "left";
+    const plan = compileRenderPlan(doc, []);
+    const ass = buildAssScript(plan, resolveScene(plan));
+    expect(ass).toContain("{\\an7\\q2\\pos(");
+    expect(ass).not.toContain("{\\an8\\q2\\pos(");
+  });
+});

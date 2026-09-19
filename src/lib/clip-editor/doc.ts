@@ -133,8 +133,11 @@ const textStyleSchema = z.object({
   outlinePct: z.number().finite().min(0).max(30),
   outlineColor: hexColor,
   uppercase: z.boolean(),
+  /** How the lines sit inside the layer's wrap box (centred on `xPct`). */
+  align: z.enum(["left", "center", "right"]).default("center"),
 });
 export type TextStyle = z.infer<typeof textStyleSchema>;
+export type TextAlign = TextStyle["align"];
 
 /** Which edge of the layer's box sits on `yPct`. A hook anchored "bottom"
  *  grows UP as it wraps to more lines, so it never collides with the video
@@ -298,6 +301,7 @@ export function createDefaultDoc(args: {
     outlinePct: vertical ? 0 : 8,
     outlineColor: "#000000",
     uppercase: false,
+    align: "center",
   };
   // AI hooks range from five words to a paragraph — start a long one at a
   // size that fits the space it has (above the video) rather than off-canvas.
@@ -349,6 +353,7 @@ export function createDefaultDoc(args: {
           outlinePct: 8,
           outlineColor: "#000000",
           uppercase: true,
+          align: "center",
         },
         maxWordsPerCue: 3,
         maxCharsPerCue: 18,
