@@ -5,12 +5,14 @@
  * writes through `apply(commands.…)`, so it is undoable and autosaved like
  * any other edit. Sliders pass a coalesce key so one drag = one undo step.
  */
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CaptionsLayer, ClipEditDoc, FontId, TextLayer } from "@/lib/clip-editor/doc";
 import { FONT_IDS, findCaptionsLayer, findHookLayer } from "@/lib/clip-editor/doc";
 import { FONTS } from "@/lib/clip-editor/fonts";
+import { colorsInClipDoc } from "@/lib/clip-editor/colors";
+import { ColorPicker } from "@/components/editor/color-picker";
 import { commands, useEditor } from "./store";
 
 const HIGHLIGHTS = ["#FFE14D", "#4ADE80", "#38BDF8", "#FB7185", "#FFFFFF"];
@@ -26,6 +28,7 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
     hook && apply(commands.patchLayer<TextLayer>(hook.id, patch), key);
   const patchCaptions = (patch: (l: CaptionsLayer) => CaptionsLayer, key?: string) =>
     captions && apply(commands.patchLayer<CaptionsLayer>(captions.id, patch), key);
+  const usedColors = useMemo(() => colorsInClipDoc(doc), [doc]);
 
   return (
     <fieldset disabled={disabled} className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1 disabled:opacity-60">
@@ -76,6 +79,9 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
               patchHook((l) => ({ ...l, style: { ...l.style, uppercase } }))
             }
           />
+          <ColorRow usedColors={usedColors} label="Colour" value={hook.style.color} onChange={(color) => patchHook((l) => ({ ...l, style: { ...l.style, color } }), "hook-color")} />
+          <ColorRow usedColors={usedColors} label="Outline" value={hook.style.outlineColor} onChange={(outlineColor) => patchHook((l) => ({ ...l, style: { ...l.style, outlineColor, outlinePct: l.style.outlinePct || 8 } }), "hook-outline")} />
+          <Slider label="Outline width" value={hook.style.outlinePct} min={0} max={20} step={1} format={(v) => `${Math.round(v)}%`} onChange={(outlinePct) => patchHook((l) => ({ ...l, style: { ...l.style, outlinePct } }), "hook-outline-w")} />
         </Panel>
       )}
 
@@ -155,8 +161,11 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
                   style={{ background: c }}
                 />
               ))}
+              <ColorPicker value={captions.highlightColor ?? "#FFE14D"} onChange={(highlightColor) => patchCaptions((l) => ({ ...l, highlightColor }), "cap-highlight")} usedColors={usedColors} label="Custom highlight" />
             </div>
           </div>
+          <ColorRow usedColors={usedColors} label="Colour" value={captions.style.color} onChange={(color) => patchCaptions((l) => ({ ...l, style: { ...l.style, color } }), "cap-color")} />
+          <ColorRow usedColors={usedColors} label="Outline" value={captions.style.outlineColor} onChange={(outlineColor) => patchCaptions((l) => ({ ...l, style: { ...l.style, outlineColor, outlinePct: l.style.outlinePct || 8 } }), "cap-outline")} />
           <Check
             label="ALL CAPS"
             checked={captions.style.uppercase}
@@ -168,6 +177,7 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
       )}
 
       <Panel title="Video" active={selection?.kind === "video"}>
+        <ColorRow usedColors={usedColors} label="Background" value={doc.canvas.background} onChange={(bg) => apply(commands.setBackground(bg), "canvas-bg")} />
         <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-0.5 text-xs">
           {(
             [
@@ -343,6 +353,15 @@ function FontPicker({ value, onChange }: { value: FontId; onChange: (id: FontId)
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ColorRow({ label, value, onChange, usedColors }: { label: string; value: string; onChange: (hex: string) => void; usedColors: string[] }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <ColorPicker value={value} onChange={onChange} usedColors={usedColors} label={label} />
     </div>
   );
 }

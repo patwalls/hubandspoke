@@ -2,7 +2,9 @@
 
 /** Properties of the selected element (or the page). Every control writes
  *  through `apply(commands.…)` — undoable, autosaved. */
-import { useRef, useState } from "react";
+import { createContext, useContext, useMemo, useRef, useState } from "react";
+import { ColorPicker } from "@/components/editor/color-picker";
+import { colorsInDesignDoc } from "@/lib/design-editor/colors";
 import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, Loader2Icon, LockIcon, Trash2Icon, UnlockIcon, UploadIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
@@ -47,10 +49,12 @@ export function Inspector({ doc, mode, images, frames, source, onPickImage, onGr
   const page = doc.pages[selection.pageIndex];
   const el = page?.elements.find((e) => e.id === selection.elementId) ?? null;
   const pi = selection.pageIndex;
+  const usedColors = useMemo(() => colorsInDesignDoc(doc), [doc]);
 
   if (!page) return null;
   if (!el) {
     return (
+      <UsedColorsContext.Provider value={usedColors}>
       <Panel title={`Page ${pi + 1}`}>
         <Color label="Background" value={page.background} onChange={(v) => apply(commands.setPageBackground(pi, v), "page-bg")} />
         <p className="text-[11px] leading-snug text-muted-foreground">Click anything on the page to edit it. Double-click text to type, double-click a picture to reposition it.</p>
@@ -58,12 +62,14 @@ export function Inspector({ doc, mode, images, frames, source, onPickImage, onGr
           <p className="text-[11px] leading-snug text-muted-foreground">This is a video slide — it exports as an mp4 of the clip, with everything on the page baked in.</p>
         )}
       </Panel>
+      </UsedColorsContext.Provider>
     );
   }
 
   const patch = <E extends DesignElement>(fn: (e: E) => E, key?: string) => apply(commands.patchElement<E>(pi, el.id, fn), key);
 
   return (
+    <UsedColorsContext.Provider value={usedColors}>
     <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
       <Panel title={el.name || el.type}>
         <div className="grid grid-cols-4 gap-1">
@@ -135,6 +141,7 @@ export function Inspector({ doc, mode, images, frames, source, onPickImage, onGr
       )}
       {el.type === "captions" && <CaptionsPanel el={el} patch={(fn, key) => patch<DesignCaptionsElement>(fn, key)} />}
     </div>
+    </UsedColorsContext.Provider>
   );
 }
 
@@ -396,15 +403,17 @@ function Slider({ label, value, min, max, step, format, onChange }: { label: str
   );
 }
 
+/** Colours used in the open document, for the picker's "In this design"
+ *  row. Set by the Inspector so every nested Color field sees the same list. */
+const UsedColorsContext = createContext<string[]>([]);
+
 function Color({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const used = useContext(UsedColorsContext);
   return (
-    <label className="flex items-center justify-between text-[11px] text-muted-foreground">
+    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
       {label}
-      <span className="flex items-center gap-1.5">
-        <span className="font-mono text-[10px]">{value.toUpperCase()}</span>
-        <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="size-6 cursor-pointer rounded border border-border bg-transparent p-0" />
-      </span>
-    </label>
+      <ColorPicker value={value} onChange={onChange} usedColors={used} label={label} />
+    </div>
   );
 }
 

@@ -223,6 +223,9 @@ export const commands = {
     video: { ...doc.video, ...patch },
   }),
 
+  setBackground: (background: string) => (doc: ClipEditDoc) =>
+    doc.canvas.background === background ? doc : { ...doc, canvas: { ...doc.canvas, background } },
+
   /** Correct a transcript word. Setting it back to the original text clears
    *  the override rather than storing a no-op. */
   correctWord:
