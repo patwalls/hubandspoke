@@ -14,26 +14,29 @@ async function sourceIdFor(id: string): Promise<string | null> {
   return row ? (row.pillar ?? id) : null;
 }
 
-/** The filmstrip so far (the editor polls this while frames are pending). */
+/** The source video's photo library so far (the editor polls this while
+ *  frames are pending). `id` is the design item; frames belong to its source. */
 export async function GET(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
-  return NextResponse.json(await listFrames(id));
+  const sourceId = await sourceIdFor(id);
+  if (!sourceId) return NextResponse.json({ error: "Item not found" }, { status: 404 });
+  return NextResponse.json(await listFrames(sourceId));
 }
 
-/** Grab a frame at an exact time — `{ atSec: number }` — or, with no body,
- *  (re)request the automatic filmstrip. */
+/** Grab a frame at an exact time — `{ atSec: number }` — or (re)request the
+ *  automatic filmstrip (`{ force: true }` re-runs it after a failure). */
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
   const sourceId = await sourceIdFor(id);
   if (!sourceId) return NextResponse.json({ error: "Item not found" }, { status: 404 });
-  const body = (await request.json().catch(() => ({}))) as { atSec?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { atSec?: unknown; force?: unknown };
   if (typeof body.atSec === "number" && Number.isFinite(body.atSec) && body.atSec >= 0) {
-    return NextResponse.json({ frame: await requestFrameAt(id, sourceId, body.atSec) });
+    return NextResponse.json({ frame: await requestFrameAt(sourceId, body.atSec) });
   }
-  await requestAutoFrames(id, sourceId);
-  return NextResponse.json(await listFrames(id));
+  await requestAutoFrames(sourceId, { force: body.force === true });
+  return NextResponse.json(await listFrames(sourceId));
 }

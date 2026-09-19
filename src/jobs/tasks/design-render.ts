@@ -18,7 +18,7 @@ import { designRenders, productionItems, transcripts } from "@/lib/db/schema";
 import { bucketName, buildKey, getPresignedGetUrl, putObject, putObjectFromFile } from "@/lib/s3";
 import { recordToolAction } from "@/lib/services/content-events";
 import { installDesignMedia } from "@/lib/services/design-editor/install-design-media";
-import { probeSource, runFfmpeg } from "@/lib/services/ffmpeg-process";
+import { downloadToFile, probeSource, runFfmpeg } from "@/lib/services/ffmpeg-process";
 import { pageVideo, parseDesignDoc, type DesignImageSource, type DesignPage } from "@/lib/design-editor/doc";
 import { fontsUsed, pageToSatoriTree, videoPageLayers, type ResolvedChannels, type ResolvedImages } from "@/lib/design-editor/render-tree";
 import { loadBrandChannels, resolveChannel } from "@/lib/services/design-editor/channels";
@@ -60,6 +60,21 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
     const totalWeight = weights.reduce((a, b) => a + b, 0);
     let doneWeight = 0;
     let words: EditorWord[] | null = null;
+    // ffmpeg reads local files only on the dyno (ffmpeg-process.ts); one
+    // download per distinct source, reused across the render's video pages.
+    const localSources = new Map<string, string>();
+    const localSourceFor = async (src: { bucket: string | null; key: string }): Promise<string> => {
+      const cacheKey = `${src.bucket ?? ""}/${src.key}`;
+      const hit = localSources.get(cacheKey);
+      if (hit) return hit;
+      const url = await getPresignedGetUrl(src.key, 3600, { bucket: src.bucket ?? undefined });
+      const file = path.join(workDir, `source-${localSources.size}.mp4`);
+      const t0 = Date.now();
+      await downloadToFile(url, file);
+      helpers.logger.info(`design-render: source downloaded in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+      localSources.set(cacheKey, file);
+      return file;
+    };
     const [itemRow] = await db.select({ brand: productionItems.brand }).from(productionItems).where(eq(productionItems.id, render.productionItemId)).limit(1);
     const brandChannels = await loadBrandChannels(itemRow?.brand ?? "starter-story");
 
@@ -107,7 +122,7 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
         }
 
         if (!video.src) throw new Error(`page ${i + 1}: the clip has no source video`);
-        const sourceUrl = await getPresignedGetUrl(video.src.key, 3600, { bucket: video.src.bucket ?? undefined });
+        const sourceUrl = await localSourceFor(video.src);
         const probe = await probeSource(sourceUrl);
         if (!probe) throw new Error("couldn't read the source video");
         const filterScriptPath = path.join(workDir, `p${i}-graph.txt`);

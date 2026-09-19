@@ -22,6 +22,22 @@ export async function previewUrlFor(src: DesignImageSource): Promise<string> {
   return getPresignedGetUrl(src.key, 4 * 3600, { bucket: src.bucket ?? undefined });
 }
 
+/** "https://www.youtube.com/watch?v=ID" / youtu.be/ID / shorts/ID → ID. */
+export function youtubeIdFrom(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const m = /(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})/.exec(url);
+  return m ? m[1] : null;
+}
+
+/** The YouTube thumbnail for a source item, from its id or URL. */
+export async function youtubeThumbnailFor(sourceItemId: string): Promise<ImageCandidate | null> {
+  const [item] = await db.select({ youtubeId: productionItems.youtubeId, youtubeUrl: productionItems.youtubeUrl, thumbnail: productionItems.thumbnail }).from(productionItems).where(eq(productionItems.id, sourceItemId)).limit(1);
+  if (!item) return null;
+  const id = item.youtubeId ?? youtubeIdFrom(item.youtubeUrl);
+  const url = id ? `https://i.ytimg.com/vi/${id}/maxresdefault.jpg` : item.thumbnail && /^https?:\/\//.test(item.thumbnail) ? item.thumbnail : null;
+  return url ? { label: "YouTube thumbnail", src: { kind: "url", url }, previewUrl: url } : null;
+}
+
 /** Pictures of the source video, best first. */
 export async function sourceImageCandidates(sourceItemId: string): Promise<ImageCandidate[]> {
   const [item] = await db

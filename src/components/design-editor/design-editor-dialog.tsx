@@ -159,6 +159,7 @@ export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName,
         imageUrls: json.imageUrls ?? {},
         images: json.images ?? BRAND_WORDMARKS,
         frames: { frames: [], pending: false },
+        thumbnail: null,
         source: null,
         words: [],
         channels: json.channels ?? [],
@@ -344,7 +345,9 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   }, [frames, session.item.id]);
   useEffect(() => {
     const pick = frames.frames.find((f) => f.isPick && f.status === "done");
-    const c = pick ? frameCandidate(pick) : null;
+    // The filmstrip's pick — or, once nothing more is coming and there is
+    // no pick, the YouTube thumbnail rather than an empty cover.
+    const c = pick ? frameCandidate(pick) : !frames.pending && !frames.frames.some((f) => f.status === "pending") ? session.thumbnail : null;
     if (c) {
       const { doc: cur } = storeApi.getState();
       const patched = applyPhotoPick(cur, c.src);
@@ -378,6 +381,13 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     if (!res.ok) return void toast.error("Couldn't request that frame");
     setFrames((f) => ({ ...f, pending: true }));
     toast("Grabbing that frame…", { description: "A few seconds. It'll drop in automatically." });
+  };
+
+  const rerunFrames = async () => {
+    const res = await fetch(`/api/production-items/${session.item.id}/design/frames`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force: true }) });
+    if (!res.ok) return void toast.error("Couldn't restart the frames");
+    setFrames({ ...((await res.json()) as DesignFramesState), pending: true });
+    toast("Grabbing frames again…");
   };
 
   const upload = async (elementId: string | null, file: File) => {
@@ -611,7 +621,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
           )}
         </div>
 
-        <Inspector doc={doc} mode={mode} images={images} frames={frames} source={session.source} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} />
+        <Inspector doc={doc} mode={mode} images={images} frames={frames} source={session.source} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
         {!isTemplate && (
           <AttachDmKeywordDialog
             open={keywordOpen}

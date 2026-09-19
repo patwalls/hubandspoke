@@ -955,11 +955,13 @@ export const designRenders = pgTable(
 );
 
 /**
- * Still frames pulled from a design item's SOURCE video for the design
- * editor's cover photo (design-frames task). A row is inserted `pending` when
- * the grab is requested — so the editor can show the slot — and filled in by
- * the worker. `isPick` marks the frame the AI chose as the best founder shot;
- * `sec` < 0 never happens, and (item, sec) is unique so re-requests dedupe.
+ * Still frames pulled from a SOURCE video (design-frames task) — the
+ * video's photo library, shared by every post made from it. Keyed by the
+ * SOURCE item (`production_item_id` = the pillar), not the derivative
+ * (changed 2026-09-20; earlier rows were remapped by migration 0109). A row
+ * is inserted `pending` when the grab is requested and filled by the
+ * worker. `rank` orders the AI's best founder shots (1 = the pick, used as
+ * the cover); `isPick` is rank 1. (item, sec) is unique so re-requests dedupe.
  */
 export const designFrames = pgTable(
   "design_frames",
@@ -975,9 +977,11 @@ export const designFrames = pgTable(
     s3Key: text("s3_key"),
     width: integer("width"),
     height: integer("height"),
-    /** "auto" (evenly spaced on first open) or "user" (grabbed at a time). */
+    /** "auto" (the filmstrip on first open) or "user" (grabbed at a time). */
     origin: text("origin").notNull().default("auto"),
     isPick: boolean("is_pick").notNull().default(false),
+    /** 1..n for the AI's best shots, null for the rest. */
+    rank: integer("rank"),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()

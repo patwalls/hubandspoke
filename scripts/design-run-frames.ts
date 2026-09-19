@@ -17,7 +17,7 @@ async function main() {
   if (!item) throw new Error("item not found");
   const atSec = process.argv[3] ? Number(process.argv[3]) : undefined;
   const logger = { info: (m: string) => console.log("[info]", m), warn: (m: string) => console.warn("[warn]", m), error: (m: string) => console.error("[error]", m), debug: () => {} };
-  await designFramesTask({ productionItemId, sourceItemId: item.pillar ?? productionItemId, ...(atSec !== undefined ? { atSec } : {}) }, { logger } as unknown as JobHelpers);
+  await designFramesTask({ sourceItemId: item.pillar ?? productionItemId, ...(atSec !== undefined ? { atSec } : {}) }, { logger } as unknown as JobHelpers);
   process.exit(0);
 }
 main().catch((err) => { console.error(err); process.exit(1); });

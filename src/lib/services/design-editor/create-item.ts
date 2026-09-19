@@ -108,6 +108,6 @@ export async function findOrCreateDesignItem(args: {
   }
   // Start pulling cover-photo frames now, so they're ready when the editor
   // opens (the AI brief takes ~17s on the web side).
-  await requestAutoFrames(created.id, source.id).catch((err) => console.error("design-frames enqueue (design-editor) failed:", err));
+  await requestAutoFrames(source.id).catch((err) => console.error("design-frames enqueue (design-editor) failed:", err));
   return { productionItemId: created.id, created: true };
 }

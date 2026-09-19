@@ -37,6 +37,8 @@ export interface InspectorProps {
   dmKeyword: string | null;
   /** Item mode: open the attach/change keyword dialog. */
   onChangeDmKeyword?: () => void;
+  /** Re-run the filmstrip after a failure. */
+  onRerunFrames?: () => void;
 }
 
 export function frameCandidate(f: DesignFrame): ImageCandidate | null {
@@ -50,7 +52,7 @@ export function formatSec(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function Inspector({ doc, mode, images, frames, source, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword }: InspectorProps) {
+export function Inspector({ doc, mode, images, frames, source, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword, onRerunFrames }: InspectorProps) {
   const apply = useDesign((s) => s.apply);
   const selection = useDesign((s) => s.selection);
   const select = useDesign((s) => s.select);
@@ -168,7 +170,7 @@ export function Inspector({ doc, mode, images, frames, source, onPickImage, onGr
         </Panel>
       )}
       {el.type === "image" && (
-        <PicturePicker title="Swap picture" images={images} frames={frames} source={source} onPick={(c) => onPickImage(el.id, c)} onGrabFrame={(sec) => onGrabFrame(el.id, sec)} onUpload={(file) => onUpload(el.id, file)} />
+        <PicturePicker title="Swap picture" images={images} frames={frames} source={source} onPick={(c) => onPickImage(el.id, c)} onGrabFrame={(sec) => onGrabFrame(el.id, sec)} onUpload={(file) => onUpload(el.id, file)} onRerunFrames={onRerunFrames} />
       )}
       {el.type === "captions" && <CaptionsPanel el={el} patch={(fn, key) => patch<DesignCaptionsElement>(fn, key)} />}
     </div>
@@ -279,19 +281,25 @@ function ClipTrim({ el, patch, onSeekClip }: { el: DesignVideoElement; patch: (f
  * AI's pick starred), a scrubber to grab any exact moment, the source's own
  * pictures + wordmarks, and an upload.
  */
-export function PicturePicker({ title, images, frames, source, onPick, onGrabFrame, onUpload }: {
+export function PicturePicker({ title, images, frames, source, onPick, onGrabFrame, onUpload, onRerunFrames }: {
   title: string; images: ImageCandidate[]; frames: DesignFramesState; source: { videoUrl: string } | null;
-  onPick: (c: ImageCandidate) => void; onGrabFrame: (sec: number) => void; onUpload: (file: File) => Promise<void>;
+  onPick: (c: ImageCandidate) => void; onGrabFrame: (sec: number) => void; onUpload: (file: File) => Promise<void>; onRerunFrames?: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const doneFrames = frames.frames.filter((f) => f.status === "done");
+  const failedOnly = !frames.pending && doneFrames.length === 0 && frames.frames.some((f) => f.status === "failed");
   return (
     <Panel title={title}>
+      {failedOnly && onRerunFrames && (
+        <button type="button" onClick={onRerunFrames} className="self-start rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100">
+          Frames couldn&apos;t be grabbed — try again
+        </button>
+      )}
       {(doneFrames.length > 0 || frames.pending) && (
         <>
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            From the video {frames.pending && <Loader2Icon className="size-3 animate-spin" />}
+            Photos from the video · AI&apos;s best shots first {frames.pending && <Loader2Icon className="size-3 animate-spin" />}
           </span>
           <div className="grid grid-cols-3 gap-1">
             {frames.frames.map((f) => {
@@ -307,7 +315,11 @@ export function PicturePicker({ title, images, frames, source, onPick, onGrabFra
                     <span className="flex h-full items-center justify-center"><Loader2Icon className="size-3 animate-spin text-white/60" /></span>
                   )}
                   <span className="absolute bottom-0 left-0 rounded-tr bg-black/70 px-1 text-[9px] text-white">{formatSec(f.sec)}</span>
-                  {f.isPick && <span className="absolute right-0 top-0 rounded-bl bg-amber-400 px-1 text-[9px] font-semibold text-black">AI pick</span>}
+                  {f.rank === 1 ? (
+                    <span className="absolute right-0 top-0 rounded-bl bg-amber-400 px-1 text-[9px] font-semibold text-black">AI pick</span>
+                  ) : f.rank ? (
+                    <span className="absolute right-0 top-0 rounded-bl bg-amber-200 px-1 text-[9px] font-semibold text-black">#{f.rank}</span>
+                  ) : null}
                 </button>
               );
             })}

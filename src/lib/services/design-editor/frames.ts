@@ -1,10 +1,12 @@
 /**
- * Still frames of the source video for the design editor's cover photo.
+ * A source video's photo library: still frames of the founder, shared by
+ * every post made from the video (keyed by the SOURCE item).
  *
  * The first open of a design asks the worker for a filmstrip (`auto`: ~12
- * evenly spaced frames, then Haiku picks the best founder shot); the editor
- * can also grab a frame at an exact moment (`user`). Rows live in
- * `design_frames`; the worker task is src/jobs/tasks/design-frames.ts.
+ * frames sampled where the guest talks, then Haiku ranks the best shots —
+ * rank 1 is the cover); the editor can also grab a frame at an exact moment
+ * (`user`). Rows live in `design_frames`; the worker task is
+ * src/jobs/tasks/design-frames.ts.
  */
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -22,6 +24,8 @@ export interface DesignFrame {
   status: "pending" | "done" | "failed";
   origin: "auto" | "user";
   isPick: boolean;
+  /** 1 = the cover pick, 2–3 the runner-up shots, null otherwise. */
+  rank: number | null;
   src: DesignImageSource | null;
   previewUrl: string | null;
   width: number | null;
@@ -35,43 +39,46 @@ export interface DesignFramesState {
   pending: boolean;
 }
 
-export function autoFramesJobKey(productionItemId: string): string {
-  return `design-frames:auto:${productionItemId}`;
+export function autoFramesJobKey(sourceItemId: string): string {
+  return `design-frames:auto:${sourceItemId}`;
 }
 
-/** Ask for the filmstrip once per item. Idempotent: no-op when frames
- *  already exist or the job is already queued. */
-export async function requestAutoFrames(productionItemId: string, sourceItemId: string): Promise<void> {
-  const [existing] = await db.select({ id: designFrames.id }).from(designFrames).where(eq(designFrames.productionItemId, productionItemId)).limit(1);
-  if (existing) return;
+/** Ask for the video's filmstrip once. Idempotent: no-op when frames
+ *  already exist or the job is already queued. `force` re-runs it (a
+ *  failed first attempt, or a transcript that arrived since). */
+export async function requestAutoFrames(sourceItemId: string, opts: { force?: boolean } = {}): Promise<void> {
+  if (!opts.force) {
+    const [existing] = await db.select({ id: designFrames.id }).from(designFrames).where(and(eq(designFrames.productionItemId, sourceItemId), eq(designFrames.origin, "auto"))).limit(1);
+    if (existing) return;
+  }
   await enqueue(
     "design-frames",
-    { productionItemId, sourceItemId },
-    { jobKey: autoFramesJobKey(productionItemId), jobKeyMode: "preserve_run_at", queueName: "media-heavy", maxAttempts: 2 },
+    { sourceItemId },
+    { jobKey: autoFramesJobKey(sourceItemId), jobKeyMode: "preserve_run_at", queueName: "media-heavy", maxAttempts: 2 },
   );
 }
 
 /** Grab one frame at `sec` (the editor's "use this frame"). */
-export async function requestFrameAt(productionItemId: string, sourceItemId: string, sec: number): Promise<DesignFrame> {
+export async function requestFrameAt(sourceItemId: string, sec: number): Promise<DesignFrame> {
   const rounded = Math.max(0, Math.round(sec * 100) / 100);
   const [row] = await db
     .insert(designFrames)
-    .values({ productionItemId, sec: rounded.toFixed(2), origin: "user", status: "pending" })
+    .values({ productionItemId: sourceItemId, sec: rounded.toFixed(2), origin: "user", status: "pending" })
     .onConflictDoUpdate({ target: [designFrames.productionItemId, designFrames.sec], set: { updatedAt: new Date() } })
     .returning();
   if (row.status !== "done") {
     await enqueue(
       "design-frames",
-      { productionItemId, sourceItemId, atSec: rounded },
-      { jobKey: `design-frames:at:${productionItemId}:${rounded.toFixed(2)}`, jobKeyMode: "preserve_run_at", queueName: "media-heavy", maxAttempts: 2 },
+      { sourceItemId, atSec: rounded },
+      { jobKey: `design-frames:at:${sourceItemId}:${rounded.toFixed(2)}`, jobKeyMode: "preserve_run_at", queueName: "media-heavy", maxAttempts: 2 },
     );
   }
   return toFrame(row);
 }
 
-export async function listFrames(productionItemId: string): Promise<DesignFramesState> {
-  const rows = await db.select().from(designFrames).where(eq(designFrames.productionItemId, productionItemId)).orderBy(asc(designFrames.sec));
-  const frames = await Promise.all(rows.map(toFrame));
+export async function listFrames(sourceItemId: string): Promise<DesignFramesState> {
+  const rows = await db.select().from(designFrames).where(eq(designFrames.productionItemId, sourceItemId)).orderBy(asc(designFrames.sec));
+  const frames = (await Promise.all(rows.map(toFrame))).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99) || a.sec - b.sec);
   let pending = frames.some((f) => f.status === "pending");
   // The auto filmstrip isn't finished until the AI has picked: the rows go
   // `done` one by one and `is_pick` is written last, so "no pending rows"
@@ -81,18 +88,18 @@ export async function listFrames(productionItemId: string): Promise<DesignFrames
   if (!pending && (frames.length === 0 || autoUnpicked)) {
     // Still queued/running (the job inserts its rows and picks at the end)?
     const queued = await db.execute<{ n: number }>(
-      sql`SELECT count(*)::int AS n FROM graphile_worker.jobs WHERE key = ${autoFramesJobKey(productionItemId)}`,
+      sql`SELECT count(*)::int AS n FROM graphile_worker.jobs WHERE key = ${autoFramesJobKey(sourceItemId)}`,
     );
     pending = ((queued as unknown as Array<{ n: number }>)[0]?.n ?? 0) > 0;
   }
   return { frames, pending };
 }
 
-export async function pickedFrame(productionItemId: string): Promise<DesignFrame | null> {
+export async function pickedFrame(sourceItemId: string): Promise<DesignFrame | null> {
   const [row] = await db
     .select()
     .from(designFrames)
-    .where(and(eq(designFrames.productionItemId, productionItemId), eq(designFrames.isPick, true), eq(designFrames.status, "done")))
+    .where(and(eq(designFrames.productionItemId, sourceItemId), eq(designFrames.isPick, true), eq(designFrames.status, "done")))
     .limit(1);
   return row ? toFrame(row) : null;
 }
@@ -105,6 +112,7 @@ async function toFrame(row: typeof designFrames.$inferSelect): Promise<DesignFra
     status: row.status as DesignFrame["status"],
     origin: row.origin as DesignFrame["origin"],
     isPick: row.isPick,
+    rank: row.rank,
     src,
     previewUrl: src ? await getPresignedGetUrl(src.key, 4 * 3600, { bucket: src.bucket ?? undefined }) : null,
     width: row.width,

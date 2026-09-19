@@ -17,7 +17,7 @@ import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words
 import { getPresignedGetUrl } from "@/lib/s3";
 import { generateDesignFill } from "./fill-brief";
 import { loadFormatTemplate } from "./format-template";
-import { BRAND_WORDMARKS, previewUrlFor, sourceImageCandidates, type ImageCandidate } from "./assets";
+import { BRAND_WORDMARKS, previewUrlFor, sourceImageCandidates, youtubeThumbnailFor, type ImageCandidate } from "./assets";
 import { listFrames, pickedFrame, requestAutoFrames, type DesignFramesState } from "./frames";
 import { toDesignRenderStatus, type DesignRenderStatus } from "./render-status";
 
@@ -59,8 +59,10 @@ export interface DesignEditorSession {
   imageUrls: Record<string, string>;
   /** Pictures available to place. */
   images: ImageCandidate[];
-  /** Frames grabbed from the source video (+ whether more are coming). */
+  /** The source video's photo library (+ whether more frames are coming). */
   frames: DesignFramesState;
+  /** The YouTube thumbnail — the cover's last resort when frames can't come. */
+  thumbnail: ImageCandidate | null;
   /** The source video, for video slides and the frame scrubber. */
   source: { videoUrl: string; bucket: string | null; key: string; title: string | null } | null;
   /** The source transcript's words — captions on video slides are cut from
@@ -83,7 +85,7 @@ export async function loadDesignEditorSession(args: {
 
   // Kick the filmstrip off first — it runs on the worker while the AI writes
   // the brief, so the first draft usually already has a real photo.
-  await requestAutoFrames(item.id, item.sourceItemId).catch((err) => console.error("design-frames enqueue failed:", err));
+  await requestAutoFrames(item.sourceItemId).catch((err) => console.error("design-frames enqueue failed:", err));
 
   let design = await selectDesign(item.id);
   if (!design) {
@@ -102,8 +104,8 @@ export async function loadDesignEditorSession(args: {
     // The pick landed after the draft was made (or the last editor closed
     // before it did): put it in the photo slots now, before anyone holds
     // the doc.
-    const pick = await pickedFrame(item.id);
-    let next = pick?.src ? applyPhotoPick(design.doc, pick.src)?.doc ?? null : null;
+    const photo = await coverPhotoFor(item.sourceItemId);
+    let next = photo ? applyPhotoPick(design.doc, photo)?.doc ?? null : null;
     // A keyword attached after the draft (content page) fills the CTA now.
     const slug = await currentDmKeyword(item.id);
     if (slug && JSON.stringify(next ?? design.doc).includes(DM_KEYWORD_TOKEN)) next = applyDmKeyword(next ?? design.doc, slug);
@@ -166,9 +168,7 @@ async function draftDoc(itemId: string, sourceItemId: string, template: DesignDo
   // the moment the pick lands (applyPhotoPick). Falling back to the platform
   // thumbnail is worse than nothing: it's usually a YouTube thumbnail with
   // its own text baked in. Only image-only sources use their pictures.
-  const pick = await pickedFrame(itemId);
-  const images = source ? [] : await sourceImageCandidates(sourceItemId);
-  const photo: DesignImageSource | null = pick?.src ?? images[0]?.src ?? null;
+  const photo: DesignImageSource | null = (await coverPhotoFor(sourceItemId)) ?? (source ? null : (await sourceImageCandidates(sourceItemId))[0]?.src ?? null);
   const ctx: DesignContext = {
     photo,
     source: source ? { bucket: source.bucket, key: source.key, title: source.title } : null,
@@ -218,6 +218,21 @@ async function loadWords(sourceItemId: string): Promise<EditorWord[]> {
     .limit(1);
   if (!t) return [];
   return resolveTranscriptWords({ words: t.words, segments: t.segments ?? [] }).words;
+}
+
+/**
+ * The cover photo for a video: the AI's pick from its frames. When the
+ * frames can't come (no filmstrip pending, none picked — the job failed or
+ * the video has no archive), the YouTube thumbnail: text baked in, but a
+ * real photo of the founder beats an empty slide. While the filmstrip is
+ * still being made, null — the editor fills it the moment it lands.
+ */
+async function coverPhotoFor(sourceItemId: string): Promise<DesignImageSource | null> {
+  const pick = await pickedFrame(sourceItemId);
+  if (pick?.src) return pick.src;
+  const { pending } = await listFrames(sourceItemId);
+  if (pending) return null;
+  return (await youtubeThumbnailFor(sourceItemId))?.src ?? null;
 }
 
 async function currentDmKeyword(itemId: string): Promise<string | null> {
@@ -292,18 +307,30 @@ async function finishSession(item: Awaited<ReturnType<typeof loadItem>>, design:
   const imageUrls = await resolveImageUrls(design.doc);
   const [render] = await db.select().from(designRenders).where(eq(designRenders.designDocId, design.id)).orderBy(desc(designRenders.createdAt)).limit(1);
   const source = await loadSource(item.sourceItemId);
+  const thumb = await youtubeThumbnailFor(item.sourceItemId);
   return {
     item,
     design,
     imageUrls,
-    images: [...(await sourceImageCandidates(item.sourceItemId)), ...BRAND_WORDMARKS],
-    frames: await listFrames(item.id),
+    images: dedupeImages([...(await sourceImageCandidates(item.sourceItemId)), ...(thumb ? [thumb] : []), ...BRAND_WORDMARKS]),
+    frames: await listFrames(item.sourceItemId),
+    thumbnail: thumb,
     source: source ? { ...source, videoUrl: await getPresignedGetUrl(source.key, 4 * 3600, { bucket: source.bucket ?? undefined }) } : null,
     words: await loadWords(item.sourceItemId),
     channels: await loadBrandChannels(item.brand),
     dmKeyword: await currentDmKeyword(item.id),
     latestRender: render ? toDesignRenderStatus(render) : null,
   };
+}
+
+function dedupeImages(list: ImageCandidate[]): ImageCandidate[] {
+  const seen = new Set<string>();
+  return list.filter((c) => {
+    const k = JSON.stringify(c.src);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 export async function resolveImageUrls(doc: DesignDoc): Promise<Record<string, string>> {

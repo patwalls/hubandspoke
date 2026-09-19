@@ -5,9 +5,28 @@
  * copies for now).
  */
 import { spawn } from "child_process";
+import { createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
+import { Readable } from "stream";
+import type { ReadableStream as NodeReadableStream } from "stream/web";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { parseProgressSeconds } from "@/lib/clip-editor/ffmpeg-args";
 import { parseSourceDimensions, parseSourceDuration } from "@/lib/clip-editor/video-box";
+
+/**
+ * ffmpeg reads its inputs from LOCAL FILES on the worker. The dyno's static
+ * ffmpeg build (2018) segfaults on any https input (verified 2026-09-19 on a
+ * one-off dyno: every `-i https://…` form dies with SIGSEGV in ~150 ms, with
+ * or without the reconnect flags), while locally installed builds range-read
+ * https fine — which is exactly how this went unnoticed. So every task
+ * downloads the source first; the disk is ephemeral and a 1 GB podcast
+ * lands in ~15 s from S3.
+ */
+export async function downloadToFile(url: string, destPath: string): Promise<void> {
+  const res = await fetch(url);
+  if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`);
+  await pipeline(Readable.fromWeb(res.body as unknown as NodeReadableStream), createWriteStream(destPath));
+}
 
 export function runFfmpeg(argv: string[], opts: { onProgress?: (renderedSec: number) => void; timeoutMs?: number } = {}): Promise<void> {
   return new Promise((resolve, reject) => {
