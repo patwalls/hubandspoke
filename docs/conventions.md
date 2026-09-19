@@ -365,3 +365,10 @@ Stack format):
 vitest project (`vitest.config.ts`) carries a longer `testTimeout`. Run
 them by hand whenever you touch the prompt they guard, and re-run a couple
 of times to confirm the decision is stable, not a coin-flip.
+
+## Format templates (design editor / clip editor)
+
+- A format's design is data, not code: `formats.design_template` (a `DesignDoc` with `slot`/`stack` on elements — `src/lib/design-editor/doc.ts`). To change how a format's posts look, edit the template on the format page; do not add format-specific layout code.
+- Presets in `src/lib/design-editor/templates.ts` are starting points and the fallback for a format with no stored template. A preset is a function returning a slotted `DesignDoc` with REAL sample content (the sample is the AI's style example). Keep every element the editor can produce (no hidden template-only fields).
+- New slot kinds go in `SLOT_KINDS` (doc.ts) + `fillElement` (template-fill.ts) + the inspector's `SLOT_OPTIONS`. Prefer a system slot filled from the item over asking the AI for something we already know.
+- Video formats: the format's look is `formats.clip_template` (`clipLookSchema`); it never contains cuts. Apply with `applyLook`, capture with `lookFromDoc`.

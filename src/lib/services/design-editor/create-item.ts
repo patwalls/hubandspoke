@@ -19,7 +19,7 @@ import { getChannelsForFormats, pickBestAccountForFormat } from "@/lib/format-ch
 import { recordItemCreated } from "@/lib/services/item-created";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
-import { hasDesignTemplate } from "@/lib/design-editor/templates";
+import { loadFormatTemplate } from "./format-template";
 
 export class DesignItemCreateError extends Error {
   constructor(message: string, public readonly status: 400 | 404) {
@@ -38,7 +38,7 @@ export async function findOrCreateDesignItem(args: {
   const [target] = await db.select().from(formats).where(eq(formats.id, args.targetFormatId)).limit(1);
   if (!target) throw new DesignItemCreateError("Target format not found", 404);
   if (target.brand !== source.brand) throw new DesignItemCreateError("Target format must belong to the same brand", 400);
-  if (!hasDesignTemplate(target.name)) throw new DesignItemCreateError("This format has no design template", 400);
+  if (!(await loadFormatTemplate(target.brand, target.name))) throw new DesignItemCreateError("This format has no design template", 400);
 
   const [existing] = await db
     .select({ id: productionItems.id })

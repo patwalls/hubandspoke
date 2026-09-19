@@ -7,13 +7,15 @@ import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, Loader2Icon
 import { cn } from "@/lib/utils";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
 import { FONTS } from "@/lib/clip-editor/fonts";
-import type { DesignCaptionsElement, DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignTextElement, DesignVideoElement } from "@/lib/design-editor/doc";
+import type { DesignCaptionsElement, DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignSlot, DesignTextElement, DesignVideoElement } from "@/lib/design-editor/doc";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFrame, DesignFramesState } from "@/lib/services/design-editor/frames";
 import { commands, useDesign } from "./store";
 
 export interface InspectorProps {
   doc: DesignDoc;
+  /** "template": slots are editable (the format page); "item": a post. */
+  mode: "item" | "template";
   images: ImageCandidate[];
   frames: DesignFramesState;
   source: { videoUrl: string; title: string | null } | null;
@@ -38,7 +40,7 @@ export function formatSec(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function Inspector({ doc, images, frames, source, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip }: InspectorProps) {
+export function Inspector({ doc, mode, images, frames, source, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip }: InspectorProps) {
   const apply = useDesign((s) => s.apply);
   const selection = useDesign((s) => s.selection);
   const select = useDesign((s) => s.select);
@@ -84,6 +86,14 @@ export function Inspector({ doc, images, frames, source, onPickImage, onGrabFram
         </button>
       </Panel>
 
+      {mode === "template" && (el.type === "text" || el.type === "image" || el.type === "video") && (
+        <SlotPanel el={el} patch={(fn, key) => patch<DesignElement>(fn, key)} />
+      )}
+      {mode === "item" && el.slot?.kind === "ai" && (
+        <p className="rounded-md border border-dashed border-pink-300/60 bg-pink-50/60 px-2 py-1.5 text-[11px] leading-snug text-pink-900 dark:bg-pink-950/40 dark:text-pink-200">
+          <span className="font-semibold">AI wrote this.</span> {el.slot.hint}
+        </p>
+      )}
       {el.type === "text" && <TextPanel el={el} patch={(fn, key) => patch<DesignTextElement>(fn, key)} />}
       {el.type === "rect" && (
         <Panel title="Fill">
@@ -125,6 +135,64 @@ export function Inspector({ doc, images, frames, source, onPickImage, onGrabFram
       )}
       {el.type === "captions" && <CaptionsPanel el={el} patch={(fn, key) => patch<DesignCaptionsElement>(fn, key)} />}
     </div>
+  );
+}
+
+/**
+ * Template mode: what this element IS for every post made from the
+ * template — static, written by the AI (with a hint), or filled from the
+ * item (the founder's photo, the video title, the channel row) — and
+ * whether it stacks with its neighbours.
+ */
+const SLOT_OPTIONS: Array<{ value: DesignSlot["kind"] | "static"; label: string; for: Array<DesignElement["type"]> }> = [
+  { value: "static", label: "Static — same on every post", for: ["text", "image", "video"] },
+  { value: "ai", label: "AI writes this per post", for: ["text", "video"] },
+  { value: "photo", label: "Founder photo (from the video)", for: ["image"] },
+  { value: "videoTitle", label: "The source video's title", for: ["text"] },
+  { value: "channelName", label: "Channel name", for: ["text"] },
+  { value: "channelSubscribers", label: "Subscriber count", for: ["text"] },
+];
+
+function SlotPanel({ el, patch }: { el: DesignTextElement | DesignImageElement | DesignVideoElement; patch: (fn: (e: DesignElement) => DesignElement, key?: string) => void }) {
+  const kind = el.slot?.kind ?? "static";
+  const setKind = (value: string) =>
+    patch((e) => ({ ...e, slot: value === "static" ? null : { kind: value as DesignSlot["kind"], hint: e.slot?.hint ?? "" } }));
+  return (
+    <Panel title="Template slot">
+      <select value={kind} onChange={(e) => setKind(e.target.value)} className="rounded-md border border-border bg-background px-2 py-1.5 text-[13px] text-foreground">
+        {SLOT_OPTIONS.filter((o) => o.for.includes(el.type)).map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      {kind === "ai" && (
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          What should the AI write here?
+          <textarea
+            value={el.slot?.hint ?? ""}
+            onChange={(e) => patch((cur) => ({ ...cur, slot: { kind: "ai", hint: e.target.value.slice(0, 400) } }), "slot-hint")}
+            onKeyDown={(e) => e.stopPropagation()}
+            rows={4}
+            placeholder={el.type === "video" ? "e.g. the 20–60s moment where the founder walks through the tech stack" : "e.g. the founder's biggest revenue number, like \"$720K\""}
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-[12px] leading-snug text-foreground"
+          />
+          <span>{el.type === "text" ? "The text on the element now is the AI's style example — keep it real. Colours in it become allowed highlight colours." : "The AI picks the clip's start/end from the transcript."}</span>
+        </label>
+      )}
+      {kind === "photo" && <p className="text-[11px] text-muted-foreground">Filled with the best frame of the source video (AI-picked); the placeholder shows where it goes.</p>}
+      {el.type === "text" && (
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          Stack (optional)
+          <input
+            value={el.stack ?? ""}
+            onChange={(e) => patch((cur) => ({ ...cur, stack: e.target.value.trim().slice(0, 40) || null }), "stack")}
+            onKeyDown={(e) => e.stopPropagation()}
+            placeholder="e.g. notes"
+            className="rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground"
+          />
+          <span>Elements with the same stack name flow top-to-bottom after filling — text grows to its content, empty ones close up, and the whole stack shrinks to fit the page.</span>
+        </label>
+      )}
+    </Panel>
   );
 }
 

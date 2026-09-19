@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
-import { hasDesignTemplate } from "@/lib/design-editor/templates";
+import { useDesignTemplates } from "@/components/design-editor/use-design-templates";
 
 // Lazy: only a browser whose user has the `designEditor` flag AND opens a
 // designable item ever downloads the editor.
@@ -132,12 +132,14 @@ function showTriageToast(
  */
 export function TriageDialog(props: TriageDialogProps) {
   const flags = useFeatureFlags();
+  const templates = useDesignTemplates(!!flags?.designEditor);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
   const { item } = props;
   const useDesigner =
     !!flags?.designEditor &&
     item.sourceType === "repurposed" &&
-    hasDesignTemplate(item.format) &&
+    !!item.format &&
+    !!templates?.has(item.format) &&
     !unsupported.has(item.id);
 
   if (useDesigner) {

@@ -53,6 +53,7 @@ export function PageCanvas({
   words,
   scale,
   interactive,
+  showSlots = false,
   className,
 }: {
   doc: DesignDoc;
@@ -65,6 +66,8 @@ export function PageCanvas({
   words: EditorWord[];
   scale: number;
   interactive: boolean;
+  /** Template mode: label every slot on the page. */
+  showSlots?: boolean;
   className?: string;
 }) {
   const { width: W, height: H } = doc.canvas;
@@ -204,6 +207,15 @@ export function PageCanvas({
             onDoneAdjust={() => setEditing(null)}
           />
         ))}
+        {showSlots &&
+          page.elements.map((el) =>
+            el.slot ? (
+              <div key={`slot-${el.id}`} className="pointer-events-none absolute rounded-br-md px-2 py-0.5 text-[18px] font-semibold text-white" style={{ left: el.x, top: el.y, background: el.slot.kind === "ai" ? "#DB2777" : "#0EA5E9" }}>
+                {el.slot.kind === "ai" ? "AI" : el.slot.kind === "photo" ? "Photo" : el.slot.kind === "videoTitle" ? "Video title" : el.slot.kind === "channelName" ? "Channel" : "Subscribers"}
+                {el.stack ? ` · ${el.stack}` : ""}
+              </div>
+            ) : null,
+          )}
         {selectedId &&
           !adjustingId &&
           (() => {

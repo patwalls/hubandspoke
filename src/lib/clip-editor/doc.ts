@@ -204,6 +204,47 @@ export type ClipEditDoc = z.infer<typeof clipEditDocSchema>;
 
 export type AspectRatio = "9:16" | "16:9" | "1:1";
 
+// ─── The format's look ──────────────────────────────────────────────────────
+
+/**
+ * The style half of a document — what a Descript "pack" was: canvas
+ * background, how the video sits, and the overlay layers with their fonts
+ * and positions. Stored per format (`formats.clip_template`) so every new
+ * edit for that format starts from the same look. Never holds cuts.
+ */
+export const clipLookSchema = z.object({
+  version: z.literal(1),
+  background: hexColor,
+  video: videoPlacementSchema,
+  layers: z.array(layerSchema).max(50),
+});
+export type ClipLook = z.infer<typeof clipLookSchema>;
+
+export function lookFromDoc(doc: ClipEditDoc): ClipLook {
+  return { version: 1, background: doc.canvas.background, video: doc.video, layers: doc.layers };
+}
+
+/**
+ * Apply a look to a document: background, video placement and layers are
+ * taken from the look; the hook layer's TEXT stays this clip's (re-fitted
+ * to the look's hook box). Everything about the cut is untouched.
+ */
+export function applyLook(doc: ClipEditDoc, look: ClipLook): ClipEditDoc {
+  const currentHook = doc.layers.find((l): l is TextLayer => l.type === "text" && l.role === "hook");
+  const layers: Layer[] = look.layers.map((l) => {
+    if (l.type === "text" && l.role === "hook" && currentHook) {
+      const style = { ...l.style };
+      style.sizePct = Math.min(
+        style.sizePct,
+        fitTextSizePct({ text: currentHook.text, style, canvas: doc.canvas, widthPct: l.widthPct, maxHeightPct: l.anchor === "bottom" ? Math.max(6, l.yPct - 4) : 24 }),
+      );
+      return { ...l, text: currentHook.text, style };
+    }
+    return l;
+  });
+  return { ...doc, canvas: { ...doc.canvas, background: look.background }, video: look.video, layers };
+}
+
 const CANVAS_BY_ASPECT: Record<AspectRatio, { width: number; height: number }> =
   {
     "9:16": { width: 1080, height: 1920 },

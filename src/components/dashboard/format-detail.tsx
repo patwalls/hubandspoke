@@ -56,6 +56,7 @@ import {
 import type { PostType } from "@/lib/platform-field-schemas";
 import { applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
+import { FormatTemplatesSection } from "@/components/design-editor/format-templates-section";
 import { FormatStatusBadge } from "./format-status-badge";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
 import {
@@ -1668,6 +1669,10 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </Popover>
             </PropertyRow>
           </PropertyRowGroup>
+
+          {data?.format && (
+            <FormatTemplatesSection brand={brand} formatId={formatId} formatName={data.format.name} isClippableFormat={isClippableFormat} />
+          )}
 
           <PropertyRowSolo>
             <div className="px-3 py-3 space-y-2">

@@ -31,7 +31,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { KillIdeaDialog } from "@/components/dashboard/kill-idea-dialog";
-import type { ClipEditDoc } from "@/lib/clip-editor/doc";
+import { lookFromDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
 import { resolveScene } from "@/lib/clip-editor/scene";
 import { buildTranscriptView } from "@/lib/clip-editor/transcript-view";
@@ -478,6 +478,26 @@ function EditorWorkspace({
           <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
             {session.clipIdea.targetFormat}
           </span>
+        )}
+        {session.clipIdea.targetFormat && (
+          <button
+            type="button"
+            title={`Make this edit's fonts, caption style, hook position and video inset the starting point for every new "${session.clipIdea.targetFormat}" clip — what a Descript pack did. The cut stays this clip's.`}
+            disabled={busy !== null}
+            onClick={async () => {
+              const res = await fetch(`/api/clip-ideas/${session.clipIdea.id}/editor/look`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ look: lookFromDoc(storeApi.getState().doc) }),
+              });
+              const json = (await res.json().catch(() => ({}))) as { error?: string; format?: { name: string } };
+              if (!res.ok) toast.error(json.error ?? "Couldn't save the look");
+              else toast.success(`Saved as the "${json.format?.name}" look`, { description: "New clips of this format start from it. Manage it on the format page." });
+            }}
+            className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50"
+          >
+            Save look as the format&apos;s template
+          </button>
         )}
         <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-800 dark:bg-sky-950 dark:text-sky-300">
           Editor beta

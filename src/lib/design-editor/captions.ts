@@ -77,6 +77,8 @@ export function layoutCaptionCue(el: DesignCaptionsElement, text: string): Desig
     id: el.id, name: el.name, type: "text", x: el.x, y: el.y, w: el.w, h: el.h, opacity: el.opacity, locked: el.locked,
     spans: [{ text }],
     style: el.style,
+    slot: null,
+    stack: null,
   };
   return layoutDesignText(asText);
 }

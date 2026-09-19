@@ -10,18 +10,11 @@ import { productionItemMedia, productionItems } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
 import type { DesignImageSource } from "@/lib/design-editor/doc";
 
-export interface ImageCandidate {
-  label: string;
-  src: DesignImageSource;
-  previewUrl: string;
-}
+import { BRAND_WORDMARKS, type ImageCandidate } from "@/lib/design-editor/brand-assets";
+
+export { BRAND_WORDMARKS, type ImageCandidate };
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
-
-export const BRAND_WORDMARKS: ImageCandidate[] = [
-  { label: "Starter Story wordmark (white)", src: { kind: "asset", path: "/watermarks/starter-story-hubspot-media-white.png" }, previewUrl: "/watermarks/starter-story-hubspot-media-white.png" },
-  { label: "Starter Story wordmark (black)", src: { kind: "asset", path: "/watermarks/starter-story-hubspot-media-black.png" }, previewUrl: "/watermarks/starter-story-hubspot-media-black.png" },
-];
 
 export async function previewUrlFor(src: DesignImageSource): Promise<string> {
   if (src.kind === "url") return src.url;

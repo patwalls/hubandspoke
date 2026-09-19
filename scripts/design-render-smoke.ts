@@ -9,34 +9,18 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
-import { buildPlaybookDoc } from "../src/lib/design-editor/playbook-template";
+import { buildPlaybookTemplate } from "../src/lib/design-editor/playbook-template";
+import { fillTemplate, listSlots } from "../src/lib/design-editor/template-fill";
 import { imageSize } from "image-size";
 import { fontsUsed, pageToSatoriTree, type ResolvedImages } from "../src/lib/design-editor/render-tree";
 
 const out = path.resolve(process.argv[2] ?? "/tmp/design-smoke");
 mkdirSync(out, { recursive: true });
-const doc = buildPlaybookDoc(
-  {
-    stat: "$720K",
-    statUnit: "/year",
-    headline: "I stopped guessing what customers wanted. 2,000 calls later I had a $69K/month SaaS",
-    highlights: [{ phrase: "stopped guessing", color: "red" }, { phrase: "$69K/month SaaS", color: "green" }],
-    footer: "See his 3-Phase playbook→",
-    notesTitle: "The 3-Phase Customer Call Playbook",
-    phases: [
-      { heading: "Phase 1: Customer Discovery — Reach Out & Frame", body: "Reach out to your personal network or DM people on Twitter (pay them if needed) to get on a call. Follow The Mom Test principles; never ask hypothetical questions like \"would you use this?\" Instead, ask how they currently solve the problem, how much time/money it costs, and what happens if they do nothing." },
-      { heading: "Phase 2: Usability Testing — Fight 1-to-1 for Users", body: "Acquire early users via Reddit threads, lead magnets, and waitlist signups, then immediately invite them to a call. Share a link to your platform, ask them to share their screen, and speak as little as possible." },
-      { heading: "Phase 3: Customer Success — Track & Identify Power Users", body: "Use analytics tools like PostHog to track usage and identify the users who engage with the platform the most. Get on calls with power users to understand specifically how the platform is delivering value." },
-    ],
-    caption: "…",
-    clips: [{ startSec: 60, endSec: 90, label: "Phase 1" }],
-    pillLabel: "CUSTOMER CALLS PLAYBOOK",
-  },
-  {
-    photo: { kind: "url", url: "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg" },
-    source: { bucket: null, key: "x/source.mp4", title: "How This SaaS Hit $69K/Month In Just 2 Months" },
-    channel: { name: "Starter Story", subscribers: "800K subscribers" },
-  },
+const template = buildPlaybookTemplate();
+const doc = fillTemplate(
+  template,
+  { caption: "…", values: listSlots(template).map((slot) => (slot.kind === "video" ? { key: slot.key, startSec: 60, endSec: 90 } : { key: slot.key, text: slot.sample })) },
+  { photo: { kind: "url", url: "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg" }, source: { bucket: null, key: "x/source.mp4", title: "How This SaaS Hit $69K/Month In Just 2 Months" }, channel: { name: "Starter Story", subscribers: "800K subscribers" } },
 );
 (async () => {
   for (const [i, page] of doc.pages.entries()) {

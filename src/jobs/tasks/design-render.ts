@@ -89,6 +89,7 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
           }
         }
 
+        if (!video.src) throw new Error(`page ${i + 1}: the clip has no source video`);
         const sourceUrl = await getPresignedGetUrl(video.src.key, 3600, { bucket: video.src.bucket ?? undefined });
         const probe = await probeSource(sourceUrl);
         if (!probe) throw new Error("couldn't read the source video");

@@ -16,7 +16,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { ClipEditDoc } from "@/lib/clip-editor/doc";
+import type { ClipEditDoc, ClipLook } from "@/lib/clip-editor/doc";
 import type { DesignDoc } from "@/lib/design-editor/doc";
 import type { DiarizationState, TranscriptSpeaker } from "@/lib/diarization/types";
 
@@ -1226,6 +1226,20 @@ export const formats = pgTable(
     // `{{compositionId}}` placeholders that get substituted by
     // `substituteFormatPrompt` before being sent to Descript.
     instructions: text("instructions"),
+    // The format's DESIGN TEMPLATE for the in-app design editor (flag
+    // `designEditor`): a DesignDoc whose elements carry slots the AI fills
+    // per post (src/lib/design-editor/template-fill.ts). Edited on the
+    // format page with the same editor in template mode. Null → the
+    // built-in preset for the format, if any (templates.ts).
+    designTemplate: jsonb("design_template").$type<DesignDoc>(),
+    designTemplateUpdatedAt: timestamp("design_template_updated_at", { withTimezone: true }),
+    // The format's CLIP LOOK for the in-app clip editor (flag `clipEditor`):
+    // the style half of a ClipEditDoc — caption/hook layers, fonts, video
+    // inset, aspect — that new clip edits for this format start from. What
+    // a Descript "pack" was. Saved from the clip editor ("Save look as the
+    // format's template"); never holds cuts or a specific source.
+    clipTemplate: jsonb("clip_template").$type<ClipLook>(),
+    clipTemplateUpdatedAt: timestamp("clip_template_updated_at", { withTimezone: true }),
     // Marks this format as a clippable format for its brand: clip-idea
     // generation can target it, and the Descript clip pipeline (four
     // "Create in Descript" flows) is enabled here. **Multiple per brand

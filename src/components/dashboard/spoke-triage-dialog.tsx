@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
-import { hasDesignTemplate } from "@/lib/design-editor/templates";
+import { useDesignTemplates } from "@/components/design-editor/use-design-templates";
 
 // Lazy: only a browser whose user has the `designEditor` flag AND opens a
 // designable candidate ever downloads the editor.
@@ -59,10 +59,11 @@ function formatCompact(n: number | null | undefined): string {
  */
 export function SpokeTriageDialog(props: SpokeTriageDialogProps) {
   const flags = useFeatureFlags();
+  const templates = useDesignTemplates(!!flags?.designEditor);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
   const useDesigner =
     !!flags?.designEditor &&
-    hasDesignTemplate(props.candidate.format.name) &&
+    !!templates?.has(props.candidate.format.name) &&
     !unsupported.has(props.candidate.id);
   if (useDesigner) {
     return (

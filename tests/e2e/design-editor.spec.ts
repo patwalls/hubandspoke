@@ -67,3 +67,20 @@ test("flag on → AI draft opens; a drag is undoable and autosaves", async ({ pa
   await page.getByRole("button", { name: "Save draft & close" }).click();
   await expect(page.getByText("Editor beta")).toBeHidden();
 });
+
+test("flag on → the format page shows the design template card and opens the template editor", async ({ page }) => {
+  const { flags } = await (await page.request.get("/api/feature-flags")).json();
+  test.skip(flags.designEditor !== true, "e2e user does not have the designEditor flag");
+  const formats = (await (await page.request.get("/api/formats?brand=starter-story")).json()) as Array<{ id: string; name: string }> | { formats?: Array<{ id: string; name: string }> };
+  const list = Array.isArray(formats) ? formats : (formats.formats ?? []);
+  const fmt = list.find((f) => f.name === "Tech Stack Slideshow") ?? list.find((f) => f.name === "Instagram PLAYBOOK");
+  test.skip(!fmt, "no templated format in this DB");
+  await page.goto(`/starter-story/formats/${fmt!.id}`);
+  await expect(page.getByText("Design template", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "Edit template" }).click();
+  await expect(page.getByText("Template slot")).toBeHidden(); // nothing selected yet
+  const stage = page.locator(".shadow-xl.ring-1");
+  await expect(stage.getByText("AI", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "Save template & close" }).click();
+  await expect(page.getByText("Template saved")).toBeVisible({ timeout: 10_000 });
+});

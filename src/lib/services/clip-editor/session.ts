@@ -15,7 +15,7 @@ import {
 } from "@/lib/db/schema";
 import { resolveClipAspectRatio } from "@/lib/db/formats";
 import { getPresignedGetUrl } from "@/lib/s3";
-import { createDefaultDoc, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
+import { applyLook, clipLookSchema, createDefaultDoc, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
 import type { TranscriptSpeaker } from "@/lib/diarization/types";
 import { toRenderStatus, type ClipRenderStatus } from "./render-status";
@@ -143,14 +143,20 @@ export async function loadClipEditorSession(args: {
   const edit = await loadOrCreateEdit({
     clipIdeaId: row.id,
     userId: args.userId,
-    makeDefault: async () =>
-      createDefaultDoc({
+    makeDefault: async () => {
+      const format = await loadTargetFormat(brand, row.targetFormat);
+      const doc = createDefaultDoc({
         startSec,
         endSec,
         hook: row.hook,
-        aspectRatio: await resolveAspectRatio(brand, row.targetFormat),
+        aspectRatio: format ? resolveClipAspectRatio(format) : "9:16",
         introRanges: row.hookSegments ?? [],
-      }),
+      });
+      // The format's saved look (fonts, caption style, video inset) is the
+      // starting point for every new edit of that format.
+      const look = format?.clipTemplate ? clipLookSchema.safeParse(format.clipTemplate) : null;
+      return look?.success ? applyLook(doc, look.data) : doc;
+    },
   });
 
   // The WHOLE transcript: the editor shows the full source so any part of it
@@ -196,20 +202,18 @@ export async function loadClipEditorSession(args: {
   };
 }
 
-async function resolveAspectRatio(
-  brand: string,
-  targetFormat: string | null,
-): Promise<"9:16" | "16:9"> {
-  if (!targetFormat) return "9:16";
+async function loadTargetFormat(brand: string, targetFormat: string | null) {
+  if (!targetFormat) return null;
   const [format] = await db
     .select({
       clipAspectRatio: formats.clipAspectRatio,
       clipTargetPostType: formats.clipTargetPostType,
+      clipTemplate: formats.clipTemplate,
     })
     .from(formats)
     .where(and(eq(formats.brand, brand), eq(formats.name, targetFormat)))
     .limit(1);
-  return format ? resolveClipAspectRatio(format) : "9:16";
+  return format ?? null;
 }
 
 async function loadOrCreateEdit(args: {

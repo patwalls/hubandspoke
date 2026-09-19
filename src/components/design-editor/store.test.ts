@@ -1,13 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildPlaybookDoc } from "@/lib/design-editor/playbook-template";
+import { buildPlaybookTemplate } from "@/lib/design-editor/playbook-template";
 import { rehighlight } from "./page-canvas";
 import { commands, createDesignStore } from "./store";
 
-const doc = () =>
-  buildPlaybookDoc(
-    { stat: "$1K", statUnit: "/mo", headline: "hello world", highlights: [], footer: "f", notesTitle: "t", phases: [{ heading: "h", body: "b" }], caption: "", clips: [], pillLabel: "P" },
-    { photo: null, source: null, channel: { name: "S", subscribers: "" } },
-  );
+const doc = () => buildPlaybookTemplate();
 
 describe("design store commands", () => {
   it("pages: add, duplicate (fresh ids), move, never remove the last one", () => {
@@ -20,9 +16,7 @@ describe("design store commands", () => {
     expect(b.elements.every((e) => !a.elements.some((x) => x.id === e.id))).toBe(true);
     apply(commands.movePage(2, -1));
     expect(store.getState().doc.pages[1].id).not.toBe(b.id);
-    apply(commands.removePage(0));
-    apply(commands.removePage(0));
-    apply(commands.removePage(0));
+    for (let i = 0; i < 10; i++) apply(commands.removePage(0));
     expect(store.getState().doc.pages).toHaveLength(1);
   });
 

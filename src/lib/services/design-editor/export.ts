@@ -16,7 +16,7 @@ import { enqueue } from "@/jobs/enqueue";
 import { recordToolAction } from "@/lib/services/content-events";
 import { applyDraftPatch, NoCurrentDraftError } from "@/lib/services/content-drafts/apply-patch";
 import { parseDesignDoc } from "@/lib/design-editor/doc";
-import type { PlaybookBrief } from "@/lib/design-editor/playbook-template";
+import type { DesignFill } from "@/lib/design-editor/template-fill";
 
 export class DesignNotFoundError extends Error {
   constructor() {
@@ -73,7 +73,7 @@ export async function exportDesign(args: {
     });
   }
 
-  const brief = design.brief as unknown as PlaybookBrief | null;
+  const brief = design.brief as unknown as DesignFill | null;
   if (brief?.caption && !reExport) await seedCaption(item.id, brief.caption, args.actorUserId);
 
   await recordToolAction({

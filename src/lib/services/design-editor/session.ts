@@ -7,15 +7,15 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, brands, designDocs, designRenders, productionItems, transcripts } from "@/lib/db/schema";
 import { parseDesignDoc, type DesignDoc, type DesignImageSource } from "@/lib/design-editor/doc";
-import { buildPlaybookDoc, ensureCoverPhoto, type PlaybookBrief, type PlaybookContext } from "@/lib/design-editor/playbook-template";
+import type { DesignContext } from "@/lib/design-editor/shared";
+import { applyPhotoPick, fillTemplate, type DesignFill } from "@/lib/design-editor/template-fill";
 import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
 import { getPresignedGetUrl } from "@/lib/s3";
-import { generatePlaybookBrief } from "./brief";
+import { generateDesignFill } from "./fill-brief";
+import { loadFormatTemplate } from "./format-template";
 import { BRAND_WORDMARKS, previewUrlFor, sourceImageCandidates, type ImageCandidate } from "./assets";
 import { listFrames, pickedFrame, requestAutoFrames, type DesignFramesState } from "./frames";
 import { toDesignRenderStatus, type DesignRenderStatus } from "./render-status";
-
-import { DESIGN_TEMPLATES } from "@/lib/design-editor/templates";
 
 export class DesignItemNotFoundError extends Error {
   constructor() {
@@ -48,7 +48,7 @@ export interface DesignEditorSession {
     sourceItemId: string;
     sourceTitle: string | null;
   };
-  design: { id: string; revision: number; doc: DesignDoc; brief: PlaybookBrief | null; briefInstruction: string | null };
+  design: { id: string; revision: number; doc: DesignDoc; brief: DesignFill | null; briefInstruction: string | null };
   /** Element id → URL the browser can load, for every image in the doc. */
   imageUrls: Record<string, string>;
   /** Pictures available to place. */
@@ -68,7 +68,7 @@ export async function loadDesignEditorSession(args: {
   userId: string;
 }): Promise<DesignEditorSession> {
   const item = await loadItem(args.productionItemId);
-  const template = item.format ? DESIGN_TEMPLATES[item.format] : undefined;
+  const template = item.format ? await loadFormatTemplate(item.brand, item.format) : null;
   if (!template) throw new DesignUnsupportedError("no_template");
 
   // Kick the filmstrip off first — it runs on the worker while the AI writes
@@ -77,22 +77,23 @@ export async function loadDesignEditorSession(args: {
 
   let design = await selectDesign(item.id);
   if (!design) {
-    const draft = await draftDoc(item.id, item.sourceItemId, null);
+    const draft = await draftDoc(item.id, item.sourceItemId, template.doc, null);
     await db
       .insert(designDocs)
-      .values({ productionItemId: item.id, doc: draft.doc, brief: draft.brief as unknown as Record<string, unknown>, createdByUserId: args.userId })
+      .values({ productionItemId: item.id, doc: draft.doc, brief: draft.fill as unknown as Record<string, unknown>, createdByUserId: args.userId })
       .onConflictDoNothing({ target: designDocs.productionItemId });
     design = await selectDesign(item.id);
     if (!design) throw new Error("Failed to create design");
   } else {
     // The pick landed after the draft was made (or the last editor closed
-    // before it did): put it on the cover now, before anyone holds the doc.
+    // before it did): put it in the photo slots now, before anyone holds
+    // the doc.
     const pick = await pickedFrame(item.id);
-    const patched = pick?.src ? ensureCoverPhoto(design.doc, pick.src) : null;
+    const patched = pick?.src ? applyPhotoPick(design.doc, pick.src) : null;
     if (patched) {
       await db
         .update(designDocs)
-        .set({ doc: patched, revision: sql`${designDocs.revision} + 1`, updatedAt: new Date() })
+        .set({ doc: patched.doc, revision: sql`${designDocs.revision} + 1`, updatedAt: new Date() })
         .where(and(eq(designDocs.id, design.id), eq(designDocs.revision, design.revision)));
       design = (await selectDesign(item.id)) ?? design;
     }
@@ -107,16 +108,17 @@ export async function regenerateDesign(args: {
   userId: string;
 }): Promise<DesignEditorSession> {
   const item = await loadItem(args.productionItemId);
-  if (!item.format || !DESIGN_TEMPLATES[item.format]) throw new DesignUnsupportedError("no_template");
-  const draft = await draftDoc(item.id, item.sourceItemId, args.instruction);
+  const template = item.format ? await loadFormatTemplate(item.brand, item.format) : null;
+  if (!template) throw new DesignUnsupportedError("no_template");
+  const draft = await draftDoc(item.id, item.sourceItemId, template.doc, args.instruction);
   await db
     .insert(designDocs)
-    .values({ productionItemId: item.id, doc: draft.doc, brief: draft.brief as unknown as Record<string, unknown>, briefInstruction: args.instruction, createdByUserId: args.userId })
+    .values({ productionItemId: item.id, doc: draft.doc, brief: draft.fill as unknown as Record<string, unknown>, briefInstruction: args.instruction, createdByUserId: args.userId })
     .onConflictDoUpdate({
       target: designDocs.productionItemId,
       set: {
         doc: draft.doc,
-        brief: draft.brief as unknown as Record<string, unknown>,
+        brief: draft.fill as unknown as Record<string, unknown>,
         briefInstruction: args.instruction,
         // A regeneration replaces the doc wholesale → new revision, so an
         // editor still holding the old one gets a conflict, not a clobber.
@@ -129,29 +131,32 @@ export async function regenerateDesign(args: {
   return finishSession(item, design);
 }
 
-async function draftDoc(itemId: string, sourceItemId: string, instruction: string | null) {
-  const result = await generatePlaybookBrief({ productionItemId: itemId, instruction });
+async function draftDoc(itemId: string, sourceItemId: string, template: DesignDoc, instruction: string | null) {
+  const result = await generateDesignFill({ productionItemId: itemId, template, instruction });
   if (!result.ok) {
     if (result.failure.reason === "no-transcript") throw new DesignUnsupportedError("no_transcript");
     throw new DesignUnsupportedError("ai_failed", result.failure.message ?? result.failure.reason);
   }
   const source = await loadSource(sourceItemId);
   const words = await loadWords(sourceItemId);
-  const brief: PlaybookBrief = { ...result.brief, clips: result.brief.clips.map((c) => snapClipToWords(c, words)) };
+  const fill: DesignFill = {
+    ...result.fill,
+    values: result.fill.values.map((v) => (v.startSec !== undefined && v.endSec !== undefined ? { ...v, ...snapClipToWords({ startSec: v.startSec, endSec: v.endSec, label: "" }, words) } : v)),
+  };
   // The cover photo: the AI's pick from the video's frames. If the frames
-  // aren't in yet, leave the cover empty — the editor fills it the moment
-  // the pick lands (ensureCoverPhoto). Falling back to the platform
-  // thumbnail here is worse than nothing: it's usually a YouTube thumbnail
-  // with its own text baked in. Only image-only sources use their pictures.
+  // aren't in yet the photo slot keeps its placeholder — the editor fills it
+  // the moment the pick lands (applyPhotoPick). Falling back to the platform
+  // thumbnail is worse than nothing: it's usually a YouTube thumbnail with
+  // its own text baked in. Only image-only sources use their pictures.
   const pick = await pickedFrame(itemId);
   const images = source ? [] : await sourceImageCandidates(sourceItemId);
   const photo: DesignImageSource | null = pick?.src ?? images[0]?.src ?? null;
-  const ctx: PlaybookContext = {
+  const ctx: DesignContext = {
     photo,
     source: source ? { bucket: source.bucket, key: source.key, title: source.title } : null,
     channel: await loadChannel(itemId),
   };
-  return { brief, doc: buildPlaybookDoc(brief, ctx) };
+  return { fill, doc: fillTemplate(template, fill, ctx) };
 }
 
 /** Move a clip's edges to word boundaries so it never starts mid-word, and
@@ -197,7 +202,7 @@ async function loadWords(sourceItemId: string): Promise<EditorWord[]> {
 }
 
 /** The channel row on video slides: the brand's YouTube account. */
-async function loadChannel(itemId: string): Promise<PlaybookContext["channel"]> {
+async function loadChannel(itemId: string): Promise<DesignContext["channel"]> {
   const fallback = { name: "Starter Story", subscribers: "" };
   const [item] = await db.select({ brand: productionItems.brand }).from(productionItems).where(eq(productionItems.id, itemId)).limit(1);
   if (!item?.brand) return fallback;
@@ -252,7 +257,7 @@ async function selectDesign(productionItemId: string) {
   if (!row) return null;
   const parsed = parseDesignDoc(row.doc);
   if (!parsed.ok) throw new Error(`Stored design ${row.id} is invalid: ${parsed.error}`);
-  return { id: row.id, revision: row.revision, doc: parsed.doc, brief: (row.brief as unknown as PlaybookBrief | null) ?? null, briefInstruction: row.briefInstruction };
+  return { id: row.id, revision: row.revision, doc: parsed.doc, brief: (row.brief as unknown as DesignFill | null) ?? null, briefInstruction: row.briefInstruction };
 }
 
 async function finishSession(item: Awaited<ReturnType<typeof loadItem>>, design: NonNullable<Awaited<ReturnType<typeof selectDesign>>>): Promise<DesignEditorSession> {

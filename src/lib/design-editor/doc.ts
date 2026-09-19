@@ -49,6 +49,21 @@ export type DesignTextStyle = z.infer<typeof textStyleSchema>;
 const spanSchema = z.object({ text: z.string().max(2000), color: hexColor.optional() });
 export type DesignSpan = z.infer<typeof spanSchema>;
 
+/**
+ * A slot marks an element a FORMAT TEMPLATE wants filled per post (see
+ * template-fill.ts). `ai` = the model writes it from the transcript (the
+ * hint tells it what); the others are filled from the item itself. Static
+ * elements (logos, pills, the Notes chrome) have no slot. Slots survive into
+ * the item's document so the editor can still tell what an element was.
+ */
+export const SLOT_KINDS = ["ai", "photo", "videoTitle", "channelName", "channelSubscribers"] as const;
+const slotSchema = z.object({
+  kind: z.enum(SLOT_KINDS),
+  /** For `ai`: what to write ("the founder's biggest revenue number"). */
+  hint: z.string().max(400),
+});
+export type DesignSlot = z.infer<typeof slotSchema>;
+
 const elementBase = {
   id: z.string().min(1),
   /** Editor label ("Headline", "Stat") — what the AI slot was; never shown
@@ -60,6 +75,12 @@ const elementBase = {
   h: px.min(1),
   opacity: z.number().min(0).max(1),
   locked: z.boolean(),
+  slot: slotSchema.nullable().default(null),
+  /** Elements sharing a stack key on a page flow top-to-bottom after a
+   *  template is filled (gaps kept from the template, text heights from the
+   *  layout, the whole stack shrunk to fit the page). How the Notes page
+   *  survives a 3-phase vs 5-phase playbook. */
+  stack: z.string().max(40).nullable().default(null),
 };
 
 const textElementSchema = z.object({
@@ -107,7 +128,9 @@ export type DesignImageElement = z.infer<typeof imageElementSchema>;
 const videoElementSchema = z.object({
   ...elementBase,
   type: z.literal("video"),
-  src: z.object({ kind: z.literal("s3"), bucket: z.string().nullable(), key: z.string().min(1) }),
+  /** null only inside a format template (no source yet); a filled item
+   *  document always has one. */
+  src: z.object({ kind: z.literal("s3"), bucket: z.string().nullable(), key: z.string().min(1) }).nullable(),
   startSec: z.number().min(0),
   endSec: z.number().min(0),
   fit: z.enum(["cover", "contain"]),
@@ -173,6 +196,13 @@ export const designDocSchema = z.object({
 export type DesignDoc = z.infer<typeof designDocSchema>;
 
 export const IG_SQUARE = { width: 1080, height: 1080 } as const;
+
+/** Shown in a photo slot until a real picture is chosen. */
+export const PHOTO_PLACEHOLDER: DesignImageSource = { kind: "asset", path: "/design/photo-placeholder.png" };
+
+export function isPhotoPlaceholder(src: DesignImageSource): boolean {
+  return src.kind === "asset" && src.path === (PHOTO_PLACEHOLDER as { path: string }).path;
+}
 
 export function parseDesignDoc(
   raw: unknown,

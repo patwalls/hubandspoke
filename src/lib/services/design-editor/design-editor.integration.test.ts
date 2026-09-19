@@ -8,7 +8,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentDrafts, contentEvents, designDocs, designRenders, productionItemMedia, productionItems } from "@/lib/db/schema";
 import { createTestMedia, createTestProductionItem, getTestUserId } from "@/test/factories";
-import { buildPlaybookDoc } from "@/lib/design-editor/playbook-template";
+import { buildPlaybookTemplate } from "@/lib/design-editor/playbook-template";
 
 const enqueue = vi.fn();
 vi.mock("@/jobs/enqueue", () => ({ enqueue: (...args: unknown[]) => enqueue(...args) }));
@@ -18,13 +18,13 @@ const { saveDesignDoc } = await import("./save");
 
 beforeEach(() => enqueue.mockReset());
 
-const brief = { stat: "$1K", statUnit: "/mo", headline: "hello", highlights: [], footer: "f", notesTitle: "t", phases: [{ heading: "h", body: "b" }], caption: "The AI caption", clips: [], pillLabel: "P" };
+const brief = { caption: "The AI caption", values: [] };
 
 async function seed(status = "Idea") {
   const item = await createTestProductionItem({ status, sourceType: "repurposed", postType: "instagram_post", format: "Instagram PLAYBOOK" });
   const [design] = await db
     .insert(designDocs)
-    .values({ productionItemId: item.id, doc: buildPlaybookDoc(brief, { photo: null, source: null, channel: { name: "S", subscribers: "" } }), brief })
+    .values({ productionItemId: item.id, doc: buildPlaybookTemplate(), brief })
     .returning();
   return { item, design };
 }
@@ -92,7 +92,7 @@ describe("installDesignMedia", () => {
 describe("saveDesignDoc", () => {
   it("rejects a stale revision", async () => {
     const { item } = await seed();
-    const doc = buildPlaybookDoc(brief, { photo: null, source: null, channel: { name: "S", subscribers: "" } });
+    const doc = buildPlaybookTemplate();
     expect(await saveDesignDoc({ productionItemId: item.id, expectedRevision: 1, doc })).toEqual({ ok: true, revision: 2 });
     expect(await saveDesignDoc({ productionItemId: item.id, expectedRevision: 1, doc })).toEqual({ ok: false, reason: "conflict", currentRevision: 2 });
   });

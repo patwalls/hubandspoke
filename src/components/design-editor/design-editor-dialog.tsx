@@ -33,8 +33,9 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { DEFAULT_CROP, newElementId, pageDurationSec, pageVideo, type DesignDoc } from "@/lib/design-editor/doc";
-import { ensureCoverPhoto } from "@/lib/design-editor/playbook-template";
+import { DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, type DesignDoc } from "@/lib/design-editor/doc";
+import { applyPhotoPick } from "@/lib/design-editor/template-fill";
+import { BRAND_WORDMARKS } from "@/lib/design-editor/brand-assets";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFramesState } from "@/lib/services/design-editor/frames";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
@@ -103,16 +104,85 @@ export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand
   );
 }
 
-function Workspace({ session, brand, onDone, onClose }: { session: DesignEditorSession; brand: string; onDone: () => void; onClose: () => void }) {
+/**
+ * "item": designing one post (the default). "template": editing a FORMAT's
+ * template on the format page — same editor, but slots are editable, there
+ * is no AI bar or export, and saving writes the format's template.
+ */
+export type EditorMode = "item" | "template";
+
+type SaveDoc = (doc: DesignDoc, revision: number) => Promise<{ ok: true; revision: number } | { ok: false; reason: "conflict" | "error" }>;
+
+function Workspace({ session, brand, mode = "item", saveDoc, onDone, onClose }: { session: DesignEditorSession; brand: string; mode?: EditorMode; saveDoc?: SaveDoc; onDone: () => void; onClose: () => void }) {
   const [store] = useState(() => createDesignStore({ doc: session.design.doc, revision: session.design.revision }));
   return (
     <DesignStoreContext.Provider value={store}>
-      <Editor session={session} brand={brand} onDone={onDone} onClose={onClose} />
+      <Editor session={session} brand={brand} mode={mode} saveDoc={saveDoc} onDone={onDone} onClose={onClose} />
     </DesignStoreContext.Provider>
   );
 }
 
-function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSession; brand: string; onDone: () => void; onClose: () => void }) {
+/**
+ * The format page's "Edit template" — opens the format's design template
+ * (stored, or its built-in preset) in template mode.
+ */
+export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName, brand, onSaved }: { open: boolean; onOpenChange: (open: boolean) => void; formatId: string; formatName: string; brand: string; onSaved: () => void }) {
+  const [session, setSession] = useState<DesignEditorSession | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (!open) {
+        await Promise.resolve(); // next tick: not a synchronous setState in the effect
+        if (!cancelled) setSession(null);
+        return;
+      }
+      const res = await fetch(`/api/formats/${formatId}/design-template`);
+      const json = (await res.json().catch(() => ({}))) as { template?: { doc: DesignDoc } | null; imageUrls?: Record<string, string>; images?: ImageCandidate[] };
+      if (cancelled) return;
+      if (!res.ok || !json.template) {
+        toast.error("Couldn't load the template");
+        return onOpenChange(false);
+      }
+      setSession({
+        item: { id: formatId, title: formatName, brand, format: formatName, status: null, postType: null, sourceItemId: formatId, sourceTitle: `Template · ${formatName}` },
+        design: { id: formatId, revision: 0, doc: json.template.doc, brief: null, briefInstruction: null },
+        imageUrls: json.imageUrls ?? {},
+        images: json.images ?? BRAND_WORDMARKS,
+        frames: { frames: [], pending: false },
+        source: null,
+        words: [],
+        latestRender: null,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, formatId, formatName, brand, onOpenChange]);
+  const saveDoc: SaveDoc = useCallback(async (doc, revision) => {
+    const res = await fetch(`/api/formats/${formatId}/design-template`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ doc }) });
+    if (!res.ok) return { ok: false, reason: "error" };
+    onSaved();
+    return { ok: true, revision: revision + 1 };
+  }, [formatId, onSaved]);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1600px,97vw)]">
+        {session ? (
+          <Workspace key={formatId} session={session} brand={brand} mode="template" saveDoc={saveDoc} onDone={() => onOpenChange(false)} onClose={() => onOpenChange(false)} />
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+            <DialogTitle className="sr-only">Design template</DialogTitle>
+            <Loader2Icon className="size-5 animate-spin" />
+            <span className="text-sm font-medium text-foreground">Opening the template…</span>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: DesignEditorSession; brand: string; mode: EditorMode; saveDoc?: SaveDoc; onDone: () => void; onClose: () => void }) {
+  const isTemplate = mode === "template";
   const router = useRouter();
   const storeApi = useDesignStoreApi();
   const doc = useDesign((s) => s.doc);
@@ -179,15 +249,20 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
       }
       storeApi.getState().markSaving();
       try {
-        const res = await fetch(`/api/production-items/${session.item.id}/design`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ revision, doc: current }),
-        });
-        if (res.status === 409) return (storeApi.getState().markSaveFailed("conflict"), false);
-        if (!res.ok) return (storeApi.getState().markSaveFailed("error"), false);
-        const json = (await res.json()) as { revision: number };
-        storeApi.getState().markSaved(current, json.revision);
+        const result = saveDoc
+          ? await saveDoc(current, revision)
+          : await (async () => {
+              const res = await fetch(`/api/production-items/${session.item.id}/design`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ revision, doc: current }),
+              });
+              if (res.status === 409) return { ok: false as const, reason: "conflict" as const };
+              if (!res.ok) return { ok: false as const, reason: "error" as const };
+              return { ok: true as const, revision: ((await res.json()) as { revision: number }).revision };
+            })();
+        if (!result.ok) return (storeApi.getState().markSaveFailed(result.reason), false);
+        storeApi.getState().markSaved(current, result.revision);
         return true;
       } catch {
         storeApi.getState().markSaveFailed("error");
@@ -195,7 +270,7 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
       }
     });
     return saveChain.current;
-  }, [session.item.id, storeApi]);
+  }, [session.item.id, storeApi, saveDoc]);
 
   useEffect(() => {
     if (saveState !== "dirty") return;
@@ -240,7 +315,7 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
   // cover has no photo yet, put it there. When a frame the user grabbed
   // lands, put it in the element they grabbed it for.
   useEffect(() => {
-    if (!frames.pending) return;
+    if (!frames.pending || isTemplate) return;
     const t = setTimeout(async () => {
       try {
         const res = await fetch(`/api/production-items/${session.item.id}/design/frames`);
@@ -256,11 +331,10 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
     const c = pick ? frameCandidate(pick) : null;
     if (c) {
       const { doc: cur } = storeApi.getState();
-      const patched = ensureCoverPhoto(cur, c.src);
+      const patched = applyPhotoPick(cur, c.src);
       if (patched) {
-        const photo = patched.pages[0].elements[0];
-        setImageUrls((m) => ({ ...m, [photo.id]: c.previewUrl }));
-        apply(() => patched);
+        setImageUrls((m) => ({ ...m, ...Object.fromEntries(patched.elementIds.map((id) => [id, c.previewUrl])) }));
+        apply(() => patched.doc);
       }
     }
     const grab = pendingGrab.current;
@@ -309,19 +383,20 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
         id, name: "Text", type: "text", x: 90, y: 440, w: 900, h: 200, opacity: 1, locked: false,
         spans: [{ text: "Your text here" }],
         style: { fontId: "montserrat-extrabold", sizePx: 64, lineHeight: 1.15, color: page.background === "#F7F5EF" ? "#1C1C1E" : "#FFFFFF", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 16 },
+        slot: null, stack: null,
       }),
     );
     select({ pageIndex, elementId: id });
   };
   const addRect = () => {
     const id = newElementId("r");
-    apply(commands.addElement(pageIndex, { id, name: "Box", type: "rect", x: 140, y: 140, w: 800, h: 300, opacity: 1, locked: false, fill: { color: "#22E07A", alpha: 1 }, gradientTo: null, radius: 24 }));
+    apply(commands.addElement(pageIndex, { id, name: "Box", type: "rect", x: 140, y: 140, w: 800, h: 300, opacity: 1, locked: false, fill: { color: "#22E07A", alpha: 1 }, gradientTo: null, radius: 24, slot: null, stack: null }));
     select({ pageIndex, elementId: id });
   };
   const addImage = (c: ImageCandidate) => {
     const id = newElementId("img");
     setImageUrls((m) => ({ ...m, [id]: c.previewUrl }));
-    apply(commands.addElement(pageIndex, { id, name: c.label, type: "image", x: 140, y: 140, w: 800, h: 800, opacity: 1, locked: false, src: c.src, fit: "cover", radius: 0, crop: { ...DEFAULT_CROP } }));
+    apply(commands.addElement(pageIndex, { id, name: c.label, type: "image", x: 140, y: 140, w: 800, h: 800, opacity: 1, locked: false, src: c.src, fit: "cover", radius: 0, crop: { ...DEFAULT_CROP }, slot: null, stack: null }));
     select({ pageIndex, elementId: id });
   };
   const swapImage = (elementId: string, c: ImageCandidate, onPage = pageIndex) => {
@@ -329,16 +404,27 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
     apply(commands.patchElement(onPage, elementId, (el) => (el.type === "image" ? { ...el, src: c.src, name: c.label, crop: { ...DEFAULT_CROP } } : el)));
   };
   const addClip = () => {
-    if (!session.source || pageClip) return;
+    if ((!session.source && !isTemplate) || pageClip) return;
     const id = newElementId("v");
     const W = doc.canvas.width;
-    apply(commands.addElement(pageIndex, { id, name: "Clip", type: "video", x: 30, y: 214, w: W - 60, h: Math.round(((W - 60) * 9) / 16), opacity: 1, locked: false, src: { kind: "s3", bucket: session.source.bucket, key: session.source.key }, startSec: 0, endSec: 20, fit: "cover", radius: 28, crop: { ...DEFAULT_CROP } }));
+    apply(commands.addElement(pageIndex, {
+      id, name: "Clip", type: "video", x: 30, y: 214, w: W - 60, h: Math.round(((W - 60) * 9) / 16), opacity: 1, locked: false,
+      src: session.source ? { kind: "s3", bucket: session.source.bucket, key: session.source.key } : null,
+      startSec: 0, endSec: 20, fit: "cover", radius: 28, crop: { ...DEFAULT_CROP },
+      slot: isTemplate ? { kind: "ai", hint: "The moment where the founder explains the tactic. 20–60s, start at a sentence." } : null, stack: null,
+    }));
+    select({ pageIndex, elementId: id });
+  };
+  const addPhotoSlot = () => {
+    const id = newElementId("img");
+    setImageUrls((m) => ({ ...m, [id]: (PHOTO_PLACEHOLDER as { path: string }).path }));
+    apply(commands.addElement(pageIndex, { id, name: "Photo", type: "image", x: 0, y: 0, w: doc.canvas.width, h: doc.canvas.height, opacity: 1, locked: false, src: PHOTO_PLACEHOLDER, fit: "cover", radius: 0, crop: { ...DEFAULT_CROP }, slot: { kind: "photo", hint: "" }, stack: null }));
     select({ pageIndex, elementId: id });
   };
   const addCaptions = () => {
     const id = newElementId("c");
     const dark = page.background.toLowerCase() === "#ffffff" || page.background === "#F7F5EF";
-    apply(commands.addElement(pageIndex, { id, name: "Captions", type: "captions", x: 60, y: 60, w: doc.canvas.width - 120, h: 130, opacity: 1, locked: false, maxWordsPerCue: 12, style: { fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, color: dark ? "#5C5C5C" : "#FFFFFF", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 20 } }));
+    apply(commands.addElement(pageIndex, { id, name: "Captions", type: "captions", x: 60, y: 60, w: doc.canvas.width - 120, h: 130, opacity: 1, locked: false, maxWordsPerCue: 12, style: { fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, color: dark ? "#5C5C5C" : "#FFFFFF", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 20 }, slot: null, stack: null }));
     select({ pageIndex, elementId: id });
   };
 
@@ -386,7 +472,7 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
   return (
     <>
       <div className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-3 pr-12">
-        <DialogTitle className="text-base font-semibold">Design</DialogTitle>
+        <DialogTitle className="text-base font-semibold">{isTemplate ? "Design template" : "Design"}</DialogTitle>
         {session.item.format && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{session.item.format}</span>}
         <span className="rounded bg-pink-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pink-800 dark:bg-pink-950 dark:text-pink-300">Editor beta</span>
         <span className="truncate text-xs text-muted-foreground">{session.item.sourceTitle}</span>
@@ -444,14 +530,15 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
                 </div>
               </details>
             </div>
-            {session.source && <Tool onClick={addClip} disabled={locked || !!pageClip}><ClapperboardIcon className="size-3.5" /> Clip</Tool>}
+            {(session.source || isTemplate) && <Tool onClick={addClip} disabled={locked || !!pageClip}><ClapperboardIcon className="size-3.5" /> Clip</Tool>}
+            {isTemplate && <Tool onClick={addPhotoSlot} disabled={locked}><ImageIcon className="size-3.5" /> Photo slot</Tool>}
             {pageClip && <Tool onClick={addCaptions} disabled={locked}><CaptionsIcon className="size-3.5" /> Captions</Tool>}
             <span className="ml-auto text-[11px] text-muted-foreground">Page {pageIndex + 1} of {doc.pages.length} · double-click text to edit · ⌫ deletes · arrows nudge</span>
           </div>
           <PlaybackContext.Provider value={playback}>
             <div ref={stageRef} className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
               {scale > 0 && (
-                <PageCanvas doc={doc} page={page} pageIndex={pageIndex} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} scale={scale} interactive={!locked} className="shadow-xl ring-1 ring-black/20" />
+                <PageCanvas doc={doc} page={page} pageIndex={pageIndex} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} scale={scale} interactive={!locked} showSlots={isTemplate} className="shadow-xl ring-1 ring-black/20" />
               )}
             </div>
           </PlaybackContext.Provider>
@@ -467,11 +554,11 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
           )}
         </div>
 
-        <Inspector doc={doc} images={images} frames={frames} source={session.source} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} />
+        <Inspector doc={doc} mode={mode} images={images} frames={frames} source={session.source} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} />
       </div>
 
       {/* AI bar */}
-      <div className="flex shrink-0 items-center gap-2 border-t border-border px-5 py-2.5">
+      {!isTemplate && <div className="flex shrink-0 items-center gap-2 border-t border-border px-5 py-2.5">
         <SparklesIcon className="size-4 shrink-0 text-pink-500" />
         <input
           value={instruction}
@@ -484,21 +571,30 @@ function Editor({ session, brand, onDone, onClose }: { session: DesignEditorSess
           {busy === "regen" ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : <SparklesIcon className="mr-1.5 size-3.5" />}
           Regenerate
         </Button>
-      </div>
+      </div>}
 
       <div className="flex shrink-0 items-center justify-between border-t border-border px-5 py-3">
         <span className="text-xs text-muted-foreground">
-          {doc.pages.some((p) => pageVideo(p)) ? "Video slides render on the worker — allow a minute or two. " : ""}
-          {session.design.brief?.caption ? "Export also writes the AI caption into the post draft (if the caption is still empty)." : ""}
+          {isTemplate
+            ? "Select anything to mark it as a slot the AI fills per post (or a photo / video-title / channel slot). Sample text stays as the style example. Autosaves."
+            : `${doc.pages.some((p) => pageVideo(p)) ? "Video slides render on the worker — allow a minute or two. " : ""}${session.design.brief?.caption ? "Export also writes the AI caption into the post draft (if the caption is still empty)." : ""}`}
         </span>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" onClick={async () => { if (await save()) onClose(); else toast.error("Couldn't save the draft"); }} disabled={busy === "export"}>
-            Save draft & close
-          </Button>
-          <Button type="button" onClick={() => void exportDesign()} disabled={busy !== null || locked}>
-            {busy === "export" && <Loader2Icon className="mr-1.5 size-3.5 animate-spin" />}
-            {session.latestRender ? "Re-export post" : "Export post"}
-          </Button>
+          {isTemplate ? (
+            <Button type="button" onClick={async () => { if (await save()) { toast.success("Template saved"); onClose(); } else toast.error("Couldn't save the template"); }}>
+              Save template & close
+            </Button>
+          ) : (
+            <>
+              <Button type="button" variant="outline" onClick={async () => { if (await save()) onClose(); else toast.error("Couldn't save the draft"); }} disabled={busy === "export"}>
+                Save draft & close
+              </Button>
+              <Button type="button" onClick={() => void exportDesign()} disabled={busy !== null || locked}>
+                {busy === "export" && <Loader2Icon className="mr-1.5 size-3.5 animate-spin" />}
+                {session.latestRender ? "Re-export post" : "Export post"}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
