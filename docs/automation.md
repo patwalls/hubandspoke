@@ -1436,6 +1436,7 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
          now() - coalesce(heartbeat_at, created_at) AS since_heartbeat
   FROM clip_renders ORDER BY created_at DESC LIMIT 20;
   ```
+- **Local source (2026-09-19):** the task downloads the source to the dyno before probing or rendering. The static ffmpeg on the dyno segfaults on any https input (see `design-frames` → ffmpeg note), so the old https-first order meant the size probe ALWAYS failed in prod and the graph took the aspect-only fallback — the editor's video inset/rounded-corner settings were silently dropped from every prod export until this fix (Pat noticed on 45334d1e).
 
 ### `design-frames` — a source video's photo library (2026-09-18, reworked 2026-09-20; flag `designEditor`)
 - **Status:** behind the per-user `designEditor` flag (Pat only).

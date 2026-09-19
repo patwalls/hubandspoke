@@ -128,10 +128,20 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
       bucket: source.mediaS3Bucket ?? undefined,
     });
 
+    // ffmpeg reads a LOCAL copy. The dyno's static ffmpeg segfaults on any
+    // https input (see src/lib/services/ffmpeg-process.ts) — the old
+    // "probe over https, fall back to a download on failure" order meant the
+    // probe always failed there, so the inset/rounded-corner settings were
+    // silently ignored in every prod export (2026-09-19).
+    const localSource = path.join(workDir, "source");
+    const t0 = Date.now();
+    await downloadToFile(sourceUrl, localSource);
+    helpers.logger.info(`clip-render: source downloaded in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
     // Exact placement (inset, rounded corners) needs the source's pixel size.
     // A failed probe isn't fatal: the graph falls back to aspect expressions
     // and just can't inset/round.
-    const sourceSize = await probeSourceSize(sourceUrl);
+    const sourceSize = await probeSourceSize(localSource);
     if (!sourceSize) {
       helpers.logger.warn(`clip-render: couldn't probe source size for render=${render.id}; using aspect fallback`);
     }
@@ -153,26 +163,10 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
 
     const onProgress = makeProgressWriter(render.id, plan.durationSec);
     const started = Date.now();
-    try {
-      // Fast path: ffmpeg range-reads just the seconds it needs over HTTPS.
-      await runFfmpeg(
-        buildRenderArgs({ plan, input: sourceUrl, filterScriptPath, outputPath }),
-        onProgress,
-      );
-    } catch (err) {
-      // Some sources can't be seeked remotely (odd container, moov atom the
-      // old static ffmpeg build can't reach). Fall back to the download-first
-      // path the precise-cut worker has always used.
-      helpers.logger.warn(
-        `clip-render: remote read failed (${errMessage(err).slice(0, 200)}); retrying from a local copy`,
-      );
-      const localSource = path.join(workDir, "source");
-      await downloadToFile(sourceUrl, localSource);
-      await runFfmpeg(
-        buildRenderArgs({ plan, input: localSource, filterScriptPath, outputPath }),
-        onProgress,
-      );
-    }
+    await runFfmpeg(
+      buildRenderArgs({ plan, input: localSource, filterScriptPath, outputPath }),
+      onProgress,
+    );
     const renderSeconds = (Date.now() - started) / 1000;
 
     const { size } = await stat(outputPath);

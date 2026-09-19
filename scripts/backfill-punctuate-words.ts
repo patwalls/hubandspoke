@@ -30,7 +30,7 @@ async function main() {
     todo++;
     if (!apply) continue;
     const words = punctuateWords(r.words, r.segments ?? []);
-    await sql`UPDATE transcripts SET words = ${sql.json(words)} WHERE id = ${r.id}`;
+    await sql`UPDATE transcripts SET words = ${sql.json(JSON.parse(JSON.stringify(words)))} WHERE id = ${r.id}`;
     done++;
     if (done % 25 === 0) console.log(`  ${done}/${todo}…`);
   }
