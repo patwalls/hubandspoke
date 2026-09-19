@@ -48,10 +48,10 @@ export interface ArchiveResult {
 
 /**
  * Fetch a remote URL into our S3 bucket under a key tied to the item.
- * Files under 200 MB are buffered in memory. Files between 200 MB and 2 GB
- * are streamed directly to S3 via Node.js Readable (requires Content-Length
- * header from the server — CDNs like Descript always provide it). Files above
- * 2 GB are rejected outright.
+ * Any file with a Content-Length header (CDNs like Descript always send it)
+ * up to 2 GB is streamed directly to S3 via Node.js Readable, never buffered.
+ * Without the header the body is buffered in memory, capped at 200 MB.
+ * Files above 2 GB are rejected outright.
  * Throws on download or upload failure — callers decide whether to swallow.
  */
 export async function archiveRemoteToS3(
@@ -80,10 +80,12 @@ export async function archiveRemoteToS3(
     : `${fileNameHint}.${ext}`;
   const key = buildKey(productionItemId, safeName);
 
-  // Large files (200–500 MB): stream directly to S3 so we never load the full
-  // body into a Buffer. ContentLength from the header is required; servers that
-  // omit it fall through to the arrayBuffer() path below and hit the 200 MB cap.
-  if (headerLen && headerLen > MAX_MEDIA_BYTES) {
+  // Any file with a known length streams straight to S3 so we never hold the
+  // body in a Buffer — a 150 MB Descript render buffered on the 512 MB worker
+  // dyno is what pinned it at R14 (2026-09-19). ContentLength from the header
+  // is required; servers that omit it fall through to the arrayBuffer() path
+  // below and hit the 200 MB cap.
+  if (headerLen) {
     const nodeStream = Readable.fromWeb(
       res.body as Parameters<typeof Readable.fromWeb>[0]
     );
