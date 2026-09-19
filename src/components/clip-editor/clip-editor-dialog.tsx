@@ -21,7 +21,11 @@ import { toast } from "sonner";
 import {
   AlertTriangleIcon,
   CheckIcon,
+  ExternalLinkIcon,
+  LayoutTemplateIcon,
+  LinkIcon,
   Loader2Icon,
+  MoreHorizontalIcon,
   Redo2Icon,
   SparklesIcon,
   TimerOffIcon,
@@ -399,6 +403,17 @@ function EditorWorkspace({
     if (found === 0) toast.message("No long pauses in this clip");
   };
 
+  const saveLook = async () => {
+    const res = await fetch(`/api/clip-ideas/${session.clipIdea.id}/editor/look`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ look: lookFromDoc(storeApi.getState().doc) }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { error?: string; format?: { name: string } };
+    if (!res.ok) toast.error(json.error ?? "Couldn't save the look");
+    else toast.success(`Saved as the "${json.format?.name}" look`, { description: "New clips of this format start from it. Manage it on the format page." });
+  };
+
   // ── Export / kill ────────────────────────────────────────────────────────
   const exportClip = async () => {
     setBusy("export");
@@ -479,34 +494,6 @@ function EditorWorkspace({
             {session.clipIdea.targetFormat}
           </span>
         )}
-        {session.clipIdea.targetFormat && (
-          <span
-            className={cn("rounded px-1.5 py-0.5 text-[11px]", session.formatLook ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200")}
-            title={session.formatLook ? `New clips of this format start from the look saved ${session.formatLook.savedAt ? new Date(session.formatLook.savedAt).toLocaleDateString() : ""}. Manage it on the format page.` : "This format has no saved look yet — new clips use the default Reels layout. Style this one, then save it as the format's template."}
-          >
-            {session.formatLook ? "Format look applied" : "No format look yet"}
-          </span>
-        )}
-        {session.clipIdea.targetFormat && (
-          <button
-            type="button"
-            title={`Make this edit's fonts, caption style, hook position and video inset the starting point for every new "${session.clipIdea.targetFormat}" clip — what a Descript pack did. The cut stays this clip's.`}
-            disabled={busy !== null}
-            onClick={async () => {
-              const res = await fetch(`/api/clip-ideas/${session.clipIdea.id}/editor/look`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ look: lookFromDoc(storeApi.getState().doc) }),
-              });
-              const json = (await res.json().catch(() => ({}))) as { error?: string; format?: { name: string } };
-              if (!res.ok) toast.error(json.error ?? "Couldn't save the look");
-              else toast.success(`Saved as the "${json.format?.name}" look`, { description: "New clips of this format start from it. Manage it on the format page." });
-            }}
-            className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50"
-          >
-            Save look as the format&apos;s template
-          </button>
-        )}
         <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-800 dark:bg-sky-950 dark:text-sky-300">
           Editor beta
         </span>
@@ -519,6 +506,37 @@ function EditorWorkspace({
           )}
         </span>
         <div className="ml-auto flex items-center gap-1">
+          <details className="relative">
+            <summary className="flex size-7 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" title="Options" aria-label="Options">
+              <MoreHorizontalIcon className="size-4" />
+            </summary>
+            <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-lg border border-border bg-popover p-1 text-sm shadow-lg" onClick={(e) => ((e.currentTarget.closest("details") as HTMLDetailsElement).open = false)}>
+              {session.clipIdea.targetFormat && (
+                <button
+                  type="button"
+                  disabled={busy !== null}
+                  title={`Make this edit's fonts, caption style, hook position and video inset the starting point for every new "${session.clipIdea.targetFormat}" clip — what a Descript pack did. The cut stays this clip's.`}
+                  onClick={() => void saveLook()}
+                  className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50"
+                >
+                  <span className="flex items-center gap-2"><LayoutTemplateIcon className="size-3.5 text-muted-foreground" /> Save look as the format&apos;s template</span>
+                  <span className="pl-5.5 text-[11px] text-muted-foreground">
+                    {session.formatLook
+                      ? `“${session.clipIdea.targetFormat}” has a look${session.formatLook.savedAt ? ` (saved ${new Date(session.formatLook.savedAt).toLocaleDateString()})` : ""} — this replaces it.`
+                      : `“${session.clipIdea.targetFormat}” has no look yet — new clips use the default layout.`}
+                  </span>
+                </button>
+              )}
+              {session.formatLook && (
+                <a href={`/${brand}/formats/${session.formatLook.formatId}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted">
+                  <ExternalLinkIcon className="size-3.5 text-muted-foreground" /> Open the format page
+                </a>
+              )}
+              <button type="button" onClick={() => { void navigator.clipboard.writeText(window.location.href); toast.success("Link copied"); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted">
+                <LinkIcon className="size-3.5 text-muted-foreground" /> Copy link to this clip
+              </button>
+            </div>
+          </details>
           <SaveIndicator state={saveState} onRetry={() => void save()} />
           <IconButton label="Undo (⌘Z)" disabled={!canUndo || locked} onClick={undo}>
             <Undo2Icon className="size-4" />
