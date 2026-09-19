@@ -5,6 +5,7 @@ import { isDesignPresetId } from "@/lib/design-editor/templates";
 import { clearFormatTemplate, createFormatTemplateFromPreset, loadFormatTemplateById, saveFormatTemplate } from "@/lib/services/design-editor/format-template";
 import { resolveImageUrls } from "@/lib/services/design-editor/session";
 import { BRAND_WORDMARKS } from "@/lib/services/design-editor/assets";
+import { loadBrandChannels } from "@/lib/services/design-editor/channels";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -18,7 +19,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const t = await loadFormatTemplateById(id);
   if (!t) return NextResponse.json({ template: null });
-  return NextResponse.json({ template: { doc: t.doc, source: t.source, updatedAt: t.updatedAt }, imageUrls: await resolveImageUrls(t.doc), images: BRAND_WORDMARKS });
+  return NextResponse.json({ template: { doc: t.doc, source: t.source, updatedAt: t.updatedAt }, imageUrls: await resolveImageUrls(t.doc), images: BRAND_WORDMARKS, channels: await loadBrandChannels(t.brand) });
 }
 
 /** Save the template. Body: `{ doc }`. */

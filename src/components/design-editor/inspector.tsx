@@ -9,7 +9,10 @@ import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, Loader2Icon
 import { cn } from "@/lib/utils";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
 import { FONTS } from "@/lib/clip-editor/fonts";
-import type { DesignCaptionsElement, DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignSlot, DesignTextElement, DesignVideoElement } from "@/lib/design-editor/doc";
+import type { DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignSlot, DesignTextElement, DesignVideoElement } from "@/lib/design-editor/doc";
+import { DM_KEYWORD_TOKEN } from "@/lib/design-editor/doc";
+import type { ChannelInfo } from "@/lib/design-editor/channel";
+import { formatFollowers } from "@/lib/design-editor/channel";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFrame, DesignFramesState } from "@/lib/services/design-editor/frames";
 import { commands, useDesign } from "./store";
@@ -29,6 +32,11 @@ export interface InspectorProps {
   onAdjust: (elementId: string) => void;
   /** Jump the page's clip preview to this clip time. */
   onSeekClip: (clipSec: number) => void;
+  /** The brand's accounts (channel elements) and the post's DM keyword. */
+  channels: ChannelInfo[];
+  dmKeyword: string | null;
+  /** Item mode: open the attach/change keyword dialog. */
+  onChangeDmKeyword?: () => void;
 }
 
 export function frameCandidate(f: DesignFrame): ImageCandidate | null {
@@ -42,7 +50,7 @@ export function formatSec(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function Inspector({ doc, mode, images, frames, source, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip }: InspectorProps) {
+export function Inspector({ doc, mode, images, frames, source, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword }: InspectorProps) {
   const apply = useDesign((s) => s.apply);
   const selection = useDesign((s) => s.selection);
   const select = useDesign((s) => s.select);
@@ -94,6 +102,29 @@ export function Inspector({ doc, mode, images, frames, source, onPickImage, onGr
 
       {mode === "template" && (el.type === "text" || el.type === "image" || el.type === "video") && (
         <SlotPanel el={el} patch={(fn, key) => patch<DesignElement>(fn, key)} />
+      )}
+      {el.type === "channel" && <ChannelPanel el={el} channels={channels} patch={(fn, key) => patch<DesignChannelElement>(fn, key)} />}
+      {el.slot?.kind === "dmKeyword" && el.type === "text" && (
+        <Panel title="ManyChat DM keyword">
+          {mode === "template" ? (
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              The wording stays as written; <code className="rounded bg-muted px-1">{DM_KEYWORD_TOKEN}</code> becomes the post&apos;s keyword. On a post&apos;s first draft it is attached automatically — the least-used free keyword from the ManyChat pool, pointed at the post&apos;s suggested destination through the usual go→go chain.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="text-muted-foreground">Keyword</span>
+                {dmKeyword ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">{dmKeyword.toUpperCase()}</span> : <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900">none attached</span>}
+              </div>
+              <p className="text-[11px] leading-snug text-muted-foreground">{dmKeyword ? "Commenting this on the post triggers the ManyChat DM. Clicks and leads track to this post." : "The pool had no free keyword or no destination could be suggested — attach one, or the CTA ships with a placeholder."}</p>
+              {onChangeDmKeyword && (
+                <button type="button" onClick={onChangeDmKeyword} className="self-start rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted">
+                  {dmKeyword ? "Change keyword or destination" : "Attach a keyword"}
+                </button>
+              )}
+            </>
+          )}
+        </Panel>
       )}
       {mode === "item" && el.slot?.kind === "ai" && (
         <p className="rounded-md border border-dashed border-pink-300/60 bg-pink-50/60 px-2 py-1.5 text-[11px] leading-snug text-pink-900 dark:bg-pink-950/40 dark:text-pink-200">
@@ -158,6 +189,7 @@ const SLOT_OPTIONS: Array<{ value: DesignSlot["kind"] | "static"; label: string;
   { value: "videoTitle", label: "The source video's title", for: ["text"] },
   { value: "channelName", label: "Channel name", for: ["text"] },
   { value: "channelSubscribers", label: "Subscriber count", for: ["text"] },
+  { value: "dmKeyword", label: "ManyChat DM keyword — {{keyword}} in the text", for: ["text"] },
 ];
 
 function SlotPanel({ el, patch }: { el: DesignTextElement | DesignImageElement | DesignVideoElement; patch: (fn: (e: DesignElement) => DesignElement, key?: string) => void }) {
@@ -186,6 +218,11 @@ function SlotPanel({ el, patch }: { el: DesignTextElement | DesignImageElement |
         </label>
       )}
       {kind === "photo" && <p className="text-[11px] text-muted-foreground">Filled with the best frame of the source video (AI-picked); the placeholder shows where it goes.</p>}
+      {kind === "dmKeyword" && (
+        <p className="text-[11px] leading-snug text-muted-foreground">
+          Write the CTA with <code className="rounded bg-muted px-1">{DM_KEYWORD_TOKEN}</code> where the keyword goes, e.g. comment &quot;{DM_KEYWORD_TOKEN}&quot; and i&apos;ll DM you the full video. Each post gets a real keyword from the ManyChat pool automatically.
+        </p>
+      )}
       {el.type === "text" && (
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
           Stack (optional)
@@ -322,6 +359,50 @@ function FrameScrubber({ videoUrl, onGrab }: { videoUrl: string; onGrab: (sec: n
         </button>
       </div>
     </div>
+  );
+}
+
+function ChannelPanel({ el, channels, patch }: { el: DesignChannelElement; channels: ChannelInfo[]; patch: (fn: (e: DesignChannelElement) => DesignChannelElement, key?: string) => void }) {
+  const platforms = [...new Set(channels.map((c) => c.platform))];
+  const selected = (el.accountId && channels.find((c) => c.accountId === el.accountId)) || channels.find((c) => c.platform === el.platform) || null;
+  return (
+    <Panel title="Channel">
+      <p className="text-[11px] leading-snug text-muted-foreground">Avatar, name and follower count come from the account, live — nothing to type.</p>
+      <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+        Account
+        <select
+          value={el.accountId ?? `platform:${el.platform}`}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v.startsWith("platform:")) patch((cur) => ({ ...cur, accountId: null, platform: v.slice(9) as DesignChannelElement["platform"] }));
+            else {
+              const c = channels.find((x) => x.accountId === v);
+              patch((cur) => ({ ...cur, accountId: v, platform: (c?.platform as DesignChannelElement["platform"]) ?? cur.platform }));
+            }
+          }}
+          className="rounded-md border border-border bg-background px-2 py-1.5 text-[13px] text-foreground"
+        >
+          {platforms.map((p) => (
+            <option key={`platform:${p}`} value={`platform:${p}`}>The brand&apos;s {p} account</option>
+          ))}
+          {channels.map((c) => (
+            <option key={c.accountId} value={c.accountId}>{c.name}{c.handle ? ` (@${c.handle.replace(/^@/, "")})` : ""} · {c.platform}</option>
+          ))}
+        </select>
+      </label>
+      {selected && (
+        <p className="text-[11px] text-muted-foreground">Showing: {selected.name}{selected.verified ? " ✓" : ""}{formatFollowers(selected.followerCount, selected.platform) ? ` · ${formatFollowers(selected.followerCount, selected.platform)}` : ""}</p>
+      )}
+      <Check label="Show follower count" checked={el.showFollowers} onChange={(showFollowers) => patch((e) => ({ ...e, showFollowers }))} />
+      <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-0.5 text-xs">
+        {(["light", "dark"] as const).map((t) => (
+          <button key={t} type="button" onClick={() => patch((e) => ({ ...e, theme: t }))} className={cn("rounded px-2 py-1 font-medium", el.theme === t ? "bg-background shadow-sm" : "text-muted-foreground")}>
+            {t === "light" ? "Dark text" : "Light text"}
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-muted-foreground">The box&apos;s height is the avatar size; drag a corner to resize.</p>
+    </Panel>
   );
 }
 

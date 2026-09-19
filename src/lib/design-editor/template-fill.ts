@@ -12,7 +12,7 @@
  * substitutes them, fills the system slots from the item (photo, video
  * title, channel), drops what couldn't be filled, and reflows the stacks.
  */
-import { IG_SQUARE, PHOTO_PLACEHOLDER, isPhotoPlaceholder, newElementId, type DesignDoc, type DesignElement, type DesignImageSource, type DesignPage, type DesignSpan, type DesignTextElement } from "./doc";
+import { DM_KEYWORD_TOKEN, IG_SQUARE, PHOTO_PLACEHOLDER, isPhotoPlaceholder, newElementId, type DesignDoc, type DesignElement, type DesignImageSource, type DesignPage, type DesignSpan, type DesignTextElement } from "./doc";
 import { layoutDesignText } from "./layout";
 import type { DesignContext } from "./shared";
 
@@ -128,7 +128,7 @@ export function fillTemplate(template: DesignDoc, fill: DesignFill, ctx: DesignC
 }
 
 function prefixFor(el: DesignElement): string {
-  return el.type === "text" ? "t" : el.type === "image" ? "img" : el.type === "video" ? "v" : el.type === "captions" ? "c" : "r";
+  return el.type === "text" ? "t" : el.type === "image" ? "img" : el.type === "video" ? "v" : el.type === "captions" ? "c" : el.type === "channel" ? "ch" : "r";
 }
 
 function fillElement(el: DesignElement, value: DesignFillValue | undefined, ctx: DesignContext): DesignElement | null | "drop-page" {
@@ -154,7 +154,39 @@ function fillElement(el: DesignElement, value: DesignFillValue | undefined, ctx:
       return el.type === "text" ? { ...el, spans: [{ text: `${ctx.channel.name} ✓` }] } : el;
     case "channelSubscribers":
       return el.type === "text" ? (ctx.channel.subscribers ? { ...el, spans: [{ text: ctx.channel.subscribers }] } : null) : el;
+    case "dmKeyword":
+      // The wording stays the template's; the token becomes the post's
+      // attached keyword. Keep the pattern in the slot so a later keyword
+      // change can re-substitute (applyDmKeyword). No keyword yet → the
+      // token stays visible so nobody ships a CTA with a hole in it.
+      return el.type === "text" ? substituteDmKeyword({ ...el, slot: { kind: "dmKeyword", hint: dmPattern(el) } }, ctx.dmKeyword ?? null) : el;
   }
+}
+
+/** The CTA's wording with the token, kept in `slot.hint` after filling. */
+function dmPattern(el: DesignTextElement): string {
+  return el.slot?.kind === "dmKeyword" && el.slot.hint.includes(DM_KEYWORD_TOKEN) ? el.slot.hint : el.spans.map((s) => s.text).join("");
+}
+
+function substituteDmKeyword(el: DesignTextElement, keyword: string | null): DesignTextElement {
+  const pattern = dmPattern(el);
+  if (!keyword) return { ...el, spans: [{ text: pattern }] };
+  return { ...el, spans: [{ text: pattern.split(DM_KEYWORD_TOKEN).join(keyword.toUpperCase()) }] };
+}
+
+/** Re-substitute every DM-keyword element after the post's keyword changed. */
+export function applyDmKeyword(doc: DesignDoc, keyword: string | null): DesignDoc {
+  return {
+    ...doc,
+    pages: doc.pages.map((page) => ({
+      ...page,
+      elements: page.elements.map((el) => (el.type === "text" && el.slot?.kind === "dmKeyword" ? substituteDmKeyword(el, keyword) : el)),
+    })),
+  };
+}
+
+export function hasDmKeywordSlot(doc: DesignDoc): boolean {
+  return doc.pages.some((p) => p.elements.some((el) => el.slot?.kind === "dmKeyword"));
 }
 
 /**

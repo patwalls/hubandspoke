@@ -8,13 +8,14 @@
  * the real editors, and shown here as what they are: a filmstrip of pages,
  * a summary of the look.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ClapperboardIcon, LayoutTemplateIcon, Loader2Icon, PencilIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FONTS } from "@/lib/clip-editor/fonts";
 import type { ClipLook } from "@/lib/clip-editor/doc";
 import type { DesignDoc } from "@/lib/design-editor/doc";
+import { resolveChannelsInDoc, type ChannelInfo } from "@/lib/design-editor/channel";
 import { DESIGN_PRESETS, type DesignPresetId } from "@/lib/design-editor/templates";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { DesignTemplateDialog } from "./design-editor-dialog";
@@ -25,6 +26,7 @@ import { invalidateDesignTemplates } from "./use-design-templates";
 interface TemplateResponse {
   template: { doc: DesignDoc; source: "stored" | "preset"; updatedAt: string | null } | null;
   imageUrls?: Record<string, string>;
+  channels?: ChannelInfo[];
 }
 
 export function FormatTemplatesSection({ brand, formatId, formatName, isClippableFormat }: { brand: string; formatId: string; formatName: string; isClippableFormat: boolean }) {
@@ -83,7 +85,7 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
         <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
       ) : t ? (
         <>
-          <Filmstrip doc={t.doc} imageUrls={data.imageUrls ?? {}} />
+          <Filmstrip doc={t.doc} imageUrls={data.imageUrls ?? {}} channels={data.channels ?? []} />
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             <span>{t.doc.pages.length} slides · {t.source === "stored" ? `custom${t.updatedAt ? `, updated ${new Date(t.updatedAt).toLocaleDateString()}` : ""}` : "built-in preset (edit to customise)"}</span>
           </div>
@@ -118,15 +120,16 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
 
 /** Read-only thumbnails of a template's pages. PageCanvas reads the editor
  *  store even when inert, so give it a throwaway one. */
-function Filmstrip({ doc, imageUrls }: { doc: DesignDoc; imageUrls: Record<string, string> }) {
+function Filmstrip({ doc, imageUrls, channels }: { doc: DesignDoc; imageUrls: Record<string, string>; channels: ChannelInfo[] }) {
   const [store] = useState(() => createDesignStore({ doc, revision: 0 }));
+  const resolved = useMemo(() => resolveChannelsInDoc(doc, channels), [doc, channels]);
   useEffect(() => store.getState().replaceDoc(doc, 0), [doc, store]);
   return (
     <DesignStoreContext.Provider value={store}>
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {doc.pages.map((p, i) => (
           <div key={p.id} className="relative shrink-0 overflow-hidden rounded border border-border">
-            <PageCanvas doc={doc} page={p} pageIndex={i} imageUrls={imageUrls} videoUrl={null} words={[]} scale={96 / doc.canvas.width} interactive={false} showSlots />
+            <PageCanvas doc={doc} page={p} pageIndex={i} imageUrls={imageUrls} videoUrl={null} words={[]} channels={resolved} scale={96 / doc.canvas.width} interactive={false} showSlots />
             {p.elements.some((e) => e.type === "video") && <span className="absolute right-0.5 top-0.5 rounded bg-black/70 px-1 text-[9px] font-semibold uppercase text-white">video</span>}
           </div>
         ))}

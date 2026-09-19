@@ -8,7 +8,11 @@ import { db } from "@/lib/db";
 import { accounts, brands, designDocs, designRenders, formats, productionItems, transcripts } from "@/lib/db/schema";
 import { parseDesignDoc, type DesignDoc, type DesignImageSource } from "@/lib/design-editor/doc";
 import type { DesignContext } from "@/lib/design-editor/shared";
-import { applyPhotoPick, fillTemplate, type DesignFill } from "@/lib/design-editor/template-fill";
+import { applyDmKeyword, applyPhotoPick, fillTemplate, hasDmKeywordSlot, type DesignFill } from "@/lib/design-editor/template-fill";
+import { DM_KEYWORD_TOKEN } from "@/lib/design-editor/doc";
+import type { ChannelInfo } from "@/lib/design-editor/channel";
+import { loadBrandChannels } from "./channels";
+import { ensureDmKeyword } from "@/lib/services/dm-keyword";
 import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { generateDesignFill } from "./fill-brief";
@@ -62,6 +66,10 @@ export interface DesignEditorSession {
   /** The source transcript's words — captions on video slides are cut from
    *  these in the browser exactly as the exporter cuts them. */
   words: EditorWord[];
+  /** The brand's accounts, for channel elements. */
+  channels: ChannelInfo[];
+  /** The post's attached ManyChat keyword (`short_link_slug`), if any. */
+  dmKeyword: string | null;
   latestRender: DesignRenderStatus | null;
 }
 
@@ -79,6 +87,10 @@ export async function loadDesignEditorSession(args: {
 
   let design = await selectDesign(item.id);
   if (!design) {
+    // A template with a DM-keyword CTA gets the post a keyword up front —
+    // the best free one from the ManyChat pool, pointed at the post's
+    // suggested destination — so the CTA never shows a placeholder.
+    if (hasDmKeywordSlot(template.doc)) await ensureDmKeyword(item.id).catch((err) => console.error("[design-editor] ensureDmKeyword failed:", err));
     const draft = await draftDoc(item.id, item.sourceItemId, template.doc, null);
     await db
       .insert(designDocs)
@@ -91,11 +103,14 @@ export async function loadDesignEditorSession(args: {
     // before it did): put it in the photo slots now, before anyone holds
     // the doc.
     const pick = await pickedFrame(item.id);
-    const patched = pick?.src ? applyPhotoPick(design.doc, pick.src) : null;
-    if (patched) {
+    let next = pick?.src ? applyPhotoPick(design.doc, pick.src)?.doc ?? null : null;
+    // A keyword attached after the draft (content page) fills the CTA now.
+    const slug = await currentDmKeyword(item.id);
+    if (slug && JSON.stringify(next ?? design.doc).includes(DM_KEYWORD_TOKEN)) next = applyDmKeyword(next ?? design.doc, slug);
+    if (next) {
       await db
         .update(designDocs)
-        .set({ doc: patched.doc, revision: sql`${designDocs.revision} + 1`, updatedAt: new Date() })
+        .set({ doc: next, revision: sql`${designDocs.revision} + 1`, updatedAt: new Date() })
         .where(and(eq(designDocs.id, design.id), eq(designDocs.revision, design.revision)));
       design = (await selectDesign(item.id)) ?? design;
     }
@@ -112,6 +127,7 @@ export async function regenerateDesign(args: {
   const item = await loadItem(args.productionItemId);
   const template = item.format ? await loadFormatTemplate(item.brand, item.format) : null;
   if (!template) throw new DesignUnsupportedError("no_template");
+  if (hasDmKeywordSlot(template.doc)) await ensureDmKeyword(item.id).catch((err) => console.error("[design-editor] ensureDmKeyword failed:", err));
   const draft = await draftDoc(item.id, item.sourceItemId, template.doc, args.instruction);
   await db
     .insert(designDocs)
@@ -157,6 +173,7 @@ async function draftDoc(itemId: string, sourceItemId: string, template: DesignDo
     photo,
     source: source ? { bucket: source.bucket, key: source.key, title: source.title } : null,
     channel: await loadChannel(itemId),
+    dmKeyword: await currentDmKeyword(itemId),
   };
   return { fill, doc: fillTemplate(template, fill, ctx) };
 }
@@ -201,6 +218,11 @@ async function loadWords(sourceItemId: string): Promise<EditorWord[]> {
     .limit(1);
   if (!t) return [];
   return resolveTranscriptWords({ words: t.words, segments: t.segments ?? [] }).words;
+}
+
+async function currentDmKeyword(itemId: string): Promise<string | null> {
+  const [row] = await db.select({ slug: productionItems.shortLinkSlug }).from(productionItems).where(eq(productionItems.id, itemId)).limit(1);
+  return row?.slug ?? null;
 }
 
 /** The channel row on video slides: the brand's YouTube account. */
@@ -278,6 +300,8 @@ async function finishSession(item: Awaited<ReturnType<typeof loadItem>>, design:
     frames: await listFrames(item.id),
     source: source ? { ...source, videoUrl: await getPresignedGetUrl(source.key, 4 * 3600, { bucket: source.bucket ?? undefined }) } : null,
     words: await loadWords(item.sourceItemId),
+    channels: await loadBrandChannels(item.brand),
+    dmKeyword: await currentDmKeyword(item.id),
     latestRender: render ? toDesignRenderStatus(render) : null,
   };
 }

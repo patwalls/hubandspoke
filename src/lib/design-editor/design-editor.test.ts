@@ -4,7 +4,8 @@ import { layoutDesignText, coverGeometry, cropForOffset } from "./layout";
 import { buildPlaybookTemplate } from "./playbook-template";
 import { buildTechStackTemplate } from "./tech-stack-template";
 import { DESIGN_PRESETS } from "./templates";
-import { applyHighlights, applyPhotoPick, fillTemplate, listSlots, reflowStacks, type DesignFill, type DesignFillValue } from "./template-fill";
+import { applyDmKeyword, applyHighlights, applyPhotoPick, fillTemplate, listSlots, reflowStacks, type DesignFill, type DesignFillValue } from "./template-fill";
+import { formatFollowers, layoutChannel, resolveChannel } from "./channel";
 import { fontsUsed, pageToSatoriTree, videoPageLayers } from "./render-tree";
 import { buildDesignCaptionCues, activeCue } from "./captions";
 import { buildVideoPageFilterGraph, videoPageFrames } from "./design-ffmpeg";
@@ -51,8 +52,10 @@ describe("presets are valid templates with the expected slots", () => {
     const t = buildTechStackTemplate();
     expect(parseDesignDoc(JSON.parse(JSON.stringify(t))).ok).toBe(true);
     expect(t.pages.map((p) => p.elements.some((e) => e.type === "video"))).toEqual([false, false, true, false]);
-    expect(listSlots(t).map((s) => s.name)).toEqual(["Headline", "Sub line", "Intro", "Stack", "Total", "Clip", "Pill label", "Question", "CTA"]);
-    expect(t.pages[3].elements.find((e) => e.name === "Subscribers")?.slot?.kind).toBe("channelSubscribers");
+    expect(listSlots(t).map((s) => s.name)).toEqual(["Headline", "Sub line", "Intro", "Stack", "Total", "Clip", "Pill label", "Question"]);
+    // The CTA is a DM-keyword slot (ManyChat), not AI; the channel row is one live element.
+    expect(t.pages[3].elements.find((e) => e.name === "CTA")?.slot?.kind).toBe("dmKeyword");
+    expect(t.pages[3].elements.filter((e) => e.type === "channel")).toHaveLength(1);
   });
   it("every preset builds and parses", () => {
     for (const id of Object.keys(DESIGN_PRESETS) as Array<keyof typeof DESIGN_PRESETS>) {
@@ -74,7 +77,7 @@ describe("fillTemplate", () => {
     const v = pageVideo(doc.pages[2])!;
     expect(v).toMatchObject({ src: { key: withSource.source.key }, startSec: 260, endSec: 295 });
     expect((doc.pages[2].elements.find((e) => e.name === "Video title") as DesignTextElement).spans[0].text).toBe(withSource.source.title);
-    expect((doc.pages[2].elements.find((e) => e.name === "Channel") as DesignTextElement).spans[0].text).toBe("Starter Story ✓");
+    expect(doc.pages[2].elements.find((e) => e.type === "channel")).toMatchObject({ platform: "youtube", accountId: null });
     const ids = doc.pages.flatMap((p) => [p.id, ...p.elements.map((e) => e.id)]);
     const tIds = new Set(t.pages.flatMap((p) => [p.id, ...p.elements.map((e) => e.id)]));
     expect(ids.some((id) => tIds.has(id))).toBe(false);
@@ -112,6 +115,18 @@ describe("fillTemplate", () => {
     const picked = applyPhotoPick(doc, { kind: "url", url: "https://x/y.jpg" })!;
     expect(picked.elementIds).toHaveLength(1);
     expect(applyPhotoPick(picked.doc, { kind: "url", url: "https://x/z.jpg" })).toBeNull();
+  });
+
+  it("DM keyword: the CTA keeps its wording, the token becomes the post's keyword, and can be re-substituted later", () => {
+    const t = buildTechStackTemplate();
+    const withKw = fillTemplate(t, fillFor(t), { ...withSource, dmKeyword: "bootstrap" });
+    const cta = withKw.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement;
+    expect(cta.spans[0].text).toBe('comment "BOOTSTRAP" and i\'ll DM you the full video.');
+    expect(cta.slot).toEqual({ kind: "dmKeyword", hint: 'comment "{{keyword}}" and i\'ll DM you the full video.' });
+    const none = fillTemplate(t, fillFor(t), withSource);
+    expect((none.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement).spans[0].text).toContain("{{keyword}}");
+    const swapped = applyDmKeyword(withKw, "dailywin");
+    expect((swapped.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement).spans[0].text).toContain('"DAILYWIN"');
   });
 
   it("reflowStacks leaves pages without stacks alone", () => {
@@ -260,5 +275,25 @@ describe("captions", () => {
     expect(ass).toContain("Style: Cap0,Inter");
     expect(ass.match(/^Dialogue:/gm)).toHaveLength(1);
     expect(ass).toContain("gamma delta epsilon");
+  });
+});
+
+describe("channel element", () => {
+  const el = { id: "ch", name: "Channel", type: "channel" as const, x: 30, y: 900, w: 620, h: 68, opacity: 1, locked: false, slot: null, stack: null, accountId: null, platform: "youtube" as const, showFollowers: true, theme: "light" as const };
+  const yt = { accountId: "a1", platform: "youtube", name: "Starter Story", handle: "starterstory", avatarUrl: null, followerCount: 875_000, verified: true };
+  const ig = { accountId: "a2", platform: "instagram", name: "Starter Story", handle: "starter_story", avatarUrl: null, followerCount: 120_000, verified: true };
+  it("resolves by account id, else the brand's account on the platform", () => {
+    expect(resolveChannel(el, [ig, yt])?.accountId).toBe("a1");
+    expect(resolveChannel({ ...el, accountId: "a2" }, [ig, yt])?.accountId).toBe("a2");
+    expect(resolveChannel({ ...el, platform: "tiktok" }, [ig, yt])).toBeNull();
+  });
+  it("lays out avatar + name ✓ + followers from the box height", () => {
+    const l = layoutChannel(el, yt);
+    expect(l.avatar).toEqual({ x: 30, y: 900, d: 68 });
+    expect(l.name.spans[0].text).toBe("Starter Story ✓");
+    expect(l.followers?.spans[0].text).toBe("875K subscribers");
+    expect(l.name.x).toBeGreaterThan(30 + 68);
+    expect(formatFollowers(1_250_000, "instagram")).toBe("1.3M followers");
+    expect(layoutChannel({ ...el, showFollowers: false }, yt).followers).toBeNull();
   });
 });

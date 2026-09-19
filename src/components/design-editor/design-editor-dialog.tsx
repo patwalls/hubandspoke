@@ -20,6 +20,7 @@ import {
   CheckIcon,
   ClapperboardIcon,
   ExternalLinkIcon,
+  AtSignIcon,
   ImageIcon,
   LayoutTemplateIcon,
   LinkIcon,
@@ -40,6 +41,10 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, type DesignDoc, type DesignVideoElement } from "@/lib/design-editor/doc";
 import { applyPhotoPick } from "@/lib/design-editor/template-fill";
 import { BRAND_WORDMARKS } from "@/lib/design-editor/brand-assets";
+import type { ChannelInfo } from "@/lib/design-editor/channel";
+import { applyDmKeyword } from "@/lib/design-editor/template-fill";
+import { resolveChannelsInDoc } from "@/lib/design-editor/channel";
+import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFramesState } from "@/lib/services/design-editor/frames";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
@@ -142,7 +147,7 @@ export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName,
         return;
       }
       const res = await fetch(`/api/formats/${formatId}/design-template`);
-      const json = (await res.json().catch(() => ({}))) as { template?: { doc: DesignDoc } | null; imageUrls?: Record<string, string>; images?: ImageCandidate[] };
+      const json = (await res.json().catch(() => ({}))) as { template?: { doc: DesignDoc } | null; imageUrls?: Record<string, string>; images?: ImageCandidate[]; channels?: ChannelInfo[] };
       if (cancelled) return;
       if (!res.ok || !json.template) {
         toast.error("Couldn't load the template");
@@ -156,6 +161,8 @@ export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName,
         frames: { frames: [], pending: false },
         source: null,
         words: [],
+        channels: json.channels ?? [],
+        dmKeyword: null,
         latestRender: null,
       });
     })();
@@ -207,6 +214,9 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   /** A frame grab the user asked for; swapped in when the worker delivers it. */
   const pendingGrab = useRef<{ elementId: string | null; pageIndex: number; sec: number } | null>(null);
   const [busy, setBusy] = useState<null | "regen" | "export">(null);
+  const [dmKeyword, setDmKeyword] = useState<string | null>(session.dmKeyword);
+  const [keywordOpen, setKeywordOpen] = useState(false);
+  const channelsInDoc = useMemo(() => resolveChannelsInDoc(doc, session.channels), [doc, session.channels]);
   const [leaving, setLeaving] = useState(false);
   const [instruction, setInstruction] = useState(session.design.briefInstruction ?? "");
   const [stageBox, setStageBox] = useState({ w: 0, h: 0 });
@@ -427,6 +437,12 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     apply(commands.addElement(pageIndex, { id, name: "Photo", type: "image", x: 0, y: 0, w: doc.canvas.width, h: doc.canvas.height, opacity: 1, locked: false, src: PHOTO_PLACEHOLDER, fit: "cover", radius: 0, crop: { ...DEFAULT_CROP }, slot: { kind: "photo", hint: "" }, stack: null }));
     select({ pageIndex, elementId: id });
   };
+  const addChannel = () => {
+    const id = newElementId("ch");
+    const dark = page.background.toLowerCase() === "#ffffff" || page.background.toUpperCase() === "#F7F5EF" || page.background.toUpperCase() === "#F5F3EE";
+    apply(commands.addElement(pageIndex, { id, name: "Channel", type: "channel", x: 60, y: doc.canvas.height - 160, w: 620, h: 68, opacity: 1, locked: false, slot: null, stack: null, accountId: null, platform: (session.channels[0]?.platform as "youtube") ?? "youtube", showFollowers: true, theme: dark ? "light" : "dark" }));
+    select({ pageIndex, elementId: id });
+  };
   const addCaptions = () => {
     const id = newElementId("c");
     const dark = page.background.toLowerCase() === "#ffffff" || page.background === "#F7F5EF";
@@ -529,7 +545,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
           {doc.pages.map((p, i) => (
             <div key={p.id} className="group relative">
               <button type="button" onClick={() => select({ pageIndex: i, elementId: null })} className={cn("w-full overflow-hidden rounded-md ring-2 ring-transparent transition-shadow", i === pageIndex ? "ring-sky-500" : "hover:ring-sky-300")}>
-                <PageCanvas doc={doc} page={p} pageIndex={i} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} scale={126 / doc.canvas.width} interactive={false} />
+                <PageCanvas doc={doc} page={p} pageIndex={i} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} channels={channelsInDoc} scale={126 / doc.canvas.width} interactive={false} />
               </button>
               <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] font-semibold text-white">{i + 1}</span>
               {pageVideo(p) && <span className="absolute right-1 top-1 rounded bg-black/60 px-1 text-[9px] font-semibold uppercase text-white">▶ {Math.round(pageDurationSec(p))}s</span>}
@@ -564,12 +580,13 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
             {(session.source || isTemplate) && <Tool onClick={addClip} disabled={locked || !!pageClip}><ClapperboardIcon className="size-3.5" /> Clip</Tool>}
             {isTemplate && <Tool onClick={addPhotoSlot} disabled={locked}><ImageIcon className="size-3.5" /> Photo slot</Tool>}
             {pageClip && <Tool onClick={addCaptions} disabled={locked}><CaptionsIcon className="size-3.5" /> Captions</Tool>}
+            <Tool onClick={addChannel} disabled={locked}><AtSignIcon className="size-3.5" /> Channel</Tool>
             <span className="ml-auto text-[11px] text-muted-foreground">Page {pageIndex + 1} of {doc.pages.length} · double-click text to edit · ⌫ deletes · arrows nudge</span>
           </div>
           <PlaybackContext.Provider value={playback}>
             <div ref={stageRef} className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
               {scale > 0 && (
-                <PageCanvas doc={doc} page={page} pageIndex={pageIndex} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} scale={scale} interactive={!locked} showSlots={isTemplate} className="shadow-xl ring-1 ring-black/20" />
+                <PageCanvas doc={doc} page={page} pageIndex={pageIndex} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} channels={channelsInDoc} scale={scale} interactive={!locked} showSlots={isTemplate} className="shadow-xl ring-1 ring-black/20" />
               )}
             </div>
           </PlaybackContext.Provider>
@@ -594,7 +611,21 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
           )}
         </div>
 
-        <Inspector doc={doc} mode={mode} images={images} frames={frames} source={session.source} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} />
+        <Inspector doc={doc} mode={mode} images={images} frames={frames} source={session.source} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} />
+        {!isTemplate && (
+          <AttachDmKeywordDialog
+            open={keywordOpen}
+            onOpenChange={setKeywordOpen}
+            itemId={session.item.id}
+            currentSlug={dmKeyword}
+            baseUrl="https://go.starterstory.com"
+            onSaved={async (slug) => {
+              setDmKeyword(slug);
+              apply(() => applyDmKeyword(storeApi.getState().doc, slug));
+              toast.success(slug ? `CTA now uses ${slug.toUpperCase()}` : "Keyword detached");
+            }}
+          />
+        )}
       </div>
 
       {/* AI bar */}

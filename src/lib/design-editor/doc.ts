@@ -56,7 +56,10 @@ export type DesignSpan = z.infer<typeof spanSchema>;
  * elements (logos, pills, the Notes chrome) have no slot. Slots survive into
  * the item's document so the editor can still tell what an element was.
  */
-export const SLOT_KINDS = ["ai", "photo", "videoTitle", "channelName", "channelSubscribers"] as const;
+export const SLOT_KINDS = ["ai", "photo", "videoTitle", "channelName", "channelSubscribers", "dmKeyword"] as const;
+/** In a `dmKeyword` text slot, this token becomes the post's attached
+ *  ManyChat keyword ("BOOTSTRAP"). Structural placeholder, not content. */
+export const DM_KEYWORD_TOKEN = "{{keyword}}";
 const slotSchema = z.object({
   kind: z.enum(SLOT_KINDS),
   /** For `ai`: what to write ("the founder's biggest revenue number"). */
@@ -162,6 +165,25 @@ const rectElementSchema = z.object({
 });
 export type DesignRectElement = z.infer<typeof rectElementSchema>;
 
+/**
+ * The brand's channel, drawn from `accounts` at preview and render time:
+ * avatar, display name (✓ when verified), follower count. Nothing about the
+ * account is stored in the document — pick the account (or just a platform
+ * and the brand's account for it is used) and the numbers stay live.
+ * The box's HEIGHT sets the avatar size; the width is the room for the name.
+ */
+const channelElementSchema = z.object({
+  ...elementBase,
+  type: z.literal("channel"),
+  /** A specific `accounts.id`, or null → the brand's account on `platform`. */
+  accountId: z.string().nullable(),
+  platform: z.enum(["youtube", "instagram", "x", "tiktok", "linkedin", "threads"]),
+  showFollowers: z.boolean(),
+  /** Text colours: dark text on light pages, light text on dark ones. */
+  theme: z.enum(["light", "dark"]),
+});
+export type DesignChannelElement = z.infer<typeof channelElementSchema>;
+
 /** Discriminated on `type`; array order = z-order, last on top. */
 export const designElementSchema = z.discriminatedUnion("type", [
   textElementSchema,
@@ -169,6 +191,7 @@ export const designElementSchema = z.discriminatedUnion("type", [
   rectElementSchema,
   videoElementSchema,
   captionsElementSchema,
+  channelElementSchema,
 ]);
 export type DesignElement = z.infer<typeof designElementSchema>;
 

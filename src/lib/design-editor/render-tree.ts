@@ -8,11 +8,15 @@
 import { FONTS } from "@/lib/clip-editor/fonts";
 import type { DesignElement, DesignPage, DesignTextElement, Rgba } from "./doc";
 import { coverGeometry, layoutDesignText } from "./layout";
+import { layoutChannel, type ChannelInfo } from "./channel";
 
 type Node = { type: string; props: Record<string, unknown> };
 
-/** Element id → the picture, with its pixel size (the crop needs it). */
+/** Element id → the picture, with its pixel size (the crop needs it). For a
+ *  channel element, its avatar under the same id. */
 export type ResolvedImages = Record<string, { src: string; width: number; height: number }>;
+/** Channel element id → the account it shows. */
+export type ResolvedChannels = Record<string, ChannelInfo | null>;
 
 function rgba(c: Rgba): string {
   const r = parseInt(c.color.slice(1, 3), 16);
@@ -58,8 +62,37 @@ function textNodes(el: DesignTextElement): Node[] {
   }));
 }
 
-function elementNodes(el: DesignElement, images: ResolvedImages): Node[] {
+function channelNodes(el: DesignElement & { type: "channel" }, images: ResolvedImages, channels: ResolvedChannels): Node[] {
+  const info = channels[el.id] ?? null;
+  const l = layoutChannel(el, info);
+  const avatar = images[el.id];
+  const nodes: Node[] = [];
+  if (avatar) {
+    const g = coverGeometry({ width: avatar.width, height: avatar.height }, { w: l.avatar.d, h: l.avatar.d }, { x: 0.5, y: 0.5, zoom: 1 });
+    nodes.push({
+      type: "div",
+      props: {
+        style: { position: "absolute", left: l.avatar.x, top: l.avatar.y, width: l.avatar.d, height: l.avatar.d, borderRadius: l.avatar.d / 2, overflow: "hidden", display: "flex", opacity: el.opacity },
+        children: { type: "img", props: { src: avatar.src, width: g.width, height: g.height, style: { position: "absolute", left: g.left, top: g.top, width: g.width, height: g.height } } },
+      },
+    });
+  } else {
+    nodes.push({
+      type: "div",
+      props: {
+        style: { position: "absolute", left: l.avatar.x, top: l.avatar.y, width: l.avatar.d, height: l.avatar.d, borderRadius: l.avatar.d / 2, backgroundColor: el.theme === "light" ? "#111111" : "#FFFFFF", color: el.theme === "light" ? "#FFFFFF" : "#111111", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONTS.anton.cssFamily, fontSize: Math.round(l.avatar.d * 0.58), opacity: el.opacity },
+        children: l.initial,
+      },
+    });
+  }
+  nodes.push(...textNodes({ ...l.name, opacity: el.opacity }));
+  if (l.followers) nodes.push(...textNodes({ ...l.followers, opacity: el.opacity }));
+  return nodes;
+}
+
+function elementNodes(el: DesignElement, images: ResolvedImages, channels: ResolvedChannels): Node[] {
   if (el.type === "text") return textNodes(el);
+  if (el.type === "channel") return channelNodes(el, images, channels);
   if (el.type === "rect") {
     return [
       {
@@ -122,8 +155,9 @@ export function pageToSatoriTree(
   page: DesignPage,
   canvas: { width: number; height: number },
   images: ResolvedImages,
-  opts: { transparent?: boolean } = {},
+  opts: { transparent?: boolean; channels?: ResolvedChannels } = {},
 ): Node {
+  const channels = opts.channels ?? {};
   return {
     type: "div",
     props: {
@@ -135,7 +169,7 @@ export function pageToSatoriTree(
         ...(opts.transparent ? {} : { backgroundColor: page.background }),
         overflow: "hidden",
       },
-      children: page.elements.flatMap((el) => elementNodes(el, images)),
+      children: page.elements.flatMap((el) => elementNodes(el, images, channels)),
     },
   };
 }
@@ -157,7 +191,7 @@ export function videoPageLayers(page: DesignPage): { under: DesignPage; over: De
 /** The fonts a page needs, for satori's `fonts` option. */
 export function fontsUsed(page: DesignPage): Array<(typeof FONTS)[keyof typeof FONTS]> {
   const ids = new Set(
-    page.elements.flatMap((el) => (el.type === "text" ? [el.style.fontId] : [])),
+    page.elements.flatMap((el) => (el.type === "text" || el.type === "captions" ? [el.style.fontId] : el.type === "channel" ? (["inter-semibold", "inter-regular", "anton"] as const) : [])),
   );
   return [...ids].map((id) => FONTS[id]);
 }

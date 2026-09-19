@@ -12,7 +12,7 @@
  *            DM you the full video." + the channel row.
  */
 import { IG_SQUARE, newElementId, type DesignDoc, type DesignElement, type DesignPage } from "./doc";
-import { ai, baseText, channelRow, notesChrome, photoSlot, rect, text, videoPageTemplate, NOTES_BG } from "./shared";
+import { ai, baseText, channelElement, notesChrome, photoSlot, rect, sys, text, videoPageTemplate, DM_KEYWORD_TOKEN, NOTES_BG } from "./shared";
 
 export const TECH_STACK_TEMPLATE = "tech-stack-v1";
 const BAND = "#F5F3EE";
@@ -48,8 +48,8 @@ function cta(): DesignPage {
   const M = 110;
   const elements: DesignElement[] = [
     text("Question", { x: M, y: 300, w: W - 2 * M, h: 70 }, [{ text: "curious what his website does?" }], baseText({ fontId: "inter-regular", sizePx: 40, lineHeight: 1.3, color: INK }), { slot: ai("A lowercase one-line question teasing the product: \"curious what his website does?\", \"curious what his apps do?\"."), stack: "cta" }),
-    text("CTA", { x: M, y: 420, w: W - 2 * M, h: 130 }, [{ text: "comment \"BSC\" and i'll DM you the full video." }], baseText({ fontId: "inter-regular", sizePx: 40, lineHeight: 1.3, color: INK }), { slot: ai("comment \"<KEYWORD>\" and i'll DM you the full video. — KEYWORD is a short all-caps word from the business name or the video's topic (\"BSC\", \"DAILYWIN\")."), stack: "cta" }),
-    ...channelRow(M, 620),
+    text("CTA", { x: M, y: 420, w: W - 2 * M, h: 130 }, [{ text: `comment "${DM_KEYWORD_TOKEN}" and i'll DM you the full video.` }], baseText({ fontId: "inter-regular", sizePx: 40, lineHeight: 1.3, color: INK }), { slot: sys("dmKeyword"), stack: "cta" }),
+    channelElement({ x: M, y: 620, w: W - 2 * M, h: 68 }),
   ];
   return { id: newElementId("page"), background: "#FFFFFF", elements };
 }

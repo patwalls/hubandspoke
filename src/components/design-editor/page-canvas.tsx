@@ -13,7 +13,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type P
 import { cn } from "@/lib/utils";
 import { FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
 import type { EditorWord } from "@/lib/clip-editor/words";
-import type { DesignCaptionsElement, DesignDoc, DesignElement, DesignImageElement, DesignPage, DesignSpan, DesignTextElement, DesignVideoElement, Rgba } from "@/lib/design-editor/doc";
+import type { DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignPage, DesignSpan, DesignTextElement, DesignVideoElement, Rgba } from "@/lib/design-editor/doc";
+import { layoutChannel, type ChannelInfo } from "@/lib/design-editor/channel";
 import { pageVideo } from "@/lib/design-editor/doc";
 import { activeCue, buildDesignCaptionCues, layoutCaptionCue } from "@/lib/design-editor/captions";
 import { coverGeometry, cropForOffset, layoutDesignText } from "@/lib/design-editor/layout";
@@ -54,6 +55,7 @@ export function PageCanvas({
   imageUrls,
   videoUrl,
   words,
+  channels = {},
   scale,
   interactive,
   showSlots = false,
@@ -67,6 +69,8 @@ export function PageCanvas({
   videoUrl: string | null;
   /** Source transcript words (captions on video slides). */
   words: EditorWord[];
+  /** Channel element id → the account it shows (live data). */
+  channels?: Record<string, ChannelInfo | null>;
   scale: number;
   interactive: boolean;
   /** Template mode: label every slot on the page. */
@@ -190,6 +194,7 @@ export function PageCanvas({
             imageUrl={imageUrls[el.id]}
             videoUrl={videoUrl}
             cues={cues}
+            channel={channels[el.id] ?? null}
             selected={selectedId === el.id}
             editing={interactive && editingId === el.id}
             interactive={interactive}
@@ -214,7 +219,7 @@ export function PageCanvas({
           page.elements.map((el) =>
             el.slot ? (
               <div key={`slot-${el.id}`} className="pointer-events-none absolute rounded-br-md px-2 py-0.5 text-[18px] font-semibold text-white" style={{ left: el.x, top: el.y, background: el.slot.kind === "ai" ? "#DB2777" : "#0EA5E9" }}>
-                {el.slot.kind === "ai" ? "AI" : el.slot.kind === "photo" ? "Photo" : el.slot.kind === "videoTitle" ? "Video title" : el.slot.kind === "channelName" ? "Channel" : "Subscribers"}
+                {el.slot.kind === "ai" ? "AI" : el.slot.kind === "photo" ? "Photo" : el.slot.kind === "videoTitle" ? "Video title" : el.slot.kind === "channelName" ? "Channel" : el.slot.kind === "dmKeyword" ? "DM keyword" : "Subscribers"}
                 {el.stack ? ` · ${el.stack}` : ""}
               </div>
             ) : null,
@@ -256,6 +261,7 @@ function ElementView({
   imageUrl,
   videoUrl,
   cues,
+  channel,
   selected,
   editing,
   interactive,
@@ -271,6 +277,7 @@ function ElementView({
   imageUrl: string | undefined;
   videoUrl: string | null;
   cues: ReturnType<typeof buildDesignCaptionCues>;
+  channel: ChannelInfo | null;
   selected: boolean;
   editing: boolean;
   interactive: boolean;
@@ -320,6 +327,9 @@ function ElementView({
   }
   if (el.type === "captions") {
     return <CaptionsView el={el} cues={cues} base={base} hover={hover} interactive={interactive} onPointerDown={onPointerDown} />;
+  }
+  if (el.type === "channel") {
+    return <ChannelView el={el} info={channel} base={base} hover={hover} onPointerDown={onPointerDown} />;
   }
   return (
     <TextView el={el} base={base} hover={hover} editing={editing} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} onCommitText={onCommitText} />
@@ -474,6 +484,44 @@ function CaptionsView({ el, cues, base, hover, interactive, onPointerDown }: {
         </div>
       ))}
     </div>
+  );
+}
+
+/** The brand's channel: avatar (or initial), name ✓, followers — from the
+ *  same layout the exporter draws. */
+function ChannelView({ el, info, base, hover, onPointerDown }: { el: DesignChannelElement; info: ChannelInfo | null; base: React.CSSProperties; hover: string; onPointerDown: (e: ReactPointerEvent) => void }) {
+  const l = useMemo(() => layoutChannel(el, info), [el, info]);
+  const [broken, setBroken] = useState(false);
+  const showImg = !!info?.avatarUrl && !broken;
+  return (
+    <div className={hover} onPointerDown={onPointerDown} style={base}>
+      <div className="absolute overflow-hidden rounded-full" style={{ left: 0, top: 0, width: l.avatar.d, height: l.avatar.d, background: el.theme === "light" ? "#111111" : "#FFFFFF" }}>
+        {showImg ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={info!.avatarUrl!} alt="" draggable={false} onError={() => setBroken(true)} className="pointer-events-none h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center" style={{ fontFamily: `"${FONTS.anton.cssFamily}"`, fontSize: Math.round(l.avatar.d * 0.58), color: el.theme === "light" ? "#FFFFFF" : "#111111" }}>{l.initial}</span>
+        )}
+      </div>
+      {[l.name, l.followers].map((t) =>
+        t ? <StaticText key={t.id} el={t} originX={el.x} originY={el.y} /> : null,
+      )}
+    </div>
+  );
+}
+
+/** A laid-out text element drawn relative to a parent box. */
+function StaticText({ el, originX, originY }: { el: DesignTextElement; originX: number; originY: number }) {
+  const layout = useMemo(() => layoutDesignText(el), [el]);
+  const font = FONTS[el.style.fontId];
+  return (
+    <>
+      {layout.lines.map((line, i) => (
+        <div key={i} className="absolute flex whitespace-pre" style={{ left: line.x - originX, top: line.y - originY, height: layout.linePitchPx, lineHeight: `${layout.linePitchPx}px`, fontSize: layout.fontSizePx, fontFamily: `"${font.cssFamily}"`, fontWeight: font.cssWeight, color: el.style.color }}>
+          {line.words.map((w, wi) => <span key={wi}>{(wi > 0 ? " " : "") + w.text}</span>)}
+        </div>
+      ))}
+    </>
   );
 }
 

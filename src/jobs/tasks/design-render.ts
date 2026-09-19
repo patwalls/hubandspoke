@@ -20,7 +20,8 @@ import { recordToolAction } from "@/lib/services/content-events";
 import { installDesignMedia } from "@/lib/services/design-editor/install-design-media";
 import { probeSource, runFfmpeg } from "@/lib/services/ffmpeg-process";
 import { pageVideo, parseDesignDoc, type DesignImageSource, type DesignPage } from "@/lib/design-editor/doc";
-import { fontsUsed, pageToSatoriTree, videoPageLayers, type ResolvedImages } from "@/lib/design-editor/render-tree";
+import { fontsUsed, pageToSatoriTree, videoPageLayers, type ResolvedChannels, type ResolvedImages } from "@/lib/design-editor/render-tree";
+import { loadBrandChannels, resolveChannel } from "@/lib/services/design-editor/channels";
 import { buildDesignCaptionCues } from "@/lib/design-editor/captions";
 import { buildCaptionsAss } from "@/lib/design-editor/design-ass";
 import { buildFrameGrabArgs, buildVideoPageArgs, buildVideoPageFilterGraph } from "@/lib/design-editor/design-ffmpeg";
@@ -59,15 +60,31 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
     const totalWeight = weights.reduce((a, b) => a + b, 0);
     let doneWeight = 0;
     let words: EditorWord[] | null = null;
+    const [itemRow] = await db.select({ brand: productionItems.brand }).from(productionItems).where(eq(productionItems.id, render.productionItemId)).limit(1);
+    const brandChannels = await loadBrandChannels(itemRow?.brand ?? "starter-story");
 
     for (const [i, page] of doc.pages.entries()) {
       const images: ResolvedImages = {};
+      const channels: ResolvedChannels = {};
       for (const el of page.elements) {
         if (el.type === "image") images[el.id] = await loadImage(el.src);
+        if (el.type === "channel") {
+          const info = resolveChannel(el, brandChannels);
+          channels[el.id] = info;
+          // The avatar is a platform CDN URL; if it can't be fetched the
+          // element falls back to the initial in a circle.
+          if (info?.avatarUrl) {
+            try {
+              images[el.id] = await loadImage({ kind: "url", url: info.avatarUrl });
+            } catch (err) {
+              helpers.logger.warn(`design-render: avatar fetch failed for ${info.accountId}: ${err instanceof Error ? err.message : err}`);
+            }
+          }
+        }
       }
       const video = pageVideo(page);
       if (!video) {
-        const png = await rasterize(page, doc.canvas, images, false);
+        const png = await rasterize(page, doc.canvas, images, false, channels);
         const s3Key = buildKey(render.productionItemId, `design-page-${i + 1}.png`);
         await putObject(s3Key, png, "image/png");
         pages.push({ s3Key, sizeBytes: png.length, kind: "image", contentType: "image/png", posterS3Key: null });
@@ -76,8 +93,8 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
         const layers = videoPageLayers(page);
         const underPath = path.join(workDir, `p${i}-under.png`);
         const overPath = path.join(workDir, `p${i}-over.png`);
-        await writeFile(underPath, await rasterize(layers.under, doc.canvas, images, false));
-        await writeFile(overPath, await rasterize(layers.over, doc.canvas, images, true));
+        await writeFile(underPath, await rasterize(layers.under, doc.canvas, images, false, channels));
+        await writeFile(overPath, await rasterize(layers.over, doc.canvas, images, true, channels));
 
         let assPath: string | null = null;
         const captions = page.elements.find((el) => el.type === "captions");
@@ -149,8 +166,8 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
   }
 };
 
-async function rasterize(page: DesignPage, canvas: { width: number; height: number }, images: ResolvedImages, transparent: boolean): Promise<Buffer> {
-  const svg = await satori(pageToSatoriTree(page, canvas, images, { transparent }) as never, {
+async function rasterize(page: DesignPage, canvas: { width: number; height: number }, images: ResolvedImages, transparent: boolean, channels: ResolvedChannels = {}): Promise<Buffer> {
+  const svg = await satori(pageToSatoriTree(page, canvas, images, { transparent, channels }) as never, {
     width: canvas.width,
     height: canvas.height,
     fonts: await Promise.all(

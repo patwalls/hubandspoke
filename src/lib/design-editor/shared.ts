@@ -4,14 +4,19 @@
  * A template file (playbook-template.ts, tech-stack-template.ts) composes
  * these into its pages; nothing here knows about any one format's brief.
  */
-import { DEFAULT_CROP, IG_SQUARE, PHOTO_PLACEHOLDER, newElementId, type DesignElement, type DesignImageSource, type DesignPage, type DesignSlot, type DesignSpan, type DesignTextElement, type DesignTextStyle } from "./doc";
+import { DEFAULT_CROP, DM_KEYWORD_TOKEN, IG_SQUARE, PHOTO_PLACEHOLDER, newElementId, type DesignChannelElement, type DesignElement, type DesignImageSource, type DesignPage, type DesignSlot, type DesignSpan, type DesignTextElement, type DesignTextStyle } from "./doc";
+
+export { DM_KEYWORD_TOKEN };
 
 /** What a template needs beyond the brief: the founder's picture, the
  *  source video (for video slides) and the brand's channel. */
 export interface DesignContext {
   photo: DesignImageSource | null;
   source: { bucket: string | null; key: string; title: string | null } | null;
+  /** For the legacy channelName/channelSubscribers text slots. */
   channel: { name: string; subscribers: string };
+  /** The post's attached ManyChat keyword ("BOOTSTRAP"), if any. */
+  dmKeyword?: string | null;
 }
 
 export interface ClipPick {
@@ -81,14 +86,10 @@ function todayLabel(): string {
   return `${date} at ${time}`;
 }
 
-/** Avatar circle + "Starter Story ✓" + subscriber count, left edge at (x, y). */
-export function channelRow(x: number, y: number, sample = { name: "Starter Story", subscribers: "800K subscribers" }): DesignElement[] {
-  return [
-    rect("Channel avatar", { x, y, w: 68, h: 68 }, "#111111", 34),
-    text("Avatar letter", { x, y, w: 68, h: 68 }, [{ text: sample.name.slice(0, 1).toUpperCase() }], baseText({ fontId: "anton", sizePx: 40, lineHeight: 1, color: "#FFFFFF", align: "center", valign: "middle" })),
-    text("Channel", { x: x + 84, y: y - 2, w: 600, h: 38 }, [{ text: `${sample.name} ✓` }], baseText({ fontId: "inter-semibold", sizePx: 28, lineHeight: 1.2, color: "#0F0F0F" }), { slot: sys("channelName") }),
-    text("Subscribers", { x: x + 84, y: y + 36, w: 600, h: 30 }, [{ text: sample.subscribers }], baseText({ fontId: "inter-regular", sizePx: 22, lineHeight: 1.2, color: "#606060" }), { slot: sys("channelSubscribers") }),
-  ];
+/** The brand's channel — avatar, name ✓, follower count from `accounts`,
+ *  live. One element; the box height is the avatar size. */
+export function channelElement(box: Box, over: Partial<Pick<DesignChannelElement, "platform" | "theme" | "showFollowers">> = {}): DesignChannelElement {
+  return { id: newElementId("ch"), name: "Channel", type: "channel", ...box, opacity: 1, locked: false, slot: null, stack: null, accountId: null, platform: "youtube", showFollowers: true, theme: "light", ...over };
 }
 
 /**
@@ -126,7 +127,7 @@ export function videoPageTemplate(args: { clipHint: string; pillHint: string; pi
   elements.push(rect("YouTube badge", { x: W - M - 160, y: titleY + 2, w: 160, h: 46 }, "#FF0000", 10));
   elements.push(text("YouTube", { x: W - M - 160, y: titleY + 2, w: 160, h: 46 }, [{ text: "▶ YouTube" }], baseText({ fontId: "inter-bold", sizePx: 24, lineHeight: 1, color: "#FFFFFF", align: "center", valign: "middle" })));
   const rowY = titleY + 116;
-  elements.push(...channelRow(M, rowY));
+  elements.push(channelElement({ x: M, y: rowY, w: 620, h: 68 }));
   elements.push({ id: newElementId("img"), name: "Wordmark", type: "image", x: W - M - 260, y: rowY + 6, w: 260, h: 60, opacity: 0.9, locked: false, src: WORDMARK_DARK, fit: "contain", radius: 0, crop: { ...DEFAULT_CROP }, slot: null, stack: null });
   return { id: newElementId("page"), background: "#FFFFFF", elements };
 }

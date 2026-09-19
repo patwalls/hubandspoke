@@ -14,7 +14,7 @@ describe("colour picker", () => {
   });
   it("lists a design's colours most-used first, and a clip's", () => {
     const design = colorsInDesignDoc(buildPlaybookTemplate());
-    expect(design[0]).toBe("#FFFFFF"); // most text is white
+    expect(design.slice(0, 2)).toEqual(expect.arrayContaining(["#FFFFFF", "#1C1C1E"])); // the two text inks lead
     expect(design).toContain("#FF3B3B");
     expect(design).toContain("#F7F5EF");
     const clip = colorsInClipDoc(createDefaultDoc({ startSec: 0, endSec: 10, hook: "h" }));
