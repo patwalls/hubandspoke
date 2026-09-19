@@ -32,6 +32,7 @@ import {
   putObject,
 } from "@/lib/s3";
 import { downloadToFile, safeUnlink } from "./descript-upload-helpers";
+import { punctuateWords } from "@/lib/transcripts/punctuate-words";
 
 const FFMPEG_TIMEOUT_MS = 10 * 60 * 1000;
 const SEGMENT_SECONDS = 600; // 10 min
@@ -432,6 +433,13 @@ export async function transcribeFromS3Audio(
         await safeUnlink(audioPath);
       }
     }
+
+    // Whisper's timed words come back without punctuation; the segments'
+    // text has it. Put it back on the words (src/lib/transcripts) so every
+    // consumer — captions, sentence snapping, the editors — can see where
+    // sentences end. Timing is untouched.
+    const punctuated = punctuateWords(mergedWords, mergedSegments);
+    mergedWords.splice(0, mergedWords.length, ...punctuated);
 
     const durationSec = lastEndSec;
     const wordCount =

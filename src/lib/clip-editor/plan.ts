@@ -24,6 +24,7 @@ import type {
 import { wordEditKey } from "./doc";
 import { keptRanges } from "./removals";
 import type { EditorWord } from "./words";
+import { endsClause, endsSentence, stripCaptionPunctuation } from "@/lib/transcripts/punctuate-words";
 
 /** A kept run shorter than this is an artifact between two removals (a
  *  sliver of breath), not footage anyone chose. ~100ms at 30fps. */
@@ -211,12 +212,18 @@ function buildCaptionCues(
       prev &&
       segments[prev.segmentIndex].sectionId !==
         segments[w.segmentIndex].sectionId;
+    // A cue never runs past the end of a sentence, and a clause end
+    // (comma, dash) is taken as the break once a cue is half full — the
+    // captions then breathe with the speech instead of chopping it every N
+    // words. Needs punctuated words (src/lib/transcripts/punctuate-words.ts).
     const shouldBreak =
       current.length > 0 &&
       (current.length >= layer.maxWordsPerCue ||
         chars + 1 + w.text.length > layer.maxCharsPerCue ||
         w.outStartSec - prev!.outEndSec > CUE_BREAK_GAP_SEC ||
-        crossesSection);
+        crossesSection ||
+        endsSentence(prev!.text) ||
+        (endsClause(prev!.text) && current.length >= Math.ceil(layer.maxWordsPerCue / 2)));
     if (shouldBreak) {
       groups.push(current);
       current = [];
@@ -244,7 +251,7 @@ function buildCaptionCues(
       // Each word stays highlighted until the next one starts, so the
       // highlight never blinks off mid-cue.
       words: group.map((w, wi) => ({
-        text: w.text,
+        text: layer.showPunctuation ? w.text : stripCaptionPunctuation(w.text),
         outStartSec: wi === 0 ? cueStart : w.outStartSec,
         outEndSec: wi < group.length - 1 ? group[wi + 1].outStartSec : cueEnd,
       })),

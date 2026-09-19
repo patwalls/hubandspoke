@@ -176,6 +176,9 @@ const captionsLayerSchema = z.object({
   maxCharsPerCue: z.number().int().min(4).max(80),
   /** Colour the word being spoken. null = no karaoke highlight. */
   highlightColor: hexColor.nullable(),
+  /** Show commas/periods on screen. Off by default — the cues still break
+   *  on them, which is what makes captions feel like sentences. */
+  showPunctuation: z.boolean().default(false),
 });
 export type CaptionsLayer = z.infer<typeof captionsLayerSchema>;
 
@@ -358,6 +361,7 @@ export function createDefaultDoc(args: {
         maxWordsPerCue: 3,
         maxCharsPerCue: 18,
         highlightColor: "#FFE14D",
+        showPunctuation: false,
       },
     ],
     wordEdits: {},

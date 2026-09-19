@@ -168,6 +168,7 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
           <ColorRow usedColors={usedColors} label="Colour" value={captions.style.color} onChange={(color) => patchCaptions((l) => ({ ...l, style: { ...l.style, color } }), "cap-color")} />
           <ColorRow usedColors={usedColors} label="Outline" value={captions.style.outlineColor} onChange={(outlineColor) => patchCaptions((l) => ({ ...l, style: { ...l.style, outlineColor, outlinePct: l.style.outlinePct || 8 } }), "cap-outline")} />
           <AlignPicker value={captions.style.align} onChange={(align) => patchCaptions((l) => ({ ...l, style: { ...l.style, align } }))} />
+          <Check label="Show punctuation" checked={captions.showPunctuation} onChange={(showPunctuation) => patchCaptions((l) => ({ ...l, showPunctuation }))} />
           <Check
             label="ALL CAPS"
             checked={captions.style.uppercase}
