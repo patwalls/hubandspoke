@@ -31,7 +31,7 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
   const usedColors = useMemo(() => colorsInClipDoc(doc), [doc]);
 
   return (
-    <fieldset disabled={disabled} className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1 disabled:opacity-60">
+    <fieldset disabled={disabled} className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto pr-1 disabled:opacity-60">
       {hook && (
         <Panel
           title="Hook"
@@ -133,9 +133,9 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
               )
             }
           />
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-y-1.5">
             <span className="text-[11px] text-muted-foreground">Highlight</span>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => patchCaptions((l) => ({ ...l, highlightColor: null }))}
