@@ -63,6 +63,8 @@ export interface ClipEditorSession {
     acceptedProductionItemId: string | null;
   };
   brand: string;
+  /** The target format's saved look (what new edits start from), if any. */
+  formatLook: { formatId: string; savedAt: string | null } | null;
   edit: { id: string; revision: number; doc: ClipEditDoc };
   source: {
     productionItemId: string;
@@ -188,6 +190,7 @@ export async function loadClipEditorSession(args: {
       acceptedProductionItemId: row.acceptedProductionItemId,
     },
     brand,
+    formatLook: await loadFormatLookInfo(brand, row.targetFormat),
     edit,
     source: {
       productionItemId: row.sourceProductionItemId,
@@ -200,6 +203,16 @@ export async function loadClipEditorSession(args: {
     wordsSynthetic: synthetic,
     latestRender: render ? toRenderStatus(render) : null,
   };
+}
+
+async function loadFormatLookInfo(brand: string, targetFormat: string | null): Promise<{ formatId: string; savedAt: string | null } | null> {
+  if (!targetFormat) return null;
+  const [f] = await db
+    .select({ id: formats.id, look: formats.clipTemplate, savedAt: formats.clipTemplateUpdatedAt })
+    .from(formats)
+    .where(and(eq(formats.brand, brand), eq(formats.name, targetFormat)))
+    .limit(1);
+  return f?.look ? { formatId: f.id, savedAt: f.savedAt?.toISOString() ?? null } : null;
 }
 
 async function loadTargetFormat(brand: string, targetFormat: string | null) {

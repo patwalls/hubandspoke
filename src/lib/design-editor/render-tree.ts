@@ -107,7 +107,7 @@ function elementNodes(el: DesignElement, images: ResolvedImages, channels: Resol
             borderRadius: el.radius,
             opacity: el.opacity,
             ...(el.gradientTo
-              ? { backgroundImage: `linear-gradient(180deg, ${rgba(el.fill)} 0%, ${rgba(el.gradientTo)} 100%)` }
+              ? { backgroundImage: `linear-gradient(${el.gradientDirection === "up" ? 0 : 180}deg, ${rgba(el.fill)} 0%, ${rgba(el.gradientTo)} 100%)` }
               : { backgroundColor: rgba(el.fill) }),
           },
         },

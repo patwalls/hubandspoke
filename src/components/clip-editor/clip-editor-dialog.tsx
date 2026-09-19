@@ -480,6 +480,14 @@ function EditorWorkspace({
           </span>
         )}
         {session.clipIdea.targetFormat && (
+          <span
+            className={cn("rounded px-1.5 py-0.5 text-[11px]", session.formatLook ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200")}
+            title={session.formatLook ? `New clips of this format start from the look saved ${session.formatLook.savedAt ? new Date(session.formatLook.savedAt).toLocaleDateString() : ""}. Manage it on the format page.` : "This format has no saved look yet — new clips use the default Reels layout. Style this one, then save it as the format's template."}
+          >
+            {session.formatLook ? "Format look applied" : "No format look yet"}
+          </span>
+        )}
+        {session.clipIdea.targetFormat && (
           <button
             type="button"
             title={`Make this edit's fonts, caption style, hook position and video inset the starting point for every new "${session.clipIdea.targetFormat}" clip — what a Descript pack did. The cut stays this clip's.`}

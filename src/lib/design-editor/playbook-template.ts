@@ -12,7 +12,7 @@
  * the editor and gives the AI its style example. Everything it emits is
  * ordinary elements the format owner can move, restyle, re-slot or delete.
  */
-import { DEFAULT_CROP, IG_SQUARE, newElementId, type DesignDoc, type DesignElement, type DesignImageSource, type DesignPage } from "./doc";
+import { DEFAULT_CROP, IG_SQUARE, newElementId, shadeElement, type DesignDoc, type DesignElement, type DesignImageSource, type DesignPage } from "./doc";
 import { ai, baseText, notesChrome, photoSlot, text, videoPageTemplate, NOTES_BG } from "./shared";
 import { applyHighlights } from "./template-fill";
 
@@ -24,10 +24,7 @@ export function buildPlaybookCover(): DesignPage {
   const { width: W, height: H } = IG_SQUARE;
   const elements: DesignElement[] = [];
   elements.push(photoSlot({ x: 0, y: 0, w: W, h: H }));
-  elements.push({
-    id: newElementId("r"), name: "Shade", type: "rect", x: 0, y: 380, w: W, h: H - 380, opacity: 1, locked: false,
-    fill: { color: "#000000", alpha: 0 }, gradientTo: { color: "#000000", alpha: 0.92 }, radius: 0, slot: null, stack: null,
-  });
+  elements.push({ ...shadeElement(IG_SQUARE, "bottom"), y: 380, h: H - 380 });
   // 2249×519 wordmark at 300 wide.
   elements.push({ id: newElementId("img"), name: "Logo", type: "image", x: W - 40 - 300, y: 40, w: 300, h: 69, opacity: 1, locked: false, src: WORDMARK, fit: "contain", radius: 0, crop: { ...DEFAULT_CROP }, slot: null, stack: null });
   elements.push(

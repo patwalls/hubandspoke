@@ -22,6 +22,8 @@ import { resolveVideoBox } from "@/lib/clip-editor/video-box";
 import { activeCaptionAt, type Scene } from "@/lib/clip-editor/scene";
 import type { PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
+import { MagnetIcon } from "lucide-react";
+import { readSnapEnabled, snapThreshold, snapValue, writeSnapEnabled, type SnapGuide, type SnapTarget } from "@/lib/editor/snap";
 
 interface StageProps {
   plan: RenderPlan;
@@ -63,6 +65,9 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
   // Only the MODE is React state here (it flips a couple of times a session);
   // the clock itself never is.
   const [previewing, setPreviewing] = useState(false);
+  /** The guide line while a drag is snapping; ⌥ drags freely. */
+  const [guide, setGuide] = useState<SnapGuide | null>(null);
+  const [snapOn, setSnapOn] = useState(() => (typeof window === "undefined" ? true : readSnapEnabled()));
   useEffect(
     () => engine.subscribe((snap) => setPreviewing(snap.mode === "preview")),
     [engine],
@@ -103,7 +108,7 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
   /** Start a drag that maps pointer movement (in canvas px) to a doc change. */
   const startDrag = (
     e: PointerEvent,
-    onMove: (dxCanvas: number, dyCanvas: number) => (doc: ClipEditDoc) => ClipEditDoc,
+    onMove: (dxCanvas: number, dyCanvas: number, alt: boolean) => (doc: ClipEditDoc) => ClipEditDoc,
     coalesceKey: string,
   ) => {
     if (scale === 0) return;
@@ -114,11 +119,12 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
     // Unique per gesture so two separate drags are two undo steps.
     const key = `${coalesceKey}:${e.timeStamp}`;
     const move = (ev: globalThis.PointerEvent) => {
-      apply(onMove((ev.clientX - startX) / scale, (ev.clientY - startY) / scale), key);
+      apply(onMove((ev.clientX - startX) / scale, (ev.clientY - startY) / scale, ev.altKey), key);
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      setGuide(null);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -126,16 +132,45 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
 
   const clampPct = (n: number) => Math.max(0, Math.min(100, n));
 
+  /**
+   * Vertical snap targets for a layer's anchor edge: canvas centre and
+   * thirds, the video's top/bottom (and a hand's width off them, where a
+   * hook or captions usually sit), and the other text layer's edges.
+   */
+  const layerSnapTargets = (movingId: string): SnapTarget[] => {
+    const gap = Math.round(H * 0.02);
+    const t: SnapTarget[] = [
+      { at: H / 2, kind: "center" },
+      { at: H / 3, kind: "third" },
+      { at: (2 * H) / 3, kind: "third" },
+      { at: videoBox.top, kind: "video" },
+      { at: videoBox.top + videoBox.height, kind: "video" },
+      { at: videoBox.top - gap, kind: "video" },
+      { at: videoBox.top + videoBox.height + gap, kind: "video" },
+    ];
+    for (const block of scene.textBlocks) {
+      if (block.layer.id === movingId) continue;
+      t.push({ at: block.layout.top, kind: "element" }, { at: block.layout.bottom, kind: "element" });
+    }
+    return t;
+  };
+
   const dragLayerY = (e: PointerEvent, layer: TextLayer | CaptionsLayer) => {
     setSelection({ kind: "layer", id: layer.id });
     const startPct = layer.yPct;
+    const targets = layerSnapTargets(layer.id);
     startDrag(
       e,
-      (_dx, dy) =>
-        commands.patchLayer(layer.id, (l) => ({
-          ...l,
-          yPct: clampPct(startPct + (dy / H) * 100),
-        })),
+      (_dx, dy, alt) =>
+        commands.patchLayer(layer.id, (l) => {
+          let y = ((startPct + (dy / H) * 100) / 100) * H;
+          if (snapOn && !alt) {
+            const s = snapValue(y, targets, snapThreshold(scale));
+            y = s.value;
+            setGuide(s.guide);
+          } else setGuide(null);
+          return { ...l, yPct: clampPct((y / H) * 100) };
+        }),
       `drag-layer-${layer.id}`,
     );
   };
@@ -222,6 +257,9 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
           <div
             className={cn("transition-opacity duration-200", previewing && "pointer-events-none opacity-20")}
           >
+          {guide && (
+            <div className="pointer-events-none absolute left-0" style={{ top: guide.at - 1, width: W, height: 2, background: "#EC4899" }} />
+          )}
           {scene.textBlocks.map((block) => (
             <TextBlock
               key={block.layer.id}
@@ -257,6 +295,15 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
           )}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); const next = !snapOn; setSnapOn(next); writeSnapEnabled(next); }}
+          onPointerDown={(e) => e.stopPropagation()}
+          title="Snap the hook and captions to the centre, thirds and the video's edges while dragging (hold ⌥ to drag freely)"
+          className={cn("absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium", snapOn ? "border-pink-300 bg-pink-50 text-pink-800" : "border-border bg-background/90 text-muted-foreground")}
+        >
+          <MagnetIcon className="size-3" /> Snap
+        </button>
         {previewing && (
           <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
             <span className="rounded-full bg-amber-400 px-3 py-1 text-[11px] font-semibold text-black shadow">

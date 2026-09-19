@@ -158,12 +158,30 @@ const rectElementSchema = z.object({
   ...elementBase,
   type: z.literal("rect"),
   fill: rgbaSchema,
-  /** Optional vertical gradient: fill at the top → `gradientTo` at the bottom.
-   *  How the cover darkens toward the headline. */
+  /** Optional gradient: `fill` at one end → `gradientTo` at the other. How
+   *  a cover darkens toward its headline: fill transparent, gradientTo black. */
   gradientTo: rgbaSchema.nullable(),
+  /** Which way the gradient runs: "down" = fill at the top, gradientTo at
+   *  the bottom (a shade under a headline); "up" the reverse (under a title
+   *  at the top). */
+  gradientDirection: z.enum(["down", "up"]).default("down"),
   radius: px.min(0),
 });
 export type DesignRectElement = z.infer<typeof rectElementSchema>;
+
+/**
+ * The shade every photo cover needs so white text reads over it: clear at
+ * one end, near-black at the other, over the part of the picture the text
+ * sits on. Add it right above the photo in z-order, under the text.
+ */
+export function shadeElement(canvas: { width: number; height: number }, where: "bottom" | "top" = "bottom"): DesignRectElement {
+  const h = Math.round(canvas.height * 0.62);
+  return {
+    id: newElementId("r"), name: where === "bottom" ? "Shade" : "Shade (top)", type: "rect",
+    x: 0, y: where === "bottom" ? canvas.height - h : 0, w: canvas.width, h, opacity: 1, locked: false, slot: null, stack: null,
+    fill: { color: "#000000", alpha: 0 }, gradientTo: { color: "#000000", alpha: 0.92 }, gradientDirection: where === "bottom" ? "down" : "up", radius: 0,
+  };
+}
 
 /**
  * The brand's channel, drawn from `accounts` at preview and render time:

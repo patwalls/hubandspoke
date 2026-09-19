@@ -18,6 +18,7 @@ import { layoutChannel, type ChannelInfo } from "@/lib/design-editor/channel";
 import { pageVideo } from "@/lib/design-editor/doc";
 import { activeCue, buildDesignCaptionCues, layoutCaptionCue } from "@/lib/design-editor/captions";
 import { coverGeometry, cropForOffset, layoutDesignText } from "@/lib/design-editor/layout";
+import { elementSnapTargets, snapMove, snapResize, snapThreshold, type SnapGuide } from "@/lib/editor/snap";
 import { commands, useDesign } from "./store";
 
 /**
@@ -59,6 +60,7 @@ export function PageCanvas({
   scale,
   interactive,
   showSlots = false,
+  snap = true,
   className,
 }: {
   doc: DesignDoc;
@@ -75,6 +77,8 @@ export function PageCanvas({
   interactive: boolean;
   /** Template mode: label every slot on the page. */
   showSlots?: boolean;
+  /** Snap drags to the canvas centre/edges and other elements (⌥ bypasses). */
+  snap?: boolean;
   className?: string;
 }) {
   const { width: W, height: H } = doc.canvas;
@@ -86,6 +90,10 @@ export function PageCanvas({
   const selectedId = interactive && selection.pageIndex === pageIndex ? selection.elementId : null;
   /** Pixel size of each picture/clip once loaded — the crop needs it. */
   const naturalSizes = useRef<Record<string, { width: number; height: number }>>({});
+  /** Guide lines while a drag is snapping. */
+  const [guides, setGuides] = useState<SnapGuide[]>([]);
+  const snapTargetsFor = (movingId: string) =>
+    elementSnapTargets(page.elements.filter((el) => el.id !== movingId).map((el) => ({ x: el.x, y: el.y, w: el.w, h: el.h })), { width: W, height: H }, { margin: 40 });
   const video = pageVideo(page);
   /** Repositioning a picture/clip: everything else on the page goes inert
    *  so a drag anywhere over it pans the picture, not the text on top. */
@@ -100,7 +108,7 @@ export function PageCanvas({
   /** Pointer drag mapped to canvas px. */
   const startDrag = (
     e: ReactPointerEvent,
-    onMove: (dx: number, dy: number, shift: boolean) => (d: DesignDoc) => DesignDoc,
+    onMove: (dx: number, dy: number, shift: boolean, alt: boolean) => (d: DesignDoc) => DesignDoc,
     key: string,
   ) => {
     e.preventDefault();
@@ -108,10 +116,11 @@ export function PageCanvas({
     const sx = e.clientX;
     const sy = e.clientY;
     const k = `${key}:${e.timeStamp}`;
-    const move = (ev: PointerEvent) => apply(onMove((ev.clientX - sx) / scale, (ev.clientY - sy) / scale, ev.shiftKey), k);
+    const move = (ev: PointerEvent) => apply(onMove((ev.clientX - sx) / scale, (ev.clientY - sy) / scale, ev.shiftKey, ev.altKey), k);
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      setGuides([]);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -140,23 +149,31 @@ export function PageCanvas({
     }
     select({ pageIndex, elementId: el.id });
     const start = { x: el.x, y: el.y };
+    const targets = snapTargetsFor(el.id);
     startDrag(
       e,
-      (dx, dy, shift) =>
-        commands.patchElement(pageIndex, el.id, (cur) => ({
-          ...cur,
-          x: Math.round(shift ? start.x : start.x + dx),
-          y: Math.round(start.y + dy),
-        })),
+      (dx, dy, shift, alt) =>
+        commands.patchElement(pageIndex, el.id, (cur) => {
+          let x = shift ? start.x : start.x + dx;
+          let y = start.y + dy;
+          if (snap && !alt) {
+            const s = snapMove({ x, y, w: cur.w, h: cur.h }, targets, snapThreshold(scale));
+            x = shift ? x : s.x;
+            y = s.y;
+            setGuides(s.guides.filter((g) => !(shift && g.axis === "x")));
+          } else setGuides([]);
+          return { ...cur, x: Math.round(x), y: Math.round(y) };
+        }),
       `move-${el.id}`,
     );
   };
 
   const onHandleDown = (e: ReactPointerEvent, el: DesignElement, handle: Handle) => {
     const start = { x: el.x, y: el.y, w: el.w, h: el.h };
+    const targets = snapTargetsFor(el.id);
     startDrag(
       e,
-      (dx, dy) =>
+      (dx, dy, _shift, alt) =>
         commands.patchElement(pageIndex, el.id, (cur) => {
           let { x, y, w, h } = start;
           if (handle.includes("e")) w = Math.max(20, start.w + dx);
@@ -169,6 +186,11 @@ export function PageCanvas({
             h = Math.max(20, start.h - dy);
             y = start.y + (start.h - h);
           }
+          if (snap && !alt) {
+            const s = snapResize({ x, y, w, h }, handle, targets, snapThreshold(scale));
+            ({ x, y, w, h } = s.rect);
+            setGuides(s.guides);
+          } else setGuides([]);
           return { ...cur, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
         }),
       `resize-${el.id}`,
@@ -213,6 +235,13 @@ export function PageCanvas({
             }}
             onZoom={(zoom) => apply(commands.patchElement<DesignImageElement | DesignVideoElement>(pageIndex, el.id, (cur) => ({ ...cur, crop: { ...cur.crop, zoom } })), `zoom-${el.id}`)}
             onDoneAdjust={() => setEditing(null)}
+          />
+        ))}
+        {guides.map((g, i) => (
+          <div
+            key={`${g.axis}-${g.at}-${i}`}
+            className="pointer-events-none absolute"
+            style={g.axis === "x" ? { left: g.at - 1, top: 0, width: 2, height: H, background: "#EC4899" } : { top: g.at - 1, left: 0, height: 2, width: W, background: "#EC4899" }}
           />
         ))}
         {showSlots &&
@@ -309,7 +338,7 @@ function ElementView({
           ...base,
           borderRadius: el.radius,
           ...(el.gradientTo
-            ? { backgroundImage: `linear-gradient(180deg, ${rgba(el.fill)} 0%, ${rgba(el.gradientTo)} 100%)` }
+            ? { backgroundImage: `linear-gradient(${el.gradientDirection === "up" ? 0 : 180}deg, ${rgba(el.fill)} 0%, ${rgba(el.gradientTo)} 100%)` }
             : { backgroundColor: rgba(el.fill) }),
         }}
       />

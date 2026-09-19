@@ -21,10 +21,12 @@ import {
   ClapperboardIcon,
   ExternalLinkIcon,
   AtSignIcon,
+  BlendIcon,
   ImageIcon,
   LayoutTemplateIcon,
   LinkIcon,
   Loader2Icon,
+  MagnetIcon,
   MoreHorizontalIcon,
   PauseIcon,
   PlayIcon,
@@ -38,12 +40,13 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, type DesignDoc, type DesignVideoElement } from "@/lib/design-editor/doc";
+import { DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, shadeElement, type DesignDoc, type DesignVideoElement } from "@/lib/design-editor/doc";
 import { applyPhotoPick } from "@/lib/design-editor/template-fill";
 import { BRAND_WORDMARKS } from "@/lib/design-editor/brand-assets";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
 import { applyDmKeyword } from "@/lib/design-editor/template-fill";
 import { resolveChannelsInDoc } from "@/lib/design-editor/channel";
+import { readSnapEnabled, writeSnapEnabled } from "@/lib/editor/snap";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFramesState } from "@/lib/services/design-editor/frames";
@@ -221,6 +224,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   const [leaving, setLeaving] = useState(false);
   const [instruction, setInstruction] = useState(session.design.briefInstruction ?? "");
   const [stageBox, setStageBox] = useState({ w: 0, h: 0 });
+  const [snap, setSnap] = useState(() => (typeof window === "undefined" ? true : readSnapEnabled()));
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   const page = doc.pages[selection.pageIndex] ?? doc.pages[0];
@@ -414,9 +418,17 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     );
     select({ pageIndex, elementId: id });
   };
+  const addShade = () => {
+    const el = shadeElement(doc.canvas, "bottom");
+    // Straight above the last picture on the page (under any text) — the
+    // z-order a shade needs to do its job.
+    const lastImage = page.elements.map((e, i) => (e.type === "image" || e.type === "video" ? i : -1)).filter((i) => i >= 0).pop();
+    apply(commands.addElement(pageIndex, el, lastImage === undefined ? 0 : lastImage + 1));
+    select({ pageIndex, elementId: el.id });
+  };
   const addRect = () => {
     const id = newElementId("r");
-    apply(commands.addElement(pageIndex, { id, name: "Box", type: "rect", x: 140, y: 140, w: 800, h: 300, opacity: 1, locked: false, fill: { color: "#22E07A", alpha: 1 }, gradientTo: null, radius: 24, slot: null, stack: null }));
+    apply(commands.addElement(pageIndex, { id, name: "Box", type: "rect", x: 140, y: 140, w: 800, h: 300, opacity: 1, locked: false, fill: { color: "#22E07A", alpha: 1 }, gradientTo: null, gradientDirection: "down", radius: 24, slot: null, stack: null }));
     select({ pageIndex, elementId: id });
   };
   const addImage = (c: ImageCandidate) => {
@@ -577,6 +589,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
           <div className="flex items-center gap-1.5">
             <Tool onClick={addText} disabled={locked}><TypeIcon className="size-3.5" /> Text</Tool>
             <Tool onClick={addRect} disabled={locked}><SquareIcon className="size-3.5" /> Box</Tool>
+            <Tool onClick={addShade} disabled={locked} title="A clear-to-black fade over the lower part of the photo so white text reads on top"><BlendIcon className="size-3.5" /> Shade</Tool>
             <div className="relative">
               <details className="group">
                 <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[12px] font-medium hover:bg-muted">
@@ -591,12 +604,20 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
             {isTemplate && <Tool onClick={addPhotoSlot} disabled={locked}><ImageIcon className="size-3.5" /> Photo slot</Tool>}
             {pageClip && <Tool onClick={addCaptions} disabled={locked}><CaptionsIcon className="size-3.5" /> Captions</Tool>}
             <Tool onClick={addChannel} disabled={locked}><AtSignIcon className="size-3.5" /> Channel</Tool>
+            <button
+              type="button"
+              onClick={() => { const next = !snap; setSnap(next); writeSnapEnabled(next); }}
+              title="Snap to the canvas centre, edges and other elements while dragging (hold ⌥ to drag freely)"
+              className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] font-medium", snap ? "border-pink-300 bg-pink-50 text-pink-800 dark:bg-pink-950/40 dark:text-pink-200" : "border-border bg-background text-muted-foreground hover:bg-muted")}
+            >
+              <MagnetIcon className="size-3.5" /> Snap
+            </button>
             <span className="ml-auto text-[11px] text-muted-foreground">Page {pageIndex + 1} of {doc.pages.length} · double-click text to edit · ⌫ deletes · arrows nudge</span>
           </div>
           <PlaybackContext.Provider value={playback}>
             <div ref={stageRef} className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
               {scale > 0 && (
-                <PageCanvas doc={doc} page={page} pageIndex={pageIndex} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} channels={channelsInDoc} scale={scale} interactive={!locked} showSlots={isTemplate} className="shadow-xl ring-1 ring-black/20" />
+                <PageCanvas doc={doc} page={page} pageIndex={pageIndex} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} channels={channelsInDoc} scale={scale} interactive={!locked} showSlots={isTemplate} snap={snap} className="shadow-xl ring-1 ring-black/20" />
               )}
             </div>
           </PlaybackContext.Provider>
@@ -697,9 +718,9 @@ function IconButton({ label, disabled, onClick, children }: { label: string; dis
   );
 }
 
-function Tool({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+function Tool({ onClick, disabled, title, children }: { onClick: () => void; disabled?: boolean; title?: string; children: React.ReactNode }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[12px] font-medium hover:bg-muted disabled:opacity-50">
+    <button type="button" onClick={onClick} disabled={disabled} title={title} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[12px] font-medium hover:bg-muted disabled:opacity-50">
       {children}
     </button>
   );

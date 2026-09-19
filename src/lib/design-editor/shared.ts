@@ -64,7 +64,7 @@ export function photoSlot(box: Box, src: DesignImageSource = PHOTO_PLACEHOLDER):
 }
 
 function rect(name: string, box: Box, fill: string, radius: number): DesignElement {
-  return { id: newElementId("r"), name, type: "rect", ...box, opacity: 1, locked: false, fill: { color: fill, alpha: 1 }, gradientTo: null, radius, slot: null, stack: null };
+  return { id: newElementId("r"), name, type: "rect", ...box, opacity: 1, locked: false, fill: { color: fill, alpha: 1 }, gradientTo: null, gradientDirection: "down", radius, slot: null, stack: null };
 }
 
 /** The top of an iOS Notes screenshot: "‹ Reminder", "Done", today's date. */

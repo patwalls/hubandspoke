@@ -136,13 +136,29 @@ export function Inspector({ doc, mode, images, frames, source, onPickImage, onGr
       {el.type === "text" && <TextPanel el={el} patch={(fn, key) => patch<DesignTextElement>(fn, key)} />}
       {el.type === "rect" && (
         <Panel title="Fill">
-          <Color label="Colour" value={el.fill.color} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, fill: { ...e.fill, color: v } }), "fill")} />
-          <Slider label="Fill opacity" value={el.fill.alpha} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, fill: { ...e.fill, alpha: v } }), "fill-a")} />
-          <Check label="Fade to a second colour (gradient)" checked={!!el.gradientTo} onChange={(on) => patch<DesignRectElement>((e) => ({ ...e, gradientTo: on ? { color: "#000000", alpha: 0.9 } : null }))} />
+          <div className="grid grid-cols-2 gap-1">
+            <button type="button" onClick={() => patch<DesignRectElement>((e) => ({ ...e, fill: { color: "#000000", alpha: 0 }, gradientTo: { color: "#000000", alpha: 0.92 }, gradientDirection: "down" }))} className="rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted" title="Clear at the top, black at the bottom — for white text over the lower half of a photo">
+              Fade to black ↓
+            </button>
+            <button type="button" onClick={() => patch<DesignRectElement>((e) => ({ ...e, fill: { color: "#000000", alpha: 0 }, gradientTo: { color: "#000000", alpha: 0.92 }, gradientDirection: "up" }))} className="rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted" title="Clear at the bottom, black at the top — for white text at the top of a photo">
+              Fade to black ↑
+            </button>
+          </div>
+          <Color label={el.gradientTo ? (el.gradientDirection === "up" ? "Bottom (start)" : "Top (start)") : "Colour"} value={el.fill.color} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, fill: { ...e.fill, color: v } }), "fill")} />
+          <Slider label={el.gradientTo ? "Start opacity" : "Opacity"} value={el.fill.alpha} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, fill: { ...e.fill, alpha: v } }), "fill-a")} />
+          <Check label="Gradient (fade to a second colour)" checked={!!el.gradientTo} onChange={(on) => patch<DesignRectElement>((e) => ({ ...e, gradientTo: on ? { color: "#000000", alpha: 0.92 } : null, fill: on && e.fill.alpha === 1 ? { ...e.fill, alpha: 0 } : e.fill }))} />
           {el.gradientTo && (
             <>
-              <Color label="Bottom colour" value={el.gradientTo.color} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, gradientTo: { ...e.gradientTo!, color: v } }), "grad")} />
-              <Slider label="Bottom opacity" value={el.gradientTo.alpha} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, gradientTo: { ...e.gradientTo!, alpha: v } }), "grad-a")} />
+              <Color label={el.gradientDirection === "up" ? "Top (end)" : "Bottom (end)"} value={el.gradientTo.color} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, gradientTo: { ...e.gradientTo!, color: v } }), "grad")} />
+              <Slider label="End opacity" value={el.gradientTo.alpha} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, gradientTo: { ...e.gradientTo!, alpha: v } }), "grad-a")} />
+              <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-0.5 text-xs">
+                {(["down", "up"] as const).map((d) => (
+                  <button key={d} type="button" onClick={() => patch<DesignRectElement>((e) => ({ ...e, gradientDirection: d }))} className={cn("rounded px-2 py-1 font-medium", el.gradientDirection === d ? "bg-background shadow-sm" : "text-muted-foreground")}>
+                    {d === "down" ? "Darkens downward" : "Darkens upward"}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] leading-snug text-muted-foreground">Best practice: keep the shade right above the photo in the stack (under the text), cover the lower ~60% and let it reach ~90% black so white type reads without a box.</p>
             </>
           )}
           <Slider label="Rounded corners" value={el.radius} min={0} max={200} step={2} format={(v) => `${v}`} onChange={(v) => patch<DesignRectElement>((e) => ({ ...e, radius: v }), "radius")} />

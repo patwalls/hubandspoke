@@ -142,8 +142,12 @@ export const commands = {
     (doc: DesignDoc) =>
       mapPage(doc, pageIndex, (p) => ({ ...p, elements: p.elements.map((el) => (el.id === id ? patch(el as E) : el)) })),
 
-  addElement: (pageIndex: number, element: DesignElement) => (doc: DesignDoc) =>
-    mapPage(doc, pageIndex, (p) => ({ ...p, elements: [...p.elements, element] })),
+  /** Append (on top), or insert at `at` in z-order. */
+  addElement: (pageIndex: number, element: DesignElement, at?: number) => (doc: DesignDoc) =>
+    mapPage(doc, pageIndex, (p) => {
+      const i = at === undefined ? p.elements.length : Math.max(0, Math.min(p.elements.length, at));
+      return { ...p, elements: [...p.elements.slice(0, i), element, ...p.elements.slice(i)] };
+    }),
 
   removeElement: (pageIndex: number, id: string) => (doc: DesignDoc) =>
     mapPage(doc, pageIndex, (p) => ({ ...p, elements: p.elements.filter((el) => el.id !== id) })),
