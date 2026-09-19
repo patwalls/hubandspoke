@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { accounts, brands, designDocs, designRenders, productionItems, transcripts } from "@/lib/db/schema";
+import { accounts, brands, designDocs, designRenders, formats, productionItems, transcripts } from "@/lib/db/schema";
 import { parseDesignDoc, type DesignDoc, type DesignImageSource } from "@/lib/design-editor/doc";
 import type { DesignContext } from "@/lib/design-editor/shared";
 import { applyPhotoPick, fillTemplate, type DesignFill } from "@/lib/design-editor/template-fill";
@@ -43,6 +43,8 @@ export interface DesignEditorSession {
     title: string | null;
     brand: string;
     format: string | null;
+    /** The format row, for the link to its template on the format page. */
+    formatId: string | null;
     status: string | null;
     postType: string | null;
     sourceItemId: string;
@@ -236,11 +238,15 @@ async function loadItem(id: string) {
   if (!row) throw new DesignItemNotFoundError();
   const sourceItemId = row.pillarContentItemId ?? row.id;
   const [source] = await db.select({ title: productionItems.title }).from(productionItems).where(eq(productionItems.id, sourceItemId)).limit(1);
+  const [format] = row.format
+    ? await db.select({ id: formats.id }).from(formats).where(and(eq(formats.brand, row.brand ?? "starter-story"), eq(formats.name, row.format))).limit(1)
+    : [];
   return {
     id: row.id,
     title: row.title,
     brand: row.brand ?? "starter-story",
     format: row.format,
+    formatId: format?.id ?? null,
     status: row.status,
     postType: row.postType,
     sourceItemId,

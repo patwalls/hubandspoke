@@ -27,6 +27,7 @@ import {
   type PlatformKey,
 } from "@/lib/platform-field-schemas";
 import { PreviewEmbed } from "./preview/embed";
+import { useDialogUrl } from "./use-dialog-url";
 /** Subset of `RepostCandidate` the dialog actually consumes. The queue
  *  triage path passes a full candidate (with hotness signals + evergreen
  *  reasoning + prior reposts); the content-detail Actions menu synthesizes
@@ -639,6 +640,7 @@ export function RepostTriageDialog({
   onOpenChange,
   ...panelProps
 }: RepostTriageDialogProps) {
+  useDialogUrl({ param: "candidate", id: panelProps.candidate.id, open, onOpenChange });
   // Mirror the cross-post dialog: show a Live-post column on the left when
   // the source has a publishedLink AND a recognized platform key.
   const livePlatform: PlatformKey | null =

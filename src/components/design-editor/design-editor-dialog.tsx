@@ -19,8 +19,12 @@ import {
   CaptionsIcon,
   CheckIcon,
   ClapperboardIcon,
+  ExternalLinkIcon,
   ImageIcon,
+  LayoutTemplateIcon,
+  LinkIcon,
   Loader2Icon,
+  MoreHorizontalIcon,
   PauseIcon,
   PlayIcon,
   PlusIcon,
@@ -145,7 +149,7 @@ export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName,
         return onOpenChange(false);
       }
       setSession({
-        item: { id: formatId, title: formatName, brand, format: formatName, status: null, postType: null, sourceItemId: formatId, sourceTitle: `Template · ${formatName}` },
+        item: { id: formatId, title: formatName, brand, format: formatName, formatId, status: null, postType: null, sourceItemId: formatId, sourceTitle: `Template · ${formatName}` },
         design: { id: formatId, revision: 0, doc: json.template.doc, brief: null, briefInstruction: null },
         imageUrls: json.imageUrls ?? {},
         images: json.images ?? BRAND_WORDMARKS,
@@ -479,6 +483,31 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
         <span className="rounded bg-pink-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pink-800 dark:bg-pink-950 dark:text-pink-300">Editor beta</span>
         <span className="truncate text-xs text-muted-foreground">{session.item.sourceTitle}</span>
         <div className="ml-auto flex items-center gap-1">
+          <details className="relative">
+            <summary className="flex size-7 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" title="Options" aria-label="Options">
+              <MoreHorizontalIcon className="size-4" />
+            </summary>
+            <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-lg border border-border bg-popover p-1 text-sm shadow-lg" onClick={(e) => (e.currentTarget.closest("details") as HTMLDetailsElement).open = false}>
+              {session.item.formatId && (
+                <a href={`/${brand}/formats/${session.item.formatId}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted">
+                  <LayoutTemplateIcon className="size-3.5 text-muted-foreground" /> {isTemplate ? "Open the format page" : `Open the “${session.item.format}” template`}
+                </a>
+              )}
+              {!isTemplate && (
+                <>
+                  <button type="button" onClick={() => { void navigator.clipboard.writeText(window.location.href); toast.success("Link copied"); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted">
+                    <LinkIcon className="size-3.5 text-muted-foreground" /> Copy link to this post
+                  </button>
+                  <a href={`/${brand}/content/${session.item.id}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted">
+                    <ExternalLinkIcon className="size-3.5 text-muted-foreground" /> Open the content page
+                  </a>
+                  <button type="button" onClick={() => void regenerate()} disabled={busy !== null || locked} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50">
+                    <SparklesIcon className="size-3.5 text-pink-500" /> Re-draft from the template
+                  </button>
+                </>
+              )}
+            </div>
+          </details>
           <span className="mr-2 flex items-center gap-1 text-xs text-muted-foreground">
             {saveState === "saved" ? (<><CheckIcon className="size-3" /> Draft saved</>) : saveState === "error" ? (<button type="button" onClick={() => void save()} className="text-red-600 hover:underline">Save failed — retry</button>) : saveState === "conflict" ? "Out of date" : (<><Loader2Icon className="size-3 animate-spin" /> Saving draft…</>)}
           </span>

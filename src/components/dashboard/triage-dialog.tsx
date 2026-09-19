@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { useDesignTemplates } from "@/components/design-editor/use-design-templates";
+import { useDialogUrl } from "./use-dialog-url";
 
 // Lazy: only a browser whose user has the `designEditor` flag AND opens a
 // designable item ever downloads the editor.
@@ -132,6 +133,8 @@ function showTriageToast(
  */
 export function TriageDialog(props: TriageDialogProps) {
   const flags = useFeatureFlags();
+  // `?item=<id>` — a link for the open post; Back / close returns to the queue.
+  useDialogUrl({ param: "item", id: props.item.id, open: props.open, onOpenChange: props.onOpenChange });
   const templates = useDesignTemplates(!!flags?.designEditor);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
   const { item } = props;

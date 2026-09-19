@@ -31,12 +31,9 @@ import {
 } from "lucide-react";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { SocialEmbedHeader } from "./preview/social-embed-header";
+import { useDialogUrl } from "./use-dialog-url";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
-import {
-  readClipParam,
-  refreshClipDrafts,
-  writeClipParam,
-} from "@/components/clip-editor/drafts";
+import { CLIP_PARAM, refreshClipDrafts } from "@/components/clip-editor/drafts";
 
 // Lazy: the editor bundle (player, stage, font metrics, zustand) is only ever
 // fetched by a browser whose user has the `clipEditor` flag AND opens a clip.
@@ -148,24 +145,13 @@ export function ClipTriageDialog(props: Props) {
   const useEditor = !!flags?.clipEditor && !!ideaId && !unsupported.has(ideaId);
   const { open, onOpenChange } = props;
 
-  // The open editor lives in the URL (`?clip=<id>`), so a reload — or a
-  // crash — lands back in it instead of on the bare queue. Restore runs once
-  // per mount, and only for the row whose idea the URL names.
-  const restored = useRef(false);
+  // The open dialog lives in the URL (`?clip=<id>`) — editor or classic —
+  // so it has a link to send, a reload lands back in it, and closing goes
+  // back to the queue.
+  useDialogUrl({ param: CLIP_PARAM, id: ideaId, open, onOpenChange });
   useEffect(() => {
-    if (!useEditor || restored.current) return;
-    restored.current = true;
-    if (!open && readClipParam() === ideaId) onOpenChange(true);
-  }, [useEditor, ideaId, open, onOpenChange]);
-
-  useEffect(() => {
-    if (!useEditor) return;
-    if (open) writeClipParam(ideaId);
-    else if (readClipParam() === ideaId) {
-      writeClipParam(null);
-      refreshClipDrafts(); // closing may have just created / updated a draft
-    }
-  }, [useEditor, ideaId, open]);
+    if (useEditor && !open) refreshClipDrafts(); // closing may have just created / updated a draft
+  }, [useEditor, open]);
 
   if (useEditor) {
     return (

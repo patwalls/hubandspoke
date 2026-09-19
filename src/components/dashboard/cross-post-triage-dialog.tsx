@@ -35,6 +35,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { BrandAccount } from "@/lib/services/cross-post-candidates";
 import { PreviewEmbed } from "./preview/embed";
+import { useDialogUrl } from "./use-dialog-url";
 
 /** "3d ago", "2h ago", "just now" — short relative-time helper for the
  *  "Already posted · Xd ago" hint on a cross-post target row. Same shape
@@ -958,6 +959,7 @@ export function CrossPostTriageDialog({
   onOpenChange,
   ...panelProps
 }: CrossPostTriageDialogProps) {
+  useDialogUrl({ param: "candidate", id: panelProps.candidate.id, open, onOpenChange });
   // Show a Live-post column on the left whenever the source has a
   // publishedLink AND a recognized platform key. Skip when either is
   // missing — falls back to the original single-column layout so the

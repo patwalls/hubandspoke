@@ -9,6 +9,7 @@ import { isNotionAuthoritative } from "@/lib/platform";
 import { SelectPill } from "./filter-pills";
 const HistoryQueueTable = dynamic(() => import("./history-queue-table").then((m) => m.HistoryQueueTable), { ssr: false });
 const SpokeQueueTable = dynamic(() => import("./spoke-queue-table").then((m) => m.SpokeQueueTable), { ssr: false });
+const RestoredDesignEditor = dynamic(() => import("@/components/design-editor/restored-design-editor").then((m) => m.RestoredDesignEditor), { ssr: false });
 const RepostQueueTable = dynamic(() => import("./repost-queue-table").then((m) => m.RepostQueueTable), { ssr: false });
 const CrossPostQueueTable = dynamic(() => import("./cross-post-queue-table").then((m) => m.CrossPostQueueTable), { ssr: false });
 // Static import ON PURPOSE: this is the default tab — dynamic() suspends
@@ -719,6 +720,8 @@ export function QueueView({
         spokeLoading ? (
           <LoadingPanel label="Running SPOKE algorithm…" />
         ) : (
+          <>
+          <RestoredDesignEditor brand={brand} onDone={fetchSpokeQueue} />
           <SpokeQueueTable
             items={spokeFiltered}
             brand={brand}
@@ -731,6 +734,7 @@ export function QueueView({
             }
             onMutate={fetchSpokeQueue}
           />
+          </>
         )
       ) : loading ? (
         <LoadingPanel label="Loading queue…" />

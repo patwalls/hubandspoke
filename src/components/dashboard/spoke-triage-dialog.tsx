@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { useDesignTemplates } from "@/components/design-editor/use-design-templates";
+import { readUrlParam, replaceUrlParam, useDialogUrl } from "./use-dialog-url";
 
 // Lazy: only a browser whose user has the `designEditor` flag AND opens a
 // designable candidate ever downloads the editor.
@@ -59,6 +60,10 @@ function formatCompact(n: number | null | undefined): string {
  */
 export function SpokeTriageDialog(props: SpokeTriageDialogProps) {
   const flags = useFeatureFlags();
+  // `?candidate=<id>` — the open candidate has a link; once the design
+  // editor has made its item, `&item=<id>` is added in place (below).
+  const [detached] = useState(() => !!readUrlParam("item"));
+  useDialogUrl({ param: "candidate", id: props.candidate.id, open: props.open, onOpenChange: props.onOpenChange, enabled: !detached });
   const templates = useDesignTemplates(!!flags?.designEditor);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
   const useDesigner =
@@ -107,6 +112,7 @@ function DesignFromCandidate({
         if (cancelled) return;
         if (!res.ok || !json.productionItemId) return onUnsupported(json.error);
         setItemId(json.productionItemId);
+        replaceUrlParam("item", json.productionItemId);
       } catch {
         if (!cancelled) onUnsupported();
       }

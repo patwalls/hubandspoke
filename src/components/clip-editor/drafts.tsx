@@ -21,20 +21,6 @@ import { useFeatureFlags } from "./use-feature-flags";
 
 export const CLIP_PARAM = "clip";
 
-export function readClipParam(): string | null {
-  if (typeof window === "undefined") return null;
-  return new URLSearchParams(window.location.search).get(CLIP_PARAM);
-}
-
-export function writeClipParam(clipIdeaId: string | null): void {
-  const url = new URL(window.location.href);
-  if (clipIdeaId) url.searchParams.set(CLIP_PARAM, clipIdeaId);
-  else url.searchParams.delete(CLIP_PARAM);
-  if (url.href !== window.location.href) {
-    window.history.replaceState(window.history.state, "", url);
-  }
-}
-
 // ── Draft list (module-cached, shared by every row) ────────────────────────
 
 let drafts: Set<string> | null = null;
