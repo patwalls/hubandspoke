@@ -220,17 +220,12 @@ function ClipTrim({ el, patch, onSeekClip }: { el: DesignVideoElement; patch: (f
         {num("Start (s)", "startSec")}
         {num("End (s)", "endSec")}
       </div>
-      <div className="grid grid-cols-2 gap-1">
-        <button type="button" onClick={() => patch((c) => ({ ...c, startSec: Math.max(0, c.startSec - 2) }), "trim-startSec")} className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-muted">Start −2s</button>
-        <button type="button" onClick={() => patch((c) => ({ ...c, startSec: Math.min(c.endSec - 1, c.startSec + 2) }), "trim-startSec")} className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-muted">Start +2s</button>
-        <button type="button" onClick={() => patch((c) => ({ ...c, endSec: Math.max(c.startSec + 1, c.endSec - 2) }), "trim-endSec")} className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-muted">End −2s</button>
-        <button type="button" onClick={() => patch((c) => ({ ...c, endSec: c.endSec + 2 }), "trim-endSec")} className="rounded border border-border px-1 py-0.5 text-[11px] hover:bg-muted">End +2s</button>
-      </div>
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
         <span>{formatSec(el.startSec)} → {formatSec(el.endSec)}</span>
         <span className="font-mono">{len.toFixed(1)}s</span>
       </div>
       <button type="button" onClick={() => onSeekClip(0)} className="rounded border border-border px-2 py-1 text-[11px] hover:bg-muted">Preview from the start</button>
+      <p className="text-[11px] leading-snug text-muted-foreground">Trim against the transcript in the panel under the slide.</p>
     </div>
   );
 }

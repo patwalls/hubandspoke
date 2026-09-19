@@ -27,12 +27,15 @@ import { commands, useDesign } from "./store";
 export interface PlaybackState {
   timeSec: number;
   playing: boolean;
+  /** Length of the source video, once its metadata loaded (0 = unknown). */
+  durationSec: number;
   setTime: (sec: number) => void;
   setPlaying: (on: boolean) => void;
+  setDuration: (sec: number) => void;
   /** Reload the <video> at this clip time (after a trim edit / scrub). */
   seekRequest: { sec: number; nonce: number } | null;
 }
-export const PlaybackContext = createContext<PlaybackState>({ timeSec: 0, playing: false, setTime: () => {}, setPlaying: () => {}, seekRequest: null });
+export const PlaybackContext = createContext<PlaybackState>({ timeSec: 0, playing: false, durationSec: 0, setTime: () => {}, setPlaying: () => {}, setDuration: () => {}, seekRequest: null });
 
 function rgba(c: Rgba): string {
   const r = parseInt(c.color.slice(1, 3), 16);
@@ -388,7 +391,7 @@ function VideoView({ el, videoUrl, base, hover, editing, interactive, onNaturalS
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const g = natural ? coverGeometry(natural, { w: el.w, h: el.h }, el.crop, el.fit) : null;
   const { startSec, endSec } = el;
-  const { playing, setPlaying, setTime, seekRequest } = playback;
+  const { playing, setPlaying, setTime, setDuration, seekRequest } = playback;
 
   // Play/pause follows the shared state; time reports back in clip seconds.
   useEffect(() => {
@@ -426,6 +429,7 @@ function VideoView({ el, videoUrl, base, hover, editing, interactive, onNaturalS
             const size = { width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight };
             setNatural(size);
             onNaturalSize(size);
+            if (interactive && Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
           }}
           onTimeUpdate={(e) => {
             const v = e.currentTarget;

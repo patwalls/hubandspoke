@@ -33,12 +33,13 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, type DesignDoc } from "@/lib/design-editor/doc";
+import { DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, type DesignDoc, type DesignVideoElement } from "@/lib/design-editor/doc";
 import { applyPhotoPick } from "@/lib/design-editor/template-fill";
 import { BRAND_WORDMARKS } from "@/lib/design-editor/brand-assets";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFramesState } from "@/lib/services/design-editor/frames";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
+import { ClipTrimmer } from "./clip-trimmer";
 import { Inspector, PicturePicker, formatSec, frameCandidate } from "./inspector";
 import { PageCanvas, PlaybackContext, type PlaybackState } from "./page-canvas";
 import { DesignStoreContext, commands, createDesignStore, useDesign, useDesignStoreApi } from "./store";
@@ -217,8 +218,9 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   const [timeSec, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [seekRequest, setSeekRequest] = useState<PlaybackState["seekRequest"]>(null);
+  const [sourceDurationSec, setSourceDurationSec] = useState(0);
   const seekClip = useCallback((sec: number) => setSeekRequest({ sec, nonce: Date.now() }), []);
-  const playback = useMemo<PlaybackState>(() => ({ timeSec, playing, setTime, setPlaying, seekRequest }), [timeSec, playing, seekRequest]);
+  const playback = useMemo<PlaybackState>(() => ({ timeSec, playing, durationSec: sourceDurationSec, setTime, setPlaying, setDuration: setSourceDurationSec, seekRequest }), [timeSec, playing, seekRequest, sourceDurationSec]);
   useEffect(() => {
     setPlaying(false);
     setTime(0);
@@ -551,6 +553,15 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
               <span className="font-mono text-[11px] text-muted-foreground">{formatSec(timeSec)} / {formatSec(clipLen)}</span>
               <span className="text-[11px] text-muted-foreground">Video slide · exports as an mp4</span>
             </div>
+          )}
+          {pageClip && !isTemplate && (
+            <ClipTrimmer
+              el={pageClip}
+              words={session.words}
+              durationSec={sourceDurationSec}
+              patch={(fn, key) => apply(commands.patchElement<DesignVideoElement>(pageIndex, pageClip.id, fn), key)}
+              onPlayFrom={(sec) => { seekClip(sec); setPlaying(true); }}
+            />
           )}
         </div>
 
