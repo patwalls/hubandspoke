@@ -49,6 +49,8 @@ export async function GET(request: NextRequest) {
       WHERE media_s3_key = ${key} OR poster_s3_key = ${key}
       UNION ALL
       SELECT 1 FROM production_item_media WHERE s3_key = ${key}
+      UNION ALL
+      SELECT 1 FROM accounts WHERE avatar_s3_key = ${key}
     ) AS exists
   `);
   if (!rows[0]?.exists) {

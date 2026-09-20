@@ -1211,6 +1211,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - Idempotent — overwrites whatever SC returned non-null
   - Per-platform endpoints; skips platforms without SC support
   - 1 SC credit per account
+- **Durable avatars (2026-09-20):** after a successful refresh the task archives the platform avatar to S3 (`src/lib/services/account-avatar.ts` → `<prefix>/accounts/<id>/avatar-<hash>.<ext>`, skipped when the platform URL is unchanged) and rewrites `accounts.avatar_url` to `/api/media-proxy?key=<avatar_s3_key>` — same-origin and permanent, so the simulator/AccountBadge/channel element stop falling back to a monogram when Instagram's CDN link expires (they last days). `avatar_source_url` keeps the platform URL. Server-side fetchers (the design render) use `avatarFetchUrl` to presign. Backfill: `npx tsx scripts/backfill-account-avatars.ts --apply` archives what's still reachable and enqueues `account-refresh` for accounts whose URL already expired (ran on prod 2026-09-20).
 
 ### `transcribe-whisper` — Whisper transcription (ffmpeg + OpenAI)
 - **Trigger:** enqueued by `enrich-item` (when it sets `mediaS3Key`), by `youtube-download` (on success), by `POST /api/uploads/confirm` (user direct upload), and by `POST /api/production-items/[id]/transcript/fetch` (manual refetch). Operational kill switch: `WHISPER_TRANSCRIBE_LIVE=false` disables enqueue-side firing.

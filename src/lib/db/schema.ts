@@ -2157,6 +2157,14 @@ export const accounts = pgTable(
     syncedFromNotion: boolean("synced_from_notion").notNull().default(false),
     lastRefreshedAt: timestamp("last_refreshed_at", { withTimezone: true }),
     lastRefreshError: text("last_refresh_error"),
+    // Our durable copy of the avatar (2026-09-20). Platform avatar URLs
+    // (Instagram's especially) expire within days, so account-refresh
+    // archives the picture to S3 and points `avatar_url` at
+    // `/api/media-proxy?key=<avatar_s3_key>` — same-origin, permanent.
+    // `avatar_source_url` is the platform URL that copy came from, so a
+    // refresh that returns the same URL doesn't re-download it.
+    avatarS3Key: text("avatar_s3_key"),
+    avatarSourceUrl: text("avatar_source_url"),
     // Stamped by the per-account content sync (account-content-sync task).
     // Distinct from lastRefreshedAt, which is the profile-metadata sweep.
     lastContentSyncAt: timestamp("last_content_sync_at", { withTimezone: true }),

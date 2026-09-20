@@ -25,6 +25,7 @@ import { accounts } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { scFetchJson, ScrapeCreatorsError } from "@/lib/services/sc-client";
 import { getAccountById } from "@/lib/db/accounts";
+import { archiveAccountAvatar } from "@/lib/services/account-avatar";
 
 interface AccountRefreshResult {
   displayName?: string | null;
@@ -360,6 +361,8 @@ export async function refreshAccount(
   if (result.metadata) patch.metadata = result.metadata;
 
   await db.update(accounts).set(patch).where(eq(accounts.id, accountId));
+  // Keep our own copy of the avatar — the platform URL just written expires.
+  if (result.avatarUrl) await archiveAccountAvatar(accountId, result.avatarUrl);
   return { platform: account.platform, credits: 1, ok: true };
 }
 

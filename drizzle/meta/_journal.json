@@ -771,6 +771,13 @@
       "when": 1789859044362,
       "tag": "0109_worthless_doomsday",
       "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1789863695017,
+      "tag": "0110_daily_corsair",
+      "breakpoints": true
     }
   ]
 }

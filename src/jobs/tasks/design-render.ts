@@ -22,6 +22,7 @@ import { downloadToFile, probeSource, runFfmpeg } from "@/lib/services/ffmpeg-pr
 import { pageVideo, parseDesignDoc, type DesignImageSource, type DesignPage } from "@/lib/design-editor/doc";
 import { fontsUsed, pageToSatoriTree, videoPageLayers, type ResolvedChannels, type ResolvedImages } from "@/lib/design-editor/render-tree";
 import { loadBrandChannels, resolveChannel } from "@/lib/services/design-editor/channels";
+import { avatarFetchUrl } from "@/lib/services/account-avatar";
 import { buildDesignCaptionCues } from "@/lib/design-editor/captions";
 import { buildCaptionsAss } from "@/lib/design-editor/design-ass";
 import { buildFrameGrabArgs, buildVideoPageArgs, buildVideoPageFilterGraph } from "@/lib/design-editor/design-ffmpeg";
@@ -90,7 +91,7 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
           // element falls back to the initial in a circle.
           if (info?.avatarUrl) {
             try {
-              images[el.id] = await loadImage({ kind: "url", url: info.avatarUrl });
+              images[el.id] = await loadImage({ kind: "url", url: (await avatarFetchUrl(info.avatarUrl)) ?? info.avatarUrl });
             } catch (err) {
               helpers.logger.warn(`design-render: avatar fetch failed for ${info.accountId}: ${err instanceof Error ? err.message : err}`);
             }

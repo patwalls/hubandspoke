@@ -29,6 +29,8 @@ export async function loadBrandChannels(brandSlug: string): Promise<ChannelInfo[
     platform: r.platform,
     name: r.displayName ?? r.label ?? r.handle ?? "Channel",
     handle: r.handle,
+    // Our durable copy when there is one (a same-origin proxy URL the
+    // browser can load); the render task presigns it (`avatarFetchUrl`).
     avatarUrl: r.avatarUrl,
     followerCount: r.followerCount,
     // Our own brand accounts carry the tick on the platforms that show one.
