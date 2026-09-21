@@ -112,10 +112,14 @@ export function buildVideoPageArgs(args: {
 }
 
 /** Args for one still frame of a source at `sec`, scaled to `width` wide. */
-export function buildFrameGrabArgs(args: { input: string; sec: number; width: number; outputPath: string }): string[] {
+/** One still, at the source's own resolution (a 1080p video gives a
+ *  1920-wide frame; 4K is capped at `maxWidth`) as a near-lossless JPEG —
+ *  these get placed full-bleed and zoomed into, so no downscale here. A
+ *  smaller source is never upscaled. */
+export function buildFrameGrabArgs(args: { input: string; sec: number; maxWidth: number; outputPath: string }): string[] {
   const isHttp = /^https?:\/\//i.test(args.input);
   const argv = ["-hide_banner", "-loglevel", "error", "-nostats", "-y"];
   if (isHttp) argv.push("-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5");
-  argv.push("-threads", "1", "-ss", args.sec.toFixed(3), "-i", args.input, "-frames:v", "1", "-vf", `scale=${args.width}:-2:flags=lanczos`, "-q:v", "3", args.outputPath);
+  argv.push("-threads", "1", "-ss", args.sec.toFixed(3), "-i", args.input, "-frames:v", "1", "-vf", `scale='min(iw,${args.maxWidth})':-2:flags=lanczos`, "-q:v", "2", args.outputPath);
   return argv;
 }

@@ -46,7 +46,7 @@ export function layoutChannel(el: DesignChannelElement, info: ChannelInfo | null
   const subSize = Math.round(d * 0.32);
   const base = { id: el.id, opacity: 1, locked: false, slot: null, stack: null } as const;
   const style = (sizePx: number, color: string, fontId: "inter-semibold" | "inter-regular") => ({
-    fontId, sizePx, lineHeight: 1.2, color, align: "left" as const, valign: "middle" as const, uppercase: false, shadow: null, autoFit: true, minSizePx: 10,
+    fontId, sizePx, lineHeight: 1.2, letterSpacing: 0, color, align: "left" as const, valign: "middle" as const, uppercase: false, shadow: null, autoFit: true, minSizePx: 10,
   });
   const nameEl: DesignTextElement = {
     ...base, id: `${el.id}-name`, name: "Channel name", type: "text",

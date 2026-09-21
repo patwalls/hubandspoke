@@ -22,7 +22,7 @@ import { buildFrameGrabArgs } from "@/lib/design-editor/design-ffmpeg";
 import { frameTimes } from "@/lib/design-editor/frame-times";
 import { resolveTranscriptWords } from "@/lib/clip-editor/words";
 import { downloadToFile, probeSource, runFfmpeg } from "@/lib/services/ffmpeg-process";
-import { AUTO_FRAME_COUNT, FRAME_WIDTH } from "@/lib/services/design-editor/frames";
+import { AUTO_FRAME_COUNT, FRAME_MAX_WIDTH } from "@/lib/services/design-editor/frames";
 
 export interface DesignFramesPayload {
   /** The SOURCE (pillar) item whose video the frames come from. */
@@ -109,7 +109,7 @@ async function grabOne(sourceItemId: string, localSource: string, sec: number, w
   await db.insert(designFrames).values({ productionItemId: sourceItemId, sec: secStr, origin, status: "pending" }).onConflictDoNothing();
   const file = path.join(workDir, `frame-${secStr.replace(".", "_")}.jpg`);
   try {
-    await runFfmpeg(buildFrameGrabArgs({ input: localSource, sec, width: FRAME_WIDTH, outputPath: file }), { timeoutMs: 120_000 });
+    await runFfmpeg(buildFrameGrabArgs({ input: localSource, sec, maxWidth: FRAME_MAX_WIDTH, outputPath: file }), { timeoutMs: 120_000 });
     const buf = await readFile(file);
     if (buf.length === 0) throw new Error("empty frame");
     const dims = imageSize(buf);

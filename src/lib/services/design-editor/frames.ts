@@ -16,7 +16,10 @@ import type { DesignImageSource } from "@/lib/design-editor/doc";
 import { getPresignedGetUrl } from "@/lib/s3";
 
 export const AUTO_FRAME_COUNT = 12;
-export const FRAME_WIDTH = 1080;
+/** Frames keep the source's resolution up to this (4K sources are capped;
+ *  1080p sources give 1920-wide stills) — they get placed full-bleed and
+ *  zoomed, so quality matters more than bytes (~0.5–1.5 MB each). */
+export const FRAME_MAX_WIDTH = 2160;
 
 export interface DesignFrame {
   id: string;

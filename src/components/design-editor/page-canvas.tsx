@@ -512,7 +512,7 @@ function CaptionsView({ el, cues, base, hover, interactive, onPointerDown }: {
   return (
     <div className={cn(hover, interactive && "outline-dashed outline-1 outline-sky-300/40")} onPointerDown={onPointerDown} style={{ ...base, opacity: cue ? el.opacity : el.opacity * 0.5 }}>
       {layout.lines.map((line, i) => (
-        <div key={i} className="absolute flex whitespace-pre" style={{ left: line.x - el.x, top: line.y - el.y, height: layout.linePitchPx, lineHeight: `${layout.linePitchPx}px`, fontSize: layout.fontSizePx, fontFamily: `"${font.cssFamily}"`, fontWeight: font.cssWeight, color: el.style.color, ...(shadow ? { textShadow: shadow } : {}) }}>
+        <div key={i} className="absolute flex whitespace-pre" style={{ left: line.x - el.x, top: line.y - el.y, height: layout.linePitchPx, lineHeight: `${layout.linePitchPx}px`, fontSize: layout.fontSizePx, fontFamily: `"${font.cssFamily}"`, fontWeight: font.cssWeight, color: el.style.color, letterSpacing: `${el.style.letterSpacing ?? 0}em`, ...(shadow ? { textShadow: shadow } : {}) }}>
           {line.words.map((w, wi) => <span key={wi}>{(wi > 0 ? " " : "") + w.text}</span>)}
         </div>
       ))}

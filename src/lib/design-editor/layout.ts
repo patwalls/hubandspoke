@@ -85,6 +85,7 @@ function layoutAt(el: DesignTextElement, fontSizePx: number): DesignTextLayout {
     anchor: "top",
     widthPct: 100,
     balance: false,
+    letterSpacingEm: el.style.letterSpacing,
   });
   // The engine's pitch is fixed (LINE_HEIGHT_EM); rescale to the element's.
   // Paragraph gaps (blank lines in the text) add to the block on top.

@@ -113,6 +113,8 @@ export function layoutTextBlock(args: {
   widthPct: number;
   /** Balance line widths (hooks) or fill greedily (captions). */
   balance: boolean;
+  /** Extra space after every glyph, in em (CSS letter-spacing). */
+  letterSpacingEm?: number;
 }): TextBlockLayout {
   const font = FONTS[args.style.fontId];
   const fontSizePx = (args.style.sizePct / 100) * args.canvas.height;
@@ -123,8 +125,11 @@ export function layoutTextBlock(args: {
 
   const display = (t: string) => (args.style.uppercase ? t.toUpperCase() : t);
   const words = args.words.map((w) => ({ ...w, text: display(w.text) }));
-  const widths = words.map((w) => measureTextEm(font, w.text) * fontSizePx);
-  const spaceWidth = measureTextEm(font, " ") * fontSizePx;
+  // Letter spacing is added after every glyph (as CSS does), so a word is
+  // wider by one spacing per character and a space by one.
+  const spacing = (args.letterSpacingEm ?? 0) * fontSizePx;
+  const widths = words.map((w) => measureTextEm(font, w.text) * fontSizePx + spacing * [...w.text].length);
+  const spaceWidth = measureTextEm(font, " ") * fontSizePx + spacing;
 
   const breaks = (args.balance ? balancedBreak : greedyBreak)(
     widths,

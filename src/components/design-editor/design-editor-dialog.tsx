@@ -421,7 +421,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       commands.addElement(pageIndex, {
         id, name: "Text", type: "text", x: 90, y: 440, w: 900, h: 200, opacity: 1, locked: false,
         spans: [{ text: "Your text here" }],
-        style: { fontId: "montserrat-extrabold", sizePx: 64, lineHeight: 1.15, color: page.background === "#F7F5EF" ? "#1C1C1E" : "#FFFFFF", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 16 },
+        style: { fontId: "montserrat-extrabold", sizePx: 64, lineHeight: 1.15, letterSpacing: 0, color: page.background === "#F7F5EF" ? "#1C1C1E" : "#FFFFFF", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 16 },
         slot: null, stack: null,
       }),
     );
@@ -477,7 +477,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   const addCaptions = () => {
     const id = newElementId("c");
     const dark = page.background.toLowerCase() === "#ffffff" || page.background === "#F7F5EF";
-    apply(commands.addElement(pageIndex, { id, name: "Captions", type: "captions", x: 60, y: 60, w: doc.canvas.width - 120, h: 130, opacity: 1, locked: false, maxWordsPerCue: 12, style: { fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, color: dark ? "#5C5C5C" : "#FFFFFF", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 20 }, slot: null, stack: null }));
+    apply(commands.addElement(pageIndex, { id, name: "Captions", type: "captions", x: 60, y: 60, w: doc.canvas.width - 120, h: 130, opacity: 1, locked: false, maxWordsPerCue: 12, style: { fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, letterSpacing: 0, color: dark ? "#5C5C5C" : "#FFFFFF", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 20 }, slot: null, stack: null }));
     select({ pageIndex, elementId: id });
   };
 

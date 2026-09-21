@@ -14,6 +14,7 @@ import type { DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElem
 import { DM_KEYWORD_TOKEN } from "@/lib/design-editor/doc";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
 import { formatFollowers } from "@/lib/design-editor/channel";
+import { layoutDesignText } from "@/lib/design-editor/layout";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFrame, DesignFramesState } from "@/lib/services/design-editor/frames";
 import { commands, useDesign } from "./store";
@@ -469,6 +470,9 @@ function CaptionsPanel({ el, patch }: { el: DesignCaptionsElement; patch: (fn: (
 
 function TextPanel({ el, patch }: { el: DesignTextElement; patch: (fn: (e: DesignTextElement) => DesignTextElement, key?: string) => void }) {
   const style = (p: Partial<DesignTextElement["style"]>, key?: string) => patch((e) => ({ ...e, style: { ...e.style, ...p } }), key);
+  // The size the text is actually drawn at — smaller than the slider when
+  // shrink-to-fit had to step in (the slider then looks broken).
+  const fittedSize = useMemo(() => (el.style.autoFit ? layoutDesignText(el).fontSizePx : null), [el]);
   return (
     <Panel title="Text">
       <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
@@ -480,7 +484,13 @@ function TextPanel({ el, patch }: { el: DesignTextElement; patch: (fn: (e: Desig
         </select>
       </label>
       <Slider label="Size" value={el.style.sizePx} min={12} max={320} step={1} format={(v) => `${Math.round(v)}px`} onChange={(v) => style({ sizePx: v }, "size")} />
+      {el.style.autoFit && fittedSize !== null && fittedSize < el.style.sizePx - 0.5 && (
+        <p className="-mt-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] leading-snug text-amber-800">
+          Showing at {Math.round(fittedSize)}px &mdash; &ldquo;Shrink to fit the box&rdquo; is on and the text doesn&apos;t fit at {Math.round(el.style.sizePx)}px. Make the box bigger, or turn shrink-to-fit off.
+        </p>
+      )}
       <Slider label="Line height" value={el.style.lineHeight} min={0.8} max={2} step={0.02} format={(v) => v.toFixed(2)} onChange={(v) => style({ lineHeight: v }, "lh")} />
+      <Slider label="Letter spacing" value={el.style.letterSpacing ?? 0} min={-0.05} max={0.4} step={0.005} format={(v) => `${(v * 100).toFixed(1)}%`} onChange={(v) => style({ letterSpacing: v }, "ls")} />
       <Color label="Colour" value={el.style.color} onChange={(v) => style({ color: v }, "color")} />
       <div className="grid grid-cols-3 gap-1 rounded-md bg-muted p-0.5 text-xs">
         {(["left", "center", "right"] as const).map((a) => (

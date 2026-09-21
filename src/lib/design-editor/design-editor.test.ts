@@ -195,7 +195,7 @@ describe("layoutDesignText", () => {
   const el: DesignTextElement = {
     id: "t", name: "t", type: "text", x: 100, y: 100, w: 800, h: 300, opacity: 1, locked: false,
     spans: [{ text: "Hello " }, { text: "world", color: "#22E07A" }, { text: " again" }],
-    style: { fontId: "anton", sizePx: 80, lineHeight: 1.2, color: "#FFFFFF", align: "center", valign: "bottom", uppercase: true, shadow: null, autoFit: false, minSizePx: 20 },
+    style: { fontId: "anton", sizePx: 80, lineHeight: 1.2, letterSpacing: 0, color: "#FFFFFF", align: "center", valign: "bottom", uppercase: true, shadow: null, autoFit: false, minSizePx: 20 },
     slot: null, stack: null,
   };
 
@@ -327,7 +327,7 @@ describe("captions", () => {
     const ws = words("alpha beta gamma delta epsilon zeta eta theta");
     const cues = buildDesignCaptionCues(ws, { startSec: 101, endSec: 102.5 }, 12);
     expect(cues.map((c) => c.text).join(" ")).toBe("gamma delta epsilon");
-    const el: DesignCaptionsElement = { id: "c", name: "Captions", type: "captions", x: 60, y: 60, w: 960, h: 130, opacity: 1, locked: false, maxWordsPerCue: 12, style: { fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, color: "#5C5C5C", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 20 }, slot: null, stack: null };
+    const el: DesignCaptionsElement = { id: "c", name: "Captions", type: "captions", x: 60, y: 60, w: 960, h: 130, opacity: 1, locked: false, maxWordsPerCue: 12, style: { fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, letterSpacing: 0, color: "#5C5C5C", align: "center", valign: "middle", uppercase: false, shadow: null, autoFit: true, minSizePx: 20 }, slot: null, stack: null };
     const ass = buildCaptionsAss(el, cues, IG_SQUARE);
     expect(ass).toContain("Style: Cap0,Inter");
     expect(ass.match(/^Dialogue:/gm)).toHaveLength(1);

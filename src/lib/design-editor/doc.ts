@@ -30,6 +30,8 @@ const textStyleSchema = z.object({
   sizePx: px.min(8).max(600),
   /** Line pitch as a multiple of the font size. */
   lineHeight: z.number().min(0.7).max(3),
+  /** Extra space after each letter, in em (CSS letter-spacing). */
+  letterSpacing: z.number().min(-0.1).max(1).default(0),
   color: hexColor,
   align: z.enum(["left", "center", "right"]),
   valign: z.enum(["top", "middle", "bottom"]),

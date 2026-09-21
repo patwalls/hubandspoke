@@ -142,7 +142,7 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
         const { size } = await stat(outputPath);
         if (size === 0) throw new Error("ffmpeg produced an empty file");
         const posterPath = path.join(workDir, `p${i}-poster.jpg`);
-        await runFfmpeg(buildFrameGrabArgs({ input: outputPath, sec: 0, width: doc.canvas.width, outputPath: posterPath }), { timeoutMs: 60_000 });
+        await runFfmpeg(buildFrameGrabArgs({ input: outputPath, sec: 0, maxWidth: doc.canvas.width, outputPath: posterPath }), { timeoutMs: 60_000 });
         const s3Key = buildKey(render.productionItemId, `design-page-${i + 1}.mp4`);
         const posterS3Key = buildKey(render.productionItemId, `design-page-${i + 1}-poster.jpg`);
         await putObjectFromFile(s3Key, outputPath, "video/mp4");

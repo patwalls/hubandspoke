@@ -36,6 +36,7 @@ export const baseText = (over: Partial<DesignTextStyle>): DesignTextStyle => ({
   fontId: "inter-regular",
   sizePx: 32,
   lineHeight: 1.25,
+  letterSpacing: 0,
   color: "#FFFFFF",
   align: "left",
   valign: "top",
@@ -123,18 +124,18 @@ export function videoPageTemplate(args: { clipHint: string; pillHint: string; pi
   const pillX = Math.round((W - pillW) / 2);
   const pillY = boxY + boxH - 96;
   elements.push(rect("Pill", { x: pillX, y: pillY, w: pillW, h: 64 }, PILL_PURPLE, 14));
-  elements.push(text("Pill label", { x: pillX, y: pillY, w: pillW, h: 64 }, [{ text: args.pillSample }], baseText({ fontId: "montserrat-extrabold", sizePx: 30, lineHeight: 1, color: "#FFFFFF", align: "center", valign: "middle", uppercase: true, autoFit: true, minSizePx: 16 }), { slot: ai(args.pillHint) }));
+  elements.push(text("Pill label", { x: pillX, y: pillY, w: pillW, h: 64 }, [{ text: args.pillSample }], baseText({ fontId: "montserrat-extrabold", sizePx: 30, lineHeight: 1, letterSpacing: 0, color: "#FFFFFF", align: "center", valign: "middle", uppercase: true, autoFit: true, minSizePx: 16 }), { slot: ai(args.pillHint) }));
   if (args.captions) {
     elements.push({
       id: newElementId("c"), name: "Captions", type: "captions", x: 60, y: 60, w: W - 120, h: 130, opacity: 1, locked: false, maxWordsPerCue: 12,
-      style: baseText({ fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, color: "#5C5C5C", align: "center", valign: "middle", autoFit: true, minSizePx: 20 }),
+      style: baseText({ fontId: "inter-regular", sizePx: 32, lineHeight: 1.25, letterSpacing: 0, color: "#5C5C5C", align: "center", valign: "middle", autoFit: true, minSizePx: 20 }),
       slot: null, stack: null,
     });
   }
   const titleY = boxY + boxH + 34;
-  elements.push(text("Video title", { x: M, y: titleY, w: boxW - 190, h: 100 }, [{ text: args.titleSample }], baseText({ fontId: "inter-bold", sizePx: 40, lineHeight: 1.15, color: "#0F0F0F", align: "left", valign: "top", autoFit: true, minSizePx: 24 }), { slot: sys("videoTitle") }));
+  elements.push(text("Video title", { x: M, y: titleY, w: boxW - 190, h: 100 }, [{ text: args.titleSample }], baseText({ fontId: "inter-bold", sizePx: 40, lineHeight: 1.15, letterSpacing: 0, color: "#0F0F0F", align: "left", valign: "top", autoFit: true, minSizePx: 24 }), { slot: sys("videoTitle") }));
   elements.push(rect("YouTube badge", { x: W - M - 160, y: titleY + 2, w: 160, h: 46 }, "#FF0000", 10));
-  elements.push(text("YouTube", { x: W - M - 160, y: titleY + 2, w: 160, h: 46 }, [{ text: "▶ YouTube" }], baseText({ fontId: "inter-bold", sizePx: 24, lineHeight: 1, color: "#FFFFFF", align: "center", valign: "middle" })));
+  elements.push(text("YouTube", { x: W - M - 160, y: titleY + 2, w: 160, h: 46 }, [{ text: "▶ YouTube" }], baseText({ fontId: "inter-bold", sizePx: 24, lineHeight: 1, letterSpacing: 0, color: "#FFFFFF", align: "center", valign: "middle" })));
   const rowY = titleY + 116;
   elements.push(channelElement({ x: M, y: rowY, w: 620, h: 68 }));
   elements.push({ id: newElementId("img"), name: "Wordmark", type: "image", x: W - M - 260, y: rowY + 6, w: 260, h: 60, opacity: 0.9, locked: false, src: WORDMARK_DARK, fit: "contain", radius: 0, crop: { ...DEFAULT_CROP }, slot: null, stack: null });

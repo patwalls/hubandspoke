@@ -48,6 +48,7 @@ function textNodes(el: DesignTextElement): Node[] {
         whiteSpace: "pre",
         display: "flex",
         opacity: el.opacity,
+        ...(el.style.letterSpacing ? { letterSpacing: `${el.style.letterSpacing}em` } : {}),
         ...(shadow ? { textShadow: shadow } : {}),
       },
       children: line.words.map((w, wi) => ({
