@@ -11,13 +11,16 @@
  * the words the cut keeps; Redraft re-runs it against the current cut.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLinkIcon, Loader2Icon, SparklesIcon } from "lucide-react";
+import { ExternalLinkIcon, Loader2Icon, MessageSquareTextIcon, SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 import type { ContentDraftContent } from "@/lib/db/schema";
 import type { ProductionItem } from "@/types";
 import type { ClipPost } from "@/lib/services/clip-editor/post-draft";
 import { ContentPreview } from "@/components/dashboard/preview/content-preview";
 import type { EnrichmentMedia } from "@/components/dashboard/enrichment-dialog";
+import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
+import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
+import { captionMentionsKeyword, keywordCtaLine, replaceKeywordInCaption } from "@/lib/dm-keyword-text";
 
 interface DraftRow {
   id: string;
@@ -37,6 +40,8 @@ export function PostPane({
   brand,
   onDraftingChange,
   beforeRedraft,
+  dmKeyword: dmKeywordProp,
+  onDmKeywordChange,
 }: {
   post: ClipPost;
   brand: string;
@@ -45,6 +50,12 @@ export function PostPane({
   /** Flush the clip's edits first, so a redraft reads the current cut.
    *  Resolve false to abort. */
   beforeRedraft?: () => Promise<boolean>;
+  /** The post's DM keyword as the parent knows it (the design editor can
+   *  change it from its CTA panel too); the pane follows it. */
+  dmKeyword?: string | null;
+  /** The keyword was changed here — the parent updates its own copy (the
+   *  design's CTA elements). */
+  onDmKeywordChange?: (slug: string | null) => void;
 }) {
   const itemId = post.productionItemId;
   const [detail, setDetail] = useState<DetailResponse | null>(null);
@@ -105,6 +116,18 @@ export function PostPane({
     };
   }, [itemId, load, settled, detail?.currentDraft]);
 
+  // ── DM keyword ──────────────────────────────────────────────────────────
+  // The keyword lives on the item (its attached short link). It can change
+  // from here (the dialog below) or from the parent; either way the caption
+  // follows: the old keyword is swapped for the new one wherever it appears.
+  const [keywordOpen, setKeywordOpen] = useState(false);
+  const [keyword, setKeywordState] = useState<{ base: string | null | undefined; value: string | null }>({ base: dmKeywordProp, value: dmKeywordProp ?? null });
+  if (keyword.base !== dmKeywordProp) setKeywordState({ base: dmKeywordProp, value: dmKeywordProp ?? null });
+  const currentKeyword = keyword.value ?? detail?.item.shortLinkSlug ?? null;
+  const captionKey = post.postType ? PLATFORM_FIELD_MAP[post.postType as PostType]?.caption ?? null : null;
+  const caption = captionKey && typeof liveContent?.[captionKey] === "string" ? (liveContent[captionKey] as string) : "";
+  const mentionsKeyword = !!currentKeyword && captionMentionsKeyword(caption, currentKeyword);
+
   const drafting = running === true || redrafting;
   useEffect(() => {
     onDraftingChange?.(drafting);
@@ -116,10 +139,10 @@ export function PostPane({
 
   // Blur-save one field, the same clone-on-write PUT the content page uses.
   const onCommit = useCallback(
-    async (fieldKey: string) => {
+    async (fieldKey: string, value?: string) => {
       const draft = detail?.currentDraft;
       if (!draft) return;
-      const next = liveContent?.[fieldKey];
+      const next = value ?? liveContent?.[fieldKey];
       if (next === draft.content[fieldKey] || (next == null && draft.content[fieldKey] == null)) return;
       try {
         const res = await fetch(`/api/production-items/${itemId}/drafts/${draft.id}`, {
@@ -137,6 +160,42 @@ export function PostPane({
     },
     [detail?.currentDraft, itemId, liveContent],
   );
+
+  /** A new keyword: remember it, tell the parent, and rewrite the caption. */
+  const keywordChanged = async (slug: string | null, from: string | null) => {
+    setKeywordState({ base: dmKeywordProp, value: slug });
+    onDmKeywordChange?.(slug);
+    if (!captionKey || !slug || !from) return;
+    const rewritten = replaceKeywordInCaption(caption, from, slug);
+    if (rewritten !== caption) {
+      onLocalEdit(captionKey, rewritten);
+      await onCommit(captionKey, rewritten);
+      toast.success(`Caption now says ${slug.toUpperCase()}`);
+    }
+  };
+  // The parent changed the keyword (design CTA panel): follow it in the caption.
+  const lastFollowed = useRef<string | null | undefined>(dmKeywordProp);
+  useEffect(() => {
+    if (dmKeywordProp === undefined || lastFollowed.current === dmKeywordProp) return;
+    const from = lastFollowed.current ?? null;
+    lastFollowed.current = dmKeywordProp;
+    if (!captionKey || !dmKeywordProp || !from) return;
+    const rewritten = replaceKeywordInCaption(caption, from, dmKeywordProp);
+    if (rewritten !== caption) {
+      onLocalEdit(captionKey, rewritten);
+      void onCommit(captionKey, rewritten);
+    }
+    // caption/onCommit are read at the moment the keyword changes; re-running
+    // on their updates would loop the rewrite.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dmKeywordProp]);
+
+  const addKeywordToCaption = async () => {
+    if (!captionKey || !currentKeyword) return;
+    const next = `${caption.trimEnd()}\n\n${keywordCtaLine(currentKeyword)}`.trimStart();
+    onLocalEdit(captionKey, next);
+    await onCommit(captionKey, next);
+  };
 
   const redraft = async () => {
     setRedrafting(true);
@@ -198,6 +257,35 @@ export function PostPane({
           <ExternalLinkIcon className="size-3.5" />
         </a>
       </div>
+
+      {detail && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs">
+          <MessageSquareTextIcon className="size-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">DM keyword</span>
+          {currentKeyword ? (
+            <span className="rounded bg-background px-1.5 py-0.5 font-mono font-semibold">{currentKeyword.toUpperCase()}</span>
+          ) : (
+            <span className="text-muted-foreground">none — comments won&apos;t trigger a DM</span>
+          )}
+          <button type="button" onClick={() => setKeywordOpen(true)} className="rounded-md border border-border bg-background px-2 py-0.5 hover:bg-muted">
+            {currentKeyword ? "Change…" : "Attach…"}
+          </button>
+          {currentKeyword && draft && !mentionsKeyword && (
+            <button type="button" onClick={() => void addKeywordToCaption()} className="ml-auto text-sky-700 hover:underline" title={`The caption doesn't say ${currentKeyword.toUpperCase()} yet`}>
+              Add &ldquo;comment {currentKeyword.toUpperCase()}&rdquo; to the caption
+            </button>
+          )}
+          {currentKeyword && mentionsKeyword && <span className="ml-auto text-muted-foreground">in the caption ✓</span>}
+        </div>
+      )}
+      <AttachDmKeywordDialog
+        open={keywordOpen}
+        onOpenChange={setKeywordOpen}
+        itemId={itemId}
+        currentSlug={currentKeyword}
+        baseUrl="https://go.starterstory.com"
+        onSaved={(slug) => keywordChanged(slug, currentKeyword)}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {loadError ? (

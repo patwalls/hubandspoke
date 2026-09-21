@@ -609,7 +609,17 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       {session.post && !isTemplate && (
         <div className={cn("min-h-0 flex-1 px-5 py-4", tab !== "post" && "hidden")}>
           <div className="mx-auto h-full max-w-3xl">
-            <PostPane post={session.post} brand={brand} onDraftingChange={setPostDrafting} beforeRedraft={save} />
+            <PostPane
+              post={session.post}
+              brand={brand}
+              onDraftingChange={setPostDrafting}
+              beforeRedraft={save}
+              dmKeyword={dmKeyword}
+              onDmKeywordChange={(slug) => {
+                setDmKeyword(slug);
+                apply(() => applyDmKeyword(storeApi.getState().doc, slug));
+              }}
+            />
           </div>
         </div>
       )}

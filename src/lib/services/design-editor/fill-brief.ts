@@ -29,6 +29,9 @@ export interface GenerateFillArgs {
   template: DesignDoc;
   /** Free-text steer from the user ("focus on the pricing strategy"). */
   instruction?: string | null;
+  /** The post's attached ManyChat keyword, so the caption tells readers
+   *  to comment it. */
+  dmKeyword?: string | null;
   client?: Anthropic;
 }
 
@@ -133,6 +136,7 @@ export function buildFillPrompt(args: {
   transcript: string;
   slots: DesignSlotSpec[];
   instruction: string | null;
+  dmKeyword?: string | null;
 }): Anthropic.TextBlockParam[] {
   const blocks: Anthropic.TextBlockParam[] = [];
   blocks.push({ type: "text", text: `## SOURCE VIDEO\nTitle: ${args.title ?? "(untitled)"}\nFormat: ${args.formatName}` });
@@ -149,6 +153,7 @@ export function buildFillPrompt(args: {
   }
   blocks.push({ type: "text", text: `## SLOTS TO FILL\n${describeSlots(args.slots)}` });
   blocks.push({ type: "text", text: `## TRANSCRIPT\n${args.transcript.slice(0, TRANSCRIPT_CHAR_BUDGET)}` });
+  if (args.dmKeyword?.trim()) blocks.push({ type: "text", text: `## DM KEYWORD\nThis post is wired to ManyChat with the keyword "${args.dmKeyword.trim().toUpperCase()}": the caption's CTA must tell readers to comment "${args.dmKeyword.trim().toUpperCase()}" to get the link DM'd (that is the CTA — not "link in bio"). Never invent a different keyword.` });
   if (args.instruction?.trim()) blocks.push({ type: "text", text: `## INSTRUCTION FROM THE EDITOR (follow this)\n${args.instruction.trim().slice(0, 1000)}` });
   blocks.push({ type: "text", text: "Fill the template now. Call fill_design exactly once." });
   return blocks;
@@ -242,6 +247,7 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
             transcript: transcript.segmentsMarkdown,
             slots,
             instruction: args.instruction ?? null,
+            dmKeyword: args.dmKeyword ?? null,
           }),
         },
       ],

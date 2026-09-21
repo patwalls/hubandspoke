@@ -166,7 +166,7 @@ export async function regenerateDesign(args: {
 }
 
 async function draftDoc(itemId: string, sourceItemId: string, template: DesignDoc, instruction: string | null) {
-  const result = await generateDesignFill({ productionItemId: itemId, template, instruction });
+  const result = await generateDesignFill({ productionItemId: itemId, template, instruction, dmKeyword: await currentDmKeyword(itemId) });
   if (!result.ok) {
     if (result.failure.reason === "no-transcript") throw new DesignUnsupportedError("no_transcript");
     throw new DesignUnsupportedError("ai_failed", result.failure.message ?? result.failure.reason);
