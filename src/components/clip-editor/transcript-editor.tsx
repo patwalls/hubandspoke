@@ -29,7 +29,7 @@ import {
   useState,
   type MouseEvent,
 } from "react";
-import { PlusIcon, RotateCcwIcon, ScissorsIcon } from "lucide-react";
+import { ChevronsLeftRightIcon, PlusIcon, RotateCcwIcon, ScissorsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ClipEditDoc } from "@/lib/clip-editor/doc";
 import type { RenderPlan } from "@/lib/clip-editor/plan";
@@ -40,6 +40,7 @@ import {
   type ViewGap,
   type ViewToken,
   type ViewWord,
+  trimRangeFor,
 } from "@/lib/clip-editor/transcript-view";
 import type { PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
@@ -307,6 +308,33 @@ export function TranscriptEditor({
     [apply, readOnly, setSelection],
   );
 
+  /**
+   * Tidy one edge of a single kept word: shave TRIM_STEP_SEC more off its
+   * start or end (a "trim" removal that never reaches the word's middle,
+   * so the word stays in the transcript), then play the join. What
+   * Descript's gap handles do, without a timeline.
+   */
+  const trimWordEdge = useCallback(
+    (edge: "start" | "end") => {
+      if (!selection || readOnly) return;
+      const lo = Math.min(selection.anchor, selection.focus);
+      const w = view.words[lo];
+      if (!w || w.state !== "kept" || !w.sectionId) return;
+      const range = trimRangeFor(w.word, edge, edge === "start" ? w.trimStartSec : w.trimEndSec);
+      if (!range) return;
+      apply(commands.remove(w.sectionId, [range], "trim"), `trim-${w.pos}-${edge}`);
+      // Hear the result: a second before the edge, through it.
+      const edgeSec = edge === "start" ? range.endSec : range.startSec;
+      const out = sourceToOutput(plan, Math.max(0, edgeSec - 0.9), w.sectionId);
+      if (out !== null) {
+        engine.seek(out);
+        engine.play();
+        window.setTimeout(() => engine.pause(), 1800);
+      }
+    },
+    [selection, readOnly, view.words, apply, plan, engine],
+  );
+
   const removeSelection = useCallback(() => {
     if (!actions) return;
     run((d) =>
@@ -449,6 +477,17 @@ export function TranscriptEditor({
               End here
             </ToolbarButton>
           )}
+          {actions.wordCount === 1 && view.words[lo]?.state === "kept" && (
+            <span className="flex items-center gap-0.5" title="Tidy a blip at the edge of this word: each press shaves 0.08s and plays the join. Undo with ⌘Z.">
+              <ChevronsLeftRightIcon className="mx-0.5 size-3.5 text-muted-foreground" />
+              <ToolbarButton tone="quiet" onClick={() => trimWordEdge("start")}>
+                ◁ start{view.words[lo].trimStartSec > 0 ? ` −${view.words[lo].trimStartSec.toFixed(2)}s` : ""}
+              </ToolbarButton>
+              <ToolbarButton tone="quiet" onClick={() => trimWordEdge("end")}>
+                end ▷{view.words[lo].trimEndSec > 0 ? ` −${view.words[lo].trimEndSec.toFixed(2)}s` : ""}
+              </ToolbarButton>
+            </span>
+          )}
           {actions.wordCount === 1 && view.words[lo]?.state !== "outside" && (
             <ToolbarButton
               tone="quiet"
@@ -560,6 +599,8 @@ const TranscriptChunk = memo(function TranscriptChunk({
                 t.state === "removed" && "line-through decoration-2",
                 t.state === "removed" && t.reason === "filler" && "text-amber-600/70 decoration-amber-500/60",
                 t.state === "removed" && t.reason !== "filler" && "text-red-500/60 decoration-red-400/60",
+                t.state === "kept" && t.trimStartSec > 0 && "border-l-2 border-rose-400/80",
+                t.state === "kept" && t.trimEndSec > 0 && "border-r-2 border-rose-400/80",
                 t.corrected && "underline decoration-dotted decoration-sky-500 underline-offset-4",
                 t.pos >= selLo && t.pos <= selHi && "bg-sky-200/80 !text-foreground dark:bg-sky-800/70",
               )}

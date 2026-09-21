@@ -31,6 +31,10 @@ export interface ViewWord {
   sectionId: string | null;
   state: WordState;
   reason: RemovalReason | null;
+  /** Seconds shaved off this (kept) word's start / end — "trim" removals
+   *  that cover an edge but not the middle. 0 when untouched. */
+  trimStartSec: number;
+  trimEndSec: number;
 }
 
 export interface ViewGap {
@@ -117,6 +121,7 @@ export function buildTranscriptView(
       sectionId: section?.id ?? null,
       state: !section ? "outside" : removal ? "removed" : "kept",
       reason: removal?.reason ?? null,
+      ...(section && !removal ? wordTrims(section, word) : { trimStartSec: 0, trimEndSec: 0 }),
     };
     flat.push(view);
     tokens.push(view);
@@ -159,6 +164,37 @@ export interface SelectionActions {
   /** Trim a section to start / end at the selection. Null when N/A. */
   startHere: { sectionId: string; window: TimeRange } | null;
   endHere: { sectionId: string; window: TimeRange } | null;
+}
+
+/** How much of a kept word's edges is shaved off by removals that don't
+ *  reach its middle. */
+export function wordTrims(section: Section, word: EditorWord): { trimStartSec: number; trimEndSec: number } {
+  const mid = (word.startSec + word.endSec) / 2;
+  let trimStartSec = 0;
+  let trimEndSec = 0;
+  for (const r of section.removals) {
+    if (r.startSec <= word.startSec && r.endSec > word.startSec && r.endSec <= mid) trimStartSec = Math.max(trimStartSec, r.endSec - word.startSec);
+    if (r.endSec >= word.endSec && r.startSec < word.endSec && r.startSec >= mid) trimEndSec = Math.max(trimEndSec, word.endSec - r.startSec);
+  }
+  return { trimStartSec: round3(trimStartSec), trimEndSec: round3(trimEndSec) };
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+/** How far a single tidy press shaves. */
+export const TRIM_STEP_SEC = 0.08;
+
+/**
+ * Shave `step` more off a word's edge (never past its middle). Returns the
+ * removal range to add, or null when the edge is as short as it can get.
+ */
+export function trimRangeFor(word: EditorWord, edge: "start" | "end", current: number, step = TRIM_STEP_SEC): TimeRange | null {
+  const half = (word.endSec - word.startSec) / 2 - 0.02;
+  const next = Math.min(half, current + step);
+  if (next <= current + 0.005) return null;
+  return edge === "start" ? { startSec: word.startSec, endSec: round3(word.startSec + next) } : { startSec: round3(word.endSec - next), endSec: word.endSec };
 }
 
 /** What can be done with the words at positions [lo, hi]. */

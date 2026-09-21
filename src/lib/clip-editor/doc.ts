@@ -44,7 +44,9 @@ export type TimeRange = z.infer<typeof timeRangeSchema>;
 
 /** Why a range was removed. Kept so bulk actions are reversible as a group
  *  ("restore all filler words") and so we can learn from manual edits later. */
-export const REMOVAL_REASONS = ["manual", "filler", "silence"] as const;
+/** "trim" = a sliver shaved off the start or end of one word to clean a
+ *  blip at the join (the transcript keeps showing the word). */
+export const REMOVAL_REASONS = ["manual", "filler", "silence", "trim"] as const;
 export type RemovalReason = (typeof REMOVAL_REASONS)[number];
 
 const removalSchema = z

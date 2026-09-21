@@ -75,3 +75,21 @@ describe("caption effects in the ASS export", () => {
     expect(new Set(layers)).toEqual(new Set([3, 4, 5, 10]));
   });
 });
+
+import { trimRangeFor, wordTrims } from "./transcript-view";
+
+describe("tidying a word's edges", () => {
+  const word = { index: 0, text: "mechanics", startSec: 10, endSec: 10.6 };
+  it("each press shaves a step more, never past the middle, and the view reports it", () => {
+    const first = trimRangeFor(word, "end", 0)!;
+    expect(first).toEqual({ startSec: 10.52, endSec: 10.6 });
+    const second = trimRangeFor(word, "end", 0.08)!;
+    expect(second.startSec).toBeCloseTo(10.44, 5);
+    // 0.6s word → at most 0.28s off one edge.
+    expect(trimRangeFor(word, "end", 0.28)).toBeNull();
+    const section = { id: "s", role: "body" as const, startSec: 0, endSec: 60, removals: [{ ...second, reason: "trim" as const }, { startSec: 10, endSec: 10.05, reason: "trim" as const }] };
+    expect(wordTrims(section, word)).toEqual({ trimStartSec: 0.05, trimEndSec: 0.16 });
+    // A removal over the whole word is a removal, not a trim.
+    expect(wordTrims({ ...section, removals: [{ startSec: 9, endSec: 11, reason: "manual" as const }] }, word)).toEqual({ trimStartSec: 0, trimEndSec: 0 });
+  });
+});

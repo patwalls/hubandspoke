@@ -302,7 +302,7 @@ function TrimStrip({
             title={`${r.reason} · ${(r.endSec - r.startSec).toFixed(1)}s`}
             className={cn(
               "absolute inset-y-0",
-              r.reason === "filler" ? "bg-amber-500/60" : r.reason === "silence" ? "bg-zinc-500/50" : "bg-red-500/55",
+              r.reason === "filler" ? "bg-amber-500/60" : r.reason === "silence" ? "bg-zinc-500/50" : r.reason === "trim" ? "bg-rose-400/70" : "bg-red-500/55",
             )}
             style={{ left: left(r.startSec), width: width(r.startSec, r.endSec) }}
           />
