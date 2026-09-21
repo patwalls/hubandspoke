@@ -121,7 +121,7 @@ export function buildTranscriptView(
       sectionId: section?.id ?? null,
       state: !section ? "outside" : removal ? "removed" : "kept",
       reason: removal?.reason ?? null,
-      ...(section && !removal ? wordTrims(section, word) : { trimStartSec: 0, trimEndSec: 0 }),
+      ...(section && !removal ? wordTrims(section, word, words[i - 1], words[i + 1]) : { trimStartSec: 0, trimEndSec: 0 }),
     };
     flat.push(view);
     tokens.push(view);
@@ -168,13 +168,21 @@ export interface SelectionActions {
 
 /** How much of a kept word's edges is shaved off by removals that don't
  *  reach its middle. */
-export function wordTrims(section: Section, word: EditorWord): { trimStartSec: number; trimEndSec: number } {
+export function wordTrims(section: Section, word: EditorWord, prev?: EditorWord, next?: EditorWord): { trimStartSec: number; trimEndSec: number } {
   const mid = (word.startSec + word.endSec) / 2;
+  // A "trim" cut that runs into the gap beside the word counts too (that
+  // gap is the word's — see word-trim.ts), measured from the gap's far edge.
+  const before = prev ? Math.max(prev.endSec, word.startSec - 1) : word.startSec - 1;
+  const after = next ? Math.min(next.startSec, word.endSec + 1) : word.endSec + 1;
+  // Removal edges are rounded to the millisecond; word times are not.
+  const E = 2e-3;
   let trimStartSec = 0;
   let trimEndSec = 0;
   for (const r of section.removals) {
-    if (r.startSec <= word.startSec && r.endSec > word.startSec && r.endSec <= mid) trimStartSec = Math.max(trimStartSec, r.endSec - word.startSec);
-    if (r.endSec >= word.endSec && r.startSec < word.endSec && r.startSec >= mid) trimEndSec = Math.max(trimEndSec, word.endSec - r.startSec);
+    if (r.startSec <= word.startSec + E && r.endSec > word.startSec + E && r.endSec <= mid) trimStartSec = Math.max(trimStartSec, r.endSec - word.startSec);
+    else if (r.reason === "trim" && r.startSec <= before + E && r.endSec > before && r.endSec <= word.startSec + E) trimStartSec = Math.max(trimStartSec, r.endSec - before);
+    if (r.endSec >= word.endSec - E && r.startSec < word.endSec - E && r.startSec >= mid) trimEndSec = Math.max(trimEndSec, word.endSec - r.startSec);
+    else if (r.reason === "trim" && r.endSec >= after - E && r.startSec < after && r.startSec >= word.endSec - E) trimEndSec = Math.max(trimEndSec, after - r.startSec);
   }
   return { trimStartSec: round3(trimStartSec), trimEndSec: round3(trimEndSec) };
 }

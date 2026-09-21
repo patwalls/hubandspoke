@@ -40,10 +40,11 @@ import {
   type ViewGap,
   type ViewToken,
   type ViewWord,
-  trimRangeFor,
 } from "@/lib/clip-editor/transcript-view";
 import type { PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
+import { applyWordTrim, stepWordTrim, wordTrimAudition, wordTrimWindow } from "@/lib/clip-editor/word-trim";
+import { WordTrimmer } from "./word-trimmer";
 
 const WORDS_PER_CHUNK = 90;
 
@@ -115,6 +116,11 @@ export function TranscriptEditor({
   const [dragging, setDragging] = useState(false);
   const [editingPos, setEditingPos] = useState<number | null>(null);
   const [toolbar, setToolbar] = useState<{ top: number; left: number; below: boolean } | null>(null);
+  /** The word whose trim popover is open (double-click), and where it sits. */
+  const [trimPos, setTrimPos] = useState<number | null>(null);
+  const [trimBox, setTrimBox] = useState<{ top: number; left: number } | null>(null);
+  /** A join to play once the plan has caught up with the last trim. */
+  const [audition, setAudition] = useState<{ sectionId: string; startSec: number; endSec: number; key: number } | null>(null);
 
   const chunks = useMemo(() => chunkTokens(view.tokens), [view]);
   const lo = selection ? Math.min(selection.anchor, selection.focus) : -1;
@@ -209,6 +215,7 @@ export function TranscriptEditor({
 
   const onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
+    if (trimPos !== null) setTrimPos(null); // any click in the text closes the trimmer
     const pos = posFromEvent(e);
     if (pos === null) {
       if (!(e.target as HTMLElement).closest("[data-gap]")) setSelection(null);
@@ -258,10 +265,13 @@ export function TranscriptEditor({
   const onDoubleClick = (e: MouseEvent) => {
     if (readOnly) return;
     const pos = posFromEvent(e);
-    if (pos !== null && view.words[pos]?.state !== "outside") {
-      setSelection(null);
-      setEditingPos(pos);
-    }
+    const w = pos !== null ? view.words[pos] : undefined;
+    if (!w || w.state === "outside") return;
+    setSelection(null);
+    // A kept word opens the trimmer (which has the spelling field too); a
+    // cut word only has its text to fix.
+    if (w.state === "kept") setTrimPos(pos);
+    else setEditingPos(pos);
   };
 
   // ── Floating toolbar placement ──────────────────────────────────────────
@@ -298,6 +308,73 @@ export function TranscriptEditor({
     };
   }, [placeToolbar]);
 
+  // The trim popover sits under its word and follows scrolling; it closes
+  // when the word scrolls out of view or is no longer kept.
+  const placeTrimmer = useCallback(() => {
+    const wrap = wrapRef.current;
+    const scroller = scrollRef.current;
+    if (!wrap || !scroller || trimPos === null) return setTrimBox(null);
+    const el = scroller.querySelector(`[data-pos="${trimPos}"]`);
+    if (!el) return setTrimBox(null);
+    const word = el.getBoundingClientRect();
+    const box = wrap.getBoundingClientRect();
+    const port = scroller.getBoundingClientRect();
+    if (word.bottom < port.top || word.top > port.bottom) return setTrimBox(null);
+    setTrimBox({ top: word.bottom + 6 - box.top, left: Math.min(Math.max(word.left + word.width / 2 - box.left, 185), box.width - 185) });
+  }, [trimPos]);
+  useLayoutEffect(placeTrimmer, [placeTrimmer, view]);
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    scroller.addEventListener("scroll", placeTrimmer, { passive: true });
+    window.addEventListener("resize", placeTrimmer);
+    return () => {
+      scroller.removeEventListener("scroll", placeTrimmer);
+      window.removeEventListener("resize", placeTrimmer);
+    };
+  }, [placeTrimmer]);
+  useEffect(() => {
+    if (trimPos !== null && view.words[trimPos]?.state !== "kept") setTrimPos(null);
+  }, [trimPos, view]);
+
+  /** The trim window of a kept word, computed from the live doc. */
+  const trimWindowFor = useCallback(
+    (pos: number) => {
+      const w = view.words[pos];
+      if (!w || w.state !== "kept" || !w.sectionId) return null;
+      const section = doc.sections.find((s) => s.id === w.sectionId);
+      if (!section) return null;
+      return wordTrimWindow(section, view.words.map((v) => v.word), pos, (i) => view.words[i].text);
+    },
+    [view, doc],
+  );
+
+  /** Write new cut points for a word and queue the join for playback. */
+  const trimWord = useCallback(
+    (pos: number, inSec: number, outSec: number, coalesceKey?: string) => {
+      const win = trimWindowFor(pos);
+      if (!win || readOnly) return;
+      apply((d) => ({ ...d, sections: d.sections.map((s) => (s.id === win.sectionId ? applyWordTrim(s, win, inSec, outSec) : s)) }), coalesceKey);
+      const range = wordTrimAudition(win, inSec, outSec);
+      setAudition({ sectionId: win.sectionId, ...range, key: Date.now() });
+    },
+    [trimWindowFor, apply, readOnly],
+  );
+
+  // Play the join once the plan reflects the trim (it is recomputed by the
+  // parent after `apply`, a render later).
+  useEffect(() => {
+    if (!audition) return;
+    const start = sourceToOutput(plan, audition.startSec, audition.sectionId) ?? sourceToOutput(plan, audition.startSec + 0.75, audition.sectionId);
+    const end = sourceToOutput(plan, audition.endSec, audition.sectionId);
+    if (start === null) return;
+    engine.seek(start);
+    engine.play();
+    const ms = Math.max(400, ((end ?? start + 1.2) - start) * 1000);
+    const t = window.setTimeout(() => engine.pause(), ms);
+    return () => window.clearTimeout(t);
+  }, [audition, plan, engine]);
+
   // ── Actions ─────────────────────────────────────────────────────────────
   const run = useCallback(
     (mutate: (d: ClipEditDoc) => ClipEditDoc) => {
@@ -309,30 +386,21 @@ export function TranscriptEditor({
   );
 
   /**
-   * Tidy one edge of a single kept word: shave TRIM_STEP_SEC more off its
-   * start or end (a "trim" removal that never reaches the word's middle,
-   * so the word stays in the transcript), then play the join. What
-   * Descript's gap handles do, without a timeline.
+   * Tidy one edge of a single kept word from the toolbar: the first press
+   * cuts the gap beside it (where the blip usually lives), later presses
+   * shave the word, and each plays the join. The popover does the same
+   * with handles — see word-trim.ts.
    */
   const trimWordEdge = useCallback(
     (edge: "start" | "end") => {
       if (!selection || readOnly) return;
       const lo = Math.min(selection.anchor, selection.focus);
-      const w = view.words[lo];
-      if (!w || w.state !== "kept" || !w.sectionId) return;
-      const range = trimRangeFor(w.word, edge, edge === "start" ? w.trimStartSec : w.trimEndSec);
-      if (!range) return;
-      apply(commands.remove(w.sectionId, [range], "trim"), `trim-${w.pos}-${edge}`);
-      // Hear the result: a second before the edge, through it.
-      const edgeSec = edge === "start" ? range.endSec : range.startSec;
-      const out = sourceToOutput(plan, Math.max(0, edgeSec - 0.9), w.sectionId);
-      if (out !== null) {
-        engine.seek(out);
-        engine.play();
-        window.setTimeout(() => engine.pause(), 1800);
-      }
+      const win = trimWindowFor(lo);
+      if (!win) return;
+      const next = stepWordTrim(win, edge);
+      if (next) trimWord(lo, next.inSec, next.outSec, `trim-${lo}-${edge}`);
     },
-    [selection, readOnly, view.words, apply, plan, engine],
+    [selection, readOnly, trimWindowFor, trimWord],
   );
 
   const removeSelection = useCallback(() => {
@@ -432,6 +500,24 @@ export function TranscriptEditor({
         })}
       </div>
 
+      {trimPos !== null && trimBox && !readOnly && (() => {
+        const win = trimWindowFor(trimPos);
+        const w = view.words[trimPos];
+        if (!win || !w) return null;
+        return (
+          <div className="absolute z-20 -translate-x-1/2" style={{ top: trimBox.top, left: trimBox.left }}>
+            <WordTrimmer
+              win={win}
+              text={w.text}
+              onTrim={(inSec, outSec) => trimWord(trimPos, inSec, outSec)}
+              onText={(text) => apply(commands.correctWord(w.word, text))}
+              onAudition={() => setAudition({ sectionId: win.sectionId, ...wordTrimAudition(win, win.inSec, win.outSec), key: Date.now() })}
+              onClose={() => setTrimPos(null)}
+            />
+          </div>
+        );
+      })()}
+
       {toolbar && actions && !readOnly && (
         <div
           role="toolbar"
@@ -478,13 +564,16 @@ export function TranscriptEditor({
             </ToolbarButton>
           )}
           {actions.wordCount === 1 && view.words[lo]?.state === "kept" && (
-            <span className="flex items-center gap-0.5" title="Tidy a blip at the edge of this word: each press shaves 0.08s and plays the join. Undo with ⌘Z.">
+            <span className="flex items-center gap-0.5" title="Tidy a blip at the edge of this word: the first press cuts the gap beside it, then each press shaves 0.08s, and the join plays. Double-click the word for handles. Undo with ⌘Z.">
               <ChevronsLeftRightIcon className="mx-0.5 size-3.5 text-muted-foreground" />
               <ToolbarButton tone="quiet" onClick={() => trimWordEdge("start")}>
-                ◁ start{view.words[lo].trimStartSec > 0 ? ` −${view.words[lo].trimStartSec.toFixed(2)}s` : ""}
+                ◁ start
               </ToolbarButton>
               <ToolbarButton tone="quiet" onClick={() => trimWordEdge("end")}>
-                end ▷{view.words[lo].trimEndSec > 0 ? ` −${view.words[lo].trimEndSec.toFixed(2)}s` : ""}
+                end ▷
+              </ToolbarButton>
+              <ToolbarButton tone="quiet" onClick={() => { setSelection(null); setTrimPos(lo); }}>
+                Fine-tune…
               </ToolbarButton>
             </span>
           )}

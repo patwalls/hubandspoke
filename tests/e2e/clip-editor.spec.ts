@@ -99,6 +99,18 @@ test("flag on → editor opens; cutting a word is undoable and autosaves", async
   await page.getByRole("button", { name: "Back to clip" }).click();
   await expect(page.getByText("Previewing source · not in your clip")).toBeHidden();
 
+  // Double-clicking a kept word opens the trimmer (spelling + IN/OUT handles);
+  // its end ▷ cuts a blip and marks the word's edge. Undone below.
+  await page.locator("[data-pos].text-foreground").nth(8).dblclick();
+  const trimmer = page.getByRole("dialog", { name: "Trim word" });
+  await expect(trimmer).toBeVisible();
+  await trimmer.getByRole("button", { name: /end ▷/ }).click();
+  await expect(page.locator("[data-pos].text-foreground").nth(8)).toHaveClass(/border-r-2/);
+  await page.keyboard.press("Escape");
+  await expect(trimmer).toBeHidden();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator("[data-pos].text-foreground").nth(8)).not.toHaveClass(/border-r-2/);
+
   // Adding things on the stage: + Text makes a layer with its own panel,
   // arrows nudge it, and its panel's bin takes it away again.
   await page.getByRole("button", { name: "Text", exact: true }).click();
