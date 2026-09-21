@@ -37,6 +37,13 @@ function keyPrefix(): string {
   return (process.env.HUBANDSPOKE_S3_PREFIX ?? "hubandspoke/uploads").replace(/\/+$/, "");
 }
 
+/** Platforms hand out thumbnail-sized avatars (YouTube's `=s68-c-k…`);
+ *  the same URL serves bigger sizes on request. Ask for one that still
+ *  looks sharp drawn at 100px on a 1080 canvas. */
+export function largestAvatarVariant(url: string): string {
+  return url.replace(/=s\d+(-[a-z0-9-]+)?$/i, "=s400$1");
+}
+
 /**
  * Fetch the platform's avatar and store our copy. Returns the new S3 key,
  * or null when nothing was archived (same source as last time, not an
@@ -46,9 +53,16 @@ function keyPrefix(): string {
 export async function archiveAccountAvatar(accountId: string, sourceUrl: string | null | undefined): Promise<string | null> {
   if (!sourceUrl || isProxiedAvatar(sourceUrl)) return null;
   try {
-    const [row] = await db.select({ sourceUrl: accounts.avatarSourceUrl, key: accounts.avatarS3Key }).from(accounts).where(eq(accounts.id, accountId)).limit(1);
-    if (row?.key && row.sourceUrl === sourceUrl) return row.key;
-    const res = await fetch(sourceUrl);
+    const [row] = await db.select({ sourceUrl: accounts.avatarSourceUrl, key: accounts.avatarS3Key, avatarUrl: accounts.avatarUrl }).from(accounts).where(eq(accounts.id, accountId)).limit(1);
+    if (row?.key && row.sourceUrl === sourceUrl) {
+      // Same picture as last time — but the refresh that called us has just
+      // written the platform URL back over `avatar_url`; point it at our
+      // copy again or every refresh un-proxies the avatar (2026-09-21).
+      const proxied = `${PROXY_PREFIX}${encodeURIComponent(row.key)}`;
+      if (row.avatarUrl !== proxied) await db.update(accounts).set({ avatarUrl: proxied }).where(eq(accounts.id, accountId));
+      return row.key;
+    }
+    const res = await fetch(largestAvatarVariant(sourceUrl));
     if (!res.ok) return null;
     const type = res.headers.get("content-type")?.split(";")[0] ?? "";
     if (!type.startsWith("image/")) return null;
