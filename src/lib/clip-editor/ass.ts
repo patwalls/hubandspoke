@@ -103,6 +103,49 @@ function lineAnchorX(line: LaidOutLine, align: TextStyle["align"]): number {
   return align === "left" ? line.x : align === "right" ? line.x + line.widthPx : line.x + line.widthPx / 2;
 }
 
+/** &HAA — ASS alpha, 00 = opaque. */
+function assAlpha(alpha: number): string {
+  return `&H${Math.round((1 - alpha) * 255).toString(16).padStart(2, "0").toUpperCase()}&`;
+}
+
+/**
+ * The rounded box behind a line as an ASS vector drawing: a rectangle path
+ * with bezier corners, filled with the box colour. Same rectangle the
+ * stage draws (stage.tsx → LineBox). Drawn on a layer under the text.
+ */
+function boxEvent(start: number, end: number, styleName: string, style: TextStyle, layout: TextBlockLayout, line: LaidOutLine, layer: number): string | null {
+  if (!style.box) return null;
+  const pad = (style.box.padPct / 100) * layout.fontSizePx;
+  const w = line.widthPx + pad * 2;
+  const h = layout.linePitchPx;
+  const r = Math.min((style.box.radiusPct / 100) * layout.fontSizePx, w / 2, h / 2);
+  const f = (n: number) => n.toFixed(1);
+  // Cubic beziers with both control points on the corner ≈ a quarter circle.
+  const path =
+    `m ${f(r)} 0 l ${f(w - r)} 0 b ${f(w)} 0 ${f(w)} 0 ${f(w)} ${f(r)} ` +
+    `l ${f(w)} ${f(h - r)} b ${f(w)} ${f(h)} ${f(w)} ${f(h)} ${f(w - r)} ${f(h)} ` +
+    `l ${f(r)} ${f(h)} b 0 ${f(h)} 0 ${f(h)} 0 ${f(h - r)} ` +
+    `l 0 ${f(r)} b 0 0 0 0 ${f(r)} 0`;
+  const tags = `{\\an7\\pos(${f(line.x - pad)},${f(line.topY)})\\bord0\\shad0\\c${assInlineColor(style.box.color)}\\1a${assAlpha(style.box.alpha)}\\p1}`;
+  return `Dialogue: ${layer},${assTime(start)},${assTime(end)},${styleName},,0,0,0,,${tags}${path}{\\p0}`;
+}
+
+/**
+ * A soft shadow as a blurred, offset copy of the line in the shadow colour,
+ * under the text (libass can't blur the built-in shadow without blurring
+ * the glyph). The copy keeps the outline's shape so the silhouette matches.
+ */
+function shadowEvent(start: number, end: number, styleName: string, style: TextStyle, layout: TextBlockLayout, line: LaidOutLine, text: string, x: number, y: number, layer: number): string | null {
+  if (!style.shadow) return null;
+  const s = style.shadow;
+  const dx = (s.xPct / 100) * layout.fontSizePx;
+  const dy = (s.yPct / 100) * layout.fontSizePx;
+  const blur = ((s.blurPct / 100) * layout.fontSizePx) / 2; // CSS blur radius ≈ 2× libass \blur
+  const an = style.align === "left" ? 7 : style.align === "right" ? 9 : 8;
+  const tags = `{\\an${an}\\q2\\pos(${(x + dx).toFixed(1)},${(y + dy).toFixed(1)})\\c${assInlineColor(s.color)}\\3c${assInlineColor(s.color)}\\1a${assAlpha(s.alpha)}\\3a${assAlpha(s.alpha)}\\shad0\\blur${blur.toFixed(2)}}`;
+  return `Dialogue: ${layer},${assTime(start)},${assTime(end)},${styleName},,0,0,0,,${tags}${text}`;
+}
+
 export function buildAssScript(plan: RenderPlan, scene: Scene): string {
   const styles: string[] = [];
   const events: string[] = [];
@@ -111,6 +154,10 @@ export function buildAssScript(plan: RenderPlan, scene: Scene): string {
     const name = `Text${bi}`;
     styles.push(styleLine(name, block.layer.style, block.layout.fontSizePx));
     for (const line of block.layout.lines) {
+      const bx = boxEvent(0, plan.durationSec + 1, name, block.layer.style, block.layout, line, 8 + bi);
+      if (bx) events.push(bx);
+      const sh = shadowEvent(0, plan.durationSec + 1, name, block.layer.style, block.layout, line, assEscape(line.text), lineAnchorX(line, block.layer.style.align), posY(block.layer.style, block.layout, line), 9 + bi);
+      if (sh) events.push(sh);
       events.push(
         event(
           0,
@@ -143,6 +190,10 @@ export function buildAssScript(plan: RenderPlan, scene: Scene): string {
       for (const iv of intervals) {
         if (iv.end - iv.start < 0.005) continue;
         for (const line of layout.lines) {
+          const bx = boxEvent(iv.start, iv.end, "Captions", layer.style, layout, line, 3);
+          if (bx) events.push(bx);
+          const sh = shadowEvent(iv.start, iv.end, "Captions", layer.style, layout, line, line.words.map((w) => assEscape(w.text)).join(" "), lineAnchorX(line, layer.style.align), posY(layer.style, layout, line), 4);
+          if (sh) events.push(sh);
           const text = line.words
             .map((w) =>
               w.ref === iv.active && layer.highlightColor

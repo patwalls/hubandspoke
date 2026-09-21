@@ -35,7 +35,7 @@ import { resolveScene } from "./scene";
 
 describe("text alignment", () => {
   const base = { words: [{ text: "short", ref: 0 }, { text: "a", ref: 1 }, { text: "much", ref: 2 }, { text: "longer", ref: 3 }, { text: "line", ref: 4 }], canvas: { width: 1080, height: 1920 }, xPct: 50, yPct: 30, anchor: "bottom" as const, widthPct: 80, balance: false };
-  const style = { fontId: "montserrat-extrabold" as const, sizePct: 6, color: "#FFF", outlinePct: 0, outlineColor: "#000", uppercase: false };
+  const style = { fontId: "montserrat-extrabold" as const, sizePct: 6, color: "#FFF", outlinePct: 0, outlineColor: "#000", uppercase: false, shadow: null, box: null };
   it("left/right lines share an edge with the wrap box; centre lines are centred on xPct", () => {
     const left = layoutTextBlock({ ...base, style: { ...style, align: "left" } });
     expect(left.lines.length).toBeGreaterThan(1);
@@ -56,5 +56,22 @@ describe("text alignment", () => {
     const ass = buildAssScript(plan, resolveScene(plan));
     expect(ass).toContain("{\\an7\\q2\\pos(");
     expect(ass).not.toContain("{\\an8\\q2\\pos(");
+  });
+});
+
+describe("caption effects in the ASS export", () => {
+  it("emits a box drawing and a blurred shadow copy under each line", () => {
+    const doc = createDefaultDoc({ startSec: 0, endSec: 6, hook: "hello there" });
+    const caps = doc.layers.find((l): l is CaptionsLayer => l.type === "captions")!;
+    caps.style = { ...caps.style, outlinePct: 0, shadow: { color: "#000000", alpha: 0.5, blurPct: 10, xPct: 0, yPct: 5 }, box: { color: "#112233", alpha: 0.7, radiusPct: 20, padPct: 20 } };
+    const words = ["we", "built", "it"].map((text, i) => ({ index: i, text, startSec: i, endSec: i + 0.8 }));
+    const plan = compileRenderPlan(doc, words);
+    const ass = buildAssScript(plan, resolveScene(plan));
+    expect(ass).toMatch(/\\p1}m [\d.]+ 0 l /); // the box path
+    expect(ass).toContain("\\c&H332211&"); // box colour (BGR)
+    expect(ass).toMatch(/\\blur[\d.]+}WE/); // shadow copy of the cue
+    // Box (3) and shadow (4) sit under the caption text (5); the hook is on 10.
+    const layers = [...ass.matchAll(/^Dialogue: (\d+),/gm)].map((m) => Number(m[1]));
+    expect(new Set(layers)).toEqual(new Set([3, 4, 5, 10]));
   });
 });

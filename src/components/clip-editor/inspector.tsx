@@ -8,8 +8,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { AlignCenterIcon, AlignLeftIcon, AlignRightIcon, ChevronDownIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { CaptionsLayer, ClipEditDoc, FontId, TextAlign, TextLayer } from "@/lib/clip-editor/doc";
-import { FONT_IDS, findCaptionsLayer, findHookLayer } from "@/lib/clip-editor/doc";
+import type { CaptionsLayer, ClipEditDoc, FontId, TextAlign, TextLayer, TextStyle } from "@/lib/clip-editor/doc";
+import { FONT_IDS, TEXT_STYLE_PRESETS, findCaptionsLayer, findHookLayer } from "@/lib/clip-editor/doc";
 import { FONTS } from "@/lib/clip-editor/fonts";
 import { colorsInClipDoc } from "@/lib/clip-editor/colors";
 import { ColorPicker } from "@/components/editor/color-picker";
@@ -81,8 +81,7 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
             }
           />
           <ColorRow usedColors={usedColors} label="Colour" value={hook.style.color} onChange={(color) => patchHook((l) => ({ ...l, style: { ...l.style, color } }), "hook-color")} />
-          <ColorRow usedColors={usedColors} label="Outline" value={hook.style.outlineColor} onChange={(outlineColor) => patchHook((l) => ({ ...l, style: { ...l.style, outlineColor, outlinePct: l.style.outlinePct || 8 } }), "hook-outline")} />
-          <Slider label="Outline width" value={hook.style.outlinePct} min={0} max={20} step={1} format={(v) => `${Math.round(v)}%`} onChange={(outlinePct) => patchHook((l) => ({ ...l, style: { ...l.style, outlinePct } }), "hook-outline-w")} />
+          <TextEffects style={hook.style} usedColors={usedColors} onChange={(patch, key) => patchHook((l) => ({ ...l, style: { ...l.style, ...patch } }), key)} />
         </Panel>
       )}
 
@@ -166,7 +165,7 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
             </div>
           </div>
           <ColorRow usedColors={usedColors} label="Colour" value={captions.style.color} onChange={(color) => patchCaptions((l) => ({ ...l, style: { ...l.style, color } }), "cap-color")} />
-          <ColorRow usedColors={usedColors} label="Outline" value={captions.style.outlineColor} onChange={(outlineColor) => patchCaptions((l) => ({ ...l, style: { ...l.style, outlineColor, outlinePct: l.style.outlinePct || 8 } }), "cap-outline")} />
+          <TextEffects style={captions.style} usedColors={usedColors} onChange={(patch, key) => patchCaptions((l) => ({ ...l, style: { ...l.style, ...patch } }), key)} />
           <AlignPicker value={captions.style.align} onChange={(align) => patchCaptions((l) => ({ ...l, style: { ...l.style, align } }))} />
           <Check label="Show punctuation" checked={captions.showPunctuation} onChange={(showPunctuation) => patchCaptions((l) => ({ ...l, showPunctuation }))} />
           <Check
@@ -357,6 +356,54 @@ function FontPicker({ value, onChange }: { value: FontId; onChange: (id: FontId)
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Outline / shadow / box for a text layer — the same three controls for the
+ * hook and the captions, plus one-click presets. Every value is a % of the
+ * font size, so a look survives a size change.
+ */
+function TextEffects({ style, usedColors, onChange }: { style: TextStyle; usedColors: string[]; onChange: (patch: Partial<TextStyle>, key?: string) => void }) {
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-1">
+        {(Object.keys(TEXT_STYLE_PRESETS) as Array<keyof typeof TEXT_STYLE_PRESETS>).map((id) => {
+          const p = TEXT_STYLE_PRESETS[id];
+          const active = style.outlinePct === p.patch.outlinePct && !!style.shadow === !!p.patch.shadow && !!style.box === !!p.patch.box;
+          return (
+            <button key={id} type="button" title={p.hint} aria-pressed={active} onClick={() => onChange({ ...p.patch })} className={cn("rounded-md border px-2 py-1 text-[11px] font-medium", active ? "border-sky-400 bg-sky-50 text-sky-900 dark:bg-sky-950/40 dark:text-sky-200" : "border-border hover:bg-muted")}>
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+      <Check label="Outline" checked={style.outlinePct > 0} onChange={(on) => onChange({ outlinePct: on ? 8 : 0 })} />
+      {style.outlinePct > 0 && (
+        <>
+          <ColorRow usedColors={usedColors} label="Outline colour" value={style.outlineColor} onChange={(outlineColor) => onChange({ outlineColor }, "outline-c")} />
+          <Slider label="Outline width" value={style.outlinePct} min={1} max={20} step={1} format={(v) => `${Math.round(v)}%`} onChange={(outlinePct) => onChange({ outlinePct }, "outline-w")} />
+        </>
+      )}
+      <Check label="Shadow" checked={!!style.shadow} onChange={(on) => onChange({ shadow: on ? { color: "#000000", alpha: 0.55, blurPct: 14, xPct: 0, yPct: 5 } : null })} />
+      {style.shadow && (
+        <>
+          <ColorRow usedColors={usedColors} label="Shadow colour" value={style.shadow.color} onChange={(color) => onChange({ shadow: { ...style.shadow!, color } }, "shadow-c")} />
+          <Slider label="Shadow opacity" value={style.shadow.alpha} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(alpha) => onChange({ shadow: { ...style.shadow!, alpha } }, "shadow-a")} />
+          <Slider label="Softness" value={style.shadow.blurPct} min={0} max={40} step={1} format={(v) => `${Math.round(v)}%`} onChange={(blurPct) => onChange({ shadow: { ...style.shadow!, blurPct } }, "shadow-b")} />
+          <Slider label="Distance" value={style.shadow.yPct} min={-20} max={30} step={1} format={(v) => `${Math.round(v)}%`} onChange={(yPct) => onChange({ shadow: { ...style.shadow!, yPct } }, "shadow-y")} />
+        </>
+      )}
+      <Check label="Box behind each line" checked={!!style.box} onChange={(on) => onChange({ box: on ? { color: "#000000", alpha: 0.7, radiusPct: 22, padPct: 22 } : null })} />
+      {style.box && (
+        <>
+          <ColorRow usedColors={usedColors} label="Box colour" value={style.box.color} onChange={(color) => onChange({ box: { ...style.box!, color } }, "box-c")} />
+          <Slider label="Box opacity" value={style.box.alpha} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(alpha) => onChange({ box: { ...style.box!, alpha } }, "box-a")} />
+          <Slider label="Corners" value={style.box.radiusPct} min={0} max={60} step={1} format={(v) => `${Math.round(v)}%`} onChange={(radiusPct) => onChange({ box: { ...style.box!, radiusPct } }, "box-r")} />
+          <Slider label="Padding" value={style.box.padPct} min={0} max={60} step={1} format={(v) => `${Math.round(v)}%`} onChange={(padPct) => onChange({ box: { ...style.box!, padPct } }, "box-p")} />
+        </>
+      )}
+    </>
   );
 }
 

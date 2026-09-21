@@ -51,7 +51,38 @@ function textCss(style: TextStyle, layout: TextBlockLayout): React.CSSProperties
           paintOrder: "stroke fill",
         }
       : {}),
+    ...(style.shadow
+      ? {
+          textShadow: `${(style.shadow.xPct / 100) * layout.fontSizePx}px ${(style.shadow.yPct / 100) * layout.fontSizePx}px ${(style.shadow.blurPct / 100) * layout.fontSizePx}px ${rgba(style.shadow.color, style.shadow.alpha)}`,
+        }
+      : {}),
   };
+}
+
+function rgba(hex: string, alpha: number): string {
+  return `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${alpha})`;
+}
+
+/** The rounded box behind one line (`style.box`), in canvas px. Drawn as
+ *  its own element under the text — the exporter draws the same rectangle
+ *  as an ASS vector event (ass.ts → boxEvent). */
+function LineBox({ style, layout, line, opacity }: { style: TextStyle; layout: TextBlockLayout; line: TextBlockLayout["lines"][number]; opacity?: number }) {
+  if (!style.box) return null;
+  const pad = (style.box.padPct / 100) * layout.fontSizePx;
+  return (
+    <div
+      className="absolute"
+      style={{
+        left: line.x - pad,
+        top: line.topY,
+        width: line.widthPx + pad * 2,
+        height: layout.linePitchPx,
+        borderRadius: (style.box.radiusPct / 100) * layout.fontSizePx,
+        background: rgba(style.box.color, style.box.alpha),
+        opacity,
+      }}
+    />
+  );
 }
 
 export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
@@ -268,6 +299,9 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
               onPointerDown={(e) => dragLayerY(e, block.layer)}
             >
               {block.layout.lines.map((line, i) => (
+                <LineBox key={`box-${i}`} style={block.layer.style} layout={block.layout} line={line} />
+              ))}
+              {block.layout.lines.map((line, i) => (
                 <div
                   key={i}
                   className="absolute"
@@ -394,6 +428,9 @@ function CaptionOverlay({
 
   return (
     <TextBlock layout={shown.layout} selected={selected} onPointerDown={onPointerDown}>
+      {shown.layout.lines.map((line, i) => (
+        <LineBox key={`box-${i}`} style={layer.style} layout={shown.layout} line={line} opacity={ghost ? (selected ? 0.35 : 0) : 1} />
+      ))}
       {shown.layout.lines.map((line, i) => (
         <div
           key={i}

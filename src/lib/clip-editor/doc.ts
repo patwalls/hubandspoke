@@ -135,8 +135,28 @@ const textStyleSchema = z.object({
   uppercase: z.boolean(),
   /** How the lines sit inside the layer's wrap box (centred on `xPct`). */
   align: z.enum(["left", "center", "right"]).default("center"),
+  /** Soft drop shadow. Sizes are % of the font size so they scale with it. */
+  shadow: z
+    .object({ color: hexColor, alpha: z.number().min(0).max(1), blurPct: z.number().min(0).max(40), xPct: z.number().min(-40).max(40), yPct: z.number().min(-40).max(40) })
+    .nullable()
+    .default(null),
+  /** A rounded box behind each line (the TikTok / Notes look). */
+  box: z
+    .object({ color: hexColor, alpha: z.number().min(0).max(1), radiusPct: z.number().min(0).max(60), padPct: z.number().min(0).max(60) })
+    .nullable()
+    .default(null),
 });
 export type TextStyle = z.infer<typeof textStyleSchema>;
+export type TextShadow = NonNullable<TextStyle["shadow"]>;
+export type TextBox = NonNullable<TextStyle["box"]>;
+
+/** Ready-made caption looks. "Clean" is the slick one: no outline, a soft
+ *  shadow. Applied on top of the current font/size/colour/alignment. */
+export const TEXT_STYLE_PRESETS: Record<"clean" | "outline" | "boxed", { label: string; hint: string; patch: Pick<TextStyle, "outlinePct" | "shadow" | "box"> & { color?: string } }> = {
+  clean: { label: "Clean", hint: "No outline, a soft shadow", patch: { outlinePct: 0, shadow: { color: "#000000", alpha: 0.55, blurPct: 14, xPct: 0, yPct: 5 }, box: null } },
+  outline: { label: "Outline", hint: "Thick dark outline (the classic)", patch: { outlinePct: 8, shadow: null, box: null } },
+  boxed: { label: "Boxed", hint: "Rounded box behind each line", patch: { outlinePct: 0, shadow: null, box: { color: "#000000", alpha: 0.7, radiusPct: 22, padPct: 22 } } },
+};
 export type TextAlign = TextStyle["align"];
 
 /** Which edge of the layer's box sits on `yPct`. A hook anchored "bottom"
@@ -305,6 +325,8 @@ export function createDefaultDoc(args: {
     outlineColor: "#000000",
     uppercase: false,
     align: "center",
+    shadow: null,
+    box: null,
   };
   // AI hooks range from five words to a paragraph — start a long one at a
   // size that fits the space it has (above the video) rather than off-canvas.
@@ -357,6 +379,8 @@ export function createDefaultDoc(args: {
           outlineColor: "#000000",
           uppercase: true,
           align: "center",
+          shadow: null,
+          box: null,
         },
         maxWordsPerCue: 3,
         maxCharsPerCue: 18,
