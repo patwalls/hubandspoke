@@ -124,12 +124,12 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
             label="Words at a time"
             value={captions.maxWordsPerCue}
             min={1}
-            max={6}
+            max={12}
             step={1}
             format={(v) => String(v)}
             onChange={(n) =>
               patchCaptions(
-                (l) => ({ ...l, maxWordsPerCue: n, maxCharsPerCue: Math.max(12, n * 7) }),
+                (l) => ({ ...l, maxWordsPerCue: n, maxCharsPerCue: Math.min(120, Math.max(12, n * 8)) }),
                 "cap-words",
               )
             }

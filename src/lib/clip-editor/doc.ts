@@ -173,7 +173,7 @@ const captionsLayerSchema = z.object({
   style: textStyleSchema,
   /** Words shown at once. Short cues are what make captions feel "fast". */
   maxWordsPerCue: z.number().int().min(1).max(12),
-  maxCharsPerCue: z.number().int().min(4).max(80),
+  maxCharsPerCue: z.number().int().min(4).max(120),
   /** Colour the word being spoken. null = no karaoke highlight. */
   highlightColor: hexColor.nullable(),
   /** Show commas/periods on screen. Off by default — the cues still break
