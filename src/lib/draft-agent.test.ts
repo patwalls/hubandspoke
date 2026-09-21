@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   findEmptyRequiredFields,
+  renderClipIdeaExtras,
   renderEditorialContextBlock,
   type EditorialContext,
 } from "./draft-agent";
@@ -257,5 +258,43 @@ describe("renderEditorialContextBlock (v14)", () => {
     expect(out).toContain("Pillar title");
     expect(out).toContain("Pillar hook");
     expect(out).toContain("Pillar description");
+  });
+});
+
+describe("renderEditorialContextBlock (v15: the clip itself)", () => {
+  const clipIdea = {
+    hook: null,
+    angle: null,
+    rationale: null,
+    anchorQuote: null,
+    anchorStartSec: null,
+    blueprintAnchorHook: null,
+  };
+
+  it("renders the cut's words with its range and edited length, and the idea's extras as a list", () => {
+    const out = renderEditorialContextBlock({
+      ...EMPTY_EC,
+      clipIdea: {
+        ...clipIdea,
+        clip: { startSec: 754, endSec: 781.4, durationSec: 24.6, transcript: "Most closets are full of crap. Buy quality." },
+        extras: { quotables: ["Most closets are full of crap.", "Buy quality."], note: "", count: 2 },
+      },
+    });
+    expect(out).toContain("THE CLIP (exactly what viewers hear — 12:34–13:01 of the pillar, 25s after cuts)");
+    expect(out).toContain("Most closets are full of crap. Buy quality.");
+    expect(out).toContain("CLIP IDEA EXTRAS");
+    expect(out).toContain("- quotables:\n  1. Most closets are full of crap.\n  2. Buy quality.");
+    expect(out).toContain("- count: 2");
+    expect(out).not.toContain("- note"); // blank strings are dropped
+  });
+
+  it("stays silent when the clip has no words and the extras have nothing renderable", () => {
+    expect(
+      renderEditorialContextBlock({
+        ...EMPTY_EC,
+        clipIdea: { ...clipIdea, clip: { startSec: 0, endSec: 5, durationSec: 5, transcript: "  " }, extras: { picks: [1, 2], meta: { a: 1 } } },
+      }),
+    ).toBeNull();
+    expect(renderClipIdeaExtras(null)).toBeNull();
   });
 });

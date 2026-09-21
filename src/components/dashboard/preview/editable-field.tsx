@@ -36,12 +36,26 @@ export function EditableField({
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
   // Auto-size the textarea to fit content. Runs on every value change so the
-  // mock doesn't grow scrollbars mid-caption.
+  // mock doesn't grow scrollbars mid-caption — and again whenever the box's
+  // width changes, which covers a mock that mounted while hidden (a tab not
+  // yet shown measures 0 and would stay one line tall) and re-wrapping on
+  // resize.
   useEffect(() => {
     if (!ref.current || !multiline) return;
     const el = ref.current;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [value, multiline]);
 
   if (!editable || !fieldKey || !onLocalEdit) {

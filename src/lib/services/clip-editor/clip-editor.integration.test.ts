@@ -11,12 +11,14 @@ import {
   clipIdeas,
   clipRenders,
   contentComments,
+  contentDrafts,
   productionItemMedia,
   productionItems,
 } from "@/lib/db/schema";
 import {
   createTestClipEdit,
   createTestClipIdea,
+  createTestContentDraft,
   createTestMedia,
   createTestProductionItem,
   getTestUserId,
@@ -34,6 +36,7 @@ const { exportClipEdit, buildClipCreatedComment, ClipEditEmptyError, ClipEditNot
 const { installRenderedClipMedia, CLIP_EDITOR_SOURCE_PREFIX } = await import("./install-rendered-media");
 const { saveClipEdit } = await import("./save");
 const { toRenderStatus, RENDER_STALL_MS } = await import("./render-status");
+const { ensureClipPostDraft } = await import("./post-draft");
 
 beforeEach(() => enqueue.mockReset());
 
@@ -259,5 +262,37 @@ describe("toRenderStatus", () => {
   it("derives `stalled` when the worker died without stamping a failure", () => {
     const row = { ...base, status: "rendering", createdAt: new Date(now - 3_600_000), startedAt: new Date(now - 3_500_000), heartbeatAt: new Date(now - RENDER_STALL_MS - 1) };
     expect(toRenderStatus(row, now).state).toBe("stalled");
+  });
+});
+
+describe("ensureClipPostDraft — the post is drafted when the editor opens", () => {
+  it("queues one keyed draft run for the idea's item, and leaves a written post alone", async () => {
+    const { idea, queueItem } = await seedIdea();
+    await db.update(productionItems).set({ postType: "x" }).where(eq(productionItems.id, queueItem.id));
+
+    expect(await ensureClipPostDraft(idea.id)).toEqual({ productionItemId: queueItem.id, postType: "x", state: "drafting" });
+    expect(enqueue).toHaveBeenCalledWith(
+      "draft-algorithm-run",
+      { productionItemId: queueItem.id },
+      { jobKey: `draft-algorithm-run:${queueItem.id}` },
+    );
+
+    // A draft whose caption is still empty (an /ensure placeholder) is not a post.
+    enqueue.mockReset();
+    const empty = await createTestContentDraft({ productionItemId: queueItem.id, content: { tweet: "  " } });
+    expect((await ensureClipPostDraft(idea.id))?.state).toBe("drafting");
+    expect(enqueue).toHaveBeenCalledTimes(1);
+
+    enqueue.mockReset();
+    await db.update(contentDrafts).set({ content: { tweet: "A real tweet" } }).where(eq(contentDrafts.id, empty.id));
+    expect((await ensureClipPostDraft(idea.id))?.state).toBe("ready");
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("is null for an idea with no queue-side item", async () => {
+    const pillar = await createTestProductionItem({ postType: "youtube_long" });
+    const idea = await createTestClipIdea({ sourceProductionItemId: pillar.id, startSec: 1, endSec: 2 });
+    expect(await ensureClipPostDraft(idea.id)).toBeNull();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });

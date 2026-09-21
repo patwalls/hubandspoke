@@ -14,6 +14,10 @@
  * Everything below the store is a pure function of the doc, recomputed on
  * each edit. Export sends nothing but "export what you have saved" — the
  * server renders from its own copy of the doc, never from client state.
+ *
+ * A second tab, Post, puts the clip's post copy next to the stage
+ * (post-pane.tsx). The two tabs share one DOM — panes are hidden, not
+ * unmounted — so switching never reloads the video.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -44,6 +48,7 @@ import type { ClipEditorSession } from "@/lib/services/clip-editor/session";
 import { Inspector } from "./inspector";
 import { clearBackup, takeBackup, writeBackup } from "./local-backup";
 import { PlaybackEngine } from "./playback-engine";
+import { PostPane } from "./post-pane";
 import { Stage } from "./stage";
 import {
   EditorStoreContext,
@@ -184,6 +189,8 @@ function EditorWorkspace({
   const [busy, setBusy] = useState<null | "fillers" | "export" | "kill">(null);
   const [killOpen, setKillOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [tab, setTab] = useState<"clip" | "post">("clip");
+  const [postDrafting, setPostDrafting] = useState(session.post?.state === "drafting");
 
   const plan = useMemo(() => compileRenderPlan(doc, session.words), [doc, session.words]);
   const scene = useMemo(() => resolveScene(plan), [plan]);
@@ -505,6 +512,26 @@ function EditorWorkspace({
             </span>
           )}
         </span>
+        {session.post && (
+          <div role="tablist" aria-label="Editor tabs" className="ml-4 flex items-center rounded-lg bg-muted p-[3px] text-xs">
+            {(["clip", "post"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+                className={cn(
+                  "flex h-6 items-center gap-1.5 rounded-md px-3 font-medium transition-colors",
+                  tab === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t === "clip" ? "Clip" : "Post"}
+                {t === "post" && postDrafting && <Loader2Icon className="size-3 animate-spin" />}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-1">
           <details className="relative">
             <summary className="flex size-7 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" title="Options" aria-label="Options">
@@ -567,13 +594,18 @@ function EditorWorkspace({
           "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-5 px-5 py-4",
           // Vertical canvas: the stage is as tall as the workspace and its
           // width follows from the aspect ratio. Landscape: it takes a share
-          // of the width instead.
-          vertical
-            ? "grid-cols-[minmax(0,1fr)_auto_280px]"
-            : "grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_280px]",
+          // of the width instead. The Post tab keeps the stage and swaps the
+          // transcript + inspector for the post pane.
+          tab === "post"
+            ? vertical
+              ? "grid-cols-[auto_minmax(0,1fr)]"
+              : "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+            : vertical
+              ? "grid-cols-[minmax(0,1fr)_auto_280px]"
+              : "grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_280px]",
         )}
       >
-        <div className="flex min-h-0 min-w-0 flex-col">
+        <div className={cn("flex min-h-0 min-w-0 flex-col", tab !== "clip" && "hidden")}>
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <h3 className="mr-auto text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Transcript
@@ -626,7 +658,18 @@ function EditorWorkspace({
           <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} />
         </div>
 
-        <Inspector doc={doc} disabled={locked} />
+        <Inspector doc={doc} disabled={locked} className={tab !== "clip" ? "hidden" : undefined} />
+
+        {session.post && (
+          <div className={cn("min-h-0 min-w-0", tab !== "post" && "hidden")}>
+            <PostPane
+              post={session.post}
+              brand={brand}
+              onDraftingChange={setPostDrafting}
+              beforeRedraft={save}
+            />
+          </div>
+        )}
       </div>
 
       <div className="shrink-0 px-5">

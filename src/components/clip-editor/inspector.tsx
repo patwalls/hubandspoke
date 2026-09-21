@@ -17,7 +17,7 @@ import { commands, useEditor } from "./store";
 
 const HIGHLIGHTS = ["#FFE14D", "#4ADE80", "#38BDF8", "#FB7185", "#FFFFFF"];
 
-export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boolean }) {
+export function Inspector({ doc, disabled, className }: { doc: ClipEditDoc; disabled: boolean; className?: string }) {
   const apply = useEditor((s) => s.apply);
   const selection = useEditor((s) => s.stageSelection);
   const hook = findHookLayer(doc);
@@ -31,7 +31,7 @@ export function Inspector({ doc, disabled }: { doc: ClipEditDoc; disabled: boole
   const usedColors = useMemo(() => colorsInClipDoc(doc), [doc]);
 
   return (
-    <fieldset disabled={disabled} className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto pr-1 disabled:opacity-60">
+    <fieldset disabled={disabled} className={cn("flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto pr-1 disabled:opacity-60", className)}>
       {hook && (
         <Panel
           title="Hook"

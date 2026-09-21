@@ -5,9 +5,10 @@
  * (src/lib/services/promote-clip-idea.ts), so a clip made here is
  * indistinguishable downstream: the queue-side production item flips to
  * Assigned with the editor on it, the idea is marked assigned, the promotion
- * comment and activity events are written, and the Draft Algorithm drafts the
- * post copy. The ONLY difference is what produces the video — a `clip-render`
- * job on our own worker instead of a Descript project.
+ * comment and activity events are written. The post copy is drafted earlier
+ * than in the Descript paths — when the editor opens (post-draft.ts) — so
+ * export finds it already written. The ONLY difference is what produces the
+ * video — a `clip-render` job on our own worker instead of a Descript project.
  *
  * Re-export is supported: exporting an idea this editor already promoted
  * queues a new render (superseding any in flight) and skips the one-time
@@ -175,8 +176,10 @@ export async function exportClipEdit(args: {
       hook,
     });
 
-    // Same fire-and-forget the Descript paths do: drafts the post copy from
-    // the pillar transcript + format Skill, independent of the video bytes.
+    // Safety net only: the post is normally drafted when the editor OPENS
+    // (session.ts → ensureClipPostDraft) and edited in the Post tab. The
+    // algorithm's `already_filled` guard makes this a no-op then; it only
+    // does work if that earlier run never happened or came up empty.
     try {
       await enqueue("draft-algorithm-run", { productionItemId });
     } catch (err) {

@@ -17,7 +17,8 @@ import { test, expect } from "@playwright/test";
  * editor half of this spec skips).
  *
  * Idempotent: the one edit it makes is undone before it finishes, and it
- * never exports.
+ * never exports. (Opening the editor does enqueue the post draft for the
+ * idea's item — that is the product behaviour, and a no-op once written.)
  */
 
 test.use({ viewport: { width: 1600, height: 1000 } });
@@ -97,6 +98,16 @@ test("flag on → editor opens; cutting a word is undoable and autosaves", async
   await expect(page.getByText("Previewing source · not in your clip")).toBeVisible();
   await page.getByRole("button", { name: "Back to clip" }).click();
   await expect(page.getByText("Previewing source · not in your clip")).toBeHidden();
+
+  // The Post tab: the clip's post copy next to the stage. Opening the editor
+  // starts the draft, so the pane is either still writing or shows the
+  // platform mock; either way the transcript gives way to it and comes back.
+  await page.getByRole("tab", { name: /^Post/ }).click();
+  await expect(page.getByRole("heading", { name: "Post" })).toBeVisible();
+  await expect(page.getByText(/Writing the post from this clip|How this will look on|No post yet/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("heading", { name: "Transcript" })).toBeHidden();
+  await page.getByRole("tab", { name: "Clip" }).click();
+  await expect(page.getByRole("heading", { name: "Transcript" })).toBeVisible();
 
   // (the dialog's own ✕ is also named "Close" — take the footer button)
   await page.getByRole("button", { name: /Save draft & close|^Close$/ }).last().click();

@@ -112,7 +112,16 @@ const MODEL = "claude-opus-4-7";
 // and the pillar's own hook/description/overlay. Operator's hand-edit to
 // hook now biases the caption; clip-idea-spawned rows reuse the angle the
 // LLM already discovered for them rather than re-deriving it.
-export const PROMPT_VERSION = 14;
+// v15 (2026-09-21): the clip itself. Clip-idea posts were drafted from the
+// WHOLE pillar transcript plus a one-line anchor quote — the agent never saw
+// which 25 seconds actually made it into the video, nor the format-specific
+// picks the clip-idea agent had already made (X Quotables' three verbatim
+// `quotables` only ever reached the Descript prompt). v15 adds THE CLIP
+// (the kept words of the current edit, or the idea's range) and CLIP IDEA
+// EXTRAS to the editorial block, with a rule that verbatim pulls come from
+// the clip. Drafting now happens when the in-app editor opens, not at
+// export, so this is what the editor's Post tab shows.
+export const PROMPT_VERSION = 15;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -184,6 +193,8 @@ A per-call ## EDITORIAL CONTEXT block (when present) carries the operator's most
 - If an ANCHOR QUOTE is present, focus the caption on what THAT line delivers, not adjacent setup. The anchor is the operator-vetted moment of payoff.
 - If an ANGLE is present, treat it as the editorial thesis — the caption is a longer-form expression of that thesis.
 - HOOK is the operator's most recent intent. If both item.hook and clipIdea.hook exist, item.hook is the hand-edit and wins.
+- If THE CLIP is present, the post is about what THAT cut says — it is the only footage the viewer will see. Every verbatim quote or "pull" in the post must come from THE CLIP word-for-word (tidying punctuation and dropping a filler is fine); never quote a line from elsewhere in the transcript, however good it is. Use the wider transcript only for context (who the speaker is, what they built).
+- If CLIP IDEA EXTRAS carry pre-picked lines (e.g. quotables), prefer those where they still fall inside THE CLIP; drop any that were cut.
 - The pillar's own HOOK / DESCRIPTION ground tone and brand voice — they're what worked for the source video.
 The exemplar pool still drives structure (length, list shape, format conventions); editorial context drives substance (what to say).
 
@@ -249,6 +260,18 @@ export interface EditorialContext {
     anchorStartSec: number | null;
     /** The brand-library hook this clip's structure mirrors. */
     blueprintAnchorHook: string | null;
+    /** v15: what the finished video actually says — the kept words of the
+     *  current clip edit (or the idea's range when nothing was edited).
+     *  Seconds are into the pillar; `durationSec` is after cuts. */
+    clip?: {
+      startSec: number;
+      endSec: number;
+      durationSec: number;
+      transcript: string;
+    } | null;
+    /** v15: format-specific output the clip-idea agent produced alongside
+     *  the idea (e.g. X Quotables' `quotables`: three verbatim pulls). */
+    extras?: Record<string, unknown> | null;
   } | null;
   /** Set when this item has a pillar (most derivatives do). */
   pillar: {
@@ -454,6 +477,21 @@ export function renderEditorialContextBlock(
     lines.push(ec.clipIdea.rationale.trim());
     lines.push("");
   }
+  const clip = ec.clipIdea?.clip;
+  if (clip && clip.transcript.trim()) {
+    const range = `${formatTimestamp(clip.startSec) ?? "?"}–${formatTimestamp(clip.endSec) ?? "?"}`;
+    lines.push(
+      `THE CLIP (exactly what viewers hear — ${range} of the pillar, ${Math.round(clip.durationSec)}s after cuts). Verbatim quotes MUST come from these words; nothing outside them plays:`,
+    );
+    lines.push(clip.transcript.trim());
+    lines.push("");
+  }
+  const extras = renderClipIdeaExtras(ec.clipIdea?.extras);
+  if (extras) {
+    lines.push(`CLIP IDEA EXTRAS (format-specific picks the clip-idea agent made for this idea):`);
+    lines.push(extras);
+    lines.push("");
+  }
   // Fallback: if no item hook was authored, surface the clip_idea's
   // original hook for grounding. Item hook always wins when both exist.
   if (!ec.itemHook?.trim() && ec.clipIdea?.hook && ec.clipIdea.hook.trim()) {
@@ -503,6 +541,29 @@ export function renderEditorialContextBlock(
   // Trailing blank from the last section is intentional — keeps spacing
   // consistent when this block is joined with the substrate below.
   return `## EDITORIAL CONTEXT\n${lines.join("\n").trimEnd()}`;
+}
+
+/** v15: the clip idea's `extras` as a readable list — string arrays become
+ *  numbered lines, scalars one line each. Unknown shapes are skipped rather
+ *  than dumped as JSON. Null when nothing renders. */
+export function renderClipIdeaExtras(
+  extras: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!extras) return null;
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(extras)) {
+    if (Array.isArray(value)) {
+      const items = value.filter((v): v is string => typeof v === "string" && v.trim() !== "");
+      if (items.length === 0) continue;
+      lines.push(`- ${key}:`);
+      items.forEach((v, i) => lines.push(`  ${i + 1}. ${v.trim()}`));
+    } else if (typeof value === "string" && value.trim()) {
+      lines.push(`- ${key}: ${value.trim()}`);
+    } else if (typeof value === "number" || typeof value === "boolean") {
+      lines.push(`- ${key}: ${String(value)}`);
+    }
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 // Render the past-captions section of the prompt. v1.2: format-scoped and

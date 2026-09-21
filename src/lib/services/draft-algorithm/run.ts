@@ -42,6 +42,7 @@ import {
   runDescriptStepForDerivative,
   type DescriptStepStatus,
 } from "./descript-step";
+import { loadClipCut } from "@/lib/services/clip-editor/post-draft";
 
 /**
  * Coerce a content-draft field value to the primitive shape the
@@ -807,6 +808,8 @@ export async function runDraftAlgorithm(
     anchorQuote: string | null;
     anchorStartSec: number | null;
     blueprintAnchorHook: string | null;
+    clip: Awaited<ReturnType<typeof loadClipCut>>;
+    extras: Record<string, unknown> | null;
   } | null = null;
   if (item.sourceClipIdeaId) {
     const [row] = await db
@@ -817,6 +820,7 @@ export async function runDraftAlgorithm(
         anchorQuote: clipIdeas.transcriptAnchorQuote,
         anchorStartSec: clipIdeas.transcriptAnchorStartSec,
         blueprintAnchorHook: clipIdeas.blueprintAnchorHook,
+        extras: clipIdeas.extras,
       })
       .from(clipIdeas)
       .where(eq(clipIdeas.id, item.sourceClipIdeaId))
@@ -832,6 +836,11 @@ export async function runDraftAlgorithm(
         anchorStartSec:
           row.anchorStartSec == null ? null : Number(row.anchorStartSec),
         blueprintAnchorHook: row.blueprintAnchorHook,
+        // v15: the words that actually make the video — the in-app edit's
+        // kept text when there is one, else the idea's range — plus the
+        // clip-idea agent's format-specific picks (X Quotables' quotables).
+        clip: await loadClipCut(item.sourceClipIdeaId),
+        extras: (row.extras as Record<string, unknown> | null) ?? null,
       };
     }
   }

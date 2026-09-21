@@ -19,6 +19,7 @@ import { applyLook, clipLookSchema, createDefaultDoc, parseDoc, type ClipEditDoc
 import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
 import type { TranscriptSpeaker } from "@/lib/diarization/types";
 import { toRenderStatus, type ClipRenderStatus } from "./render-status";
+import { ensureClipPostDraft, type ClipPost } from "./post-draft";
 
 export class ClipEditorIdeaNotFoundError extends Error {
   constructor() {
@@ -79,6 +80,10 @@ export interface ClipEditorSession {
   /** True when word timings were interpolated from caption segments. */
   wordsSynthetic: boolean;
   latestRender: ClipRenderStatus | null;
+  /** The post this clip goes out with (the queue-side item), and whether
+   *  its copy is written yet. Opening the editor starts the draft — see
+   *  post-draft.ts. Null for legacy ideas without an item. */
+  post: ClipPost | null;
 }
 
 export async function loadClipEditorSession(args: {
@@ -191,6 +196,10 @@ export async function loadClipEditorSession(args: {
     },
     brand,
     formatLook: await loadFormatLookInfo(brand, row.targetFormat),
+    // Opening the editor is the moment the post gets drafted (it used to
+    // wait for export), so the Post tab has copy to show by the time the
+    // cut is done.
+    post: await ensureClipPostDraft(row.id),
     edit,
     source: {
       productionItemId: row.sourceProductionItemId,
