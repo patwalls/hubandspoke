@@ -18,8 +18,8 @@ export const DESIGN_PRESETS: Record<DesignPresetId, { label: string; description
   playbook: { label: "Playbook", description: "Photo + stat + headline, iOS Notes playbook, a clip as a YouTube card, a comment-to-DM CTA.", build: buildPlaybookTemplate },
   "tech-stack": { label: "Tech Stack", description: "Photo cover with a plain headline, the stack as a Notes list, a clip, a comment-to-DM CTA.", build: buildTechStackTemplate },
   story: { label: "Full Story", description: "Photo cover with an all-caps headline, up to 9 story beats over stills of the video, a sign-off slide.", build: buildStoryTemplate },
-  tmz: { label: "TMZ", description: "One 4:5 image: the founder over a black band with a first-person quote in condensed caps.", build: buildTmzTemplate },
-  apps: { label: "What My Apps Do", description: "4:5 photo cover, then one Notes page per app: name, result, three bullets, a screenshot card.", build: buildAppsTemplate },
+  tmz: { label: "TMZ", description: "One image: the founder over a black band with a first-person quote in condensed caps.", build: buildTmzTemplate },
+  apps: { label: "What My Apps Do", description: "Photo cover, then one Notes page per app: name, result, three bullets, a screenshot card.", build: buildAppsTemplate },
   blank: {
     label: "Blank",
     description: "One empty square page.",

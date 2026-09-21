@@ -55,17 +55,18 @@ describe("presets are valid templates with the expected slots", () => {
     expect(t.pages[2].elements.find((e) => e.name === "Video title")?.slot).toEqual({ kind: "videoTitle", hint: "" });
     expect(t.pages[3].elements.find((e) => e.name === "CTA")?.slot?.kind).toBe("dmKeyword");
   });
-  it("story: cover, 9 beats with their own frame slots (5–9 optional), a static closer; tmz is one 4:5 page; apps is 4:5 with 5 app pages", () => {
+  it("story: cover, 9 beats with their own frame slots (5–9 optional), a static closer; tmz is one square page; apps has 5 app pages — every preset is a square", () => {
     const story = buildStoryTemplate();
     expect(story.pages).toHaveLength(11);
     expect(story.pages.slice(1, 10).every((p) => p.elements.some((e) => e.slot?.kind === "frame"))).toBe(true);
     expect(listSlots(story).filter((s) => s.hint.includes("Leave EMPTY"))).toHaveLength(5);
     expect(listSlots(story).filter((s) => s.pageIndex === 10)).toHaveLength(0);
     const tmz = buildTmzTemplate();
-    expect(tmz.canvas).toEqual({ width: 1080, height: 1350 });
+    expect(tmz.canvas).toEqual({ width: 1080, height: 1080 });
     expect(listSlots(tmz).map((s) => s.name)).toEqual(["Headline"]);
     const apps = buildAppsTemplate();
-    expect(apps.canvas.height).toBe(1350);
+    expect(apps.canvas.height).toBe(1080);
+    for (const id of Object.keys(DESIGN_PRESETS) as Array<keyof typeof DESIGN_PRESETS>) expect(DESIGN_PRESETS[id].build().canvas).toEqual({ width: 1080, height: 1080 });
     expect(apps.pages).toHaveLength(6);
     expect(listSlots(apps).filter((s) => s.pageIndex === 1).map((s) => s.name)).toEqual(["App name", "Result", "Bullets"]);
   });
