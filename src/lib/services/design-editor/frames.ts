@@ -32,6 +32,8 @@ export interface DesignFrame {
   height: number | null;
 }
 
+export { storyFrames } from "@/lib/design-editor/story-frames";
+
 export interface DesignFramesState {
   frames: DesignFrame[];
   /** Something is still being extracted (rows pending, or the auto job is

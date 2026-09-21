@@ -3,6 +3,9 @@ import { parseDesignDoc, pageVideo, DEFAULT_CROP, IG_SQUARE, PHOTO_PLACEHOLDER, 
 import { layoutDesignText, coverGeometry, cropForOffset } from "./layout";
 import { buildPlaybookTemplate } from "./playbook-template";
 import { buildTechStackTemplate } from "./tech-stack-template";
+import { buildStoryTemplate } from "./story-template";
+import { buildTmzTemplate } from "./tmz-template";
+import { buildAppsTemplate } from "./apps-template";
 import { DESIGN_PRESETS } from "./templates";
 import { applyDmKeyword, applyHighlights, applyPhotoPick, fillTemplate, listSlots, reflowStacks, type DesignFill, type DesignFillValue } from "./template-fill";
 import { formatFollowers, layoutChannel, resolveChannel } from "./channel";
@@ -29,6 +32,9 @@ describe("applyHighlights", () => {
     const spans = applyHighlights("I STOPPED GUESSING what customers wanted", [{ phrase: "stopped guessing", color: "red" }]);
     expect(spans).toEqual([{ text: "I " }, { text: "STOPPED GUESSING", color: "#FF3B3B" }, { text: " what customers wanted" }]);
   });
+  it("grows a phrase to whole words so closing punctuation keeps its colour", () => {
+    expect(applyHighlights("Growing up, he was obese. The gym", [{ phrase: "he was obese", color: "red" }])).toEqual([{ text: "Growing up, " }, { text: "he was obese.", color: "#FF3B3B" }, { text: " The gym" }]);
+  });
   it("ignores phrases that aren't in the text and overlapping ones", () => {
     const spans = applyHighlights("a b c", [{ phrase: "zzz", color: "red" }, { phrase: "a b", color: "green" }, { phrase: "b c", color: "red" }]);
     expect(spans).toEqual([{ text: "a b", color: "#22E07A" }, { text: " c" }]);
@@ -36,17 +42,32 @@ describe("applyHighlights", () => {
 });
 
 describe("presets are valid templates with the expected slots", () => {
-  it("playbook: photo slot, 4 AI text slots on the cover, a stacked Notes page, two video pages", () => {
+  it("playbook: photo slot, 2 AI text slots on the cover, a stacked Notes page, one video page, a DM CTA", () => {
     const t = buildPlaybookTemplate();
     expect(parseDesignDoc(JSON.parse(JSON.stringify(t))).ok).toBe(true);
     expect(t.pages).toHaveLength(4);
     expect(t.pages[0].elements.find((e) => e.name === "Photo")).toMatchObject({ slot: { kind: "photo" }, src: PHOTO_PLACEHOLDER });
     const slots = listSlots(t);
-    expect(slots.filter((s) => s.pageIndex === 0).map((s) => s.name)).toEqual(["Stat", "Stat unit", "Headline", "Footer"]);
-    expect(slots.find((s) => s.name === "Headline")?.highlightColors.sort()).toEqual(["green", "red"]);
-    expect(slots.filter((s) => s.kind === "video")).toHaveLength(2);
+    expect(slots.filter((s) => s.pageIndex === 0).map((s) => s.name)).toEqual(["Headline", "Footer"]);
+    expect(slots.find((s) => s.name === "Headline")?.highlightColors).toEqual(["green"]);
+    expect(slots.filter((s) => s.kind === "video")).toHaveLength(1);
     expect(t.pages[1].elements.filter((e) => e.stack === "notes").length).toBeGreaterThan(8);
     expect(t.pages[2].elements.find((e) => e.name === "Video title")?.slot).toEqual({ kind: "videoTitle", hint: "" });
+    expect(t.pages[3].elements.find((e) => e.name === "CTA")?.slot?.kind).toBe("dmKeyword");
+  });
+  it("story: cover, 9 beats with their own frame slots (5–9 optional), a static closer; tmz is one 4:5 page; apps is 4:5 with 5 app pages", () => {
+    const story = buildStoryTemplate();
+    expect(story.pages).toHaveLength(11);
+    expect(story.pages.slice(1, 10).every((p) => p.elements.some((e) => e.slot?.kind === "frame"))).toBe(true);
+    expect(listSlots(story).filter((s) => s.hint.includes("Leave EMPTY"))).toHaveLength(5);
+    expect(listSlots(story).filter((s) => s.pageIndex === 10)).toHaveLength(0);
+    const tmz = buildTmzTemplate();
+    expect(tmz.canvas).toEqual({ width: 1080, height: 1350 });
+    expect(listSlots(tmz).map((s) => s.name)).toEqual(["Headline"]);
+    const apps = buildAppsTemplate();
+    expect(apps.canvas.height).toBe(1350);
+    expect(apps.pages).toHaveLength(6);
+    expect(listSlots(apps).filter((s) => s.pageIndex === 1).map((s) => s.name)).toEqual(["App name", "Result", "Bullets"]);
   });
   it("tech stack: cover band + stack list + one clip + CTA with the channel row", () => {
     const t = buildTechStackTemplate();
@@ -67,11 +88,10 @@ describe("presets are valid templates with the expected slots", () => {
 describe("fillTemplate", () => {
   it("substitutes AI text with highlights, fills system slots from the item, gives everything fresh ids", () => {
     const t = buildPlaybookTemplate();
-    const doc = fillTemplate(t, fillFor(t, { Stat: "$1.2M", Headline: "I stopped guessing and built a $69K/month SaaS" }), { ...withSource, photo: { kind: "url", url: "https://x/founder.jpg" } });
+    const doc = fillTemplate(t, fillFor(t, { Headline: "I stopped guessing and built a $69K/month SaaS" }), { ...withSource, photo: { kind: "url", url: "https://x/founder.jpg" } });
     expect(parseDesignDoc(JSON.parse(JSON.stringify(doc))).ok).toBe(true);
     const cover = doc.pages[0];
     expect(cover.elements.find((e) => e.name === "Photo")).toMatchObject({ src: { kind: "url", url: "https://x/founder.jpg" } });
-    expect((cover.elements.find((e) => e.name === "Stat") as DesignTextElement).spans).toEqual([{ text: "$1.2M" }]);
     const headline = cover.elements.find((e) => e.name === "Headline") as DesignTextElement;
     expect(headline.spans.some((s) => s.color === "#FF3B3B")).toBe(true);
     const v = pageVideo(doc.pages[2])!;
@@ -87,7 +107,7 @@ describe("fillTemplate", () => {
   it("drops empty AI slots and reflows the stack; drops video pages without a source", () => {
     const t = buildPlaybookTemplate();
     const doc = fillTemplate(t, fillFor(t), noPhoto);
-    expect(doc.pages).toHaveLength(2); // no source → no video pages
+    expect(doc.pages).toHaveLength(3); // no source → no video page; the CTA page stays
     const notes = doc.pages[1];
     expect(notes.elements.some((e) => e.name.startsWith("Phase 4"))).toBe(false);
     const stack = notes.elements.filter((e) => e.stack === "notes");
@@ -107,6 +127,22 @@ describe("fillTemplate", () => {
     const bodies = notes.elements.filter((e) => e.name.endsWith("body")) as DesignTextElement[];
     expect(bodies).toHaveLength(5);
     expect(bodies[0].style.sizePx).toBeLessThan(29);
+  });
+
+  it("optional pages: a page whose AI text all came back empty is dropped; frame slots take distinct stills in order", () => {
+    const t = buildStoryTemplate();
+    const values = listSlots(t).filter((s) => s.pageIndex <= 6).map((s) => ({ key: s.key, text: `Beat ${s.pageIndex}` }));
+    const frames = [1, 2, 3].map((n) => ({ kind: "url" as const, url: `https://x/f${n}.jpg` }));
+    const doc = fillTemplate(t, { caption: "c", values }, { ...noPhoto, frames });
+    // cover + 6 beats + closer (beats 7–9 empty → gone; the closer has no AI text → kept)
+    expect(doc.pages).toHaveLength(8);
+    const stills = doc.pages.slice(1).map((p) => (p.elements.find((e) => e.type === "image" && e.slot?.kind === "frame") as { src: { url?: string } }).src.url);
+    expect(stills).toEqual(["https://x/f1.jpg", "https://x/f2.jpg", "https://x/f3.jpg", "https://x/f1.jpg", "https://x/f2.jpg", "https://x/f3.jpg", "https://x/f1.jpg"]);
+    // Without frames the slots keep the placeholder and applyPhotoPick fills them later, distinctly.
+    const bare = fillTemplate(t, { caption: "c", values }, noPhoto);
+    const later = applyPhotoPick(bare, null, frames.slice(0, 2))!;
+    expect(later.elementIds).toHaveLength(7);
+    expect(Object.values(later.sources).map((s) => (s as { url: string }).url).slice(0, 3)).toEqual(["https://x/f1.jpg", "https://x/f2.jpg", "https://x/f1.jpg"]);
   });
 
   it("applyPhotoPick fills placeholder photo slots only", () => {
@@ -165,9 +201,9 @@ describe("render tree", () => {
     const page = doc.pages[0];
     const tree = pageToSatoriTree(page, doc.canvas, {});
     const children = (tree.props as { children: Array<{ props: { style: Record<string, unknown> } }> }).children;
-    expect(children.length).toBeGreaterThan(5);
+    expect(children.length).toBeGreaterThan(3);
     expect(children.every((c) => c.props.style.position === "absolute")).toBe(true);
-    expect(fontsUsed(page).map((f) => f.id)).toEqual(expect.arrayContaining(["anton", "montserrat-medium", "inter-regular"]));
+    expect(fontsUsed(page).map((f) => f.id)).toEqual(expect.arrayContaining(["anton", "inter-regular"]));
   });
 });
 
@@ -179,7 +215,7 @@ describe("video slides", () => {
     const t = buildPlaybookTemplate();
     return fillTemplate(t, fillFor(t), withSource);
   };
-  it("a filled playbook has one video page per clip, each with a clip, captions and the pill", () => {
+  it("a filled playbook has its clip page with a clip, captions and the pill, then the CTA", () => {
     const t = buildPlaybookTemplate();
     const doc = fillTemplate(t, fillFor(t), withSource);
     expect(parseDesignDoc(JSON.parse(JSON.stringify(doc))).ok).toBe(true);
@@ -188,7 +224,8 @@ describe("video slides", () => {
     expect(v).toMatchObject({ startSec: 260, endSec: 295, src: { key: withSource.source.key } });
     expect(doc.pages[2].elements.map((e) => e.type)).toContain("captions");
     expect(doc.pages[2].elements.find((e) => e.name === "Pill label")).toBeTruthy();
-    expect(doc.pages[3].elements.find((e) => e.name === "Video title")).toMatchObject({ spans: [{ text: withSource.source.title }] });
+    expect(doc.pages[2].elements.find((e) => e.name === "Video title")).toMatchObject({ spans: [{ text: withSource.source.title }] });
+    expect(doc.pages[3].elements.find((e) => e.name === "CTA")).toBeTruthy();
   });
 
   it("a page holds at most one clip", () => {

@@ -28,25 +28,38 @@ export interface DesignTextLayout {
 
 /** Break spans into layout words, each remembering its span's colour and
  *  hard breaks (`\n`). */
-function spanWords(spans: DesignSpan[], uppercase: boolean): Array<LaidOutWord & { color: string | null }> {
-  const out: Array<LaidOutWord & { color: string | null }> = [];
+/** A word that starts a new paragraph remembers how many blank lines
+ *  preceded it — they become a paragraph gap in the layout. */
+type ParaWord = LaidOutWord & { color: string | null; blankBefore?: number };
+
+function spanWords(spans: DesignSpan[], uppercase: boolean): ParaWord[] {
+  const out: ParaWord[] = [];
+  let blank = 0;
   spans.forEach((span, si) => {
     span.text.split(/\r?\n/).forEach((line, li) => {
-      line
-        .split(/\s+/)
-        .filter(Boolean)
-        .forEach((t, wi) => {
-          out.push({
-            text: uppercase ? t.toUpperCase() : t,
-            ref: si,
-            color: span.color ?? null,
-            ...(li > 0 && wi === 0 && out.length > 0 ? { hardBreakBefore: true } : {}),
-          });
+      const tokens = line.split(/\s+/).filter(Boolean);
+      if (tokens.length === 0) {
+        if (li > 0) blank += 1;
+        return;
+      }
+      tokens.forEach((t, wi) => {
+        const first = wi === 0 && out.length > 0 && (li > 0 || blank > 0);
+        out.push({
+          text: uppercase ? t.toUpperCase() : t,
+          ref: si,
+          color: span.color ?? null,
+          ...(first ? { hardBreakBefore: true } : {}),
+          ...(first && blank > 0 ? { blankBefore: blank } : {}),
         });
+        if (wi === 0) blank = 0;
+      });
     });
   });
   return out;
 }
+
+/** Vertical room a blank line takes, as a share of the line pitch. */
+const PARAGRAPH_GAP = 0.65;
 
 function layoutAt(el: DesignTextElement, fontSizePx: number): DesignTextLayout {
   const words = spanWords(el.spans, el.style.uppercase);
@@ -74,8 +87,18 @@ function layoutAt(el: DesignTextElement, fontSizePx: number): DesignTextLayout {
     balance: false,
   });
   // The engine's pitch is fixed (LINE_HEIGHT_EM); rescale to the element's.
+  // Paragraph gaps (blank lines in the text) add to the block on top.
   const pitch = fontSizePx * el.style.lineHeight;
-  const blockHeightPx = base.lines.length * pitch;
+  const gapPx = pitch * PARAGRAPH_GAP;
+  const lineGaps: number[] = [];
+  {
+    let wi = 0;
+    for (const line of base.lines) {
+      lineGaps.push((words[wi]?.blankBefore ?? 0) * gapPx);
+      wi += line.words.length;
+    }
+  }
+  const blockHeightPx = base.lines.length * pitch + lineGaps.reduce((a, b) => a + b, 0);
   const startY =
     el.style.valign === "top"
       ? el.y
@@ -84,7 +107,9 @@ function layoutAt(el: DesignTextElement, fontSizePx: number): DesignTextLayout {
         : el.y + (el.h - blockHeightPx) / 2;
 
   let wi = 0;
+  let offset = 0;
   const lines: DesignLine[] = base.lines.map((line, li) => {
+    offset += lineGaps[li];
     const lineWords = line.words.map((w) => {
       const color = words[wi]?.color ?? null;
       wi += 1;
@@ -96,7 +121,7 @@ function layoutAt(el: DesignTextElement, fontSizePx: number): DesignTextLayout {
         : el.style.align === "right"
           ? el.x + el.w - line.widthPx
           : el.x + (el.w - line.widthPx) / 2;
-    return { words: lineWords, x, y: startY + li * pitch, widthPx: line.widthPx };
+    return { words: lineWords, x, y: startY + li * pitch + offset, widthPx: line.widthPx };
   });
   void LINE_HEIGHT_EM;
   return {

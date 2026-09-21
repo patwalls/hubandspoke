@@ -17,6 +17,9 @@ export interface DesignContext {
   channel: { name: string; subscribers: string };
   /** The post's attached ManyChat keyword ("BOOTSTRAP"), if any. */
   dmKeyword?: string | null;
+  /** Stills of the source video for `frame` slots, best first, the cover
+   *  pick excluded. Empty while the filmstrip is still being made. */
+  frames?: DesignImageSource[];
 }
 
 export interface ClipPick {
@@ -61,6 +64,12 @@ export interface Box {
  *  picked frame once a post is drafted (template-fill.ts). */
 export function photoSlot(box: Box, src: DesignImageSource = PHOTO_PLACEHOLDER): DesignElement {
   return { id: newElementId("img"), name: "Photo", type: "image", ...box, opacity: 1, locked: false, src, fit: "cover", radius: 0, crop: { ...DEFAULT_CROP }, slot: sys("photo"), stack: null };
+}
+
+/** A picture slot that gets its own still of the video (not the cover
+ *  pick): the n-th frame slot of a document takes the n-th best frame. */
+export function frameSlot(box: Box, src: DesignImageSource = PHOTO_PLACEHOLDER): DesignElement {
+  return { ...photoSlot(box, src), name: "Frame", slot: sys("frame") };
 }
 
 function rect(name: string, box: Box, fill: string, radius: number): DesignElement {

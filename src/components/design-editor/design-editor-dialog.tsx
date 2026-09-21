@@ -40,7 +40,7 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, shadeElement, type DesignDoc, type DesignVideoElement } from "@/lib/design-editor/doc";
+import { DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, shadeElement, type DesignDoc, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
 import { applyPhotoPick } from "@/lib/design-editor/template-fill";
 import { BRAND_WORDMARKS } from "@/lib/design-editor/brand-assets";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
@@ -50,6 +50,7 @@ import { readSnapEnabled, writeSnapEnabled } from "@/lib/editor/snap";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFramesState } from "@/lib/services/design-editor/frames";
+import { storyFrames } from "@/lib/design-editor/story-frames";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
 import { ClipTrimmer } from "./clip-trimmer";
 import { Inspector, PicturePicker, formatSec, frameCandidate } from "./inspector";
@@ -352,11 +353,15 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     // The filmstrip's pick — or, once nothing more is coming and there is
     // no pick, the YouTube thumbnail rather than an empty cover.
     const c = pick ? frameCandidate(pick) : !frames.pending && !frames.frames.some((f) => f.status === "pending") ? session.thumbnail : null;
-    if (c) {
+    // Story slides take their own stills as the filmstrip lands.
+    const stills = storyFrames(frames.frames);
+    if (c || stills.length > 0) {
       const { doc: cur } = storeApi.getState();
-      const patched = applyPhotoPick(cur, c.src);
+      const patched = applyPhotoPick(cur, c?.src ?? null, stills.map((f) => f.src));
       if (patched) {
-        setImageUrls((m) => ({ ...m, ...Object.fromEntries(patched.elementIds.map((id) => [id, c.previewUrl])) }));
+        const urlFor = (src: DesignImageSource): string | null =>
+          c && JSON.stringify(src) === JSON.stringify(c.src) ? c.previewUrl : stills.find((f) => JSON.stringify(f.src) === JSON.stringify(src))?.previewUrl ?? null;
+        setImageUrls((m) => ({ ...m, ...Object.fromEntries(patched.elementIds.flatMap((id) => { const u = urlFor(patched.sources[id]); return u ? [[id, u]] : []; })) }));
         apply(() => patched.doc);
       }
     }

@@ -19,7 +19,7 @@ import { generateDesignFill } from "./fill-brief";
 import { loadFormatTemplate } from "./format-template";
 import { previewUrlFor, sourceImageCandidates, youtubeThumbnailFor, type ImageCandidate } from "./assets";
 import { listBrandLogos } from "@/lib/services/brand-logos";
-import { listFrames, pickedFrame, requestAutoFrames, type DesignFramesState } from "./frames";
+import { listFrames, pickedFrame, requestAutoFrames, storyFrames, type DesignFramesState } from "./frames";
 import { toDesignRenderStatus, type DesignRenderStatus } from "./render-status";
 
 export class DesignItemNotFoundError extends Error {
@@ -106,7 +106,8 @@ export async function loadDesignEditorSession(args: {
     // before it did): put it in the photo slots now, before anyone holds
     // the doc.
     const photo = await coverPhotoFor(item.sourceItemId);
-    let next = photo ? applyPhotoPick(design.doc, photo)?.doc ?? null : null;
+    const frames = storyFrames((await listFrames(item.sourceItemId)).frames).map((f) => f.src);
+    let next = photo || frames.length ? applyPhotoPick(design.doc, photo, frames)?.doc ?? null : null;
     // A keyword attached after the draft (content page) fills the CTA now.
     const slug = await currentDmKeyword(item.id);
     if (slug && JSON.stringify(next ?? design.doc).includes(DM_KEYWORD_TOKEN)) next = applyDmKeyword(next ?? design.doc, slug);
@@ -172,6 +173,7 @@ async function draftDoc(itemId: string, sourceItemId: string, template: DesignDo
   const photo: DesignImageSource | null = (await coverPhotoFor(sourceItemId)) ?? (source ? null : (await sourceImageCandidates(sourceItemId))[0]?.src ?? null);
   const ctx: DesignContext = {
     photo,
+    frames: storyFrames((await listFrames(sourceItemId)).frames).map((f) => f.src),
     source: source ? { bucket: source.bucket, key: source.key, title: source.title } : null,
     channel: await loadChannel(itemId),
     dmKeyword: await currentDmKeyword(itemId),

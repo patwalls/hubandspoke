@@ -206,7 +206,8 @@ export function Inspector({ doc, mode, images, frames, source, brand, onPickImag
 const SLOT_OPTIONS: Array<{ value: DesignSlot["kind"] | "static"; label: string; for: Array<DesignElement["type"]> }> = [
   { value: "static", label: "Static — same on every post", for: ["text", "image", "video"] },
   { value: "ai", label: "AI writes this per post", for: ["text", "video"] },
-  { value: "photo", label: "Founder photo (from the video)", for: ["image"] },
+  { value: "photo", label: "Founder photo (the video's best shot)", for: ["image"] },
+  { value: "frame", label: "A different still of the video per slide", for: ["image"] },
   { value: "videoTitle", label: "The source video's title", for: ["text"] },
   { value: "channelName", label: "Channel name", for: ["text"] },
   { value: "channelSubscribers", label: "Subscriber count", for: ["text"] },

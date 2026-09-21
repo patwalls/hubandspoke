@@ -82,9 +82,14 @@ export function applyHighlights(text: string, highlights: Array<{ phrase: string
   for (const h of highlights) {
     const phrase = h.phrase.trim().toLowerCase();
     if (!phrase) continue;
-    const start = lower.indexOf(phrase);
+    let start = lower.indexOf(phrase);
     if (start < 0) continue;
-    const end = start + phrase.length;
+    let end = start + phrase.length;
+    // Whole words only: a phrase that stops before its closing punctuation
+    // ("obese" in "obese.") would otherwise leave the "." as its own white
+    // token with a space before it. Grow to the surrounding whitespace.
+    while (start > 0 && !/\s/.test(text[start - 1])) start--;
+    while (end < text.length && !/\s/.test(text[end])) end++;
     if (marks.some((m) => start < m.end && end > m.start)) continue;
     const color = (HIGHLIGHT_COLORS as Record<string, string>)[h.color] ?? h.color;
     marks.push({ start, end, color });
@@ -110,18 +115,27 @@ export function applyHighlights(text: string, highlights: Array<{ phrase: string
 export function fillTemplate(template: DesignDoc, fill: DesignFill, ctx: DesignContext): DesignDoc {
   const byKey = new Map(fill.values.map((v) => [v.key, v]));
   const pages: DesignPage[] = [];
+  const frames = { list: ctx.frames ?? [], next: 0 };
   for (const page of template.pages) {
     const elements: DesignElement[] = [];
     let dropPage = false;
+    // A page whose AI text all came back empty is an optional page the
+    // post doesn't need (story slide 9 of a 6-beat story, app 4 of 3).
+    let aiText = 0;
+    let aiTextFilled = 0;
     for (const el of page.elements) {
-      const filled = fillElement(el, byKey.get(el.id), ctx);
+      if (el.slot?.kind === "ai" && el.type === "text") aiText++;
+      const filled = fillElement(el, byKey.get(el.id), ctx, frames);
       if (filled === "drop-page") {
         dropPage = true;
         break;
       }
-      if (filled) elements.push({ ...filled, id: newElementId(prefixFor(filled)) });
+      if (filled) {
+        if (el.slot?.kind === "ai" && el.type === "text") aiTextFilled++;
+        elements.push({ ...filled, id: newElementId(prefixFor(filled)) });
+      }
     }
-    if (dropPage) continue;
+    if (dropPage || (aiText > 0 && aiTextFilled === 0)) continue;
     pages.push(reflowStacks({ ...page, id: newElementId("page"), elements }, template.canvas));
   }
   return { ...template, pages: pages.length > 0 ? pages : [{ id: newElementId("page"), background: "#0B0B0B", elements: [] }] };
@@ -131,9 +145,14 @@ function prefixFor(el: DesignElement): string {
   return el.type === "text" ? "t" : el.type === "image" ? "img" : el.type === "video" ? "v" : el.type === "captions" ? "c" : el.type === "channel" ? "ch" : "r";
 }
 
-function fillElement(el: DesignElement, value: DesignFillValue | undefined, ctx: DesignContext): DesignElement | null | "drop-page" {
+function fillElement(el: DesignElement, value: DesignFillValue | undefined, ctx: DesignContext, frames: { list: DesignImageSource[]; next: number }): DesignElement | null | "drop-page" {
   if (!el.slot) return el;
   switch (el.slot.kind) {
+    case "frame": {
+      if (el.type !== "image") return el;
+      const src = frames.list.length > 0 ? frames.list[frames.next++ % frames.list.length] : null;
+      return { ...el, src: src ?? PHOTO_PLACEHOLDER };
+    }
     case "ai": {
       if (el.type === "text") {
         const text = value?.text?.trim() ?? "";
@@ -232,18 +251,26 @@ export function reflowStacks(page: DesignPage, canvas: { width: number; height: 
 }
 
 /** After the frames arrive: put the picked frame into every photo slot
- *  that still shows the placeholder. Returns null when nothing changed. */
-export function applyPhotoPick(doc: DesignDoc, photo: DesignImageSource): { doc: DesignDoc; elementIds: string[] } | null {
+ *  that still shows the placeholder, and a different still into every
+ *  frame slot still showing it (in document order, cycling through
+ *  `frames`). Returns the new sources by element id, or null when nothing
+ *  changed. */
+export function applyPhotoPick(doc: DesignDoc, photo: DesignImageSource | null, frames: DesignImageSource[] = []): { doc: DesignDoc; elementIds: string[]; sources: Record<string, DesignImageSource> } | null {
   const ids: string[] = [];
+  const sources: Record<string, DesignImageSource> = {};
+  let next = 0;
   const pages = doc.pages.map((page) => ({
     ...page,
     elements: page.elements.map((el) => {
-      if (el.type === "image" && el.slot?.kind === "photo" && isPhotoPlaceholder(el.src)) {
-        ids.push(el.id);
-        return { ...el, src: photo };
-      }
-      return el;
+      if (el.type !== "image" || !isPhotoPlaceholder(el.src)) return el;
+      let src: DesignImageSource | null = null;
+      if (el.slot?.kind === "photo") src = photo;
+      else if (el.slot?.kind === "frame" && frames.length > 0) src = frames[next++ % frames.length];
+      if (!src) return el;
+      ids.push(el.id);
+      sources[el.id] = src;
+      return { ...el, src };
     }),
   }));
-  return ids.length > 0 ? { doc: { ...doc, pages }, elementIds: ids } : null;
+  return ids.length > 0 ? { doc: { ...doc, pages }, elementIds: ids, sources } : null;
 }

@@ -53,18 +53,21 @@ export type DesignSpan = z.infer<typeof spanSchema>;
 /**
  * A slot marks an element a FORMAT TEMPLATE wants filled per post (see
  * template-fill.ts). `ai` = the model writes it from the transcript (the
- * hint tells it what); the others are filled from the item itself. Static
+ * hint tells it what); the others are filled from the item itself —
+ * `photo` is THE founder picture (the filmstrip's pick), `frame` is a
+ * different still of the video per slot, in library order, for story
+ * slides that each want their own picture. Static
  * elements (logos, pills, the Notes chrome) have no slot. Slots survive into
  * the item's document so the editor can still tell what an element was.
  */
-export const SLOT_KINDS = ["ai", "photo", "videoTitle", "channelName", "channelSubscribers", "dmKeyword"] as const;
+export const SLOT_KINDS = ["ai", "photo", "frame", "videoTitle", "channelName", "channelSubscribers", "dmKeyword"] as const;
 /** In a `dmKeyword` text slot, this token becomes the post's attached
  *  ManyChat keyword ("BOOTSTRAP"). Structural placeholder, not content. */
 export const DM_KEYWORD_TOKEN = "{{keyword}}";
 const slotSchema = z.object({
   kind: z.enum(SLOT_KINDS),
   /** For `ai`: what to write ("the founder's biggest revenue number"). */
-  hint: z.string().max(400),
+  hint: z.string().max(800),
 });
 export type DesignSlot = z.infer<typeof slotSchema>;
 
