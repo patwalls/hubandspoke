@@ -307,6 +307,14 @@ what still fails) and keep the opening clause byte for byte. The ledger matches 
 opening clause and masks numbers, so a refreshed count inherits the wait; only a rewritten
 action resets it.
 
+Refreshing is replacing, not appending. Measured 2026-09-21 by the `loops` meta-loop, lap
+162: the PR #29 line had grown to 568 characters — each lap kept the old incident story
+(the 517M burst, second by second) and bolted this lap's on after it ("a twenty-third
+straight lap…", "but the same shape hit a worse R14…"), so the ask no longer reads in one
+pass. The evidence half is at most two short clauses: what the fix stops, and the single
+strongest current fact (`open as draft 51 laps; worst R14 since: 840M on 09-20`). Whole
+line under ~250 characters; the incident history lives in the PR, not on Pat's board.
+
 **A service logged Pat out / a token expired (401, "session expired", invalid key):**
 that is never your finding to narrate — run
 `loops cred expired <service> --fix "<the exact re-login step>" --stalls "<one line on what stops>"`
