@@ -99,6 +99,20 @@ test("flag on → editor opens; cutting a word is undoable and autosaves", async
   await page.getByRole("button", { name: "Back to clip" }).click();
   await expect(page.getByText("Previewing source · not in your clip")).toBeHidden();
 
+  // Adding things on the stage: + Text makes a layer with its own panel,
+  // arrows nudge it, and its panel's bin takes it away again.
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Text 1" })).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  await page.getByRole("button", { name: "Remove text 1" }).click();
+  await expect(page.getByRole("heading", { name: "Text 1" })).toHaveCount(0);
+  // + Logo opens the brand's library (upload + wordmarks + account avatars)
+  await page.getByRole("button", { name: "Logo", exact: true }).click();
+  await expect(page.getByText("Upload a logo for this brand")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Upload a logo for this brand")).toBeHidden();
+  await expect(page.getByText("Editor beta")).toBeVisible(); // Escape closed the picker, not the editor
+
   // The Post tab: the clip's post copy next to the stage. Opening the editor
   // starts the draft, so the pane is either still writing or shows the
   // platform mock; either way the transcript gives way to it and comes back.

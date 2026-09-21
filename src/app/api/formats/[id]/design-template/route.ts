@@ -4,7 +4,7 @@ import { parseDesignDoc } from "@/lib/design-editor/doc";
 import { isDesignPresetId } from "@/lib/design-editor/templates";
 import { clearFormatTemplate, createFormatTemplateFromPreset, loadFormatTemplateById, saveFormatTemplate } from "@/lib/services/design-editor/format-template";
 import { resolveImageUrls } from "@/lib/services/design-editor/session";
-import { BRAND_WORDMARKS } from "@/lib/services/design-editor/assets";
+import { listBrandLogos } from "@/lib/services/brand-logos";
 import { loadBrandChannels } from "@/lib/services/design-editor/channels";
 
 interface RouteContext {
@@ -19,7 +19,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const t = await loadFormatTemplateById(id);
   if (!t) return NextResponse.json({ template: null });
-  return NextResponse.json({ template: { doc: t.doc, source: t.source, updatedAt: t.updatedAt }, imageUrls: await resolveImageUrls(t.doc), images: BRAND_WORDMARKS, channels: await loadBrandChannels(t.brand) });
+  return NextResponse.json({ template: { doc: t.doc, source: t.source, updatedAt: t.updatedAt }, imageUrls: await resolveImageUrls(t.doc), images: await listBrandLogos(t.brand), channels: await loadBrandChannels(t.brand) });
 }
 
 /** Save the template. Body: `{ doc }`. */
@@ -42,7 +42,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const body = (await request.json().catch(() => ({}))) as { preset?: unknown };
   if (!isDesignPresetId(body.preset)) return NextResponse.json({ error: "Unknown preset" }, { status: 400 });
   const doc = await createFormatTemplateFromPreset(id, body.preset);
-  return NextResponse.json({ template: { doc, source: "stored" }, imageUrls: await resolveImageUrls(doc), images: BRAND_WORDMARKS });
+  const t = await loadFormatTemplateById(id);
+  return NextResponse.json({ template: { doc, source: "stored" }, imageUrls: await resolveImageUrls(doc), images: t ? await listBrandLogos(t.brand) : [] });
 }
 
 /** Remove the stored template (the format falls back to its preset, if any). */

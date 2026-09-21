@@ -42,6 +42,10 @@ export interface EditorState {
   /** Selected transcript words, as positions in the editor's display list. */
   wordSelection: { anchor: number; focus: number } | null;
   stageSelection: StageSelection;
+  /** Browser URL per image layer id — resolved by the session for stored
+   *  layers, registered by the logo picker for layers added here. Not part
+   *  of the doc (URLs expire; the doc keeps the durable source). */
+  imageUrls: Record<string, string>;
 
   apply: (mutate: (doc: ClipEditDoc) => ClipEditDoc, coalesceKey?: string) => void;
   undo: () => void;
@@ -51,6 +55,7 @@ export interface EditorState {
   markSaveFailed: (kind: "error" | "conflict") => void;
   setWordSelection: (sel: EditorState["wordSelection"]) => void;
   setStageSelection: (sel: StageSelection) => void;
+  registerImageUrl: (layerId: string, url: string) => void;
 }
 
 /**
@@ -71,6 +76,7 @@ export function createEditorStore(init: {
   /** Unsaved edits recovered from this browser (local-backup.ts). The editor
    *  opens on them, already dirty, so the normal autosave sends them up. */
   recoveredDoc?: ClipEditDoc | null;
+  imageUrls?: Record<string, string>;
 }): StoreApi<EditorState> {
   return createStore<EditorState>((set, get) => ({
     doc: init.recoveredDoc ?? init.doc,
@@ -82,6 +88,7 @@ export function createEditorStore(init: {
     saveState: init.recoveredDoc ? "dirty" : "saved",
     wordSelection: null,
     stageSelection: null,
+    imageUrls: init.imageUrls ?? {},
 
     apply: (mutate, coalesceKey) => {
       const { doc, past, lastChange, saveState } = get();
@@ -139,6 +146,7 @@ export function createEditorStore(init: {
     markSaveFailed: (kind) => set({ saveState: kind }),
     setWordSelection: (wordSelection) => set({ wordSelection }),
     setStageSelection: (stageSelection) => set({ stageSelection }),
+    registerImageUrl: (layerId, url) => set({ imageUrls: { ...get().imageUrls, [layerId]: url } }),
   }));
 }
 
@@ -217,6 +225,18 @@ export const commands = {
     <L extends Layer>(layerId: string, patch: (l: L) => L) =>
     (doc: ClipEditDoc) =>
       mapLayer(doc, layerId, patch),
+
+  /** Append a layer (on top). */
+  addLayer: (layer: Layer) => (doc: ClipEditDoc) => ({ ...doc, layers: [...doc.layers, layer] }),
+
+  /** Remove an added layer. The hook and the captions are never removed —
+   *  they are hidden with their toggle — so the workflow can always find
+   *  the hook. */
+  removeLayer: (layerId: string) => (doc: ClipEditDoc) => {
+    const layer = doc.layers.find((l) => l.id === layerId);
+    if (!layer || layer.type === "captions" || (layer.type === "text" && layer.role === "hook")) return doc;
+    return { ...doc, layers: doc.layers.filter((l) => l.id !== layerId) };
+  },
 
   patchVideo: (patch: Partial<ClipEditDoc["video"]>) => (doc: ClipEditDoc) => ({
     ...doc,

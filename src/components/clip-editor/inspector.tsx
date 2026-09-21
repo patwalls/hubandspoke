@@ -6,10 +6,11 @@
  * any other edit. Sliders pass a coalesce key so one drag = one undo step.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { AlignCenterIcon, AlignLeftIcon, AlignRightIcon, ChevronDownIcon } from "lucide-react";
+import { AlignCenterIcon, AlignLeftIcon, AlignRightIcon, ChevronDownIcon, Trash2Icon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { CaptionsLayer, ClipEditDoc, FontId, TextAlign, TextLayer, TextStyle } from "@/lib/clip-editor/doc";
+import type { CaptionsLayer, ClipEditDoc, FontId, ImageLayer, TextAlign, TextLayer, TextStyle } from "@/lib/clip-editor/doc";
 import { FONT_IDS, TEXT_STYLE_PRESETS, findCaptionsLayer, findHookLayer } from "@/lib/clip-editor/doc";
+import { LogoPicker } from "@/components/editor/logo-picker";
 import { FONTS } from "@/lib/clip-editor/fonts";
 import { colorsInClipDoc } from "@/lib/clip-editor/colors";
 import { ColorPicker } from "@/components/editor/color-picker";
@@ -17,73 +18,84 @@ import { commands, useEditor } from "./store";
 
 const HIGHLIGHTS = ["#FFE14D", "#4ADE80", "#38BDF8", "#FB7185", "#FFFFFF"];
 
-export function Inspector({ doc, disabled, className }: { doc: ClipEditDoc; disabled: boolean; className?: string }) {
+export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDoc; disabled: boolean; brand: string; className?: string }) {
   const apply = useEditor((s) => s.apply);
   const selection = useEditor((s) => s.stageSelection);
+  const setSelection = useEditor((s) => s.setStageSelection);
+  const registerImageUrl = useEditor((s) => s.registerImageUrl);
   const hook = findHookLayer(doc);
   const captions = findCaptionsLayer(doc);
   const vertical = doc.canvas.height > doc.canvas.width;
 
-  const patchHook = (patch: (l: TextLayer) => TextLayer, key?: string) =>
-    hook && apply(commands.patchLayer<TextLayer>(hook.id, patch), key);
   const patchCaptions = (patch: (l: CaptionsLayer) => CaptionsLayer, key?: string) =>
     captions && apply(commands.patchLayer<CaptionsLayer>(captions.id, patch), key);
   const usedColors = useMemo(() => colorsInClipDoc(doc), [doc]);
+  const removeLayer = (id: string) => {
+    apply(commands.removeLayer(id));
+    if (selection?.kind === "layer" && selection.id === id) setSelection(null);
+  };
+  const extraText = doc.layers.filter((l): l is TextLayer => l.type === "text" && l.role !== "hook");
+  const images = doc.layers.filter((l): l is ImageLayer => l.type === "image");
 
   return (
     <fieldset disabled={disabled} className={cn("flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto pr-1 disabled:opacity-60", className)}>
       {hook && (
-        <Panel
+        <TextLayerPanel
           title="Hook"
+          layer={hook}
           active={selection?.kind === "layer" && selection.id === hook.id}
-          toggle={{
-            on: hook.visible,
-            onChange: (visible) => patchHook((l) => ({ ...l, visible })),
-          }}
+          usedColors={usedColors}
+          placeholder="The line that stops the scroll"
+          patch={(patch, key) => apply(commands.patchLayer<TextLayer>(hook.id, patch), key)}
+        />
+      )}
+      {extraText.map((layer, i) => (
+        <TextLayerPanel
+          key={layer.id}
+          title={`Text ${i + 1}`}
+          layer={layer}
+          active={selection?.kind === "layer" && selection.id === layer.id}
+          usedColors={usedColors}
+          placeholder="Your text"
+          patch={(patch, key) => apply(commands.patchLayer<TextLayer>(layer.id, patch), key)}
+          onRemove={() => removeLayer(layer.id)}
+        />
+      ))}
+      {images.map((layer, i) => (
+        <Panel
+          key={layer.id}
+          title={images.length > 1 ? `Logo ${i + 1}` : "Logo"}
+          active={selection?.kind === "layer" && selection.id === layer.id}
+          toggle={{ on: layer.visible, onChange: (visible) => apply(commands.patchLayer<ImageLayer>(layer.id, (l) => ({ ...l, visible }))) }}
+          onRemove={() => removeLayer(layer.id)}
         >
-          <textarea
-            value={hook.text}
-            rows={3}
-            onChange={(e) => patchHook((l) => ({ ...l, text: e.target.value }), "hook-text")}
-            onKeyDown={(e) => e.stopPropagation()}
-            placeholder="The line that stops the scroll"
-            className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-[13px] font-medium leading-snug outline-none focus:ring-2 focus:ring-ring"
-          />
-          <FontPicker
-            value={hook.style.fontId}
-            onChange={(fontId) => patchHook((l) => ({ ...l, style: { ...l.style, fontId } }))}
-          />
           <Slider
             label="Size"
-            value={hook.style.sizePct}
-            min={1.5}
-            max={8}
-            step={0.1}
-            onChange={(sizePct) =>
-              patchHook((l) => ({ ...l, style: { ...l.style, sizePct } }), "hook-size")
-            }
+            hint="or drag its corner on the preview"
+            value={layer.widthPct}
+            min={2}
+            max={100}
+            step={0.5}
+            onChange={(widthPct) => apply(commands.patchLayer<ImageLayer>(layer.id, (l) => ({ ...l, widthPct })), `image-size-${layer.id}`)}
           />
           <Slider
-            label="Position"
-            hint="or drag it on the preview"
-            value={hook.yPct}
-            min={2}
-            max={98}
-            step={0.5}
-            onChange={(yPct) => patchHook((l) => ({ ...l, yPct }), "hook-y")}
+            label="Opacity"
+            value={Math.round(layer.opacity * 100)}
+            min={5}
+            max={100}
+            step={1}
+            onChange={(pct) => apply(commands.patchLayer<ImageLayer>(layer.id, (l) => ({ ...l, opacity: pct / 100 })), `image-opacity-${layer.id}`)}
           />
-          <AlignPicker value={hook.style.align} onChange={(align) => patchHook((l) => ({ ...l, style: { ...l.style, align } }))} />
-          <Check
-            label="ALL CAPS"
-            checked={hook.style.uppercase}
-            onChange={(uppercase) =>
-              patchHook((l) => ({ ...l, style: { ...l.style, uppercase } }))
-            }
+          <LogoPicker
+            brand={brand}
+            trigger={<span className="inline-flex h-7 items-center rounded-md border border-border px-2 text-xs hover:bg-muted">Replace picture…</span>}
+            onPick={(logo) => {
+              apply(commands.patchLayer<ImageLayer>(layer.id, (l) => ({ ...l, src: logo.src })));
+              registerImageUrl(layer.id, logo.previewUrl);
+            }}
           />
-          <ColorRow usedColors={usedColors} label="Colour" value={hook.style.color} onChange={(color) => patchHook((l) => ({ ...l, style: { ...l.style, color } }), "hook-color")} />
-          <TextEffects style={hook.style} usedColors={usedColors} onChange={(patch, key) => patchHook((l) => ({ ...l, style: { ...l.style, ...patch } }), key)} />
         </Panel>
-      )}
+      ))}
 
       {captions && (
         <Panel
@@ -253,15 +265,85 @@ export function Inspector({ doc, disabled, className }: { doc: ClipEditDoc; disa
   );
 }
 
+/** Everything about one text layer: the hook, or an added line of text. */
+function TextLayerPanel({ title, layer, active, usedColors, placeholder, patch, onRemove }: {
+  title: string;
+  layer: TextLayer;
+  active: boolean;
+  usedColors: string[];
+  placeholder: string;
+  patch: (patch: (l: TextLayer) => TextLayer, key?: string) => void;
+  onRemove?: () => void;
+}) {
+  const hook = layer;
+  const patchHook = patch;
+  return (
+        <Panel
+          title={title}
+          active={active}
+          onRemove={onRemove}
+          toggle={{
+            on: hook.visible,
+            onChange: (visible) => patchHook((l) => ({ ...l, visible })),
+          }}
+        >
+          <textarea
+            value={hook.text}
+            rows={3}
+            onChange={(e) => patchHook((l) => ({ ...l, text: e.target.value }), `${layer.id}-text`)}
+            onKeyDown={(e) => e.stopPropagation()}
+            placeholder={placeholder}
+            className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-[13px] font-medium leading-snug outline-none focus:ring-2 focus:ring-ring"
+          />
+          <FontPicker
+            value={hook.style.fontId}
+            onChange={(fontId) => patchHook((l) => ({ ...l, style: { ...l.style, fontId } }))}
+          />
+          <Slider
+            label="Size"
+            value={hook.style.sizePct}
+            min={1.5}
+            max={8}
+            step={0.1}
+            onChange={(sizePct) =>
+              patchHook((l) => ({ ...l, style: { ...l.style, sizePct } }), `${layer.id}-size`)
+            }
+          />
+          <Slider
+            label="Position"
+            hint="or drag it on the preview"
+            value={hook.yPct}
+            min={2}
+            max={98}
+            step={0.5}
+            onChange={(yPct) => patchHook((l) => ({ ...l, yPct }), `${layer.id}-y`)}
+          />
+          <AlignPicker value={hook.style.align} onChange={(align) => patchHook((l) => ({ ...l, style: { ...l.style, align } }))} />
+          <Check
+            label="ALL CAPS"
+            checked={hook.style.uppercase}
+            onChange={(uppercase) =>
+              patchHook((l) => ({ ...l, style: { ...l.style, uppercase } }))
+            }
+          />
+          <ColorRow usedColors={usedColors} label="Colour" value={hook.style.color} onChange={(color) => patchHook((l) => ({ ...l, style: { ...l.style, color } }), `${layer.id}-color`)} />
+          <TextEffects style={hook.style} usedColors={usedColors} onChange={(patch, key) => patchHook((l) => ({ ...l, style: { ...l.style, ...patch } }), key && `${layer.id}-${key}`)} />
+        </Panel>
+  );
+}
+
 function Panel({
   title,
   active,
   toggle,
+  onRemove,
   children,
 }: {
   title: string;
   active?: boolean;
   toggle?: { on: boolean; onChange: (on: boolean) => void };
+  /** Layers that were added can be taken away again. */
+  onRemove?: () => void;
   children: ReactNode;
 }) {
   const hidden = toggle && !toggle.on;
@@ -273,9 +355,14 @@ function Panel({
       )}
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <h3 className="mr-auto text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </h3>
+        {onRemove && (
+          <button type="button" onClick={onRemove} title="Remove" aria-label={`Remove ${title.toLowerCase()}`} className="mr-2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-red-600">
+            <Trash2Icon className="size-3.5" />
+          </button>
+        )}
         {toggle && (
           <button
             type="button"

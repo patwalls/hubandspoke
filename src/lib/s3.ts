@@ -88,7 +88,7 @@ function clientForBucket(bucket: string): S3Client {
   return s3Client();
 }
 
-function keyPrefix(): string {
+export function keyPrefix(): string {
   return (process.env.HUBANDSPOKE_S3_PREFIX || "hubandspoke/uploads").replace(
     /\/+$/,
     ""

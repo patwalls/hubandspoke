@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createDefaultDoc, parseDoc } from "./doc";
+import { createDefaultDoc, createImageLayer, parseDoc, type TextLayer } from "./doc";
 import { compileRenderPlan } from "./plan";
 import { resolveScene, activeCaptionAt } from "./scene";
 import { assEscape, assTime, buildAssScript } from "./ass";
@@ -21,7 +21,7 @@ function planFor(mutate?: (doc: ReturnType<typeof createDefaultDoc>) => void) {
 
 describe("layoutTextBlock", () => {
   const base = {
-    style: createDefaultDoc({ startSec: 0, endSec: 1, hook: "" }).layers[0].style,
+    style: (createDefaultDoc({ startSec: 0, endSec: 1, hook: "" }).layers[0] as TextLayer).style,
     canvas: { width: 1080, height: 1920 },
     xPct: 50, yPct: 30, widthPct: 86,
   };
@@ -154,6 +154,26 @@ describe("buildFilterGraph", () => {
     );
     expect(g).toContain("scale=972:546");
     expect(g).toContain("pad=1080:1920:54:687"); // centered: (1080-972)/2, 960-273
+  });
+
+  it("overlays image layers between the placed video and the text, as extra inputs", () => {
+    const logo = createImageLayer({ src: { kind: "asset", path: "/watermarks/x.png" }, canvas: { width: 1080, height: 1920 } });
+    const plan = planFor((doc) => {
+      doc.layers.push({ ...logo, xPct: 50, yPct: 90, anchor: "bottom", widthPct: 20, opacity: 0.5 });
+      doc.layers.push({ ...logo, id: "hidden", visible: false });
+    });
+    expect(plan.imageLayers).toHaveLength(1);
+    const g = buildFilterGraph(plan, { assPath: "/tmp/o.ass", fontsDir: "/f", sourceSize: HD });
+    // one video input (index 0) → the logo is input 1, scaled by width only
+    expect(g).toContain("[1:v]format=rgba,scale=216:-1:flags=lanczos,colorchannelmixer=aa=0.500[img0]");
+    expect(g).toContain("[vplaced][img0]overlay=x=540-overlay_w/2:y=1728-overlay_h[vi0]");
+    // text burns in AFTER the logo, so it always sits on top
+    expect(g).toContain("[vi0]null,ass=filename='/tmp/o.ass'");
+    const argv = buildRenderArgs({ plan, input: "/tmp/in.mp4", images: ["/tmp/logo.png"], filterScriptPath: "/tmp/g", outputPath: "/tmp/o.mp4" });
+    const inputs = argv.map((a, i) => (a === "-i" ? argv[i + 1] : null)).filter(Boolean);
+    expect(inputs).toEqual(["/tmp/in.mp4", "/tmp/logo.png"]);
+    // without a probed size the same overlay applies to the fallback placement
+    expect(buildFilterGraph(plan, { assPath: null, fontsDir: "/f" })).toContain("[vplaced][img0]overlay");
   });
 
   it("rounds corners with a one-frame looped alpha mask, not per-frame geq", () => {

@@ -17,7 +17,8 @@ import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words
 import { getPresignedGetUrl } from "@/lib/s3";
 import { generateDesignFill } from "./fill-brief";
 import { loadFormatTemplate } from "./format-template";
-import { BRAND_WORDMARKS, previewUrlFor, sourceImageCandidates, youtubeThumbnailFor, type ImageCandidate } from "./assets";
+import { previewUrlFor, sourceImageCandidates, youtubeThumbnailFor, type ImageCandidate } from "./assets";
+import { listBrandLogos } from "@/lib/services/brand-logos";
 import { listFrames, pickedFrame, requestAutoFrames, type DesignFramesState } from "./frames";
 import { toDesignRenderStatus, type DesignRenderStatus } from "./render-status";
 
@@ -312,7 +313,7 @@ async function finishSession(item: Awaited<ReturnType<typeof loadItem>>, design:
     item,
     design,
     imageUrls,
-    images: dedupeImages([...(await sourceImageCandidates(item.sourceItemId)), ...(thumb ? [thumb] : []), ...BRAND_WORDMARKS]),
+    images: dedupeImages([...(await sourceImageCandidates(item.sourceItemId)), ...(thumb ? [thumb] : []), ...(await listBrandLogos(item.brand))]),
     frames: await listFrames(item.sourceItemId),
     thumbnail: thumb,
     source: source ? { ...source, videoUrl: await getPresignedGetUrl(source.key, 4 * 3600, { bucket: source.bucket ?? undefined }) } : null,

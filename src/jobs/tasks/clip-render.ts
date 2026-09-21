@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { mkdtemp, rm, stat, writeFile } from "fs/promises";
+import { copyFile, mkdtemp, rm, stat, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import path from "path";
 import type { Task } from "graphile-worker";
@@ -146,6 +146,21 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
       helpers.logger.warn(`clip-render: couldn't probe source size for render=${render.id}; using aspect fallback`);
     }
 
+    // Image layers (logos): each a local file, same order as the plan.
+    // Bundled assets are read straight from public/; anything else is
+    // downloaded (ffmpeg here must never see an https input).
+    const images: string[] = [];
+    for (const [i, layer] of plan.imageLayers.entries()) {
+      const file = path.join(workDir, `image-${i}`);
+      if (layer.src.kind === "asset") {
+        await copyFile(path.join(process.cwd(), "public", layer.src.path), file);
+      } else {
+        const url = layer.src.kind === "s3" ? await getPresignedGetUrl(layer.src.key, 3600, { bucket: layer.src.bucket ?? undefined }) : layer.src.url;
+        await downloadToFile(url, file);
+      }
+      images.push(file);
+    }
+
     const filterScriptPath = path.join(workDir, "graph.txt");
     await writeFile(
       filterScriptPath,
@@ -153,6 +168,7 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
         assPath,
         fontsDir: path.join(process.cwd(), "public", "fonts", "clip-editor"),
         sourceSize,
+        imageCount: images.length,
       }),
     );
     const outputPath = path.join(workDir, "clip.mp4");
@@ -164,7 +180,7 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
     const onProgress = makeProgressWriter(render.id, plan.durationSec);
     const started = Date.now();
     await runFfmpeg(
-      buildRenderArgs({ plan, input: localSource, filterScriptPath, outputPath }),
+      buildRenderArgs({ plan, input: localSource, images, filterScriptPath, outputPath }),
       onProgress,
     );
     const renderSeconds = (Date.now() - started) / 1000;

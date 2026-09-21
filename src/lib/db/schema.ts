@@ -2348,3 +2348,27 @@ export const workerHeartbeat = pgTable("worker_heartbeat", {
   workerDyno: text("worker_dyno"), // e.g. "worker.1" — informational
 });
 
+
+/**
+ * A brand's logo library — pictures (wordmarks, icons, partner logos) any
+ * editor can drop onto a clip or a design, uploaded once and kept per brand
+ * rather than per post. The built-in Starter Story wordmarks in
+ * public/watermarks and the brand's account avatars are listed alongside
+ * these rows by `listBrandLogos`; only uploads live here.
+ */
+export const brandLogos = pgTable(
+  "brand_logos",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** Brand slug (matches `formats.brand` / `production_items.brand`). */
+    brand: text("brand").notNull(),
+    label: text("label").notNull(),
+    s3Bucket: text("s3_bucket").notNull(),
+    s3Key: text("s3_key").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("brand_logos_brand_idx").on(table.brand)],
+);

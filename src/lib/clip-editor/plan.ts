@@ -18,6 +18,7 @@ import type {
   Canvas,
   CaptionsLayer,
   ClipEditDoc,
+  ImageLayer,
   TextLayer,
   VideoPlacement,
 } from "./doc";
@@ -81,6 +82,8 @@ export interface RenderPlan {
   durationSec: number;
   /** Visible, non-empty text layers in z-order. */
   textLayers: TextLayer[];
+  /** Visible image layers (logos, stickers) in z-order. */
+  imageLayers: ImageLayer[];
   /** null when captions are hidden or there is nothing to caption. */
   captions: { layer: CaptionsLayer; cues: CaptionCue[] } | null;
 }
@@ -149,6 +152,8 @@ export function compileRenderPlan(
       l.type === "text" && l.visible && l.text.trim().length > 0,
   );
 
+  const imageLayers = doc.layers.filter((l): l is ImageLayer => l.type === "image" && l.visible);
+
   const captionsLayer = doc.layers.find(
     (l): l is CaptionsLayer => l.type === "captions" && l.visible,
   );
@@ -164,6 +169,7 @@ export function compileRenderPlan(
     totalFrames: outFrame,
     durationSec: outFrame / fps,
     textLayers,
+    imageLayers,
     captions:
       captionsLayer && cues.length > 0 ? { layer: captionsLayer, cues } : null,
   };

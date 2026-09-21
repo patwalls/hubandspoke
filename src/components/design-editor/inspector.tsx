@@ -5,7 +5,8 @@
 import { createContext, useContext, useMemo, useRef, useState } from "react";
 import { ColorPicker } from "@/components/editor/color-picker";
 import { colorsInDesignDoc } from "@/lib/design-editor/colors";
-import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, Loader2Icon, LockIcon, Trash2Icon, UnlockIcon, UploadIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, ImageIcon, Loader2Icon, LockIcon, Trash2Icon, UnlockIcon, UploadIcon } from "lucide-react";
+import { LogoPicker } from "@/components/editor/logo-picker";
 import { cn } from "@/lib/utils";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
 import { FONTS } from "@/lib/clip-editor/fonts";
@@ -24,6 +25,8 @@ export interface InspectorProps {
   images: ImageCandidate[];
   frames: DesignFramesState;
   source: { videoUrl: string; title: string | null } | null;
+  /** For the brand logo library in the picture panel. */
+  brand: string;
   onPickImage: (elementId: string, c: ImageCandidate) => void;
   /** Grab a frame of the source at `sec` and put it in this element when it lands. */
   onGrabFrame: (elementId: string | null, sec: number) => void;
@@ -52,7 +55,7 @@ export function formatSec(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function Inspector({ doc, mode, images, frames, source, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword, onRerunFrames }: InspectorProps) {
+export function Inspector({ doc, mode, images, frames, source, brand, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword, onRerunFrames }: InspectorProps) {
   const apply = useDesign((s) => s.apply);
   const selection = useDesign((s) => s.selection);
   const select = useDesign((s) => s.select);
@@ -186,7 +189,7 @@ export function Inspector({ doc, mode, images, frames, source, onPickImage, onGr
         </Panel>
       )}
       {el.type === "image" && (
-        <PicturePicker title="Swap picture" images={images} frames={frames} source={source} onPick={(c) => onPickImage(el.id, c)} onGrabFrame={(sec) => onGrabFrame(el.id, sec)} onUpload={(file) => onUpload(el.id, file)} onRerunFrames={onRerunFrames} />
+        <PicturePicker title="Swap picture" images={images} frames={frames} source={source} brand={brand} onPick={(c) => onPickImage(el.id, c)} onGrabFrame={(sec) => onGrabFrame(el.id, sec)} onUpload={(file) => onUpload(el.id, file)} onRerunFrames={onRerunFrames} />
       )}
       {el.type === "captions" && <CaptionsPanel el={el} patch={(fn, key) => patch<DesignCaptionsElement>(fn, key)} />}
     </div>
@@ -297,8 +300,8 @@ function ClipTrim({ el, patch, onSeekClip }: { el: DesignVideoElement; patch: (f
  * AI's pick starred), a scrubber to grab any exact moment, the source's own
  * pictures + wordmarks, and an upload.
  */
-export function PicturePicker({ title, images, frames, source, onPick, onGrabFrame, onUpload, onRerunFrames }: {
-  title: string; images: ImageCandidate[]; frames: DesignFramesState; source: { videoUrl: string } | null;
+export function PicturePicker({ title, images, frames, source, brand, onPick, onGrabFrame, onUpload, onRerunFrames }: {
+  title: string; images: ImageCandidate[]; frames: DesignFramesState; source: { videoUrl: string } | null; brand: string;
   onPick: (c: ImageCandidate) => void; onGrabFrame: (sec: number) => void; onUpload: (file: File) => Promise<void>; onRerunFrames?: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -363,9 +366,18 @@ export function PicturePicker({ title, images, frames, source, onPick, onGrabFra
         setUploading(true);
         try { await onUpload(file); } finally { setUploading(false); }
       }} />
-      <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()} className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-[11px] font-medium hover:bg-muted disabled:opacity-50">
-        {uploading ? <Loader2Icon className="size-3 animate-spin" /> : <UploadIcon className="size-3" />} Upload a picture
-      </button>
+      <div className="grid grid-cols-2 gap-1.5">
+        <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()} className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-[11px] font-medium hover:bg-muted disabled:opacity-50">
+          {uploading ? <Loader2Icon className="size-3 animate-spin" /> : <UploadIcon className="size-3" />} Upload a picture
+        </button>
+        {/* The brand's logo library — the same one the clip editor uses. */}
+        <LogoPicker
+          brand={brand}
+          onPick={onPick}
+          className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-[11px] font-medium hover:bg-muted"
+          trigger={<><ImageIcon className="size-3" /> Brand logos</>}
+        />
+      </div>
     </Panel>
   );
 }

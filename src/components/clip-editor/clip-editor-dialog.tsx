@@ -141,7 +141,7 @@ function EditorRoot(props: {
     const { clipIdea, edit } = props.session;
     const recoveredDoc = takeBackup(clipIdea.id, edit.revision, edit.doc);
     return {
-      store: createEditorStore({ doc: edit.doc, revision: edit.revision, recoveredDoc }),
+      store: createEditorStore({ doc: edit.doc, revision: edit.revision, recoveredDoc, imageUrls: props.session.imageUrls }),
       recovered: recoveredDoc !== null,
     };
   });
@@ -330,11 +330,45 @@ function EditorWorkspace({
         e.preventDefault();
         (document.activeElement as HTMLElement | null)?.blur?.();
         engine.toggle();
+        return;
+      }
+      // Arrow keys nudge whatever is selected on the stage (⇧ for bigger
+      // steps); ⌫ removes an added text or logo layer — but never while
+      // transcript words are highlighted, where ⌫ means "cut these words".
+      const { stageSelection, wordSelection, doc: current } = storeApi.getState();
+      if (!stageSelection || storeApi.getState().saveState === "conflict") return;
+      const arrow = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+      if (arrow) {
+        e.preventDefault();
+        const step = e.shiftKey ? 2 : 0.5;
+        const [dx, dy] = [arrow[0] * step, arrow[1] * step];
+        const clamp = (n: number) => Math.max(0, Math.min(100, n));
+        if (stageSelection.kind === "video") {
+          const v = current.video;
+          apply(
+            v.fit === "contain"
+              ? commands.patchVideo({ yPct: clamp(v.yPct + dy) })
+              : commands.patchVideo({ panXPct: clamp(v.panXPct + dx) }),
+            "nudge-video",
+          );
+        } else {
+          const id = stageSelection.id;
+          apply(commands.patchLayer(id, (l) => ({ ...l, xPct: clamp(l.xPct + dx), yPct: clamp(l.yPct + dy) })), `nudge-${id}`);
+        }
+        return;
+      }
+      if ((e.key === "Backspace" || e.key === "Delete") && stageSelection.kind === "layer" && !wordSelection) {
+        const layer = current.layers.find((l) => l.id === stageSelection.id);
+        if (layer && (layer.type === "image" || (layer.type === "text" && layer.role !== "hook"))) {
+          e.preventDefault();
+          apply(commands.removeLayer(layer.id));
+          storeApi.getState().setStageSelection(null);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [engine, undo, redo]);
+  }, [engine, undo, redo, apply, storeApi]);
 
   // ── Bulk clean-up ────────────────────────────────────────────────────────
   const fillerCount = doc.sections.reduce(
@@ -655,10 +689,10 @@ function EditorWorkspace({
           className={cn("min-h-0 min-w-0", vertical && "h-full")}
           style={vertical ? { aspectRatio: `${doc.canvas.width} / ${doc.canvas.height}` } : undefined}
         >
-          <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} />
+          <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} brand={brand} />
         </div>
 
-        <Inspector doc={doc} disabled={locked} className={tab !== "clip" ? "hidden" : undefined} />
+        <Inspector doc={doc} disabled={locked} brand={brand} className={tab !== "clip" ? "hidden" : undefined} />
 
         {session.post && (
           <div className={cn("min-h-0 min-w-0", tab !== "post" && "hidden")}>

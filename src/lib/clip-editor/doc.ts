@@ -27,6 +27,7 @@
  * the shape changes. Saved docs and render snapshots are migrated on read.
  */
 import { z } from "zod";
+import { imageSourceSchema } from "@/lib/editor/image-source";
 import { fitTextSizePct } from "./layout";
 
 export const CLIP_EDIT_DOC_VERSION = 1;
@@ -161,6 +162,19 @@ export const TEXT_STYLE_PRESETS: Record<"clean" | "outline" | "boxed", { label: 
 };
 export type TextAlign = TextStyle["align"];
 
+/** What a new text layer starts as: white, outlined, centred. */
+export const DEFAULT_TEXT_STYLE: TextStyle = {
+  fontId: "montserrat-extrabold",
+  sizePct: 4,
+  color: "#FFFFFF",
+  outlinePct: 8,
+  outlineColor: "#000000",
+  uppercase: false,
+  align: "center",
+  shadow: null,
+  box: null,
+};
+
 /** Which edge of the layer's box sits on `yPct`. A hook anchored "bottom"
  *  grows UP as it wraps to more lines, so it never collides with the video
  *  below it; captions anchored "top" grow down. */
@@ -204,12 +218,29 @@ const captionsLayerSchema = z.object({
 });
 export type CaptionsLayer = z.infer<typeof captionsLayerSchema>;
 
-/** Discriminated on `type`. To add a layer kind (image, b-roll, progress
- *  bar…): add a schema here, resolve it in plan.ts, draw it in the stage
+/** A picture — a logo, a watermark, a sticker — sized by width; its height
+ *  follows the picture's own aspect ratio, so neither renderer needs the
+ *  dimensions up front (the stage lets the browser size it, ffmpeg scales
+ *  `w:-1`). `xPct` is its horizontal centre, `anchor` says which edge
+ *  `yPct` is. */
+const imageLayerSchema = z.object({
+  ...layerBase,
+  type: z.literal("image"),
+  src: imageSourceSchema,
+  /** Width, % of canvas width. */
+  widthPct: z.number().finite().min(2).max(100),
+  /** 0–1. */
+  opacity: z.number().finite().min(0).max(1).default(1),
+});
+export type ImageLayer = z.infer<typeof imageLayerSchema>;
+
+/** Discriminated on `type`. To add a layer kind (b-roll, progress bar…):
+ *  add a schema here, resolve it in plan.ts, draw it in the stage
  *  component and in the ffmpeg renderer. Array order = z-order, last on top. */
 const layerSchema = z.discriminatedUnion("type", [
   textLayerSchema,
   captionsLayerSchema,
+  imageLayerSchema,
 ]);
 export type Layer = z.infer<typeof layerSchema>;
 
@@ -271,6 +302,46 @@ export function applyLook(doc: ClipEditDoc, look: ClipLook): ClipEditDoc {
     return l;
   });
   return { ...doc, canvas: { ...doc.canvas, background: look.background }, video: look.video, layers };
+}
+
+/** A fresh generic text layer, placed in the middle of the canvas. */
+export function createTextLayer(args: { text: string; canvas: { width: number; height: number } }): TextLayer {
+  return {
+    id: newLayerId("text"),
+    type: "text",
+    role: "generic",
+    visible: true,
+    text: args.text,
+    xPct: 50,
+    yPct: 50,
+    anchor: "center",
+    widthPct: 80,
+    style: { ...DEFAULT_TEXT_STYLE, sizePct: args.canvas.height > args.canvas.width ? 3.2 : 4.5 },
+  };
+}
+
+/** A fresh image layer — a logo where a watermark goes and where the
+ *  default hook and captions are not: the top-right corner above the hook
+ *  on a vertical canvas, the right edge between hook and captions on a
+ *  landscape one. (Text is drawn over images, so a logo dropped under the
+ *  hook could not be grabbed.) */
+export function createImageLayer(args: { src: ImageLayer["src"]; canvas: { width: number; height: number } }): ImageLayer {
+  const vertical = args.canvas.height > args.canvas.width;
+  return {
+    id: newLayerId("image"),
+    type: "image",
+    visible: true,
+    src: args.src,
+    xPct: vertical ? 80 : 88,
+    yPct: vertical ? 4 : 50,
+    anchor: vertical ? "top" : "center",
+    widthPct: vertical ? 32 : 16,
+    opacity: 1,
+  };
+}
+
+function newLayerId(kind: string): string {
+  return `${kind}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 const CANVAS_BY_ASPECT: Record<AspectRatio, { width: number; height: number }> =

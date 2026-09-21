@@ -11,6 +11,7 @@ export function colorsInClipDoc(doc: ClipEditDoc): string[] {
   };
   add(doc.canvas.background);
   for (const l of doc.layers) {
+    if (l.type === "image") continue;
     add(l.style.color);
     if (l.style.outlinePct > 0) add(l.style.outlineColor);
     if (l.type === "captions") add(l.highlightColor);

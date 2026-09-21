@@ -596,7 +596,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
                   <ImageIcon className="size-3.5" /> Picture
                 </summary>
                 <div className="absolute left-0 top-full z-20 mt-1 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg" onClick={(e) => { if ((e.target as HTMLElement).closest("button[title]")) (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; }}>
-                  <PicturePicker title="Add a picture" images={images} frames={frames} source={session.source} onPick={addImage} onGrabFrame={(sec) => void grabFrame(null, sec)} onUpload={(file) => upload(null, file)} />
+                  <PicturePicker title="Add a picture" images={images} frames={frames} source={session.source} brand={brand} onPick={addImage} onGrabFrame={(sec) => void grabFrame(null, sec)} onUpload={(file) => upload(null, file)} />
                 </div>
               </details>
             </div>
@@ -642,7 +642,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
           )}
         </div>
 
-        <Inspector doc={doc} mode={mode} images={images} frames={frames} source={session.source} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
+        <Inspector doc={doc} mode={mode} images={images} frames={frames} source={session.source} brand={brand} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
         {!isTemplate && (
           <AttachDmKeywordDialog
             open={keywordOpen}

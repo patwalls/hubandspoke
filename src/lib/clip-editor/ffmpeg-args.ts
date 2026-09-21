@@ -7,7 +7,8 @@
  *   per plan input (one seeked open of the source per section)
  *     video: fps → select(kept frames) → setpts
  *     audio: aresample → asetnsamples(one video frame of samples) → aselect → asetpts
- *   concat the inputs → place on the canvas (scale + pad | crop) → burn in ASS
+ *   concat the inputs → place on the canvas (scale + pad | crop)
+ *     → overlay each image layer (logos; extra still-image inputs) → burn in ASS
  *
  * Why select/aselect by FRAME NUMBER instead of trim+concat per cut: a clip
  * with filler words removed has dozens of cuts. One decode pass with a
@@ -65,6 +66,9 @@ export function buildFilterGraph(
     /** Display size of the source (see `parseSourceDimensions`). Without it
      *  the graph falls back to aspect expressions and cannot inset/round. */
     sourceSize?: { width: number; height: number } | null;
+    /** Image layers as extra inputs, in the order `buildRenderArgs` adds
+     *  them after the video inputs (one per `plan.imageLayers` entry). */
+    imageCount?: number;
   },
 ): string {
   const { width: W, height: H, fps } = plan.canvas;
@@ -100,10 +104,32 @@ export function buildFilterGraph(
     chains.push(`[a0]anull[aout]`);
   }
 
-  const burnIn = opts.assPath
-    ? `,ass=filename=${quote(opts.assPath)}:fontsdir=${quote(opts.fontsDir)}`
-    : "";
   const bg = hexToFfmpegColor(plan.canvas.background);
+
+  // Image layers sit between the placed video and the text: each is one
+  // extra still input, scaled to its width (height follows the picture),
+  // faded by its opacity, and overlaid at its anchor. `overlay` repeats a
+  // still's single frame for the whole clip (its default eof_action), so no
+  // looping is needed. Then the ASS burn-in, last, so text is always on top.
+  const images = plan.imageLayers.slice(0, opts.imageCount ?? plan.imageLayers.length);
+  const finish = (placed: string): void => {
+    let cur = placed;
+    images.forEach((img, i) => {
+      const input = plan.inputs.length + i;
+      const w = Math.max(2, Math.round((img.widthPct / 100) * W));
+      const cx = Math.round((img.xPct / 100) * W);
+      const cy = Math.round((img.yPct / 100) * H);
+      const y = img.anchor === "top" ? `${cy}` : img.anchor === "center" ? `${cy}-overlay_h/2` : `${cy}-overlay_h`;
+      const fade = img.opacity < 1 ? `,colorchannelmixer=aa=${img.opacity.toFixed(3)}` : "";
+      chains.push(`[${input}:v]format=rgba,scale=${w}:-1:flags=lanczos${fade}[img${i}]`);
+      chains.push(`[${cur}][img${i}]overlay=x=${cx}-overlay_w/2:y=${y}[vi${i}]`);
+      cur = `vi${i}`;
+    });
+    const burnIn = opts.assPath
+      ? `,ass=filename=${quote(opts.assPath)}:fontsdir=${quote(opts.fontsDir)}`
+      : "";
+    chains.push(`[${cur}]null${burnIn},format=yuv420p[vout]`);
+  };
 
   if (!opts.sourceSize) {
     // Dimension-free fallback (source couldn't be probed): ffmpeg works the
@@ -114,7 +140,8 @@ export function buildFilterGraph(
       plan.video.fit === "contain"
         ? `scale=w='if(gt(a,${canvasAspect}),${W},-2)':h='if(gt(a,${canvasAspect}),-2,${H})':flags=lanczos,pad=${W}:${H}:'(ow-iw)/2':'max(0,min(oh-ih,oh*${plan.video.yPct}/100-ih/2))':color=${bg}`
         : `scale=w='if(gt(a,${canvasAspect}),-2,${W})':h='if(gt(a,${canvasAspect}),${H},-2)':flags=lanczos,crop=${W}:${H}:'(iw-${W})*${plan.video.panXPct}/100':'(ih-${H})/2'`;
-    chains.push(`[vcat]${place},setsar=1${burnIn},format=yuv420p[vout]`);
+    chains.push(`[vcat]${place},setsar=1[vplaced]`);
+    finish("vplaced");
     return chains.join(";\n");
   }
 
@@ -123,13 +150,9 @@ export function buildFilterGraph(
   const scaled = `scale=${box.width}:${box.height}:flags=lanczos,setsar=1`;
 
   if (plan.video.fit === "cover") {
-    chains.push(
-      `[vcat]${scaled},crop=${W}:${H}:${-box.x}:${-box.y}${burnIn},format=yuv420p[vout]`,
-    );
+    chains.push(`[vcat]${scaled},crop=${W}:${H}:${-box.x}:${-box.y}[vplaced]`);
   } else if (box.radius === 0) {
-    chains.push(
-      `[vcat]${scaled},pad=${W}:${H}:${box.x}:${box.y}:color=${bg}${burnIn},format=yuv420p[vout]`,
-    );
+    chains.push(`[vcat]${scaled},pad=${W}:${H}:${box.x}:${box.y}:color=${bg}[vplaced]`);
   } else {
     // Rounded corners = an alpha mask. The mask is a rounded-rect distance
     // field evaluated by `geq` for ONE frame, then looped forever — running
@@ -149,9 +172,10 @@ export function buildFilterGraph(
       `color=c=${bg}:s=${W}x${H}:r=${fps},trim=end_frame=${plan.totalFrames}[bg]`,
     );
     chains.push(
-      `[bg][vr]overlay=x=${box.x}:y=${box.y}:shortest=1:format=yuv420,setsar=1${burnIn},format=yuv420p[vout]`,
+      `[bg][vr]overlay=x=${box.x}:y=${box.y}:shortest=1:format=yuv420,setsar=1[vplaced]`,
     );
   }
+  finish("vplaced");
 
   return chains.join(";\n");
 }
@@ -160,6 +184,9 @@ export function buildRenderArgs(args: {
   plan: RenderPlan;
   /** Local path or (presigned) https URL of the source media. */
   input: string;
+  /** Local files for `plan.imageLayers`, same order. Added as inputs after
+   *  the video inputs — `buildFilterGraph` refers to them by that index. */
+  images?: string[];
   filterScriptPath: string;
   outputPath: string;
 }): string[] {
@@ -198,6 +225,7 @@ export function buildRenderArgs(args: {
       args.input,
     );
   }
+  for (const image of args.images ?? []) argv.push("-i", image);
   argv.push(
     "-filter_complex_threads",
     String(FILTER_THREADS),

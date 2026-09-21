@@ -14,6 +14,7 @@
  */
 import { z } from "zod";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
+import { imageSourceSchema, type ImageSource } from "@/lib/editor/image-source";
 
 export const DESIGN_DOC_VERSION = 1;
 
@@ -94,13 +95,7 @@ const textElementSchema = z.object({
 });
 export type DesignTextElement = z.infer<typeof textElementSchema>;
 
-const imageSourceSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("url"), url: z.string().url().max(2000) }),
-  z.object({ kind: z.literal("s3"), bucket: z.string().nullable(), key: z.string().min(1) }),
-  /** A file under public/ (brand logos, watermarks) — "/watermarks/x.png". */
-  z.object({ kind: z.literal("asset"), path: z.string().regex(/^\/[a-zA-Z0-9_\-./]+$/) }),
-]);
-export type DesignImageSource = z.infer<typeof imageSourceSchema>;
+export type DesignImageSource = ImageSource;
 
 /** How a `cover`-fitted picture sits in its box: the focal point (0–1 of the
  *  picture's own width/height) that stays centred, and extra zoom on top of

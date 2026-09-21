@@ -9,12 +9,13 @@
  * libass. No second set of "preview" math to drift out of sync with export.
  *
  * Everything on the stage can be dragged: hook and captions vertically, the
- * video vertically (fit) or horizontally (fill). Drags go through the store's
- * `apply` with a coalesce key, so one drag = one undo step.
+ * video vertically (fit) or horizontally (fill), images (logos) anywhere and
+ * resized by their corner. Drags go through the store's `apply` with a
+ * coalesce key, so one drag = one undo step.
  */
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
-import type { CaptionsLayer, ClipEditDoc, TextLayer, TextStyle } from "@/lib/clip-editor/doc";
+import type { CaptionsLayer, ClipEditDoc, ImageLayer, TextLayer, TextStyle } from "@/lib/clip-editor/doc";
 import { FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
 import type { TextBlockLayout } from "@/lib/clip-editor/layout";
 import type { RenderPlan } from "@/lib/clip-editor/plan";
@@ -22,14 +23,18 @@ import { resolveVideoBox } from "@/lib/clip-editor/video-box";
 import { activeCaptionAt, type Scene } from "@/lib/clip-editor/scene";
 import type { PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
-import { MagnetIcon } from "lucide-react";
-import { readSnapEnabled, snapThreshold, snapValue, writeSnapEnabled, type SnapGuide, type SnapTarget } from "@/lib/editor/snap";
+import { ImageIcon, MagnetIcon, TypeIcon } from "lucide-react";
+import { createImageLayer, createTextLayer } from "@/lib/clip-editor/doc";
+import { LogoPicker } from "@/components/editor/logo-picker";
+import { readSnapEnabled, snapMove, snapThreshold, snapValue, writeSnapEnabled, type SnapGuide, type SnapTarget } from "@/lib/editor/snap";
 
 interface StageProps {
   plan: RenderPlan;
   scene: Scene;
   engine: PlaybackEngine;
   videoUrl: string;
+  /** For the logo library behind "+ Logo". */
+  brand: string;
 }
 
 function textCss(style: TextStyle, layout: TextBlockLayout): React.CSSProperties {
@@ -85,7 +90,7 @@ function LineBox({ style, layout, line, opacity }: { style: TextStyle; layout: T
   );
 }
 
-export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
+export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
   const { width: W, height: H } = plan.canvas;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const videoA = useRef<HTMLVideoElement | null>(null);
@@ -96,8 +101,13 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
   // Only the MODE is React state here (it flips a couple of times a session);
   // the clock itself never is.
   const [previewing, setPreviewing] = useState(false);
-  /** The guide line while a drag is snapping; ⌥ drags freely. */
-  const [guide, setGuide] = useState<SnapGuide | null>(null);
+  /** The guide lines while a drag is snapping; ⌥ drags freely. */
+  const [guides, setGuides] = useState<SnapGuide[]>([]);
+  const setGuide = (g: SnapGuide | null) => setGuides(g ? [g] : []);
+  /** Natural aspect (w/h) of each image layer once its picture has loaded —
+   *  what turns a width into a box for snapping and the resize handle. */
+  const [imageAspect, setImageAspect] = useState<Record<string, number>>({});
+  const imageUrls = useEditor((s) => s.imageUrls);
   const [snapOn, setSnapOn] = useState(() => (typeof window === "undefined" ? true : readSnapEnabled()));
   useEffect(
     () => engine.subscribe((snap) => setPreviewing(snap.mode === "preview")),
@@ -107,6 +117,19 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
   const apply = useEditor((s) => s.apply);
   const selection = useEditor((s) => s.stageSelection);
   const setSelection = useEditor((s) => s.setStageSelection);
+  const registerImageUrl = useEditor((s) => s.registerImageUrl);
+
+  const addText = () => {
+    const layer = createTextLayer({ text: "Your text", canvas: plan.canvas });
+    apply(commands.addLayer(layer));
+    setSelection({ kind: "layer", id: layer.id });
+  };
+  const addImage = (logo: { src: ImageLayer["src"]; previewUrl: string }) => {
+    const layer = createImageLayer({ src: logo.src, canvas: plan.canvas });
+    registerImageUrl(layer.id, logo.previewUrl);
+    apply(commands.addLayer(layer));
+    setSelection({ kind: "layer", id: layer.id });
+  };
 
   // Fit the true-size canvas into whatever box the dialog gives us.
   useEffect(() => {
@@ -155,7 +178,7 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      setGuide(null);
+      setGuides([]);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -220,6 +243,68 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
                 overflowX > 0 ? clampPct(start.panXPct - (dx / overflowX) * 100) : 50,
             }),
       "drag-video",
+    );
+  };
+
+  /** The canvas-px box of an image layer (height from its loaded aspect). */
+  const imageRect = (layer: ImageLayer) => {
+    const w = (layer.widthPct / 100) * W;
+    const h = w / (imageAspect[layer.id] ?? 1);
+    const cx = (layer.xPct / 100) * W;
+    const y = (layer.yPct / 100) * H;
+    const top = layer.anchor === "top" ? y : layer.anchor === "center" ? y - h / 2 : y - h;
+    return { x: cx - w / 2, y: top, w, h };
+  };
+
+  const dragImage = (e: PointerEvent, layer: ImageLayer) => {
+    setSelection({ kind: "layer", id: layer.id });
+    const start = imageRect(layer);
+    const others = plan.imageLayers.filter((l) => l.id !== layer.id).map(imageRect);
+    for (const block of scene.textBlocks) {
+      others.push({ x: block.layout.left, y: block.layout.top, w: block.layout.right - block.layout.left, h: block.layout.bottom - block.layout.top });
+    }
+    const margin = Math.round(Math.min(W, H) * 0.04);
+    const targets: { x: SnapTarget[]; y: SnapTarget[] } = {
+      x: [{ at: 0, kind: "edge" as const }, { at: W, kind: "edge" as const }, { at: W / 2, kind: "center" as const }, { at: margin, kind: "edge" as const }, { at: W - margin, kind: "edge" as const }, { at: videoBox.left, kind: "video" as const }, { at: videoBox.left + videoBox.width, kind: "video" as const }],
+      y: [{ at: 0, kind: "edge" as const }, { at: H, kind: "edge" as const }, { at: H / 2, kind: "center" as const }, { at: margin, kind: "edge" as const }, { at: H - margin, kind: "edge" as const }, { at: videoBox.top, kind: "video" as const }, { at: videoBox.top + videoBox.height, kind: "video" as const }],
+    };
+    for (const o of others) {
+      targets.x.push({ at: o.x, kind: "element" }, { at: o.x + o.w / 2, kind: "element" }, { at: o.x + o.w, kind: "element" });
+      targets.y.push({ at: o.y, kind: "element" }, { at: o.y + o.h / 2, kind: "element" }, { at: o.y + o.h, kind: "element" });
+    }
+    startDrag(
+      e,
+      (dx, dy, alt) =>
+        commands.patchLayer<ImageLayer>(layer.id, (l) => {
+          let rect = { ...start, x: start.x + dx, y: start.y + dy };
+          if (snapOn && !alt) {
+            const snapped = snapMove(rect, targets, snapThreshold(scale));
+            rect = { ...rect, x: snapped.x, y: snapped.y };
+            setGuides(snapped.guides);
+          } else setGuides([]);
+          const anchorY = l.anchor === "top" ? rect.y : l.anchor === "center" ? rect.y + rect.h / 2 : rect.y + rect.h;
+          return { ...l, xPct: clampPct(((rect.x + rect.w / 2) / W) * 100), yPct: clampPct((anchorY / H) * 100) };
+        }),
+      `drag-image-${layer.id}`,
+    );
+  };
+
+  /** Corner handle: width follows the pointer, the top-left corner stays. */
+  const resizeImage = (e: PointerEvent, layer: ImageLayer) => {
+    setSelection({ kind: "layer", id: layer.id });
+    const start = imageRect(layer);
+    const aspect = imageAspect[layer.id] ?? 1;
+    startDrag(
+      e,
+      (dx) =>
+        commands.patchLayer<ImageLayer>(layer.id, (l) => {
+          const w = Math.max(W * 0.02, Math.min(W, start.w + dx));
+          const h = w / aspect;
+          const cx = start.x + w / 2;
+          const anchorY = l.anchor === "top" ? start.y : l.anchor === "center" ? start.y + h / 2 : start.y + h;
+          return { ...l, widthPct: (w / W) * 100, xPct: clampPct((cx / W) * 100), yPct: clampPct((anchorY / H) * 100) };
+        }),
+      `resize-image-${layer.id}`,
     );
   };
 
@@ -288,9 +373,51 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
           <div
             className={cn("transition-opacity duration-200", previewing && "pointer-events-none opacity-20")}
           >
-          {guide && (
-            <div className="pointer-events-none absolute left-0" style={{ top: guide.at - 1, width: W, height: 2, background: "#EC4899" }} />
+          {guides.map((g, i) =>
+            g.axis === "y" ? (
+              <div key={i} className="pointer-events-none absolute left-0" style={{ top: g.at - 1, width: W, height: 2, background: "#EC4899" }} />
+            ) : (
+              <div key={i} className="pointer-events-none absolute top-0" style={{ left: g.at - 1, height: H, width: 2, background: "#EC4899" }} />
+            ),
           )}
+          {/* Images sit between the video and the text — the same order the
+              exporter overlays them. */}
+          {plan.imageLayers.map((layer) => {
+            const rect = imageRect(layer);
+            const selected = selection?.kind === "layer" && selection.id === layer.id;
+            return (
+              <div
+                key={layer.id}
+                data-image-layer={layer.id}
+                className={cn("absolute cursor-grab active:cursor-grabbing", selected && "outline-dashed outline-[6px] outline-sky-400")}
+                style={{ left: rect.x, top: rect.y, width: rect.w, opacity: layer.opacity }}
+                onPointerDown={(e) => dragImage(e, layer)}
+              >
+                {imageUrls[layer.id] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imageUrls[layer.id]}
+                    alt=""
+                    draggable={false}
+                    className="block h-auto w-full select-none"
+                    onLoad={(e) => {
+                      const img = e.currentTarget;
+                      if (img.naturalWidth && img.naturalHeight) setImageAspect((m) => ({ ...m, [layer.id]: img.naturalWidth / img.naturalHeight }));
+                    }}
+                  />
+                ) : (
+                  <div className="aspect-square w-full bg-white/20" />
+                )}
+                {selected && (
+                  <div
+                    onPointerDown={(e) => resizeImage(e, layer)}
+                    className="absolute -bottom-3 -right-3 size-6 cursor-nwse-resize rounded-full border-4 border-sky-400 bg-white"
+                    style={{ transform: `scale(${1 / Math.max(scale, 0.05)})`, transformOrigin: "center" }}
+                  />
+                )}
+              </div>
+            );
+          })}
           {scene.textBlocks.map((block) => (
             <TextBlock
               key={block.layer.id}
@@ -328,6 +455,26 @@ export function Stage({ plan, scene, engine, videoUrl }: StageProps) {
             />
           )}
           </div>
+        </div>
+        {/* Add things: a line of text, or a logo from the brand's library. */}
+        <div className="absolute left-2 top-2 z-10 flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={addText}
+            title="Add a line of text"
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-background/90 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+          >
+            <TypeIcon className="size-3" /> Text
+          </button>
+          <LogoPicker
+            brand={brand}
+            onPick={addImage}
+            trigger={
+              <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background/90 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground">
+                <ImageIcon className="size-3" /> Logo
+              </span>
+            }
+          />
         </div>
         <button
           type="button"

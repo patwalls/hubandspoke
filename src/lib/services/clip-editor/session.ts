@@ -20,6 +20,7 @@ import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words
 import type { TranscriptSpeaker } from "@/lib/diarization/types";
 import { toRenderStatus, type ClipRenderStatus } from "./render-status";
 import { ensureClipPostDraft, type ClipPost } from "./post-draft";
+import { previewUrlFor } from "@/lib/services/design-editor/assets";
 
 export class ClipEditorIdeaNotFoundError extends Error {
   constructor() {
@@ -67,6 +68,9 @@ export interface ClipEditorSession {
   /** The target format's saved look (what new edits start from), if any. */
   formatLook: { formatId: string; savedAt: string | null } | null;
   edit: { id: string; revision: number; doc: ClipEditDoc };
+  /** A browser URL per image layer id in the doc (logos). Layers added in
+   *  the session bring their own URL from the logo picker. */
+  imageUrls: Record<string, string>;
   source: {
     productionItemId: string;
     title: string | null;
@@ -201,6 +205,7 @@ export async function loadClipEditorSession(args: {
     // cut is done.
     post: await ensureClipPostDraft(row.id),
     edit,
+    imageUrls: await resolveLayerImageUrls(edit.doc),
     source: {
       productionItemId: row.sourceProductionItemId,
       title: row.sourceTitle,
@@ -212,6 +217,14 @@ export async function loadClipEditorSession(args: {
     wordsSynthetic: synthetic,
     latestRender: render ? toRenderStatus(render) : null,
   };
+}
+
+async function resolveLayerImageUrls(doc: ClipEditDoc): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const layer of doc.layers) {
+    if (layer.type === "image") out[layer.id] = await previewUrlFor(layer.src);
+  }
+  return out;
 }
 
 async function loadFormatLookInfo(brand: string, targetFormat: string | null): Promise<{ formatId: string; savedAt: string | null } | null> {
