@@ -127,6 +127,16 @@ describe("fillTemplate", () => {
     expect(doc.pages[0].elements.find((e) => e.name === "Photo")).toMatchObject({ src: PHOTO_PLACEHOLDER });
   });
 
+  it("a short stack grows to fill the page (up to 1.5×), keeping order and staying on the page", () => {
+    const t = buildTechStackTemplate();
+    const notes = fillTemplate(t, fillFor(t), noPhoto).pages[1];
+    const stack = notes.elements.filter((e) => e.stack === "notes") as DesignTextElement[];
+    const templateStack = t.pages[1].elements.filter((e) => e.stack === "notes") as DesignTextElement[];
+    expect(stack[0].style.sizePx).toBeGreaterThanOrEqual(Math.round(templateStack[0].style.sizePx * 1.4));
+    for (let i = 1; i < stack.length; i++) expect(stack[i].y).toBeGreaterThanOrEqual(stack[i - 1].y + stack[i - 1].h);
+    expect(Math.max(...notes.elements.map((e) => e.y + e.h))).toBeLessThanOrEqual(IG_SQUARE.height);
+  });
+
   it("a long playbook shrinks the stack until it fits", () => {
     const t = buildPlaybookTemplate();
     const long = Object.fromEntries(

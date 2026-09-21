@@ -208,11 +208,18 @@ export function hasDmKeywordSlot(doc: DesignDoc): boolean {
   return doc.pages.some((p) => p.elements.some((el) => el.slot?.kind === "dmKeyword"));
 }
 
+/** How much a stack may grow to fill its page — a five-line stack list is
+ *  set bigger, not left floating in whitespace; a one-line one doesn't
+ *  become a billboard. */
+const STACK_MAX_GROW = 1.8;
+
 /**
  * Elements sharing a `stack` key flow top-to-bottom in their order: each
  * starts where the previous ended plus the template's gap, text takes the
- * height its layout needs, and if the stack runs off the page everything in
- * it is scaled down together (font sizes and gaps) until it fits.
+ * height its layout needs, and the whole stack is scaled together (font
+ * sizes, gaps, picture heights) to FILL the page: up when there is room
+ * (to `STACK_MAX_GROW`), down when it runs off the bottom — so a short
+ * playbook and a long one both use the page.
  */
 export function reflowStacks(page: DesignPage, canvas: { width: number; height: number } = IG_SQUARE): DesignPage {
   const keys = [...new Set(page.elements.flatMap((el) => (el.stack ? [el.stack] : [])))];
@@ -224,8 +231,12 @@ export function reflowStacks(page: DesignPage, canvas: { width: number; height: 
     const top = members[0].y;
     // Gaps as authored (template order), measured before any drop.
     const gaps = members.map((el, i) => (i === 0 ? 0 : Math.max(0, el.y - (members[i - 1].y + members[i - 1].h))));
-    const bottomLimit = canvas.height - 30;
-    for (let scale = 1; scale >= 0.5; scale -= 0.05) {
+    // The stack may fill the page down to its bottom margin — or down to the
+    // first thing that isn't in the stack and sits below it (a channel row
+    // under a CTA), which it must not grow over.
+    const floor = elements.filter((el) => el.stack !== key && el.y > top).reduce((m, el) => Math.min(m, el.y - 24), canvas.height - 30);
+    const bottomLimit = Math.max(floor, top + 40);
+    for (let scale = STACK_MAX_GROW; scale >= 0.5; scale = Math.round((scale - 0.05) * 100) / 100) {
       let y = top;
       const placed = members.map((el, i) => {
         y += Math.round(gaps[i] * scale);

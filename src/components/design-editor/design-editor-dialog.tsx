@@ -51,6 +51,7 @@ import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFramesState } from "@/lib/services/design-editor/frames";
 import { storyFrames } from "@/lib/design-editor/story-frames";
+import { PostPane } from "@/components/clip-editor/post-pane";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
 import { ClipTrimmer } from "./clip-trimmer";
 import { Inspector, PicturePicker, formatSec, frameCandidate } from "./inspector";
@@ -164,6 +165,7 @@ export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName,
         images: json.images ?? BRAND_WORDMARKS,
         frames: { frames: [], pending: false },
         thumbnail: null,
+        post: null,
         source: null,
         words: [],
         channels: json.channels ?? [],
@@ -223,6 +225,8 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   const [keywordOpen, setKeywordOpen] = useState(false);
   const channelsInDoc = useMemo(() => resolveChannelsInDoc(doc, session.channels), [doc, session.channels]);
   const [leaving, setLeaving] = useState(false);
+  const [tab, setTab] = useState<"design" | "post">("design");
+  const [postDrafting, setPostDrafting] = useState(false);
   const [instruction, setInstruction] = useState(session.design.briefInstruction ?? "");
   const [stageBox, setStageBox] = useState({ w: 0, h: 0 });
   const [snap, setSnap] = useState(() => (typeof window === "undefined" ? true : readSnapEnabled()));
@@ -525,6 +529,23 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
         {session.item.format && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{session.item.format}</span>}
         <span className="rounded bg-pink-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pink-800 dark:bg-pink-950 dark:text-pink-300">Editor beta</span>
         <span className="truncate text-xs text-muted-foreground">{session.item.sourceTitle}</span>
+        {session.post && !isTemplate && (
+          <div role="tablist" aria-label="Editor tabs" className="ml-2 flex shrink-0 items-center rounded-lg bg-muted p-[3px] text-xs">
+            {(["design", "post"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+                className={cn("flex h-6 items-center gap-1.5 rounded-md px-3 font-medium transition-colors", tab === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+              >
+                {t === "design" ? "Design" : "Post"}
+                {t === "post" && postDrafting && <Loader2Icon className="size-3 animate-spin" />}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-1">
           <details className="relative">
             <summary className="flex size-7 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" title="Options" aria-label="Options">
@@ -585,7 +606,14 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[150px_minmax(0,1fr)_300px] gap-4 px-5 py-4">
+      {session.post && !isTemplate && (
+        <div className={cn("min-h-0 flex-1 px-5 py-4", tab !== "post" && "hidden")}>
+          <div className="mx-auto h-full max-w-3xl">
+            <PostPane post={session.post} brand={brand} onDraftingChange={setPostDrafting} beforeRedraft={save} />
+          </div>
+        </div>
+      )}
+      <div className={cn("grid min-h-0 flex-1 grid-cols-[150px_minmax(0,1fr)_300px] gap-4 px-5 py-4", tab !== "design" && "hidden")}>
         {/* Pages */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
           {doc.pages.map((p, i) => (
@@ -684,7 +712,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       </div>
 
       {/* AI bar */}
-      {!isTemplate && <div className="flex shrink-0 items-center gap-2 border-t border-border px-5 py-2.5">
+      {!isTemplate && <div className={cn("flex shrink-0 items-center gap-2 border-t border-border px-5 py-2.5", tab !== "design" && "hidden")}>
         <SparklesIcon className="size-4 shrink-0 text-pink-500" />
         <input
           value={instruction}

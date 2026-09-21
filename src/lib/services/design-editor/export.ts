@@ -96,15 +96,17 @@ export async function exportDesign(args: {
 }
 
 /**
- * Put the AI caption on the post. Normally the item already has a current
- * draft (the Draft Algorithm seeds one when the item is created) and this is
- * an ordinary patch that fills an EMPTY caption — a caption a person already
- * wrote is never overwritten. Right after creation the draft may not exist
- * yet (the algorithm runs on the worker); then this creates version 1 itself
- * rather than racing it, using the platform's field schema so the simulator
+ * Put the AI caption on the post. Called when the editor OPENS (session.ts —
+ * so the Post tab has copy from the first moment) and again at export as a
+ * safety net. Normally the item already has a current draft (the Draft
+ * Algorithm seeds one when the item is created) and this is an ordinary
+ * patch that fills an EMPTY caption — a caption a person already wrote is
+ * never overwritten. Right after creation the draft may not exist yet (the
+ * algorithm runs on the worker); then this creates version 1 itself rather
+ * than racing it, using the platform's field schema so the simulator
  * renders it like any other draft.
  */
-async function seedCaption(itemId: string, caption: string, actorUserId: string): Promise<void> {
+export async function seedCaption(itemId: string, caption: string, actorUserId: string): Promise<void> {
   const [current] = await db
     .select({ content: contentDrafts.content })
     .from(contentDrafts)

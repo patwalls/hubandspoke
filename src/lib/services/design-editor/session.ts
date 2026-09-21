@@ -20,6 +20,8 @@ import { loadFormatTemplate } from "./format-template";
 import { previewUrlFor, sourceImageCandidates, youtubeThumbnailFor, type ImageCandidate } from "./assets";
 import { listBrandLogos } from "@/lib/services/brand-logos";
 import { listFrames, pickedFrame, requestAutoFrames, storyFrames, type DesignFramesState } from "./frames";
+import { seedCaption } from "./export";
+import type { ClipPost } from "@/lib/services/clip-editor/post-draft";
 import { toDesignRenderStatus, type DesignRenderStatus } from "./render-status";
 
 export class DesignItemNotFoundError extends Error {
@@ -64,6 +66,9 @@ export interface DesignEditorSession {
   frames: DesignFramesState;
   /** The YouTube thumbnail — the cover's last resort when frames can't come. */
   thumbnail: ImageCandidate | null;
+  /** The post this design goes out with — its caption is seeded from the
+   *  brief when the editor opens, and edited in the Post tab. */
+  post: ClipPost | null;
   /** The source video, for video slides and the frame scrubber. */
   source: { videoUrl: string; bucket: string | null; key: string; title: string | null } | null;
   /** The source transcript's words — captions on video slides are cut from
@@ -120,6 +125,13 @@ export async function loadDesignEditorSession(args: {
     }
   }
 
+  // The Post tab: the brief's caption becomes the post's draft now, not at
+  // export, so the copy is there to edit while the design is being made. A
+  // caption someone already wrote is left alone.
+  const brief = design.brief as { caption?: unknown } | null;
+  if (typeof brief?.caption === "string" && brief.caption.trim()) {
+    await seedCaption(item.id, brief.caption, args.userId).catch((err) => console.error("[design-editor] seedCaption at open failed:", err));
+  }
   return finishSession(item, design);
 }
 
@@ -318,6 +330,7 @@ async function finishSession(item: Awaited<ReturnType<typeof loadItem>>, design:
     images: dedupeImages([...(await sourceImageCandidates(item.sourceItemId)), ...(thumb ? [thumb] : []), ...(await listBrandLogos(item.brand))]),
     frames: await listFrames(item.sourceItemId),
     thumbnail: thumb,
+    post: { productionItemId: item.id, postType: item.postType, state: "ready" },
     source: source ? { ...source, videoUrl: await getPresignedGetUrl(source.key, 4 * 3600, { bucket: source.bucket ?? undefined }) } : null,
     words: await loadWords(item.sourceItemId),
     channels: await loadBrandChannels(item.brand),
