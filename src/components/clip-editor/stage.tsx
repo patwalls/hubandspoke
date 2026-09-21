@@ -168,6 +168,9 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
     if (scale === 0) return;
     e.preventDefault();
     e.stopPropagation();
+    // Take focus off an inspector field so the arrow keys nudge the layer
+    // instead of moving a slider (preventDefault would keep it there).
+    (document.activeElement as HTMLElement | null)?.blur?.();
     const startX = e.clientX;
     const startY = e.clientY;
     // Unique per gesture so two separate drags are two undo steps.

@@ -235,6 +235,37 @@ export const designDocSchema = z.object({
 export type DesignDoc = z.infer<typeof designDocSchema>;
 
 export const IG_SQUARE = { width: 1080, height: 1080 } as const;
+export const IG_PORTRAIT = { width: 1080, height: 1350 } as const;
+
+/** The sizes a design can be, in the ⋯ menu. Square is the default. */
+export const CANVAS_SIZES: Array<{ id: string; label: string; width: number; height: number }> = [
+  { id: "square", label: "Square · 1:1", ...IG_SQUARE },
+  { id: "portrait", label: "Portrait · 4:5", ...IG_PORTRAIT },
+  { id: "story", label: "Vertical · 9:16", width: 1080, height: 1920 },
+  { id: "landscape", label: "Landscape · 16:9", width: 1920, height: 1080 },
+];
+
+/**
+ * Change the canvas size, carrying the layout over: every element's box is
+ * stretched by the same factors the canvas grew by, so a square design
+ * turned 4:5 keeps its photo over the top half and its headline in the
+ * band below — the editor then tidies what the stretch got wrong. Text
+ * sizes are left alone (a headline shouldn't shrink because the page got
+ * taller); autoFit handles a box that got smaller.
+ */
+export function resizeCanvas(doc: DesignDoc, size: { width: number; height: number }): DesignDoc {
+  const sx = size.width / doc.canvas.width;
+  const sy = size.height / doc.canvas.height;
+  if (sx === 1 && sy === 1) return doc;
+  return {
+    ...doc,
+    canvas: { width: size.width, height: size.height },
+    pages: doc.pages.map((page) => ({
+      ...page,
+      elements: page.elements.map((el) => ({ ...el, x: Math.round(el.x * sx), y: Math.round(el.y * sy), w: Math.max(1, Math.round(el.w * sx)), h: Math.max(1, Math.round(el.h * sy)) })),
+    })),
+  };
+}
 
 /** Shown in a photo slot until a real picture is chosen. */
 export const PHOTO_PLACEHOLDER: DesignImageSource = { kind: "asset", path: "/design/photo-placeholder.png" };

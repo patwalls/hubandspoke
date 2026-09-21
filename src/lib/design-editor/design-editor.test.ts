@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseDesignDoc, pageVideo, DEFAULT_CROP, IG_SQUARE, PHOTO_PLACEHOLDER, type DesignCaptionsElement, type DesignTextElement } from "./doc";
+import { parseDesignDoc, pageVideo, resizeCanvas, DEFAULT_CROP, IG_SQUARE, PHOTO_PLACEHOLDER, type DesignCaptionsElement, type DesignTextElement } from "./doc";
 import { layoutDesignText, coverGeometry, cropForOffset } from "./layout";
 import { buildPlaybookTemplate } from "./playbook-template";
 import { buildTechStackTemplate } from "./tech-stack-template";
@@ -55,20 +55,29 @@ describe("presets are valid templates with the expected slots", () => {
     expect(t.pages[2].elements.find((e) => e.name === "Video title")?.slot).toEqual({ kind: "videoTitle", hint: "" });
     expect(t.pages[3].elements.find((e) => e.name === "CTA")?.slot?.kind).toBe("dmKeyword");
   });
-  it("story: cover, 9 beats with their own frame slots (5–9 optional), a static closer; tmz is one square page; apps has 5 app pages — every preset is a square", () => {
+  it("story: cover, 9 beats with their own frame slots (5–9 optional), a static closer; tmz is one 4:5 page; apps has 5 square app pages", () => {
     const story = buildStoryTemplate();
     expect(story.pages).toHaveLength(11);
     expect(story.pages.slice(1, 10).every((p) => p.elements.some((e) => e.slot?.kind === "frame"))).toBe(true);
     expect(listSlots(story).filter((s) => s.hint.includes("Leave EMPTY"))).toHaveLength(5);
     expect(listSlots(story).filter((s) => s.pageIndex === 10)).toHaveLength(0);
     const tmz = buildTmzTemplate();
-    expect(tmz.canvas).toEqual({ width: 1080, height: 1080 });
+    expect(tmz.canvas).toEqual({ width: 1080, height: 1350 });
     expect(listSlots(tmz).map((s) => s.name)).toEqual(["Headline"]);
     const apps = buildAppsTemplate();
     expect(apps.canvas.height).toBe(1080);
-    for (const id of Object.keys(DESIGN_PRESETS) as Array<keyof typeof DESIGN_PRESETS>) expect(DESIGN_PRESETS[id].build().canvas).toEqual({ width: 1080, height: 1080 });
     expect(apps.pages).toHaveLength(6);
     expect(listSlots(apps).filter((s) => s.pageIndex === 1).map((s) => s.name)).toEqual(["App name", "Result", "Bullets"]);
+  });
+  it("resizeCanvas stretches every box by the canvas's growth and leaves text sizes alone", () => {
+    const doc = resizeCanvas(buildTmzTemplate(), { width: 1080, height: 1080 });
+    expect(doc.canvas).toEqual({ width: 1080, height: 1080 });
+    const photo = doc.pages[0].elements[0];
+    expect(photo).toMatchObject({ y: 0, h: 592, w: 1080 }); // 740 × 1080/1350
+    const headline = doc.pages[0].elements[1] as DesignTextElement;
+    expect(headline.y).toBe(Math.round(764 * (1080 / 1350)));
+    expect(headline.style.sizePx).toBe(92);
+    expect(resizeCanvas(doc, { width: 1080, height: 1080 })).toBe(doc);
   });
   it("tech stack: cover band + stack list + one clip + CTA with the channel row", () => {
     const t = buildTechStackTemplate();

@@ -113,6 +113,10 @@ export function PageCanvas({
   ) => {
     e.preventDefault();
     e.stopPropagation();
+    // preventDefault keeps focus where it was — in an inspector field or the
+    // AI bar if that was last touched — and those swallow the arrow keys.
+    // Clicking the stage means "work here": take focus off the field.
+    (document.activeElement as HTMLElement | null)?.blur?.();
     const sx = e.clientX;
     const sy = e.clientY;
     const k = `${key}:${e.timeStamp}`;

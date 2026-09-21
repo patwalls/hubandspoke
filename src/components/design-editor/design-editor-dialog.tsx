@@ -40,7 +40,7 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, shadeElement, type DesignDoc, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
+import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, resizeCanvas, shadeElement, type DesignDoc, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
 import { applyPhotoPick } from "@/lib/design-editor/template-fill";
 import { BRAND_WORDMARKS } from "@/lib/design-editor/brand-assets";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
@@ -536,6 +536,25 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
                   <LayoutTemplateIcon className="size-3.5 text-muted-foreground" /> {isTemplate ? "Open the format page" : `Open the “${session.item.format}” template`}
                 </a>
               )}
+              <div className="mt-1 border-t border-border pt-1">
+                <div className="px-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Canvas size</div>
+                {CANVAS_SIZES.map((size) => {
+                  const current = doc.canvas.width === size.width && doc.canvas.height === size.height;
+                  return (
+                    <button
+                      key={size.id}
+                      type="button"
+                      disabled={locked || current}
+                      onClick={() => { apply((d) => resizeCanvas(d, size)); toast.success(`Canvas is now ${size.label.toLowerCase()}`, { description: "Everything was stretched to fit — tidy what needs it." }); }}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-100"
+                    >
+                      <span className={cn("size-3.5 text-center text-[11px] leading-none", current ? "text-foreground" : "text-transparent")}>✓</span>
+                      <span className={cn(current && "font-medium")}>{size.label}</span>
+                      <span className="ml-auto text-[11px] text-muted-foreground">{size.width}×{size.height}</span>
+                    </button>
+                  );
+                })}
+              </div>
               {!isTemplate && (
                 <>
                   <button type="button" onClick={() => { void navigator.clipboard.writeText(window.location.href); toast.success("Link copied"); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted">
