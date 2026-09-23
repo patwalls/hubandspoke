@@ -427,6 +427,13 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   (homepage, "Twitter Post", reused Klaviyo links) appear thousands of
   times in legitimate rows; `scripts/backfill-find-duplicates.mjs` surfaces
   URL-level collisions for manual audit instead.
+- **LinkedIn reshare skip:** the LinkedIn path (`fetchLinkedInCompanyPostsPaged`)
+  skips reshares of other companies' posts — SC returns the ORIGINAL post's URL
+  as `p.url` but the reshare's own activity ID as `p.id`, so ingesting it
+  creates a row whose `published_link` points to the wrong account's post and
+  embeds the wrong post on the content-detail page (`isForeignLinkedInReshare`
+  detects a mismatch between `p.id` and the activity ID in `p.url`).
+  (science-of-scaling incident, 2026-09.)
 - **X retweet skip:** the X path (`fetchXTweetsLatest`) skips retweets of
   accounts we don't own — SC dereferences a plain retweet to the ORIGINAL
   tweet, so ingesting it records the retweeted account's tweet ID/body/metrics

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isForeignRetweet,
+  isForeignLinkedInReshare,
   normalizeLinkedInCompanyPost,
 } from "./account-content-sync";
 import type { SCTweet } from "./sc-fetchers";
@@ -145,6 +146,68 @@ describe("isForeignRetweet", () => {
         tweet({ fullText: "RT @thsottiaux: original tweet body" }),
         "saj_adib",
       ),
+    ).toBe(true);
+  });
+});
+
+// Regression for the science-of-scaling incident (2026-09): LinkedIn reshares
+// by @thescience-of-scaling were ingested as the company's own original posts.
+// SC returns the ORIGINAL post's URL as `p.url` but the reshare's own activity
+// ID as `p.id` — so the published_link points to someone else's post while
+// platform_content_id is the reshare. The content-detail page then embeds the
+// original author's post, not the company's.
+describe("isForeignLinkedInReshare", () => {
+  it("detects a reshare: p.id differs from the activity ID in p.url", () => {
+    // Real IDs from the science-of-scaling incident:
+    //   p.id = 7506783504366702592 (the reshare)
+    //   p.url activity ID = 7506668343827959809 (the original)
+    expect(
+      isForeignLinkedInReshare({
+        id: "7506783504366702592",
+        url: "https://www.linkedin.com/posts/activity-7506668343827959809-FnwG",
+        text: "some reshared post",
+        datePublished: "2026-09-22T12:00:00.000Z",
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps an original post: p.id matches the activity ID in p.url", () => {
+    expect(
+      isForeignLinkedInReshare({
+        id: "7506783504366702592",
+        url: "https://www.linkedin.com/posts/thescience-of-scaling_some-title-activity-7506783504366702592-ABC",
+        text: "our own original post",
+        datePublished: "2026-09-22T12:00:00.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("fails-open when p.id is absent (lean payload with no id field)", () => {
+    expect(
+      isForeignLinkedInReshare({
+        url: "https://www.linkedin.com/posts/activity-7506668343827959809-FnwG",
+        text: "some post",
+        datePublished: "2026-09-22T12:00:00.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("fails-open when the URL has no parseable activity ID", () => {
+    expect(
+      isForeignLinkedInReshare({
+        id: "7506783504366702592",
+        url: "https://www.linkedin.com/company/thescience-of-scaling/",
+      }),
+    ).toBe(false);
+  });
+
+  it("handles urn:li:activity URL format (feed/update style)", () => {
+    expect(
+      isForeignLinkedInReshare({
+        id: "7506783504366702592",
+        url: "https://www.linkedin.com/feed/update/urn:li:activity:7506668343827959809/",
+        text: "reshared via feed url",
+      }),
     ).toBe(true);
   });
 });

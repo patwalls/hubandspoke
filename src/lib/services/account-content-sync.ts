@@ -610,6 +610,27 @@ export function normalizeLinkedInCompanyPost(
   };
 }
 
+/** True when a LinkedIn company post is a reshare of someone else's content.
+ *
+ * When a company reshares another post, SC returns the ORIGINAL post's URL
+ * as `p.url` but assigns the reshare's own activity ID as `p.id`. The
+ * activity ID extractable from the URL (the original post) therefore doesn't
+ * match `p.id` (the reshare). Ingesting these creates rows whose
+ * `published_link` points to someone else's post, pollutes the brand's
+ * metrics with the original poster's engagement, and (on LinkedIn) renders
+ * the wrong post embed on the content-detail page.
+ * (science-of-scaling incident, 2026-09.)
+ *
+ * Only fires when both `p.id` and a parseable activity ID in `p.url` are
+ * present; without both anchors we fail-open and keep the post.
+ */
+export function isForeignLinkedInReshare(p: SCLinkedInPost): boolean {
+  if (!p.id || !p.url) return false;
+  const urlContentId = extractContentId("linkedin", p.url);
+  if (!urlContentId) return false;
+  return String(p.id) !== String(urlContentId);
+}
+
 async function fetchLinkedInCompanyPostsPaged(
   companyUrl: string,
   maxPages: number
@@ -618,6 +639,7 @@ async function fetchLinkedInCompanyPostsPaged(
   const hardCap = Math.min(maxPages, 7);
   const items: NormalizedItem[] = [];
   let credits = 0;
+  let totalSkipped = 0;
   for (let page = 1; page <= hardCap; page++) {
     const data = await scGetJson("/v1/linkedin/company/posts", {
       url: companyUrl,
@@ -625,11 +647,22 @@ async function fetchLinkedInCompanyPostsPaged(
     });
     credits++;
     const posts: SCLinkedInPost[] = data.posts || data.items || [];
+    let pageSkipped = 0;
     for (const p of posts) {
+      if (isForeignLinkedInReshare(p)) {
+        pageSkipped++;
+        continue;
+      }
       const item = normalizeLinkedInCompanyPost(p);
       if (item) items.push(item);
     }
+    if (pageSkipped > 0) totalSkipped += pageSkipped;
     if (posts.length === 0) break;
+  }
+  if (totalSkipped > 0) {
+    console.info(
+      `[linkedin-sync] url=${companyUrl} skipped ${totalSkipped} reshare(s) of other accounts' content`
+    );
   }
   return { items, credits };
 }
