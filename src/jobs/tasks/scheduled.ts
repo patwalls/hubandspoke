@@ -25,7 +25,11 @@ import { sendDailyScorecardEmail } from "@/lib/email";
 import { db } from "@/lib/db";
 import { accounts, productionItems, users } from "@/lib/db/schema";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
-import { runScheduleReconcile, runScheduleNodateReconcile } from "@/lib/services/schedule-reconcile/reconcile";
+import {
+  runScheduleReconcile,
+  runScheduleNodateReconcile,
+  selectAccountsForScheduleSync,
+} from "@/lib/services/schedule-reconcile/reconcile";
 import type { EnrichItemPayload } from "./enrich-item";
 import type { ExtractHookPayload } from "./extract-hook";
 import type { HookFallbackPayload } from "./hook-fallback";
@@ -237,9 +241,9 @@ export const accountContentSyncSweepTask: Task = async (_payload, helpers) => {
 /**
  * Schedule-reconcile sweep (every 10 min). Two jobs in one tick:
  *   1. Targeted freshness: enqueue `account-content-sync` (latest) for only
- *      the accounts that currently own a pending Scheduled item, so a post
- *      that just went live is discovered within ~10 min. Near-zero SC spend
- *      when nothing is scheduled.
+ *      the accounts that currently own a pending, due Scheduled item — see
+ *      `selectAccountsForScheduleSync` for the due/throttle rules. Near-zero
+ *      SC spend when nothing is scheduled (or not due yet).
  *   2. Match pass: run the reconciler over current data — it ties newly-
  *      synced Published posts back to their waiting Scheduled item
  *      (auto-merge ≥85, suggestion 55–84), and flags items aged past their
@@ -252,29 +256,16 @@ export const scheduleReconcileSweepTask: Task = async (_payload, helpers) => {
   const start = Date.now();
   helpers.logger.info("schedule-reconcile-sweep start");
 
-  // Distinct accounts with a pending Scheduled item that hasn't been given
-  // up on yet — only those need fresh platform data.
-  const accountRows = await db
-    .selectDistinct({ accountId: productionItems.accountId })
-    .from(productionItems)
-    .where(
-      and(
-        eq(productionItems.status, "Scheduled"),
-        isNotNull(productionItems.accountId),
-        isNull(productionItems.scheduleNeedsAttentionAt),
-        isNull(productionItems.deletedAt),
-      ),
-    );
+  const accountIds = await selectAccountsForScheduleSync();
 
   let enqueued = 0;
-  for (const row of accountRows) {
-    if (!row.accountId) continue;
+  for (const accountId of accountIds) {
     const payload: AccountContentSyncPayload = {
-      accountId: row.accountId,
+      accountId,
       mode: "latest",
     };
     await helpers.addJob("account-content-sync", payload as never, {
-      jobKey: `account-content-sync-${row.accountId}-latest`,
+      jobKey: `account-content-sync-${accountId}-latest`,
       jobKeyMode: "unsafe_dedupe",
     });
     enqueued++;

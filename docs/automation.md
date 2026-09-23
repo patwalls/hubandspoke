@@ -301,8 +301,18 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   a *separate* Published row. This sweep reunites them.
 - **Two jobs per tick:**
   1. **Targeted freshness:** enqueues `account-content-sync` (`mode=latest`,
-     jobKey dedup) for ONLY the distinct accounts that own a pending Scheduled
-     item (not given-up). ≈$0 extra SC spend when nothing is scheduled.
+     jobKey dedup) for ONLY the distinct accounts selected by
+     `selectAccountsForScheduleSync()` (`reconcile.ts`) — accounts owning a
+     pending, not-given-up Scheduled item that's actually *due*: either it has
+     no `expectedPublishAt` (can't tell when to expect it, so kept on the
+     original every-tick behavior) or its `expectedPublishAt` has arrived —
+     and, for the latter, the account hasn't already been synced (any sync,
+     tracked via `accounts.last_content_sync_at`) within the last 30 min
+     (`SCHEDULE_SYNC_THROTTLE_MS`). An item scheduled days ahead of its
+     expected go-live no longer burns an SC credit every 10-min tick while it
+     waits — added 2026-09-23 after Futurepedia's batch-ahead scheduling was
+     re-syncing the same account every tick for days with nothing to find.
+     ≈$0 extra SC spend when nothing is scheduled or due yet.
   2. **Match pass:** `runScheduleReconcile()` over current data. For each
      pending Scheduled item: structural candidate gate (same account,
      Published, synced-origin, published inside the scheduling window, same

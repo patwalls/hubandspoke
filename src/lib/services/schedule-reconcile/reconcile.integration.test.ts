@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
+import { accounts, productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
 import {
   createTestAccount,
   createTestProductionItem,
@@ -11,7 +11,11 @@ import {
   findBestScheduledMatch,
   type ScheduledItemForMatch,
 } from "./matcher";
-import { runScheduleReconcile, runScheduleNodateReconcile } from "./reconcile";
+import {
+  runScheduleReconcile,
+  runScheduleNodateReconcile,
+  selectAccountsForScheduleSync,
+} from "./reconcile";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -520,5 +524,104 @@ describe("runScheduleNodateReconcile", () => {
       .from(productionItems)
       .where(eq(productionItems.id, sched.id));
     expect(row.na).not.toBeNull();
+  });
+});
+
+describe("selectAccountsForScheduleSync (targeted-freshness gate)", () => {
+  it("skips an account whose only pending item's expected date is still days away", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "x",
+      scheduledAt: now,
+      expectedPublishAt: new Date(now.getTime() + 2 * 24 * HOUR),
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const ids = await selectAccountsForScheduleSync(now);
+    expect(ids).not.toContain(acct.id);
+  });
+
+  it("includes an account whose pending item has no expected date, regardless of last sync", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    await db
+      .update(accounts)
+      .set({ lastContentSyncAt: now })
+      .where(eq(accounts.id, acct.id));
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "x",
+      scheduledAt: now,
+      expectedPublishAt: null,
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const ids = await selectAccountsForScheduleSync(now);
+    expect(ids).toContain(acct.id);
+  });
+
+  it("includes an account whose item's expected date has arrived and it has never been synced", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "x",
+      scheduledAt: new Date(now.getTime() - HOUR),
+      expectedPublishAt: new Date(now.getTime() - 5 * 60 * 1000),
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const ids = await selectAccountsForScheduleSync(now);
+    expect(ids).toContain(acct.id);
+  });
+
+  it("throttles an account whose due item was already synced within the last 30 min", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    await db
+      .update(accounts)
+      .set({ lastContentSyncAt: new Date(now.getTime() - 10 * 60 * 1000) })
+      .where(eq(accounts.id, acct.id));
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "x",
+      scheduledAt: new Date(now.getTime() - HOUR),
+      expectedPublishAt: new Date(now.getTime() - 5 * 60 * 1000),
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const ids = await selectAccountsForScheduleSync(now);
+    expect(ids).not.toContain(acct.id);
+  });
+
+  it("re-includes a throttled account once the throttle window has elapsed", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    await db
+      .update(accounts)
+      .set({ lastContentSyncAt: new Date(now.getTime() - 45 * 60 * 1000) })
+      .where(eq(accounts.id, acct.id));
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "x",
+      scheduledAt: new Date(now.getTime() - HOUR),
+      expectedPublishAt: new Date(now.getTime() - 5 * 60 * 1000),
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const ids = await selectAccountsForScheduleSync(now);
+    expect(ids).toContain(acct.id);
   });
 });

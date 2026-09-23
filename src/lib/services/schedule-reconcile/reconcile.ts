@@ -9,9 +9,9 @@
 //     and stop matching it (some content must never sit at Scheduled past 24h)
 
 import type Anthropic from "@anthropic-ai/sdk";
-import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
+import { accounts, productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
 import {
   findBestScheduledMatch,
   type ScheduledItemForMatch,
@@ -21,6 +21,53 @@ import { reconcileScheduledIntoPublished } from "@/lib/services/merge-production
 // Confidence tiers (0–100). ≥85 auto-applies; 55–84 waits for a human.
 export const AUTO_MATCH_SCORE = 85;
 export const SUGGEST_SCORE = 55;
+
+// Once a pending item's expected publish time has arrived, only re-sync its
+// account this often via the targeted-freshness job — no point spending an
+// SC credit every 10-min tick for a post that isn't due for days.
+export const SCHEDULE_SYNC_THROTTLE_MS = 30 * 60 * 1000;
+
+/**
+ * Accounts that should get a fresh `account-content-sync` this tick because
+ * they own a pending Scheduled item that's either due (no expected date, or
+ * its expected date has arrived) — and, for dated items, haven't already
+ * been synced within `SCHEDULE_SYNC_THROTTLE_MS`. An item with an
+ * `expectedPublishAt` days out is skipped entirely until that time arrives;
+ * an item with no expected date (can't tell when to expect it) keeps the
+ * original every-tick behavior.
+ */
+export async function selectAccountsForScheduleSync(
+  now: Date = new Date(),
+): Promise<string[]> {
+  const throttleCutoff = new Date(now.getTime() - SCHEDULE_SYNC_THROTTLE_MS);
+
+  const rows = await db
+    .selectDistinct({ accountId: productionItems.accountId })
+    .from(productionItems)
+    .innerJoin(accounts, eq(accounts.id, productionItems.accountId))
+    .where(
+      and(
+        eq(productionItems.status, "Scheduled"),
+        isNotNull(productionItems.accountId),
+        isNull(productionItems.scheduleNeedsAttentionAt),
+        isNull(productionItems.deletedAt),
+        or(
+          isNull(productionItems.expectedPublishAt),
+          and(
+            lte(productionItems.expectedPublishAt, now),
+            or(
+              isNull(accounts.lastContentSyncAt),
+              lte(accounts.lastContentSyncAt, throttleCutoff),
+            ),
+          ),
+        ),
+      ),
+    );
+
+  return rows
+    .map((r) => r.accountId)
+    .filter((id): id is string => id != null);
+}
 
 // Per-post-type give-up window, in hours. Fast-moving short-form should never
 // sit at Scheduled for more than a day; slower formats get a longer ceiling.
