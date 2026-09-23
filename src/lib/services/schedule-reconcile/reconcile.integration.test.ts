@@ -349,6 +349,38 @@ describe("runScheduleReconcile tier policy", () => {
       .where(eq(productionItems.id, slow.id));
     expect(slowRow.na).toBeNull();
   });
+
+  it("measures the give-up window from expectedPublishAt, not scheduledAt, when both are set", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    // Operator batch-scheduled this Reel 3 days ago (scheduledAt), but told
+    // the system it isn't expected to go live until 2h from now. The old
+    // scheduledAt-only clock would have given up on this already.
+    const scheduledAt = new Date(now.getTime() - 72 * HOUR);
+    const expectedPublishAt = new Date(now.getTime() + 2 * HOUR);
+
+    const item = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "instagram_reel", // fast, 24h window
+      scheduledAt,
+      expectedPublishAt,
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const summary = await runScheduleReconcile({
+      client: stubClient(0, 0), // no candidates anyway
+      onlyItemIds: [item.id],
+    });
+    expect(summary.gaveUp).toBe(0);
+
+    const [row] = await db
+      .select({ na: productionItems.scheduleNeedsAttentionAt })
+      .from(productionItems)
+      .where(eq(productionItems.id, item.id));
+    expect(row.na).toBeNull();
+  });
 });
 
 describe("runScheduleReconcile — no-date item exclusion", () => {

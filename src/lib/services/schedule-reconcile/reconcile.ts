@@ -108,7 +108,12 @@ export async function runScheduleReconcile(opts?: {
     const accountId = row.accountId!;
 
     // Give-up check: past the per-post-type window with no confident match.
-    const ageHours = (now.getTime() - scheduledAt.getTime()) / (1000 * 60 * 60);
+    // Measured from the operator's expected go-live time when they gave one
+    // (scheduledAt is just the moment they clicked "Scheduled", which can be
+    // days before the post actually goes live for batch-ahead scheduling —
+    // using it alone gave up on fast formats before they'd even published).
+    const staleRef = row.expectedPublishAt ?? scheduledAt;
+    const ageHours = (now.getTime() - staleRef.getTime()) / (1000 * 60 * 60);
     if (ageHours > staleWindowHours(row.postType)) {
       await db
         .update(productionItems)

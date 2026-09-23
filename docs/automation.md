@@ -314,11 +314,15 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   emits `status_change` + `content_changed`, schedules velocity snapshots);
   **55–84** → upsert a `scheduled_match_suggestions` row (pending) for human
   Confirm/Reject at `/[brand]/scheduled`; **<55** → leave Scheduled, retry.
-- **Give-up window (per post_type):** unmatched past `staleWindowHours()` —
-  **24h** for fast formats (x, tiktok, threads, instagram_*), **48h** otherwise
-  — stamps `production_items.schedule_needs_attention_at`, surfaces a
-  needs-attention badge, and stops matching that item. "Some content should
-  never sit at Scheduled more than 24h."
+- **Give-up window (per post_type):** unmatched past `staleWindowHours()`,
+  measured from `expectedPublishAt` when the operator set one, else
+  `scheduledAt` — **24h** for fast formats (x, tiktok, threads, instagram_*),
+  **48h** otherwise — stamps `production_items.schedule_needs_attention_at`,
+  surfaces a needs-attention badge, and stops matching that item. "Some
+  content should never sit at Scheduled more than 24h." (Bug fixed 2026-09-23:
+  the window used to be measured from `scheduledAt` alone — the moment the
+  operator clicked "Scheduled" — which gives up hours/days before go-live for
+  anything batch-scheduled ahead of its actual expected publish time.)
 - **Rules / idempotency:** matcher runs against whatever Published rows exist
   now, so a post synced this tick is matched next tick (~10-min latency, by
   design). Rejected (item, candidate) pairs are excluded from future matching.
