@@ -111,7 +111,9 @@ export function layoutTextBlock(args: {
   yPct: number;
   anchor: LayerAnchor;
   widthPct: number;
-  /** Balance line widths (hooks) or fill greedily (captions). */
+  /** Balance line widths, or fill each line as far as it goes (every text
+   *  layer and the captions — what a text box is expected to do; balancing
+   *  left a hook's lines stopping short of a wide box, 2026-09-24). */
   balance: boolean;
   /** Extra space after every glyph, in em (CSS letter-spacing). */
   letterSpacingEm?: number;
@@ -232,7 +234,7 @@ export function fitTextSizePct(args: {
       yPct: 0,
       anchor: "top",
       widthPct: args.widthPct,
-      balance: true,
+      balance: false,
     });
     if (layout.bottom - layout.top <= (args.maxHeightPct / 100) * args.canvas.height) break;
     sizePct = Math.round((sizePct - 0.1) * 10) / 10;

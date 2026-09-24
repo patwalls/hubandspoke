@@ -52,7 +52,7 @@ export function resolveScene(plan: RenderPlan): Scene {
       yPct: layer.yPct,
       anchor: layer.anchor,
       widthPct: layer.widthPct,
-      balance: true,
+      balance: false,
     }),
   }));
 

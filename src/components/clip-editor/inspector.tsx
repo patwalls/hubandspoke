@@ -289,7 +289,7 @@ function TextLayerPanel({ title, layer, active, usedColors, placeholder, canvas,
   const toggleFit = (on: boolean) =>
     patchHook((l) => {
       if (!on) return { ...l, fitHeightPct: null };
-      const block = layoutTextBlock({ words: textToLayoutWords(l.text), style: l.style, canvas, xPct: l.xPct, yPct: l.yPct, anchor: l.anchor, widthPct: l.widthPct, balance: true });
+      const block = layoutTextBlock({ words: textToLayoutWords(l.text), style: l.style, canvas, xPct: l.xPct, yPct: l.yPct, anchor: l.anchor, widthPct: l.widthPct, balance: false });
       return { ...l, fitHeightPct: Math.max(2, Math.min(100, ((block.bottom - block.top) / canvas.height) * 100)) };
     });
   return (

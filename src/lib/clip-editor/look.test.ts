@@ -126,3 +126,24 @@ describe("text box: shrink to fit, line and letter spacing", () => {
     expect(Number(styleLine.split(",")[13])).toBeCloseTo(0.1 * after.fontSizePx, 1);
   });
 });
+
+describe("text wraps like a text box", () => {
+  it("each line takes every word that fits (a smaller size pulls words up), not balanced short lines", () => {
+    const doc = createDefaultDoc({ startSec: 0, endSec: 10, hook: "$80K per month app builder breaks down his $500 tech stack:" });
+    const hook = doc.layers.find((l) => l.type === "text")!;
+    if (hook.type !== "text") throw new Error("no hook");
+    hook.widthPct = 90;
+    hook.style = { ...hook.style, sizePct: 3.2, align: "left" };
+    const lines = resolveScene(compileRenderPlan(doc, [])).textBlocks[0].layout.lines;
+    const maxWidth = 0.9 * doc.canvas.width;
+    const wordWidth = (t: string) => layoutTextBlock({ words: [{ text: t, ref: 0 }], style: hook.style, canvas: doc.canvas, xPct: 50, yPct: 0, anchor: "top", widthPct: 100, balance: false }).widthPx;
+    const space = wordWidth("a a") - 2 * wordWidth("a");
+    for (let i = 0; i < lines.length - 1; i++) {
+      // The next line's first word would not have fit on this one.
+      expect(lines[i].widthPx + space + wordWidth(lines[i + 1].words[0].text)).toBeGreaterThan(maxWidth);
+    }
+    const smaller = { ...hook, style: { ...hook.style, sizePct: 2.4 } };
+    const fewer = resolveScene(compileRenderPlan({ ...doc, layers: doc.layers.map((l) => (l.id === hook.id ? smaller : l)) }, [])).textBlocks[0].layout.lines;
+    expect(fewer[0].words.length).toBeGreaterThan(lines[0].words.length);
+  });
+});
