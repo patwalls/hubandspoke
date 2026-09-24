@@ -62,7 +62,7 @@ function styleLine(name: string, style: TextStyle, fontSizePx: number): string {
     0, // strikeout
     100, // scaleX
     100, // scaleY
-    0, // spacing
+    Math.round((style.letterSpacing ?? 0) * fontSizePx * 100) / 100, // spacing (px after each glyph)
     0, // angle
     1, // border style: outline + shadow
     outline,

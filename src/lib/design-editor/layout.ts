@@ -76,6 +76,8 @@ function layoutAt(el: DesignTextElement, fontSizePx: number): DesignTextLayout {
       outlineColor: "#000000",
       uppercase: false, // already applied
       align: "center", // the design engine aligns lines itself below
+      lineHeight: LINE_HEIGHT_EM, // rescaled to the element's below
+      letterSpacing: 0, // letterSpacingEm below wins
       shadow: null,
       box: null,
     },

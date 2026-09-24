@@ -127,7 +127,7 @@ export function layoutTextBlock(args: {
   const words = args.words.map((w) => ({ ...w, text: display(w.text) }));
   // Letter spacing is added after every glyph (as CSS does), so a word is
   // wider by one spacing per character and a space by one.
-  const spacing = (args.letterSpacingEm ?? 0) * fontSizePx;
+  const spacing = (args.letterSpacingEm ?? args.style.letterSpacing ?? 0) * fontSizePx;
   const widths = words.map((w) => measureTextEm(font, w.text) * fontSizePx + spacing * [...w.text].length);
   const spaceWidth = measureTextEm(font, " ") * fontSizePx + spacing;
 
@@ -138,7 +138,7 @@ export function layoutTextBlock(args: {
     words.map((w) => w.hardBreakBefore === true),
   );
 
-  const pitch = LINE_HEIGHT_EM * fontSizePx;
+  const pitch = (args.style.lineHeight ?? LINE_HEIGHT_EM) * fontSizePx;
   const blockHeight = breaks.length * pitch;
   const top =
     args.anchor === "top"

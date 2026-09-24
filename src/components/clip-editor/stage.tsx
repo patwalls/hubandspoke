@@ -8,9 +8,11 @@
  * numbers layout.ts produced and the exact numbers the ASS script hands to
  * libass. No second set of "preview" math to drift out of sync with export.
  *
- * Everything on the stage can be dragged: hook and captions vertically, the
+ * Everything on the stage can be dragged: text and captions anywhere, the
  * video vertically (fit) or horizontally (fill), images (logos) anywhere and
- * resized by their corner. Drags go through the store's `apply` with a
+ * resized by their corner. Text layers have Canva's handles: the sides set
+ * the wrap width, the corners scale the text, and with shrink-to-fit on the
+ * top/bottom set the box height. Drags go through the store's `apply` with a
  * coalesce key, so one drag = one undo step.
  */
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
@@ -26,7 +28,7 @@ import { commands, useEditor } from "./store";
 import { ImageIcon, MagnetIcon, TypeIcon } from "lucide-react";
 import { createImageLayer, createTextLayer } from "@/lib/clip-editor/doc";
 import { LogoPicker } from "@/components/editor/logo-picker";
-import { readSnapEnabled, snapMove, snapThreshold, snapValue, writeSnapEnabled, type SnapGuide, type SnapTarget } from "@/lib/editor/snap";
+import { readSnapEnabled, snapMove, snapThreshold, writeSnapEnabled, type SnapGuide, type SnapTarget } from "@/lib/editor/snap";
 
 interface StageProps {
   plan: RenderPlan;
@@ -47,6 +49,7 @@ function textCss(style: TextStyle, layout: TextBlockLayout): React.CSSProperties
     lineHeight: `${layout.linePitchPx}px`,
     height: layout.linePitchPx,
     color: style.color,
+    letterSpacing: `${style.letterSpacing ?? 0}em`,
     whiteSpace: "pre",
     // libass draws the outline OUTSIDE the glyph; a CSS stroke is centered on
     // the edge, so double the width and paint it under the fill to match.
@@ -103,7 +106,6 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
   const [previewing, setPreviewing] = useState(false);
   /** The guide lines while a drag is snapping; ⌥ drags freely. */
   const [guides, setGuides] = useState<SnapGuide[]>([]);
-  const setGuide = (g: SnapGuide | null) => setGuides(g ? [g] : []);
   /** Natural aspect (w/h) of each image layer once its picture has loaded —
    *  what turns a width into a box for snapping and the resize handle. */
   const [imageAspect, setImageAspect] = useState<Record<string, number>>({});
@@ -212,23 +214,81 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
     return t;
   };
 
-  const dragLayerY = (e: PointerEvent, layer: TextLayer | CaptionsLayer) => {
+  /** Snap targets for a moving box: canvas edges/centre/margins, the
+   *  video's edges, and every other layer's edges and centre. */
+  const boxTargets = (movingId: string) => {
+    const margin = Math.round(Math.min(W, H) * 0.04);
+    const t: { x: SnapTarget[]; y: SnapTarget[] } = {
+      x: [{ at: 0, kind: "edge" }, { at: W, kind: "edge" }, { at: W / 2, kind: "center" }, { at: margin, kind: "edge" }, { at: W - margin, kind: "edge" }, { at: videoBox.left, kind: "video" }, { at: videoBox.left + videoBox.width, kind: "video" }],
+      y: [...layerSnapTargets(movingId), { at: 0, kind: "edge" }, { at: H, kind: "edge" }, { at: margin, kind: "edge" }, { at: H - margin, kind: "edge" }],
+    };
+    const others = plan.imageLayers.filter((l) => l.id !== movingId).map(imageRect);
+    for (const block of scene.textBlocks) if (block.layer.id !== movingId) others.push(textRect(block.layer, block.layout));
+    for (const o of others) {
+      t.x.push({ at: o.x, kind: "element" }, { at: o.x + o.w / 2, kind: "element" }, { at: o.x + o.w, kind: "element" });
+      t.y.push({ at: o.y + o.h / 2, kind: "element" });
+    }
+    return t;
+  };
+
+  /** Move a text layer (or the captions) anywhere; x and y follow the
+   *  pointer by the snapped delta, so the anchor never matters. */
+  const dragText = (e: PointerEvent, layer: TextLayer | CaptionsLayer, rect: Rect) => {
     setSelection({ kind: "layer", id: layer.id });
-    const startPct = layer.yPct;
-    const targets = layerSnapTargets(layer.id);
+    const start = { xPct: layer.xPct, yPct: layer.yPct };
+    const targets = boxTargets(layer.id);
     startDrag(
       e,
-      (_dx, dy, alt) =>
+      (dx, dy, alt) =>
         commands.patchLayer(layer.id, (l) => {
-          let y = ((startPct + (dy / H) * 100) / 100) * H;
+          let moved = { ...rect, x: rect.x + dx, y: rect.y + dy };
           if (snapOn && !alt) {
-            const s = snapValue(y, targets, snapThreshold(scale));
-            y = s.value;
-            setGuide(s.guide);
-          } else setGuide(null);
-          return { ...l, yPct: clampPct((y / H) * 100) };
+            const snapped = snapMove(moved, targets, snapThreshold(scale));
+            moved = { ...moved, x: snapped.x, y: snapped.y };
+            setGuides(snapped.guides);
+          } else setGuides([]);
+          return { ...l, xPct: clampPct(start.xPct + ((moved.x - rect.x) / W) * 100), yPct: clampPct(start.yPct + ((moved.y - rect.y) / H) * 100) };
         }),
       `drag-layer-${layer.id}`,
+    );
+  };
+
+  /** A text layer's handles. Sides: wrap width (text rewraps). Corners:
+   *  scale width + font size together (the opposite corner stays). Top/
+   *  bottom (shrink-to-fit only): the box height. */
+  const resizeText = (e: PointerEvent, layer: TextLayer, rect: Rect, handle: Handle) => {
+    setSelection({ kind: "layer", id: layer.id });
+    const start = { ...layer, style: { ...layer.style } };
+    const fromLeft = handle.includes("w");
+    const fromTop = handle.startsWith("n");
+    const horizontal = handle.includes("e") || fromLeft;
+    const vertical = handle.startsWith("n") || handle.startsWith("s");
+    const corner = horizontal && vertical;
+    const anchorYFor = (top: number, h: number) => (start.anchor === "top" ? top : start.anchor === "center" ? top + h / 2 : top + h);
+    startDrag(
+      e,
+      (dx, dy) =>
+        commands.patchLayer<TextLayer>(layer.id, (l) => {
+          if (horizontal) {
+            const w = Math.max(W * 0.1, Math.min(W, rect.w + (fromLeft ? -dx : dx)));
+            const left = fromLeft ? rect.x + rect.w - w : rect.x;
+            const next: TextLayer = { ...l, widthPct: (w / W) * 100, xPct: clampPct(((left + w / 2) / W) * 100) };
+            if (!corner) return next;
+            const f = w / rect.w;
+            const h = rect.h * f;
+            const top = fromTop ? rect.y + rect.h - h : rect.y;
+            return {
+              ...next,
+              yPct: clampPct((anchorYFor(top, h) / H) * 100),
+              fitHeightPct: start.fitHeightPct == null ? null : Math.max(2, Math.min(100, start.fitHeightPct * f)),
+              style: { ...l.style, sizePct: Math.max(0.5, Math.min(20, Math.round(start.style.sizePct * f * 100) / 100)) },
+            };
+          }
+          const h = Math.max(H * 0.02, Math.min(H, rect.h + (fromTop ? -dy : dy)));
+          const top = fromTop ? rect.y + rect.h - h : rect.y;
+          return { ...l, fitHeightPct: (h / H) * 100, yPct: clampPct((anchorYFor(top, h) / H) * 100) };
+        }),
+      `resize-text-${layer.id}`,
     );
   };
 
@@ -257,6 +317,17 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
     const y = (layer.yPct / 100) * H;
     const top = layer.anchor === "top" ? y : layer.anchor === "center" ? y - h / 2 : y - h;
     return { x: cx - w / 2, y: top, w, h };
+  };
+
+  /** The canvas-px box of a text layer: its wrap width × its block height
+   *  (or the shrink-to-fit box). What the handles and the outline follow. */
+  const textRect = (layer: TextLayer, layout: TextBlockLayout): Rect => {
+    const w = (layer.widthPct / 100) * W;
+    const x = (layer.xPct / 100) * W - w / 2;
+    if (layer.fitHeightPct == null) return { x, y: layout.top, w, h: layout.bottom - layout.top };
+    const h = (layer.fitHeightPct / 100) * H;
+    const ay = (layer.yPct / 100) * H;
+    return { x, y: layer.anchor === "top" ? ay : layer.anchor === "center" ? ay - h / 2 : ay - h, w, h };
   };
 
   const dragImage = (e: PointerEvent, layer: ImageLayer) => {
@@ -421,12 +492,20 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
               </div>
             );
           })}
-          {scene.textBlocks.map((block) => (
+          {scene.textBlocks.map((block) => {
+            const rect = textRect(block.layer, block.layout);
+            const layer = block.layer;
+            return (
             <TextBlock
-              key={block.layer.id}
-              layout={block.layout}
-              selected={selection?.kind === "layer" && selection.id === block.layer.id}
-              onPointerDown={(e) => dragLayerY(e, block.layer)}
+              key={layer.id}
+              id={layer.id}
+              rect={rect}
+              scale={scale}
+              selected={selection?.kind === "layer" && selection.id === layer.id}
+              onPointerDown={(e) => dragText(e, layer, rect)}
+              onDoubleClick={() => focusLayerText(layer.id)}
+              handles={layer.fitHeightPct == null ? SIDE_AND_CORNER_HANDLES : HANDLES}
+              onHandleDown={(e, h) => resizeText(e, layer, rect, h)}
             >
               {block.layout.lines.map((line, i) => (
                 <LineBox key={`box-${i}`} style={block.layer.style} layout={block.layout} line={line} />
@@ -445,7 +524,8 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
                 </div>
               ))}
             </TextBlock>
-          ))}
+            );
+          })}
 
           {scene.captions && (
             <CaptionOverlay
@@ -454,7 +534,8 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
               selected={
                 selection?.kind === "layer" && selection.id === scene.captions.layer.id
               }
-              onPointerDown={(e) => dragLayerY(e, scene.captions!.layer)}
+              scale={scale}
+              onDragStart={(e, rect) => dragText(e, scene.captions!.layer, rect)}
             />
           )}
           </div>
@@ -500,38 +581,87 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
   );
 }
 
-/** Draggable hit-area around a laid-out text block. */
+type Rect = { x: number; y: number; w: number; h: number };
+type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+const SIDE_AND_CORNER_HANDLES: Handle[] = ["nw", "ne", "e", "se", "sw", "w"];
+
+/** Double-click on the stage → type in the layer's text field. */
+function focusLayerText(id: string) {
+  const el = document.querySelector<HTMLTextAreaElement>(`textarea[data-text-layer="${CSS.escape(id)}"]`);
+  if (!el) return;
+  el.scrollIntoView({ block: "nearest" });
+  el.focus();
+  el.select();
+}
+
+/** Draggable hit-area around a text block, with resize handles when
+ *  selected. `rect` is in canvas px; the grab margin and handles are sized
+ *  in SCREEN px (÷ scale) so they stay easy to hit on a small preview. */
 function TextBlock({
-  layout,
+  id,
+  rect,
+  scale,
   selected,
   onPointerDown,
+  onDoubleClick,
+  handles = [],
+  onHandleDown,
   children,
 }: {
-  layout: TextBlockLayout;
+  id?: string;
+  rect: Rect;
+  scale: number;
   selected: boolean;
   onPointerDown: (e: PointerEvent) => void;
+  onDoubleClick?: () => void;
+  handles?: Handle[];
+  onHandleDown?: (e: PointerEvent, h: Handle) => void;
   children: React.ReactNode;
 }) {
-  const pad = 16;
-  const contentW = Math.max(layout.right - layout.left, 120);
-  const width = contentW + pad * 2;
-  const boxLeft = (layout.left + layout.right) / 2 - width / 2;
+  const k = 1 / Math.max(scale, 0.05);
+  const pad = 8 * k;
+  const w = Math.max(rect.w, 40 * k);
+  const left = rect.x + rect.w / 2 - w / 2;
+  const box = { left: left - pad, top: rect.y - pad, width: w + pad * 2, height: rect.h + pad * 2 };
+  const hs = 12 * k;
   return (
     <>
       {children}
       <div
         className={cn(
-          "absolute cursor-grab rounded-md active:cursor-grabbing hover:outline-dashed hover:outline-[4px] hover:outline-sky-400/60",
-          selected && "outline-dashed outline-[6px] outline-sky-400",
+          "absolute cursor-grab rounded-md active:cursor-grabbing hover:outline-dashed hover:outline-sky-400/60",
+          selected && "outline-dashed outline-sky-400",
         )}
-        style={{
-          left: boxLeft,
-          top: layout.top - pad,
-          width,
-          height: layout.bottom - layout.top + pad * 2,
-        }}
+        data-text-block={id}
+        style={{ ...box, outlineWidth: (selected ? 2 : 1.5) * k }}
         onPointerDown={onPointerDown}
+        onDoubleClick={onDoubleClick}
       />
+      {selected &&
+        onHandleDown &&
+        handles.map((h) => {
+          const cx = h.includes("w") ? box.left : h.includes("e") ? box.left + box.width : box.left + box.width / 2;
+          const cy = h.startsWith("n") ? box.top : h.startsWith("s") ? box.top + box.height : box.top + box.height / 2;
+          const side = h === "e" || h === "w";
+          const tb = h === "n" || h === "s";
+          return (
+            <div
+              key={h}
+              data-handle={h}
+              onPointerDown={(e) => onHandleDown(e, h)}
+              className="absolute rounded-full border-sky-500 bg-white shadow"
+              style={{
+                left: cx - (side ? hs / 3 : tb ? hs : hs / 2),
+                top: cy - (tb ? hs / 3 : side ? hs : hs / 2),
+                width: side ? (hs * 2) / 3 : tb ? hs * 2 : hs,
+                height: tb ? (hs * 2) / 3 : side ? hs * 2 : hs,
+                borderWidth: 2 * k,
+                cursor: side ? "ew-resize" : tb ? "ns-resize" : h === "nw" || h === "se" ? "nwse-resize" : "nesw-resize",
+              }}
+            />
+          );
+        })}
     </>
   );
 }
@@ -546,12 +676,14 @@ function CaptionOverlay({
   scene,
   engine,
   selected,
-  onPointerDown,
+  scale,
+  onDragStart,
 }: {
   scene: Scene;
   engine: PlaybackEngine;
   selected: boolean;
-  onPointerDown: (e: PointerEvent) => void;
+  scale: number;
+  onDragStart: (e: PointerEvent, rect: Rect) => void;
 }) {
   const [active, setActive] = useState<{ cue: number; word: number } | null>(null);
   const captions = scene.captions!;
@@ -577,7 +709,12 @@ function CaptionOverlay({
   const ghost = !cue;
 
   return (
-    <TextBlock layout={shown.layout} selected={selected} onPointerDown={onPointerDown}>
+    <TextBlock
+      rect={{ x: shown.layout.left, y: shown.layout.top, w: shown.layout.right - shown.layout.left, h: shown.layout.bottom - shown.layout.top }}
+      scale={scale}
+      selected={selected}
+      onPointerDown={(e) => onDragStart(e, { x: shown.layout.left, y: shown.layout.top, w: shown.layout.right - shown.layout.left, h: shown.layout.bottom - shown.layout.top })}
+    >
       {shown.layout.lines.map((line, i) => (
         <LineBox key={`box-${i}`} style={layer.style} layout={shown.layout} line={line} opacity={ghost ? (selected ? 0.35 : 0) : 1} />
       ))}

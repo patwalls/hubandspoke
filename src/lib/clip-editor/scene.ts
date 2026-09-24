@@ -7,6 +7,7 @@
  */
 import type { CaptionsLayer, TextLayer } from "./doc";
 import {
+  fitTextSizePct,
   layoutTextBlock,
   textToLayoutWords,
   type TextBlockLayout,
@@ -32,12 +33,20 @@ export interface Scene {
   captions: { layer: CaptionsLayer; cues: SceneCaptionCue[] } | null;
 }
 
+/** Shrink to fit: the layer's size, or the largest smaller one at which the
+ *  block fits its box. Here (not in the stage) so preview and export agree. */
+export function fittedStyle(layer: TextLayer, canvas: { width: number; height: number }): TextLayer["style"] {
+  if (layer.fitHeightPct == null) return layer.style;
+  const sizePct = fitTextSizePct({ text: layer.text, style: layer.style, canvas, widthPct: layer.widthPct, maxHeightPct: layer.fitHeightPct, minSizePct: 0.5 });
+  return sizePct === layer.style.sizePct ? layer.style : { ...layer.style, sizePct };
+}
+
 export function resolveScene(plan: RenderPlan): Scene {
   const textBlocks = plan.textLayers.map((layer) => ({
     layer,
     layout: layoutTextBlock({
       words: textToLayoutWords(layer.text),
-      style: layer.style,
+      style: fittedStyle(layer, plan.canvas),
       canvas: plan.canvas,
       xPct: layer.xPct,
       yPct: layer.yPct,

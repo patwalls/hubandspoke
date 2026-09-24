@@ -31,11 +31,11 @@ describe("clip look (a format's template for new edits)", () => {
 import { layoutTextBlock } from "./layout";
 import { buildAssScript } from "./ass";
 import { compileRenderPlan } from "./plan";
-import { resolveScene } from "./scene";
+import { fittedStyle, resolveScene } from "./scene";
 
 describe("text alignment", () => {
   const base = { words: [{ text: "short", ref: 0 }, { text: "a", ref: 1 }, { text: "much", ref: 2 }, { text: "longer", ref: 3 }, { text: "line", ref: 4 }], canvas: { width: 1080, height: 1920 }, xPct: 50, yPct: 30, anchor: "bottom" as const, widthPct: 80, balance: false };
-  const style = { fontId: "montserrat-extrabold" as const, sizePct: 6, color: "#FFF", outlinePct: 0, outlineColor: "#000", uppercase: false, shadow: null, box: null };
+  const style = { fontId: "montserrat-extrabold" as const, sizePct: 6, color: "#FFF", outlinePct: 0, outlineColor: "#000", uppercase: false, lineHeight: 1.18, letterSpacing: 0, shadow: null, box: null };
   it("left/right lines share an edge with the wrap box; centre lines are centred on xPct", () => {
     const left = layoutTextBlock({ ...base, style: { ...style, align: "left" } });
     expect(left.lines.length).toBeGreaterThan(1);
@@ -91,5 +91,38 @@ describe("tidying a word's edges", () => {
     expect(wordTrims(section, word)).toEqual({ trimStartSec: 0.05, trimEndSec: 0.16 });
     // A removal over the whole word is a removal, not a trim.
     expect(wordTrims({ ...section, removals: [{ startSec: 9, endSec: 11, reason: "manual" as const }] }, word)).toEqual({ trimStartSec: 0, trimEndSec: 0 });
+  });
+});
+
+describe("text box: shrink to fit, line and letter spacing", () => {
+  const longHook = "a very long hook that keeps going and going so it wraps onto many lines at this size";
+  it("shrink to fit sets the text smaller only when the box is too short, and the export follows", () => {
+    const doc = createDefaultDoc({ startSec: 0, endSec: 10, hook: longHook });
+    const hook = doc.layers.find((l) => l.type === "text")!;
+    if (hook.type !== "text") throw new Error("no hook");
+    hook.style.sizePct = 5;
+    expect(fittedStyle(hook, doc.canvas).sizePct).toBe(5); // off → untouched
+    hook.fitHeightPct = 60;
+    expect(fittedStyle(hook, doc.canvas).sizePct).toBe(5); // roomy box → untouched
+    hook.fitHeightPct = 6;
+    const fitted = fittedStyle(hook, doc.canvas).sizePct;
+    expect(fitted).toBeLessThan(5);
+    const plan = compileRenderPlan(doc, []);
+    const block = resolveScene(plan).textBlocks[0].layout;
+    expect(block.bottom - block.top).toBeLessThanOrEqual(0.06 * doc.canvas.height + 0.5);
+    expect(block.fontSizePx).toBeCloseTo((fitted / 100) * doc.canvas.height, 5);
+  });
+  it("line spacing sets the pitch; letter spacing widens lines and reaches the ASS style", () => {
+    const doc = createDefaultDoc({ startSec: 0, endSec: 10, hook: "two lines\nof hook" });
+    const hook = doc.layers.find((l) => l.type === "text")!;
+    if (hook.type !== "text") throw new Error("no hook");
+    const before = resolveScene(compileRenderPlan(doc, [])).textBlocks[0].layout;
+    hook.style = { ...hook.style, lineHeight: 1.6, letterSpacing: 0.1 };
+    const plan = compileRenderPlan(doc, []);
+    const after = resolveScene(plan).textBlocks[0].layout;
+    expect(after.linePitchPx).toBeCloseTo(after.fontSizePx * 1.6, 5);
+    expect(after.widthPx).toBeGreaterThan(before.widthPx);
+    const styleLine = buildAssScript(plan, resolveScene(plan)).split("\n").find((l) => l.startsWith("Style: Text0"))!;
+    expect(Number(styleLine.split(",")[13])).toBeCloseTo(0.1 * after.fontSizePx, 1);
   });
 });

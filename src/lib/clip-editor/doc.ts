@@ -138,6 +138,10 @@ const textStyleSchema = z.object({
   uppercase: z.boolean(),
   /** How the lines sit inside the layer's wrap box (centred on `xPct`). */
   align: z.enum(["left", "center", "right"]).default("center"),
+  /** Line pitch in em (1.18 = the tight social-hook default). */
+  lineHeight: z.number().finite().min(0.7).max(3).default(1.18),
+  /** Extra space after every glyph, in em (CSS letter-spacing / ASS spacing). */
+  letterSpacing: z.number().finite().min(-0.1).max(1).default(0),
   /** Soft drop shadow. Sizes are % of the font size so they scale with it. */
   shadow: z
     .object({ color: hexColor, alpha: z.number().min(0).max(1), blurPct: z.number().min(0).max(40), xPct: z.number().min(-40).max(40), yPct: z.number().min(-40).max(40) })
@@ -171,6 +175,8 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   outlineColor: "#000000",
   uppercase: false,
   align: "center",
+  lineHeight: 1.18,
+  letterSpacing: 0,
   shadow: null,
   box: null,
 };
@@ -199,6 +205,10 @@ const textLayerSchema = z.object({
   text: z.string().max(500),
   /** Wrap width, % of canvas width. */
   widthPct: z.number().finite().min(10).max(100),
+  /** Shrink to fit: the box's height, % of canvas height. The text is set
+   *  at `style.sizePct` or smaller so the block fits it (scene.ts). null =
+   *  off — the block is as tall as its lines. */
+  fitHeightPct: z.number().finite().min(2).max(100).nullable().default(null),
   style: textStyleSchema,
 });
 export type TextLayer = z.infer<typeof textLayerSchema>;
@@ -316,6 +326,7 @@ export function createTextLayer(args: { text: string; canvas: { width: number; h
     yPct: 50,
     anchor: "center",
     widthPct: 80,
+    fitHeightPct: null,
     style: { ...DEFAULT_TEXT_STYLE, sizePct: args.canvas.height > args.canvas.width ? 3.2 : 4.5 },
   };
 }
@@ -397,6 +408,8 @@ export function createDefaultDoc(args: {
     outlinePct: vertical ? 0 : 8,
     outlineColor: "#000000",
     uppercase: false,
+    lineHeight: 1.18,
+    letterSpacing: 0,
     align: "center",
     shadow: null,
     box: null,
@@ -435,6 +448,7 @@ export function createDefaultDoc(args: {
         yPct: hookYPct,
         anchor: vertical ? "bottom" : "center",
         widthPct: hookWidthPct,
+        fitHeightPct: null,
         style: hookStyle,
       },
       {
@@ -452,6 +466,8 @@ export function createDefaultDoc(args: {
           outlineColor: "#000000",
           uppercase: true,
           align: "center",
+          lineHeight: 1.18,
+          letterSpacing: 0,
           shadow: null,
           box: null,
         },

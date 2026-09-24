@@ -14,6 +14,8 @@ import { LogoPicker } from "@/components/editor/logo-picker";
 import { FONTS } from "@/lib/clip-editor/fonts";
 import { colorsInClipDoc } from "@/lib/clip-editor/colors";
 import { ColorPicker } from "@/components/editor/color-picker";
+import { layoutTextBlock, textToLayoutWords } from "@/lib/clip-editor/layout";
+import { fittedStyle } from "@/lib/clip-editor/scene";
 import { commands, useEditor } from "./store";
 
 const HIGHLIGHTS = ["#FFE14D", "#4ADE80", "#38BDF8", "#FB7185", "#FFFFFF"];
@@ -46,6 +48,7 @@ export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDo
           active={selection?.kind === "layer" && selection.id === hook.id}
           usedColors={usedColors}
           placeholder="The line that stops the scroll"
+          canvas={doc.canvas}
           patch={(patch, key) => apply(commands.patchLayer<TextLayer>(hook.id, patch), key)}
         />
       )}
@@ -57,6 +60,7 @@ export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDo
           active={selection?.kind === "layer" && selection.id === layer.id}
           usedColors={usedColors}
           placeholder="Your text"
+          canvas={doc.canvas}
           patch={(patch, key) => apply(commands.patchLayer<TextLayer>(layer.id, patch), key)}
           onRemove={() => removeLayer(layer.id)}
         />
@@ -122,6 +126,7 @@ export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDo
               patchCaptions((l) => ({ ...l, style: { ...l.style, sizePct } }), "cap-size")
             }
           />
+          <Spacing style={captions.style} onChange={(patch, key) => patchCaptions((l) => ({ ...l, style: { ...l.style, ...patch } }), `cap-${key}`)} />
           <Slider
             label="Position"
             hint="or drag it on the preview"
@@ -266,17 +271,27 @@ export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDo
 }
 
 /** Everything about one text layer: the hook, or an added line of text. */
-function TextLayerPanel({ title, layer, active, usedColors, placeholder, patch, onRemove }: {
+function TextLayerPanel({ title, layer, active, usedColors, placeholder, canvas, patch, onRemove }: {
   title: string;
   layer: TextLayer;
   active: boolean;
   usedColors: string[];
   placeholder: string;
+  canvas: { width: number; height: number };
   patch: (patch: (l: TextLayer) => TextLayer, key?: string) => void;
   onRemove?: () => void;
 }) {
   const hook = layer;
   const patchHook = patch;
+  const drawnSizePct = fittedStyle(layer, canvas).sizePct;
+  /** Shrink to fit on: the box starts as tall as the text is now, so
+   *  nothing jumps; drag its top/bottom handles to give it a height. */
+  const toggleFit = (on: boolean) =>
+    patchHook((l) => {
+      if (!on) return { ...l, fitHeightPct: null };
+      const block = layoutTextBlock({ words: textToLayoutWords(l.text), style: l.style, canvas, xPct: l.xPct, yPct: l.yPct, anchor: l.anchor, widthPct: l.widthPct, balance: true });
+      return { ...l, fitHeightPct: Math.max(2, Math.min(100, ((block.bottom - block.top) / canvas.height) * 100)) };
+    });
   return (
         <Panel
           title={title}
@@ -293,6 +308,7 @@ function TextLayerPanel({ title, layer, active, usedColors, placeholder, patch, 
             onChange={(e) => patchHook((l) => ({ ...l, text: e.target.value }), `${layer.id}-text`)}
             onKeyDown={(e) => e.stopPropagation()}
             placeholder={placeholder}
+            data-text-layer={layer.id}
             className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-[13px] font-medium leading-snug outline-none focus:ring-2 focus:ring-ring"
           />
           <FontPicker
@@ -309,6 +325,21 @@ function TextLayerPanel({ title, layer, active, usedColors, placeholder, patch, 
               patchHook((l) => ({ ...l, style: { ...l.style, sizePct } }), `${layer.id}-size`)
             }
           />
+          {drawnSizePct < hook.style.sizePct - 0.05 && (
+            <p className="-mt-1 text-[11px] text-amber-700 dark:text-amber-400">Shrunk to {drawnSizePct.toFixed(1)} to fit the box</p>
+          )}
+          <Check label="Shrink to fit the box" checked={hook.fitHeightPct != null} onChange={toggleFit} />
+          <Slider
+            label="Width"
+            hint="or drag its side handles"
+            value={hook.widthPct}
+            min={10}
+            max={100}
+            step={1}
+            format={(v) => `${Math.round(v)}%`}
+            onChange={(widthPct) => patchHook((l) => ({ ...l, widthPct }), `${layer.id}-width`)}
+          />
+          <Spacing style={hook.style} onChange={(patch, key) => patchHook((l) => ({ ...l, style: { ...l.style, ...patch } }), `${layer.id}-${key}`)} />
           <Slider
             label="Position"
             hint="or drag it on the preview"
@@ -520,6 +551,16 @@ function ColorRow({ label, value, onChange, usedColors }: { label: string; value
       <span className="text-[11px] text-muted-foreground">{label}</span>
       <ColorPicker value={value} onChange={onChange} usedColors={usedColors} label={label} />
     </div>
+  );
+}
+
+/** Line and letter spacing — the same two controls as the design editor. */
+function Spacing({ style, onChange }: { style: TextStyle; onChange: (patch: Partial<TextStyle>, key: string) => void }) {
+  return (
+    <>
+      <Slider label="Line spacing" value={style.lineHeight ?? 1.18} min={0.7} max={2.5} step={0.02} format={(v) => v.toFixed(2)} onChange={(lineHeight) => onChange({ lineHeight }, "line-height")} />
+      <Slider label="Letter spacing" value={style.letterSpacing ?? 0} min={-0.1} max={0.5} step={0.005} format={(v) => (v === 0 ? "0" : v.toFixed(3))} onChange={(letterSpacing) => onChange({ letterSpacing }, "letter-spacing")} />
+    </>
   );
 }
 
