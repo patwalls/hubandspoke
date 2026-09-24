@@ -23,6 +23,7 @@ import {
   AtSignIcon,
   BlendIcon,
   ImageIcon,
+  LayersIcon,
   LayoutTemplateIcon,
   LinkIcon,
   Loader2Icon,
@@ -54,6 +55,8 @@ import { storyFrames } from "@/lib/design-editor/story-frames";
 import { PostPane } from "@/components/clip-editor/post-pane";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
 import { ClipTrimmer } from "./clip-trimmer";
+import { LayersPanel } from "./layers-panel";
+import { DesignPostPreview } from "./post-preview";
 import { Inspector, PicturePicker, formatSec, frameCandidate } from "./inspector";
 import { PageCanvas, PlaybackContext, type PlaybackState } from "./page-canvas";
 import { DesignStoreContext, commands, createDesignStore, useDesign, useDesignStoreApi } from "./store";
@@ -230,6 +233,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   const [instruction, setInstruction] = useState(session.design.briefInstruction ?? "");
   const [stageBox, setStageBox] = useState({ w: 0, h: 0 });
   const [snap, setSnap] = useState(() => (typeof window === "undefined" ? true : readSnapEnabled()));
+  const [layersOpen, setLayersOpen] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   const page = doc.pages[selection.pageIndex] ?? doc.pages[0];
@@ -320,6 +324,14 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       if (typing || editingId) return;
       const { selection: sel } = storeApi.getState();
       if (!sel.elementId) return;
+      // ⌘] / ⌘[ one step, with ⇧ all the way — Canva/Figma's z-order keys.
+      if ((e.metaKey || e.ctrlKey) && (e.code === "BracketRight" || e.code === "BracketLeft")) {
+        e.preventDefault();
+        if (storeApi.getState().saveState === "conflict") return;
+        const up = e.code === "BracketRight";
+        apply(e.shiftKey ? commands.moveElementTo(sel.pageIndex, sel.elementId, up ? "front" : "back") : commands.reorderElement(sel.pageIndex, sel.elementId, up ? "forward" : "backward"));
+        return;
+      }
       if (e.key === "Backspace" || e.key === "Delete") {
         e.preventDefault();
         apply(commands.removeElement(sel.pageIndex, sel.elementId));
@@ -614,6 +626,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
               brand={brand}
               onDraftingChange={setPostDrafting}
               beforeRedraft={save}
+              mediaOverride={tab === "post" ? <DesignPostPreview doc={doc} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} channels={channelsInDoc} /> : undefined}
               dmKeyword={dmKeyword}
               onDmKeywordChange={(slug) => {
                 setDmKeyword(slug);
@@ -674,12 +687,27 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
             >
               <MagnetIcon className="size-3.5" /> Snap
             </button>
+            <button
+              type="button"
+              onClick={() => setLayersOpen((o) => !o)}
+              aria-pressed={layersOpen}
+              title="Everything on this page, top first — click to select, drag or use the arrows to send things forward and back (⌘] / ⌘[)"
+              className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] font-medium", layersOpen ? "border-sky-300 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200" : "border-border bg-background text-muted-foreground hover:bg-muted")}
+            >
+              <LayersIcon className="size-3.5" /> Layers
+            </button>
             <span className="ml-auto text-[11px] text-muted-foreground">Page {pageIndex + 1} of {doc.pages.length} · double-click text to edit · ⌫ deletes · arrows nudge</span>
           </div>
           <PlaybackContext.Provider value={playback}>
-            <div ref={stageRef} className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
+            {/* Clicking the grey around the page deselects — the page then shows exactly what exports, no editor chrome. */}
+            <div ref={stageRef} onPointerDown={(e) => { if (e.target === e.currentTarget) select({ pageIndex, elementId: null }); }} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
               {scale > 0 && (
                 <PageCanvas doc={doc} page={page} pageIndex={pageIndex} imageUrls={imageUrls} videoUrl={session.source?.videoUrl ?? null} words={session.words} channels={channelsInDoc} scale={scale} interactive={!locked} showSlots={isTemplate} snap={snap} className="shadow-xl ring-1 ring-black/20" />
+              )}
+              {layersOpen && (
+                <div className="absolute bottom-2 left-2 top-2 z-10 flex items-start">
+                  <LayersPanel page={page} pageIndex={pageIndex} disabled={locked} onClose={() => setLayersOpen(false)} />
+                </div>
               )}
             </div>
           </PlaybackContext.Provider>

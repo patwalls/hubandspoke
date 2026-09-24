@@ -34,6 +34,22 @@ describe("design store commands", () => {
     expect(store.getState().doc.pages[0].elements.at(-1)!.id).toBe(copy.id);
   });
 
+  it("moveElementTo: front, back, absolute index; no-op keeps the same doc", () => {
+    const store = createDesignStore({ doc: doc(), revision: 1 });
+    const { apply } = store.getState();
+    const ids = () => store.getState().doc.pages[0].elements.map((e) => e.id);
+    const [a, b] = ids();
+    apply(commands.moveElementTo(0, a, "front"));
+    expect(ids().at(-1)).toBe(a);
+    apply(commands.moveElementTo(0, a, "back"));
+    expect(ids()[0]).toBe(a);
+    apply(commands.moveElementTo(0, a, 1));
+    expect(ids().slice(0, 2)).toEqual([b, a]);
+    const before = store.getState().doc;
+    apply(commands.moveElementTo(0, a, 1));
+    expect(store.getState().doc).toBe(before);
+  });
+
   it("replaceDoc (a regeneration) resets history and dirtiness", () => {
     const store = createDesignStore({ doc: doc(), revision: 1 });
     store.getState().apply(commands.setPageBackground(0, "#123456"));

@@ -42,6 +42,7 @@ export function PostPane({
   beforeRedraft,
   dmKeyword: dmKeywordProp,
   onDmKeywordChange,
+  mediaOverride,
 }: {
   post: ClipPost;
   brand: string;
@@ -56,6 +57,9 @@ export function PostPane({
   /** The keyword was changed here — the parent updates its own copy (the
    *  design's CTA elements). */
   onDmKeywordChange?: (slug: string | null) => void;
+  /** The design editor's live pages, shown in the mock instead of the
+   *  post's stored media (which only changes on export). */
+  mediaOverride?: React.ReactNode;
 }) {
   const itemId = post.productionItemId;
   const [detail, setDetail] = useState<DetailResponse | null>(null);
@@ -305,6 +309,7 @@ export function PostPane({
             onMediaMutated={() => void load()}
             onDraftMutated={() => void load()}
             draftAlgorithmRunning={drafting}
+            mediaOverride={mediaOverride}
           />
         ) : drafting ? (
           <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-6 py-12 text-center">

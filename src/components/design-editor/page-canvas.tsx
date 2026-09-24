@@ -36,6 +36,8 @@ export interface PlaybackState {
   setDuration: (sec: number) => void;
   /** Reload the <video> at this clip time (after a trim edit / scrub). */
   seekRequest: { sec: number; nonce: number } | null;
+  /** Play (with sound) on a non-interactive canvas — the Post tab's preview. */
+  enabled?: boolean;
 }
 export const PlaybackContext = createContext<PlaybackState>({ timeSec: 0, playing: false, durationSec: 0, setTime: () => {}, setPlaying: () => {}, setDuration: () => {}, seekRequest: null });
 
@@ -435,16 +437,17 @@ function VideoView({ el, videoUrl, base, hover, editing, interactive, onNaturalS
   const g = natural ? coverGeometry(natural, { w: el.w, h: el.h }, el.crop, el.fit) : null;
   const { startSec, endSec } = el;
   const { playing, setPlaying, setTime, setDuration, seekRequest } = playback;
+  const live = interactive || !!playback.enabled;
 
   // Play/pause follows the shared state; time reports back in clip seconds.
   useEffect(() => {
     const v = ref.current;
-    if (!v || !interactive) return;
+    if (!v || !live) return;
     if (playing) {
       if (v.currentTime < startSec || v.currentTime >= endSec) v.currentTime = startSec;
       void v.play().catch(() => setPlaying(false));
     } else v.pause();
-  }, [playing, startSec, endSec, interactive, setPlaying]);
+  }, [playing, startSec, endSec, live, setPlaying]);
   useEffect(() => {
     const v = ref.current;
     if (!v || !seekRequest) return;
@@ -467,12 +470,12 @@ function VideoView({ el, videoUrl, base, hover, editing, interactive, onNaturalS
           src={`${videoUrl}#t=${startSec.toFixed(2)}`}
           preload="metadata"
           playsInline
-          muted={!interactive}
+          muted={!live}
           onLoadedMetadata={(e) => {
             const size = { width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight };
             setNatural(size);
             onNaturalSize(size);
-            if (interactive && Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
+            if (live && Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration);
           }}
           onTimeUpdate={(e) => {
             const v = e.currentTarget;
@@ -510,7 +513,7 @@ function CaptionsView({ el, cues, base, hover, interactive, onPointerDown }: {
     ? `${el.style.shadow.x}px ${el.style.shadow.y}px ${el.style.shadow.blur}px ${rgba({ color: el.style.shadow.color, alpha: el.style.shadow.alpha })}`
     : undefined;
   return (
-    <div className={cn(hover, interactive && "outline-dashed outline-1 outline-sky-300/40")} onPointerDown={onPointerDown} style={{ ...base, opacity: cue ? el.opacity : el.opacity * 0.5 }}>
+    <div className={hover} onPointerDown={onPointerDown} style={{ ...base, opacity: cue ? el.opacity : el.opacity * 0.5 }}>
       {layout.lines.map((line, i) => (
         <div key={i} className="absolute flex whitespace-pre" style={{ left: line.x - el.x, top: line.y - el.y, height: layout.linePitchPx, lineHeight: `${layout.linePitchPx}px`, fontSize: layout.fontSizePx, fontFamily: `"${font.cssFamily}"`, fontWeight: font.cssWeight, color: el.style.color, letterSpacing: `${el.style.letterSpacing ?? 0}em`, ...(shadow ? { textShadow: shadow } : {}) }}>
           {line.words.map((w, wi) => <span key={wi}>{(wi > 0 ? " " : "") + w.text}</span>)}

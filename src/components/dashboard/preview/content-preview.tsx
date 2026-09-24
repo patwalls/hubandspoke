@@ -98,6 +98,8 @@ interface ContentPreviewProps {
    *  Used inside the Publish/Schedule dialog to show "exactly what will be
    *  sent" without turning the modal into an editing surface. */
   forceReadOnly?: boolean;
+  /** Live media in place of the stored slides. See `SimulatorProps.mediaOverride`. */
+  mediaOverride?: React.ReactNode;
 }
 
 export function ContentPreview({
@@ -114,6 +116,7 @@ export function ContentPreview({
   descriptProcessingDetail,
   draftAlgorithmRunning,
   forceReadOnly = false,
+  mediaOverride,
 }: ContentPreviewProps) {
   // Prefer the canonical `postType` ("x", "instagram_reel", …) — it's the
   // accounts-rollout key and matches the simulator map directly. Fall back
@@ -176,6 +179,7 @@ export function ContentPreview({
           descriptProcessingDetail={descriptProcessingDetail}
           descriptProjectUrl={item.descriptProjectUrl ?? null}
           draftAlgorithmRunning={draftAlgorithmRunning}
+          mediaOverride={mediaOverride}
         />
       </div>
     </div>

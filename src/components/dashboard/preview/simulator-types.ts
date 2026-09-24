@@ -60,6 +60,10 @@ export interface SimulatorProps {
    *  doesn't start typing text that's about to be overwritten by the
    *  algorithm's commit. */
   draftAlgorithmRunning?: boolean;
+  /** Replaces the post's stored media with a live render — the design
+   *  editor's Post tab shows the pages being edited, before any export.
+   *  Simulators that don't support it show their stored media. */
+  mediaOverride?: React.ReactNode;
 }
 
 export function readLive(

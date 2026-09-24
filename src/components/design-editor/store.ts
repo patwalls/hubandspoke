@@ -163,6 +163,17 @@ export const commands = {
       return { ...p, elements };
     }),
 
+  /** Move to an absolute z-index (0 = bottom), or all the way to the front/back. */
+  moveElementTo: (pageIndex: number, id: string, to: number | "front" | "back") => (doc: DesignDoc) =>
+    mapPage(doc, pageIndex, (p) => {
+      const i = p.elements.findIndex((el) => el.id === id);
+      if (i < 0) return p;
+      const rest = p.elements.filter((el) => el.id !== id);
+      const j = to === "front" ? rest.length : to === "back" ? 0 : Math.max(0, Math.min(rest.length, to));
+      if (j === i) return p;
+      return { ...p, elements: [...rest.slice(0, j), p.elements[i], ...rest.slice(j)] };
+    }),
+
   duplicateElement: (pageIndex: number, id: string) => (doc: DesignDoc) =>
     mapPage(doc, pageIndex, (p) => {
       const el = p.elements.find((e) => e.id === id);

@@ -17,6 +17,7 @@ export function InstagramPostSimulator({
   onMediaMutated,
   onDraftMutated,
   descriptProjectUrl,
+  mediaOverride,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
 
@@ -37,6 +38,10 @@ export function InstagramPostSimulator({
        *  from flex-stretching this square carousel into a tall portrait
        *  letterbox. Without it `aspect-square` gets overridden and the
        *  4-slide images sit in massive black bars. */}
+      {mediaOverride ? (
+        // A live design sets its own aspect (1:1 or 4:5).
+        <div className="relative w-full max-w-[400px] shrink-0 overflow-hidden rounded-lg">{mediaOverride}</div>
+      ) : (
       <div
         className={`relative ${PLATFORM_MEDIA_RULES.instagram_post.aspectClass} w-full max-w-[400px] shrink-0 overflow-hidden rounded-lg bg-black`}
       >
@@ -58,6 +63,7 @@ export function InstagramPostSimulator({
           )}
         </DraftMediaDropZone>
       </div>
+      )}
 
       {/* RIGHT: ig-embed-style sidebar — same layout as IG Reel. No
        *  "Original audio" subtitle since IG Posts are static. */}
