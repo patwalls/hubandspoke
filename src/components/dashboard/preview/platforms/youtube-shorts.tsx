@@ -18,6 +18,7 @@ export function YouTubeShortsSimulator({
   liveContent,
   onLocalEdit,
   onCommit,
+  mediaOverride,
 }: SimulatorProps) {
   const title = readLive(liveContent, fieldMap.secondary, data.secondaryText ?? "");
   const description = readLive(liveContent, fieldMap.caption, data.caption);
@@ -27,7 +28,9 @@ export function YouTubeShortsSimulator({
   return (
     <div className="mx-auto w-full max-w-[380px] overflow-hidden rounded-xl border border-border bg-black text-white">
       <div className="relative aspect-[9/16] w-full">
-        {firstSlide?.kind === "video" ? (
+        {mediaOverride ? (
+          <div className="absolute inset-0">{mediaOverride}</div>
+        ) : firstSlide?.kind === "video" ? (
           <video
             src={firstSlide.url ?? undefined}
             poster={firstSlide.posterUrl ?? undefined}

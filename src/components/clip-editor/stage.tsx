@@ -25,7 +25,7 @@ import { resolveVideoBox } from "@/lib/clip-editor/video-box";
 import { activeCaptionAt, type Scene } from "@/lib/clip-editor/scene";
 import type { PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
-import { ImageIcon, MagnetIcon, TypeIcon } from "lucide-react";
+import { ImageIcon, MagnetIcon, PlayIcon, TypeIcon } from "lucide-react";
 import { createImageLayer, createTextLayer } from "@/lib/clip-editor/doc";
 import { LogoPicker } from "@/components/editor/logo-picker";
 import { readSnapEnabled, snapMove, snapThreshold, writeSnapEnabled, type SnapGuide, type SnapTarget } from "@/lib/editor/snap";
@@ -37,6 +37,9 @@ interface StageProps {
   videoUrl: string;
   /** For the logo library behind "+ Logo". */
   brand: string;
+  /** "preview": the finished clip only — no tools, handles or outlines, a
+   *  play/scrub overlay instead. What the Post tab's platform mock shows. */
+  variant?: "edit" | "preview";
 }
 
 function textCss(style: TextStyle, layout: TextBlockLayout): React.CSSProperties {
@@ -93,7 +96,8 @@ function LineBox({ style, layout, line, opacity }: { style: TextStyle; layout: T
   );
 }
 
-export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
+export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }: StageProps) {
+  const isPreview = variant === "preview";
   const { width: W, height: H } = plan.canvas;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const videoA = useRef<HTMLVideoElement | null>(null);
@@ -117,7 +121,8 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
   );
 
   const apply = useEditor((s) => s.apply);
-  const selection = useEditor((s) => s.stageSelection);
+  const editSelection = useEditor((s) => s.stageSelection);
+  const selection = isPreview ? null : editSelection;
   const setSelection = useEditor((s) => s.setStageSelection);
   const registerImageUrl = useEditor((s) => s.registerImageUrl);
 
@@ -386,15 +391,16 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
     <div
       ref={wrapRef}
       className="relative flex h-full w-full items-center justify-center"
-      onPointerDown={() => setSelection(null)}
+      onPointerDown={() => !isPreview && setSelection(null)}
     >
       <style dangerouslySetInnerHTML={{ __html: fontFaceCss() }} />
       <div
         className={cn(
-          "relative shrink-0 overflow-hidden rounded-lg shadow-xl ring-1 ring-black/20 transition-shadow",
+          "relative shrink-0 overflow-hidden",
+          !isPreview && "rounded-lg shadow-xl ring-1 ring-black/20 transition-shadow",
           // Amber = "this is not your clip". Same colour as the transcript's
           // preview word and the transport, so the three read as one state.
-          previewing && "ring-4 ring-amber-400",
+          previewing && !isPreview && "ring-4 ring-amber-400",
         )}
         style={{ width: W * scale, height: H * scale, visibility: scale ? "visible" : "hidden" }}
       >
@@ -540,7 +546,9 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
           )}
           </div>
         </div>
+        {isPreview && <PreviewControls engine={engine} />}
         {/* Add things: a line of text, or a logo from the brand's library. */}
+        {!isPreview && (<>
         <div className="absolute left-2 top-2 z-10 flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
           <button
             type="button"
@@ -569,13 +577,53 @@ export function Stage({ plan, scene, engine, videoUrl, brand }: StageProps) {
         >
           <MagnetIcon className="size-3" /> Snap
         </button>
-        {previewing && (
+        </>)}
+        {previewing && !isPreview && (
           <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
             <span className="rounded-full bg-amber-400 px-3 py-1 text-[11px] font-semibold text-black shadow">
               Previewing source · not in your clip
             </span>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The Post tab's player chrome, over the finished clip: click anywhere to
+ * play/pause, a thin scrub bar along the bottom. Subscribes to the engine
+ * itself so only this re-renders on playback.
+ */
+function PreviewControls({ engine }: { engine: PlaybackEngine }) {
+  const [snap, setSnap] = useState(() => engine.snapshot());
+  useEffect(() => engine.subscribe(setSnap), [engine]);
+  // The Post tab shows the clip, never a source preview left over from the Clip tab.
+  useEffect(() => {
+    if (engine.snapshot().mode === "preview") engine.exitPreview();
+  }, [engine]);
+  const pct = snap.durationSec > 0 ? (snap.outSec / snap.durationSec) * 100 : 0;
+  return (
+    <div className="group/player absolute inset-0 z-10">
+      <button type="button" aria-label={snap.playing ? "Pause" : "Play clip"} onClick={() => engine.toggle()} className="absolute inset-0 flex items-center justify-center">
+        {!snap.playing && (
+          <span className="flex size-14 items-center justify-center rounded-full bg-black/55 text-white shadow-lg backdrop-blur-sm">
+            <PlayIcon className="size-6 translate-x-0.5" fill="currentColor" />
+          </span>
+        )}
+      </button>
+      <div className={cn("absolute inset-x-0 bottom-0 px-3 pb-2 pt-6 transition-opacity", snap.playing && "opacity-0 group-hover/player:opacity-100")} style={{ background: "linear-gradient(transparent, rgba(0,0,0,0.45))" }}>
+        <input
+          type="range"
+          aria-label="Seek"
+          min={0}
+          max={Math.max(0.1, snap.durationSec)}
+          step={0.01}
+          value={Math.min(snap.outSec, snap.durationSec)}
+          onChange={(e) => engine.seek(Number(e.target.value))}
+          className="h-1 w-full cursor-pointer accent-white"
+          style={{ background: `linear-gradient(to right, #fff ${pct}%, rgba(255,255,255,0.35) ${pct}%)` }}
+        />
       </div>
     </div>
   );

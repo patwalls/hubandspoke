@@ -31,6 +31,7 @@ export function InstagramReelSimulator({
   descriptProcessingDetail,
   descriptProjectUrl,
   draftAlgorithmRunning,
+  mediaOverride,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   // Show the render-state placeholder whenever Descript work isn't done.
@@ -59,7 +60,9 @@ export function InstagramReelSimulator({
       <div
         className={`group relative ${PLATFORM_MEDIA_RULES.instagram_reel.aspectClass} w-full max-w-[320px] shrink-0 overflow-hidden rounded-lg bg-black`}
       >
-        {showStatePlaceholder ? (
+        {mediaOverride ? (
+          <div className="absolute inset-0">{mediaOverride}</div>
+        ) : showStatePlaceholder ? (
           <ReelStatePlaceholder
             state={descriptRenderState!}
             itemId={itemId}

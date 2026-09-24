@@ -34,6 +34,7 @@ export function TikTokSimulator({
   onCommit,
   itemId,
   onMediaMutated,
+  mediaOverride,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   const hasMedia = data.slides.length > 0;
@@ -56,7 +57,9 @@ export function TikTokSimulator({
             <div
               className={`group relative ${PLATFORM_MEDIA_RULES.tiktok.aspectClass} w-full max-w-[320px] shrink-0 overflow-hidden rounded-lg bg-black`}
             >
-              {enriched?.slide.kind === "video" && enriched.slide.url ? (
+              {mediaOverride ? (
+                <div className="absolute inset-0">{mediaOverride}</div>
+              ) : enriched?.slide.kind === "video" && enriched.slide.url ? (
                 <>
                   <video
                     src={enriched.slide.url}

@@ -628,12 +628,10 @@ function EditorWorkspace({
           "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-5 px-5 py-4",
           // Vertical canvas: the stage is as tall as the workspace and its
           // width follows from the aspect ratio. Landscape: it takes a share
-          // of the width instead. The Post tab keeps the stage and swaps the
-          // transcript + inspector for the post pane.
+          // of the width instead. The Post tab is the post pane alone — the
+          // clip plays INSIDE its platform mock (the stage's preview variant).
           tab === "post"
-            ? vertical
-              ? "grid-cols-[auto_minmax(0,1fr)]"
-              : "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+            ? "grid-cols-[minmax(0,1fr)]"
             : vertical
               ? "grid-cols-[minmax(0,1fr)_auto_280px]"
               : "grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_280px]",
@@ -685,28 +683,34 @@ function EditorWorkspace({
           />
         </div>
 
-        <div
-          className={cn("min-h-0 min-w-0", vertical && "h-full")}
-          style={vertical ? { aspectRatio: `${doc.canvas.width} / ${doc.canvas.height}` } : undefined}
-        >
-          <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} brand={brand} />
-        </div>
+        {/* One stage at a time — the engine drives a single pair of <video>s. */}
+        {tab !== "post" && (
+          <div
+            className={cn("min-h-0 min-w-0", vertical && "h-full")}
+            style={vertical ? { aspectRatio: `${doc.canvas.width} / ${doc.canvas.height}` } : undefined}
+          >
+            <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} brand={brand} />
+          </div>
+        )}
 
         <Inspector doc={doc} disabled={locked} brand={brand} className={tab !== "clip" ? "hidden" : undefined} />
 
         {session.post && (
-          <div className={cn("min-h-0 min-w-0", tab !== "post" && "hidden")}>
+          <div className={cn("mx-auto h-full min-h-0 w-full min-w-0 max-w-4xl", tab !== "post" && "hidden")}>
             <PostPane
               post={session.post}
               brand={brand}
               onDraftingChange={setPostDrafting}
               beforeRedraft={save}
+              mediaOverride={
+                tab === "post" ? <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} brand={brand} variant="preview" /> : undefined
+              }
             />
           </div>
         )}
       </div>
 
-      <div className="shrink-0 px-5">
+      <div className={cn("shrink-0 px-5", tab === "post" && "hidden")}>
         <Transport
           plan={plan}
           engine={engine}

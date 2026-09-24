@@ -37,6 +37,7 @@ export function XSimulator({
   itemId,
   onMediaMutated,
   onDraftMutated,
+  mediaOverride,
 }: SimulatorProps) {
   const caption = readLive(liveContent, fieldMap.caption, data.caption);
   const slides = data.slides;
@@ -98,7 +99,10 @@ export function XSimulator({
               placeholder="What's happening?"
             />
 
-            {showMediaSlot && totalSlides > 1 ? (
+            {mediaOverride ? (
+              // A live clip letterboxes itself, as x.com shows a vertical video.
+              <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-border bg-black">{mediaOverride}</div>
+            ) : showMediaSlot && totalSlides > 1 ? (
               // 2–4 photos. 16:9 wrapper so all slides crop the same way
               // x.com itself shows multi-photo as a 2/3/4-up grid; we use
               // a swipeable carousel here as a fidelity-vs-build tradeoff.

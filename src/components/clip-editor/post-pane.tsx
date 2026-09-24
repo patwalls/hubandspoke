@@ -298,11 +298,19 @@ export function PostPane({
           <div className="flex h-40 items-center justify-center text-muted-foreground">
             <Loader2Icon className="size-4 animate-spin" />
           </div>
-        ) : draft ? (
-          <ContentPreview
+        ) : draft || mediaOverride ? (
+          <>
+            {/* Live media: the mock is worth showing before there is copy —
+                the clip plays in it while the post is written. */}
+            {!draft && (
+              <p className="mb-2 flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                {drafting ? <><Loader2Icon className="size-3.5 animate-spin" /> Writing the post from this clip — the caption lands here in under a minute.</> : "No post yet — the draft couldn't be written automatically (usually no transcript yet). Try Draft the post."}
+              </p>
+            )}
+            <ContentPreview
             item={detail.item}
             media={detail.media}
-            draftId={draft.id}
+            draftId={draft?.id ?? null}
             liveContent={liveContent}
             onLocalEdit={onLocalEdit}
             onCommit={(k) => void onCommit(k)}
@@ -311,6 +319,7 @@ export function PostPane({
             draftAlgorithmRunning={drafting}
             mediaOverride={mediaOverride}
           />
+          </>
         ) : drafting ? (
           <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-6 py-12 text-center">
             <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
