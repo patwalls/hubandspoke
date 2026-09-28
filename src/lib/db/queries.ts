@@ -40,6 +40,59 @@ function withIdea(names: string[]): string[] {
 
 type ProductionItemRow = typeof productionItems.$inferSelect;
 
+// Column subset actually read by mapProductionItem/ProductionItem for
+// list views. Excludes large text/blob columns (contentBody,
+// newsletterBodyHtml, hook, overlay, description, evergreenReasoning,
+// crossPostFitReasoning, etc.) that a brand's full in-flight backlog can
+// otherwise balloon into a multi-MB row fetch — see the 2026-09-28 MFM
+// incident where an untriaged 3k-row "Idea" backlog full-column-fetched
+// past the unstable_cache 2MB ceiling and starved the web dyno's memory.
+type ProductionPipelineRow = Pick<
+  ProductionItemRow,
+  | "id"
+  | "notionId"
+  | "youtubeId"
+  | "youtubeUrl"
+  | "thumbnail"
+  | "title"
+  | "publishedDate"
+  | "publishedAt"
+  | "status"
+  | "platform"
+  | "postType"
+  | "accountId"
+  | "format"
+  | "brand"
+  | "campaign"
+  | "utmCampaign"
+  | "publishedLink"
+  | "isExternal"
+  | "views"
+  | "likes"
+  | "comments"
+  | "clicks"
+  | "leads"
+  | "hubspotLeads"
+  | "ctrFirstHour"
+  | "apvFirst24Hours"
+  | "editorEmail"
+  | "editorName"
+  | "editorUserId"
+  | "viewsEstimated"
+  | "lastPerformanceSyncAt"
+  | "sourceType"
+  | "sourceClipIdeaId"
+  | "repostedFromItemId"
+  | "pillarContentItemId"
+  | "posterS3Key"
+  | "mediaS3Key"
+  | "mediaContentType"
+  | "predictedViewsSnapshot"
+  | "predictedViewsSnapshotAt"
+  | "createdAt"
+  | "updatedAt"
+>;
+
 type UserExtras = {
   editorUserName?: string | null;
   editorAvatarUrl?: string | null;
@@ -76,7 +129,7 @@ type UserExtras = {
 };
 
 function mapProductionItem(
-  item: ProductionItemRow,
+  item: ProductionItemRow | ProductionPipelineRow,
   extras: UserExtras = {}
 ): ProductionItem {
   return {
@@ -915,7 +968,50 @@ export async function getProductionPipeline(
 
   const rows = await db
     .select({
-      item: productionItems,
+      item: {
+        id: productionItems.id,
+        notionId: productionItems.notionId,
+        youtubeId: productionItems.youtubeId,
+        youtubeUrl: productionItems.youtubeUrl,
+        thumbnail: productionItems.thumbnail,
+        title: productionItems.title,
+        publishedDate: productionItems.publishedDate,
+        publishedAt: productionItems.publishedAt,
+        status: productionItems.status,
+        platform: productionItems.platform,
+        postType: productionItems.postType,
+        accountId: productionItems.accountId,
+        format: productionItems.format,
+        brand: productionItems.brand,
+        campaign: productionItems.campaign,
+        utmCampaign: productionItems.utmCampaign,
+        publishedLink: productionItems.publishedLink,
+        isExternal: productionItems.isExternal,
+        views: productionItems.views,
+        likes: productionItems.likes,
+        comments: productionItems.comments,
+        clicks: productionItems.clicks,
+        leads: productionItems.leads,
+        hubspotLeads: productionItems.hubspotLeads,
+        ctrFirstHour: productionItems.ctrFirstHour,
+        apvFirst24Hours: productionItems.apvFirst24Hours,
+        editorEmail: productionItems.editorEmail,
+        editorName: productionItems.editorName,
+        editorUserId: productionItems.editorUserId,
+        viewsEstimated: productionItems.viewsEstimated,
+        lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
+        sourceType: productionItems.sourceType,
+        sourceClipIdeaId: productionItems.sourceClipIdeaId,
+        repostedFromItemId: productionItems.repostedFromItemId,
+        pillarContentItemId: productionItems.pillarContentItemId,
+        posterS3Key: productionItems.posterS3Key,
+        mediaS3Key: productionItems.mediaS3Key,
+        mediaContentType: productionItems.mediaContentType,
+        predictedViewsSnapshot: productionItems.predictedViewsSnapshot,
+        predictedViewsSnapshotAt: productionItems.predictedViewsSnapshotAt,
+        createdAt: productionItems.createdAt,
+        updatedAt: productionItems.updatedAt,
+      },
       editorUserName: editors.name,
       editorAvatarUrl: editors.avatarUrl,
       accountId: accounts.id,
