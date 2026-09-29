@@ -624,4 +624,200 @@ describe("selectAccountsForScheduleSync (targeted-freshness gate)", () => {
     const ids = await selectAccountsForScheduleSync(now);
     expect(ids).toContain(acct.id);
   });
+
+  it("keeps syncing a flagged (needs-attention) item's account while within the abandon horizon", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    // Flagged 5 days ago, scheduled 6 days ago, no expected date → still
+    // within the 14-day abandon horizon, so its account must keep syncing.
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "instagram_reel",
+      scheduledAt: new Date(now.getTime() - 6 * 24 * HOUR),
+      expectedPublishAt: null,
+      scheduleNeedsAttentionAt: new Date(now.getTime() - 5 * 24 * HOUR),
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const ids = await selectAccountsForScheduleSync(now);
+    expect(ids).toContain(acct.id);
+  });
+
+  it("stops syncing an item's account once it is past the abandon horizon", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "instagram_reel",
+      scheduledAt: new Date(now.getTime() - 15 * 24 * HOUR),
+      expectedPublishAt: null,
+      scheduleNeedsAttentionAt: new Date(now.getTime() - 14 * 24 * HOUR),
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    const ids = await selectAccountsForScheduleSync(now);
+    expect(ids).not.toContain(acct.id);
+  });
+});
+
+describe("runScheduleReconcile — needs-attention is not terminal", () => {
+  it("still auto-merges a flagged item when its go-live finally appears (the reported bug)", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+
+    // A Reel marked Scheduled 30h ago (past its 24h window) with no live post
+    // yet — exactly the case that was permanently lost before.
+    const sched = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "instagram_reel",
+      scheduledAt: new Date(now.getTime() - 30 * HOUR),
+      expectedPublishAt: null,
+      publishedAt: null,
+      publishedDate: null,
+      title: "HubSpot lost 140 million visits but grew leads 20%",
+    });
+
+    // First sweep, no candidate exists yet → it surfaces to Needs-attention
+    // but is NOT abandoned.
+    const first = await runScheduleReconcile({
+      client: stubClient(0, 0),
+      onlyItemIds: [sched.id],
+    });
+    expect(first.gaveUp).toBe(1);
+    const [afterFirst] = await db
+      .select({
+        na: productionItems.scheduleNeedsAttentionAt,
+        status: productionItems.status,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, sched.id));
+    expect(afterFirst.na).not.toBeNull();
+    expect(afterFirst.status).toBe("Scheduled");
+
+    // The post actually goes live a day later; the sync pulls it in.
+    const live = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "instagram_reel",
+      publishedAt: now,
+      publishedLink: "https://instagram.com/reel/late-golive",
+      platformContentId: `vitest-late-golive-${now.getTime()}`,
+      title: "HubSpot lost 140 million visits in a year but grew leads 20%",
+    });
+
+    // Second sweep: the flagged item must still be considered and auto-merge.
+    const second = await runScheduleReconcile({
+      client: stubClient(1, 95),
+      onlyItemIds: [sched.id],
+    });
+    expect(second.considered).toBe(1);
+    expect(second.autoMerged).toBe(1);
+
+    const [afterSecond] = await db
+      .select({ status: productionItems.status, link: productionItems.publishedLink })
+      .from(productionItems)
+      .where(eq(productionItems.id, sched.id));
+    expect(afterSecond.status).toBe("Published");
+    expect(afterSecond.link).toBe("https://instagram.com/reel/late-golive");
+
+    const [absorbed] = await db
+      .select({ deletedAt: productionItems.deletedAt })
+      .from(productionItems)
+      .where(eq(productionItems.id, live.id));
+    expect(absorbed.deletedAt).not.toBeNull();
+  });
+
+  it("stops matching once an item is past the dated abandon horizon", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+
+    // Scheduled 15 days ago → well past the 7-day dated abandon horizon: never
+    // matched again, even though a perfect candidate exists.
+    const sched = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "instagram_reel",
+      scheduledAt: new Date(now.getTime() - 15 * 24 * HOUR),
+      expectedPublishAt: null,
+      publishedAt: null,
+      publishedDate: null,
+    });
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "instagram_reel",
+      publishedAt: now,
+    });
+
+    const summary = await runScheduleReconcile({
+      client: stubClient(1, 95),
+      onlyItemIds: [sched.id],
+    });
+    // The abandon bound filters it out of the query entirely.
+    expect(summary.considered).toBe(0);
+    expect(summary.autoMerged).toBe(0);
+
+    const [row] = await db
+      .select({ status: productionItems.status })
+      .from(productionItems)
+      .where(eq(productionItems.id, sched.id));
+    expect(row.status).toBe("Scheduled");
+  });
+
+  it("lifts a flagged item out of Needs-attention into Suggestions when a borderline candidate appears", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+
+    const sched = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "instagram_reel",
+      scheduledAt: new Date(now.getTime() - 30 * HOUR),
+      expectedPublishAt: null,
+      publishedAt: null,
+      publishedDate: null,
+      title: "AI agent cuts Google Ads cost-per-lead",
+    });
+    const cand = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "instagram_reel",
+      publishedAt: now,
+      title: "AI agent cuts Google Ads cost-per-lead from $1,100 to $250",
+    });
+
+    const summary = await runScheduleReconcile({
+      client: stubClient(1, 70), // borderline → suggestion, not auto-merge
+      onlyItemIds: [sched.id],
+    });
+    expect(summary.suggested).toBe(1);
+
+    const [row] = await db
+      .select({
+        na: productionItems.scheduleNeedsAttentionAt,
+        status: productionItems.status,
+      })
+      .from(productionItems)
+      .where(eq(productionItems.id, sched.id));
+    // Flagged during this same pass, then cleared because we now have a
+    // candidate awaiting a human — it belongs in Suggestions, not Needs-attention.
+    expect(row.na).toBeNull();
+    expect(row.status).toBe("Scheduled");
+
+    const [suggestion] = await db
+      .select({ status: scheduledMatchSuggestions.status })
+      .from(scheduledMatchSuggestions)
+      .where(
+        and(
+          eq(scheduledMatchSuggestions.scheduledItemId, sched.id),
+          eq(scheduledMatchSuggestions.candidateItemId, cand.id),
+        ),
+      );
+    expect(suggestion.status).toBe("pending");
+  });
 });

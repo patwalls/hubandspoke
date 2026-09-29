@@ -303,7 +303,9 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   1. **Targeted freshness:** enqueues `account-content-sync` (`mode=latest`,
      jobKey dedup) for ONLY the distinct accounts selected by
      `selectAccountsForScheduleSync()` (`reconcile.ts`) — accounts owning a
-     pending, not-given-up Scheduled item that's actually *due*: either it has
+     pending Scheduled item still within the abandon horizon (items already
+     flagged "needs attention" are still re-synced — see the give-up section)
+     that's actually *due*: either it has
      no `expectedPublishAt` (can't tell when to expect it, so kept on the
      original every-tick behavior) or its `expectedPublishAt` has arrived —
      and, for the latter, the account hasn't already been synced (any sync,
@@ -324,15 +326,25 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   emits `status_change` + `content_changed`, schedules velocity snapshots);
   **55–84** → upsert a `scheduled_match_suggestions` row (pending) for human
   Confirm/Reject at `/[brand]/scheduled`; **<55** → leave Scheduled, retry.
-- **Give-up window (per post_type):** unmatched past `staleWindowHours()`,
-  measured from `expectedPublishAt` when the operator set one, else
-  `scheduledAt` — **24h** for fast formats (x, tiktok, threads, instagram_*),
-  **48h** otherwise — stamps `production_items.schedule_needs_attention_at`,
-  surfaces a needs-attention badge, and stops matching that item. "Some
-  content should never sit at Scheduled more than 24h." (Bug fixed 2026-09-23:
-  the window used to be measured from `scheduledAt` alone — the moment the
-  operator clicked "Scheduled" — which gives up hours/days before go-live for
-  anything batch-scheduled ahead of its actual expected publish time.)
+- **Surface window vs. abandon horizon (per post_type):** unmatched past
+  `staleWindowHours()` — measured from `expectedPublishAt` when the operator set
+  one, else `scheduledAt`; **24h** for fast formats (x, tiktok, threads,
+  instagram_*), **48h** otherwise — stamps
+  `production_items.schedule_needs_attention_at` and surfaces a needs-attention
+  badge, **but keeps matching and re-syncing the item.** "Needs attention"
+  means *not matched yet* (go take a look / maybe publish manually), NOT
+  *abandoned*. Matching only truly stops once the item is past
+  `MATCH_ABANDON_HOURS` (**7 days** for dated items — observed real slippage is
+  1–6 days; the no-date sweep keeps 14), enforced as a filter on the reconcile
+  query and the freshness selector. When a candidate does turn
+  up at suggest-tier (55–84), the flag is cleared so the item moves from
+  Needs-attention into Suggestions. (Bug fixed 2026-09-29: the flag used to
+  *stop* matching/syncing permanently, so a post that went live after its
+  short window — batch-ahead scheduling, or a publish that slipped past its
+  date — was never auto-picked-up even though the live row existed. Earlier
+  2026-09-23 fix measured the window from `expectedPublishAt`, but that column
+  is usually empty, so the flag still fired ~24h after the operator clicked
+  Scheduled.)
 - **Rules / idempotency:** matcher runs against whatever Published rows exist
   now, so a post synced this tick is matched next tick (~10-min latency, by
   design). Rejected (item, candidate) pairs are excluded from future matching.
