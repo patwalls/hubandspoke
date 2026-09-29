@@ -327,8 +327,12 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   **55–84** → upsert a `scheduled_match_suggestions` row (pending) for human
   Confirm/Reject at `/[brand]/scheduled`; **<55** → leave Scheduled, retry.
 - **Surface window vs. abandon horizon:** unmatched past the surface window —
-  **a uniform 24h** past the scheduled date (`expectedPublishAt ?? scheduledAt`)
-  for dated items, **5 days** past marked-Scheduled for no-date items — stamps
+  keyed off whether there's an actual publish date: **1 day** past
+  `expectedPublishAt` when the operator set one, else **5 days** past
+  `scheduledAt` (a bare `scheduled_at` is only the click moment, not a target —
+  so a dated item with a blank expected date surfaces at 5 days, same as an
+  explicit no-date item). The dated loop is self-healing: a flag set under a
+  stricter window is cleared once the item is back inside its window. Stamps
   `production_items.schedule_needs_attention_at`, surfaces the item in the
   "Needs attention" tab AND drives the brand-scoped header banner
   (`ScheduledAttentionBanner` → `/api/scheduled-needs-attention`), **but keeps

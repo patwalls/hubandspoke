@@ -311,46 +311,51 @@ describe("runScheduleReconcile tier policy", () => {
     expect(summary.skipped).toBe(1);
   });
 
-  it("flags needs-attention a uniform 1 day after the scheduled date, any post_type", async () => {
+  it("surface window: 1 day when a publish date is set, 5 days when it isn't", async () => {
     const acct = await createTestAccount();
     const now = new Date();
-    const at30h = new Date(now.getTime() - 30 * HOUR); // > 24h → flag
-    const at12h = new Date(now.getTime() - 12 * HOUR); // < 24h → not yet
+    const at30h = new Date(now.getTime() - 30 * HOUR);
+    const at6days = new Date(now.getTime() - 6 * 24 * HOUR);
 
-    // A day+ past its date → surface, regardless of post type (fast or slow).
-    const overdueFast = await createTestProductionItem({
-      accountId: acct.id,
-      status: "Scheduled",
-      postType: "tiktok",
-      scheduledAt: at30h,
-      publishedAt: null,
-      publishedDate: null,
-    });
-    const overdueSlow = await createTestProductionItem({
+    // HAS a publish date, 30h past it → flag (1-day window), any post type.
+    const datedOverdue = await createTestProductionItem({
       accountId: acct.id,
       status: "Scheduled",
       postType: "youtube_long",
-      scheduledAt: at30h,
+      scheduledAt: new Date(now.getTime() - 10 * 24 * HOUR), // batch-scheduled long ago
+      expectedPublishAt: at30h,
       publishedAt: null,
       publishedDate: null,
     });
-    // Under a day past its date → not surfaced yet.
-    const fresh = await createTestProductionItem({
+    // NO publish date, only 30h since marked Scheduled → NOT surfaced yet
+    // (needs 5 days). This is the case the banner was firing too early on.
+    const noDateFresh = await createTestProductionItem({
       accountId: acct.id,
       status: "Scheduled",
-      postType: "youtube_long",
-      scheduledAt: at12h,
+      postType: "x",
+      scheduledAt: at30h,
+      expectedPublishAt: null,
+      publishedAt: null,
+      publishedDate: null,
+    });
+    // NO publish date, 6 days since marked Scheduled → surfaced (past 5 days).
+    const noDateOverdue = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "x",
+      scheduledAt: at6days,
+      expectedPublishAt: null,
       publishedAt: null,
       publishedDate: null,
     });
 
     const summary = await runScheduleReconcile({
       client: stubClient(0, 0), // no candidates anyway
-      onlyItemIds: [overdueFast.id, overdueSlow.id, fresh.id],
+      onlyItemIds: [datedOverdue.id, noDateFresh.id, noDateOverdue.id],
     });
-    expect(summary.gaveUp).toBe(2); // both overdue items surfaced
+    expect(summary.gaveUp).toBe(2); // datedOverdue + noDateOverdue
 
-    for (const id of [overdueFast.id, overdueSlow.id]) {
+    for (const id of [datedOverdue.id, noDateOverdue.id]) {
       const [row] = await db
         .select({ na: productionItems.scheduleNeedsAttentionAt })
         .from(productionItems)
@@ -361,8 +366,36 @@ describe("runScheduleReconcile tier policy", () => {
     const [freshRow] = await db
       .select({ na: productionItems.scheduleNeedsAttentionAt })
       .from(productionItems)
-      .where(eq(productionItems.id, fresh.id));
+      .where(eq(productionItems.id, noDateFresh.id));
     expect(freshRow.na).toBeNull();
+  });
+
+  it("self-heals a flag set inside the current window (clears it)", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    // No publish date, only 2 days in (< 5-day window) but somehow already
+    // flagged (e.g. flagged under the old 1-day rule). The sweep should clear it.
+    const item = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "x",
+      scheduledAt: new Date(now.getTime() - 2 * 24 * HOUR),
+      expectedPublishAt: null,
+      scheduleNeedsAttentionAt: new Date(now.getTime() - 1 * 24 * HOUR),
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    await runScheduleReconcile({
+      client: stubClient(0, 0),
+      onlyItemIds: [item.id],
+    });
+
+    const [row] = await db
+      .select({ na: productionItems.scheduleNeedsAttentionAt })
+      .from(productionItems)
+      .where(eq(productionItems.id, item.id));
+    expect(row.na).toBeNull();
   });
 
   it("measures the give-up window from expectedPublishAt, not scheduledAt, when both are set", async () => {
@@ -688,7 +721,7 @@ describe("selectAccountsForScheduleSync (targeted-freshness gate)", () => {
     const acct = await createTestAccount();
     const now = new Date();
     // Flagged 5 days ago, scheduled 6 days ago, no expected date → still
-    // within the 14-day abandon horizon, so its account must keep syncing.
+    // within the 7-day dated abandon horizon, so its account must keep syncing.
     await createTestProductionItem({
       accountId: acct.id,
       status: "Scheduled",
@@ -728,13 +761,13 @@ describe("runScheduleReconcile — needs-attention is not terminal", () => {
     const acct = await createTestAccount();
     const now = new Date();
 
-    // A Reel marked Scheduled 30h ago (past its 24h window) with no live post
-    // yet — exactly the case that was permanently lost before.
+    // A Reel marked Scheduled 6 days ago (past its 5-day no-date window) with
+    // no live post yet — exactly the case that was permanently lost before.
     const sched = await createTestProductionItem({
       accountId: acct.id,
       status: "Scheduled",
       postType: "instagram_reel",
-      scheduledAt: new Date(now.getTime() - 30 * HOUR),
+      scheduledAt: new Date(now.getTime() - 6 * 24 * HOUR),
       expectedPublishAt: null,
       publishedAt: null,
       publishedDate: null,
@@ -836,7 +869,7 @@ describe("runScheduleReconcile — needs-attention is not terminal", () => {
       accountId: acct.id,
       status: "Scheduled",
       postType: "instagram_reel",
-      scheduledAt: new Date(now.getTime() - 30 * HOUR),
+      scheduledAt: new Date(now.getTime() - 6 * 24 * HOUR), // past 5-day no-date window → flagged
       expectedPublishAt: null,
       publishedAt: null,
       publishedDate: null,

@@ -95,15 +95,17 @@ export async function selectAccountsForScheduleSync(
     .filter((id): id is string => id != null);
 }
 
-// SURFACE window for dated items, in hours: flag into "Needs attention" one day
-// after the scheduled date (expectedPublishAt ?? scheduledAt) if we still
-// haven't matched a go-live. Uniform across post types — the flag no longer
-// stops matching (see MATCH_ABANDON_HOURS), so there's no reason to treat fast
-// formats differently; a human just wants to know a dated post is a day late.
+// SURFACE window when the operator gave an actual publish date
+// (expectedPublishAt): flag into "Needs attention" one day after that date if
+// we still haven't matched a go-live. Uniform across post types — the flag no
+// longer stops matching (see MATCH_ABANDON_HOURS), so there's no reason to
+// treat fast formats differently; a human just wants to know it's a day late.
 const DATED_SURFACE_HOURS = 24;
 
-// SURFACE window for no-date items: they told us no publish date, so give them
-// more runway — flag 5 days after the operator marked them Scheduled.
+// SURFACE window when there's NO publish date — whether the explicit "no
+// publish date yet" no-date sweep, or a dated item whose expectedPublishAt is
+// blank. `scheduled_at` is only the moment they clicked Scheduled, not a
+// target, so give it more runway: flag 5 days after marked-Scheduled.
 const NODATE_SURFACE_HOURS = 5 * 24;
 
 // Absolute stop for the dated sweep. Past the surface window we only flag an
@@ -208,22 +210,35 @@ export async function runScheduleReconcile(opts?: {
     const scheduledAt = row.scheduledAt!;
     const accountId = row.accountId!;
 
-    // Surface check: past the per-post-type window with no confident match yet.
-    // Flag it into "Needs attention" for a human to eyeball — but DO NOT stop
-    // matching. The reference is the operator's expected go-live when they gave
-    // one (scheduledAt alone is just when they clicked "Scheduled", often days
-    // before the post actually publishes for batch-ahead scheduling). Matching
-    // continues every sweep until the abandon horizon in the query above, so a
-    // late go-live is still auto-picked-up.
+    // Surface check: past the window with no confident match yet → flag it into
+    // "Needs attention" for a human to eyeball, but DO NOT stop matching. The
+    // window depends on whether the operator gave an actual publish date:
+    //   - expectedPublishAt set → 1 day after that date;
+    //   - no date (scheduledAt is just the click moment, not a target) → 5 days
+    //     after marked-Scheduled, same as the explicit no-date sweep.
+    // Matching continues every sweep until the abandon horizon in the query
+    // above, so a late go-live is still auto-picked-up. This branch also
+    // SELF-HEALS: if a flag was set under a stricter window (config change /
+    // batch-ahead re-time), clear it once the item is back inside its window.
     const staleRef = row.expectedPublishAt ?? scheduledAt;
+    const surfaceHours = row.expectedPublishAt
+      ? DATED_SURFACE_HOURS
+      : NODATE_SURFACE_HOURS;
     const ageHours = (now.getTime() - staleRef.getTime()) / (1000 * 60 * 60);
-    if (ageHours > DATED_SURFACE_HOURS && !row.scheduleNeedsAttentionAt) {
+    const pastWindow = ageHours > surfaceHours;
+    if (pastWindow && !row.scheduleNeedsAttentionAt) {
       await db
         .update(productionItems)
         .set({ scheduleNeedsAttentionAt: now, updatedAt: now })
         .where(eq(productionItems.id, row.id));
       row.scheduleNeedsAttentionAt = now;
       summary.gaveUp++;
+    } else if (!pastWindow && row.scheduleNeedsAttentionAt) {
+      await db
+        .update(productionItems)
+        .set({ scheduleNeedsAttentionAt: null, updatedAt: now })
+        .where(eq(productionItems.id, row.id));
+      row.scheduleNeedsAttentionAt = null;
     }
 
     const item: ScheduledItemForMatch = {
