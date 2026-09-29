@@ -15,6 +15,15 @@
  *                              11.9x like/view ratios that don't match
  *                              the Threads UI. Always estimate.
  *   youtube_community  → 194x  (based on 12 posts, avg 194)
+ *   facebook_post      → 165x  (median 168 over 121 posts, Jul–Sep 2026 FB
+ *                              analytics export). SC's /facebook/profile/posts
+ *                              returns NO view count for any post — photo or
+ *                              video (videoViewCount comes back null on our
+ *                              page) — so reactions (SC `reactionCount`) are
+ *                              the only anchor. Weaker than the others:
+ *                              ~±47% per-post error, and top posts undercount
+ *                              (aggregate ratio 461x). Use for trend, not as a
+ *                              precise per-post number.
  *
  * Post types with real view data (no estimation):
  *   youtube_long, youtube_shorts, instagram_reel, x, tiktok
@@ -25,6 +34,7 @@ export const POST_TYPE_VIEW_MULTIPLIERS: Record<string, number> = {
   threads: 150,
   youtube_community: 194,
   instagram_post: 137,
+  facebook_post: 165,
 };
 
 /**
