@@ -95,46 +95,38 @@ export async function selectAccountsForScheduleSync(
     .filter((id): id is string => id != null);
 }
 
-// Per-post-type SURFACE window, in hours: how long a dated item may sit at
-// Scheduled with no confident match before we flag it into "Needs attention"
-// for a human to eyeball. This NO LONGER stops matching (see
-// MATCH_ABANDON_HOURS) — a flagged item keeps being matched and re-synced so a
-// late go-live still gets picked up automatically. Fast-moving short-form
-// surfaces after a day; slower formats get a longer ceiling. Modeled on the
-// per-platform age-gate maps in repost-candidates.ts.
-const STALE_WINDOW_HOURS = { fast: 24, default: 48 } as const;
-const FAST_POST_TYPES = new Set(["x", "tiktok", "threads"]);
+// SURFACE window for dated items, in hours: flag into "Needs attention" one day
+// after the scheduled date (expectedPublishAt ?? scheduledAt) if we still
+// haven't matched a go-live. Uniform across post types — the flag no longer
+// stops matching (see MATCH_ABANDON_HOURS), so there's no reason to treat fast
+// formats differently; a human just wants to know a dated post is a day late.
+const DATED_SURFACE_HOURS = 24;
 
-// No-date items have no expected go-live; 14 days gives ample runway before
-// flagging them as needing attention.
-const NODATE_STALE_WINDOW_HOURS = 14 * 24;
+// SURFACE window for no-date items: they told us no publish date, so give them
+// more runway — flag 5 days after the operator marked them Scheduled.
+const NODATE_SURFACE_HOURS = 5 * 24;
 
-// Absolute stop for the dated sweep. Past the per-type surface window we only
-// flag an item (above) — we keep matching and re-syncing it, because posts
-// routinely go live a few days after being marked Scheduled (batch-ahead
-// planning) or slip past their expected date. Observed real slippage is 1–6
-// days; a dated post that still hasn't gone live a week later was almost
-// certainly cancelled or mis-scheduled, and it's been surfaced in
-// Needs-attention since 24–48h, so a human owns it past here. Shorter than the
-// no-date horizon on purpose: a dated item told us when to expect it.
+// Absolute stop for the dated sweep. Past the surface window we only flag an
+// item — we keep matching and re-syncing it, because posts routinely go live a
+// few days after being marked Scheduled (batch-ahead planning) or slip past
+// their expected date. Observed real slippage is 1–6 days; a dated post that
+// still hasn't gone live a week later was almost certainly cancelled or
+// mis-scheduled, and it's been surfaced in Needs-attention since day one, so a
+// human owns it past here. Shorter than the no-date horizon on purpose: a
+// dated item told us when to expect it.
 const MATCH_ABANDON_HOURS = 7 * 24;
 
-export function staleWindowHours(postType: string | null): number {
-  if (!postType) return STALE_WINDOW_HOURS.default;
-  if (FAST_POST_TYPES.has(postType)) return STALE_WINDOW_HOURS.fast;
-  // instagram_reel / instagram_post / instagram_story are all fast.
-  if (postType.startsWith("instagram")) return STALE_WINDOW_HOURS.fast;
-  return STALE_WINDOW_HOURS.default;
-}
+// Absolute stop for the no-date sweep — 14 days after marked Scheduled.
+// Exported so the no-date sync selector (scheduled.ts) shares the same horizon.
+export const NODATE_ABANDON_HOURS = 14 * 24;
 
 export interface ReconcileSummary {
   considered: number;
   autoMerged: number;
   suggested: number;
-  /** Items newly surfaced into "Needs attention" this pass. Dated sweep: past
-   *  their per-type surface window (still matched afterwards until
-   *  MATCH_ABANDON_HOURS). No-date sweep: past the 14-day horizon (a true
-   *  give-up). */
+  /** Items newly surfaced into "Needs attention" this pass (dated: 1 day past
+   *  the scheduled date; no-date: 5 days past marked-Scheduled). They keep
+   *  being matched afterwards, until MATCH_ABANDON_HOURS / NODATE_ABANDON_HOURS. */
   gaveUp: number;
   llmErrors: number;
   skipped: number;
@@ -225,10 +217,7 @@ export async function runScheduleReconcile(opts?: {
     // late go-live is still auto-picked-up.
     const staleRef = row.expectedPublishAt ?? scheduledAt;
     const ageHours = (now.getTime() - staleRef.getTime()) / (1000 * 60 * 60);
-    if (
-      ageHours > staleWindowHours(row.postType) &&
-      !row.scheduleNeedsAttentionAt
-    ) {
+    if (ageHours > DATED_SURFACE_HOURS && !row.scheduleNeedsAttentionAt) {
       await db
         .update(productionItems)
         .set({ scheduleNeedsAttentionAt: now, updatedAt: now })
@@ -320,7 +309,8 @@ export async function runScheduleReconcile(opts?: {
 
 /**
  * Run one reconcile pass over pending "no publish date yet" Scheduled items.
- * Identical logic to runScheduleReconcile() but uses a 14-day give-up window
+ * Same flag-but-keep-matching shape as runScheduleReconcile(), but surfaces at
+ * NODATE_SURFACE_HOURS (5 days) and abandons at NODATE_ABANDON_HOURS (14 days),
  * and only processes items where scheduledNoDate = true. Called by the hourly
  * schedule-nodate-sweep cron task.
  */
@@ -339,6 +329,10 @@ export async function runScheduleNodateReconcile(opts?: {
     skipped: 0,
   };
 
+  const abandonCutoff = new Date(
+    now.getTime() - NODATE_ABANDON_HOURS * 60 * 60 * 1000,
+  );
+
   const items = await db
     .select({
       id: productionItems.id,
@@ -349,6 +343,7 @@ export async function runScheduleNodateReconcile(opts?: {
       contentBody: productionItems.contentBody,
       scheduledAt: productionItems.scheduledAt,
       expectedPublishAt: productionItems.expectedPublishAt,
+      scheduleNeedsAttentionAt: productionItems.scheduleNeedsAttentionAt,
     })
     .from(productionItems)
     .where(
@@ -356,9 +351,11 @@ export async function runScheduleNodateReconcile(opts?: {
         eq(productionItems.status, "Scheduled"),
         eq(productionItems.scheduledNoDate, true),
         isNotNull(productionItems.scheduledAt),
-        isNull(productionItems.scheduleNeedsAttentionAt),
         isNotNull(productionItems.accountId),
         isNull(productionItems.deletedAt),
+        // Abandon horizon: keep matching flagged items until 14 days past
+        // marked-Scheduled, then stop.
+        gte(productionItems.scheduledAt, abandonCutoff),
         opts?.onlyItemIds && opts.onlyItemIds.length > 0
           ? inArray(productionItems.id, opts.onlyItemIds)
           : undefined,
@@ -370,14 +367,16 @@ export async function runScheduleNodateReconcile(opts?: {
     const scheduledAt = row.scheduledAt!;
     const accountId = row.accountId!;
 
+    // Surface after 5 days with no confident match — flag it, but keep matching
+    // (a late go-live still auto-picks-up until the abandon horizon above).
     const ageHours = (now.getTime() - scheduledAt.getTime()) / (1000 * 60 * 60);
-    if (ageHours > NODATE_STALE_WINDOW_HOURS) {
+    if (ageHours > NODATE_SURFACE_HOURS && !row.scheduleNeedsAttentionAt) {
       await db
         .update(productionItems)
         .set({ scheduleNeedsAttentionAt: now, updatedAt: now })
         .where(eq(productionItems.id, row.id));
+      row.scheduleNeedsAttentionAt = now;
       summary.gaveUp++;
-      continue;
     }
 
     const item: ScheduledItemForMatch = {
@@ -440,6 +439,15 @@ export async function runScheduleNodateReconcile(opts?: {
           ],
           set: { score, reason, status: "pending", updatedAt: now },
         });
+      // Now that a candidate is awaiting a human, lift it out of
+      // Needs-attention into Suggestions.
+      if (row.scheduleNeedsAttentionAt) {
+        await db
+          .update(productionItems)
+          .set({ scheduleNeedsAttentionAt: null, updatedAt: now })
+          .where(eq(productionItems.id, row.id));
+        row.scheduleNeedsAttentionAt = null;
+      }
       summary.suggested++;
     } else {
       summary.skipped++;

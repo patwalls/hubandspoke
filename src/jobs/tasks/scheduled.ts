@@ -24,11 +24,12 @@ import { getScorecardData } from "@/lib/services/scorecard";
 import { sendDailyScorecardEmail } from "@/lib/email";
 import { db } from "@/lib/db";
 import { accounts, productionItems, users } from "@/lib/db/schema";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull } from "drizzle-orm";
 import {
   runScheduleReconcile,
   runScheduleNodateReconcile,
   selectAccountsForScheduleSync,
+  NODATE_ABANDON_HOURS,
 } from "@/lib/services/schedule-reconcile/reconcile";
 import type { EnrichItemPayload } from "./enrich-item";
 import type { ExtractHookPayload } from "./extract-hook";
@@ -291,6 +292,12 @@ export const scheduleNodateSweepTask: Task = async (_payload, helpers) => {
   const start = Date.now();
   helpers.logger.info("schedule-nodate-sweep start");
 
+  // Keep re-syncing flagged ("needs attention") no-date items too — they
+  // surface after 5 days but must stay matchable until the 14-day abandon
+  // horizon, so a late go-live still auto-picks-up.
+  const nodateAbandonCutoff = new Date(
+    Date.now() - NODATE_ABANDON_HOURS * 60 * 60 * 1000,
+  );
   const accountRows = await db
     .selectDistinct({ accountId: productionItems.accountId })
     .from(productionItems)
@@ -299,8 +306,9 @@ export const scheduleNodateSweepTask: Task = async (_payload, helpers) => {
         eq(productionItems.status, "Scheduled"),
         eq(productionItems.scheduledNoDate, true),
         isNotNull(productionItems.accountId),
-        isNull(productionItems.scheduleNeedsAttentionAt),
         isNull(productionItems.deletedAt),
+        isNotNull(productionItems.scheduledAt),
+        gte(productionItems.scheduledAt, nodateAbandonCutoff),
       ),
     );
 

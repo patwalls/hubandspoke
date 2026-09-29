@@ -105,6 +105,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     nextStatus = "Published";
     updates.status = "Published";
     updates.publishedLink = linkRaw;
+    // Publishing resolves any "needs attention" state (e.g. the operator
+    // pasting the live link from the Scheduled tab's Mark-published action).
+    updates.scheduleNeedsAttentionAt = null;
 
     // publishedDate: body value parsed as YYYY-MM-DD, falling back to
     // today UTC if absent or unparseable. Drizzle's `date` column expects

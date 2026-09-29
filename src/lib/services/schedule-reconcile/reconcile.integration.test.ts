@@ -311,13 +311,14 @@ describe("runScheduleReconcile tier policy", () => {
     expect(summary.skipped).toBe(1);
   });
 
-  it("flags needs-attention per post_type window (TikTok 24h, YouTube long 48h)", async () => {
+  it("flags needs-attention a uniform 1 day after the scheduled date, any post_type", async () => {
     const acct = await createTestAccount();
     const now = new Date();
-    const at30h = new Date(now.getTime() - 30 * HOUR);
+    const at30h = new Date(now.getTime() - 30 * HOUR); // > 24h → flag
+    const at12h = new Date(now.getTime() - 12 * HOUR); // < 24h → not yet
 
-    // TikTok (fast, 24h window) scheduled 30h ago → give up.
-    const fast = await createTestProductionItem({
+    // A day+ past its date → surface, regardless of post type (fast or slow).
+    const overdueFast = await createTestProductionItem({
       accountId: acct.id,
       status: "Scheduled",
       postType: "tiktok",
@@ -325,8 +326,7 @@ describe("runScheduleReconcile tier policy", () => {
       publishedAt: null,
       publishedDate: null,
     });
-    // YouTube long (slow, 48h window) scheduled 30h ago → still matching.
-    const slow = await createTestProductionItem({
+    const overdueSlow = await createTestProductionItem({
       accountId: acct.id,
       status: "Scheduled",
       postType: "youtube_long",
@@ -334,24 +334,35 @@ describe("runScheduleReconcile tier policy", () => {
       publishedAt: null,
       publishedDate: null,
     });
+    // Under a day past its date → not surfaced yet.
+    const fresh = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "youtube_long",
+      scheduledAt: at12h,
+      publishedAt: null,
+      publishedDate: null,
+    });
 
     const summary = await runScheduleReconcile({
       client: stubClient(0, 0), // no candidates anyway
-      onlyItemIds: [fast.id, slow.id],
+      onlyItemIds: [overdueFast.id, overdueSlow.id, fresh.id],
     });
-    expect(summary.gaveUp).toBe(1);
+    expect(summary.gaveUp).toBe(2); // both overdue items surfaced
 
-    const [fastRow] = await db
+    for (const id of [overdueFast.id, overdueSlow.id]) {
+      const [row] = await db
+        .select({ na: productionItems.scheduleNeedsAttentionAt })
+        .from(productionItems)
+        .where(eq(productionItems.id, id));
+      expect(row.na).not.toBeNull();
+    }
+
+    const [freshRow] = await db
       .select({ na: productionItems.scheduleNeedsAttentionAt })
       .from(productionItems)
-      .where(eq(productionItems.id, fast.id));
-    expect(fastRow.na).not.toBeNull();
-
-    const [slowRow] = await db
-      .select({ na: productionItems.scheduleNeedsAttentionAt })
-      .from(productionItems)
-      .where(eq(productionItems.id, slow.id));
-    expect(slowRow.na).toBeNull();
+      .where(eq(productionItems.id, fresh.id));
+    expect(freshRow.na).toBeNull();
   });
 
   it("measures the give-up window from expectedPublishAt, not scheduledAt, when both are set", async () => {
@@ -470,10 +481,10 @@ describe("runScheduleNodateReconcile", () => {
     expect(absorbed.deletedAt).not.toBeNull();
   });
 
-  it("does not give up a no-date item after 48h (still within 14-day window)", async () => {
+  it("does not surface a no-date item before 5 days", async () => {
     const acct = await createTestAccount();
     const now = new Date();
-    const at50h = new Date(now.getTime() - 50 * HOUR);
+    const at50h = new Date(now.getTime() - 50 * HOUR); // ~2 days < 5-day surface
 
     const sched = await createTestProductionItem({
       accountId: acct.id,
@@ -498,7 +509,47 @@ describe("runScheduleNodateReconcile", () => {
     expect(row.na).toBeNull();
   });
 
-  it("gives up a no-date item after 14 days and flags needs-attention", async () => {
+  it("surfaces a no-date item after 5 days but keeps matching it", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    const at6days = new Date(now.getTime() - 6 * 24 * HOUR);
+
+    const sched = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "youtube_long",
+      scheduledAt: at6days,
+      scheduledNoDate: true,
+      publishedAt: null,
+      publishedDate: null,
+    });
+    // A perfect candidate exists — a flagged no-date item must still merge it.
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "youtube_long",
+      publishedAt: now,
+      publishedLink: "https://youtu.be/nodate-late",
+      platformContentId: `vitest-nodate-late-${now.getTime()}`,
+    });
+
+    const summary = await runScheduleNodateReconcile({
+      client: stubClient(1, 95),
+      onlyItemIds: [sched.id],
+    });
+    expect(summary.considered).toBe(1);
+    // Flagged this pass (surfaced) AND still matched → auto-merged.
+    expect(summary.gaveUp).toBe(1);
+    expect(summary.autoMerged).toBe(1);
+
+    const [row] = await db
+      .select({ status: productionItems.status })
+      .from(productionItems)
+      .where(eq(productionItems.id, sched.id));
+    expect(row.status).toBe("Published");
+  });
+
+  it("abandons a no-date item after 14 days (never matched again)", async () => {
     const acct = await createTestAccount();
     const now = new Date();
     const at15days = new Date(now.getTime() - 15 * 24 * HOUR);
@@ -512,18 +563,26 @@ describe("runScheduleNodateReconcile", () => {
       publishedAt: null,
       publishedDate: null,
     });
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "youtube_long",
+      publishedAt: now,
+    });
 
     const summary = await runScheduleNodateReconcile({
-      client: stubClient(0, 0),
+      client: stubClient(1, 95),
       onlyItemIds: [sched.id],
     });
-    expect(summary.gaveUp).toBe(1);
+    // Past the abandon horizon → filtered out of the query entirely.
+    expect(summary.considered).toBe(0);
+    expect(summary.autoMerged).toBe(0);
 
     const [row] = await db
-      .select({ na: productionItems.scheduleNeedsAttentionAt })
+      .select({ status: productionItems.status })
       .from(productionItems)
       .where(eq(productionItems.id, sched.id));
-    expect(row.na).not.toBeNull();
+    expect(row.status).toBe("Scheduled");
   });
 });
 

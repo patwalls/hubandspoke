@@ -6,9 +6,38 @@
 //   - needsAttention: Scheduled items the matcher gave up on (aged past their
 //     per-post-type window) — an operator should publish them manually.
 
-import { aliasedTable, and, desc, eq, isNotNull, isNull, asc } from "drizzle-orm";
+import {
+  aliasedTable,
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+} from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
+
+/**
+ * Count of a brand's "needs attention" Scheduled items — scheduled posts we
+ * couldn't auto-mark as published within their surface window. Drives the
+ * brand-scoped header banner (polled), so keep it a single cheap COUNT.
+ */
+export async function countNeedsAttention(brand: string): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.brand, brand),
+        eq(productionItems.status, "Scheduled"),
+        isNotNull(productionItems.scheduleNeedsAttentionAt),
+        isNull(productionItems.deletedAt),
+      ),
+    );
+  return Number(row?.n ?? 0);
+}
 
 export interface ScheduledMatchSuggestionView {
   id: string;

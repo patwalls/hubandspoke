@@ -176,6 +176,107 @@ function SuggestionCard({
   );
 }
 
+function NeedsAttentionRow({
+  brand,
+  n,
+  onPublished,
+}: {
+  brand: string;
+  n: NeedsAttentionItemView;
+  onPublished: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function publish() {
+    const url = link.trim();
+    if (!url) {
+      toast.error("Paste the live post link first");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/production-items/${n.id}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "publish", link: url }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Couldn't mark as published");
+        return;
+      }
+      toast.success("Marked as published");
+      onPublished(n.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2">
+      <div className="flex items-center gap-3">
+        <Calendar className="size-4 shrink-0 text-muted-foreground" />
+        <Link
+          href={`/${brand}/content/${n.id}`}
+          className="min-w-0 flex-1 hover:underline"
+        >
+          <div className="truncate text-sm font-medium text-foreground">
+            {n.title || "(untitled)"}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {postTypeLabel(n.postType)} · scheduled {fmt(n.scheduledAt)}
+            {n.expectedPublishAt ? ` · expected ${fmt(n.expectedPublishAt)}` : ""}
+          </div>
+        </Link>
+        {open ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => {
+              setOpen(false);
+              setLink("");
+            }}
+          >
+            Cancel
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+            Mark published
+          </Button>
+        )}
+      </div>
+      {open ? (
+        <div className="mt-2 flex items-center gap-2 pl-7">
+          <input
+            type="url"
+            autoFocus
+            value={link}
+            disabled={busy}
+            onChange={(e) => setLink(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void publish();
+            }}
+            placeholder="Paste the live post URL…"
+            className="flex-1 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-foreground/40"
+          />
+          <Button
+            size="sm"
+            disabled={busy || link.trim().length === 0}
+            onClick={() => void publish()}
+          >
+            {busy ? "Publishing…" : "Publish"}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ScheduledReview({
   brand,
   initialData,
@@ -207,6 +308,14 @@ export function ScheduledReview({
     setData((d) => ({
       ...d,
       suggestions: d.suggestions.filter((s) => s.id !== id),
+    }));
+    void refetch();
+  }
+
+  function onPublished(id: string) {
+    setData((d) => ({
+      ...d,
+      needsAttention: d.needsAttention.filter((n) => n.id !== id),
     }));
     void refetch();
   }
@@ -280,9 +389,9 @@ export function ScheduledReview({
           Needs attention
         </h2>
         <p className="mb-3 text-sm text-muted-foreground">
-          Scheduled posts we couldn&apos;t auto-detect going live within their
-          window. Check whether they posted (and publish manually) or were
-          cancelled.
+          Scheduled posts we couldn&apos;t auto-mark as published within their
+          window (sometimes a low-view post never gets detected). Paste the live
+          link to mark it published, or check whether it was cancelled.
         </p>
         {needsAttention.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
@@ -291,26 +400,12 @@ export function ScheduledReview({
         ) : (
           <div className="space-y-2">
             {needsAttention.map((n: NeedsAttentionItemView) => (
-              <Link
+              <NeedsAttentionRow
                 key={n.id}
-                href={`/${brand}/content/${n.id}`}
-                className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2 transition-colors hover:border-foreground/30"
-              >
-                <Calendar className="size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-foreground">
-                    {n.title || "(untitled)"}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {postTypeLabel(n.postType)} · scheduled{" "}
-                    {fmt(n.scheduledAt)}
-                    {n.expectedPublishAt
-                      ? ` · expected ${fmt(n.expectedPublishAt)}`
-                      : ""}
-                  </div>
-                </div>
-                <span className="text-xs text-muted-foreground">Review →</span>
-              </Link>
+                brand={brand}
+                n={n}
+                onPublished={onPublished}
+              />
             ))}
           </div>
         )}

@@ -326,25 +326,23 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   emits `status_change` + `content_changed`, schedules velocity snapshots);
   **55–84** → upsert a `scheduled_match_suggestions` row (pending) for human
   Confirm/Reject at `/[brand]/scheduled`; **<55** → leave Scheduled, retry.
-- **Surface window vs. abandon horizon (per post_type):** unmatched past
-  `staleWindowHours()` — measured from `expectedPublishAt` when the operator set
-  one, else `scheduledAt`; **24h** for fast formats (x, tiktok, threads,
-  instagram_*), **48h** otherwise — stamps
-  `production_items.schedule_needs_attention_at` and surfaces a needs-attention
-  badge, **but keeps matching and re-syncing the item.** "Needs attention"
-  means *not matched yet* (go take a look / maybe publish manually), NOT
-  *abandoned*. Matching only truly stops once the item is past
-  `MATCH_ABANDON_HOURS` (**7 days** for dated items — observed real slippage is
-  1–6 days; the no-date sweep keeps 14), enforced as a filter on the reconcile
-  query and the freshness selector. When a candidate does turn
-  up at suggest-tier (55–84), the flag is cleared so the item moves from
-  Needs-attention into Suggestions. (Bug fixed 2026-09-29: the flag used to
-  *stop* matching/syncing permanently, so a post that went live after its
-  short window — batch-ahead scheduling, or a publish that slipped past its
-  date — was never auto-picked-up even though the live row existed. Earlier
-  2026-09-23 fix measured the window from `expectedPublishAt`, but that column
-  is usually empty, so the flag still fired ~24h after the operator clicked
-  Scheduled.)
+- **Surface window vs. abandon horizon:** unmatched past the surface window —
+  **a uniform 24h** past the scheduled date (`expectedPublishAt ?? scheduledAt`)
+  for dated items, **5 days** past marked-Scheduled for no-date items — stamps
+  `production_items.schedule_needs_attention_at`, surfaces the item in the
+  "Needs attention" tab AND drives the brand-scoped header banner
+  (`ScheduledAttentionBanner` → `/api/scheduled-needs-attention`), **but keeps
+  matching and re-syncing the item.** "Needs attention" means *not matched yet*
+  (go take a look / paste the live link), NOT *abandoned*. Matching only truly
+  stops past the abandon horizon — `MATCH_ABANDON_HOURS` = **7 days** for dated
+  items (observed real slippage is 1–6 days), `NODATE_ABANDON_HOURS` = **14
+  days** for no-date — enforced as a filter on both the reconcile query and the
+  freshness selector. When a candidate turns up at suggest-tier (55–84) the flag
+  is cleared so the item moves from Needs-attention into Suggestions. (Bug fixed
+  2026-09-29: the flag used to *stop* matching/syncing permanently, so a post
+  that went live after its short window — batch-ahead scheduling, or a publish
+  that slipped past its date, or a low-view X post ScrapeCreators detected late
+  — was never auto-picked-up even though the live row existed.)
 - **Rules / idempotency:** matcher runs against whatever Published rows exist
   now, so a post synced this tick is matched next tick (~10-min latency, by
   design). Rejected (item, candidate) pairs are excluded from future matching.
@@ -368,9 +366,11 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Two jobs per tick:** identical structure to `schedule-reconcile-sweep`
   (targeted `account-content-sync` enqueue + `runScheduleNodateReconcile()`
   match pass), but filtered to `scheduled_no_date = true` items only.
-- **Give-up window:** **14 days** from `scheduled_at` (vs 24/48h for date-known
-  items). Stamps `schedule_needs_attention_at` and surfaces the same
-  "Needs attention" badge when exceeded.
+- **Surface vs. abandon:** surfaces (`schedule_needs_attention_at` + "Needs
+  attention" tab/banner) **5 days** after `scheduled_at`, but keeps matching and
+  re-syncing until the **14-day** abandon horizon (`NODATE_ABANDON_HOURS`) — same
+  flag-but-keep-matching shape as the dated sweep, just with a longer clock since
+  there's no target date.
 - **Tier policy:** identical to `schedule-reconcile-sweep` (≥85 auto-merge,
   55–84 suggestion, <55 retry).
 - **Detection latency:** ~60 min (acceptable — operator doesn't know the date).
