@@ -277,8 +277,10 @@ No `--wake-in` (the runner owns the schedule and closes the lap) and no `--keep-
 (this report should REPLACE last lap's). CRIT/WARN one-liners belong in `--did`; a
 still-open escalation is a `--blocked` line (repeatable) written so Pat can act on it in
 one read: the action first, then the consequence — `--blocked "Review and merge PR #16
-(stops the bot reopening tickets a human meant to close); open as draft 10 laps"` — not
-a bare issue tag like `"issue #16 (10 laps, re-fed)"`.
+(stops the bot reopening tickets a human meant to close); open as draft since 08-30"` — not
+a bare issue tag like `"issue #16 (10 laps, re-fed)"`. Age is a date, never a lap count:
+Pat does not know how long a lap is, so "open 600 laps" (Canva #22 at lap 780,
+2026-09-28, measured by the `loops` meta-loop) reads as a number, not as "since Sep 2".
 
 **A standing ask goes on every emit, until the lap it actually clears — copied from
 `loops policy --loop hubandspoke`, not retyped.** The emit replaces the board wholesale, so
@@ -297,13 +299,13 @@ line's wording only when the ask itself changed. Rewriting it from memory makes 
 item to the ledger.
 
 Copying is not freezing. The action is the opening clause; everything after it — the
-parenthetical, the `open N laps` tail — is evidence, and evidence goes stale while the ask
+parenthetical, the `open since <date>` tail — is evidence, and evidence goes stale while the ask
 stands. Measured 2026-09-09 by the `loops` meta-loop: the Canva line still read "open 87
 laps" at lap 603, a count that was true at lap 544 when the paragraph above was written
 and had been handed back unchanged for 60 laps since — a true ask carrying a stale number,
 which reads to Pat as "nothing has moved". Each lap, read the evidence half against the
-issue; when it is no longer true, rewrite THAT half with this lap's facts (the lap count,
-what still fails) and keep the opening clause byte for byte. The ledger matches on the
+issue; when it is no longer true, rewrite THAT half with this lap's facts (the date it
+opened, what still fails, when it last failed) and keep the opening clause byte for byte. The ledger matches on the
 opening clause and masks numbers, so a refreshed count inherits the wait; only a rewritten
 action resets it.
 
@@ -312,7 +314,7 @@ Refreshing is replacing, not appending. Measured 2026-09-21 by the `loops` meta-
 (the 517M burst, second by second) and bolted this lap's on after it ("a twenty-third
 straight lap…", "but the same shape hit a worse R14…"), so the ask no longer reads in one
 pass. The evidence half is at most two short clauses: what the fix stops, and the single
-strongest current fact (`open as draft 51 laps; worst R14 since: 840M on 09-20`). Whole
+strongest current fact (`open as draft since 09-19; worst memory since: 840M on 09-20`). Whole
 line under ~250 characters; the incident history lives in the PR, not on Pat's board.
 
 **A service logged Pat out / a token expired (401, "session expired", invalid key):**
