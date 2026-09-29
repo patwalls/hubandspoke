@@ -71,17 +71,19 @@ export interface NeedsAttentionItemView {
   expectedPublishAt: string | null;
 }
 
-export interface WatchingNoDateItemView {
+export interface WatchingItemView {
   id: string;
   title: string | null;
   postType: string | null;
   scheduledAt: string | null;
+  expectedPublishAt: string | null;
+  scheduledNoDate: boolean;
 }
 
 export interface ScheduledReviewData {
   suggestions: ScheduledMatchSuggestionView[];
   needsAttention: NeedsAttentionItemView[];
-  watching: WatchingNoDateItemView[];
+  watching: WatchingItemView[];
 }
 
 export async function getScheduledReviewData(
@@ -146,20 +148,24 @@ export async function getScheduledReviewData(
     )
     .orderBy(desc(productionItems.scheduleNeedsAttentionAt));
 
-  // No-date items currently being watched by the hourly sweep (not yet timed out).
+  // Every currently-Scheduled item we're still watching for its go-live —
+  // dated and no-date alike — that hasn't been flagged (needs-attention) or
+  // tied yet. This is what shows a post is in a Scheduled state while the
+  // sweep waits for it to publish.
   const watchingRows = await db
     .select({
       id: productionItems.id,
       title: productionItems.title,
       postType: productionItems.postType,
       scheduledAt: productionItems.scheduledAt,
+      expectedPublishAt: productionItems.expectedPublishAt,
+      scheduledNoDate: productionItems.scheduledNoDate,
     })
     .from(productionItems)
     .where(
       and(
         eq(productionItems.brand, brand),
         eq(productionItems.status, "Scheduled"),
-        eq(productionItems.scheduledNoDate, true),
         isNull(productionItems.scheduleNeedsAttentionAt),
         isNull(productionItems.deletedAt),
       ),
@@ -202,6 +208,8 @@ export async function getScheduledReviewData(
       title: r.title,
       postType: r.postType,
       scheduledAt: r.scheduledAt?.toISOString() ?? null,
+      expectedPublishAt: r.expectedPublishAt?.toISOString() ?? null,
+      scheduledNoDate: r.scheduledNoDate ?? false,
     })),
   };
 }

@@ -10,7 +10,7 @@ import type {
   ScheduledReviewData,
   ScheduledMatchSuggestionView,
   NeedsAttentionItemView,
-  WatchingNoDateItemView,
+  WatchingItemView,
 } from "@/lib/services/schedule-reconcile/review";
 
 function fmt(iso: string | null): string {
@@ -360,10 +360,11 @@ export function ScheduledReview({
             Watching for publish
           </h2>
           <p className="mb-3 text-sm text-muted-foreground">
-            Scheduled without a publish date. Checked hourly for up to 14 days — will auto-tie when the video goes live.
+            Scheduled posts we&apos;re watching for their go-live — we&apos;ll
+            auto-tie them the moment the live post is detected.
           </p>
           <div className="space-y-2">
-            {watching.map((n: WatchingNoDateItemView) => (
+            {watching.map((n: WatchingItemView) => (
               <Link
                 key={n.id}
                 href={`/${brand}/content/${n.id}`}
@@ -375,7 +376,12 @@ export function ScheduledReview({
                     {n.title || "(untitled)"}
                   </div>
                   <div className="text-[11px] text-muted-foreground">
-                    {postTypeLabel(n.postType)} · watching since {fmt(n.scheduledAt)}
+                    {postTypeLabel(n.postType)} ·{" "}
+                    {n.expectedPublishAt
+                      ? `scheduled for ${fmt(n.expectedPublishAt)}`
+                      : n.scheduledNoDate
+                        ? `no publish date · watching since ${fmt(n.scheduledAt)}`
+                        : `scheduled on ${fmt(n.scheduledAt)}, no publish date set`}
                   </div>
                 </div>
                 <span className="text-xs text-muted-foreground">View →</span>
