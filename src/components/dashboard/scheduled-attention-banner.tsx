@@ -62,12 +62,10 @@ export function ScheduledAttentionBanner() {
       <AlertTriangleIcon className="size-4 mt-0.5 shrink-0 text-amber-600" />
       <div className="flex-1 min-w-0">
         <div className="font-medium">
-          {count} scheduled post{count === 1 ? "" : "s"} couldn&apos;t be marked
-          as published.
+          {`${count} scheduled post${count === 1 ? "" : "s"} couldn't be marked as published.`}
         </div>
         <div className="mt-0.5 text-xs text-amber-800 dark:text-amber-200">
-          We couldn&apos;t auto-detect {count === 1 ? "it" : "them"} going live.
-          Review and add the publish link →
+          {`We couldn't auto-detect ${count === 1 ? "it" : "them"} going live. Review and add the publish link →`}
         </div>
       </div>
     </Link>

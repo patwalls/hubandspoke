@@ -228,8 +228,10 @@ function NeedsAttentionRow({
             {n.title || "(untitled)"}
           </div>
           <div className="text-[11px] text-muted-foreground">
-            {postTypeLabel(n.postType)} · scheduled {fmt(n.scheduledAt)}
-            {n.expectedPublishAt ? ` · expected ${fmt(n.expectedPublishAt)}` : ""}
+            {postTypeLabel(n.postType)} ·{" "}
+            {n.expectedPublishAt
+              ? `scheduled for ${fmt(n.expectedPublishAt)}`
+              : `scheduled on ${fmt(n.scheduledAt)}, no publish date set`}
           </div>
         </Link>
         {open ? (
