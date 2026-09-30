@@ -11,6 +11,7 @@ import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
 import { resolveCleanSourceMedia } from "@/lib/services/clean-media-resolver";
 import { isVideoBearingPostType } from "@/lib/platform-media-rules";
 import { seedRepostContent } from "@/lib/services/repost-seed";
+import { forkEditorStateForCrossPost } from "@/lib/services/cross-post-editor-fork";
 import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { checkRepostReadiness } from "@/lib/services/descript-derivative";
@@ -342,6 +343,30 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return row;
   });
+
+  // Carry the in-app editor state (design/clip) over to the cross-post, the
+  // way the Descript project is carried over — the cross-post opens the same
+  // design/clip in the editor, but as its OWN copy so edits never touch the
+  // source (see cross-post-editor-fork.ts). Gated on the same seeded-targets
+  // set so the mirrored media and the editor render arrive together. Runs in
+  // its own transaction, best-effort: a fork failure must not undo a
+  // successfully-created cross-post.
+  if (CROSS_POST_SEEDED_TARGETS.has(targetPostType as PostType)) {
+    try {
+      await db.transaction((tx) =>
+        forkEditorStateForCrossPost(tx, {
+          sourceId: source.id,
+          crossPostId: created.id,
+          userId: guard.session.user.id,
+        }),
+      );
+    } catch (err) {
+      console.error(
+        `[cross-post] editor-state fork failed for ${created.id}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 
   // Activity trail on the new row so the editor lands on the detail page
   // and immediately sees where this came from. Only stamped on queue-

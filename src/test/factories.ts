@@ -38,13 +38,17 @@ import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { createDefaultDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
+import { DESIGN_DOC_VERSION, type DesignDoc } from "@/lib/design-editor/doc";
 import {
   accounts,
   brands,
   clipEdits,
   clipIdeas,
+  clipRenders,
   contentDrafts,
   descriptLayoutPacks,
+  designDocs,
+  designRenders,
   formats,
   formatChannels,
   formatTriggerSources,
@@ -577,6 +581,114 @@ export async function createTestClipEdit(
         opts.doc ??
         createDefaultDoc({ startSec: 0, endSec: 30, hook: "vitest clip hook" }),
       createdByUserId: opts.createdByUserId ?? null,
+    })
+    .returning();
+  return row;
+}
+
+export interface CreateTestClipRenderOptions {
+  clipEditId: string;
+  productionItemId: string;
+  doc?: ClipEditDoc;
+  status?: string;
+  outputS3Bucket?: string | null;
+  outputS3Key?: string | null;
+  durationSec?: string | null;
+}
+
+/**
+ * Insert a `clip_renders` row (one export of a clip edit). Not tracked for
+ * cleanup on its own — it cascades from its clip edit → clip idea (which IS
+ * tracked). Defaults to a finished (`done`) render.
+ */
+export async function createTestClipRender(
+  opts: CreateTestClipRenderOptions,
+): Promise<typeof clipRenders.$inferSelect> {
+  const [row] = await db
+    .insert(clipRenders)
+    .values({
+      clipEditId: opts.clipEditId,
+      productionItemId: opts.productionItemId,
+      doc:
+        opts.doc ??
+        createDefaultDoc({ startSec: 0, endSec: 30, hook: "vitest clip hook" }),
+      status: opts.status ?? "done",
+      progress: 100,
+      outputS3Bucket: opts.outputS3Bucket ?? "vitest-bucket",
+      outputS3Key: opts.outputS3Key ?? `vitest/${randomSuffix()}.mp4`,
+      durationSec: opts.durationSec ?? "30",
+      finishedAt: new Date(),
+    })
+    .returning();
+  return row;
+}
+
+/** A minimal, schema-valid single-page design document for tests. */
+export function minimalDesignDoc(): DesignDoc {
+  return {
+    version: DESIGN_DOC_VERSION,
+    canvas: { width: 1080, height: 1080 },
+    pages: [{ id: "p1", background: "#ffffff", elements: [] }],
+    template: "vitest",
+  };
+}
+
+export interface CreateTestDesignDocOptions {
+  productionItemId: string;
+  doc?: DesignDoc;
+  brief?: Record<string, unknown> | null;
+  briefInstruction?: string | null;
+  createdByUserId?: string | null;
+}
+
+/**
+ * Insert a `design_docs` row (the in-app design editor's document for one
+ * production item). Not tracked for cleanup on its own — it cascades from its
+ * production item (which IS tracked), and `design_renders` cascade from it.
+ */
+export async function createTestDesignDoc(
+  opts: CreateTestDesignDocOptions,
+): Promise<typeof designDocs.$inferSelect> {
+  const [row] = await db
+    .insert(designDocs)
+    .values({
+      productionItemId: opts.productionItemId,
+      doc: opts.doc ?? minimalDesignDoc(),
+      brief: opts.brief ?? null,
+      briefInstruction: opts.briefInstruction ?? null,
+      createdByUserId: opts.createdByUserId ?? null,
+    })
+    .returning();
+  return row;
+}
+
+export interface CreateTestDesignRenderOptions {
+  designDocId: string;
+  productionItemId: string;
+  doc?: DesignDoc;
+  status?: string;
+  outputKeys?: string[] | null;
+}
+
+/**
+ * Insert a `design_renders` row (one export of a design). Not tracked for
+ * cleanup on its own — it cascades from its design doc / production item.
+ * Defaults to a finished (`done`) render with a couple of slide keys.
+ */
+export async function createTestDesignRender(
+  opts: CreateTestDesignRenderOptions,
+): Promise<typeof designRenders.$inferSelect> {
+  const [row] = await db
+    .insert(designRenders)
+    .values({
+      designDocId: opts.designDocId,
+      productionItemId: opts.productionItemId,
+      doc: opts.doc ?? minimalDesignDoc(),
+      status: opts.status ?? "done",
+      progress: 100,
+      outputKeys:
+        opts.outputKeys ?? [`vitest/${randomSuffix()}-1.png`, `vitest/${randomSuffix()}-2.png`],
+      finishedAt: new Date(),
     })
     .returning();
   return row;
