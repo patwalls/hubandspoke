@@ -34,7 +34,7 @@ const FLAGS = {
    * it to Descript. See docs/features.md → "Clip editor".
    */
   clipEditor: {
-    emails: ["patrickswalls@gmail.com", "sam@starterstory.com"],
+    emails: ["patrickswalls@gmail.com", "sam@starterstory.com", "timjohn2002@gmail.com"],
     envVar: "FEATURE_CLIP_EDITOR_EMAILS",
   },
   /**
@@ -43,7 +43,7 @@ const FLAGS = {
    * rendered on our own worker. See docs/features.md → "Design editor".
    */
   designEditor: {
-    emails: ["patrickswalls@gmail.com", "sam@starterstory.com"],
+    emails: ["patrickswalls@gmail.com", "sam@starterstory.com", "timjohn2002@gmail.com"],
     envVar: "FEATURE_DESIGN_EDITOR_EMAILS",
   },
 } as const satisfies Record<string, FlagDefinition>;
