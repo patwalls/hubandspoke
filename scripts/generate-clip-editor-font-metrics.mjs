@@ -46,15 +46,25 @@ const RANGES = [
   [0x2190, 0x2193],
 ];
 
+// The emoji fallback (not in the picker — layout.ts and ass.ts switch to it
+// for emoji runs; see fonts.ts → EMOJI_FONT). Only emoji ranges are tabled.
+const EMOJI_FONT = { id: "noto-emoji", file: "NotoEmoji-Regular.ttf" };
+const EMOJI_RANGES = [
+  [0xa9, 0xa9], [0xae, 0xae], [0x203c, 0x203c], [0x2049, 0x2049], [0x2122, 0x2122], [0x2139, 0x2139],
+  [0x2194, 0x21aa], [0x231a, 0x23ff], [0x24c2, 0x24c2], [0x25aa, 0x25fe], [0x2600, 0x27bf],
+  [0x2934, 0x2935], [0x2b05, 0x2b55], [0x3030, 0x3030], [0x303d, 0x303d], [0x3297, 0x3299],
+  [0x1f000, 0x1f2ff], [0x1f300, 0x1faff],
+];
+
 const out = {};
-for (const [id, file] of Object.entries(FONTS)) {
+for (const [id, file, ranges] of [...Object.entries(FONTS).map(([id, file]) => [id, file, RANGES]), [EMOJI_FONT.id, EMOJI_FONT.file, EMOJI_RANGES]]) {
   const buf = readFileSync(path.join(root, "public/fonts/clip-editor", file));
   const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
   const upm = font.unitsPerEm;
   const os2 = font.tables.os2;
   const hhea = font.tables.hhea;
   const advances = {};
-  for (const [lo, hi] of RANGES) {
+  for (const [lo, hi] of ranges) {
     for (let cp = lo; cp <= hi; cp++) {
       const glyph = font.charToGlyph(String.fromCodePoint(cp));
       if (!glyph || glyph.index === 0) continue;
@@ -70,8 +80,13 @@ for (const [id, file] of Object.entries(FONTS)) {
     hheaAscentEm: hhea.ascender / upm,
     hheaDescentEm: Math.abs(hhea.descender) / upm,
     capHeightEm: (os2.sCapHeight || 700) / upm,
-    // Fallback advance for characters outside the table (emoji, CJK…).
-    defaultAdvanceEm: 1,
+    // Fallback advance for characters outside the table (CJK…). For the
+    // emoji font: its typical glyph width, used for emoji it doesn't table
+    // (ZWJ sequences resolve to a ligature about that wide).
+    defaultAdvanceEm:
+      id === EMOJI_FONT.id
+        ? Math.round((Object.values(advances).reduce((a, b) => a + b, 0) / Math.max(1, Object.values(advances).length)) * 10000) / 10000
+        : 1,
     advances,
   };
 }

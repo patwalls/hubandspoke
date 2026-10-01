@@ -6,7 +6,7 @@
  * glyph rasterizer — all layout already happened in layout.ts.
  */
 import type { TextStyle } from "./doc";
-import { FONTS, assFontSizeFactor } from "./fonts";
+import { EMOJI_FONT, FONTS, assFontSizeFactor, splitEmojiRuns, type EmojiFontDefinition, type FontDefinition } from "./fonts";
 import type { LaidOutLine, TextBlockLayout } from "./layout";
 import type { RenderPlan } from "./plan";
 import type { Scene } from "./scene";
@@ -43,6 +43,19 @@ export function assEscape(text: string): string {
     .replace(/\r?\n/g, " ");
 }
 
+/** `text` escaped for an event, with emoji runs switched to the emoji font
+ *  (`\fn`, un-bolded, sized so its em equals the text font's) and back.
+ *  Pure text when there is nothing to switch. See fonts.ts → EMOJI_FONT. */
+export function assText(text: string, style: TextStyle, fontSizePx: number): string {
+  const font = FONTS[style.fontId];
+  const runs = splitEmojiRuns(font, text);
+  if (!runs.some((r) => r.emoji)) return assEscape(text);
+  const size = (f: FontDefinition | EmojiFontDefinition) => (Math.round(fontSizePx * assFontSizeFactor(f) * 100) / 100).toString();
+  const main = `{\\fn${font.assFamily}\\b${font.assBold ? 1 : 0}\\fs${size(font)}}`;
+  const emoji = `{\\fn${EMOJI_FONT.assFamily}\\b0\\fs${size(EMOJI_FONT)}}`;
+  return runs.map((r, i) => (r.emoji ? emoji : i === 0 ? "" : main) + assEscape(r.text)).join("");
+}
+
 function styleLine(name: string, style: TextStyle, fontSizePx: number): string {
   const font = FONTS[style.fontId];
   const assSize = Math.round(fontSizePx * assFontSizeFactor(font) * 100) / 100;
@@ -76,10 +89,13 @@ function styleLine(name: string, style: TextStyle, fontSizePx: number): string {
 }
 
 /** \pos Y for a line: libass puts the TOP of its line box at \pos with \an8,
- *  and the baseline `winAscent` below that. */
+ *  and the baseline `winAscent` below that — the tallest ascent among the
+ *  fonts on the line, so a line with emoji accounts for the emoji font. */
 function posY(style: TextStyle, layout: TextBlockLayout, line: LaidOutLine) {
   const font = FONTS[style.fontId];
-  return line.baselineY - font.metrics.winAscentEm * layout.fontSizePx;
+  const hasEmoji = splitEmojiRuns(font, line.text).some((r) => r.emoji);
+  const ascentEm = hasEmoji ? Math.max(font.metrics.winAscentEm, EMOJI_FONT.metrics.winAscentEm) : font.metrics.winAscentEm;
+  return line.baselineY - ascentEm * layout.fontSizePx;
 }
 
 /** libass anchors: 7 = top-left, 8 = top-centre, 9 = top-right. The line's
@@ -156,7 +172,8 @@ export function buildAssScript(plan: RenderPlan, scene: Scene): string {
     for (const line of block.layout.lines) {
       const bx = boxEvent(0, plan.durationSec + 1, name, block.layer.style, block.layout, line, 8 + bi);
       if (bx) events.push(bx);
-      const sh = shadowEvent(0, plan.durationSec + 1, name, block.layer.style, block.layout, line, assEscape(line.text), lineAnchorX(line, block.layer.style.align), posY(block.layer.style, block.layout, line), 9 + bi);
+      const text = assText(line.text, block.layer.style, block.layout.fontSizePx);
+      const sh = shadowEvent(0, plan.durationSec + 1, name, block.layer.style, block.layout, line, text, lineAnchorX(line, block.layer.style.align), posY(block.layer.style, block.layout, line), 9 + bi);
       if (sh) events.push(sh);
       events.push(
         event(
@@ -165,7 +182,7 @@ export function buildAssScript(plan: RenderPlan, scene: Scene): string {
           name,
           lineAnchorX(line, block.layer.style.align),
           posY(block.layer.style, block.layout, line),
-          assEscape(line.text),
+          text,
           10 + bi,
           block.layer.style.align,
         ),
@@ -192,13 +209,13 @@ export function buildAssScript(plan: RenderPlan, scene: Scene): string {
         for (const line of layout.lines) {
           const bx = boxEvent(iv.start, iv.end, "Captions", layer.style, layout, line, 3);
           if (bx) events.push(bx);
-          const sh = shadowEvent(iv.start, iv.end, "Captions", layer.style, layout, line, line.words.map((w) => assEscape(w.text)).join(" "), lineAnchorX(line, layer.style.align), posY(layer.style, layout, line), 4);
+          const sh = shadowEvent(iv.start, iv.end, "Captions", layer.style, layout, line, line.words.map((w) => assText(w.text, layer.style, fontSizePx)).join(" "), lineAnchorX(line, layer.style.align), posY(layer.style, layout, line), 4);
           if (sh) events.push(sh);
           const text = line.words
             .map((w) =>
               w.ref === iv.active && layer.highlightColor
-                ? `{\\c${assInlineColor(layer.highlightColor)}}${assEscape(w.text)}{\\c${assInlineColor(layer.style.color)}}`
-                : assEscape(w.text),
+                ? `{\\c${assInlineColor(layer.highlightColor)}}${assText(w.text, layer.style, fontSizePx)}{\\c${assInlineColor(layer.style.color)}}`
+                : assText(w.text, layer.style, fontSizePx),
             )
             .join(" ");
           events.push(

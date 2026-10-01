@@ -18,7 +18,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
 import type { CaptionsLayer, ClipEditDoc, ImageLayer, TextLayer, TextStyle } from "@/lib/clip-editor/doc";
-import { FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
+import { EMOJI_FONT, FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
 import type { TextBlockLayout } from "@/lib/clip-editor/layout";
 import type { RenderPlan } from "@/lib/clip-editor/plan";
 import { resolveVideoBox } from "@/lib/clip-editor/video-box";
@@ -46,7 +46,9 @@ function textCss(style: TextStyle, layout: TextBlockLayout): React.CSSProperties
   const font = FONTS[style.fontId];
   const outlinePx = (style.outlinePct / 100) * layout.fontSizePx;
   return {
-    fontFamily: `"${font.cssFamily}"`,
+    // The emoji font second: the browser uses it for exactly the glyphs the
+    // text font lacks — the same runs the exporter switches fonts for.
+    fontFamily: `"${font.cssFamily}", "${EMOJI_FONT.cssFamily}"`,
     fontWeight: font.cssWeight,
     fontSize: layout.fontSizePx,
     lineHeight: `${layout.linePitchPx}px`,

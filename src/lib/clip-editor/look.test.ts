@@ -147,3 +147,27 @@ describe("text wraps like a text box", () => {
     expect(fewer[0].words.length).toBeGreaterThan(lines[0].words.length);
   });
 });
+
+import { EMOJI_FONT, FONTS, measureTextEm, splitEmojiRuns } from "./fonts";
+
+describe("emoji in text (the emoji font fallback)", () => {
+  const font = FONTS["montserrat-extrabold"];
+  it("measures emoji with the emoji font and tabled symbols with the text font", () => {
+    expect(splitEmojiRuns(font, "a 🔥 b")).toEqual([{ text: "a ", emoji: false }, { text: "🔥", emoji: true }, { text: " b", emoji: false }]);
+    expect(splitEmojiRuns(font, "→ ©")).toEqual([{ text: "→ ©", emoji: false }]); // Montserrat has both
+    expect(measureTextEm(font, "🔥")).toBe(EMOJI_FONT.metrics.advances["128293"]);
+    expect(measureTextEm(font, "a🔥")).toBeCloseTo(font.metrics.advances["97"] + EMOJI_FONT.metrics.advances["128293"], 6);
+    // A ZWJ family is one grapheme, about one emoji wide — not four.
+    expect(measureTextEm(font, "👨‍👩‍👧")).toBeLessThan(2 * EMOJI_FONT.metrics.defaultAdvanceEm);
+  });
+  it("the ASS export switches font for the emoji run and back, nothing else", () => {
+    const doc = createDefaultDoc({ startSec: 0, endSec: 5, hook: "Makes $80K/mo 🤯 fast" });
+    const plan = compileRenderPlan(doc, []);
+    const ass = buildAssScript(plan, resolveScene(plan));
+    const line = ass.split("\n").find((l) => l.startsWith("Dialogue: 10,"))!;
+    expect(line).toMatch(/Makes \$80K\/mo \{\\fnNoto Emoji\\b0\\fs[\d.]+\}🤯\{\\fnMontserrat ExtraBold\\b0\\fs[\d.]+\} fast$/);
+    const plainPlan = compileRenderPlan(createDefaultDoc({ startSec: 0, endSec: 5, hook: "No emoji here" }), []);
+    const plain = buildAssScript(plainPlan, resolveScene(plainPlan));
+    expect(plain).not.toContain("\\fn");
+  });
+});

@@ -39,7 +39,28 @@ export interface FontDefinition {
   metrics: FontMetrics;
 }
 
-const metrics = metricsJson as Record<FontId, FontMetrics>;
+const metrics = metricsJson as Record<FontId | "noto-emoji", FontMetrics>;
+
+/**
+ * The emoji fallback — not in the picker. None of the text fonts have emoji
+ * glyphs (an exported hook with 🔥 came out as missing-glyph boxes, and the
+ * worker's fontconfig has no emoji font either), so both renderers switch
+ * to this monochrome Noto Emoji for emoji runs: the stage lists it as the
+ * CSS fallback family, the ASS exporter wraps runs in `\fn` (ass.ts →
+ * assText). Monochrome on purpose — libass can't draw colour fonts, and
+ * the preview must show what exports. Same OFL + metrics pipeline as the
+ * rest.
+ */
+export const EMOJI_FONT = {
+  id: "noto-emoji" as const,
+  label: "Noto Emoji",
+  cssFamily: "ClipEditor Noto Emoji",
+  cssWeight: 400,
+  assFamily: "Noto Emoji",
+  assBold: false,
+  metrics: metrics["noto-emoji"],
+};
+export type EmojiFontDefinition = typeof EMOJI_FONT;
 
 /**
  * Order here is the order of the font picker. `assFamily` must be a family
@@ -192,7 +213,7 @@ export const FONT_PUBLIC_DIR = "/fonts/clip-editor";
 
 /** @font-face rules for every registered font (injected once by the stage). */
 export function fontFaceCss(): string {
-  return Object.values(FONTS)
+  return [...Object.values(FONTS), EMOJI_FONT]
     .map(
       (f) =>
         // ascent/descent/line-gap overrides pin the metrics the browser lays
@@ -211,17 +232,65 @@ export function fontFaceCss(): string {
  * Fontsize that rasterizes at the same glyph size. Verified against a
  * rendered calibration frame (cap height of "H") for Montserrat.
  */
-export function assFontSizeFactor(font: FontDefinition): number {
+export function assFontSizeFactor(font: FontDefinition | EmojiFontDefinition): number {
   return font.metrics.winAscentEm + font.metrics.winDescentEm;
 }
 
+const EMOJI_RE = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u;
+const segmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+
+/** User-perceived characters (a ZWJ family, a flag, a keycap are one each). */
+export function graphemes(text: string): string[] {
+  if (segmenter) return Array.from(segmenter.segment(text), (s) => s.segment);
+  return Array.from(text);
+}
+
+/** Does this grapheme draw with the emoji font? Only when the text font has
+ *  no glyph for it — so "→" and "©" (tabled in every font) stay in the text
+ *  font, like the browser's font-family fallback picks them. */
+export function isEmojiGrapheme(font: FontDefinition, g: string): boolean {
+  const cp = g.codePointAt(0)!;
+  if (g.length <= 2 && String.fromCodePoint(cp) === g && font.metrics.advances[String(cp)] !== undefined) return false;
+  return EMOJI_RE.test(g);
+}
+
+/** `text` as alternating text-font / emoji-font runs, in order. */
+export function splitEmojiRuns(font: FontDefinition, text: string): Array<{ text: string; emoji: boolean }> {
+  const runs: Array<{ text: string; emoji: boolean }> = [];
+  for (const g of graphemes(text)) {
+    const emoji = isEmojiGrapheme(font, g);
+    const last = runs[runs.length - 1];
+    if (last && last.emoji === emoji) last.text += g;
+    else runs.push({ text: g, emoji });
+  }
+  return runs;
+}
+
+/** Advance of one emoji grapheme in em: the emoji font's glyph for its
+ *  first code point, or the font's typical width for sequences (ZWJ
+ *  families, flags, keycaps — ligatures about that wide). */
+export function emojiAdvanceEm(g: string): number {
+  const single = String.fromCodePoint(g.codePointAt(0)!) === g;
+  return (single ? EMOJI_FONT.metrics.advances[String(g.codePointAt(0))] : undefined) ?? EMOJI_FONT.metrics.defaultAdvanceEm;
+}
+
 /** Advance width of `text` in em. No kerning — see layout.ts for why that
- *  is fine. */
+ *  is fine. Emoji measure with the emoji font (what both renderers draw
+ *  them with). */
 export function measureTextEm(font: FontDefinition, text: string): number {
   let width = 0;
-  for (const ch of text) {
-    const cp = ch.codePointAt(0)!;
-    width += font.metrics.advances[String(cp)] ?? font.metrics.defaultAdvanceEm;
+  for (const run of splitEmojiRuns(font, text)) {
+    if (run.emoji) {
+      for (const g of graphemes(run.text)) width += emojiAdvanceEm(g);
+      continue;
+    }
+    for (const ch of run.text) {
+      const cp = ch.codePointAt(0)!;
+      width += font.metrics.advances[String(cp)] ?? font.metrics.defaultAdvanceEm;
+    }
   }
   return width;
 }
