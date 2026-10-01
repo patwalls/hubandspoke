@@ -185,11 +185,17 @@ export async function selectCrossPostCandidates(opts: {
   // still get a bar; truly cohort-less formats fall through to the post-
   // type cohort (e.g. "all instagram_reels"); only when neither cohort
   // exists does the candidate auto-admit as NEW.
+  // Bars, the commonality table, the brand's accounts and the candidate
+  // pool are independent reads — one round trip instead of seven. The
+  // result is cached per brand; see services/queue-candidates-cached.ts.
   const [
     lifetimeFormatBars,
     checkpointFormatBars,
     lifetimePostTypeBars,
     checkpointPostTypeBars,
+    targetCommonality,
+    brandAccountsRows,
+    rawCandidates,
   ] = await Promise.all([
     fetchFormatViewBars({
       percentile: PERCENTILE,
@@ -211,68 +217,68 @@ export async function selectCrossPostCandidates(opts: {
       windowDays: COHORT_WINDOW_DAYS,
       minCohort: 5,
     }),
+      fetchTargetCommonalityByFormat(),
+    db
+      .select({
+        id: accounts.id,
+        platform: accounts.platform,
+        handle: accounts.handle,
+        displayName: accounts.displayName,
+        avatarUrl: accounts.avatarUrl,
+        syncedFromNotion: accounts.syncedFromNotion,
+      })
+      .from(accounts)
+      .innerJoin(brands, eq(brands.id, accounts.brandId))
+      .where(
+        and(
+          eq(brands.slug, brand),
+          eq(accounts.isActive, true),
+          isNull(accounts.deletedAt)
+        )
+      ),
+    db
+      .select({
+        id: productionItems.id,
+        brand: productionItems.brand,
+        title: productionItems.title,
+        thumbnail: productionItems.thumbnail,
+        publishedAt: productionItems.publishedAt,
+        publishedDate: productionItems.publishedDate,
+        publishedLink: productionItems.publishedLink,
+        postType: productionItems.postType,
+        format: productionItems.format,
+        sourceType: productionItems.sourceType,
+        views: productionItems.views,
+        likes: productionItems.likes,
+        comments: productionItems.comments,
+        accountId: productionItems.accountId,
+        accountPlatform: accounts.platform,
+        accountHandle: accounts.handle,
+        accountDisplayName: accounts.displayName,
+        accountAvatarUrl: accounts.avatarUrl,
+        pillarContentItemId: productionItems.pillarContentItemId,
+      })
+      .from(productionItems)
+      .leftJoin(accounts, eq(productionItems.accountId, accounts.id))
+      .where(
+        and(
+          eq(productionItems.brand, brand),
+          inArray(productionItems.sourceType, [...ELIGIBLE_SOURCE_TYPES]),
+          eq(productionItems.status, "Published"),
+          isNull(productionItems.deletedAt),
+          gte(
+            productionItems.publishedAt,
+            sql`(now() - interval '${sql.raw(String(CANDIDATE_WINDOW_DAYS))} days')`
+          )
+        )
+      ),
   ]);
 
-  const targetCommonality = await fetchTargetCommonalityByFormat();
 
-  const brandAccountsRows = await db
-    .select({
-      id: accounts.id,
-      platform: accounts.platform,
-      handle: accounts.handle,
-      displayName: accounts.displayName,
-      avatarUrl: accounts.avatarUrl,
-      syncedFromNotion: accounts.syncedFromNotion,
-    })
-    .from(accounts)
-    .innerJoin(brands, eq(brands.id, accounts.brandId))
-    .where(
-      and(
-        eq(brands.slug, brand),
-        eq(accounts.isActive, true),
-        isNull(accounts.deletedAt)
-      )
-    );
   const brandAccounts: BrandAccount[] = brandAccountsRows;
 
   // Candidate pool: original / clip / repost (anything but cross_post)
   // published in the last CANDIDATE_WINDOW_DAYS.
-  const rawCandidates = await db
-    .select({
-      id: productionItems.id,
-      brand: productionItems.brand,
-      title: productionItems.title,
-      thumbnail: productionItems.thumbnail,
-      publishedAt: productionItems.publishedAt,
-      publishedDate: productionItems.publishedDate,
-      publishedLink: productionItems.publishedLink,
-      postType: productionItems.postType,
-      format: productionItems.format,
-      sourceType: productionItems.sourceType,
-      views: productionItems.views,
-      likes: productionItems.likes,
-      comments: productionItems.comments,
-      accountId: productionItems.accountId,
-      accountPlatform: accounts.platform,
-      accountHandle: accounts.handle,
-      accountDisplayName: accounts.displayName,
-      accountAvatarUrl: accounts.avatarUrl,
-      pillarContentItemId: productionItems.pillarContentItemId,
-    })
-    .from(productionItems)
-    .leftJoin(accounts, eq(productionItems.accountId, accounts.id))
-    .where(
-      and(
-        eq(productionItems.brand, brand),
-        inArray(productionItems.sourceType, [...ELIGIBLE_SOURCE_TYPES]),
-        eq(productionItems.status, "Published"),
-        isNull(productionItems.deletedAt),
-        gte(
-          productionItems.publishedAt,
-          sql`(now() - interval '${sql.raw(String(CANDIDATE_WINDOW_DAYS))} days')`
-        )
-      )
-    );
 
   stats.rawCandidates = rawCandidates.length;
 
@@ -310,44 +316,87 @@ export async function selectCrossPostCandidates(opts: {
   //
   // Depth bound at 8 — actual chains are 1–2 deep, but the ceiling guards
   // against a cycle bug elsewhere.
-  const existingCrossPostRows =
+
+  const pillarIds = Array.from(
+    new Set(
+      rawCandidates
+        .map((c) => c.pillarContentItemId)
+        .filter((x): x is string => !!x)
+    )
+  );
+  // The downstream cross-posts, velocity snapshots, dismissals and pillar
+  // titles — independent reads, one round trip.
+  const [existingCrossPostRows, snapshotRows, dismissalRows, pillars] = await Promise.all([
     candidateIds.length === 0
-      ? []
-      : ((await db.execute(sql`
-        WITH RECURSIVE descendants(candidate_id, node_id, depth) AS (
-          SELECT pi.id, pi.id, 0
-          FROM production_items pi
-          WHERE pi.id IN ${sql.raw(`(${candidateIds.map((id) => `'${id}'`).join(",")})`)}
-            AND pi.deleted_at IS NULL
-          UNION ALL
-          SELECT d.candidate_id, pi.id, d.depth + 1
+        ? []
+        : (db.execute(sql`
+          WITH RECURSIVE descendants(candidate_id, node_id, depth) AS (
+            SELECT pi.id, pi.id, 0
+            FROM production_items pi
+            WHERE pi.id IN ${sql.raw(`(${candidateIds.map((id) => `'${id}'`).join(",")})`)}
+              AND pi.deleted_at IS NULL
+            UNION ALL
+            SELECT d.candidate_id, pi.id, d.depth + 1
+            FROM descendants d
+            JOIN production_items pi ON pi.reposted_from_item_id = d.node_id
+            WHERE d.depth < 8
+              AND pi.deleted_at IS NULL
+          )
+          SELECT DISTINCT
+            d.candidate_id::text AS candidate_id,
+            pi.id::text AS production_item_id,
+            pi.account_id::text AS account_id,
+            pi.post_type AS post_type,
+            pi.status AS status,
+            pi.published_at AS published_at
           FROM descendants d
-          JOIN production_items pi ON pi.reposted_from_item_id = d.node_id
-          WHERE d.depth < 8
+          JOIN production_items pi ON pi.id = d.node_id
+          WHERE pi.source_type = 'cross_post'
+            AND pi.account_id IS NOT NULL
+            AND pi.post_type IS NOT NULL
             AND pi.deleted_at IS NULL
+            AND pi.id != d.candidate_id;
+        `) as unknown as Promise<Array<{
+            candidate_id: string;
+            production_item_id: string;
+            account_id: string;
+            post_type: string | null;
+            status: string | null;
+            published_at: Date | string | null;
+          }>>),
+    db
+      .select({
+        productionItemId: viewSnapshots.productionItemId,
+        checkpointKey: viewSnapshots.checkpointKey,
+        views: viewSnapshots.views,
+      })
+      .from(viewSnapshots)
+      .where(
+        and(
+          inArray(viewSnapshots.productionItemId, candidateIds),
+          sql`${viewSnapshots.checkpointKey} IS NOT NULL`
         )
-        SELECT DISTINCT
-          d.candidate_id::text AS candidate_id,
-          pi.id::text AS production_item_id,
-          pi.account_id::text AS account_id,
-          pi.post_type AS post_type,
-          pi.status AS status,
-          pi.published_at AS published_at
-        FROM descendants d
-        JOIN production_items pi ON pi.id = d.node_id
-        WHERE pi.source_type = 'cross_post'
-          AND pi.account_id IS NOT NULL
-          AND pi.post_type IS NOT NULL
-          AND pi.deleted_at IS NULL
-          AND pi.id != d.candidate_id;
-      `)) as unknown as Array<{
-          candidate_id: string;
-          production_item_id: string;
-          account_id: string;
-          post_type: string | null;
-          status: string | null;
-          published_at: Date | string | null;
-        }>);
+      ),
+    db
+      .select({ contentItemId: contentEvents.contentItemId })
+      .from(contentEvents)
+      .where(
+        and(
+          eq(contentEvents.eventType, "cross_post_dismissed"),
+          inArray(contentEvents.contentItemId, candidateIds),
+          gte(
+            contentEvents.createdAt,
+            sql`(now() - interval '${sql.raw(String(DISMISSAL_TTL_DAYS))} days')`
+          )
+        )
+      ),
+    pillarIds.length > 0
+      ? db
+          .select({ id: productionItems.id, title: productionItems.title })
+          .from(productionItems)
+          .where(inArray(productionItems.id, pillarIds))
+      : [],
+  ]);
 
   // Group by candidate, then dedupe by (accountId, postType) keeping the
   // most-recent published-at. The dialog renders one row per
@@ -390,19 +439,6 @@ export async function selectCrossPostCandidates(opts: {
   }
 
   // Per-candidate velocity snapshots. One query, batched on ID list.
-  const snapshotRows = await db
-    .select({
-      productionItemId: viewSnapshots.productionItemId,
-      checkpointKey: viewSnapshots.checkpointKey,
-      views: viewSnapshots.views,
-    })
-    .from(viewSnapshots)
-    .where(
-      and(
-        inArray(viewSnapshots.productionItemId, candidateIds),
-        sql`${viewSnapshots.checkpointKey} IS NOT NULL`
-      )
-    );
   const snapshotsByItem = new Map<string, Map<string, number>>();
   for (const row of snapshotRows) {
     if (!row.checkpointKey) continue;
@@ -411,36 +447,10 @@ export async function selectCrossPostCandidates(opts: {
     snapshotsByItem.set(row.productionItemId, m);
   }
 
-  const dismissalRows = await db
-    .select({ contentItemId: contentEvents.contentItemId })
-    .from(contentEvents)
-    .where(
-      and(
-        eq(contentEvents.eventType, "cross_post_dismissed"),
-        inArray(contentEvents.contentItemId, candidateIds),
-        gte(
-          contentEvents.createdAt,
-          sql`(now() - interval '${sql.raw(String(DISMISSAL_TTL_DAYS))} days')`
-        )
-      )
-    );
   const dismissedIds = new Set(dismissalRows.map((r) => r.contentItemId));
 
-  const pillarIds = Array.from(
-    new Set(
-      rawCandidates
-        .map((c) => c.pillarContentItemId)
-        .filter((x): x is string => !!x)
-    )
-  );
   const pillarTitleById = new Map<string, string | null>();
-  if (pillarIds.length > 0) {
-    const pillars = await db
-      .select({ id: productionItems.id, title: productionItems.title })
-      .from(productionItems)
-      .where(inArray(productionItems.id, pillarIds));
-    for (const p of pillars) pillarTitleById.set(p.id, p.title);
-  }
+  for (const p of pillars) pillarTitleById.set(p.id, p.title);
 
   const items: CrossPostCandidate[] = [];
   for (const c of rawCandidates) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
+import { invalidateQueueCaches } from "@/lib/invalidate-report-caches";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
 
@@ -54,5 +55,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     payload: { type: "repost_dismissed", reason },
   });
 
+  invalidateQueueCaches();
   return NextResponse.json({ ok: true }, { status: 201 });
 }

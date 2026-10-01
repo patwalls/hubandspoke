@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth-guards";
 import { selectCrossPostCandidates } from "@/lib/services/cross-post-candidates";
+import { getCrossPostCandidatesCached } from "@/lib/services/queue-candidates-cached";
+import { invalidateQueueCaches } from "@/lib/invalidate-report-caches";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,11 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const result = await selectCrossPostCandidates({ brand });
+  // `fresh=1` (the queue's refetch after a triage action): recompute and
+  // reset the shared entry so the next plain load doesn't serve the row
+  // that was just dismissed. See services/queue-candidates-cached.ts.
+  const fresh = request.nextUrl.searchParams.get("fresh") === "1";
+  if (fresh) invalidateQueueCaches();
+  const result = fresh ? await selectCrossPostCandidates({ brand }) : await getCrossPostCandidatesCached(brand);
   return NextResponse.json(result);
 }

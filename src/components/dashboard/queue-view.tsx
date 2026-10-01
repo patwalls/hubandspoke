@@ -123,8 +123,11 @@ export function QueueView({
     clipFormatNameBySource.get(selectedSource) ?? null;
   void initialClipFormatFilter;
   const router = useRouter();
-  const [items, setItems] = useState<ProductionItem[]>([]);
-  const [loading, setLoading] = useState(!initialItems); // SSR path: rows are already in state — render them in the server HTML, not a spinner
+  // SSR path: the rows are the initial state, so the All tab is in the server
+  // HTML and the mount fetch is skipped. (Before 2026-10-01 only the spinner
+  // flag read `initialItems` — the rows were thrown away and re-fetched.)
+  const [items, setItems] = useState<ProductionItem[]>(initialItems ?? []);
+  const [loading, setLoading] = useState(!initialItems);
   const [crossPostData, setCrossPostData] =
     useState<CrossPostCandidatesResult | null>(null);
   const [crossPostLoading, setCrossPostLoading] = useState(true);
@@ -181,11 +184,13 @@ export function QueueView({
     }
   }, [brand]);
 
-  const fetchCrossPostQueue = useCallback(async () => {
+  // The three candidate lists are served from a 2-minute server cache; after
+  // an action here we ask for a fresh run (`fresh=1` also resets the cache).
+  const fetchCrossPostQueue = useCallback(async (fresh = false) => {
     setCrossPostLoading(true);
     try {
       const res = await fetch(
-        `/api/cross-post-queue?brand=${encodeURIComponent(brand)}`
+        `/api/cross-post-queue?brand=${encodeURIComponent(brand)}${fresh ? "&fresh=1" : ""}`
       );
       if (!res.ok) {
         console.error(`Cross-post queue API returned HTTP ${res.status}`);
@@ -221,18 +226,20 @@ export function QueueView({
   }, [brand]);
 
   useEffect(() => {
+    if (initialItems) return; // already painted from the server
     fetchQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchQueue]);
 
   useEffect(() => {
-    fetchCrossPostQueue();
+    void fetchCrossPostQueue(false);
   }, [fetchCrossPostQueue]);
 
-  const fetchRepostQueue = useCallback(async () => {
+  const fetchRepostQueue = useCallback(async (fresh = false) => {
     setRepostLoading(true);
     try {
       const res = await fetch(
-        `/api/repost-queue?brand=${encodeURIComponent(brand)}`
+        `/api/repost-queue?brand=${encodeURIComponent(brand)}${fresh ? "&fresh=1" : ""}`
       );
       if (!res.ok) {
         console.error(`Repost queue API returned HTTP ${res.status}`);
@@ -272,14 +279,14 @@ export function QueueView({
   }, [brand]);
 
   useEffect(() => {
-    fetchRepostQueue();
+    void fetchRepostQueue(false);
   }, [fetchRepostQueue]);
 
-  const fetchSpokeQueue = useCallback(async () => {
+  const fetchSpokeQueue = useCallback(async (fresh = false) => {
     setSpokeLoading(true);
     try {
       const res = await fetch(
-        `/api/spoke-queue?brand=${encodeURIComponent(brand)}`
+        `/api/spoke-queue?brand=${encodeURIComponent(brand)}${fresh ? "&fresh=1" : ""}`
       );
       if (!res.ok) {
         console.error(`Spoke queue API returned HTTP ${res.status}`);
@@ -325,7 +332,7 @@ export function QueueView({
   }, [brand]);
 
   useEffect(() => {
-    fetchSpokeQueue();
+    void fetchSpokeQueue(false);
   }, [fetchSpokeQueue]);
 
   const fetchHistory = useCallback(async () => {
@@ -696,7 +703,7 @@ export function QueueView({
                 ? "No hot posts match the current filters."
                 : "Nothing hot in the last 21 days. Check back tomorrow."
             }
-            onMutate={fetchCrossPostQueue}
+            onMutate={() => void fetchCrossPostQueue(true)}
           />
         )
       ) : isRepostTab ? (
@@ -713,7 +720,7 @@ export function QueueView({
                 ? "No evergreen candidates match the current filters."
                 : "No elite evergreen right now. The bar is high — give it time as more cohort data lands."
             }
-            onMutate={fetchRepostQueue}
+            onMutate={() => void fetchRepostQueue(true)}
           />
         )
       ) : isSpokeTab ? (
@@ -721,7 +728,7 @@ export function QueueView({
           <LoadingPanel label="Running SPOKE algorithm…" />
         ) : (
           <>
-          <RestoredDesignEditor brand={brand} onDone={fetchSpokeQueue} />
+          <RestoredDesignEditor brand={brand} onDone={() => void fetchSpokeQueue(true)} />
           <SpokeQueueTable
             items={spokeFiltered}
             brand={brand}
@@ -732,7 +739,7 @@ export function QueueView({
                 ? "No SPOKE candidates match the current filters."
                 : "No SPOKE candidates above the bar right now. Pillars need to clear their channel's typical performance to surface."
             }
-            onMutate={fetchSpokeQueue}
+            onMutate={() => void fetchSpokeQueue(true)}
           />
           </>
         )

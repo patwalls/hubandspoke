@@ -11,4 +11,14 @@ const revalidateByTag = revalidateTag as (tag: string) => void;
 export function invalidateReportCaches(): void {
   revalidateByTag("production-report");
   revalidateByTag("content-report");
+  // Anything that moves an item through the pipeline can admit or retire a
+  // queue candidate (in-flight pairs, cooldowns, prior attempts).
+  invalidateQueueCaches();
+}
+
+/** The Repurposed / Repost / Cross-post candidate lists (see
+ *  services/queue-candidates-cached.ts). Call after a dismissal or a kill —
+ *  anything that changes the answer without touching the reports. */
+export function invalidateQueueCaches(): void {
+  revalidateByTag("queue-candidates");
 }

@@ -176,51 +176,66 @@ export async function selectSpokeCandidates(opts: {
   };
 
   // 1. Eligible pillars: brand-scoped, YT long-form, Published, fresh-ish.
-  const pillarRows = await db
-    .select({
-      id: productionItems.id,
-      brand: productionItems.brand,
-      title: productionItems.title,
-      thumbnail: productionItems.thumbnail,
-      publishedAt: productionItems.publishedAt,
-      publishedDate: productionItems.publishedDate,
-      publishedLink: productionItems.publishedLink,
-      views: productionItems.views,
-      likes: productionItems.likes,
-      comments: productionItems.comments,
-      format: productionItems.format,
-      lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
-      accountId: productionItems.accountId,
-      accountPlatform: accounts.platform,
-      accountHandle: accounts.handle,
-      accountDisplayName: accounts.displayName,
-      accountAvatarUrl: accounts.avatarUrl,
-    })
-    .from(productionItems)
-    .innerJoin(accounts, eq(productionItems.accountId, accounts.id))
-    .where(
-      and(
-        eq(productionItems.brand, brand),
-        eq(productionItems.postType, PILLAR_POST_TYPE),
-        eq(productionItems.status, "Published"),
-        isNull(productionItems.deletedAt),
-        sql`${productionItems.views} IS NOT NULL AND ${productionItems.views} > 0`,
-        sql`${productionItems.publishedAt} IS NOT NULL`,
-        // v1.1 gate: pillar must have a format assigned AND that format must
-        // exist as a row in the brand's formats table. Free-form legacy
-        // format strings (anything not in the formats table) get filtered.
-        sql`${productionItems.format} IS NOT NULL`,
-        sql`EXISTS (
-          SELECT 1 FROM formats f
-          WHERE f.brand = ${brand}
-            AND lower(trim(f.name)) = lower(trim(${productionItems.format}))
-        )`,
-        gte(
-          productionItems.publishedAt,
-          sql`(now() - interval '${sql.raw(String(PILLAR_WINDOW_DAYS))} days')`,
+
+  // Steps 1 and 2 (and, below, 3–5b) are independent reads — one round
+  // trip each instead of a chain of ten. The result is cached per brand;
+  // see services/queue-candidates-cached.ts.
+  const [pillarRows, allFormats] = await Promise.all([
+    db
+      .select({
+        id: productionItems.id,
+        brand: productionItems.brand,
+        title: productionItems.title,
+        thumbnail: productionItems.thumbnail,
+        publishedAt: productionItems.publishedAt,
+        publishedDate: productionItems.publishedDate,
+        publishedLink: productionItems.publishedLink,
+        views: productionItems.views,
+        likes: productionItems.likes,
+        comments: productionItems.comments,
+        format: productionItems.format,
+        lastPerformanceSyncAt: productionItems.lastPerformanceSyncAt,
+        accountId: productionItems.accountId,
+        accountPlatform: accounts.platform,
+        accountHandle: accounts.handle,
+        accountDisplayName: accounts.displayName,
+        accountAvatarUrl: accounts.avatarUrl,
+      })
+      .from(productionItems)
+      .innerJoin(accounts, eq(productionItems.accountId, accounts.id))
+      .where(
+        and(
+          eq(productionItems.brand, brand),
+          eq(productionItems.postType, PILLAR_POST_TYPE),
+          eq(productionItems.status, "Published"),
+          isNull(productionItems.deletedAt),
+          sql`${productionItems.views} IS NOT NULL AND ${productionItems.views} > 0`,
+          sql`${productionItems.publishedAt} IS NOT NULL`,
+          // v1.1 gate: pillar must have a format assigned AND that format must
+          // exist as a row in the brand's formats table. Free-form legacy
+          // format strings (anything not in the formats table) get filtered.
+          sql`${productionItems.format} IS NOT NULL`,
+          sql`EXISTS (
+            SELECT 1 FROM formats f
+            WHERE f.brand = ${brand}
+              AND lower(trim(f.name)) = lower(trim(${productionItems.format}))
+          )`,
+          gte(
+            productionItems.publishedAt,
+            sql`(now() - interval '${sql.raw(String(PILLAR_WINDOW_DAYS))} days')`,
+          ),
         ),
       ),
-    );
+    db
+      .select({
+        id: formatsTable.id,
+        name: formatsTable.name,
+        parentFormatId: formatsTable.parentFormatId,
+        isClippableFormat: formatsTable.isClippableFormat,
+      })
+      .from(formatsTable)
+      .where(eq(formatsTable.brand, brand)),
+  ]);
 
   stats.rawPillars = pillarRows.length;
   if (pillarRows.length === 0) {
@@ -231,15 +246,6 @@ export async function selectSpokeCandidates(opts: {
   //    formats per-pillar to the children of the pillar's own format
   //    (formats.parentFormatId), not the brand-wide format menu. Pillars
   //    whose format has no children get skipped.
-  const allFormats = await db
-    .select({
-      id: formatsTable.id,
-      name: formatsTable.name,
-      parentFormatId: formatsTable.parentFormatId,
-      isClippableFormat: formatsTable.isClippableFormat,
-    })
-    .from(formatsTable)
-    .where(eq(formatsTable.brand, brand));
 
   const formatByLowerName = new Map<
     string,
@@ -267,19 +273,169 @@ export async function selectSpokeCandidates(opts: {
     return { items: [], stats, config: configBlock() };
   }
 
+  const pillarAccountIds = Array.from(
+    new Set(pillarRows.map((p) => p.accountId).filter((x): x is string => !!x)),
+  );
+  const pillarIds = pillarRows.map((p) => p.id);
+  const allFormatNamesLower = allFormats.map((f) =>
+    f.name.toLowerCase().trim(),
+  );
+
+  // 3–5b, all at once: target post types, the cohort bars, pair history
+  // and dismissals. Each block below just indexes its rows.
+  const [
+    formatPostTypeRows,
+    channelBarsRows,
+    formatBarsRows,
+    brandBarRows,
+    pairSourceRows,
+    priorRows,
+    dismissalRows,
+  ] = await Promise.all([
+    db.execute<{
+      format_id: string;
+      post_type: string | null;
+    }>(sql`
+      SELECT DISTINCT ON (fc.format_id) fc.format_id::text AS format_id, fc.post_type
+      FROM format_channels fc
+      WHERE fc.format_id = ANY(${sql.raw(
+        `ARRAY[${allFormats.map((f) => `'${f.id}'`).join(",")}]::uuid[]`,
+      )})
+      ORDER BY fc.format_id, fc.created_at ASC
+    `),
+    pillarAccountIds.length === 0
+      ? []
+      : db.execute<{
+          account_id: string;
+          p: string;
+          cohort_size: string;
+        }>(sql`
+          SELECT
+            account_id::text AS account_id,
+            percentile_cont(${PERCENTILE}) WITHIN GROUP (ORDER BY views) AS p,
+            count(*)::text AS cohort_size
+          FROM production_items
+          WHERE account_id = ANY(${sql.raw(
+            `ARRAY[${pillarAccountIds.map((id) => `'${id}'`).join(",")}]::uuid[]`,
+          )})
+            AND post_type = ${PILLAR_POST_TYPE}
+            AND status = 'Published'
+            AND deleted_at IS NULL
+            AND views IS NOT NULL
+            AND published_at >= (now() - interval '${sql.raw(
+              String(CHANNEL_COHORT_WINDOW_DAYS),
+            )} days')
+          GROUP BY account_id
+        `),
+    db.execute<{
+      format: string;
+      post_type: string;
+      p: string;
+      cohort_size: string;
+    }>(sql`
+      SELECT
+        lower(trim(format)) AS format,
+        post_type,
+        percentile_cont(${PERCENTILE}) WITHIN GROUP (ORDER BY views) AS p,
+        count(*)::text AS cohort_size
+      FROM production_items
+      WHERE brand = ${brand}
+        AND format IS NOT NULL
+        AND post_type IS NOT NULL
+        AND status = 'Published'
+        AND deleted_at IS NULL
+        AND views IS NOT NULL
+        AND published_at >= (now() - interval '${sql.raw(
+          String(FORMAT_COHORT_WINDOW_DAYS),
+        )} days')
+      GROUP BY lower(trim(format)), post_type
+    `),
+    db.execute<{ p: string; cohort_size: string }>(sql`
+      SELECT
+        percentile_cont(${PERCENTILE}) WITHIN GROUP (ORDER BY views) AS p,
+        count(*)::text AS cohort_size
+      FROM production_items
+      WHERE brand = ${brand}
+        AND status = 'Published'
+        AND deleted_at IS NULL
+        AND views IS NOT NULL
+        AND published_at >= (now() - interval '${sql.raw(
+          String(FORMAT_COHORT_WINDOW_DAYS),
+        )} days')
+    `),
+    db.execute<{
+      format: string;
+      pillar_account_id: string;
+      p: string;
+      cohort_size: string;
+    }>(sql`
+      SELECT
+        lower(trim(derivative.format)) AS format,
+        pillar.account_id::text AS pillar_account_id,
+        percentile_cont(${PAIR_SOURCE_PERCENTILE}) WITHIN GROUP (ORDER BY derivative.views) AS p,
+        count(*)::text AS cohort_size
+      FROM production_items derivative
+      JOIN production_items pillar ON pillar.id = derivative.pillar_content_item_id
+      WHERE derivative.brand = ${brand}
+        AND derivative.status = 'Published'
+        AND derivative.deleted_at IS NULL
+        AND derivative.views IS NOT NULL
+        AND derivative.format IS NOT NULL
+        AND derivative.published_at >= (now() - interval '${sql.raw(
+          String(PAIR_SOURCE_COHORT_WINDOW_DAYS),
+        )} days')
+        AND pillar.account_id IS NOT NULL
+        AND pillar.post_type = ${PILLAR_POST_TYPE}
+      GROUP BY lower(trim(derivative.format)), pillar.account_id
+      HAVING count(*) >= ${MIN_PAIR_SOURCE_COHORT}
+    `),
+    db.execute<{
+      production_item_id: string;
+      pillar_id: string;
+      format: string;
+      status: string | null;
+      published_at: Date | string | null;
+      views: number | null;
+      killed_at: Date | string | null;
+    }>(sql`
+      SELECT
+        id::text AS production_item_id,
+        pillar_content_item_id::text AS pillar_id,
+        lower(trim(format)) AS format,
+        status,
+        published_at,
+        views,
+        CASE WHEN status = 'Killed' THEN updated_at ELSE NULL END AS killed_at
+      FROM production_items
+      WHERE pillar_content_item_id = ANY(${sql.raw(
+        `ARRAY[${pillarIds.map((id) => `'${id}'`).join(",")}]::uuid[]`,
+      )})
+        AND lower(trim(format)) = ANY(${sql.raw(
+          `ARRAY[${allFormatNamesLower.map((n) => `'${n.replace(/'/g, "''")}'`).join(",")}]::text[]`,
+        )})
+        AND deleted_at IS NULL
+    `),
+    db
+      .select({
+        contentItemId: contentEvents.contentItemId,
+        payload: contentEvents.payload,
+      })
+      .from(contentEvents)
+      .where(
+        and(
+          eq(contentEvents.eventType, "spoke_dismissed"),
+          inArray(contentEvents.contentItemId, pillarIds),
+          gte(
+            contentEvents.createdAt,
+            sql`(now() - interval '${sql.raw(String(DISMISSAL_TTL_DAYS))} days')`,
+          ),
+        ),
+      ),
+  ]);
+  const [brandBarRow] = brandBarRows as Array<{ p: string; cohort_size: string }>;
+
   // 3. Format's representative target post type (for accountId resolution
   //    on promotion). Use the format's most-used post_type historically.
-  const formatPostTypeRows = await db.execute<{
-    format_id: string;
-    post_type: string | null;
-  }>(sql`
-    SELECT DISTINCT ON (fc.format_id) fc.format_id::text AS format_id, fc.post_type
-    FROM format_channels fc
-    WHERE fc.format_id = ANY(${sql.raw(
-      `ARRAY[${allFormats.map((f) => `'${f.id}'`).join(",")}]::uuid[]`,
-    )})
-    ORDER BY fc.format_id, fc.created_at ASC
-  `);
   const targetPostTypeByFormatId = new Map<string, string | null>();
   for (const r of formatPostTypeRows) {
     targetPostTypeByFormatId.set(r.format_id, r.post_type);
@@ -288,33 +444,6 @@ export async function selectSpokeCandidates(opts: {
   // 4. Cohort bars — fetched once, indexed in memory.
 
   // 4a. Channel lifetime P60 for YT long-form (per pillar account).
-  const pillarAccountIds = Array.from(
-    new Set(pillarRows.map((p) => p.accountId).filter((x): x is string => !!x)),
-  );
-  const channelBarsRows = pillarAccountIds.length === 0
-    ? []
-    : await db.execute<{
-        account_id: string;
-        p: string;
-        cohort_size: string;
-      }>(sql`
-        SELECT
-          account_id::text AS account_id,
-          percentile_cont(${PERCENTILE}) WITHIN GROUP (ORDER BY views) AS p,
-          count(*)::text AS cohort_size
-        FROM production_items
-        WHERE account_id = ANY(${sql.raw(
-          `ARRAY[${pillarAccountIds.map((id) => `'${id}'`).join(",")}]::uuid[]`,
-        )})
-          AND post_type = ${PILLAR_POST_TYPE}
-          AND status = 'Published'
-          AND deleted_at IS NULL
-          AND views IS NOT NULL
-          AND published_at >= (now() - interval '${sql.raw(
-            String(CHANNEL_COHORT_WINDOW_DAYS),
-          )} days')
-        GROUP BY account_id
-      `);
   const channelP60ByAccount = new Map<
     string,
     { p: number; cohortSize: number }
@@ -329,29 +458,6 @@ export async function selectSpokeCandidates(opts: {
   // 4b. Brand format P60 (per format, summed across post_types). One row
   //     per format using the largest-cohort post_type so we don't pool
   //     wildly different distributions.
-  const formatBarsRows = await db.execute<{
-    format: string;
-    post_type: string;
-    p: string;
-    cohort_size: string;
-  }>(sql`
-    SELECT
-      lower(trim(format)) AS format,
-      post_type,
-      percentile_cont(${PERCENTILE}) WITHIN GROUP (ORDER BY views) AS p,
-      count(*)::text AS cohort_size
-    FROM production_items
-    WHERE brand = ${brand}
-      AND format IS NOT NULL
-      AND post_type IS NOT NULL
-      AND status = 'Published'
-      AND deleted_at IS NULL
-      AND views IS NOT NULL
-      AND published_at >= (now() - interval '${sql.raw(
-        String(FORMAT_COHORT_WINDOW_DAYS),
-      )} days')
-    GROUP BY lower(trim(format)), post_type
-  `);
   // Pick the largest-cohort post_type per format as the representative bar.
   // No MIN_FORMAT_HISTORY filter at fetch time anymore (v1.2) — child
   // formats with thin cohorts get a neutral formatFit=1.0 in scoring so
@@ -373,50 +479,11 @@ export async function selectSpokeCandidates(opts: {
   }
 
   // 4c. Brand-all-formats P60 (denominator for formatFit).
-  const [brandBarRow] = (await db.execute<{ p: string; cohort_size: string }>(sql`
-    SELECT
-      percentile_cont(${PERCENTILE}) WITHIN GROUP (ORDER BY views) AS p,
-      count(*)::text AS cohort_size
-    FROM production_items
-    WHERE brand = ${brand}
-      AND status = 'Published'
-      AND deleted_at IS NULL
-      AND views IS NOT NULL
-      AND published_at >= (now() - interval '${sql.raw(
-        String(FORMAT_COHORT_WINDOW_DAYS),
-      )} days')
-  `)) as Array<{ p: string; cohort_size: string }>;
   const brandAllFormatsP60 = brandBarRow ? Number(brandBarRow.p) : 0;
 
   // 4d. Pair-source P50: per (format, pillar_account_id), historical median
   //     views of repurposes that came from THAT account. Captures "this
   //     format has worked well on this channel before."
-  const pairSourceRows = await db.execute<{
-    format: string;
-    pillar_account_id: string;
-    p: string;
-    cohort_size: string;
-  }>(sql`
-    SELECT
-      lower(trim(derivative.format)) AS format,
-      pillar.account_id::text AS pillar_account_id,
-      percentile_cont(${PAIR_SOURCE_PERCENTILE}) WITHIN GROUP (ORDER BY derivative.views) AS p,
-      count(*)::text AS cohort_size
-    FROM production_items derivative
-    JOIN production_items pillar ON pillar.id = derivative.pillar_content_item_id
-    WHERE derivative.brand = ${brand}
-      AND derivative.status = 'Published'
-      AND derivative.deleted_at IS NULL
-      AND derivative.views IS NOT NULL
-      AND derivative.format IS NOT NULL
-      AND derivative.published_at >= (now() - interval '${sql.raw(
-        String(PAIR_SOURCE_COHORT_WINDOW_DAYS),
-      )} days')
-      AND pillar.account_id IS NOT NULL
-      AND pillar.post_type = ${PILLAR_POST_TYPE}
-    GROUP BY lower(trim(derivative.format)), pillar.account_id
-    HAVING count(*) >= ${MIN_PAIR_SOURCE_COHORT}
-  `);
   const pairSourceByKey = new Map<
     string,
     { p: number; cohortSize: number }
@@ -432,42 +499,12 @@ export async function selectSpokeCandidates(opts: {
   //    One batched query, then indexed by pillarId|formatNameLower.
   //    Format scope: any brand format (a pair's history is tied to the
   //    target format name, which is some child in the hierarchy).
-  const pillarIds = pillarRows.map((p) => p.id);
-  const allFormatNamesLower = allFormats.map((f) =>
-    f.name.toLowerCase().trim(),
-  );
   // killed_at: no dedicated column today. Approximate with updated_at when
   // status='Killed' — the row's updated_at flips when status transitions,
   // and the 60-day kill window is forgiving enough that an occasional
   // post-kill edit nudging this forward is acceptable. content_events of
   // type='killed' would be exact, but worth the join only if this becomes
   // a sharper gate later.
-  const priorRows = await db.execute<{
-    production_item_id: string;
-    pillar_id: string;
-    format: string;
-    status: string | null;
-    published_at: Date | string | null;
-    views: number | null;
-    killed_at: Date | string | null;
-  }>(sql`
-    SELECT
-      id::text AS production_item_id,
-      pillar_content_item_id::text AS pillar_id,
-      lower(trim(format)) AS format,
-      status,
-      published_at,
-      views,
-      CASE WHEN status = 'Killed' THEN updated_at ELSE NULL END AS killed_at
-    FROM production_items
-    WHERE pillar_content_item_id = ANY(${sql.raw(
-      `ARRAY[${pillarIds.map((id) => `'${id}'`).join(",")}]::uuid[]`,
-    )})
-      AND lower(trim(format)) = ANY(${sql.raw(
-        `ARRAY[${allFormatNamesLower.map((n) => `'${n.replace(/'/g, "''")}'`).join(",")}]::text[]`,
-      )})
-      AND deleted_at IS NULL
-  `);
   const priorByPair = new Map<string, SpokePriorAttempt[]>();
   for (const r of priorRows) {
     const key = `${r.pillar_id}|${r.format}`;
@@ -497,22 +534,6 @@ export async function selectSpokeCandidates(opts: {
   //     on the pillar carrying the rejected `formatId`. Build a Set keyed by
   //     `${pillarId}|${formatId}` so the scoring loop skips just that pair,
   //     not the pillar's other candidate formats.
-  const dismissalRows = await db
-    .select({
-      contentItemId: contentEvents.contentItemId,
-      payload: contentEvents.payload,
-    })
-    .from(contentEvents)
-    .where(
-      and(
-        eq(contentEvents.eventType, "spoke_dismissed"),
-        inArray(contentEvents.contentItemId, pillarIds),
-        gte(
-          contentEvents.createdAt,
-          sql`(now() - interval '${sql.raw(String(DISMISSAL_TTL_DAYS))} days')`,
-        ),
-      ),
-    );
   const dismissedPairs = new Set<string>();
   for (const r of dismissalRows) {
     const p = r.payload;

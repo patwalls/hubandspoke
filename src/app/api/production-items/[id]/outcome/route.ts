@@ -7,6 +7,7 @@ import {
   productionItems,
 } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 
 // Accept / kill a production item (primarily used by the cross-post feed).
 // Captures the operator's reason, stamps a content_events row, and — when
@@ -112,6 +113,7 @@ export async function POST(
       return row;
     });
 
+    invalidateReportCaches();
     return NextResponse.json({ item: updated });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

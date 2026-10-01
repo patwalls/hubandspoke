@@ -246,11 +246,51 @@ export async function selectRepostCandidates(opts: {
   // Resolve brand → brand id once. Used for the brand-cohort fallback
   // tier and for filtering the candidate query (productionItems.brand
   // is a slug, but the cohort fetch keys off accounts.brand_id).
-  const [brandRow] = await db
-    .select({ id: brands.id, slug: brands.slug })
-    .from(brands)
-    .where(eq(brands.slug, brand))
-    .limit(1);
+  const [brandRows, rawCandidates] = await Promise.all([
+    db
+      .select({ id: brands.id, slug: brands.slug })
+      .from(brands)
+      .where(eq(brands.slug, brand))
+      .limit(1),
+    db
+      .select({
+        id: productionItems.id,
+        brand: productionItems.brand,
+        title: productionItems.title,
+        thumbnail: productionItems.thumbnail,
+        publishedAt: productionItems.publishedAt,
+        publishedDate: productionItems.publishedDate,
+        publishedLink: productionItems.publishedLink,
+        postType: productionItems.postType,
+        format: productionItems.format,
+        sourceType: productionItems.sourceType,
+        views: productionItems.views,
+        likes: productionItems.likes,
+        comments: productionItems.comments,
+        accountId: productionItems.accountId,
+        pillarContentItemId: productionItems.pillarContentItemId,
+        evergreenReasoning: productionItems.evergreenReasoning,
+        accountPlatform: accounts.platform,
+        accountHandle: accounts.handle,
+        accountDisplayName: accounts.displayName,
+        accountAvatarUrl: accounts.avatarUrl,
+      })
+      .from(productionItems)
+      .innerJoin(accounts, eq(productionItems.accountId, accounts.id))
+      .where(
+        and(
+          eq(productionItems.brand, brand),
+          inArray(productionItems.sourceType, [...ELIGIBLE_SOURCE_TYPES]),
+          eq(productionItems.status, "Published"),
+          isNull(productionItems.deletedAt),
+          sql`${productionItems.views} IS NOT NULL AND ${productionItems.views} > 0`,
+          sql`${productionItems.format} IS NOT NULL`,
+          sql`${productionItems.postType} IS NOT NULL`,
+          sql`${productionItems.publishedAt} IS NOT NULL`,
+        )
+      ),
+  ]);
+  const [brandRow] = brandRows;
   if (!brandRow) {
     return {
       items: [],
@@ -262,43 +302,6 @@ export async function selectRepostCandidates(opts: {
   // Eligibility filter (SQL): brand-scoped, eligible source type, all
   // required fields populated. Per-platform min-age applied in code
   // because per-row age depends on the joined account.platform.
-  const rawCandidates = await db
-    .select({
-      id: productionItems.id,
-      brand: productionItems.brand,
-      title: productionItems.title,
-      thumbnail: productionItems.thumbnail,
-      publishedAt: productionItems.publishedAt,
-      publishedDate: productionItems.publishedDate,
-      publishedLink: productionItems.publishedLink,
-      postType: productionItems.postType,
-      format: productionItems.format,
-      sourceType: productionItems.sourceType,
-      views: productionItems.views,
-      likes: productionItems.likes,
-      comments: productionItems.comments,
-      accountId: productionItems.accountId,
-      pillarContentItemId: productionItems.pillarContentItemId,
-      evergreenReasoning: productionItems.evergreenReasoning,
-      accountPlatform: accounts.platform,
-      accountHandle: accounts.handle,
-      accountDisplayName: accounts.displayName,
-      accountAvatarUrl: accounts.avatarUrl,
-    })
-    .from(productionItems)
-    .innerJoin(accounts, eq(productionItems.accountId, accounts.id))
-    .where(
-      and(
-        eq(productionItems.brand, brand),
-        inArray(productionItems.sourceType, [...ELIGIBLE_SOURCE_TYPES]),
-        eq(productionItems.status, "Published"),
-        isNull(productionItems.deletedAt),
-        sql`${productionItems.views} IS NOT NULL AND ${productionItems.views} > 0`,
-        sql`${productionItems.format} IS NOT NULL`,
-        sql`${productionItems.postType} IS NOT NULL`,
-        sql`${productionItems.publishedAt} IS NOT NULL`,
-      )
-    );
 
   stats.rawCandidates = rawCandidates.length;
 
@@ -347,11 +350,25 @@ export async function selectRepostCandidates(opts: {
   const accountIds = Array.from(
     new Set(ageEligible.map((c) => c.accountId).filter((x): x is string => !!x))
   );
+  const pillarIds = Array.from(
+    new Set(
+      ageEligible
+        .map((c) => c.pillarContentItemId)
+        .filter((x): x is string => !!x)
+    )
+  );
+  // Everything from here to the scoring loop is an independent read — one
+  // round trip instead of eight. The result is cached per brand; see
+  // services/queue-candidates-cached.ts.
   const [
     accountFormatBars,
     brandFormatBars,
     crossBrandFormatBars,
     checkpointFormatBars,
+    snapshotRows,
+    existingReposts,
+    dismissalRows,
+    pillars,
   ] = await Promise.all([
     fetchAccountFormatViewBars({
       accountIds,
@@ -379,24 +396,61 @@ export async function selectRepostCandidates(opts: {
       // built from the format's recent snapshots.)
       windowDays: 90,
     }),
+      db
+      .select({
+        productionItemId: viewSnapshots.productionItemId,
+        checkpointKey: viewSnapshots.checkpointKey,
+        views: viewSnapshots.views,
+      })
+      .from(viewSnapshots)
+      .where(
+        and(
+          inArray(viewSnapshots.productionItemId, candidateIds),
+          sql`${viewSnapshots.checkpointKey} IS NOT NULL`
+        )
+      ),
+    db
+      .select({
+        sourceItemId: productionItems.repostedFromItemId,
+        productionItemId: productionItems.id,
+        status: productionItems.status,
+        publishedAt: productionItems.publishedAt,
+        publishedDate: productionItems.publishedDate,
+        views: productionItems.views,
+        likes: productionItems.likes,
+      })
+      .from(productionItems)
+      .where(
+        and(
+          eq(productionItems.sourceType, "repost"),
+          inArray(productionItems.repostedFromItemId, candidateIds),
+          isNull(productionItems.deletedAt)
+        )
+      ),
+    db
+      .select({ contentItemId: contentEvents.contentItemId })
+      .from(contentEvents)
+      .where(
+        and(
+          eq(contentEvents.eventType, "repost_dismissed"),
+          inArray(contentEvents.contentItemId, candidateIds),
+          gte(
+            contentEvents.createdAt,
+            sql`(now() - interval '${sql.raw(String(DISMISSAL_TTL_DAYS))} days')`
+          )
+        )
+      ),
+    pillarIds.length > 0
+      ? db
+          .select({ id: productionItems.id, title: productionItems.title })
+          .from(productionItems)
+          .where(inArray(productionItems.id, pillarIds))
+      : [],
   ]);
 
   // Velocity snapshots for each candidate. Most repost candidates are
   // far older than the snapshot pipeline (2026+), so this is usually
   // empty; we surface the signals when they happen to be there.
-  const snapshotRows = await db
-    .select({
-      productionItemId: viewSnapshots.productionItemId,
-      checkpointKey: viewSnapshots.checkpointKey,
-      views: viewSnapshots.views,
-    })
-    .from(viewSnapshots)
-    .where(
-      and(
-        inArray(viewSnapshots.productionItemId, candidateIds),
-        sql`${viewSnapshots.checkpointKey} IS NOT NULL`
-      )
-    );
   const snapshotsByItem = new Map<string, Map<string, number>>();
   for (const row of snapshotRows) {
     if (!row.checkpointKey) continue;
@@ -408,24 +462,6 @@ export async function selectRepostCandidates(opts: {
   // Existing reposts on each candidate (any status, including Killed —
   // we use Killed to permanent-block the source). Sort by createdAt
   // desc so cooldown checks against the latest published repost.
-  const existingReposts = await db
-    .select({
-      sourceItemId: productionItems.repostedFromItemId,
-      productionItemId: productionItems.id,
-      status: productionItems.status,
-      publishedAt: productionItems.publishedAt,
-      publishedDate: productionItems.publishedDate,
-      views: productionItems.views,
-      likes: productionItems.likes,
-    })
-    .from(productionItems)
-    .where(
-      and(
-        eq(productionItems.sourceType, "repost"),
-        inArray(productionItems.repostedFromItemId, candidateIds),
-        isNull(productionItems.deletedAt)
-      )
-    );
 
   // For Killed reposts we want the kill reason for the modal. Pull
   // content_events of type 'killed' for those rows.
@@ -467,37 +503,11 @@ export async function selectRepostCandidates(opts: {
   }
 
   // Dismissals — 30d hide-list.
-  const dismissalRows = await db
-    .select({ contentItemId: contentEvents.contentItemId })
-    .from(contentEvents)
-    .where(
-      and(
-        eq(contentEvents.eventType, "repost_dismissed"),
-        inArray(contentEvents.contentItemId, candidateIds),
-        gte(
-          contentEvents.createdAt,
-          sql`(now() - interval '${sql.raw(String(DISMISSAL_TTL_DAYS))} days')`
-        )
-      )
-    );
   const dismissedIds = new Set(dismissalRows.map((r) => r.contentItemId));
 
   // Pillar titles for the table column.
-  const pillarIds = Array.from(
-    new Set(
-      ageEligible
-        .map((c) => c.pillarContentItemId)
-        .filter((x): x is string => !!x)
-    )
-  );
   const pillarTitleById = new Map<string, string | null>();
-  if (pillarIds.length > 0) {
-    const pillars = await db
-      .select({ id: productionItems.id, title: productionItems.title })
-      .from(productionItems)
-      .where(inArray(productionItems.id, pillarIds));
-    for (const p of pillars) pillarTitleById.set(p.id, p.title);
-  }
+  for (const p of pillars) pillarTitleById.set(p.id, p.title);
 
   void lte; // imported for potential future filters; keep linter quiet
 

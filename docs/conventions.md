@@ -375,3 +375,27 @@ of times to confirm the decision is stable, not a coin-flip.
 - **Canvas sizes:** square (`IG_SQUARE`, 1080×1080) is the default and what almost every format uses; TMZ is the vertical one (`IG_PORTRAIT`, 4:5). The canvas is per document and nothing downstream assumes a square (`reflowStacks` and the renderers read `doc.canvas`); the ⋯ menu's **Canvas size** switches a document or template between square / 4:5 / 9:16 / 16:9 via `resizeCanvas` (every box stretched by the canvas's growth, text sizes untouched). Add new sizes to `CANVAS_SIZES` in doc.ts.
 - **Model a preset on real posts, and check it against them:** pull the format's top published posts' slides (`production_item_media`), build the preset with a real post's content as the sample, then `npx tsx --env-file=.env.local scripts/design-preview.ts <preset> <outDir> [founder.jpg]` rasterizes every page to PNG without the worker or S3 — put the result next to the real slides before shipping. Then draft a real candidate (`POST /api/design/from-candidate` locally with `scripts/design-run-frames.ts` run first for the pillar) and look at the filled pages too: the AI's text is where a template fails in practice (room, tone, optional pages).
 - Video formats: the format's look is `formats.clip_template` (`clipLookSchema`); it never contains cuts. Apply with `applyLook`, capture with `lookFromDoc`.
+
+## Cached reports (`unstable_cache`)
+
+Expensive read-only payloads that the UI fetches on every mount (the production
+and content reports, the three queue candidate lists) are wrapped in
+`unstable_cache` with a short `revalidate` (60–120s) and a tag, in a
+`*-cached.ts` module next to the service (`src/lib/services/production-report.ts`,
+`src/lib/db/queries-cached.ts`, `src/lib/services/queue-candidates-cached.ts`).
+Rules:
+
+- **One cache entry per payload**, in one module — the API route, SSR and
+  `/api/warm` must all call the SAME wrapper or they populate different keys.
+- **Every write that changes the answer invalidates the tag** through
+  `src/lib/invalidate-report-caches.ts` (`invalidateReportCaches()` covers the
+  reports AND the queue lists; `invalidateQueueCaches()` just the lists). Grep
+  for the existing call sites when adding a route that promotes, dismisses or
+  kills an item.
+- **Post-action refetches ask for `?fresh=1`.** The route then calls the
+  uncached function AND invalidates the tag, so the user who acted sees the
+  result immediately and the next plain load recomputes. Mount fetches stay on
+  the cached path.
+- Keep an entry under Next's 2 MB `unstable_cache` ceiling (the production
+  report is ~1 MB).
+
