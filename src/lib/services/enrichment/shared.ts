@@ -77,10 +77,12 @@ export async function archiveRemoteToS3(
     : `${fileNameHint}.${ext}`;
   const key = buildKey(productionItemId, safeName);
 
-  // Large files (200–500 MB): stream directly to S3 so we never load the full
-  // body into a Buffer. ContentLength from the header is required; servers that
-  // omit it fall through to the arrayBuffer() path below and hit the 200 MB cap.
-  if (headerLen && headerLen > MAX_MEDIA_BYTES) {
+  // Any file with a known length streams straight to S3 so we never hold the
+  // body in a Buffer — a 150 MB Descript render buffered on the 512 MB worker
+  // dyno is what pinned it at R14 (2026-09-19). ContentLength from the header
+  // is required; servers that omit it fall through to the arrayBuffer() path
+  // below and hit the 200 MB cap.
+  if (headerLen) {
     const nodeStream = Readable.fromWeb(
       res.body as Parameters<typeof Readable.fromWeb>[0]
     );
