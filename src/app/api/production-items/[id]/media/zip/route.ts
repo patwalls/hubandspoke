@@ -19,10 +19,8 @@ interface RouteContext {
  * GET /api/production-items/[id]/media/zip
  *
  * Stream every `productionItemMedia` row for the item back as a single zip,
- * one entry per slide in carousel order. Used by the "Download all" button
- * on the content-detail page for Canva-generated IG-Post slideshows so an
- * editor can grab all four PNGs (plus the page-3 MP4 once exported) in one
- * click instead of right-click-saving each card individually.
+ * one entry per slide in carousel order, so an editor can grab every slide
+ * of a carousel in one click instead of right-click-saving each card.
  *
  * Auth: standard session guard, no special permission — anyone who can view
  * the item can grab its media.

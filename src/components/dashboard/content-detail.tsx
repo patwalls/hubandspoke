@@ -2505,7 +2505,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
            *  pipeline statuses, prediction, reference-post link, and
            *  published date all live here. Each chip uses CHIP_B_BASE
            *  styling — no border, dim text, optional colored dot or
-           *  icon. The four pipeline-status components (Descript, Canva,
+           *  icon. The pipeline-status components (Descript,
            *  Transcript, Enrichment) render as chips via their
            *  `variant="chip"` mode so they match. */}
           <div className="flex items-center gap-1 flex-wrap mt-2 text-xs text-muted-foreground">
@@ -2730,7 +2730,6 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               brand={item.brand ?? "starter-story"}
               onRendered={() => void load()}
             />
-            <CanvaStatusPill productionItemId={item.id} initialItem={item} variant="chip" />
             <TranscriptButton
               itemId={item.id}
               hasMedia={!!item.mediaS3Key}
@@ -5694,154 +5693,6 @@ function DescriptStatusPill({
       </PopoverContent>
     </Popover>
   );
-}
-
-/**
- * Small pill that surfaces Canva autofill state on the content-detail page.
- * Renders nothing when no Canva fields are set on the item (most posts).
- *
- *   - autofillJobId set, no editUrl: "Creating in Canva…" with amber pulse;
- *     polls /api/production-items/{id} every 5s until the URL appears.
- *   - editUrl set: green "Open in Canva" link button — opens the autofilled
- *     design in a new tab.
- */
-function CanvaStatusPill({
-  productionItemId,
-  initialItem,
-  variant = "default",
-}: {
-  productionItemId: string;
-  initialItem: ProductionItem;
-  /** "default" = legacy bold dual-button (Open in Canva + Download all)
-   *  / colored pill. "chip" = Pattern B — single dim chip with a colored
-   *  dot, opens the same actions via popover. Used in the title-area
-   *  state row. */
-  variant?: "default" | "chip";
-}) {
-  const [state, setState] = useState({
-    jobId: initialItem.canvaAutofillJobId ?? null,
-    designId: initialItem.canvaDesignId ?? null,
-    editUrl: initialItem.canvaEditUrl ?? null,
-  });
-
-  // Poll while autofill is in flight (job id set, no URL yet). Stops as soon
-  // as the URL lands — the canva-create-copy worker task is the only writer.
-  useEffect(() => {
-    if (state.editUrl) return;
-    if (!state.jobId) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const res = await fetch(`/api/production-items/${productionItemId}`);
-        if (!res.ok) return;
-        const json = (await res.json()) as { item: ProductionItem };
-        if (cancelled) return;
-        setState({
-          jobId: json.item.canvaAutofillJobId ?? null,
-          designId: json.item.canvaDesignId ?? null,
-          editUrl: json.item.canvaEditUrl ?? null,
-        });
-      } catch {
-        // Silent — next tick will retry. Editors don't need a toast for a
-        // transient network blip while waiting on Canva.
-      }
-    };
-    const interval = setInterval(() => void tick(), 5_000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [productionItemId, state.jobId, state.editUrl]);
-
-  if (state.editUrl) {
-    if (variant === "chip") {
-      // Pattern B: collapse the dual buttons into a single chip with a
-      // popover that holds the two actions. Keeps the title-area state
-      // row visually consistent.
-      return (
-        <Popover>
-          <PopoverTrigger
-            className={cn(CHIP_B_BASE, CHIP_B_CLICKABLE)}
-            title="Canva design ready"
-          >
-            <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
-            Canva ready
-          </PopoverTrigger>
-          <PopoverContent className="w-48 p-1" align="end">
-            <a
-              href={state.editUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
-            >
-              <ExternalLinkIcon className="size-3.5" /> Open in Canva
-            </a>
-            <a
-              href={`/api/production-items/${productionItemId}/media/zip`}
-              className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
-            >
-              <DownloadIcon className="size-3.5" /> Download all slides
-            </a>
-          </PopoverContent>
-        </Popover>
-      );
-    }
-    return (
-      <>
-        <a
-          href={state.editUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            buttonVariants({ variant: "outline", size: "sm" }),
-            "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:text-emerald-900",
-          )}
-          title="Open the autofilled Canva design in a new tab"
-        >
-          <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
-          Open in Canva
-          <ExternalLinkIcon className="size-3.5" />
-        </a>
-        <a
-          href={`/api/production-items/${productionItemId}/media/zip`}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-          title="Download every slide of the Canva slideshow as a zip"
-        >
-          <DownloadIcon className="size-3.5" />
-          Download all
-        </a>
-      </>
-    );
-  }
-  if (state.jobId) {
-    if (variant === "chip") {
-      return (
-        <span
-          className={CHIP_B_BASE}
-          title="Canva is generating the autofilled design"
-        >
-          <span
-            className="size-1.5 rounded-full bg-amber-500 animate-pulse"
-            aria-hidden
-          />
-          Canva creating…
-        </span>
-      );
-    }
-    return (
-      <span
-        className={cn(
-          buttonVariants({ variant: "outline", size: "sm" }),
-          "border-amber-200 bg-amber-50 text-amber-800 cursor-default",
-        )}
-        title="Canva is generating the autofilled design"
-      >
-        <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" aria-hidden />
-        Creating in Canva…
-      </span>
-    );
-  }
-  return null;
 }
 
 interface TypefullyStatusResponse {

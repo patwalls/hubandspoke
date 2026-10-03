@@ -6,9 +6,8 @@
  * reuses the one an earlier open created, so re-opening a candidate lands on
  * the same draft.
  *
- * Deliberately does NOT fire `canva-create-copy` (this editor is what that
- * job is being replaced by) and marks the item `createdVia: "design-editor"`
- * so it's distinguishable from a manual repurpose.
+ * Marks the item `createdVia: "design-editor"` so it's distinguishable from
+ * a manual repurpose.
  */
 import { and, eq, isNull, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";

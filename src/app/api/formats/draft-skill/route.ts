@@ -75,7 +75,6 @@ interface DraftedFormat {
   /** Present in fork mode — the parent's clip settings, so the client can
    *  pass them straight through to POST /api/formats without a refetch. */
   inheritedIsClippable?: boolean;
-  inheritedIsCanva?: boolean;
   inheritedLabelsAsOriginal?: boolean;
 }
 
@@ -467,7 +466,6 @@ export async function POST(request: NextRequest) {
       result.suggestedAspectRatio = forkParent.clipAspectRatio;
     }
     result.inheritedIsClippable = forkParent.isClippableFormat;
-    result.inheritedIsCanva = forkParent.isCanvaFormat;
     result.inheritedLabelsAsOriginal = forkParent.labelsAsOriginal;
   }
 

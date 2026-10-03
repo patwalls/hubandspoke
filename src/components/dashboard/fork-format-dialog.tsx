@@ -24,7 +24,6 @@ interface DraftedFormat {
   suggestedAspectRatio: "9:16" | "16:9";
   suggestedParentFormatId: string | null;
   inheritedIsClippable?: boolean;
-  inheritedIsCanva?: boolean;
   inheritedLabelsAsOriginal?: boolean;
 }
 
@@ -124,7 +123,6 @@ export function ForkFormatDialog({
           instructions: draft.instructions,
           parentFormatId,
           isClippableFormat: draft.inheritedIsClippable ?? true,
-          isCanvaFormat: draft.inheritedIsCanva ?? false,
           labelsAsOriginal: draft.inheritedLabelsAsOriginal ?? false,
           clipTargetPostType: draft.suggestedPostType,
           clipTargetPlatform: draft.suggestedPlatform,

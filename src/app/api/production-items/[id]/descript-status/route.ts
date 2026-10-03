@@ -71,7 +71,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   // Short-circuit when the item itself has zero Descript context. Both
   // the agent flow and the precise-cut flow stamp the derivative's own
   // descript_* columns once Descript work is in flight; if everything is
-  // still null the item isn't a Descript clip — it's a Canva post, a
+  // still null the item isn't a Descript clip — it's a designed post, a
   // text-only item, or a fresh row that never got promoted. Without this
   // gate the trigger lookup below walks up to the pillar and picks up
   // ANY Descript trigger the pillar has (often from a sibling derivative
@@ -127,7 +127,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   // trigger against the pillar's production_item id, not the derivative).
   // Fall back to any trigger created BY this row if the row IS a pillar.
   // Filter to triggers that actually carry Descript state — every
-  // repurpose action (including non-Descript paths like Canva) writes a
+  // repurpose action (including non-Descript paths) writes a
   // trigger row for dedup, but only Descript-promoted clips populate
   // descriptJobId / descriptCompositionId. Without this filter the
   // working-state pill leaks onto every repurpose target.

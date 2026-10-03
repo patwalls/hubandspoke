@@ -114,18 +114,6 @@ import {
   regenerateCtaForItemTask,
   type RegenerateCtaForItemPayload,
 } from "./regenerate-cta-for-item";
-import {
-  canvaCreateCopyTask,
-  type CanvaCreateCopyPayload,
-} from "./canva-create-copy";
-import {
-  canvaExportDesignTask,
-  type CanvaExportDesignPayload,
-} from "./canva-export-design";
-import {
-  canvaExportPageVideoTask,
-  type CanvaExportPageVideoPayload,
-} from "./canva-export-page-video";
 import { workerHeartbeatTask } from "./worker-heartbeat";
 import {
   klaviyoSyncAccountTask,
@@ -163,9 +151,6 @@ export interface TaskPayloads {
   "generate-instagram-caption": GenerateInstagramCaptionPayload;
   "draft-algorithm-run": DraftAlgorithmRunPayload;
   "regenerate-cta-for-item": RegenerateCtaForItemPayload;
-  "canva-create-copy": CanvaCreateCopyPayload;
-  "canva-export-design": CanvaExportDesignPayload;
-  "canva-export-page-video": CanvaExportPageVideoPayload;
   "klaviyo-sync-account": KlaviyoSyncAccountPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
@@ -228,9 +213,6 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "generate-instagram-caption": generateInstagramCaptionTask,
   "draft-algorithm-run": draftAlgorithmRunTask,
   "regenerate-cta-for-item": regenerateCtaForItemTask,
-  "canva-create-copy": canvaCreateCopyTask,
-  "canva-export-design": canvaExportDesignTask,
-  "canva-export-page-video": canvaExportPageVideoTask,
   "klaviyo-sync-account": klaviyoSyncAccountTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,

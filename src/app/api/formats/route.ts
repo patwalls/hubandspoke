@@ -146,7 +146,6 @@ export async function POST(request: NextRequest) {
       instructions,
       parentFormatId,
       isClippableFormat,
-      isCanvaFormat,
       labelsAsOriginal,
       clipTargetPostType,
       clipTargetPlatform,
@@ -160,7 +159,6 @@ export async function POST(request: NextRequest) {
       instructions?: string | null;
       parentFormatId?: string | null;
       isClippableFormat?: boolean;
-      isCanvaFormat?: boolean;
       labelsAsOriginal?: boolean;
       clipTargetPostType?: string | null;
       clipTargetPlatform?: string[] | null;
@@ -195,7 +193,6 @@ export async function POST(request: NextRequest) {
         instructions: instructions || null,
         parentFormatId: parentFormatId || null,
         isClippableFormat: isClippableFormat === true,
-        isCanvaFormat: isCanvaFormat === true,
         labelsAsOriginal: labelsAsOriginal === true,
         clipTargetPostType: clipTargetPostType || null,
         clipTargetPlatform:
@@ -245,7 +242,6 @@ export async function PUT(request: NextRequest) {
       instructions?: string | null;
       parentFormatId?: string | null;
       isClippableFormat?: boolean;
-      isCanvaFormat?: boolean;
       labelsAsOriginal?: boolean;
       clipTargetPostType?: string | null;
       clipTargetPlatform?: string[] | null;
@@ -326,8 +322,6 @@ export async function PUT(request: NextRequest) {
       updateData.parentFormatId = parentFormatId || null;
     if (body.isClippableFormat !== undefined)
       updateData.isClippableFormat = body.isClippableFormat;
-    if (body.isCanvaFormat !== undefined)
-      updateData.isCanvaFormat = body.isCanvaFormat;
     if (body.labelsAsOriginal !== undefined)
       updateData.labelsAsOriginal = body.labelsAsOriginal;
     if (body.clipTargetPostType !== undefined)

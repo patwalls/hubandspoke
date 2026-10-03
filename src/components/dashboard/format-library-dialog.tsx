@@ -46,7 +46,6 @@ interface LibraryFormat {
   parentFormatId: string | null;
   parentName: string | null;
   isClippableFormat: boolean;
-  isCanvaFormat: boolean;
   labelsAsOriginal: boolean;
   clipTargetPostType: string | null;
   clipAspectRatio: string | null;
@@ -210,7 +209,6 @@ function FormatPreviewPanel({
         )}
 
         {(format.isClippableFormat ||
-          format.isCanvaFormat ||
           format.labelsAsOriginal ||
           format.clipTargetPostType ||
           format.clipAspectRatio ||
@@ -229,7 +227,6 @@ function FormatPreviewPanel({
                   )}
                 </li>
               )}
-              {format.isCanvaFormat && <li>· Canva format</li>}
               {format.labelsAsOriginal && <li>· Labels clips as original content</li>}
               {format.viewThreshold != null && (
                 <li>· View threshold: {format.viewThreshold.toLocaleString()}</li>

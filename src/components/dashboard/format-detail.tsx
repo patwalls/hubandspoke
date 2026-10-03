@@ -104,7 +104,6 @@ interface FormatRow {
   instructions: string | null;
   parentFormatId: string | null;
   isClippableFormat: boolean;
-  isCanvaFormat: boolean;
   labelsAsOriginal: boolean;
   clipTargetPlatform: string[] | null;
   clipTargetPostType: string | null;
@@ -270,7 +269,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [preTemplateInstructions, setPreTemplateInstructions] = useState<string | null>(null);
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
   const [isClippableFormat, setIsClippableFormat] = useState(false);
-  const [isCanvaFormat, setIsCanvaFormat] = useState(false);
   const [labelsAsOriginal, setLabelsAsOriginal] = useState(false);
   const [clipTargetPostType, setClipTargetPostType] = useState<string>("");
   const [clipTargetPlatform, setClipTargetPlatform] = useState<string[]>([]);
@@ -689,7 +687,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     );
     setClipAspectRatio(f.clipAspectRatio ?? "");
     setDescriptLayoutPackId(f.descriptLayoutPackId ?? null);
-    setIsCanvaFormat(f.isCanvaFormat ?? false);
     setLabelsAsOriginal(f.labelsAsOriginal ?? false);
   }
 
@@ -1841,29 +1838,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                   </div>
                 </div>
               )}
-            </div>
-          </PropertyRowSolo>
-
-          <PropertyRowSolo>
-            <div className="px-3 py-3 space-y-2">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isCanvaFormat}
-                  onChange={(e) => {
-                    const next = e.target.checked;
-                    setIsCanvaFormat(next);
-                    void persistField({ isCanvaFormat: next });
-                  }}
-                  className="mt-0.5"
-                />
-                <span className="text-sm">
-                  <span className="font-medium">Canva autofill format</span>
-                  <span className="block text-xs text-muted-foreground mt-0.5">
-                    Items in this format are Canva-based posts. When ticked and the Skill above contains a Canva brand-template URL, clicking Create on a derivative spawns a Claude-extracted autofilled design via the Canva Connect API. Leave unchecked for formats where a Canva URL in the Skill is just a reference.
-                  </span>
-                </span>
-              </label>
             </div>
           </PropertyRowSolo>
 

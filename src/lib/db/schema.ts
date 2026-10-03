@@ -141,6 +141,8 @@ export const productionItems = pgTable(
     }),
     descriptPublishError: text("descript_publish_error"),
     descriptAccount: text("descript_account"),
+    // UNUSED since 2026-10-03 — the Canva integration was removed; these
+    // canva_* columns are kept only as historical data. Nothing writes them.
     // Canva "create copy" state. Fires when an instagram_post derivative is
     // created from a format whose Skill contains a canva.com/design link.
     // Three derivable states (same pattern as descriptPublish*):
@@ -1281,6 +1283,7 @@ export const formats = pgTable(
       () => descriptLayoutPacks.id,
       { onDelete: "set null" }
     ),
+    // UNUSED since 2026-10-03 (Canva integration removed) — kept as data only.
     // Marks this format as a Canva-autofill target. When true AND the Skill
     // contains a canva.com/brand/brand-templates/<id> URL, the repurpose
     // route enqueues canva-create-copy to produce an autofilled design.
@@ -2312,6 +2315,7 @@ export const productionItemsMerges = pgTable(
   ]
 );
 
+// UNUSED since 2026-10-03 (Canva integration removed) — table kept as data only.
 // Canva Connect OAuth state. Singleton row (id="default") because we
 // authenticate as one Canva account globally — not per-brand, not per-user.
 // Refresh tokens rotate on EVERY exchange, so they must be persisted: storing

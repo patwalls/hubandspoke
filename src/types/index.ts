@@ -96,12 +96,6 @@ export interface ProductionItem {
   hasWatermarkedMedia?: boolean;
   cleanOriginAvailable?: boolean;
   cleanOriginLabel?: string | null;
-  /** Canva autofill state for instagram_post derivatives. canvaAutofillJobId
-   *  is set while the autofill is in flight and cleared on success; canvaEditUrl
-   *  is the final design link the editor opens. */
-  canvaAutofillJobId?: string | null;
-  canvaDesignId?: string | null;
-  canvaEditUrl?: string | null;
   pillarContentNotionId?: string | null;
   pillarContentItemId?: string | null;
   /** Title of the pillar production_item (when this row is a clip/repurpose
@@ -280,9 +274,6 @@ export const REPORT_ITEM_TRIMMED_KEYS = [
   "descriptPublishJobId",
   "descriptPublishedAt",
   "descriptPublishError",
-  "canvaAutofillJobId",
-  "canvaDesignId",
-  "canvaEditUrl",
   "zernioPostId",
   "zernioStatus",
   "zernioScheduledAt",

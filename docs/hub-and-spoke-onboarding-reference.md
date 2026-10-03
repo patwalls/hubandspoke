@@ -107,7 +107,7 @@ Each derivative format has:
 - One or more **publishing channels** (which account + platform it publishes to)
 - A **view threshold** (optional) — when a pillar's views cross this number, a repurpose idea is automatically created
 - A **Skill** — instructions and context for AI caption generation
-- Flags for special behaviors: **Clippable** (AI-generated clip ideas), **Canva** (auto-creates Canva slideshow)
+- Flags for special behaviors: **Clippable** (AI-generated clip ideas)
 
 ### Proven status
 
@@ -202,7 +202,7 @@ Brands can add custom statuses between Idea and Published via **Accounts → Sta
 Click any item in the Content library or Queue to open its detail page. The layout has:
 
 - **Title and chip row** — account badge, source badge, format, assigned editor, current status. All are editable inline.
-- **State row** — Descript status, Canva status, transcript button, estimated views, reference post, published date (once published)
+- **State row** — Descript status, transcript button, estimated views, reference post, published date (once published)
 - **Header buttons** — "Publish or Schedule" (or "Edit publish info" once published) and an Actions menu
 - **Main panel (Details tab)** — for pre-publish items: a platform simulator on the left (editable caption + media), metadata form on the right. For published items: a live embed of the published post on the left.
 - **Activity tab** — every edit, comment, status change, and system event in chronological order
