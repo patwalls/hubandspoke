@@ -6,8 +6,11 @@ import { buildKey, bucketName, putObject, putObjectFromStream } from "@/lib/s3";
 
 const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
 // Hard stop above which we refuse even a streaming upload. Keeps the task
-// from hanging indefinitely on a pathologically large file.
-const MAX_STREAM_BYTES = 500 * 1024 * 1024;
+// from hanging indefinitely on a pathologically large file. Streaming is
+// constant-memory and a single S3 PUT takes up to 5 GB, so this only needs to
+// clear real Descript renders — a 958 MB one hit the old 500 MB cap
+// (2026-10-02) and could never archive.
+const MAX_STREAM_BYTES = 2 * 1024 * 1024 * 1024;
 
 function extFromContentType(ct: string): string {
   if (ct.startsWith("video/mp4")) return "mp4";
@@ -45,10 +48,10 @@ export interface ArchiveResult {
 
 /**
  * Fetch a remote URL into our S3 bucket under a key tied to the item.
- * Files under 200 MB are buffered in memory. Files between 200 MB and 500 MB
+ * Files under 200 MB are buffered in memory. Files between 200 MB and 2 GB
  * are streamed directly to S3 via Node.js Readable (requires Content-Length
  * header from the server — CDNs like Descript always provide it). Files above
- * 500 MB are rejected outright.
+ * 2 GB are rejected outright.
  * Throws on download or upload failure — callers decide whether to swallow.
  */
 export async function archiveRemoteToS3(
