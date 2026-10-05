@@ -45,6 +45,37 @@ describe("resolveTranscriptWords", () => {
     expect(r.words).toEqual([{ index: 0, text: "hi", startSec: 1, endSec: 1.2 }]);
   });
 
+  it("gives a zero-length word back the time the word before swallowed", () => {
+    // Real Whisper output: "Rourke" got no time and shared its start with
+    // the next "in" — it couldn't be played, and a text fix hit both words.
+    const r = resolveTranscriptWords({
+      words: [
+        { word: "in", startSec: 314.93, endSec: 315.61 },
+        { word: "Rourke", startSec: 315.61, endSec: 315.61 },
+        { word: "in", startSec: 315.61, endSec: 315.89 },
+      ],
+      segments: [],
+    });
+    const [a, rourke, b] = r.words;
+    expect(a.startSec).toBe(314.93);
+    expect(rourke.startSec).toBeCloseTo(314.93 + 0.68 * (2 / 8), 6);
+    expect(rourke.endSec).toBe(315.61);
+    expect(rourke.startSec).toBeLessThan(b.startSec); // distinct correction keys
+    expect(b).toMatchObject({ startSec: 315.61, endSec: 315.89 }); // untouched
+  });
+
+  it("borrows from the next word when a collapsed word opens the transcript", () => {
+    const r = resolveTranscriptWords({
+      words: [
+        { word: "So", startSec: 1, endSec: 1 },
+        { word: "yeah", startSec: 1, endSec: 1.6 },
+      ],
+      segments: [],
+    });
+    expect(r.words[0]).toMatchObject({ startSec: 1, endSec: 1.2 });
+    expect(r.words[1]).toMatchObject({ startSec: 1.2, endSec: 1.6 });
+  });
+
   it("synthesizes timings from segments when the transcript has no words", () => {
     const r = resolveTranscriptWords({
       words: null,

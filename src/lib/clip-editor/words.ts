@@ -43,15 +43,17 @@ export function resolveTranscriptWords(transcript: {
   if (transcript.words && transcript.words.length > 0) {
     return {
       synthetic: false,
-      words: transcript.words
-        .map((w, index) => ({
-          index,
-          text: w.word.trim(),
-          startSec: w.startSec,
-          endSec: Math.max(w.endSec, w.startSec),
-          ...(w.speakerId ? { speakerId: w.speakerId } : {}),
-        }))
-        .filter((w) => w.text.length > 0),
+      words: spreadCollapsedWords(
+        transcript.words
+          .map((w, index) => ({
+            index,
+            text: w.word.trim(),
+            startSec: w.startSec,
+            endSec: Math.max(w.endSec, w.startSec),
+            ...(w.speakerId ? { speakerId: w.speakerId } : {}),
+          }))
+          .filter((w) => w.text.length > 0),
+      ),
     };
   }
 
@@ -75,6 +77,56 @@ export function resolveTranscriptWords(transcript: {
     }
   }
   return { words, synthetic: true };
+}
+
+/** Shorter than this, a Whisper word has no real timing. */
+const COLLAPSED_WORD_SEC = 0.02;
+/** A neighbour must hold at least this much time to share it. */
+const MIN_SHARED_SPAN_SEC = 0.1;
+
+/**
+ * Whisper sometimes gives a word ZERO length and hands its audio to the word
+ * before ("in" 314.93–315.61, "Rourke" 315.61–315.61). In the editor that
+ * word can't be heard or seen playing — clicking it lights up the next word
+ * — and since corrections are keyed by start time, fixing its text renamed
+ * the next word too. Re-split the swallowed span across the donor and the
+ * collapsed run by letter count. Borrows from the word AFTER only when there
+ * is no usable word before (that moves the next word's start, which the
+ * common case never does).
+ */
+function spreadCollapsedWords(words: EditorWord[]): EditorWord[] {
+  const out = words.map((w) => ({ ...w }));
+  const collapsed = (w: EditorWord) => w.endSec - w.startSec < COLLAPSED_WORD_SEC;
+  let i = 0;
+  while (i < out.length) {
+    if (!collapsed(out[i])) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < out.length && collapsed(out[j + 1])) j++;
+    const prev = out[i - 1];
+    const next = out[j + 1];
+    const runEnd = Math.max(...out.slice(i, j + 1).map((w) => w.endSec));
+    if (prev && Math.max(prev.endSec, runEnd) - prev.startSec >= MIN_SHARED_SPAN_SEC) {
+      splitSpan(out, i - 1, j, prev.startSec, Math.max(prev.endSec, runEnd));
+    } else if (next && next.endSec - out[i].startSec >= MIN_SHARED_SPAN_SEC) {
+      splitSpan(out, i, j + 1, out[i].startSec, next.endSec);
+    }
+    i = j + 1;
+  }
+  return out;
+}
+
+function splitSpan(words: EditorWord[], from: number, to: number, startSec: number, endSec: number) {
+  const run = words.slice(from, to + 1);
+  const chars = run.reduce((n, w) => n + w.text.length, 0);
+  let cursor = startSec;
+  run.forEach((w, k) => {
+    w.startSec = cursor;
+    cursor = k === run.length - 1 ? endSec : cursor + ((endSec - startSec) * w.text.length) / chars;
+    w.endSec = cursor;
+  });
 }
 
 /** Words whose midpoint falls inside any of the given windows. */
