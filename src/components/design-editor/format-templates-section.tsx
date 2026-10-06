@@ -13,7 +13,15 @@ import { toast } from "sonner";
 import { ClapperboardIcon, FileUpIcon, LayoutTemplateIcon, Loader2Icon, PencilIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FONTS } from "@/lib/clip-editor/fonts";
-import type { ClipLook } from "@/lib/clip-editor/doc";
+import type { AspectRatio, ClipLook } from "@/lib/clip-editor/doc";
+import { SAMPLE_WORDS, buildLookPreviewDoc } from "@/lib/clip-editor/look-preview";
+import { compileRenderPlan } from "@/lib/clip-editor/plan";
+import { resolveScene } from "@/lib/clip-editor/scene";
+import { ClipLookDialog } from "@/components/clip-editor/clip-look-dialog";
+import { PlaybackEngine } from "@/components/clip-editor/playback-engine";
+import { Stage } from "@/components/clip-editor/stage";
+import { EditorStoreContext as ClipEditorStoreContext, createEditorStore } from "@/components/clip-editor/store";
+import { cn } from "@/lib/utils";
 import type { DesignDoc } from "@/lib/design-editor/doc";
 import { resolveChannelsInDoc, type ChannelInfo } from "@/lib/design-editor/channel";
 import { DESIGN_PRESETS, type DesignPresetId } from "@/lib/design-editor/templates";
@@ -35,7 +43,7 @@ export function FormatTemplatesSection({ brand, formatId, formatName, isClippabl
   // A video format gets a clip look; an image/carousel format gets a design
   // template. Neither card is shown for the other kind.
   const card = isClippableFormat
-    ? flags.clipEditor && <ClipLookCard formatId={formatId} />
+    ? flags.clipEditor && <ClipLookCard brand={brand} formatId={formatId} formatName={formatName} />
     : flags.designEditor && <DesignTemplateCard brand={brand} formatId={formatId} formatName={formatName} />;
   if (!card) return null;
   return <div className="grid gap-3">{card}</div>;
@@ -227,12 +235,16 @@ function Filmstrip({ doc, imageUrls, channels }: { doc: DesignDoc; imageUrls: Re
   );
 }
 
-function ClipLookCard({ formatId }: { formatId: string }) {
-  const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null } | null>(null);
+function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId: string; formatName: string }) {
+  const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const load = useCallback(async () => {
     const res = await fetch(`/api/formats/${formatId}/clip-template`);
-    if (res.ok) setLook((await res.json()) as { look: ClipLook | null; updatedAt: string | null });
+    if (res.ok) {
+      const json = (await res.json()) as { look: ClipLook | null; updatedAt: string | null; aspectRatio?: AspectRatio };
+      setLook({ look: json.look, updatedAt: json.updatedAt, aspectRatio: json.aspectRatio ?? "9:16" });
+    }
   }, [formatId]);
   useEffect(() => {
     void load();
@@ -252,30 +264,65 @@ function ClipLookCard({ formatId }: { formatId: string }) {
   const hook = l?.layers.find((x) => x.type === "text" && x.role === "hook");
   const caps = l?.layers.find((x) => x.type === "captions");
   return (
-    <Card icon={<ClapperboardIcon className="size-3.5" />} title="Clip look" hint="What every new clip edit for this format starts from: fonts, caption style, hook position, how the video sits. Saved from inside the clip editor — the way a Descript pack used to work.">
+    <Card icon={<ClapperboardIcon className="size-3.5" />} title="Clip look" hint="What every new clip edit for this format starts from: fonts, caption style, hook position, how the video sits — the way a Descript pack used to work. Each clip keeps its own AI-written hook; only the style comes from here.">
       {!look ? (
         <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-      ) : l ? (
-        <>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px]">
-            <dt className="text-muted-foreground">Hook</dt>
-            <dd>{hook && hook.type === "text" ? `${FONTS[hook.style.fontId].label} · ${hook.style.sizePct.toFixed(1)}% · ${hook.style.color}` : "none"}</dd>
-            <dt className="text-muted-foreground">Captions</dt>
-            <dd>{caps && caps.type === "captions" ? `${FONTS[caps.style.fontId].label} · ${caps.maxWordsPerCue} words/cue${caps.highlightColor ? ` · highlight ${caps.highlightColor}` : ""}` : "none"}</dd>
-            <dt className="text-muted-foreground">Video</dt>
-            <dd>{l.video.fit === "cover" ? "fill" : "fit"}{l.video.scalePct !== 100 ? ` · ${l.video.scalePct}%` : ""}{l.video.radiusPct ? ` · rounded ${l.video.radiusPct}%` : ""} · {l.background} background</dd>
-            <dt className="text-muted-foreground">Layers</dt>
-            <dd>{l.layers.length}{look.updatedAt ? ` · saved ${new Date(look.updatedAt).toLocaleDateString()}` : ""}</dd>
-          </dl>
-          <p className="text-[11px] text-muted-foreground">To change it: open any clip of this format in the clip editor, style it, then “Save look as the format’s template”.</p>
-          <Button type="button" size="sm" variant="ghost" className="h-7 self-start text-xs" disabled={busy} onClick={() => void remove()}>
-            <Trash2Icon className="mr-1 size-3" /> Remove
-          </Button>
-        </>
       ) : (
-        <p className="text-[12px] text-muted-foreground">No look saved — new edits use the default Reels layout. Open a clip of this format in the clip editor, style it, then “Save look as the format’s template”.</p>
+        <>
+          <div className="flex items-start gap-4">
+            <LookThumbnail key={look.updatedAt ?? "none"} look={l ?? null} aspectRatio={look.aspectRatio} brand={brand} />
+            {l ? (
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px]">
+                <dt className="text-muted-foreground">Hook</dt>
+                <dd>{hook && hook.type === "text" ? `${FONTS[hook.style.fontId].label} · ${hook.style.sizePct.toFixed(1)}% · ${hook.style.color}` : "none"}</dd>
+                <dt className="text-muted-foreground">Captions</dt>
+                <dd>{caps && caps.type === "captions" ? `${FONTS[caps.style.fontId].label} · ${caps.maxWordsPerCue} words/cue${caps.highlightColor ? ` · highlight ${caps.highlightColor}` : ""}` : "none"}</dd>
+                <dt className="text-muted-foreground">Video</dt>
+                <dd>{l.video.fit === "cover" ? "fill" : "fit"}{l.video.scalePct !== 100 ? ` · ${l.video.scalePct}%` : ""}{l.video.radiusPct ? ` · rounded ${l.video.radiusPct}%` : ""} · {l.background} background</dd>
+                <dt className="text-muted-foreground">Layers</dt>
+                <dd>{l.layers.length}{look.updatedAt ? ` · saved ${new Date(look.updatedAt).toLocaleDateString()}` : ""}</dd>
+              </dl>
+            ) : (
+              <p className="text-[12px] text-muted-foreground">No look saved — new edits use the default Reels layout (shown). Create a look to set this format&apos;s fonts, captions and video placement.</p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" className="h-7 text-xs" onClick={() => setEditing(true)}>
+              <PencilIcon className="mr-1 size-3" /> {l ? "Edit look" : "Create look"}
+            </Button>
+            {l && (
+              <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => void remove()}>
+                <Trash2Icon className="mr-1 size-3" /> Remove
+              </Button>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground">You can also save a look from inside any clip of this format: clip editor → ⋯ → “Save look as the format’s template”.</p>
+          <ClipLookDialog open={editing} onOpenChange={(o) => { setEditing(o); if (!o) void load(); }} formatId={formatId} formatName={formatName} brand={brand} look={l ?? null} aspectRatio={look.aspectRatio} onSaved={() => {}} />
+        </>
       )}
     </Card>
+  );
+}
+
+/** The look on a placeholder, read-only — the card's picture of it. The stage
+ *  reads the editor store even when inert, so give it a throwaway one. */
+function LookThumbnail({ look, aspectRatio, brand }: { look: ClipLook | null; aspectRatio: AspectRatio; brand: string }) {
+  const [store] = useState(() => createEditorStore({ doc: buildLookPreviewDoc(look, aspectRatio), revision: 0 }));
+  const [engine] = useState(() => new PlaybackEngine());
+  const doc = store.getState().doc;
+  const plan = useMemo(() => compileRenderPlan(doc, SAMPLE_WORDS), [doc]);
+  const scene = useMemo(() => resolveScene(plan), [plan]);
+  useEffect(() => {
+    engine.setPlan(plan);
+    engine.seek(1);
+  }, [engine, plan]);
+  const vertical = doc.canvas.height > doc.canvas.width;
+  return (
+    <div className={cn("pointer-events-none relative shrink-0 overflow-hidden rounded border border-border bg-muted", vertical ? "h-[214px] w-[120px]" : "h-[120px] w-[214px]")} aria-hidden>
+      <ClipEditorStoreContext.Provider value={store}>
+        <Stage plan={plan} scene={scene} engine={engine} videoUrl={null} brand={brand} variant="preview" />
+      </ClipEditorStoreContext.Provider>
+    </div>
   );
 }
 

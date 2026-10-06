@@ -34,7 +34,9 @@ interface StageProps {
   plan: RenderPlan;
   scene: Scene;
   engine: PlaybackEngine;
-  videoUrl: string;
+  /** null = no clip (the format page's look editor): a placeholder sits in
+   *  the video's box, still draggable/resizable. */
+  videoUrl: string | null;
   /** For the logo library behind "+ Logo". */
   brand: string;
   /** "preview": the finished clip only — no tools, handles or outlines, a
@@ -423,6 +425,14 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
             style={{ ...videoBox, borderRadius: box.radius }}
             onPointerDown={dragVideo}
           >
+            {videoUrl === null ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-neutral-700">
+                <svg viewBox="0 0 160 90" className="h-1/2 max-h-[60%] text-neutral-500" fill="currentColor" aria-hidden>
+                  <circle cx="80" cy="34" r="16" />
+                  <path d="M44 90c0-22 16-36 36-36s36 14 36 36z" />
+                </svg>
+              </div>
+            ) : (<>
             {/* Two elements on one source — see playback-engine.ts. */}
             <video
               ref={videoA}
@@ -447,6 +457,7 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
               className="pointer-events-none absolute inset-0 h-full w-full object-fill"
               style={{ opacity: 0 }}
             />
+            </>)}
           </div>
 
           {/* Hook + captions belong to the EDIT. Over footage that isn't in
