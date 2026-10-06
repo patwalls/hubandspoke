@@ -11,8 +11,9 @@ import { buildTechStackTemplate } from "./tech-stack-template";
 import { buildStoryTemplate } from "./story-template";
 import { buildTmzTemplate } from "./tmz-template";
 import { buildAppsTemplate } from "./apps-template";
+import { buildQuoteCarouselTemplate } from "./quote-carousel-template";
 
-export type DesignPresetId = "playbook" | "tech-stack" | "story" | "tmz" | "apps" | "blank";
+export type DesignPresetId = "playbook" | "tech-stack" | "story" | "tmz" | "apps" | "quote-carousel" | "blank";
 
 export const DESIGN_PRESETS: Record<DesignPresetId, { label: string; description: string; build: () => DesignDoc }> = {
   playbook: { label: "Playbook", description: "Photo + stat + headline, iOS Notes playbook, a clip as a YouTube card, a comment-to-DM CTA.", build: buildPlaybookTemplate },
@@ -20,6 +21,7 @@ export const DESIGN_PRESETS: Record<DesignPresetId, { label: string; description
   story: { label: "Full Story", description: "Photo cover with an all-caps headline, up to 9 story beats over stills of the video, a sign-off slide.", build: buildStoryTemplate },
   tmz: { label: "TMZ", description: "One image: the founder over a black band with a first-person quote in condensed caps.", build: buildTmzTemplate },
   apps: { label: "What My Apps Do", description: "Photo cover, then one Notes page per app: name, result, three bullets, a screenshot card.", build: buildAppsTemplate },
+  "quote-carousel": { label: "Quote Carousel", description: "Two stills per slide with a line of the conversation over each, key words in yellow; a watch-the-episode closer.", build: buildQuoteCarouselTemplate },
   blank: {
     label: "Blank",
     description: "One empty square page.",
@@ -34,6 +36,7 @@ export const DEFAULT_PRESET_FOR_FORMAT: Record<string, DesignPresetId> = {
   "Full Story Slideshow (IG)": "story",
   "TMZ": "tmz",
   "What My Apps Are & What They Do": "apps",
+  "Quote Carousel": "quote-carousel",
 };
 
 export function isDesignPresetId(v: unknown): v is DesignPresetId {
