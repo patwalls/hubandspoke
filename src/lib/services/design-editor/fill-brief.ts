@@ -13,7 +13,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { contentDrafts, formats, productionItems } from "@/lib/db/schema";
+import { brands, contentDrafts, formats, productionItems } from "@/lib/db/schema";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import type { DesignDoc } from "@/lib/design-editor/doc";
 import { HIGHLIGHT_COLORS, listSlots, type DesignFill, type DesignFillValue, type DesignSlotSpec, type HighlightColor } from "@/lib/design-editor/template-fill";
@@ -39,7 +39,8 @@ export type GenerateFillResult =
   | { ok: true; fill: DesignFill; usage: { input: number; output: number } }
   | { ok: false; failure: { reason: "no-transcript" | "no-item" | "no-slots" | "llm-error" | "llm-no-tool-call"; message?: string } };
 
-const SYSTEM_PROMPT = `You write Starter Story's Instagram carousel posts by filling a DESIGN TEMPLATE. The template is a sequence of slides; each slot below is one thing on a slide — its name, what it's for, the example text the template currently shows (match its length, case and energy), and how much room it has.
+/** `brandLabel` = the brand's display name ("Starter Story", "My First Million"). */
+export const systemPrompt = (brandLabel: string) => `You write ${brandLabel}'s Instagram carousel posts by filling a DESIGN TEMPLATE. The template is a sequence of slides; each slot below is one thing on a slide — its name, what it's for, the example text the template currently shows (match its length, case and energy), and how much room it has.
 
 You are given the full transcript of the source video (speakers labelled when known), the format's Skill, and the brand's best-performing past posts of this format as the style anchor.
 
@@ -222,6 +223,8 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
   const formatName = item.format ?? "";
   const [format] = await db.select({ skill: formats.instructions }).from(formats).where(and(eq(formats.brand, item.brand ?? ""), eq(formats.name, formatName))).limit(1);
   const exemplars = await loadExemplars(item.brand ?? "", formatName, item.id);
+  const [brandRow] = item.brand ? await db.select({ label: brands.label }).from(brands).where(eq(brands.slug, item.brand)).limit(1) : [];
+  const brandLabel = brandRow?.label ?? "the brand";
   const [pillar] = item.pillarContentItemId
     ? await db.select({ title: productionItems.title }).from(productionItems).where(eq(productionItems.id, item.pillarContentItemId)).limit(1)
     : [{ title: item.title }];
@@ -233,7 +236,7 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
       model: MODEL,
       max_tokens: 8000,
       thinking: { type: "adaptive" },
-      system: SYSTEM_PROMPT,
+      system: systemPrompt(brandLabel),
       tools: [TOOL],
       tool_choice: { type: "tool", name: "fill_design" },
       messages: [
