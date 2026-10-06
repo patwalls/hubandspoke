@@ -254,7 +254,7 @@ export function PageCanvas({
           page.elements.map((el) =>
             el.slot ? (
               <div key={`slot-${el.id}`} className="pointer-events-none absolute rounded-br-md px-2 py-0.5 text-[18px] font-semibold text-white" style={{ left: el.x, top: el.y, background: el.slot.kind === "ai" ? "#DB2777" : "#0EA5E9" }}>
-                {el.slot.kind === "ai" ? "AI" : el.slot.kind === "photo" ? "Photo" : el.slot.kind === "videoTitle" ? "Video title" : el.slot.kind === "channelName" ? "Channel" : el.slot.kind === "dmKeyword" ? "DM keyword" : "Subscribers"}
+                {el.slot.kind === "ai" ? "AI" : el.slot.kind === "photo" ? "Photo" : el.slot.kind === "frame" ? "Frame" : el.slot.kind === "videoTitle" ? "Video title" : el.slot.kind === "channelName" ? "Channel" : el.slot.kind === "dmKeyword" ? "DM keyword" : "Subscribers"}
                 {el.stack ? ` · ${el.stack}` : ""}
               </div>
             ) : null,

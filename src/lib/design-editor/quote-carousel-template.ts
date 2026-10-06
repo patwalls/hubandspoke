@@ -10,7 +10,7 @@
  * The quotes are verbatim lines from the episode, in conversation order.
  */
 import { IG_PORTRAIT, newElementId, type DesignDoc, type DesignElement, type DesignPage, type DesignRectElement } from "./doc";
-import { ai, baseText, frameSlot, text } from "./shared";
+import { ai, baseText, frameSlot, photoSlot, text } from "./shared";
 import { applyHighlights } from "./template-fill";
 
 export const QUOTE_CAROUSEL_TEMPLATE = "quote-carousel-v1";
@@ -56,7 +56,9 @@ function quotePage(pageIndex: number, halves: (typeof PAGES)[number]): DesignPag
   const elements: DesignElement[] = [];
   halves.forEach((half, i) => {
     const top = i * halfH;
-    elements.push({ ...frameSlot({ x: 0, y: top, w: W, h: halfH }), name: `Photo · ${half.shot}` });
+    // The very first panel is the founder photo (the AI's best guest shot); every other panel gets its own still.
+    const picture = pageIndex === 0 && i === 0 ? photoSlot : frameSlot;
+    elements.push({ ...picture({ x: 0, y: top, w: W, h: halfH }), name: `Photo · ${half.shot}` });
     elements.push(shade(top + halfH * 0.45, halfH * 0.55));
     elements.push(
       text(`Quote ${pageIndex * 2 + i + 1}`, { x: 110, y: top + halfH - 175, w: W - 220, h: 140 }, applyHighlights(half.sample, half.highlights.map((phrase) => ({ phrase, color: "yellow" }))), baseText({
