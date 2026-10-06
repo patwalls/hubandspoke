@@ -91,6 +91,7 @@ USER / API ENTRY POINTS
   POST /api/clip-ideas/[id]/editor/export                 → clip-render (queue `media-heavy`, jobKey clip-render:<editId>) + draft-algorithm-run (first export only — a safety net; normally a no-op because the open-time run above already wrote the post)  [UI: in-app clip editor "Export clip" — flag `clipEditor`, NO Descript involved]
   POST /api/production-items/[id]/design/export           → design-render (queue `media-heavy`, jobKey design-render:<docId>)  [UI: in-app design editor "Export post" — flag `designEditor`, NO Canva involved]
   POST /api/design/from-candidate, GET …/design, POST …/design/frames → design-frames (queue `media-heavy`)  [cover-photo filmstrip + Haiku pick; never edits the doc]
+  POST /api/formats/[id]/design-template/import           → design-template-import (default queue, maxAttempts 2)  [UI: format page "Import from PDF" — flag `designEditor`; Opus reads the PDF into a template draft; never writes formats.design_template]
   POST /api/production-items (new row w/ link, no inline metrics) → refresh-item-metrics
   PUT  /api/production-items (→ Published w/ link, or link added on Published) → refresh-item-metrics
   POST /api/production-items, /comments, /clip-ideas/triage  → notification-send
@@ -1463,6 +1464,15 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
 - **Native resolution (2026-09-21):** frames keep the source's width up to `FRAME_MAX_WIDTH` (2160; a 1080p source gives a 1920-wide still, never upscaled) as near-lossless JPEG (`-q:v 2`) — they get placed full-bleed and zoomed, so the old 1080-wide q3 grab was visibly soft. Existing libraries stay as grabbed until "try again" re-runs them.
 - **Story stills (2026-09-21):** the same library feeds `frame` slots — a different still per slide, in `storyFrames` order (rank 2, 3, then the filmstrip by time; the cover pick left out). The session (`session.ts`) passes them into `fillTemplate` at draft time and re-applies them with the cover pick (`applyPhotoPick`) when the library lands after the draft; the editor does the same as it polls.
 - **Queue:** `media-heavy` (serial with clip/design renders), `maxAttempts: 2`.
+
+### `design-template-import` — a format template from an uploaded PDF (2026-10-06, flag `designEditor`)
+- **Status:** behind the per-user `designEditor` flag, like the rest of the design editor.
+- **Trigger:** `POST /api/formats/[id]/design-template/import` (multipart PDF ≤ 20 MB, `%PDF-` magic checked) stores the file in S3, inserts a `design_template_imports` row (`pending`) and enqueues `{ importId }` with `maxAttempts: 2`. The format page polls `GET …/design-template/import/[importId]` every 2.5s; a row still `pending` after 10 min is reported failed.
+- **Files:** `src/jobs/tasks/design-template-import.ts`, `src/lib/services/design-editor/pdf-import.ts` (Claude call, row updates), `src/lib/design-editor/pdf-import.ts` (pure: the `build_template` tool schema + `normalizeImportedTemplate` — nearest canvas size, boxes/font sizes scaled from PDF units, unknown fonts/colours/slots → safe defaults; unit-tested).
+- **What it does:** downloads the PDF, sends it to **Opus 5.5** (PDF document block, adaptive thinking, effort high, streamed) with what the editor can draw, the format's Skill and up to 8 of its best Published posts (`loadExemplars`, the same ones the post fill uses — tag published posts with the format and imports + drafts both learn its voice). One retry with the error fed back if the call fails or the result doesn't validate; then `done` (doc + the model's "couldn't reproduce" note) or `failed`. Paid: roughly $0.10–0.50 per import.
+- **What it never does:** write `formats.design_template`. The page opens the doc in the template editor as the saved state, so nothing is written until the user's first edit (autosave → the normal `PUT …/design-template`), which replaces the format's template.
+- **Idempotent:** a row that isn't `pending` is skipped. Anthropic API errors are caught (row → `failed`); other exceptions throw and Graphile retries once.
+- **Queue:** default.
 
 ### `design-render` — in-app design editor export (satori + resvg, no Canva) (2026-09-17, flag `designEditor`)
 - **Status:** behind the per-user `designEditor` flag (Pat only). Nothing enqueues this for anyone else.

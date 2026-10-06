@@ -144,7 +144,9 @@ function Workspace({ session, brand, mode = "item", saveDoc, onDone, onClose }: 
  * The format page's "Edit template" — opens the format's design template
  * (stored, or its built-in preset) in template mode.
  */
-export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName, brand, onSaved }: { open: boolean; onOpenChange: (open: boolean) => void; formatId: string; formatName: string; brand: string; onSaved: () => void }) {
+/** `initial` opens a draft (a PDF import) instead of the stored template —
+ *  nothing is saved until the first edit, which replaces the template. */
+export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName, brand, onSaved, initial = null }: { open: boolean; onOpenChange: (open: boolean) => void; formatId: string; formatName: string; brand: string; onSaved: () => void; initial?: { doc: DesignDoc; imageUrls: Record<string, string> } | null }) {
   const [session, setSession] = useState<DesignEditorSession | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -157,14 +159,15 @@ export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName,
       const res = await fetch(`/api/formats/${formatId}/design-template`);
       const json = (await res.json().catch(() => ({}))) as { template?: { doc: DesignDoc } | null; imageUrls?: Record<string, string>; images?: ImageCandidate[]; channels?: ChannelInfo[] };
       if (cancelled) return;
-      if (!res.ok || !json.template) {
+      const doc = initial?.doc ?? json.template?.doc;
+      if (!res.ok || !doc) {
         toast.error("Couldn't load the template");
         return onOpenChange(false);
       }
       setSession({
         item: { id: formatId, title: formatName, brand, format: formatName, formatId, status: null, postType: null, sourceItemId: formatId, sourceTitle: `Template · ${formatName}` },
-        design: { id: formatId, revision: 0, doc: json.template.doc, brief: null, briefInstruction: null },
-        imageUrls: json.imageUrls ?? {},
+        design: { id: formatId, revision: 0, doc, brief: null, briefInstruction: null },
+        imageUrls: { ...(json.imageUrls ?? {}), ...(initial?.imageUrls ?? {}) },
         images: json.images ?? BRAND_WORDMARKS,
         frames: { frames: [], pending: false },
         thumbnail: null,
@@ -179,7 +182,7 @@ export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName,
     return () => {
       cancelled = true;
     };
-  }, [open, formatId, formatName, brand, onOpenChange]);
+  }, [open, formatId, formatName, brand, onOpenChange, initial]);
   const saveDoc: SaveDoc = useCallback(async (doc, revision) => {
     const res = await fetch(`/api/formats/${formatId}/design-template`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ doc }) });
     if (!res.ok) return { ok: false, reason: "error" };

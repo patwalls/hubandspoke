@@ -998,6 +998,31 @@ export const designFrames = pgTable(
 );
 
 /**
+ * A format template imported from an uploaded PDF (a Canva export): the
+ * format page uploads the file, the `design-template-import` job has Claude
+ * read it into a DesignDoc, the page polls this row and opens the result in
+ * the template editor. The format's template is only replaced once the user
+ * edits/saves the draft — this row never touches `formats.design_template`.
+ */
+export const designTemplateImports = pgTable("design_template_imports", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  formatId: uuid("format_id")
+    .notNull()
+    .references(() => formats.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"), // pending | done | failed
+  fileName: text("file_name"),
+  s3Bucket: text("s3_bucket"),
+  s3Key: text("s3_key").notNull(),
+  doc: jsonb("doc").$type<DesignDoc>(),
+  /** The model's note on what it couldn't reproduce. */
+  notes: text("notes"),
+  error: text("error"),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
  * V2 (Splice v10, 2026-05-22): format-agnostic section detection. The
  * section picker runs once per pillar — Sonnet 4.6 reads the transcript
  * and picks 8-15 "interesting moments," each one a cue-aligned window

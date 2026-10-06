@@ -87,13 +87,13 @@ const TOOL: Anthropic.Tool = {
   },
 };
 
-interface Exemplar {
+export interface Exemplar {
   hook: string | null;
   caption: string | null;
   views: number | null;
 }
 
-async function loadExemplars(brand: string, formatName: string, excludeItemId: string): Promise<Exemplar[]> {
+export async function loadExemplars(brand: string, formatName: string, excludeItemId: string | null): Promise<Exemplar[]> {
   const rows = await db
     .select({ hook: productionItems.hook, views: productionItems.views, content: contentDrafts.content })
     .from(productionItems)
@@ -105,7 +105,7 @@ async function loadExemplars(brand: string, formatName: string, excludeItemId: s
         eq(productionItems.status, "Published"),
         isNotNull(productionItems.hook),
         sql`length(trim(${productionItems.hook})) > 0`,
-        ne(productionItems.id, excludeItemId),
+        excludeItemId ? ne(productionItems.id, excludeItemId) : undefined,
       ),
     )
     .orderBy(desc(productionItems.views), desc(productionItems.publishedDate))

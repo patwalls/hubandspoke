@@ -21,6 +21,7 @@ import {
 import { clipRenderTask, type ClipRenderPayload } from "./clip-render";
 import { designRenderTask, type DesignRenderPayload } from "./design-render";
 import { designFramesTask, type DesignFramesPayload } from "./design-frames";
+import { designTemplateImportTask, type DesignTemplateImportPayload } from "./design-template-import";
 import {
   diarizeTranscriptTask,
   type DiarizeTranscriptPayload,
@@ -129,6 +130,7 @@ export interface TaskPayloads {
   "clip-render": ClipRenderPayload;
   "design-render": DesignRenderPayload;
   "design-frames": DesignFramesPayload;
+  "design-template-import": DesignTemplateImportPayload;
   "diarize-transcript": DiarizeTranscriptPayload;
   "descript-derivative-create": DescriptDerivativeCreatePayload;
   "transcribe-whisper": TranscribeWhisperPayload;
@@ -191,6 +193,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "clip-render": clipRenderTask,
   "design-render": designRenderTask,
   "design-frames": designFramesTask,
+  "design-template-import": designTemplateImportTask,
   "diarize-transcript": diarizeTranscriptTask,
   "descript-derivative-create": descriptDerivativeCreateTask,
   "transcribe-whisper": transcribeWhisperTask,

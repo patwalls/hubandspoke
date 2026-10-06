@@ -8,9 +8,9 @@
  * the real editors, and shown here as what they are: a filmstrip of pages,
  * a summary of the look.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ClapperboardIcon, LayoutTemplateIcon, Loader2Icon, PencilIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
+import { ClapperboardIcon, FileUpIcon, LayoutTemplateIcon, Loader2Icon, PencilIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FONTS } from "@/lib/clip-editor/fonts";
 import type { ClipLook } from "@/lib/clip-editor/doc";
@@ -45,6 +45,7 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
   const [data, setData] = useState<TemplateResponse | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<ImportedDraft | null>(null);
   const load = useCallback(async () => {
     const res = await fetch(`/api/formats/${formatId}/design-template`);
     if (res.ok) setData((await res.json()) as TemplateResponse);
@@ -113,8 +114,96 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
           </div>
         </>
       )}
-      <DesignTemplateDialog open={editing} onOpenChange={setEditing} formatId={formatId} formatName={formatName} brand={brand} onSaved={() => { invalidateDesignTemplates(); void load(); }} />
+      {data && <ImportFromPdf formatId={formatId} hasCustomTemplate={t?.source === "stored"} onOpen={(d) => { setDraft(d); setEditing(true); }} />}
+      <DesignTemplateDialog open={editing} onOpenChange={(o) => { setEditing(o); if (!o) setDraft(null); }} formatId={formatId} formatName={formatName} brand={brand} initial={draft} onSaved={() => { invalidateDesignTemplates(); void load(); }} />
     </Card>
+  );
+}
+
+interface ImportedDraft {
+  doc: DesignDoc;
+  imageUrls: Record<string, string>;
+}
+
+type ImportState =
+  | { kind: "idle" }
+  | { kind: "uploading"; fileName: string }
+  | { kind: "reading"; fileName: string; importId: string }
+  | { kind: "done"; fileName: string; draft: ImportedDraft; notes: string | null }
+  | { kind: "failed"; error: string };
+
+/** "Import from PDF": upload a Canva export, the worker reads it into a
+ *  template (design-template-import), open the result in the editor. */
+function ImportFromPdf({ formatId, hasCustomTemplate, onOpen }: { formatId: string; hasCustomTemplate: boolean; onOpen: (draft: ImportedDraft) => void }) {
+  const [state, setState] = useState<ImportState>({ kind: "idle" });
+  const input = useRef<HTMLInputElement>(null);
+
+  const importId = state.kind === "reading" ? state.importId : null;
+  useEffect(() => {
+    if (!importId) return;
+    let cancelled = false;
+    const tick = async () => {
+      const res = await fetch(`/api/formats/${formatId}/design-template/import/${importId}`).catch(() => null);
+      if (cancelled) return;
+      const json = res?.ok ? ((await res.json()) as { status: string; error?: string; doc?: DesignDoc; imageUrls?: Record<string, string>; notes?: string | null; fileName?: string | null }) : null;
+      if (cancelled) return;
+      if (json?.status === "done" && json.doc) {
+        setState((s) => ({ kind: "done", fileName: s.kind === "reading" ? s.fileName : json.fileName ?? "PDF", draft: { doc: json.doc!, imageUrls: json.imageUrls ?? {} }, notes: json.notes ?? null }));
+      } else if (json?.status === "failed" || (res && !res.ok)) {
+        setState({ kind: "failed", error: json?.error ?? "Import failed" });
+      } else {
+        timer = setTimeout(() => void tick(), 2500);
+      }
+    };
+    let timer = setTimeout(() => void tick(), 2500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [formatId, importId]);
+
+  const upload = async (file: File) => {
+    setState({ kind: "uploading", fileName: file.name });
+    const body = new FormData();
+    body.append("file", file);
+    const res = await fetch(`/api/formats/${formatId}/design-template/import`, { method: "POST", body }).catch(() => null);
+    const json = res ? ((await res.json().catch(() => ({}))) as { importId?: string; error?: string }) : {};
+    if (!res?.ok || !json.importId) return setState({ kind: "failed", error: json.error ?? "Upload failed" });
+    setState({ kind: "reading", fileName: file.name, importId: json.importId });
+  };
+
+  const busy = state.kind === "uploading" || state.kind === "reading";
+  return (
+    <div className="flex flex-col gap-2 border-t border-border pt-2.5">
+      <input ref={input} type="file" accept="application/pdf,.pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={() => input.current?.click()}>
+          {busy ? <Loader2Icon className="mr-1 size-3 animate-spin" /> : <FileUpIcon className="mr-1 size-3" />}
+          Import from PDF
+        </Button>
+        <span className="text-[11px] text-muted-foreground">
+          {state.kind === "uploading" ? `Uploading ${state.fileName}…` : state.kind === "reading" ? `Reading ${state.fileName}… (about a minute)` : "Upload a Canva PDF export — the AI rebuilds it as a template you can edit."}
+        </span>
+      </div>
+      {state.kind === "failed" && <p className="text-[11px] text-destructive">{state.error}</p>}
+      {state.kind === "done" && (
+        <div className="flex flex-col gap-1.5 rounded-md bg-muted/60 p-2 text-[11px]">
+          <p>
+            Imported <span className="font-medium">{state.fileName}</span> — {state.draft.doc.pages.length} slides.
+            {state.notes ? <span className="text-muted-foreground"> {state.notes}</span> : null}
+          </p>
+          {hasCustomTemplate && <p className="text-amber-700 dark:text-amber-400">Opening it doesn&apos;t change anything yet — your first edit in the editor replaces the current custom template.</p>}
+          <div className="flex gap-2">
+            <Button type="button" size="sm" className="h-7 text-xs" onClick={() => onOpen(state.draft)}>
+              <PencilIcon className="mr-1 size-3" /> Open in editor
+            </Button>
+            <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setState({ kind: "idle" })}>
+              Discard
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
