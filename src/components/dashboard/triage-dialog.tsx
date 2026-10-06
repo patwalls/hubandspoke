@@ -135,7 +135,7 @@ export function TriageDialog(props: TriageDialogProps) {
   const flags = useFeatureFlags();
   // `?item=<id>` — a link for the open post; Back / close returns to the queue.
   useDialogUrl({ param: "item", id: props.item.id, open: props.open, onOpenChange: props.onOpenChange });
-  const templates = useDesignTemplates(!!flags?.designEditor);
+  const templates = useDesignTemplates(!!flags?.designEditor, props.item.brand || props.brand);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
   const { item } = props;
   const useDesigner =

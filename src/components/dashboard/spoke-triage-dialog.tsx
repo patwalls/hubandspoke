@@ -64,7 +64,7 @@ export function SpokeTriageDialog(props: SpokeTriageDialogProps) {
   // editor has made its item, `&item=<id>` is added in place (below).
   const [detached] = useState(() => !!readUrlParam("item"));
   useDialogUrl({ param: "candidate", id: props.candidate.id, open: props.open, onOpenChange: props.onOpenChange, enabled: !detached });
-  const templates = useDesignTemplates(!!flags?.designEditor);
+  const templates = useDesignTemplates(!!flags?.designEditor, props.brand);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
   const useDesigner =
     !!flags?.designEditor &&
