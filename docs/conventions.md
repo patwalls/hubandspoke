@@ -232,7 +232,10 @@ no percentage rollout, table, or admin UI on purpose.
 6. Cover both sides in e2e (`tests/e2e/clip-editor.spec.ts` is the template:
    one test per side, each skipping when the signed-in user is on the other).
 7. When the feature graduates, delete the flag and every branch that reads it
-   — don't leave it on at 100%.
+   — don't leave it on at 100%. As an interim step, `everyone: true` on the
+   flag turns it on for every signed-in user (including future signups)
+   without touching call sites; `clipEditor` and `designEditor` are in that
+   state as of 2026-10-07, pending cleanup.
 
 ## Removing a feature
 

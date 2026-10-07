@@ -18,13 +18,18 @@
  * comma-separated list — it EXTENDS the hardcoded allowlist, it never replaces
  * it, so an unset/typo'd env var can only ever make a flag narrower than you
  * meant, not wider.
+ *
+ * Set `everyone: true` to turn a flag on for every signed-in user, including
+ * accounts created later. Signed-out / email-less users still get `false`.
  */
 
-interface FlagDefinition {
+export interface FlagDefinition {
   /** Emails that always have the flag. Compared case-insensitively. */
   emails: readonly string[];
   /** Env var holding extra comma-separated emails. */
   envVar: string;
+  /** On for every signed-in user, regardless of `emails` / `envVar`. */
+  everyone?: boolean;
 }
 
 const FLAGS = {
@@ -36,6 +41,9 @@ const FLAGS = {
   clipEditor: {
     emails: ["patrickswalls@gmail.com", "sam@starterstory.com", "timjohn2002@gmail.com"],
     envVar: "FEATURE_CLIP_EDITOR_EMAILS",
+    // Rolled out to every account (2026-10-07). The allowlist above is kept
+    // only so flipping this back off restores the original dogfooders.
+    everyone: true,
   },
   /**
    * In-app design editor: the Repurposed queue's modal becomes an AI-drafted,
@@ -45,6 +53,9 @@ const FLAGS = {
   designEditor: {
     emails: ["patrickswalls@gmail.com", "sam@starterstory.com", "timjohn2002@gmail.com"],
     envVar: "FEATURE_DESIGN_EDITOR_EMAILS",
+    // Rolled out to every account (2026-10-07). The allowlist above is kept
+    // only so flipping this back off restores the original dogfooders.
+    everyone: true,
   },
 } as const satisfies Record<string, FlagDefinition>;
 
@@ -66,9 +77,18 @@ export function isFeatureEnabled(
   user: FlagSubject | null | undefined,
   env: Record<string, string | undefined> = process.env,
 ): boolean {
+  return isEnabledFor(FLAGS[flag], user, env);
+}
+
+/** The check itself, against any definition — exported for tests. */
+export function isEnabledFor(
+  def: FlagDefinition,
+  user: FlagSubject | null | undefined,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
   const email = user?.email ? normalize(user.email) : "";
   if (!email) return false;
-  const def: FlagDefinition = FLAGS[flag];
+  if (def.everyone) return true;
   if (def.emails.some((e) => normalize(e) === email)) return true;
   const extra = env[def.envVar];
   if (!extra) return false;
