@@ -10,7 +10,7 @@
  * captures it. This sweep fills the gap.
  *
  * Cost:
- * Haiku 4.5 vision, ~$0.001/image. One call returns both fields. Gated on
+ * Haiku 5.5 vision, well under $0.001/image. One call returns both fields. Gated on
  * visionExtractedAt IS NULL so it runs once per item.
  */
 
@@ -18,15 +18,13 @@ import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
-import { openai } from "@/lib/openai";
+import Anthropic from "@anthropic-ai/sdk";
 import {
   recordContentChanges,
   type ContentChange,
 } from "@/lib/services/content-revisions";
-import { BadRequestError } from "openai";
-import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
-const MODEL = "gpt-4.1-mini";
+const MODEL = "claude-haiku-5-5";
 export const VISION_EXTRACTOR_VERSION = `vision:${MODEL}:v1`;
 
 /** Post types whose cover image is meaningful (designed overlay, thumbnail
@@ -43,15 +41,13 @@ const VISION_POST_TYPES = [
 
 export const VISION_SWEEP_BATCH_LIMIT = 50;
 
-/** Match S3 keys that OpenAI's vision API will actually accept. The full
- *  set of "still image" extensions includes heic/heif/avif (iPhone-shot
- *  originals, modern web exports), but OpenAI rejects those with
- *  `400 You uploaded an unsupported image. Please make sure your image
- *  has of one the following formats: ['png', 'jpeg', 'gif', 'webp']` —
- *  see HUBANDSPOKE-V, 179 events in 8 min when an iPhone HEIC poster
- *  slipped through the old jpeg|png|webp|gif|heic|heif|avif allow-list.
- *  Keep this aligned with OpenAI's actual supported set; any conversion
- *  step (Sharp / sips) would belong in enrichment, not here. */
+/** Match S3 keys the vision model will actually accept. The full set of
+ *  "still image" extensions includes heic/heif/avif (iPhone-shot originals,
+ *  modern web exports), but vision APIs (OpenAI then, Claude now) only take
+ *  png / jpeg / gif / webp — see HUBANDSPOKE-V, 179 events in 8 min when an
+ *  iPhone HEIC poster slipped through the old
+ *  jpeg|png|webp|gif|heic|heif|avif allow-list. Any conversion step
+ *  (Sharp / sips) would belong in enrichment, not here. */
 export const IMAGE_KEY_RE = /\.(jpe?g|png|webp|gif)$/i;
 
 export function isLikelyImageKey(key: string): boolean {
@@ -61,9 +57,55 @@ export function isLikelyImageKey(key: string): boolean {
   return IMAGE_KEY_RE.test(base);
 }
 
-/** TTL for the presigned poster URL we hand to the model. 1 hour covers
- *  retries comfortably without giving out long-lived URLs. */
-const POSTER_URL_TTL_SECONDS = 60 * 60;
+/** TTL for the presigned poster URL we download the image from. Short is
+ *  fine — we fetch it immediately. */
+const POSTER_URL_TTL_SECONDS = 5 * 60;
+
+/** Claude's per-image cap. Larger posters are skipped, not retried. */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+const IMAGE_MEDIA_TYPES: Record<
+  string,
+  Anthropic.Base64ImageSource["media_type"]
+> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+
+/**
+ * Download a poster from S3 and wrap it as a base64 image block. We send
+ * bytes rather than the presigned URL so the call doesn't depend on
+ * Anthropic's fetcher reaching S3. Returns `{ skip }` for permanent
+ * problems (unsupported extension, missing object, over the size cap) so
+ * callers can stamp and move on; network/5xx errors throw for a retry.
+ * Shared with `dispatcher.ts`.
+ */
+export async function loadPosterImageBlock(
+  posterS3Key: string
+): Promise<{ block: Anthropic.ImageBlockParam } | { skip: string }> {
+  const base = posterS3Key.split("?")[0] ?? posterS3Key;
+  const mediaType = IMAGE_MEDIA_TYPES[base.split(".").pop()?.toLowerCase() ?? ""];
+  if (!mediaType) return { skip: "non-image-poster" };
+
+  const url = await getPresignedGetUrl(posterS3Key, POSTER_URL_TTL_SECONDS);
+  const res = await fetch(url);
+  if (res.status === 403 || res.status === 404) {
+    return { skip: `poster-fetch-${res.status}` };
+  }
+  if (!res.ok) throw new Error(`poster fetch failed: HTTP ${res.status}`);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  if (bytes.length > MAX_IMAGE_BYTES) return { skip: "poster-too-large" };
+
+  return {
+    block: {
+      type: "image",
+      source: { type: "base64", media_type: mediaType, data: bytes.toString("base64") },
+    },
+  };
+}
 
 const MAX_HOOK_CHARS = 240;
 const MAX_DESCRIPTION_CHARS = 400;
@@ -97,56 +139,50 @@ export async function selectVisionCandidates(
   return rows.map((r) => r.id);
 }
 
-const tools: ChatCompletionTool[] = [
+const tools: Anthropic.Tool[] = [
   {
-    type: "function",
-    function: {
-      name: "return_cover_analysis",
-      description:
-        "Return the on-screen hook text and a one-sentence description of the cover image.",
-      parameters: {
-        type: "object",
-        properties: {
-          hook: {
-            type: ["string", "null"],
-            description:
-              "VERBATIM on-screen text from the cover — the bold overlay, bar text, or caption burn-in designed as the hook. Copy exactly what is painted on the image (keep punctuation/emojis but drop small platform chrome like view counts or handles). If there is no scroll-stopping overlay text, pass null. Never invent words that aren't visibly on the image.",
-          },
-          cover_description: {
-            type: "string",
-            description:
-              "One sentence describing what the cover looks like: who/what is shown, composition (split-screen, close-up, text-only), any graphic treatment. Used for search + training data.",
-          },
+    name: "return_cover_analysis",
+    description:
+      "Return the on-screen hook text and a one-sentence description of the cover image.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        hook: {
+          type: ["string", "null"],
+          description:
+            "VERBATIM on-screen text from the cover — the bold overlay, bar text, or caption burn-in designed as the hook. Copy exactly what is painted on the image (keep punctuation/emojis but drop small platform chrome like view counts or handles). If there is no scroll-stopping overlay text, pass null. Never invent words that aren't visibly on the image.",
         },
-        required: ["hook", "cover_description"],
-        additionalProperties: false,
+        cover_description: {
+          type: "string",
+          description:
+            "One sentence describing what the cover looks like: who/what is shown, composition (split-screen, close-up, text-only), any graphic treatment. Used for search + training data.",
+        },
       },
-      strict: true,
+      required: ["hook", "cover_description"],
+      additionalProperties: false,
     },
+    strict: true,
   },
   {
-    type: "function",
-    function: {
-      name: "no_clear_cover",
-      description:
-        "Use only when the image is unreadable / failed to load / is not a real content cover. Still describe whatever you can see.",
-      parameters: {
-        type: "object",
-        properties: {
-          cover_description: {
-            type: "string",
-            description: "Brief note on what's visible, even if low-quality.",
-          },
-          reason: {
-            type: "string",
-            description: "One sentence on why no hook is extractable.",
-          },
+    name: "no_clear_cover",
+    description:
+      "Use only when the image is unreadable / failed to load / is not a real content cover. Still describe whatever you can see.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        cover_description: {
+          type: "string",
+          description: "Brief note on what's visible, even if low-quality.",
         },
-        required: ["cover_description", "reason"],
-        additionalProperties: false,
+        reason: {
+          type: "string",
+          description: "One sentence on why no hook is extractable.",
+        },
       },
-      strict: true,
+      required: ["cover_description", "reason"],
+      additionalProperties: false,
     },
+    strict: true,
   },
 ];
 
@@ -168,63 +204,63 @@ export interface VisionResult {
   outputTokens: number;
 }
 
-async function callVisionLLM(imageUrl: string): Promise<VisionResult> {
+function skipped(reason: string): VisionResult {
+  return {
+    hook: null,
+    coverDescription: null,
+    skippedReason: reason,
+    inputTokens: 0,
+    outputTokens: 0,
+  };
+}
+
+async function callVisionLLM(
+  image: Anthropic.ImageBlockParam
+): Promise<VisionResult> {
   let response;
   try {
-    response = await openai().chat.completions.create({
+    response = await new Anthropic().messages.create({
       model: MODEL,
       max_tokens: 512,
+      system: SYSTEM_PROMPT,
       tools,
-      tool_choice: "required",
+      tool_choice: { type: "any" },
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
           content: [
-            { type: "image_url", image_url: { url: imageUrl } },
+            image,
             { type: "text", text: "Analyze this cover. Call exactly one tool." },
           ],
         },
       ],
     });
   } catch (err) {
-    // 400s from OpenAI vision are permanent (unsupported format, broken image,
+    // 400s from vision are permanent (unsupported format, broken image,
     // dimensions out of range). Treat as a skipped extraction so the caller
     // stamps visionExtractedAt and we don't burn retries.
-    if (err instanceof BadRequestError) {
-      return {
-        hook: null,
-        coverDescription: null,
-        skippedReason: `openai-400:${err.message.slice(0, 200)}`,
-        inputTokens: 0,
-        outputTokens: 0,
-      };
+    if (err instanceof Anthropic.BadRequestError) {
+      return skipped(`vision-400:${err.message.slice(0, 200)}`);
     }
     throw err;
   }
 
-  const inputTokens = response.usage?.prompt_tokens ?? 0;
-  const outputTokens = response.usage?.completion_tokens ?? 0;
+  const inputTokens = response.usage.input_tokens;
+  const outputTokens = response.usage.output_tokens;
 
-  const message = response.choices[0]?.message;
-  for (const call of message?.tool_calls ?? []) {
-    if (call.type !== "function") continue;
-    let input: {
+  for (const call of response.content) {
+    if (call.type !== "tool_use") continue;
+    const input = call.input as {
       hook?: string | null;
       cover_description?: string;
       reason?: string;
     };
-    try {
-      input = JSON.parse(call.function.arguments);
-    } catch {
-      continue;
-    }
     const description =
       typeof input.cover_description === "string"
         ? input.cover_description.trim().slice(0, MAX_DESCRIPTION_CHARS)
         : null;
 
-    if (call.function.name === "return_cover_analysis") {
+    if (call.name === "return_cover_analysis") {
       const hookRaw =
         typeof input.hook === "string" ? input.hook.trim() : null;
       const hook =
@@ -239,7 +275,7 @@ async function callVisionLLM(imageUrl: string): Promise<VisionResult> {
         outputTokens,
       };
     }
-    if (call.function.name === "no_clear_cover") {
+    if (call.name === "no_clear_cover") {
       return {
         hook: null,
         coverDescription: description,
@@ -298,7 +334,7 @@ export async function extractVisionForItem(
   }
   // Defensive: legacy rows can have a video key in posterS3Key (the media
   // route used to fall back to s3Key for video slides). Vision can't read an
-  // mp4 — OpenAI returns a 400 that the SDK auto-captures to Sentry — so
+  // mp4 — the vision API returns a 400 that the SDK auto-captures to Sentry — so
   // skip and stamp instead of burning the API call.
   if (!isLikelyImageKey(existing.posterS3Key)) {
     const now = new Date();
@@ -309,12 +345,9 @@ export async function extractVisionForItem(
     return { status: "skipped", note: "non-image-poster" };
   }
 
-  const imageUrl = await getPresignedGetUrl(
-    existing.posterS3Key,
-    POSTER_URL_TTL_SECONDS
-  );
-
-  const result = await callVisionLLM(imageUrl);
+  const image = await loadPosterImageBlock(existing.posterS3Key);
+  const result =
+    "block" in image ? await callVisionLLM(image.block) : skipped(image.skip);
   const now = new Date();
 
   const canUpgradeHook =

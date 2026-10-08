@@ -11,7 +11,7 @@
  * turns that exemplar block into real training signal.
  *
  * Cost:
- * Haiku 4.5, ~200 tokens in + 50 out per item. ~$0.0005/item. The sweep
+ * Haiku 5.5, ~200 tokens in + 50 out per item. Fractions of a cent. The sweep
  * ordering prefers highest-view items first so the most-impactful exemplars
  * land in the prompt quickly.
  */
@@ -19,11 +19,10 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
-import { openai } from "@/lib/openai";
-import type { ChatCompletionTool } from "openai/resources/chat/completions";
+import Anthropic from "@anthropic-ai/sdk";
 import { recordContentChanges } from "@/lib/services/content-revisions";
 
-const MODEL = "gpt-4.1-mini";
+const MODEL = "claude-haiku-5-5";
 export const EXTRACTOR_VERSION = `${MODEL}:v1`;
 
 /** Short-form post types that have a "stop-scroll" hook to extract.
@@ -110,47 +109,41 @@ function formatSegments(
     .join("\n");
 }
 
-const tools: ChatCompletionTool[] = [
+const tools: Anthropic.Tool[] = [
   {
-    type: "function",
-    function: {
-      name: "return_hook",
-      description:
-        "Return the verbatim 1–2 sentence opening that functions as the hook — the words the viewer hears in the first few seconds.",
-      parameters: {
-        type: "object",
-        properties: {
-          hook: {
-            type: "string",
-            description:
-              "VERBATIM text copied from the transcript cues. Do not paraphrase, do not fix grammar, do not add punctuation that isn't there. 1–2 sentences, typically 8–30 words.",
-          },
+    name: "return_hook",
+    description:
+      "Return the verbatim 1–2 sentence opening that functions as the hook — the words the viewer hears in the first few seconds.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        hook: {
+          type: "string",
+          description:
+            "VERBATIM text copied from the transcript cues. Do not paraphrase, do not fix grammar, do not add punctuation that isn't there. 1–2 sentences, typically 8–30 words.",
         },
-        required: ["hook"],
-        additionalProperties: false,
       },
-      strict: true,
+      required: ["hook"],
+      additionalProperties: false,
     },
+    strict: true,
   },
   {
-    type: "function",
-    function: {
-      name: "no_clear_hook",
-      description:
-        "Use when the opening is pure filler (greetings, platform intros, silence, music-only) with no hook worth extracting.",
-      parameters: {
-        type: "object",
-        properties: {
-          reason: {
-            type: "string",
-            description: "One sentence on why no hook is extractable.",
-          },
+    name: "no_clear_hook",
+    description:
+      "Use when the opening is pure filler (greetings, platform intros, silence, music-only) with no hook worth extracting.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reason: {
+          type: "string",
+          description: "One sentence on why no hook is extractable.",
         },
-        required: ["reason"],
-        additionalProperties: false,
       },
-      strict: true,
+      required: ["reason"],
+      additionalProperties: false,
     },
+    strict: true,
   },
 ];
 
@@ -172,13 +165,13 @@ export interface ExtractHookResult {
 }
 
 async function callHookLLM(cues: string): Promise<ExtractHookResult> {
-  const response = await openai().chat.completions.create({
+  const response = await new Anthropic().messages.create({
     model: MODEL,
     max_tokens: 256,
+    system: SYSTEM_PROMPT,
     tools,
-    tool_choice: "required",
+    tool_choice: { type: "any" },
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
         content: `Transcript cues (opening window):\n\n${cues}\n\nCall exactly one tool.`,
@@ -186,19 +179,13 @@ async function callHookLLM(cues: string): Promise<ExtractHookResult> {
     ],
   });
 
-  const inputTokens = response.usage?.prompt_tokens ?? 0;
-  const outputTokens = response.usage?.completion_tokens ?? 0;
+  const inputTokens = response.usage.input_tokens;
+  const outputTokens = response.usage.output_tokens;
 
-  const message = response.choices[0]?.message;
-  for (const call of message?.tool_calls ?? []) {
-    if (call.type !== "function") continue;
-    let input: { hook?: string; reason?: string };
-    try {
-      input = JSON.parse(call.function.arguments);
-    } catch {
-      continue;
-    }
-    if (call.function.name === "return_hook") {
+  for (const call of response.content) {
+    if (call.type !== "tool_use") continue;
+    const input = call.input as { hook?: string; reason?: string };
+    if (call.name === "return_hook") {
       const hook = typeof input.hook === "string" ? input.hook.trim() : "";
       if (hook.length === 0) {
         return {
@@ -210,7 +197,7 @@ async function callHookLLM(cues: string): Promise<ExtractHookResult> {
       }
       return { hook, skippedReason: null, inputTokens, outputTokens };
     }
-    if (call.function.name === "no_clear_hook") {
+    if (call.name === "no_clear_hook") {
       return {
         hook: null,
         skippedReason:

@@ -3,9 +3,9 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, formats } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
-import { openai } from "@/lib/openai";
+import Anthropic from "@anthropic-ai/sdk";
 
-const MODEL = "gpt-4.1-mini";
+const MODEL = "claude-haiku-5-5";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -70,23 +70,21 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .join("\n");
 
   try {
-    const response = await openai().chat.completions.create({
+    const response = await new Anthropic().messages.create({
       model: MODEL,
-      max_tokens: 240,
-      messages: [
-        {
-          role: "system",
-          content: [
-            "You're helping triage content ideas. Given a derivative post's title, format, channel, and pillar source, write a 2-3 sentence plain-English summary of what the finished post will be.",
-            "Focus on: what's being made, what moment/angle of the pillar it pulls from, and (if obvious from the format skill) the tone or hook.",
-            "No bullet points, no headings, no filler. Don't restate the format name. Don't editorialize about whether it's a good idea.",
-          ].join(" "),
-        },
-        { role: "user", content: userPrompt },
-      ],
+      max_tokens: 1024,
+      system: [
+        "You're helping triage content ideas. Given a derivative post's title, format, channel, and pillar source, write a 2-3 sentence plain-English summary of what the finished post will be.",
+        "Focus on: what's being made, what moment/angle of the pillar it pulls from, and (if obvious from the format skill) the tone or hook.",
+        "No bullet points, no headings, no filler. Don't restate the format name. Don't editorialize about whether it's a good idea.",
+      ].join(" "),
+      messages: [{ role: "user", content: userPrompt }],
     });
 
-    const text = (response.choices[0]?.message?.content ?? "").trim();
+    const text = response.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
+      .trim();
 
     return NextResponse.json({ summary: text || null });
   } catch (err) {

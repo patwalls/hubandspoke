@@ -25,29 +25,21 @@
  * of the same call when vision-mode.
  */
 
+import Anthropic from "@anthropic-ai/sdk";
 import { and, eq, isNull, not, or, sql } from "drizzle-orm";
-import { BadRequestError } from "openai";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
-import { getPresignedGetUrl } from "@/lib/s3";
-import { openai } from "@/lib/openai";
-import { isLikelyImageKey } from "./vision";
-import type {
-  ChatCompletionContentPart,
-  ChatCompletionTool,
-} from "openai/resources/chat/completions";
+import { isLikelyImageKey, loadPosterImageBlock } from "./vision";
 
-const MODEL = "gpt-4.1-mini";
+const MODEL = "claude-haiku-5-5";
 export const DISPATCHER_VERSION = `dispatcher:${MODEL}:v1`;
 
 export const DISPATCHER_BATCH_LIMIT = 50;
 
-const POSTER_URL_TTL_SECONDS = 60 * 60;
-
 const MAX_HOOK_CHARS = 240;
 const MAX_DESCRIPTION_CHARS = 400;
 /** Opening window we feed to the model. Enough for a verbatim hook but not
- *  so much that Haiku loses focus in a long transcript. */
+ *  so much that the model loses focus in a long transcript. */
 const TRANSCRIPT_PREVIEW_CHARS = 600;
 const TRANSCRIPT_SEGMENT_WINDOW_SEC = 20;
 const BODY_PREVIEW_CHARS = 500;
@@ -107,43 +99,40 @@ function formatTranscriptSegments(
     .join("\n");
 }
 
-const tools: ChatCompletionTool[] = [
+const tools: Anthropic.Tool[] = [
   {
-    type: "function",
-    function: {
-      name: "return_hook",
-      description:
-        "Return the best hook for this post. Pick exactly one source and quote verbatim.",
-      parameters: {
-        type: "object",
-        properties: {
-          hook: {
-            type: ["string", "null"],
-            description:
-              "The hook text, VERBATIM from whichever source you picked. No paraphrasing, no fixing typos, no adding punctuation. 1–2 sentences, typically 6–30 words. Null if source='none'.",
-          },
-          source: {
-            type: "string",
-            enum: ["overlay", "transcript", "caption", "title", "none"],
-            description:
-              "Which signal the hook came from. 'overlay' = designed text burned into the cover image (Reels/Shorts/TikTok bar text). 'transcript' = first scroll-stopping sentence in the spoken transcript. 'caption' = first sentence of post body/caption (tweets, IG posts). 'title' = post title (YouTube long, newsletter). 'none' = no good hook available.",
-          },
-          cover_description: {
-            type: ["string", "null"],
-            description:
-              "One-sentence description of the cover image — who/what is shown, composition, any graphic treatment. Null if no image was provided.",
-          },
-          reasoning: {
-            type: "string",
-            description:
-              "One short sentence explaining why this source was picked.",
-          },
+    name: "return_hook",
+    description:
+      "Return the best hook for this post. Pick exactly one source and quote verbatim.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        hook: {
+          type: ["string", "null"],
+          description:
+            "The hook text, VERBATIM from whichever source you picked. No paraphrasing, no fixing typos, no adding punctuation. 1–2 sentences, typically 6–30 words. Null if source='none'.",
         },
-        required: ["hook", "source", "cover_description", "reasoning"],
-        additionalProperties: false,
+        source: {
+          type: "string",
+          enum: ["overlay", "transcript", "caption", "title", "none"],
+          description:
+            "Which signal the hook came from. 'overlay' = designed text burned into the cover image (Reels/Shorts/TikTok bar text). 'transcript' = first scroll-stopping sentence in the spoken transcript. 'caption' = first sentence of post body/caption (tweets, IG posts). 'title' = post title (YouTube long, newsletter). 'none' = no good hook available.",
+        },
+        cover_description: {
+          type: ["string", "null"],
+          description:
+            "One-sentence description of the cover image — who/what is shown, composition, any graphic treatment. Null if no image was provided.",
+        },
+        reasoning: {
+          type: "string",
+          description:
+            "One short sentence explaining why this source was picked.",
+        },
       },
-      strict: true,
+      required: ["hook", "source", "cover_description", "reasoning"],
+      additionalProperties: false,
     },
+    strict: true,
   },
 ];
 
@@ -178,7 +167,7 @@ interface ItemSignals {
   title: string | null;
   contentBody: string | null;
   postType: string | null;
-  posterImageUrl: string | null;
+  posterImage: Anthropic.ImageBlockParam | null;
   transcriptFullText: string | null;
   transcriptSegmentsPreview: string | null;
 }
@@ -211,31 +200,25 @@ function buildUserMessage(signals: ItemSignals): string {
 async function callLLM(signals: ItemSignals): Promise<DispatchResult> {
   const userText = buildUserMessage(signals);
 
-  const buildContent = (withImage: boolean): ChatCompletionContentPart[] => {
-    const c: ChatCompletionContentPart[] = [];
-    if (withImage && signals.posterImageUrl) {
-      c.push({
-        type: "image_url",
-        image_url: { url: signals.posterImageUrl },
-      });
-    }
+  const buildContent = (withImage: boolean): Anthropic.ContentBlockParam[] => {
+    const c: Anthropic.ContentBlockParam[] = [];
+    if (withImage && signals.posterImage) c.push(signals.posterImage);
     c.push({ type: "text", text: userText });
     return c;
   };
 
-  const request = (withImage: boolean) => ({
-    model: MODEL,
-    max_tokens: 512,
-    tools,
-    tool_choice: { type: "function" as const, function: { name: "return_hook" } },
-    messages: [
-      { role: "system" as const, content: SYSTEM_PROMPT },
-      { role: "user" as const, content: buildContent(withImage) },
-    ],
-  });
+  const create = (withImage: boolean) =>
+    new Anthropic().messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      tools,
+      tool_choice: { type: "tool", name: "return_hook" },
+      messages: [{ role: "user", content: buildContent(withImage) }],
+    });
 
-  // First attempt: send the poster image when we have one. OpenAI
-  // occasionally rejects on bytes-level format even when the S3 key's
+  // First attempt: send the poster image when we have one. Vision APIs
+  // occasionally reject on bytes-level format even when the S3 key's
   // extension passed `isLikelyImageKey` — e.g. a `.jpg` key whose
   // contents are actually HEIC, or a poster-extract output that landed
   // truncated. On 400, retry once without the image so text signals can
@@ -253,12 +236,12 @@ async function callLLM(signals: ItemSignals): Promise<DispatchResult> {
   // return a skipped result so the caller stamps `hookExtractedAt` and the
   // item stops being re-swept.
   //
-  // Match on the HTTP status, not only `instanceof BadRequestError` — the
-  // production trace rethrew from the `else` branch with a poster present,
-  // which means the class check itself did not hold for a 400 the SDK raised
+  // Match on the HTTP status, not only `instanceof BadRequestError` — under
+  // OpenAI the production trace rethrew from the `else` branch with a poster
+  // present, i.e. the class check did not hold for a 400 the SDK raised
   // through `APIError.generate`. Every `APIError` carries `.status`.
   const isPermanentBadRequest = (e: unknown): boolean =>
-    e instanceof BadRequestError ||
+    e instanceof Anthropic.BadRequestError ||
     (typeof e === "object" &&
       e !== null &&
       (e as { status?: number }).status === 400);
@@ -268,7 +251,7 @@ async function callLLM(signals: ItemSignals): Promise<DispatchResult> {
     hook: null,
     source: "none",
     coverDescription: null,
-    reasoning: `openai-400:${stage}:${
+    reasoning: `llm-400:${stage}:${
       err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)
     }`,
     inputTokens: 0,
@@ -277,35 +260,29 @@ async function callLLM(signals: ItemSignals): Promise<DispatchResult> {
 
   let response;
   try {
-    response = await openai().chat.completions.create(request(true));
+    response = await create(true);
   } catch (err) {
     if (!isPermanentBadRequest(err)) throw err;
-    if (!signals.posterImageUrl) return skippedOn400(err, "text");
+    if (!signals.posterImage) return skippedOn400(err, "text");
     try {
-      response = await openai().chat.completions.create(request(false));
+      response = await create(false);
     } catch (retryErr) {
       if (!isPermanentBadRequest(retryErr)) throw retryErr;
       return skippedOn400(retryErr, "retry-no-image");
     }
   }
 
-  const inputTokens = response.usage?.prompt_tokens ?? 0;
-  const outputTokens = response.usage?.completion_tokens ?? 0;
+  const inputTokens = response.usage.input_tokens;
+  const outputTokens = response.usage.output_tokens;
 
-  const message = response.choices[0]?.message;
-  for (const call of message?.tool_calls ?? []) {
-    if (call.type !== "function" || call.function.name !== "return_hook") continue;
-    let input: {
+  for (const call of response.content) {
+    if (call.type !== "tool_use" || call.name !== "return_hook") continue;
+    const input = call.input as {
       hook?: string | null;
       source?: string;
       cover_description?: string | null;
       reasoning?: string;
     };
-    try {
-      input = JSON.parse(call.function.arguments);
-    } catch {
-      continue;
-    }
     const source = (input.source ?? "none") as DispatcherSource;
     // LLM tool-call outputs occasionally contain literal ` ` (null byte)
     // — a model artifact that survives JSON.parse but is rejected by
@@ -412,16 +389,17 @@ export async function dispatchHookForItem(
     return { status: "no-signals", note: "no-signals" };
   }
 
-  // Only presign + send the poster when the key's extension is something
-  // OpenAI's vision API accepts (png/jpeg/gif/webp). HEIC / HEIF / AVIF
-  // posters return `400 You uploaded an unsupported image` from OpenAI —
-  // see HUBANDSPOKE-V. Treating an unsupported poster as "no poster"
+  // Only download + send the poster when the key's extension is something
+  // the vision API accepts (png/jpeg/gif/webp). HEIC / HEIF / AVIF posters
+  // return `400 You uploaded an unsupported image` — see HUBANDSPOKE-V.
+  // Treating an unsupported (or missing / oversize) poster as "no poster"
   // lets the dispatcher fall through to text-only signals on this item
   // and stamp `hookExtractedAt`, so we don't loop forever on retries.
-  const posterImageUrl =
-    existing.posterS3Key && isLikelyImageKey(existing.posterS3Key)
-      ? await getPresignedGetUrl(existing.posterS3Key, POSTER_URL_TTL_SECONDS)
-      : null;
+  let posterImage: Anthropic.ImageBlockParam | null = null;
+  if (existing.posterS3Key && isLikelyImageKey(existing.posterS3Key)) {
+    const loaded = await loadPosterImageBlock(existing.posterS3Key);
+    if ("block" in loaded) posterImage = loaded.block;
+  }
 
   const transcriptSegmentsPreview = existing.transcriptSegments
     ? formatTranscriptSegments(
@@ -434,7 +412,7 @@ export async function dispatchHookForItem(
     title: existing.title,
     contentBody: existing.contentBody,
     postType: existing.postType,
-    posterImageUrl,
+    posterImage,
     transcriptFullText: existing.transcriptFullText,
     transcriptSegmentsPreview:
       transcriptSegmentsPreview && transcriptSegmentsPreview.trim().length > 0
@@ -451,7 +429,7 @@ export async function dispatchHookForItem(
   if (result.coverDescription) {
     updates.coverDescription = result.coverDescription;
     updates.visionExtractedAt = now;
-  } else if (posterImageUrl) {
+  } else if (posterImage) {
     updates.visionExtractedAt = now;
   }
   if (result.hook && result.source !== "none") {

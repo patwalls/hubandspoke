@@ -1,7 +1,6 @@
-import { openai } from "@/lib/openai";
-import type { ChatCompletionTool } from "openai/resources/chat/completions";
+import Anthropic from "@anthropic-ai/sdk";
 
-const MODEL = "gpt-4.1-mini";
+const MODEL = "claude-haiku-5-5";
 
 // How much of the body to send to the classifier. Captions over ~1.5k chars
 // are rare; clipping keeps tokens bounded without losing judgement signal.
@@ -12,48 +11,42 @@ export interface EvergreenVerdict {
   reasoning: string;
 }
 
-const tools: ChatCompletionTool[] = [
+const tools: Anthropic.Tool[] = [
   {
-    type: "function",
-    function: {
-      name: "mark_evergreen",
-      description:
-        "Mark the content as evergreen. Use when the piece would still be valid and interesting to a new viewer 12+ months from now, is not tied to a specific moment, event, news cycle, or launch, and does not lean on time-sensitive stats or promises.",
-      parameters: {
-        type: "object",
-        properties: {
-          reasoning: {
-            type: "string",
-            description:
-              "One or two sentences explaining WHY this piece is still evergreen. Cite the topic or framing that gives it long shelf life.",
-          },
+    name: "mark_evergreen",
+    description:
+      "Mark the content as evergreen. Use when the piece would still be valid and interesting to a new viewer 12+ months from now, is not tied to a specific moment, event, news cycle, or launch, and does not lean on time-sensitive stats or promises.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reasoning: {
+          type: "string",
+          description:
+            "One or two sentences explaining WHY this piece is still evergreen. Cite the topic or framing that gives it long shelf life.",
         },
-        required: ["reasoning"],
-        additionalProperties: false,
       },
-      strict: true,
+      required: ["reasoning"],
+      additionalProperties: false,
     },
+    strict: true,
   },
   {
-    type: "function",
-    function: {
-      name: "mark_not_evergreen",
-      description:
-        "Mark the content as NOT evergreen. Use when the piece is tied to a specific moment (a launch, a news event, a holiday, a sale, a cohort, a current product price), contains stats/claims that would feel stale in a year, or is obviously seasonal.",
-      parameters: {
-        type: "object",
-        properties: {
-          reasoning: {
-            type: "string",
-            description:
-              "One or two sentences explaining WHY this piece is not evergreen. Cite the time-sensitive element.",
-          },
+    name: "mark_not_evergreen",
+    description:
+      "Mark the content as NOT evergreen. Use when the piece is tied to a specific moment (a launch, a news event, a holiday, a sale, a cohort, a current product price), contains stats/claims that would feel stale in a year, or is obviously seasonal.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reasoning: {
+          type: "string",
+          description:
+            "One or two sentences explaining WHY this piece is not evergreen. Cite the time-sensitive element.",
         },
-        required: ["reasoning"],
-        additionalProperties: false,
       },
-      strict: true,
+      required: ["reasoning"],
+      additionalProperties: false,
     },
+    strict: true,
   },
 ];
 
@@ -126,32 +119,26 @@ export async function classifyEvergreen(params: {
     `Classify this as evergreen or not. Call exactly one tool.`,
   ].join("\n");
 
-  const response = await openai().chat.completions.create({
+  const response = await new Anthropic().messages.create({
     model: MODEL,
     max_tokens: 512,
+    system: buildSystemPrompt(params.pastKillReasons),
     tools,
-    tool_choice: "required",
+    tool_choice: { type: "any" },
     messages: [
-      { role: "system", content: buildSystemPrompt(params.pastKillReasons) },
       { role: "user", content: userMessage },
     ],
   });
 
-  const message = response.choices[0]?.message;
-  for (const call of message?.tool_calls ?? []) {
-    if (call.type !== "function") continue;
-    let input: { reasoning?: string };
-    try {
-      input = JSON.parse(call.function.arguments);
-    } catch {
-      continue;
-    }
+  for (const call of response.content) {
+    if (call.type !== "tool_use") continue;
+    const input = call.input as { reasoning?: string };
     if (typeof input.reasoning !== "string" || !input.reasoning.trim()) continue;
 
-    if (call.function.name === "mark_evergreen") {
+    if (call.name === "mark_evergreen") {
       return { isEvergreen: true, reasoning: input.reasoning.trim() };
     }
-    if (call.function.name === "mark_not_evergreen") {
+    if (call.name === "mark_not_evergreen") {
       return { isEvergreen: false, reasoning: input.reasoning.trim() };
     }
   }
@@ -177,48 +164,42 @@ export interface RepostFitVerdict {
   reasoning: string;
 }
 
-const fitTools: ChatCompletionTool[] = [
+const fitTools: Anthropic.Tool[] = [
   {
-    type: "function",
-    function: {
-      name: "mark_would_repost",
-      description:
-        "Mark this candidate as a good repost fit. Use when the candidate resembles content the operator has actually published as a repost before, and does NOT resemble the kinds of content they've killed.",
-      parameters: {
-        type: "object",
-        properties: {
-          reasoning: {
-            type: "string",
-            description:
-              "One or two sentences citing which accept exemplars this is similar to, or why no kill reason applies.",
-          },
+    name: "mark_would_repost",
+    description:
+      "Mark this candidate as a good repost fit. Use when the candidate resembles content the operator has actually published as a repost before, and does NOT resemble the kinds of content they've killed.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reasoning: {
+          type: "string",
+          description:
+            "One or two sentences citing which accept exemplars this is similar to, or why no kill reason applies.",
         },
-        required: ["reasoning"],
-        additionalProperties: false,
       },
-      strict: true,
+      required: ["reasoning"],
+      additionalProperties: false,
     },
+    strict: true,
   },
   {
-    type: "function",
-    function: {
-      name: "mark_would_skip",
-      description:
-        "Mark this candidate as a bad repost fit. Use when the candidate resembles a recent kill reason (same topic, same framing, same operator objection), or when it doesn't resemble anything the operator has actually published as a repost.",
-      parameters: {
-        type: "object",
-        properties: {
-          reasoning: {
-            type: "string",
-            description:
-              "One or two sentences citing the matching kill reason or the lack of similar accept exemplars.",
-          },
+    name: "mark_would_skip",
+    description:
+      "Mark this candidate as a bad repost fit. Use when the candidate resembles a recent kill reason (same topic, same framing, same operator objection), or when it doesn't resemble anything the operator has actually published as a repost.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reasoning: {
+          type: "string",
+          description:
+            "One or two sentences citing the matching kill reason or the lack of similar accept exemplars.",
         },
-        required: ["reasoning"],
-        additionalProperties: false,
       },
-      strict: true,
+      required: ["reasoning"],
+      additionalProperties: false,
     },
+    strict: true,
   },
 ];
 
@@ -302,32 +283,26 @@ export async function judgeRepostFit(params: {
     `Decide. Call exactly one tool.`,
   ].join("\n");
 
-  const response = await openai().chat.completions.create({
+  const response = await new Anthropic().messages.create({
     model: MODEL,
     max_tokens: 512,
+    system: FIT_SYSTEM_PROMPT,
     tools: fitTools,
-    tool_choice: "required",
+    tool_choice: { type: "any" },
     messages: [
-      { role: "system", content: FIT_SYSTEM_PROMPT },
       { role: "user", content: userMessage },
     ],
   });
 
-  const message = response.choices[0]?.message;
-  for (const call of message?.tool_calls ?? []) {
-    if (call.type !== "function") continue;
-    let input: { reasoning?: string };
-    try {
-      input = JSON.parse(call.function.arguments);
-    } catch {
-      continue;
-    }
+  for (const call of response.content) {
+    if (call.type !== "tool_use") continue;
+    const input = call.input as { reasoning?: string };
     if (typeof input.reasoning !== "string" || !input.reasoning.trim()) continue;
 
-    if (call.function.name === "mark_would_repost") {
+    if (call.name === "mark_would_repost") {
       return { wouldRepost: true, reasoning: input.reasoning.trim() };
     }
-    if (call.function.name === "mark_would_skip") {
+    if (call.name === "mark_would_skip") {
       return { wouldRepost: false, reasoning: input.reasoning.trim() };
     }
   }
