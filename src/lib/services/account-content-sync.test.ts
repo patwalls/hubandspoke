@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isForeignRetweet,
   isForeignLinkedInReshare,
+  isPermanentSyncFailure,
   normalizeLinkedInCompanyPost,
 } from "./account-content-sync";
 import type { SCTweet } from "./sc-fetchers";
@@ -209,5 +210,26 @@ describe("isForeignLinkedInReshare", () => {
         text: "reshared via feed url",
       }),
     ).toBe(true);
+  });
+});
+
+describe("isPermanentSyncFailure", () => {
+  // Real error text from prod sync_logs 2026-10-08: two FB accounts added with
+  // nonexistent pages threw as transient, so graphile retried both the latest
+  // and backfill jobs up to 25 times each (~30 error rows/hour).
+  it("treats a Facebook 'account doesn't exist' 404 as permanent", () => {
+    expect(
+      isPermanentSyncFailure(
+        'SC /v1/facebook/profile/posts 404: {"success":true,"credits_remaining":371286,"credits_charged":0,"url":"https://www.facebook.com/p","accountDoesNotExist":true,"isPrivate":false,"message":"Account doesn\'t exist"}',
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a bare SC 5xx transient", () => {
+    expect(
+      isPermanentSyncFailure(
+        'SC /v1/youtube/channel-videos 500: {"message":"Internal Server Error"}',
+      ),
+    ).toBe(false);
   });
 });

@@ -428,6 +428,12 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   `uniq_production_items_account_platform_content_id`. Stamps
   `accounts.lastContentSyncAt` on success, `lastContentSyncError` on
   failure. Writes `syncLogs` with `sync_type=account-content-sync:<platform>`.
+- **Permanent vs transient failures:** `isPermanentSyncFailure` (deactivated
+  TikTok, not-found Threads, nonexistent Facebook page via SC
+  `accountDoesNotExist:true`, personal-profile LinkedIn URL) flips the account
+  `is_active=false` and the task returns cleanly — no retry. Everything else
+  (SC 5xx etc.) throws so graphile retries with backoff. A later successful sync
+  (e.g. a manual Sync after correcting the URL) re-activates the account.
 - **Cross-account uniqueness:** `uniq_production_items_platform_content_id_global`
   (added 2026-04-29) makes `platform_content_id` globally unique across
   all accounts, not just per-account. The same X tweet / IG reel / YT video

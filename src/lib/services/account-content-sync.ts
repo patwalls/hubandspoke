@@ -119,10 +119,13 @@ export interface SyncResult {
  * Conservative on purpose: anything not on this list is treated as
  * transient and surfaces normally.
  */
-function isPermanentSyncFailure(message: string): boolean {
+export function isPermanentSyncFailure(message: string): boolean {
   return (
     // TikTok: SC returns 404 + `account_deactivated:true`
     /account_deactivated/i.test(message) ||
+    // Facebook: SC returns 404 + `accountDoesNotExist:true` for a page that
+    // doesn't exist (deleted, or a mistyped/truncated URL like facebook.com/p)
+    /"accountDoesNotExist":true/i.test(message) ||
     /"message":"Account deactivated"/i.test(message) ||
     // Threads: SC returns 404 + "Shoot looks like the user is not found, or
     // is private and needs to be accessed by a logged in account"
