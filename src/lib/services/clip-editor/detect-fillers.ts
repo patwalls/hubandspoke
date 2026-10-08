@@ -14,7 +14,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { EditorWord } from "@/lib/clip-editor/words";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-5-5";
 
 /** ~6 minutes of speech. A clip is ≤ ~2 min; the cap just bounds the prompt
  *  if someone drags the trim handles across a huge range. */
@@ -83,10 +83,10 @@ export async function detectFillerWords(args: {
     response = await client.messages.create({
       model: MODEL,
       max_tokens: 2048,
-      // As repeatable as the API allows: the same clip should get the same
-      // suggestions. (The result only becomes an edit once it's applied to
-      // the doc — from there on, everything IS deterministic.)
-      temperature: 0,
+      // No `temperature: 0` any more: Haiku 5.5 400s on any non-default
+      // sampling parameter. The forced tool call + the numbered listing keep
+      // the output constrained. (The result only becomes an edit once it's
+      // applied to the doc — from there on, everything IS deterministic.)
       system: SYSTEM_PROMPT,
       tools: TOOLS,
       tool_choice: { type: "tool", name: "report_fillers" },

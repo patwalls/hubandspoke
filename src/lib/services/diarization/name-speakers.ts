@@ -15,7 +15,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { SpeakerRole } from "@/lib/diarization/types";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-5-5";
 const MAX_SAMPLE_CHARS = 220;
 const SAMPLES_PER_SPEAKER = 6;
 const OPENING_CHARS = 2500;
@@ -126,7 +126,7 @@ export async function nameSpeakers(input: NameSpeakersInput): Promise<NameSpeake
     response = await client.messages.create({
       model: MODEL,
       max_tokens: 1024,
-      temperature: 0,
+      // No `temperature: 0`: Haiku 5.5 400s on non-default sampling params.
       system: SYSTEM_PROMPT,
       tools: TOOLS,
       tool_choice: { type: "tool", name: "name_speakers" },

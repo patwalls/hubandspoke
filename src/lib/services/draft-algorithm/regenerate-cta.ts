@@ -39,7 +39,7 @@ import {
 // Skip codes mirror the main algorithm's pattern so the route's error
 // shape stays consistent.
 
-const MODEL = "claude-opus-4-7";
+const MODEL = "claude-opus-5-5";
 export const REGENERATE_CTA_VERSION = TRACKED_CTA_VERSION;
 export const REGENERATE_CTA_GENERATED_BY = `regen-cta:v${REGENERATE_CTA_VERSION}:${MODEL}`;
 

@@ -2,7 +2,7 @@
 // for the design editor's cover and picture panel, shared by every post made
 // from the video. Two modes (see services/design-editor/frames.ts):
 //   auto  — ~12 frames, sampled where the GUEST is talking when the
-//           transcript knows (frame-times.ts), then Haiku 4.5 ranks the best
+//           transcript knows (frame-times.ts), then Haiku 5.5 ranks the best
 //           founder shots: rank 1 is the cover pick;
 //   atSec — one frame at an exact time the editor scrubbed to.
 // The source is downloaded to the dyno first: the static ffmpeg there
@@ -33,7 +33,7 @@ export interface DesignFramesPayload {
   productionItemId?: string;
 }
 
-const PICK_MODEL = "claude-haiku-4-5-20251001";
+const PICK_MODEL = "claude-haiku-5-5";
 const BEST_SHOTS = 3;
 
 export const designFramesTask: Task = async (rawPayload, helpers) => {

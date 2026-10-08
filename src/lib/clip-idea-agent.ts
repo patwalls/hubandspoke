@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// Sonnet 4.6. Prompt V9 (2026-05-21): split the monolithic prompt into a
+// Sonnet 5.5 (was Sonnet 4.6). Prompt V9 (2026-05-21): split the monolithic prompt into a
 // format-agnostic SECTION_SELECTION_PROMPT_BASE plus a per-format FORMAT
 // block pulled from each format's `## Clip Idea Generation` skill section.
 // Tool schema is also format-driven — declarations of `extras` (e.g.
@@ -10,7 +10,7 @@ import Anthropic from "@anthropic-ai/sdk";
 // schema, so the original Repackage Section w/ Hook format keeps working
 // without any skill edits. V8 added MAX_LEAD_IN_SEC=15; V7 introduced the
 // verbatim transcriptAnchorQuote gate; V6 the blueprintAnchorHook gate.
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "claude-sonnet-5-5";
 export const PROMPT_VERSION = 9;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
@@ -1012,13 +1012,22 @@ export async function generateClipIdeas(
       model: MODEL,
       // 10 ideas × (hook + angle + 2-4 sentence rationale + 8+ word
       // anchor quote + blueprint anchor) easily blows past 4096 on chatty
-      // transcripts. Bumping to 8192 leaves comfortable headroom; Sonnet 4.6
-      // supports up to 64K. Symptom of being too low was V7 silently failing
+      // transcripts. Symptom of being too low was V7 silently failing
       // shape validation because the tool_use JSON was truncated mid-array.
-      max_tokens: 8192,
+      // Sonnet 5.5 thinks before answering and thinking counts toward
+      // max_tokens, so 8192 → 16000 (under the SDK's ~21K non-streaming cap).
+      max_tokens: 16000,
+      // Sonnet 5.5's default, set explicitly: levels are recalibrated vs
+      // Sonnet 4.6 (which ran here with no thinking at all) — "medium" is
+      // the cost/latency lever if this proves slow.
+      output_config: { effort: "high" },
       system: systemPrompt,
       tools,
-      tool_choice: { type: "tool", name: "propose_clip_ideas" },
+      // Sonnet 5.5 rejects forced tool_choice ("tool"/"any" → 400). The TASK
+      // line names propose_clip_ideas, and a reply without the call falls
+      // into the shape-retry loop below. No `strict`: the extras schema is
+      // format-defined and can carry keywords strict mode rejects.
+      tool_choice: { type: "auto" },
       messages: [
         { role: "user", content: extraNote ? `${userMessage}\n\n${extraNote}` : userMessage },
       ],

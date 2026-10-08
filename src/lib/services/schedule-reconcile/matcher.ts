@@ -20,7 +20,7 @@ import { and, eq, gte, isNotNull, lte, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-5-5";
 export const SCHEDULE_MATCHER_VERSION = `${MODEL}:schedule-match:v1`;
 
 // Look at most this many recent candidates — the gate already narrows hard,

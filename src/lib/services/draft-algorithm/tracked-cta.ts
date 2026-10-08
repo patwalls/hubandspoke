@@ -37,7 +37,7 @@ import { renderCtaExemplars, type CtaChannel } from "./cta-exemplars";
 // The clone-on-write into content_drafts is the CALLER's job — this service is
 // pure "produce the cta string + side-effect the tracking link".
 
-const MODEL = "claude-opus-4-7";
+const MODEL = "claude-opus-5-5";
 export const TRACKED_CTA_VERSION = 2;
 
 const BASE_URL = process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.com";
@@ -395,12 +395,22 @@ async function planCta(
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 1024,
+      // Opus 5.5 always thinks and thinking counts toward max_tokens; 1024
+      // (sized for Opus 4.7 with no thinking) could cut the turn off before
+      // propose_cta.
+      max_tokens: 8000,
+      // Opus 5.5 defaults to "medium"; Opus 4.7 ran at "high". Keep "high".
+      output_config: { effort: "high" },
       system: SYSTEM_PROMPT,
       tools,
       tool_choice: { type: "auto" },
       messages,
     });
+    if (response.stop_reason === "max_tokens" || response.stop_reason === "refusal") {
+      // A truncated or declined turn can carry a half-written tool_use whose
+      // input still parses — never act on it.
+      throw new Error(`tracked-cta: model turn ended with stop_reason=${response.stop_reason}`);
+    }
     messages.push({ role: "assistant", content: response.content });
 
     const toolUses = response.content.filter(

@@ -7,14 +7,14 @@ import {
   type TranscriptWord,
 } from "./clip-anchor-utils";
 
-// Sonnet 4.6. Splice v10 (2026-05-22): the section picker. Format-agnostic
+// Sonnet 5.5 (was Sonnet 4.6). Splice v10 (2026-05-22): the section picker. Format-agnostic
 // — picks 8-15 "interesting moments" from a pillar transcript with
 // cue-aligned windows + verbatim anchor quotes + topic/summary/theme tags.
 // Per-format hook variants are produced downstream by `clip-hook-agent.ts`
-// (Haiku 4.5), reading these sections one at a time. Replaces the v9
+// (Haiku 5.5), reading these sections one at a time. Replaces the v9
 // monolithic agent that picked sections AND wrote hooks AND emitted
 // per-format extras in a single Sonnet call.
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "claude-sonnet-5-5";
 export const SECTION_PROMPT_VERSION = 1;
 export const SECTION_GENERATED_BY = `${MODEL}:section-v${SECTION_PROMPT_VERSION}`;
 export const SECTION_ALGORITHM_NAME = "Splice";
@@ -353,10 +353,19 @@ export async function generateClipSections(
   async function attempt(extra?: string): Promise<Anthropic.Message> {
     return client.messages.create({
       model: MODEL,
-      max_tokens: 8192,
+      // Sonnet 5.5 thinks before answering and thinking counts toward
+      // max_tokens, so 8192 → 16000 (under the SDK's ~21K non-streaming cap).
+      max_tokens: 16000,
+      // Sonnet 5.5's default, set explicitly: levels are recalibrated vs
+      // Sonnet 4.6 (which ran here with no thinking) — "medium" is the
+      // cost/latency lever if this proves slow.
+      output_config: { effort: "high" },
       system: SYSTEM_PROMPT,
       tools,
-      tool_choice: { type: "tool", name: "propose_clip_sections" },
+      // Sonnet 5.5 rejects forced tool_choice ("tool"/"any" → 400). The TASK
+      // line names propose_clip_sections, and a reply without the call falls
+      // into the retry loop below.
+      tool_choice: { type: "auto" },
       messages: [
         {
           role: "user",
