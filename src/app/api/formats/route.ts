@@ -17,6 +17,7 @@ import {
   staleProvenStatus,
 } from "@/lib/services/format-proven";
 import { cascadeFormatRename } from "@/lib/services/format-rename";
+import { CTA_STRATEGIES, isCtaStrategy } from "@/lib/cta-offer-brands";
 
 async function isAncestor(candidateAncestorId: string, descendantId: string): Promise<boolean> {
   // Walk up from candidateAncestorId. Return true if we reach descendantId.
@@ -247,6 +248,8 @@ export async function PUT(request: NextRequest) {
       clipTargetPlatform?: string[] | null;
       clipAspectRatio?: string | null;
       descriptLayoutPackId?: string | null;
+      ctaStrategy?: string | null;
+      ctaFixedUrl?: string | null;
     };
     const { id, accountChannels, parentFormatId } = body;
 
@@ -334,6 +337,25 @@ export async function PUT(request: NextRequest) {
           : null;
     if (body.clipAspectRatio !== undefined)
       updateData.clipAspectRatio = body.clipAspectRatio || null;
+    if (body.ctaStrategy !== undefined) {
+      if (body.ctaStrategy && !isCtaStrategy(body.ctaStrategy)) {
+        return NextResponse.json(
+          { error: `ctaStrategy must be one of ${CTA_STRATEGIES.join(", ")} or null` },
+          { status: 400 },
+        );
+      }
+      updateData.ctaStrategy = body.ctaStrategy || null;
+    }
+    if (body.ctaFixedUrl !== undefined) {
+      const url = body.ctaFixedUrl?.trim() || null;
+      if (url && !/^https?:\/\//i.test(url)) {
+        return NextResponse.json(
+          { error: "The fixed offer link must be a full link starting with https://" },
+          { status: 400 },
+        );
+      }
+      updateData.ctaFixedUrl = url;
+    }
     if (body.descriptLayoutPackId !== undefined) {
       if (body.descriptLayoutPackId) {
         const [pack] = await db

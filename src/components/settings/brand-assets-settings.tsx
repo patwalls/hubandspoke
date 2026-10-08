@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { usesCtaOffer } from "@/lib/cta-offer-brands";
 import {
   DownloadIcon,
   UploadIcon,
@@ -23,6 +25,7 @@ interface Props {
   brandLabel: string;
   initialWatermarks: WatermarkFile[];
   initialGuidelines: string | null;
+  initialCtaFallbackUrl: string | null;
 }
 
 function formatBytes(bytes: number | null) {
@@ -37,6 +40,7 @@ export function BrandAssetsSettings({
   brandLabel,
   initialWatermarks,
   initialGuidelines,
+  initialCtaFallbackUrl,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [watermarks, setWatermarks] = useState<WatermarkFile[]>(initialWatermarks);
@@ -46,6 +50,10 @@ export function BrandAssetsSettings({
 
   const [guidelines, setGuidelines] = useState(initialGuidelines ?? "");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  const [ctaFallbackUrl, setCtaFallbackUrl] = useState(initialCtaFallbackUrl ?? "");
+  const [ctaSaveState, setCtaSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [ctaError, setCtaError] = useState<string | null>(null);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -141,6 +149,28 @@ export function BrandAssetsSettings({
     } catch {
       setSaveState("error");
       setTimeout(() => setSaveState("idle"), 3000);
+    }
+  }
+
+  async function handleSaveCtaFallback() {
+    setCtaSaveState("saving");
+    setCtaError(null);
+    try {
+      const res = await fetch("/api/brand-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brand, ctaFallbackUrl: ctaFallbackUrl.trim() || null }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || "Save failed");
+      }
+      setCtaSaveState("saved");
+      setTimeout(() => setCtaSaveState("idle"), 2000);
+    } catch (err) {
+      setCtaError(err instanceof Error ? err.message : "Failed to save.");
+      setCtaSaveState("error");
+      setTimeout(() => setCtaSaveState("idle"), 3000);
     }
   }
 
@@ -289,6 +319,44 @@ export function BrandAssetsSettings({
           )}
         </div>
       </section>
+
+      {usesCtaOffer(brand) && (
+        <section className="space-y-3">
+          <div>
+            <h3 className="text-sm font-medium">Fallback CTA offer</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Where posts send people when their format has no CTA offer rule,
+              or the rule can&apos;t find a link. Each post&apos;s UTMs are added
+              automatically. Paste the real offer page, not a clickhubspot
+              short link.
+            </p>
+          </div>
+
+          <Input
+            type="url"
+            value={ctaFallbackUrl}
+            onChange={(e) => setCtaFallbackUrl(e.target.value)}
+            placeholder="https://offers.hubspot.com/…"
+            className="text-sm"
+          />
+
+          <div className="flex items-center gap-3">
+            <Button
+              size="sm"
+              onClick={handleSaveCtaFallback}
+              disabled={ctaSaveState === "saving"}
+            >
+              {ctaSaveState === "saving" && (
+                <Loader2Icon className="size-3.5 animate-spin mr-1.5" />
+              )}
+              {ctaSaveState === "saved" ? "Saved" : "Save"}
+            </Button>
+            {ctaSaveState === "error" && (
+              <span className="text-xs text-destructive">{ctaError ?? "Failed to save."}</span>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

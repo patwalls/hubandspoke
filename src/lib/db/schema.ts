@@ -239,6 +239,16 @@ export const productionItems = pgTable(
     // post text — both can coexist on a YT video that has a caption-style
     // title and a long description.
     description: text("description"),
+    // Pillar-only cache for the "pillar_offer" CTA strategy
+    // (src/lib/services/cta-offer.ts): the offer link pulled from
+    // `description`, resolved past any clickhubspot redirect and stripped of
+    // its old tracking params, plus its label ("Free guide to …"). Derivatives
+    // add their own UTMs on top. `cta_offer_checked_at` set + url NULL = the
+    // description has no offer — don't re-ask the LLM. Clear
+    // `cta_offer_checked_at` to force a re-extract.
+    ctaOfferUrl: text("cta_offer_url"),
+    ctaOfferLabel: text("cta_offer_label"),
+    ctaOfferCheckedAt: timestamp("cta_offer_checked_at", { withTimezone: true }),
     // Owner/author snapshot at the moment of last enrichment. Author follower
     // counts at publish time are gold for trend analysis later — they drift
     // over time on the platform side.
@@ -1297,6 +1307,17 @@ export const formats = pgTable(
     // in this format. Null = derive from post_type (Reel/Shorts/TikTok →
     // 9:16; X / YouTube long → 16:9). Author can override per-format.
     clipAspectRatio: text("clip_aspect_ratio"),
+    // Where this format's posts get their CTA offer link, for brands on the
+    // per-format offer path (`CTA_OFFER_BRANDS` in
+    // src/lib/services/cta-offer.ts — MATG only today; Starter Story and
+    // every other brand ignore these). One of:
+    //   "pillar_offer" — the offer link in the pillar video's YouTube
+    //                    description, resolved past clickhubspot redirects
+    //   "pillar_video" — the pillar video itself ("watch the full video")
+    //   "fixed"        — `cta_fixed_url`
+    // NULL → the brand's `cta_fallback_url`. The post's UTMs are applied on top.
+    ctaStrategy: text("cta_strategy"),
+    ctaFixedUrl: text("cta_fixed_url"),
     // Which Descript layout pack Underlord applies to clips in this format.
     // Structured replacement (2026-09-03) for the "Apply the layout pack …"
     // prose that used to live inside the Skill: the prompt builders inject a
@@ -2054,6 +2075,11 @@ export const brands = pgTable(
     ),
     watermarkS3Key: text("watermark_s3_key"),
     brandGuidelines: text("brand_guidelines"),
+    // Default CTA offer for brands on the per-format offer path
+    // (`CTA_OFFER_BRANDS`, MATG only today) — used when a post's format has
+    // no `cta_strategy` or its strategy can't produce a link. Unused by
+    // Starter Story and every other brand.
+    ctaFallbackUrl: text("cta_fallback_url"),
     // Controls the order brands appear in the top nav and settings table.
     // Lower values appear first. Editable via drag-and-drop in settings.
     sortOrder: integer("sort_order").notNull().default(0),

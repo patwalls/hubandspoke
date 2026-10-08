@@ -49,6 +49,7 @@ export default async function BrandAssetsPage({
         createdAt: w.createdAt.toISOString(),
       }))}
       initialGuidelines={brandConfig.brandGuidelines ?? null}
+      initialCtaFallbackUrl={brandConfig.ctaFallbackUrl ?? null}
     />
   );
 }

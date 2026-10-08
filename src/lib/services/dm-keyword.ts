@@ -15,6 +15,7 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { createShortLink, findShortLinksByContent, getShortLink, listShortLinks, updateShortLink, ShortLinksApiError, type ShortLink } from "@/lib/services/short-links";
 import { suggestCtaDestination } from "@/lib/services/draft-algorithm/tracked-cta";
+import { usesCtaOffer } from "@/lib/services/cta-offer";
 
 export const DM_TAG = "dm";
 const BASE_URL = process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.com";
@@ -78,8 +79,12 @@ export async function pickFreeDmKeyword(): Promise<ShortLink | null> {
  * when the pool is empty or no destination can be suggested.
  */
 export async function ensureDmKeyword(itemId: string): Promise<string | null> {
-  const [item] = await db.select({ slug: productionItems.shortLinkSlug }).from(productionItems).where(eq(productionItems.id, itemId)).limit(1);
+  const [item] = await db.select({ slug: productionItems.shortLinkSlug, brand: productionItems.brand }).from(productionItems).where(eq(productionItems.id, itemId)).limit(1);
   if (!item) return null;
+  // The keyword pool is Starter Story's (go.starterstory.com + its ManyChat).
+  // CTA_OFFER_BRANDS (MATG) don't have their own DM setup yet — never auto-
+  // borrow a Starter Story keyword for them.
+  if (usesCtaOffer(item.brand)) return null;
   if (item.slug) return item.slug;
   const [keyword, destination] = await Promise.all([pickFreeDmKeyword(), suggestCtaDestination({ productionItemId: itemId, channel: "instagram" })]);
   if (!keyword || !destination) return null;

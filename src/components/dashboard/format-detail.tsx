@@ -58,6 +58,7 @@ import { applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { FormatTemplatesSection } from "@/components/design-editor/format-templates-section";
 import { FormatStatusBadge } from "./format-status-badge";
+import { usesCtaOffer } from "@/lib/cta-offer-brands";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
 import {
   PropertyRow,
@@ -109,6 +110,8 @@ interface FormatRow {
   clipTargetPostType: string | null;
   clipAspectRatio: string | null;
   descriptLayoutPackId: string | null;
+  ctaStrategy?: string | null;
+  ctaFixedUrl?: string | null;
   proven?: boolean;
   provenStatus?: FormatProvenStatus | null;
 }
@@ -274,6 +277,8 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [clipTargetPlatform, setClipTargetPlatform] = useState<string[]>([]);
   const [clipAspectRatio, setClipAspectRatio] = useState<string>("");
   const [descriptLayoutPackId, setDescriptLayoutPackId] = useState<string | null>(null);
+  const [ctaStrategy, setCtaStrategy] = useState<string>("");
+  const [ctaFixedUrl, setCtaFixedUrl] = useState<string>("");
   const [layoutPacks, setLayoutPacks] = useState<DescriptLayoutPack[]>([]);
   const [packPopoverOpen, setPackPopoverOpen] = useState(false);
   const [addPackOpen, setAddPackOpen] = useState(false);
@@ -688,6 +693,8 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     setClipAspectRatio(f.clipAspectRatio ?? "");
     setDescriptLayoutPackId(f.descriptLayoutPackId ?? null);
     setLabelsAsOriginal(f.labelsAsOriginal ?? false);
+    setCtaStrategy(f.ctaStrategy ?? "");
+    setCtaFixedUrl(f.ctaFixedUrl ?? "");
   }
 
   const loadLayoutPacks = useCallback(async () => {
@@ -1867,6 +1874,57 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               </label>
             </div>
           </PropertyRowSolo>
+
+          {usesCtaOffer(data?.format?.brand) && (
+            <PropertyRowSolo>
+              <div className="px-3 py-3 space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="cta-strategy" className="text-xs">
+                    CTA offer
+                  </Label>
+                  <select
+                    id="cta-strategy"
+                    value={ctaStrategy}
+                    onChange={(e) => {
+                      const next = e.target.value || null;
+                      setCtaStrategy(next ?? "");
+                      void persistField({ ctaStrategy: next });
+                    }}
+                    className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                  >
+                    <option value="">Brand fallback offer</option>
+                    <option value="pillar_offer">Offer from the pillar video&apos;s description</option>
+                    <option value="pillar_video">Link to the full pillar video</option>
+                    <option value="fixed">A fixed link</option>
+                  </select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Which link this format&apos;s posts send people to. The post&apos;s UTMs are added automatically. &quot;Offer from the pillar&quot; follows the clickhubspot link in the YouTube description to the real offer page. If a rule can&apos;t find a link, the brand&apos;s fallback offer (Brand Assets settings) is used.
+                  </p>
+                </div>
+                {ctaStrategy === "fixed" && (
+                  <div className="space-y-1">
+                    <Label htmlFor="cta-fixed-url" className="text-xs">
+                      Fixed offer link
+                    </Label>
+                    <Input
+                      id="cta-fixed-url"
+                      type="url"
+                      value={ctaFixedUrl}
+                      onChange={(e) => setCtaFixedUrl(e.target.value)}
+                      onBlur={() => {
+                        void persistField({ ctaFixedUrl: ctaFixedUrl.trim() || null });
+                      }}
+                      placeholder="https://offers.hubspot.com/…"
+                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Paste the real offer page, not a clickhubspot short link.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </PropertyRowSolo>
+          )}
         </div>
 
         {ancestors.length > 0 && (

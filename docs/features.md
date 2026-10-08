@@ -189,6 +189,16 @@ removing, or deprecating anything.
 
 ---
 
+## Per-format CTA offer (MATG only)
+
+**Active, 2026-10-08; MATG only** (`CTA_OFFER_BRANDS` in `src/lib/cta-offer-brands.ts`). Decides which link a post's CTA sends people to, by a rule on the post's format, for posts on brands that don't use Starter Story's episode/lead-magnet picker or go.starterstory.com links. Starter Story and every other brand are untouched.
+
+- **Format page** (`/(dashboard)/[brand]/formats/[formatId]`, shown only for MATG formats): "CTA offer" select → `formats.cta_strategy` (`pillar_offer` = the offer in the pillar video's YouTube description, resolved past clickhubspot to the real page; `pillar_video` = the pillar video; `fixed` = `formats.cta_fixed_url`; blank = brand fallback). Saved via `PUT /api/formats` (validated).
+- **Brand Assets settings** (`/(dashboard)/[brand]/accounts/brand-assets`, MATG only): "Fallback CTA offer" → `brands.cta_fallback_url` via `PUT /api/brand-settings`.
+- **Pillar cache:** `production_items.cta_offer_url` / `cta_offer_label` / `cta_offer_checked_at` (on the pillar row). Clear `cta_offer_checked_at` to force a re-extract after a description changes.
+- **Used by:** the draft algorithm's reply CTA and Regenerate CTA (x / linkedin / youtube_community / threads), and the DM-keyword dialog's destination prefill. Output is the full offer URL with the post's UTMs, no short link yet (short links + MATG's own ManyChat come later). Design editor auto-attach of DM keywords is off for MATG.
+- Service: `src/lib/services/cta-offer.ts` — see `docs/automation.md` → Smart tracked CTA.
+
 ## IG comment-to-DM (fixed short-link pool)
 
 Both the Meta Graph API direct dispatcher and the earlier `POST /api/manychat/lookup`

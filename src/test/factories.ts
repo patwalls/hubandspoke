@@ -303,6 +303,8 @@ export interface CreateTestFormatOptions {
   instructions?: string | null;
   viewThreshold?: number | null;
   descriptLayoutPackId?: string | null;
+  ctaStrategy?: string | null;
+  ctaFixedUrl?: string | null;
 }
 
 /**
@@ -325,6 +327,8 @@ export async function createTestFormat(
       instructions: opts.instructions ?? null,
       viewThreshold: opts.viewThreshold ?? null,
       descriptLayoutPackId: opts.descriptLayoutPackId ?? null,
+      ctaStrategy: opts.ctaStrategy ?? null,
+      ctaFixedUrl: opts.ctaFixedUrl ?? null,
     })
     .returning();
   trackCleanup("formats", row.id);
@@ -427,6 +431,9 @@ export interface CreateTestProductionItemOptions {
   mediaS3Bucket?: string | null;
   mediaS3Key?: string | null;
   contentBody?: string | null;
+  description?: string | null;
+  youtubeUrl?: string | null;
+  utmCampaign?: string | null;
   /** youtube_id has a unique index — factories randomize when set to "auto". */
   youtubeId?: string | null;
   youtubeDownloadAttempts?: number;
@@ -491,6 +498,9 @@ export async function createTestProductionItem(
       mediaS3Bucket: opts.mediaS3Bucket ?? null,
       mediaS3Key: opts.mediaS3Key ?? null,
       contentBody: opts.contentBody ?? null,
+      description: opts.description ?? null,
+      youtubeUrl: opts.youtubeUrl ?? null,
+      utmCampaign: opts.utmCampaign ?? null,
       youtubeId:
         opts.youtubeId === "auto" ? `vitest-${randomSuffix()}` : (opts.youtubeId ?? null),
       youtubeDownloadAttempts: opts.youtubeDownloadAttempts ?? 0,

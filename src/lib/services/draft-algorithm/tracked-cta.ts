@@ -22,6 +22,7 @@ import {
   type LeadMagnet,
 } from "@/lib/services/starter-story-content";
 import { renderCtaExemplars, type CtaChannel } from "./cta-exemplars";
+import { formatOfferCta, resolveCtaOffer, usesCtaOffer } from "@/lib/services/cta-offer";
 
 // Shared "smart, tracked CTA" generator used by BOTH the Regenerate CTA button
 // (regenerate-cta.ts) and the full draft algorithm (run.ts). It:
@@ -44,7 +45,9 @@ const BASE_URL = process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.co
 
 export interface TrackedCtaResult {
   cta: string;
-  slug: string;
+  /** Null for CTA_OFFER_BRANDS posts — they get the full offer URL, no
+   *  go.starterstory.com link. */
+  slug: string | null;
   destinationUrl: string;
   targetType: ShortLinkTargetType;
   leadMagnetId: number | null;
@@ -72,6 +75,23 @@ interface CtaPlan {
 export async function generateTrackedCta(
   args: GenerateTrackedCtaArgs,
 ): Promise<TrackedCtaResult> {
+  // CTA_OFFER_BRANDS (MATG) use the per-format offer rule instead: no Opus
+  // pick, no Starter Story catalog, no go.starterstory.com link.
+  const [itemBrand] = await db
+    .select({ brand: productionItems.brand })
+    .from(productionItems)
+    .where(eq(productionItems.id, args.productionItemId))
+    .limit(1);
+  if (usesCtaOffer(itemBrand?.brand)) {
+    const offer = await resolveCtaOffer({ productionItemId: args.productionItemId, channel: args.channel });
+    if (!offer) {
+      throw new Error(
+        "No CTA offer found for this post. Set a CTA source on its format, or a fallback offer in the brand's settings.",
+      );
+    }
+    return { cta: formatOfferCta(offer), slug: null, destinationUrl: offer.url, targetType: "custom", leadMagnetId: null };
+  }
+
   const leadMagnets = await listLeadMagnets();
   const plan = await planCta({ ...args, leadMagnets });
 
@@ -128,6 +148,10 @@ export async function suggestCtaDestination(args: {
     .where(eq(productionItems.id, productionItemId))
     .limit(1);
   if (!item) return null;
+
+  if (usesCtaOffer(item.brand)) {
+    return (await resolveCtaOffer({ productionItemId, channel }))?.url ?? null;
+  }
 
   const postType = item.postType as PostType | null;
 

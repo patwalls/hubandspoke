@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
       weekStartDay: row.weekStartDay ?? 0,
       defaultEditorUserId: row.defaultEditorUserId ?? null,
       brandGuidelines: row.brandGuidelines ?? null,
+      ctaFallbackUrl: row.ctaFallbackUrl ?? null,
     });
   } catch (error) {
     console.error("Error fetching brand settings:", error);
@@ -42,6 +43,7 @@ export async function PUT(request: NextRequest) {
       weekStartDay,
       defaultEditorUserId,
       brandGuidelines,
+      ctaFallbackUrl,
     } = body as {
       brand?: string;
       weeklyGoal?: number | null;
@@ -49,6 +51,7 @@ export async function PUT(request: NextRequest) {
       weekStartDay?: number;
       defaultEditorUserId?: string | null;
       brandGuidelines?: string | null;
+      ctaFallbackUrl?: string | null;
     };
 
     if (!brand) {
@@ -107,6 +110,16 @@ export async function PUT(request: NextRequest) {
     if (brandGuidelines !== undefined) {
       patch.brandGuidelines = brandGuidelines ?? null;
     }
+    if (ctaFallbackUrl !== undefined) {
+      const url = ctaFallbackUrl?.trim() || null;
+      if (url && !/^https?:\/\//i.test(url)) {
+        return NextResponse.json(
+          { error: "The fallback offer must be a full link starting with https://" },
+          { status: 400 }
+        );
+      }
+      patch.ctaFallbackUrl = url;
+    }
 
     const [row] = await db
       .update(brands)
@@ -123,6 +136,7 @@ export async function PUT(request: NextRequest) {
       weekStartDay: row.weekStartDay,
       defaultEditorUserId: row.defaultEditorUserId,
       brandGuidelines: row.brandGuidelines,
+      ctaFallbackUrl: row.ctaFallbackUrl,
     });
   } catch (error) {
     console.error("Error updating brand settings:", error);
