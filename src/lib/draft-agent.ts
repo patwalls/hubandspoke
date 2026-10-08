@@ -21,7 +21,7 @@ import { findInterestingTimestamps } from "@/lib/services/draft-algorithm/timest
 // (~$0.03/draft) against the production value of a better tweet. Bump
 // PROMPT_VERSION when prompt structure changes so clip-ideas-style audits
 // can A/B the rows.
-const MODEL = "claude-opus-4-7";
+const MODEL = "claude-opus-5-5";
 // v4 (2026-05-08): added CTA RULES. Some platforms now ship a `cta` field
 // (reply tweet / LinkedIn comment / pinned YouTube Community comment); the
 // agent fills it only when the editorial notes include CTA guidance and
@@ -1115,7 +1115,14 @@ export async function generateDraft(
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const response = await createMessagesWithOverloadRetry(client, {
       model: MODEL,
-      max_tokens: 4096,
+      // Opus 5.5 always thinks, and thinking counts toward max_tokens — the
+      // old 4096 (sized for Opus 4.7 with no thinking) could end a turn at
+      // max_tokens before propose_draft. Stays under the SDK's ~21K
+      // non-streaming ceiling.
+      max_tokens: 16000,
+      // Opus 5.5 defaults to effort "medium" (Opus 4.7 ran at "high"); the
+      // draft is the creative call we pay Opus for, so keep it at "high".
+      output_config: { effort: "high" },
       system: [
         {
           type: "text",

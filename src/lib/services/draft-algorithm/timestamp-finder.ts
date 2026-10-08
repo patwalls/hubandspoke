@@ -11,14 +11,15 @@
 // specialized call grounded in the raw `segments[]` (not just the
 // rendered markdown) gives us auditable, post-validated timestamps.
 //
-// Cost: Opus 4.7 with max_tokens 1024 ≈ $0.015/call when invoked. The
+// Cost: was Opus 4.7 with max_tokens 1024 ≈ $0.015/call when invoked
+// (Opus 5.5 is cheaper per token but thinks first — re-baseline). The
 // main draft call is ~$0.03, so a draft that triggers the tool is
 // ~$0.045 total. Pat picked Opus over Sonnet/Haiku deliberately —
 // "what's interesting" is the editorial judgment we're paying for.
 
 import Anthropic from "@anthropic-ai/sdk";
 
-const MODEL = "claude-opus-4-7";
+const MODEL = "claude-opus-5-5";
 
 export interface TranscriptSegment {
   startSec: number;
@@ -101,6 +102,10 @@ const TOOLS: Anthropic.Tool[] = [
     name: "return_timestamps",
     description:
       "Return the curated list of interesting timestamps with editor-voice labels.",
+    // Opus 5.5 rejects forced tool_choice; strict keeps the schema-valid
+    // arguments the forced call used to guarantee (needs
+    // additionalProperties: false on every object).
+    strict: true,
     input_schema: {
       type: "object" as const,
       properties: {
@@ -127,10 +132,12 @@ const TOOLS: Anthropic.Tool[] = [
               },
             },
             required: ["mmss", "label", "reason"],
+            additionalProperties: false,
           },
         },
       },
       required: ["timestamps"],
+      additionalProperties: false,
     },
   },
 ];
@@ -175,20 +182,40 @@ export async function findInterestingTimestamps(
     text: `## TRANSCRIPT\nSegments are pre-sliced. Each line: [MM:SS] speaker?: text.\n\n${renderSegmentsForPrompt(args.segments)}`,
   });
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    system: SYSTEM_PROMPT,
-    tools: TOOLS,
-    tool_choice: { type: "tool", name: "return_timestamps" },
-    messages: [{ role: "user", content: userBlocks }],
-  });
-
+  // Opus 5.5: forced tool_choice is a 400, so the call runs on "auto" with
+  // the prompt naming the tool — and "auto" doesn't guarantee the call, so
+  // retry once with a pointed nudge when it's missing.
   let raw: unknown = null;
-  for (const block of response.content) {
-    if (block.type === "tool_use" && block.name === "return_timestamps") {
-      raw = block.input;
-      break;
+  for (let attempt = 0; attempt < 2 && raw === null; attempt++) {
+    const blocks: Anthropic.TextBlockParam[] =
+      attempt === 0
+        ? userBlocks
+        : [
+            ...userBlocks,
+            {
+              type: "text",
+              text: "Your previous reply did not call return_timestamps. Call return_timestamps now, exactly once.",
+            },
+          ];
+    const response = await client.messages.create({
+      model: MODEL,
+      // Thinking is always on for Opus 5.5 and counts toward max_tokens;
+      // 1024 (sized for no thinking) could end before the tool call.
+      max_tokens: 8000,
+      // Opus 5.5 defaults to "medium"; Opus 4.7 ran at "high" — keep the
+      // editorial judgment at "high".
+      output_config: { effort: "high" },
+      system: SYSTEM_PROMPT,
+      tools: TOOLS,
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: blocks }],
+    });
+    if (response.stop_reason === "refusal") break;
+    for (const block of response.content) {
+      if (block.type === "tool_use" && block.name === "return_timestamps") {
+        raw = block.input;
+        break;
+      }
     }
   }
   if (!raw || typeof raw !== "object") {

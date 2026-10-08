@@ -6,7 +6,7 @@ import { formats, productionItems } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { buildForkUserText } from "../draft-skill-prompt";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-5-5";
 const MAX_DESCRIPTION_LEN = 800;
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB per image (Anthropic cap)

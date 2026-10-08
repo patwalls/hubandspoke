@@ -6,7 +6,7 @@ import {
   type TranscriptWord,
 } from "./clip-anchor-utils";
 
-// Haiku 4.5. Splice v10 hook writer (2026-05-22). Reads ONE pre-detected
+// Haiku 5.5 (was Haiku 4.5). Splice v10 hook writer (2026-05-22). Reads ONE pre-detected
 // section and ONE format's skill section. Decides if the format applies
 // (auto-eligibility), and if so writes a format-styled hook + extras for
 // that section. Returns `eligible: false` when the section doesn't fit
@@ -16,7 +16,7 @@ import {
 // One call per (section, format) pair. With ~12 sections × 3 formats the
 // pipeline is ~36 Haiku calls per pillar (~$0.11 total), parallel via a
 // 5-wide semaphore in the service layer.
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-5-5";
 // v2 (2026-05-27): subject-strict eligibility. v1 decided fit on framing and
 // would relabel an app-feature demo as a "feature stack" to satisfy the Tech
 // Stack format's name; v2 forbids that reframing and matches on the section's

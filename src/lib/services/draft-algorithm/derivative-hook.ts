@@ -28,7 +28,7 @@ import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-5-5";
 export const HOOK_EXTRACTOR_VERSION = `${MODEL}:derivative-hook:v1`;
 
 const MAX_EXEMPLARS = 12;

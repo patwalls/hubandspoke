@@ -14,7 +14,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-5-5";
 
 // Skip the LLM entirely when there can't possibly be an opener-plus-body
 // shape. Cheapest possible no-op and saves a round trip.
@@ -67,7 +67,7 @@ export interface StripDateOpenerOptions {
  * present). Fail-soft: any LLM error, empty response, or pre-check skip
  * returns the original input unchanged.
  *
- * Cost: ~$0.001-$0.002 per call (Haiku 4.5, ~500-token system prompt + a
+ * Cost: ~$0.0002 per call (Haiku 5.5, ~500-token system prompt + a
  * typical post body). Fires once per repost / cross-post creation.
  */
 export async function stripDateOpenerWithLLM(

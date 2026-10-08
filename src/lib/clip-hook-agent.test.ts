@@ -51,7 +51,7 @@ function makeClient(inputs: unknown[]): {
       id: "msg_test",
       type: "message",
       role: "assistant",
-      model: "claude-haiku-4-5-test",
+      model: "claude-haiku-5-5-test",
       stop_reason: "tool_use",
       stop_sequence: null,
       usage: { input_tokens: 50, output_tokens: 30 },

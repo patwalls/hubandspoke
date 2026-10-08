@@ -6,7 +6,7 @@
  * moments to clip, and the caption. Design is not its job: the template
  * owns the layout and `fillTemplate` puts the values in.
  *
- * Opus 5 (adaptive thinking): one judgment-heavy call per post that decides
+ * Opus 5.5 (adaptive thinking, effort high): one judgment-heavy call per post that decides
  * whether the post works; past-post exemplars are the style anchor the same
  * way derivative-hook.ts uses them.
  */
@@ -18,7 +18,7 @@ import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import type { DesignDoc } from "@/lib/design-editor/doc";
 import { HIGHLIGHT_COLORS, listSlots, type DesignFill, type DesignFillValue, type DesignSlotSpec, type HighlightColor } from "@/lib/design-editor/template-fill";
 
-const MODEL = "claude-opus-5";
+const MODEL = "claude-opus-5-5";
 const TRANSCRIPT_CHAR_BUDGET = 60_000;
 const MAX_EXEMPLARS = 8;
 const MIN_CLIP_SEC = 12;
@@ -58,6 +58,10 @@ Never respond with plain text. Always call fill_design exactly once.`;
 const TOOL: Anthropic.Tool = {
   name: "fill_design",
   description: "Return a value for every slot of the template, plus the caption.",
+  // Opus 5.5 rejects forced tool_choice; strict keeps the schema-valid
+  // arguments the forced call guaranteed (every object needs
+  // additionalProperties: false).
+  strict: true,
   input_schema: {
     type: "object" as const,
     properties: {
@@ -74,17 +78,20 @@ const TOOL: Anthropic.Tool = {
                 type: "object",
                 properties: { phrase: { type: "string", description: "An exact substring of text." }, color: { type: "string", enum: ["red", "green", "yellow"] } },
                 required: ["phrase", "color"],
+                additionalProperties: false,
               },
             },
             startSec: { type: "number", description: "For clip slots: seconds from the start of the video." },
             endSec: { type: "number", description: "For clip slots." },
           },
           required: ["key"],
+          additionalProperties: false,
         },
       },
       caption: { type: "string" },
     },
     required: ["values", "caption"],
+    additionalProperties: false,
   },
 };
 
@@ -230,40 +237,56 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
     : [{ title: item.title }];
 
   const client = args.client ?? new Anthropic();
-  let response: Anthropic.Message;
-  try {
-    response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 8000,
-      thinking: { type: "adaptive" },
-      system: systemPrompt(brandLabel),
-      tools: [TOOL],
-      tool_choice: { type: "tool", name: "fill_design" },
-      messages: [
-        {
-          role: "user",
-          content: buildFillPrompt({
-            title: pillar?.title ?? item.title,
-            formatName,
-            skill: format?.skill ?? null,
-            exemplars,
-            transcript: transcript.segmentsMarkdown,
-            slots,
-            instruction: args.instruction ?? null,
-            dmKeyword: args.dmKeyword ?? null,
-          }),
-        },
-      ],
-    });
-  } catch (err) {
-    return { ok: false, failure: { reason: "llm-error", message: err instanceof Error ? err.message : String(err) } };
-  }
+  const prompt = buildFillPrompt({
+    title: pillar?.title ?? item.title,
+    formatName,
+    skill: format?.skill ?? null,
+    exemplars,
+    transcript: transcript.segmentsMarkdown,
+    slots,
+    instruction: args.instruction ?? null,
+    dmKeyword: args.dmKeyword ?? null,
+  });
+  // Opus 5.5 rejects forced tool_choice ("tool"/"any" → 400), so the call
+  // runs on "auto" with the prompt naming fill_design — and "auto" doesn't
+  // guarantee the call, so retry once with a nudge when it's missing.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response: Anthropic.Message;
+    try {
+      response = await client.messages.create({
+        model: MODEL,
+        // With forced tool_choice Opus 5 skipped thinking; on "auto" Opus 5.5
+        // thinks first and that counts toward max_tokens — 8000 left too
+        // little room. Stays under the SDK's ~21K non-streaming ceiling.
+        max_tokens: 16000,
+        thinking: { type: "adaptive" },
+        // Opus 5.5 defaults to "medium" (Opus 5 was "high"); keep "high".
+        output_config: { effort: "high" },
+        system: systemPrompt(brandLabel),
+        tools: [TOOL],
+        tool_choice: { type: "auto" },
+        messages: [
+          {
+            role: "user",
+            content:
+              attempt === 0
+                ? prompt
+                : [...prompt, { type: "text", text: "Your previous reply did not call fill_design. Call fill_design now, exactly once." }],
+          },
+        ],
+      });
+    } catch (err) {
+      return { ok: false, failure: { reason: "llm-error", message: err instanceof Error ? err.message : String(err) } };
+    }
+    if (response.stop_reason === "refusal") return { ok: false, failure: { reason: "llm-error", message: "The model declined this request" } };
+    if (response.stop_reason === "max_tokens") return { ok: false, failure: { reason: "llm-no-tool-call", message: "fill cut off at max_tokens" } };
 
-  for (const block of response.content) {
-    if (block.type !== "tool_use" || block.name !== "fill_design") continue;
-    const fill = coerceFill(block.input, slots);
-    if (!fill) return { ok: false, failure: { reason: "llm-no-tool-call", message: "fill incomplete" } };
-    return { ok: true, fill, usage: { input: response.usage.input_tokens, output: response.usage.output_tokens } };
+    for (const block of response.content) {
+      if (block.type !== "tool_use" || block.name !== "fill_design") continue;
+      const fill = coerceFill(block.input, slots);
+      if (!fill) return { ok: false, failure: { reason: "llm-no-tool-call", message: "fill incomplete" } };
+      return { ok: true, fill, usage: { input: response.usage.input_tokens, output: response.usage.output_tokens } };
+    }
   }
   return { ok: false, failure: { reason: "llm-no-tool-call" } };
 }
