@@ -188,15 +188,26 @@ removing, or deprecating anything.
 
 ---
 
-## Per-format CTA offer (MATG only)
+## Per-format CTA offer (MATG + My First Million)
 
-**Active, 2026-10-08; MATG only** (`CTA_OFFER_BRANDS` in `src/lib/cta-offer-brands.ts`). Decides which link a post's CTA sends people to, by a rule on the post's format, for posts on brands that don't use Starter Story's episode/lead-magnet picker or go.starterstory.com links. Starter Story and every other brand are untouched.
+**Active, 2026-10-08; MATG, and My First Million since 2026-10-09** (`CTA_OFFER_BRANDS` in `src/lib/cta-offer-brands.ts`). Decides which link a post's CTA sends people to, by a rule on the post's format, for posts on brands that don't use Starter Story's episode/lead-magnet picker or go.starterstory.com links. Starter Story and every other brand are untouched.
 
-- **Format page** (`/(dashboard)/[brand]/formats/[formatId]`, shown only for MATG formats): "CTA offer" select → `formats.cta_strategy` (`pillar_offer` = the offer in the pillar video's YouTube description, resolved past clickhubspot to the real page; `pillar_video` = the pillar video; `fixed` = `formats.cta_fixed_url`; blank = brand fallback). Saved via `PUT /api/formats` (validated).
+- **Format page** (`/(dashboard)/[brand]/formats/[formatId]`, shown only for these brands' formats): "CTA offer" select → `formats.cta_strategy` (`pillar_offer` = the offer in the pillar video's YouTube description, resolved past clickhubspot to the real page; `pillar_video` = the pillar video; `fixed` = `formats.cta_fixed_url`; blank = brand fallback). Saved via `PUT /api/formats` (validated).
 - **Brand Assets settings** (`/(dashboard)/[brand]/accounts/brand-assets`, MATG only): "Fallback CTA offer" → `brands.cta_fallback_url` via `PUT /api/brand-settings`.
+- **UTMs** — one fixed rule for every non–Starter Story brand, no settings (`OFFER_UTM_RULE` in `src/lib/cta-offer-brands.ts`): `utm_medium=email-media-newsletter`, `utm_source=<brand short name>` (`BRAND_SHORT_NAME`: `matg`, `mfm`; slug if none), `utm_campaign=owned`, `utm_content=Social`, `utm_term=<platform>`, `utm_id=<post's CTA UTM>`. The post page's CTA UTM field says it's sent as `utm_id` for these brands.
 - **Pillar cache:** `production_items.cta_offer_url` / `cta_offer_label` / `cta_offer_checked_at` (on the pillar row). Clear `cta_offer_checked_at` to force a re-extract after a description changes.
 - **Used by:** the draft algorithm's reply CTA and Regenerate CTA (x / linkedin / youtube_community / threads), and the DM-keyword dialog's destination prefill. Output is the full offer URL with the post's UTMs, no short link yet (short links + MATG's own ManyChat come later). Design editor auto-attach of DM keywords is off for MATG.
 - Service: `src/lib/services/cta-offer.ts` — see `docs/automation.md` → Smart tracked CTA.
+
+## IG comment-to-DM for MATG + My First Million (Rebrandly)
+
+**Active, 2026-10-09.** Same editor workflow as Starter Story's (below), but the keyword links are **Rebrandly** links on `clickhubspot.com` in the "Hub & Spoke Content" workspace, named `<short>-<keyword>` (`matg-…`, `mfm-…`; `BRAND_SHORT_NAME` / `REBRANDLY_DM_BRANDS` in `src/lib/cta-offer-brands.ts`). Starter Story's pool is untouched.
+
+- **The links are the pool.** No Hub & Spoke table: `GET /api/dm-keywords?brand=<slug>` lists the brand's prefixed keyword links (per-post `-p-` links excluded) from Rebrandly (clicks, last click, destination) joined with the posts using each (`production_items.short_link_slug` = the full slashtag). The "Attach DM keyword" dialog and the IG post DM row read it for these brands; "Create new slug" is hidden (a keyword also needs its ManyChat automation — create the Rebrandly link + automation, then it shows up).
+- **Attach** (`POST /api/production-items/[id]/dm-keyword`, same route): the same go→go chain as Starter Story — `<short>-<keyword>` → the post's own link `<short>-p-<first 8 of item id>` (created on first attach, reused after) → the destination (pre-filled with the post's CTA offer + UTMs). Moving a keyword only repoints the keyword link, so every post keeps its own destination, UTMs and click count. The pool shows where commenters land now (followed through the per-post link); `?itemId=` also returns that post's own link, which the post page's DM row shows.
+- **Design editor** auto-attaches the brand's best free keyword on first draft (`ensureDmKeyword`) and prints the comment word (`ideavault`, not `mfm-ideavault`) in the CTA.
+- **Setup per keyword (manual):** create `clickhubspot.com/<prefix>-<word>` in Rebrandly (destination = brand fallback offer), then the ManyChat automation in that brand's account (comment contains `<word>` + message contains `<word>`, DM the link).
+- Config: `REBRANDLY_API_KEY` (Heroku); workspace/domain ids default in `src/lib/services/rebrandly.ts` (env overrides `REBRANDLY_WORKSPACE_ID` / `REBRANDLY_DOMAIN_ID`).
 
 ## IG comment-to-DM (fixed short-link pool)
 

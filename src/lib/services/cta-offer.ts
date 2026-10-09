@@ -18,14 +18,14 @@
 //
 // Any strategy that can't produce a link falls through to the brand fallback;
 // with no fallback the result is null and the caller leaves the CTA blank.
-// The post's own UTMs (utm_source = channel, utm_campaign = item's
-// utm_campaign) go on last via buildDestinationUrl.
+// The post's UTMs go on last: one fixed rule for every non–Starter Story
+// brand (OFFER_UTM_RULE in src/lib/cta-offer-brands.ts).
 
 import Anthropic from "@anthropic-ai/sdk";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, productionItems } from "@/lib/db/schema";
-import { isCtaStrategy, usesCtaOffer, type CtaStrategy } from "@/lib/cta-offer-brands";
+import { isCtaStrategy, offerUtms, usesCtaOffer, type CtaStrategy } from "@/lib/cta-offer-brands";
 
 export { CTA_OFFER_BRANDS, CTA_STRATEGIES, isCtaStrategy, usesCtaOffer, type CtaStrategy } from "@/lib/cta-offer-brands";
 
@@ -82,13 +82,9 @@ export function stripTrackingParams(url: string): string {
   return u.toString();
 }
 
-/** Appends the post's UTMs. Mirrors tracked-cta's buildDestinationUrl
- *  (utm_source = channel, utm_campaign when set) — kept separate so the
- *  Starter Story path isn't touched. */
-export function applyPostUtms(url: string, channel: string, utmCampaign: string | null): string {
+export function applyUtms(url: string, utms: Partial<Record<string, string>>): string {
   const u = new URL(url);
-  u.searchParams.set("utm_source", channel);
-  if (utmCampaign && utmCampaign.trim()) u.searchParams.set("utm_campaign", utmCampaign.trim());
+  for (const [k, v] of Object.entries(utms)) if (v) u.searchParams.set(k, v);
   return u.toString();
 }
 
@@ -306,7 +302,13 @@ export async function resolveCtaOffer(
     : [];
   const strategy = isCtaStrategy(fmt?.ctaStrategy) ? fmt.ctaStrategy : null;
 
-  const withUtms = (url: string) => applyPostUtms(url, args.channel, item.utmCampaign ?? null);
+  const [brandRow] = await db
+    .select({ ctaFallbackUrl: brands.ctaFallbackUrl })
+    .from(brands)
+    .where(eq(brands.slug, item.brand))
+    .limit(1);
+  const utms = offerUtms({ brand: item.brand, channel: args.channel, ctaUtm: item.utmCampaign ?? null });
+  const withUtms = (url: string) => applyUtms(stripTrackingParams(url), utms);
 
   let picked: { url: string; label: string | null; source: ResolvedCtaOffer["source"] } | null = null;
   if (strategy === "pillar_offer" && item.pillarContentItemId) {
@@ -324,13 +326,8 @@ export async function resolveCtaOffer(
     picked = { url: fmt.ctaFixedUrl, label: null, source: "fixed" };
   }
 
-  if (!picked) {
-    const [brand] = await db
-      .select({ ctaFallbackUrl: brands.ctaFallbackUrl })
-      .from(brands)
-      .where(eq(brands.slug, item.brand))
-      .limit(1);
-    if (brand?.ctaFallbackUrl) picked = { url: brand.ctaFallbackUrl, label: null, source: "fallback" };
+  if (!picked && brandRow?.ctaFallbackUrl) {
+    picked = { url: brandRow.ctaFallbackUrl, label: null, source: "fallback" };
   }
   if (!picked) return null;
 

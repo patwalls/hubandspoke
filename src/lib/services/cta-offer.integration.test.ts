@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, productionItems } from "@/lib/db/schema";
@@ -69,14 +70,47 @@ describe("resolveCtaOffer (MATG)", () => {
     listLeadMagnets.mockReset();
     listLeadMagnets.mockRejectedValue(new Error("starter-story path reached"));
     shortLinkCalls.mockReset();
-    const [b] = await db.select({ u: brands.ctaFallbackUrl }).from(brands).where(eq(brands.slug, "matg"));
+    const [b] = await db
+      .select({ u: brands.ctaFallbackUrl })
+      .from(brands)
+      .where(eq(brands.slug, "matg"));
     originalFallback = b?.u ?? null;
   });
   afterEach(async () => {
-    await db.update(brands).set({ ctaFallbackUrl: originalFallback }).where(eq(brands.slug, "matg"));
+    await db
+      .update(brands)
+      .set({ ctaFallbackUrl: originalFallback })
+      .where(eq(brands.slug, "matg"));
+  });
+
+  it("applies the one fixed UTM rule to every offer link", async () => {
+    // utm_campaign is unique across items — randomize.
+    const ctaUtm = `vitest-utm-${randomUUID().slice(0, 8)}`;
+    const fmt = await createTestFormat({ brand: "matg", ctaStrategy: "pillar_video" });
+    const pillar = await matgPillar();
+    const post = await createTestProductionItem({
+      brand: "matg",
+      accountId: null,
+      format: fmt.name,
+      postType: "x",
+      pillarContentItemId: pillar.id,
+      utmCampaign: ctaUtm,
+    });
+    const offer = await resolveCtaOffer({ productionItemId: post.id, channel: "x" });
+    const u = new URL(offer!.url);
+    expect(Object.fromEntries(u.searchParams)).toEqual({
+      v: "abc123",
+      utm_medium: "email-media-newsletter",
+      utm_source: "matg",
+      utm_campaign: "owned",
+      utm_content: "Social",
+      utm_term: "x",
+      utm_id: ctaUtm,
+    });
   });
 
   it("pillar_offer: resolves the clickhubspot link, strips old tracking, applies the post's UTMs, caches on the pillar", async () => {
+    const postUtm = `vitest-utm-${randomUUID().slice(0, 8)}`;
     const fmt = await createTestFormat({ brand: "matg", ctaStrategy: "pillar_offer" });
     const pillar = await matgPillar();
     const post = await createTestProductionItem({
@@ -85,7 +119,7 @@ describe("resolveCtaOffer (MATG)", () => {
       format: fmt.name,
       postType: "x",
       pillarContentItemId: pillar.id,
-      utmCampaign: "matg-x-oct",
+      utmCampaign: postUtm,
     });
     const { client, create } = fakeClient({
       found: true,
@@ -99,7 +133,7 @@ describe("resolveCtaOffer (MATG)", () => {
       { client, fetchImpl: fetchImpl as unknown as typeof fetch },
     );
     expect(offer).toEqual({
-      url: "https://offers.hubspot.com/muse-guide?ref=yt&utm_source=x&utm_campaign=matg-x-oct",
+      url: `https://offers.hubspot.com/muse-guide?ref=yt&utm_source=matg&utm_medium=email-media-newsletter&utm_campaign=owned&utm_content=Social&utm_term=x&utm_id=${postUtm}`,
       label: "Free guide to automate your Instagram marketing with Muse AI",
       source: "pillar_offer",
     });
@@ -123,7 +157,7 @@ describe("resolveCtaOffer (MATG)", () => {
       { productionItemId: post2.id, channel: "linkedin" },
       { client, fetchImpl: fetchImpl as unknown as typeof fetch },
     );
-    expect(again?.url).toBe("https://offers.hubspot.com/muse-guide?ref=yt&utm_source=linkedin");
+    expect(again?.url).toBe("https://offers.hubspot.com/muse-guide?ref=yt&utm_source=matg&utm_medium=email-media-newsletter&utm_campaign=owned&utm_content=Social&utm_term=linkedin");
     expect(create).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledTimes(2); // the two hops from the first resolve only
   });
@@ -140,7 +174,7 @@ describe("resolveCtaOffer (MATG)", () => {
     });
     const offer = await resolveCtaOffer({ productionItemId: post.id, channel: "instagram" });
     expect(offer).toMatchObject({
-      url: "https://www.youtube.com/watch?v=abc123&utm_source=instagram",
+      url: "https://www.youtube.com/watch?v=abc123&utm_source=matg&utm_medium=email-media-newsletter&utm_campaign=owned&utm_content=Social&utm_term=instagram",
       source: "pillar_video",
     });
   });
@@ -160,7 +194,7 @@ describe("resolveCtaOffer (MATG)", () => {
     const { client } = fakeClient({ found: false });
 
     expect(await resolveCtaOffer({ productionItemId: a.id, channel: "x" })).toMatchObject({
-      url: "https://offers.hubspot.com/main?utm_source=x",
+      url: "https://offers.hubspot.com/main?utm_source=matg&utm_medium=email-media-newsletter&utm_campaign=owned&utm_content=Social&utm_term=x",
       source: "fallback",
     });
     expect(await resolveCtaOffer({ productionItemId: b.id, channel: "x" }, { client })).toMatchObject({
@@ -190,7 +224,7 @@ describe("resolveCtaOffer (MATG)", () => {
       formatInstructions: null,
     });
     expect(result).toMatchObject({
-      cta: "Watch the full episode:\nhttps://www.youtube.com/watch?v=abc123&utm_source=x",
+      cta: "Watch the full episode:\nhttps://www.youtube.com/watch?v=abc123&utm_source=matg&utm_medium=email-media-newsletter&utm_campaign=owned&utm_content=Social&utm_term=x",
       slug: null,
     });
     expect(listLeadMagnets).not.toHaveBeenCalled();
@@ -204,7 +238,7 @@ describe("Starter Story and other brands are unchanged", () => {
     listLeadMagnets.mockRejectedValue(new Error("starter-story path reached"));
   });
 
-  for (const brand of ["starter-story", "my-first-million"]) {
+  for (const brand of ["starter-story", "futurepedia"]) {
     it(`${brand}: still goes through the Starter Story CTA logic, even with a cta_strategy set`, async () => {
       const fmt = await createTestFormat({ brand, ctaStrategy: "pillar_video" });
       const post = await createTestProductionItem({ brand, accountId: null, format: fmt.name, postType: "x" });

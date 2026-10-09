@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DM_LINK_PREFIX_BY_BRAND, commentKeywordFor, usesRebrandlyDm } from "@/lib/cta-offer-brands";
 
 // Mirror of ShortLink from lib/services/short-links, but redeclared here so
 // the client component doesn't have to import a server-only module.
@@ -42,6 +43,10 @@ interface Props {
   currentSlug: string | null;
   /** Base host for the redirect, e.g. "https://go.starterstory.com". */
   baseUrl: string;
+  /** The post's brand. MATG / MFM (`usesRebrandlyDm`) pick from their own
+   *  Rebrandly keyword links on clickhubspot.com instead of Starter Story's
+   *  go.starterstory.com pool. */
+  brand?: string;
   /** Called after a successful save so the parent can refresh its view.
    *  Receives the newly-attached slug (or null on detach). */
   onSaved: (slug: string | null) => Promise<void> | void;
@@ -90,8 +95,10 @@ export function AttachDmKeywordDialog({
   itemId,
   currentSlug,
   baseUrl,
+  brand,
   onSaved,
 }: Props) {
+  const rebrandly = usesRebrandlyDm(brand);
   const [view, setView] = useState<View>("loading");
   const [links, setLinks] = useState<ShortLink[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -148,7 +155,11 @@ export function AttachDmKeywordDialog({
     setView("loading");
     setError(null);
     try {
-      const res = await fetch(`/api/short-links?include_archived=true&tag=${DM_TAG}`);
+      const res = await fetch(
+        rebrandly
+          ? `/api/dm-keywords?brand=${encodeURIComponent(brand ?? "")}`
+          : `/api/short-links?include_archived=true&tag=${DM_TAG}`,
+      );
       if (!res.ok) {
         const { error: msg } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(msg ?? `HTTP ${res.status}`);
@@ -172,7 +183,7 @@ export function AttachDmKeywordDialog({
       setError(e instanceof Error ? e.message : "Failed to load short links");
       setView("list");
     }
-  }, [currentSlug, smartDest]);
+  }, [currentSlug, smartDest, rebrandly, brand]);
 
   // Fetch on every open so click counts + last_clicked_at stay fresh.
   useEffect(() => {
@@ -202,7 +213,12 @@ export function AttachDmKeywordDialog({
 
   function selectSlug(link: ShortLink) {
     setSelectedSlug(link.slug);
-    setDestination(smartDest(link.destinationUrl));
+    // Rebrandly brands: a keyword picked from another post shows THAT post's
+    // offer — start from this post's suggested offer instead (the effect
+    // below fills it in if the suggestion is still loading).
+    setDestination(
+      rebrandly && link.slug !== currentSlug ? suggestedRef.current ?? "" : smartDest(link.destinationUrl),
+    );
     setError(null);
     setView("edit");
   }
@@ -323,14 +339,25 @@ export function AttachDmKeywordDialog({
 
         {view === "list" && (
           <div className="flex-1 min-h-0 flex flex-col gap-3">
-            <p className="text-xs text-muted-foreground">
-              Pick a DM-keyword slug (tagged <code className="px-1 py-0.5 rounded bg-muted">{DM_TAG}</code>)
-              from the pool. Unused slugs first; slugs already attached to
-              another post are struck through and sink to the bottom — picking
-              one moves it to this post. The DM sends{" "}
-              <code className="px-1 py-0.5 rounded bg-muted">{baseUrl}/&lt;slug&gt;</code>.
-              Sponsor slugs and other non-DM redirects are hidden from this list.
-            </p>
+            {rebrandly ? (
+              <p className="text-xs text-muted-foreground">
+                Pick one of this brand&apos;s DM keyword links (Rebrandly,{" "}
+                <code className="px-1 py-0.5 rounded bg-muted">{baseUrl}/{DM_LINK_PREFIX_BY_BRAND[brand ?? ""]}-&lt;keyword&gt;</code>).
+                Unused keywords first; ones already attached to another post are
+                struck through — picking one moves it to this post. To add a
+                keyword, create its link in Rebrandly and its automation in
+                ManyChat, then reopen this dialog.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Pick a DM-keyword slug (tagged <code className="px-1 py-0.5 rounded bg-muted">{DM_TAG}</code>)
+                from the pool. Unused slugs first; slugs already attached to
+                another post are struck through and sink to the bottom — picking
+                one moves it to this post. The DM sends{" "}
+                <code className="px-1 py-0.5 rounded bg-muted">{baseUrl}/&lt;slug&gt;</code>.
+                Sponsor slugs and other non-DM redirects are hidden from this list.
+              </p>
+            )}
             <Input
               placeholder="Filter by slug or tag…"
               value={filter}
@@ -414,15 +441,19 @@ export function AttachDmKeywordDialog({
               </table>
             </div>
             <div className="flex justify-between items-center pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setView("new")}
-                disabled={saving}
-              >
-                + Create new slug
-              </Button>
+              {rebrandly ? (
+                <span />
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setView("new")}
+                  disabled={saving}
+                >
+                  + Create new slug
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="ghost"
@@ -441,7 +472,7 @@ export function AttachDmKeywordDialog({
             <div className="text-xs text-muted-foreground">
               <code className="px-1 py-0.5 rounded bg-muted">{baseUrl}/{selectedSlug}</code>{" "}
               will redirect to the URL below. Commenters who type{" "}
-              <code className="px-1 py-0.5 rounded bg-muted">{selectedSlug.toUpperCase()}</code>{" "}
+              <code className="px-1 py-0.5 rounded bg-muted">{(commentKeywordFor(brand, selectedSlug) ?? selectedSlug).toUpperCase()}</code>{" "}
               on this post get DM&apos;d that link.
             </div>
             <div className="space-y-2">
@@ -451,14 +482,23 @@ export function AttachDmKeywordDialog({
                 type="url"
                 value={destination}
                 onChange={(e) => setDestination(e.target.value)}
-                placeholder={suggesting ? "Suggesting…" : "https://starterstory.com/…"}
+                placeholder={suggesting ? "Suggesting…" : rebrandly ? "https://offers.hubspot.com/…" : "https://starterstory.com/…"}
                 autoFocus
               />
-              <p className="text-[11px] text-muted-foreground">
-                Pre-filled with this post&apos;s best CTA target + its UTM. This
-                post gets its own tracked link — the keyword redirects here for
-                this post; other posts using this keyword keep their own.
-              </p>
+              {rebrandly ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Pre-filled with this post&apos;s CTA offer + UTMs. Saving gives
+                  this post its own clickhubspot.com link pointed here and points
+                  the keyword at it — older posts keep their own link, UTMs and
+                  clicks.
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Pre-filled with this post&apos;s best CTA target + its UTM. This
+                  post gets its own tracked link — the keyword redirects here for
+                  this post; other posts using this keyword keep their own.
+                </p>
+              )}
             </div>
             <div className="flex justify-between pt-2">
               <div className="flex gap-2">

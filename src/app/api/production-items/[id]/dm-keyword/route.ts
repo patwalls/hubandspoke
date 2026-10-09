@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth-guards";
 import { attachDmKeyword } from "@/lib/services/dm-keyword";
 import { ShortLinksApiError } from "@/lib/services/short-links";
+import { RebrandlyApiError } from "@/lib/services/rebrandly";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -13,6 +14,7 @@ interface RouteContext {
  * Wires an Instagram post's ManyChat DM keyword into per-post tracking via a
  * go→go chain — see `attachDmKeyword` (src/lib/services/dm-keyword.ts),
  * which the design editor also uses to attach a keyword automatically.
+ * MATG / MFM repoint their Rebrandly keyword link at the destination instead.
  * Returns the resolved chain; the item's `short_link_slug` is set.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -23,7 +25,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   try {
     return NextResponse.json(await attachDmKeyword({ itemId: id, keywordSlug: String(body.keywordSlug ?? ""), destinationUrl: String(body.destinationUrl ?? "").trim() }));
   } catch (err) {
-    if (err instanceof ShortLinksApiError) return NextResponse.json({ error: err.message }, { status: err.status });
+    if (err instanceof ShortLinksApiError || err instanceof RebrandlyApiError) return NextResponse.json({ error: err.message }, { status: err.status });
     const message = err instanceof Error ? err.message : String(err);
     console.error("dm-keyword chain failed:", err);
     return NextResponse.json({ error: message }, { status: 502 });

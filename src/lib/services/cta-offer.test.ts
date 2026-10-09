@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import { offerUtms, renderUtmTemplate, OFFER_UTM_RULE } from "@/lib/cta-offer-brands";
 import {
-  applyPostUtms,
+  applyUtms,
   formatOfferCta,
   isHubSpotShortLink,
   parseOfferToolInput,
@@ -10,10 +11,11 @@ import {
 } from "./cta-offer";
 
 describe("usesCtaOffer", () => {
-  it("is on for MATG only", () => {
+  it("is on for MATG and My First Million only", () => {
     expect(usesCtaOffer("matg")).toBe(true);
+    expect(usesCtaOffer("my-first-million")).toBe(true);
     expect(usesCtaOffer("starter-story")).toBe(false);
-    expect(usesCtaOffer("my-first-million")).toBe(false);
+    expect(usesCtaOffer("futurepedia")).toBe(false);
     expect(usesCtaOffer(null)).toBe(false);
   });
 });
@@ -27,9 +29,35 @@ describe("stripTrackingParams", () => {
 
   it("then takes the post's UTMs cleanly", () => {
     const clean = stripTrackingParams("https://offers.hubspot.com/g?utm_source=youtube&utm_campaign=old");
-    expect(applyPostUtms(clean, "x", "matg-x-oct")).toBe(
-      "https://offers.hubspot.com/g?utm_source=x&utm_campaign=matg-x-oct",
+    expect(applyUtms(clean, offerUtms({ brand: "matg", channel: "x", ctaUtm: "p1" }))).toBe(
+      "https://offers.hubspot.com/g?utm_source=matg&utm_medium=email-media-newsletter&utm_campaign=owned&utm_content=Social&utm_term=x&utm_id=p1",
     );
+  });
+});
+
+describe("offerUtms (the one fixed UTM rule)", () => {
+  it("builds the six UTMs with the brand's short name and the post's CTA UTM", () => {
+    expect(offerUtms({ brand: "my-first-million", channel: "instagram", ctaUtm: "the-b2b-playbook-742" })).toEqual({
+      utm_source: "mfm",
+      utm_medium: "email-media-newsletter",
+      utm_campaign: "owned",
+      utm_content: "Social",
+      utm_term: "instagram",
+      utm_id: "the-b2b-playbook-742",
+    });
+    expect(offerUtms({ brand: "matg", channel: "linkedin", ctaUtm: "x" }).utm_source).toBe("matg");
+  });
+
+  it("falls back to the slug for a brand without a short name, calls YouTube Community 'youtube', and drops an empty utm_id", () => {
+    const out = offerUtms({ brand: "futurepedia", channel: "ytcommunity", ctaUtm: null });
+    expect(out.utm_source).toBe("futurepedia");
+    expect(out.utm_term).toBe("youtube");
+    expect(out).not.toHaveProperty("utm_id");
+  });
+
+  it("renderUtmTemplate fills placeholders anywhere in a value", () => {
+    expect(renderUtmTemplate({ utm_id: "{{brand}}-{{cta_utm}}" }, { brand: "mfm", channel: "x", ctaUtm: "p9" })).toEqual({ utm_id: "mfm-p9" });
+    expect(Object.keys(OFFER_UTM_RULE)).toHaveLength(6);
   });
 });
 

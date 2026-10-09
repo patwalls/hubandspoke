@@ -73,6 +73,7 @@ const ClipIdeasPanel = dynamic(() => import("./clip-ideas-panel").then((m) => m.
 const RepostTriagePanel = dynamic(() => import("./repost-triage-dialog").then((m) => m.RepostTriagePanel), { ssr: false });
 const CrossPostTriagePanel = dynamic(() => import("./cross-post-triage-dialog").then((m) => m.CrossPostTriagePanel), { ssr: false });
 import type { BrandAccount } from "@/lib/services/cross-post-candidates";
+import { REBRANDLY_DM_BASE_URL, isBrandDmSlashtag, usesCtaOffer, usesRebrandlyDm } from "@/lib/cta-offer-brands";
 import { TranscriptButton } from "./transcript-dialog";
 import { EnrichmentButton, type EnrichmentMedia } from "./enrichment-dialog";
 import { coverImageUrl } from "@/lib/cover-image";
@@ -1499,14 +1500,27 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   // they need to inspect or change the routing.
 
   const slugAttached = data?.item?.shortLinkSlug ?? null;
+  const itemBrand = data?.item?.brand ?? null;
+  // Where this brand's DM keyword links live: clickhubspot.com (Rebrandly)
+  // for MATG / MFM, go.starterstory.com for everyone else.
+  const dmBaseUrl = usesRebrandlyDm(itemBrand) ? REBRANDLY_DM_BASE_URL : shortLinksBaseUrl;
   useEffect(() => {
     if (!slugAttached) {
       setDmDestinationUrl(null);
       return;
     }
     let cancelled = false;
-    fetch(`/api/short-links/${encodeURIComponent(slugAttached)}`)
-      .then((r) => (r.ok ? r.json() : null))
+    // MATG / MFM keywords are Rebrandly links — read the destination from
+    // the brand's pool instead of the Starter Story short-links proxy.
+    const rebrandlyBrand = usesRebrandlyDm(itemBrand) && isBrandDmSlashtag(itemBrand!, slugAttached);
+    (rebrandlyBrand
+      ? fetch(`/api/dm-keywords?brand=${encodeURIComponent(itemBrand!)}&itemId=${encodeURIComponent(data!.item.id)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          // This post's own link — where ITS commenters went, even after the
+          // keyword moved to a newer post.
+          .then((p: { postLink?: { destinationUrl: string } | null } | null) => p?.postLink ?? null)
+      : fetch(`/api/short-links/${encodeURIComponent(slugAttached)}`).then((r) => (r.ok ? r.json() : null))
+    )
       .then((payload: { destinationUrl?: string } | null) => {
         if (cancelled || !payload) return;
         setDmDestinationUrl(payload.destinationUrl ?? null);
@@ -1517,7 +1531,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     return () => {
       cancelled = true;
     };
-  }, [slugAttached, dmRefresh]);
+  }, [slugAttached, itemBrand, dmRefresh]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2870,9 +2884,19 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   CTA UTM
                 </p>
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Appended as <code>utm_campaign</code> on every link in
-                  this post&apos;s reply CTA. Auto-generated from the
-                  title; you can override.
+                  {usesCtaOffer(item.brand) ? (
+                    <>
+                      Sent as <code>utm_id</code> on this post&apos;s CTA and
+                      DM links, so clicks trace back to this post.
+                      Auto-generated from the title; you can override.
+                    </>
+                  ) : (
+                    <>
+                      Appended as <code>utm_campaign</code> on every link in
+                      this post&apos;s reply CTA. Auto-generated from the
+                      title; you can override.
+                    </>
+                  )}
                 </p>
                 <div className="flex items-center gap-2">
                   <Input
@@ -2967,12 +2991,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                         </code>
                         <span className="text-muted-foreground">→</span>
                         <a
-                          href={`${shortLinksBaseUrl}/${item.shortLinkSlug}`}
+                          href={`${dmBaseUrl}/${item.shortLinkSlug}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-mono text-muted-foreground hover:text-foreground hover:underline truncate"
                         >
-                          {shortLinksBaseUrl.replace(/^https?:\/\//, "")}/{item.shortLinkSlug}
+                          {dmBaseUrl.replace(/^https?:\/\//, "")}/{item.shortLinkSlug}
                         </a>
                       </div>
                       {dmDestinationUrl && (
@@ -4702,7 +4726,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         onOpenChange={setDmKeywordDialogOpen}
         itemId={item.id}
         currentSlug={item.shortLinkSlug ?? null}
-        baseUrl={shortLinksBaseUrl}
+        baseUrl={dmBaseUrl}
+        brand={item.brand ?? undefined}
         onSaved={async (nextSlug) => {
           await persistField({ shortLinkSlug: nextSlug });
           setDmRefresh((k) => k + 1);

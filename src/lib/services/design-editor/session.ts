@@ -10,6 +10,7 @@ import { parseDesignDoc, type DesignDoc, type DesignImageSource } from "@/lib/de
 import type { DesignContext } from "@/lib/design-editor/shared";
 import { applyDmKeyword, applyPhotoPick, fillTemplate, hasDmKeywordSlot, type DesignFill } from "@/lib/design-editor/template-fill";
 import { DM_KEYWORD_TOKEN } from "@/lib/design-editor/doc";
+import { commentKeywordFor } from "@/lib/cta-offer-brands";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
 import { loadBrandChannels } from "./channels";
 import { ensureDmKeyword } from "@/lib/services/dm-keyword";
@@ -251,8 +252,9 @@ async function coverPhotoFor(sourceItemId: string): Promise<DesignImageSource | 
 }
 
 async function currentDmKeyword(itemId: string): Promise<string | null> {
-  const [row] = await db.select({ slug: productionItems.shortLinkSlug }).from(productionItems).where(eq(productionItems.id, itemId)).limit(1);
-  return row?.slug ?? null;
+  const [row] = await db.select({ slug: productionItems.shortLinkSlug, brand: productionItems.brand }).from(productionItems).where(eq(productionItems.id, itemId)).limit(1);
+  // The word people comment ("ideavault"), not a Rebrandly slashtag ("mfm-ideavault").
+  return commentKeywordFor(row?.brand, row?.slug);
 }
 
 /** The channel row on video slides: the brand's YouTube account. */
