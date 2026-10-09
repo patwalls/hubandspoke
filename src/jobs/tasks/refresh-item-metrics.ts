@@ -25,7 +25,7 @@ export const refreshItemMetricsTask: Task = async (rawPayload, helpers) => {
     `refresh-item-metrics ok item=${productionItemId} platform=${result.platform} updated=${result.updated} credits=${result.creditsUsed} (${Date.now() - start}ms)`
   );
   // Pulse-served refreshes log as credits=0 rows tagged "via pulse" so the
-  // provider mix stays observable; klaviyo (source undefined) stays unlogged.
+  // provider mix stays observable.
   if (result.source) {
     void recordScUsage({
       caller: "refresh-item-metrics",

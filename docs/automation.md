@@ -17,7 +17,7 @@ If you're new to this codebase, read in this order:
 ```
 CRON ENTRIES (src/jobs/crontab.ts, UTC)
   * * * * *  worker-heartbeat     → bumps worker_heartbeat.last_seen_at. Read by GET /api/health/worker to detect silent worker wedges.
-  *:00  performance-decay         → SC API + Klaviyo Reporting API. Writes views/likes/comments (and opens/clicks/recipients for newsletters). Decay-tier-gated.
+  *:00  performance-decay         → SC API. Writes views/likes/comments. Decay-tier-gated.
   *:15  threshold-monitor-sweep   → in-place scan. Auto-creates repurposed Idea items when views cross format thresholds.
   *:20  enrichment-sweep          → fan-out → enrich-item (per item) → maybe transcribe-whisper
   *:30  notion-sync               → Notion API ⇄ productionItems (YouTube long-form authoritative). NO LONGER writes clicks/leads/sales (sales removed; clicks/leads owned by sync-link-metrics).
@@ -28,7 +28,6 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   */30  account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
   */10  schedule-reconcile-sweep  → targeted account-content-sync (accounts w/ pending Scheduled items) + runScheduleReconcile() → auto-merge / suggest / needs-attention (date-known items only)
   :50   schedule-nodate-sweep     → same as above but for scheduledNoDate=true items; 60-min cadence, 14-day give-up window
-  */30  klaviyo-sync-sweep        → fan-out → klaviyo-sync-account (per active newsletter account with Klaviyo list id)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
   (per-post) capture-velocity-snapshot → scheduled at publish+{15m,30m,1h,2h,4h,8h,24h,48h} per item; writes one view_snapshots row each
   (live)     cross-post candidate queue → GET /api/cross-post-queue, no scheduled job — runs on every page load of /[brand]/queue Cross-post tab
@@ -149,14 +148,13 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Trigger:** cron `0 * * * *` (every hour at :00)
 - **Files:** `src/jobs/tasks/scheduled.ts:41`, `src/lib/services/performance-decay.ts`, `src/app/api/cron/performance-sync/route.ts`
 - **Inputs:** every published `productionItems` row with a `publishedDate`
-- **Outputs:** `productionItems.views`, `likes`, `comments`, `clicks`, `leads`, `salesNum`, `salesAmount`, `lastPerformanceSyncAt`. For `post_type='newsletter'`: `views = opens`, `clicks = clicks`, `newsletterRecipients = recipients`. Calls Scrape Creators (~1 credit/item/platform) for social platforms; Klaviyo Reporting API (free; rate-limited but not metered) for newsletters.
+- **Outputs:** `productionItems.views`, `likes`, `comments`, `clicks`, `leads`, `salesNum`, `salesAmount`, `lastPerformanceSyncAt`. Calls Scrape Creators (~1 credit/item/platform) for social platforms. Newsletters have no metrics source (Klaviyo cancelled 2026-10).
 - **Downstream:** none
 - **Rules:**
   - Decay tier gates frequency: fresh (< 24h) every hour, archived (180d+) ~monthly
   - Skips items with no `publishedDate`
   - View estimator (`view-estimator.ts`) fills `views` from `likes` when SC returns incomplete data. Per-post-type multipliers: `linkedin` 163×, `threads` 150×, `youtube_community` 194×, `instagram_post` 137×, `facebook_post` 165×. `facebook_post` was added 2026-09-29 because SC's `/facebook/profile/posts` returns no view count for any FB post (photo or video) — reactions are the only anchor, so FB views are always estimated (weak signal: ~±47% per-post, undercounts breakouts). Existing rows backfilled via `scripts/backfill-facebook-views.mjs`.
-  - Newsletter (Klaviyo) branch: keyed on `platform_content_id` (campaign id) + account → Klaviyo API key (env-resolved per handle). Requires `KLAVIYO_CONVERSION_METRIC_ID` env var even when we don't care about conversions (Klaviyo's reporting endpoint requires it).
-  - **Pulse-first (DARK as of 2026-07-13):** the seven single-URL fetchers are consumed via `src/lib/services/metrics-provider.ts`, which — when `PULSE_METRICS_ENABLED=1` — tries Pulse (`pulse.walls.sh`, Pat's residential-IP metrics API, free per call) before ScrapeCreators and falls back to SC on any failure or unusable answer. Flag unset (the default) → straight delegation to `sc-fetchers.ts`, exactly the pre-2026-07 behavior. Pulse-estimated views are dropped in mapping (the hub's own `view-estimator` governs). `RefreshItemResult.creditsUsed` is 0 for Pulse-served answers, 1 for SC-served, and `RefreshItemResult.source` says which provider answered — every provider-backed refresh is logged to `sc_call_log` (Pulse rows land as credits=0 tagged `via pulse` in notes, so the provider mix is queryable; Klaviyo keeps its no-accounting bypass). Env at cutover: `PULSE_METRICS_ENABLED=1`, optional `PULSE_API_URL` / `PULSE_API_TOKEN` / `PULSE_TIMEOUT_MS`. Files: `src/lib/services/pulse-client.ts`, `src/lib/services/metrics-provider.ts`.
+  - **Pulse-first (DARK as of 2026-07-13):** the seven single-URL fetchers are consumed via `src/lib/services/metrics-provider.ts`, which — when `PULSE_METRICS_ENABLED=1` — tries Pulse (`pulse.walls.sh`, Pat's residential-IP metrics API, free per call) before ScrapeCreators and falls back to SC on any failure or unusable answer. Flag unset (the default) → straight delegation to `sc-fetchers.ts`, exactly the pre-2026-07 behavior. Pulse-estimated views are dropped in mapping (the hub's own `view-estimator` governs). `RefreshItemResult.creditsUsed` is 0 for Pulse-served answers, 1 for SC-served, and `RefreshItemResult.source` says which provider answered — every provider-backed refresh is logged to `sc_call_log` (Pulse rows land as credits=0 tagged `via pulse` in notes, so the provider mix is queryable;). Env at cutover: `PULSE_METRICS_ENABLED=1`, optional `PULSE_API_URL` / `PULSE_API_TOKEN` / `PULSE_TIMEOUT_MS`. Files: `src/lib/services/pulse-client.ts`, `src/lib/services/metrics-provider.ts`.
 
 ### `threshold-monitor-sweep` — auto-create repurposed items
 - **Trigger:** cron `15 * * * *` (every hour at :15)
@@ -526,27 +524,6 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   doubt, insert-only.**
 - **Errors:** any thrown error stamps `lastContentSyncError` and re-throws
   so graphile-worker retries with backoff.
-
-### `klaviyo-sync-sweep` — discover Klaviyo campaigns (every 30 min)
-- **Trigger:** cron `*/30 * * * *`
-- **Files:** `src/jobs/tasks/klaviyo-sync-sweep.ts`, `src/jobs/tasks/klaviyo-sync-account.ts`, `src/lib/services/klaviyo-sync.ts`, `src/lib/services/klaviyo-client.ts`
-- **Inputs:** every active `accounts` row with `platform='newsletter'` AND a non-null `external_id` (the Klaviyo list id, e.g. `KBDbDN`)
-- **Outputs:** enqueues one `klaviyo-sync-account` per row with `jobKey: klaviyo-sync-account-{id}` (`unsafe_dedupe` mode)
-- **Downstream:** `klaviyo-sync-account` → `enrich-item` + `refresh-item-metrics` for every newly inserted row
-- **Rules:**
-  - Skips newsletter accounts with no `external_id` set — un-syncable, surface a config error rather than fail every tick
-  - Only Sent campaigns whose `audiences.included` contains the account's list id become production_items (drafts, scheduled, segment-targeted sends are ignored)
-  - Upsert keyed on `(account_id, platform_content_id)` where `platform_content_id` is the Klaviyo campaign id — same partial unique index used by `account-content-sync`. Re-runs UPDATE instead of INSERT
-  - `createdVia='sync:klaviyo'` on every new row; subject → `title`, send_time → `publishedAt`, list id → `klaviyo_list_id` (per-item audit). Body / preview text / metrics are filled by enrichment + decay sweeps, not by this sync
-  - API key resolution is per-handle env var (`KLAVIYO_API_KEY_<HANDLE_UPPER_SNAKE>`) with `KLAVIYO_API_KEY` as the fallback. Lets us add HubSpot brands' own Klaviyo accounts later by setting one env var per account, no code change
-
-### `klaviyo-sync-account` — sync one newsletter account
-- **Trigger:** enqueued by `klaviyo-sync-sweep`; on-demand by `scripts/backfill-klaviyo-campaigns.ts` (12-month one-shot)
-- **Files:** `src/jobs/tasks/klaviyo-sync-account.ts`, `src/lib/services/klaviyo-sync.ts`
-- **Inputs:** `{ accountId, sinceIso?, untilIso?, enqueueDownstream? }`
-- **Outputs:** upserts to `productionItems`; stamps `accounts.lastContentSyncAt` (success) / `lastContentSyncError` (failure). Enqueues per-item `enrich-item` + `refresh-item-metrics` for newly inserted rows so body + opens land within minutes instead of waiting for the next sweep tick (toggle off via `enqueueDownstream: false`).
-- **Pagination:** Klaviyo's cursor-based `links.next` URL — followed until exhausted or `maxPages` cap (200 default). Default `since` window is `accounts.lastContentSyncAt ?? now-7d`; backfills override.
-- **Rate limits:** Klaviyo allows 75 r/s steady, 700 r/s burst on `GET /campaigns`. The client retries 429 / 5xx three times with exponential backoff (1s/2s/4s) and honors `Retry-After`. Sweep volume is tiny (one paginated walk per account per 30 min) so we never approach the limit in steady state.
 
 ### `evergreen-scan` — daily classifier (Phase A only as of 2026-05-06)
 - **Trigger:** cron `0 15 * * *` (daily 15:00 UTC)
@@ -1105,8 +1082,6 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - `withMedia=true` (Instagram only) also archives the raw video to S3 (10 SC credits vs ~2)
   - **Carousel slides are archived on every run (2026-09-18):** `edge_sidecar_to_children` (per-slide image + video URLs) is on the plain 1-credit response, so `carouselSlidesFrom` (`instagram.ts`) always archives every slide of a carousel into `production_item_media`; `withMedia` only matters for single-media posts, whose bytes are only in the paid `download_media_urls[]`. Before this, the hourly sweep left our own published PLAYBOOK/TMZ/Slideshow carousels with a poster and zero slides. Backfill: `scripts/backfill-ig-carousel-slides.mjs [--apply]` re-enqueues `enrich-item` (`force: true`, 1 credit) for Published `instagram.com/p/` items with no media rows.
   - **LinkedIn OG image fallback (V1.4, 2026-05-09):** when SC's `/v1/linkedin/post` returns empty `images[]` AND no `thumbnail` / `thumbnailUrl`, the LinkedIn enricher fetches the post URL itself (5s timeout, ~64 KB read cap) and parses `<meta property="og:image">` from the head as a final fallback before giving up on media. Best-effort: failures log a `console.warn` and never block enrichment. Closes the gap where SC under-reports media on some LinkedIn share variants.
-  - **Newsletter (Klaviyo) enricher (2026-05-15):** for `post_type='newsletter'`, fetches `GET /api/campaign-messages?filter=equals(campaign_id,…)` then `GET /api/campaign-messages/{id}` and writes: subject → `title`, raw HTML → `newsletterBodyHtml`, plaintext (via `sanitize-html` + block-tag → newline pre-pass) → `contentBody`, preheader → `newsletterPreviewText`, `from_email`/`from_label` → `authorHandle`/`authorDisplayName`. First sentence → `hook` (`hookSource='body'`, `hookExtractor='newsletter-enricher:v1'`) so newsletters get a populated hook column without the LLM hook sweep (which is short-form-only).
-    - **Campaign id URL fallback (2026-05-15):** when `platform_content_id` is null but `published_link` matches `https://(www.)?klaviyo.com/campaign/<ulid>/…`, the enricher extracts the campaign id from the URL and stamps it onto the row (`updates.platformContentId`) so the next run skips this step. Recovers Notion-imported rows that predate the Klaviyo sync and never got a campaign id stamped. Backfill: `scripts/backfill-newsletter-enrichment.mjs --apply` re-enqueues `enrich-item` with `force=true` for rows matching this shape.
 
 ### `extract-hook` — Haiku hook extraction
 - **Trigger:** enqueued by `hook-extract-sweep`

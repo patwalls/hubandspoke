@@ -24,7 +24,7 @@
  */
 
 import { db } from "@/lib/db";
-import { accounts, productionItems, syncLogs } from "@/lib/db/schema";
+import { productionItems, syncLogs } from "@/lib/db/schema";
 import { recordScUsage } from "@/lib/services/sc-usage-log";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 // Pulse-first fetchers with ScrapeCreators fallback — with PULSE_METRICS_ENABLED
@@ -42,7 +42,6 @@ import {
   creditsFor,
 } from "./metrics-provider";
 import { estimateViewsFromLikes } from "./view-estimator";
-import { fetchCampaignMetrics, KlaviyoError } from "@/lib/services/klaviyo-client";
 
 // Opportunistic publish-date backfill for refreshItemMetrics. Returns SET
 // fragments that COALESCE-write publishedDate / publishedAt: existing values
@@ -138,14 +137,12 @@ export type PlatformKind =
   | "twitter"
   | "threads"
   | "linkedin"
-  | "tiktok"
-  | "klaviyo";
+  | "tiktok";
 
 /**
  * Resolve the metrics-source kind from a canonical `post_type`. Each post
- * type maps 1:1 to one fetcher endpoint. Most kinds are SC; `klaviyo` is
- * the email-newsletter branch backed by Klaviyo's reporting API. Returns
- * null for post types with no metrics coverage at all.
+ * type maps 1:1 to one fetcher endpoint. Returns null for post types with
+ * no metrics coverage at all (including newsletters).
  */
 export function platformKindFromPostType(
   postType: string | null | undefined
@@ -168,8 +165,6 @@ export function platformKindFromPostType(
       return "linkedin";
     case "tiktok":
       return "tiktok";
-    case "newsletter":
-      return "klaviyo";
     default:
       return null;
   }
@@ -221,7 +216,7 @@ export interface RefreshItemResult {
   note?: string;
   creditsUsed: number;
   /** Which provider actually answered: pulse (free) or sc (1 credit).
-   *  Absent for klaviyo and unsupported-platform results. */
+   *  Absent for unsupported-platform results. */
   source?: "pulse" | "sc";
 }
 
@@ -572,75 +567,6 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
     };
   }
 
-  // --- Klaviyo (newsletter): opens → views, clicks → clicks, recipients
-  //     stored as the open-rate denominator on `newsletter_recipients`. SC
-  //     credit accounting is bypassed because Klaviyo isn't billed per call.
-  if (kinds.has("klaviyo") && item.platformContentId && item.accountId) {
-    const [acct] = await db
-      .select({ handle: accounts.handle })
-      .from(accounts)
-      .where(eq(accounts.id, item.accountId))
-      .limit(1);
-    if (!acct) {
-      const note = "Account row missing for newsletter item";
-      await stampSyncResult(itemId, note);
-      return {
-        itemId,
-        updated: false,
-        platform: "klaviyo",
-        views: null,
-        likes: null,
-        comments: null,
-        note,
-        creditsUsed: 0,
-      };
-    }
-    try {
-      const m = await fetchCampaignMetrics(
-        { handle: acct.handle },
-        item.platformContentId,
-      );
-      await db
-        .update(productionItems)
-        .set({
-          ...(m.opens != null && { views: m.opens, viewsEstimated: false }),
-          ...(m.clicks != null && { clicks: m.clicks }),
-          ...(m.recipients != null && { newsletterRecipients: m.recipients }),
-          lastPerformanceSyncAt: new Date(),
-          lastPerformanceSyncError: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(productionItems.id, itemId));
-      return {
-        itemId,
-        updated: true,
-        platform: "klaviyo",
-        views: m.opens,
-        likes: null,
-        comments: null,
-        creditsUsed: 0,
-      };
-    } catch (err) {
-      const note =
-        err instanceof KlaviyoError
-          ? `Klaviyo ${err.status}: ${err.message.slice(0, 200)}`
-          : err instanceof Error
-            ? err.message
-            : String(err);
-      await stampSyncResult(itemId, note);
-      return {
-        itemId,
-        updated: false,
-        platform: "klaviyo",
-        views: null,
-        likes: null,
-        comments: null,
-        note,
-        creditsUsed: 0,
-      };
-    }
-  }
-
   const note = "Platform not supported or missing URL";
   await stampSyncResult(itemId, note);
   return {
@@ -789,7 +715,6 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
           "threads",
           "linkedin",
           "tiktok",
-          "klaviyo",
         ].includes(k)
       ) ?? "unknown";
     byPlatform[kind] ??= { attempted: 0, updated: 0, errors: 0 };
@@ -800,8 +725,7 @@ export async function syncPerformanceData(): Promise<PerformanceSyncResult> {
       const r = await refreshItemMetrics(item.id);
       creditsUsed += r.creditsUsed;
       // Log every provider-backed refresh — Pulse answers land as credits=0
-      // rows tagged "via pulse" so the provider mix is observable. Klaviyo
-      // (source undefined) keeps its no-accounting bypass.
+      // rows tagged "via pulse" so the provider mix is observable.
       if (r.source) {
         void recordScUsage({
           caller: "performance-decay",

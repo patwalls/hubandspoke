@@ -9,7 +9,6 @@ import { enrichTwitterItem } from "./twitter";
 import { enrichThreadsItem } from "./threads";
 import { enrichLinkedInItem } from "./linkedin";
 import { enrichTikTokItem } from "./tiktok";
-import { enrichNewsletterItem } from "./newsletter";
 import { maybeEnqueueWhisperTranscribe } from "@/lib/services/transcribe-after-upload";
 import { isPermanentEnrichmentError } from "./errors";
 import {
@@ -328,7 +327,6 @@ export async function dispatchEnrichment(
   if (kinds.has("twitter")) return enrichTwitterItem(itemId);
   if (kinds.has("threads")) return enrichThreadsItem(itemId);
   if (kinds.has("linkedin")) return enrichLinkedInItem(itemId);
-  if (kinds.has("klaviyo")) return enrichNewsletterItem(itemId);
   return null;
 }
 

@@ -23,7 +23,6 @@ const SCHEDULED_TASK_NAMES: ReadonlyArray<keyof TaskPayloads> = [
   "hook-dispatch-sweep",
   "account-content-sync-sweep",
   "schedule-reconcile-sweep",
-  "klaviyo-sync-sweep",
   "evergreen-scan",
   "youtube-download-sweep",
   "yt-archive-watch",

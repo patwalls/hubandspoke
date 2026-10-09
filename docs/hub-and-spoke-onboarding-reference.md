@@ -75,7 +75,7 @@ After creation, Hub & Spoke automatically runs a backfill sync to pull in the ac
 
 Hub & Spoke periodically pulls new posts from each account using the Scrape Creators API. The sync runs automatically every hour for most platforms. You can also trigger a manual sync from the Accounts table via the **Sync** button (latest posts) or **Backfill** button (historical posts, where supported).
 
-Newsletter accounts (Klaviyo) sync campaigns automatically on their own schedule.
+Newsletter accounts no longer sync automatically (Klaviyo was cancelled 2026-10).
 
 ### Account fields that matter
 

@@ -116,11 +116,6 @@ import {
   type RegenerateCtaForItemPayload,
 } from "./regenerate-cta-for-item";
 import { workerHeartbeatTask } from "./worker-heartbeat";
-import {
-  klaviyoSyncAccountTask,
-  type KlaviyoSyncAccountPayload,
-} from "./klaviyo-sync-account";
-import { klaviyoSyncSweepTask } from "./klaviyo-sync-sweep";
 
 export interface TaskPayloads {
   "hello": { message?: string };
@@ -153,7 +148,6 @@ export interface TaskPayloads {
   "generate-instagram-caption": GenerateInstagramCaptionPayload;
   "draft-algorithm-run": DraftAlgorithmRunPayload;
   "regenerate-cta-for-item": RegenerateCtaForItemPayload;
-  "klaviyo-sync-account": KlaviyoSyncAccountPayload;
   // Scheduled tasks — fired by the crontab in src/jobs/crontab.ts.
   "performance-decay": Record<string, never>;
   "notion-sync": Record<string, never>;
@@ -177,7 +171,6 @@ export interface TaskPayloads {
   "yt-archive-watch": Record<string, never>;
   "clip-idea-drought-watch": Record<string, never>;
   "worker-heartbeat": Record<string, never>;
-  "klaviyo-sync-sweep": Record<string, never>;
 }
 
 const helloTask: Task = async (payload, helpers) => {
@@ -216,7 +209,6 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "generate-instagram-caption": generateInstagramCaptionTask,
   "draft-algorithm-run": draftAlgorithmRunTask,
   "regenerate-cta-for-item": regenerateCtaForItemTask,
-  "klaviyo-sync-account": klaviyoSyncAccountTask,
   "performance-decay": performanceDecayTask,
   "notion-sync": notionSyncTask,
   "sync-link-metrics": syncLinkMetricsTask,
@@ -239,5 +231,4 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "yt-archive-watch": ytArchiveWatchTask,
   "clip-idea-drought-watch": clipIdeaDroughtWatchTask,
   "worker-heartbeat": workerHeartbeatTask,
-  "klaviyo-sync-sweep": klaviyoSyncSweepTask,
 };
