@@ -993,6 +993,17 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Downstream:** none. The alert names the pillar + format + section count so
   the operator can manually trigger `generate-clip-ideas` or investigate the
   blueprint-anchor / hook-writer logs.
+- **Triage — bug vs. skill mismatch:** a drought is not always a pipeline bug.
+  Ineligible reasons aren't persisted, so re-run pass 2 read-only against the
+  live sections (same inputs as `clip-idea-generate.ts`) and read each
+  `reason`. `agent error: validation failed …` on every section = pipeline bug
+  (the 2026-09-08 smart-quote case). Clean `eligible:false` reasons that all
+  cite the format's own requirements = the format's `## Clip Idea Generation`
+  skill doesn't fit that channel's content, so fix the skill (data), not the code. 2026-10-10:
+  futurepedia's X Quotables skill had been written for founder interviews
+  ("This guy X who makes $80K/month… says:", quantified result required), so a
+  pure-demo SkillLeapAI tutorial went 0/13. After rewriting the skill around
+  the creator's tested takeaways, regenerating gave 5 ideas.
 - **Brand scope:** the home cron only archives the brands in its env file
   (`BRANDS` in `~/.config/hubandspoke/yt-archive.env`). The watchdog mirrors
   that list in `DEFAULT_WATCH_BRANDS`, overridable without a deploy via the
