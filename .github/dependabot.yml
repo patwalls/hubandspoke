@@ -1,0 +1,33 @@
+# Grouped so each week is one PR per ecosystem, not dozens. Minor/patch groups
+# auto-merge once CI's `build` check passes (dependabot-auto-merge.yml); majors
+# arrive as their own PRs and wait for a human.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "13:00"
+    open-pull-requests-limit: 5
+    # Auto-merge plus a fresh release is the supply-chain-attack path: wait a
+    # week so a hijacked publish is usually yanked before we ever see it.
+    # (Security updates ignore cooldown and still arrive immediately.)
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+      npm-security:
+        applies-to: security-updates
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "13:00"
+    groups:
+      actions:
+        update-types: [minor, patch]

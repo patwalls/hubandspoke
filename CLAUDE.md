@@ -27,7 +27,8 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 - Drizzle ORM
 - HubSpot transactional SMTP for email (smtp.hubapi.com, same token pair as Starter Story)
 - Graphile Worker (Postgres-backed background job queue)
-- Deployed on Heroku (auto-deploy on push to `main` via GitHub Actions)
+- Deployed on Heroku (auto-deploy on push to `main` via Heroku's GitHub integration)
+  - CI (`.github/workflows/ci.yml`): `build` = typecheck + unit tests + `next build`; required to merge PRs, bypassed by direct pushes. Grouped Dependabot minor/patch PRs auto-merge when green — see `docs/conventions.md` → CI & Dependabot
   - Two dynos: `web` (Basic) + `worker` (Basic) — see `Procfile`
 
 ## Development

@@ -285,6 +285,33 @@ Scaling web past 1 dyno without lowering worker concurrency or upgrading
 Postgres will start to hit the cap. Update `docs/automation.md` if you
 change pool sizes.
 
+## CI & Dependabot
+
+`.github/workflows/ci.yml` runs one job, **`build`**: `npm ci` → `tsc --noEmit`
+→ `npm run test:unit` → `npm run build`, on every PR and every push to `main`.
+It needs no secrets (Sentry source-map upload skips itself without
+`SENTRY_AUTH_TOKEN`), so Dependabot and fork PRs run it too.
+
+- **Required on `main`** via the repository ruleset *"main: require build"*
+  (Settings → Rules). PRs can't merge until `build` is green. Repo admins and
+  write collaborators are bypass actors, so direct pushes to `main` still land
+  (and deploy) unchecked — the push run is a signal, not a gate. Renaming the
+  job renames the check: update the ruleset in the same change.
+- **Unit tests must not touch the DB.** CI has no Postgres. A test that
+  imports `@/test/factories` or `db` belongs in `*.integration.test.ts`; a
+  DB-backed test in the unit project fails CI with a connection error.
+- **Lint is not gated** — `main` carries pre-existing eslint errors. Gate it
+  once they're cleared.
+- **Dependabot** (`.github/dependabot.yml`) opens one grouped weekly PR per
+  ecosystem (npm minor+patch, github-actions minor+patch), with a 7-day
+  release cooldown on npm version updates. Security updates are grouped too
+  and skip the cooldown. Majors come as individual PRs.
+- **Auto-merge** (`dependabot-auto-merge.yml`) arms `gh pr merge --auto
+  --squash` on grouped, non-major Dependabot PRs. GitHub only merges once
+  `build` passes; the merge to `main` then deploys through Heroku's GitHub
+  integration like any other push. A red build leaves the PR open for a human.
+- Third-party actions are pinned by commit SHA; Dependabot bumps the pins.
+
 ## End-to-end testing (Playwright)
 
 E2e tests live in `tests/e2e/`. They drive a real Chromium against
@@ -322,10 +349,9 @@ is real.
 fresh-no-auth browser, add
 `test.use({ storageState: { cookies: [], origins: [] } })` to the file.
 
-**Local-only for now.** The e2e suite is not wired into CI. Heroku's
-release phase only runs migrations; GitHub Actions auto-deploy pushes the
-commit but doesn't run tests. Adding e2e to CI is a follow-up (browser
-caching, secrets, flake budget) — out of scope for the initial scaffold.
+**Local-only for now.** The e2e suite is not wired into CI (see
+CI & Dependabot below — CI gates on typecheck, unit tests and build only).
+Adding e2e is a follow-up (browser caching, secrets, flake budget).
 
 **Visual verification from Claude Code.** `@playwright/mcp` is registered
 in `.mcp.json` as the `playwright` server. From inside Claude Code,
