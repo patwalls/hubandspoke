@@ -362,18 +362,23 @@ export function TranscriptEditor({
   );
 
   // Play the join once the plan reflects the trim (it is recomputed by the
-  // parent after `apply`, a render later).
+  // parent after `apply`, a render later). Each audition plays once: the plan
+  // also changes on unrelated edits (typing the hook), which must not replay it.
+  const playedAuditionKey = useRef<number | null>(null);
+  const auditionStopTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (!audition) return;
+    if (!audition || playedAuditionKey.current === audition.key) return;
     const start = sourceToOutput(plan, audition.startSec, audition.sectionId) ?? sourceToOutput(plan, audition.startSec + 0.75, audition.sectionId);
     const end = sourceToOutput(plan, audition.endSec, audition.sectionId);
     if (start === null) return;
+    playedAuditionKey.current = audition.key;
     engine.seek(start);
     engine.play();
     const ms = Math.max(400, ((end ?? start + 1.2) - start) * 1000);
-    const t = window.setTimeout(() => engine.pause(), ms);
-    return () => window.clearTimeout(t);
+    window.clearTimeout(auditionStopTimer.current);
+    auditionStopTimer.current = window.setTimeout(() => engine.pause(), ms);
   }, [audition, plan, engine]);
+  useEffect(() => () => window.clearTimeout(auditionStopTimer.current), []);
 
   // ── Actions ─────────────────────────────────────────────────────────────
   const run = useCallback(
