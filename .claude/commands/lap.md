@@ -24,7 +24,7 @@ line, end. No healing beyond a worker restart, no pushes.
 
 Pat pays per lap — keep green laps NEAR-FREE:
 - Read the last ~5 lines of `~/.claude/hubandspoke-health.log` first; that IS the memory.
-- Then one `npx tsx scripts/ops-escalate.ts status` — what's already raised on GitHub, what
+- Then one `~/.local/bin/ship run hubandspoke escalate -- status` — what's already raised on GitHub, what
   is building toward it, and what a human has muted. A fresh-context lap has no other way
   to know Pat already ruled on something; skipping this is how you re-raise a closed issue.
 - And one `loops policy --loop hubandspoke` — its `blocked` list is Pat's board as it stands:
@@ -138,7 +138,8 @@ merge it, a **draft PR with the code already in it**. GitHub, not the health log
 he is not the only person working on this app and the rest of the team can read, comment
 on, and close a GitHub artifact.
 
-Everything outbound goes through `scripts/ops-escalate.ts`. Never run `gh issue create`
+Everything outbound goes through `ship run hubandspoke escalate -- …` (the ship broker runs the
+pinned `scripts/ops-escalate.ts` outside your sandbox; `gh` itself is unreachable here by design). Never run `gh issue create`
 or `gh pr create` by hand — the script owns fingerprint dedup, the streak gate, the rate
 limiter, and the mute rules, and hand-rolled calls bypass all four.
 
@@ -219,7 +220,7 @@ git checkout -b ops/<short-slug>
 # …write the fix, run `npx tsc --noEmit` and `npm run test:unit`…
 git commit -am "proposal: <what and why, with the production evidence>"
 git push -u origin ops/<short-slug>
-npx tsx scripts/ops-escalate.ts report \
+~/.local/bin/ship run hubandspoke escalate -- report \
   --fingerprint "<stable-key>" --severity warn \
   --title "<what's broken>" --body-file <evidence.md> --branch ops/<short-slug>
 ```
@@ -233,7 +234,7 @@ a plain issue instead — a broken proposal is worse than a described one.
 account misconfiguration, ambiguous root cause, repeated failures):
 
 ```bash
-npx tsx scripts/ops-escalate.ts report \
+~/.local/bin/ship run hubandspoke escalate -- report \
   --fingerprint "sync-error:linkedin:company-page-url" \
   --severity warn --title "…" --body-file <evidence.md>
 ```
