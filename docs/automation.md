@@ -249,6 +249,14 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
     launchd job `com.hubandspoke.yt-archive` running
     `scripts/archive-yt-local.ts` from a residential IP). `yt-archive-watch`
     (below) alarms when that cron stops landing archives.
+  - **Pinned + sandboxed (2026-10-12, security lap S-068):** the cron no longer
+    `git pull`s main. `home-machine/yt-archive/install.sh` pins a commit into
+    `~/Library/Application Support/hubandspoke-yt-archive/tree/`, and every
+    node/tsx child runs under `sandbox.sb` (`sandbox-exec`, `env -i`). It can't
+    read `$HOME`, write outside its scratch dir, see `HEROKU_API_KEY`, or use the
+    keychain. **A merged change to `archive-yt-local.ts` or the wrapper is not
+    live until `install.sh --no-prompt` is re-run on the home Mac.** Details:
+    `home-machine/yt-archive/README.md`.
   - **Brand scope is `--brands=auto` (2026-08-20):** the script resolves the
     brand list from the prod DB on every run — every brand with an active
     (non-deleted) YouTube account whose brand isn't disabled. Adding a brand +
@@ -932,7 +940,8 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
     both times — sending people to `heroku login` for a memory problem, and to
     the launchd job for a credentials problem. It now says runs aren't
     completing, points at the log as authoritative, and includes an exit-code
-    decoder (0/2 ran fine · 6 Heroku creds · 8 host OOM · other = bailed early).
+    decoder (0/2 ran fine · 6 Heroku creds · 8 host OOM · other = bailed early;
+    4 = pinned tree / sandbox profile missing → re-run `install.sh --no-prompt`).
 - **Downstream:** none. Once the home cron is healthy it backfills
   automatically (it looks back `RUN_SINCE_DAYS`) and the alert self-clears.
 - **Why attempts=0 and not "no media":** `archive-yt-local.ts` increments

@@ -11,14 +11,47 @@ is exactly that.
 > safely `git pull` on your laptop or any other Mac — nothing
 > happens until you opt in with `./install.sh`.
 
-> **The wrapper runs the archive script from whatever branch the
-> `~/code/hubandspoke` checkout is on.** The flags it needs
-> (`--since-days`, `--sleep-min/max`) live on `main` (since 2026-06-09 —
-> they previously only existed on the unmerged `home-yt-archive-cron`
-> branch, which broke the cron for 3 days when a work session switched
-> the checkout off it). If the cron starts exiting 1 with a usage error,
-> check what branch the checkout is on. The `yt-archive-watch` worker
-> task (see docs/automation.md) alarms on the outcome either way.
+> **The job runs a PINNED copy of the code, inside a macOS sandbox
+> (since 2026-10-12).** Nothing pushed to GitHub reaches it until someone
+> re-runs `./install.sh` on this Mac. It used to `git pull` main and run
+> straight from `~/code/hubandspoke` every hour, so anyone who could push
+> to main (an unprotected, public repo) got their code run here, as Pat,
+> next to every credential on the machine (security lap S-068). Do not add
+> an auto-update step back.
+
+## Pinned + sandboxed — how it works
+
+- **Pinned tree.** `install.sh` resolves a commit (default `HEAD` of this
+  checkout, or `--ref <commit>`), prints its author and subject, warns if it
+  is not on `origin/main` (asks before pinning one that isn't) or if main has
+  newer archiver commits it is leaving out, then `git archive`s **only**
+  `scripts/archive-yt-local.ts`, `scripts/install-yt-dlp.mjs` and this directory's
+  wrapper / profile / plist into `…/hubandspoke-yt-archive/tree/`. That tree gets a
+  minimal `node_modules` (the 5 packages the script imports, at the exact
+  versions in the pinned commit's lockfile, `npm install --ignore-scripts`) plus
+  the yt-dlp binary: ~100 MB, ~3s. The wrapper/profile/plist are installed
+  from that commit, never from the working tree, so uncommitted edits can't
+  ride along.
+- **Sandbox.** Every node/tsx child runs as
+  `env -i <5 vars> sandbox-exec -f sandbox.sb …`. It sees `PROD_DB_URL`, the
+  S3 bucket/prefix, and the AWS keys. It does **not** see `HEROKU_API_KEY`
+  (the wrapper uses that itself to fetch the DB URL). It can't read anything
+  under `$HOME` except the pinned tree and its own `sandbox-home/`, can only
+  write to `sandbox-home/` and the temp dirs, and can't reach the keychain,
+  Apple Events, `launchctl`, `osascript`, `open` or `security`. YouTube cookies
+  are copied into `sandbox-home/` for the run, and the refreshed jar is
+  copied back afterwards.
+- **What it does not stop:** the job holds the prod DB URL and S3 keys,
+  because writing archives is its job. Pinning is what keeps unreviewed
+  code from ever holding them.
+
+### Shipping a change to the archiver
+
+1. Merge the change to `main` (archive script, `wrapper.sh`, or `sandbox.sb`).
+2. On this Mac: `git -C ~/code/hubandspoke pull && ~/code/hubandspoke/home-machine/yt-archive/install.sh --no-prompt`.
+   (`--no-prompt` keeps the env file untouched and refuses off-main commits.)
+3. Read the `pinning: <sha> <author>: <subject>` line it prints, then check
+   the next log line says `pinned tree <sha>`.
 
 ## What gets installed where
 
@@ -27,12 +60,15 @@ is exactly that.
 | `~/.config/hubandspoke/yt-archive.env` (chmod 600) | secrets: BRANDS, S3 bucket, AWS creds, optional tunables |
 | `~/.config/hubandspoke/yt-archive.enabled` | identity marker — pins `LocalHostName` at install time |
 | `~/Library/Application Support/hubandspoke-yt-archive/wrapper.sh` | the script `launchd` runs every hour |
+| `~/Library/Application Support/hubandspoke-yt-archive/tree/` | pinned code + minimal node_modules + yt-dlp; `.pinned-sha` says which commit |
+| `~/Library/Application Support/hubandspoke-yt-archive/sandbox.sb` | the macOS sandbox profile every node/tsx child runs under |
+| `~/Library/Application Support/hubandspoke-yt-archive/sandbox-home/` | the sandboxed job's `$HOME` (yt-dlp cache, per-run cookies copy) |
 | `~/Library/LaunchAgents/com.hubandspoke.yt-archive.plist` | the launchd job (hourly) |
 | `~/Library/Logs/hubandspoke-yt-archive.log` | stdout + stderr, rotated at 10 MB |
 
-The wrapper is **copied** out of the repo into `~/Library/Application Support/`
-at install time. `git pull` can't accidentally rewrite the running job —
-only re-running `install.sh` does.
+Everything is **copied** out of the pinned commit into `~/Library/Application Support/`
+at install time. Pulling or switching branches in the checkout changes
+nothing that runs. Only re-running `install.sh` does.
 
 ## Prerequisites on the home Mac
 
@@ -108,8 +144,8 @@ launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.hubandspoke.yt-archive.p
 ## How the wrapper makes each run safe
 
 1. **Identity gate.** Bails immediately on machines that haven't run `install.sh`.
-2. **`git pull --ff-only`.** Stays current with `main` but refuses anything
-   that requires a merge — won't drift the home machine onto a weird state.
+2. **Pinned tree, sandboxed.** Runs the commit `install.sh` pinned, under
+   `sandbox.sb` with a scrubbed env (see above). Exit 4 = tree/profile missing.
 3. **`heroku config:get DATABASE_URL`** every run — no stale URL pinned in
    a file, no rotation pain.
 4. **Polite-mode yt-dlp** — `--sleep-interval` jitter between videos

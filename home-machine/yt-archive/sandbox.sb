@@ -1,0 +1,65 @@
+;; sandbox.sb — macOS sandbox profile the yt-archive job runs under.
+;;
+;; Installed next to wrapper.sh by install.sh; wrapper.sh runs every node/tsx
+;; child through `sandbox-exec -f sandbox.sb -D USER_HOME=… -D TREE=… -D SANDBOX_HOME=…`
+;; with a scrubbed environment (`env -i`, only the vars the script reads).
+;;
+;; Threat model (security lap 2026-10-12, S-068): this job runs hourly on Pat's
+;; Mac, as Pat, next to gh / Heroku / AWS / Cloudflare / Gmail / Claude creds and
+;; every loop. The job legitimately needs exactly three things: network, the
+;; pinned tree (read-only), and scratch space. Everything else is denied:
+;;   - no reading anything under $HOME except the pinned tree + its own home
+;;   - no writing anywhere except its own home and the temp dirs
+;;     (so no planting binaries in /opt/homebrew/bin, no LaunchAgents, no
+;;      editing ~/.zshrc or any repo)
+;;   - no keychain, no Apple Events, no launchctl/osascript/open/security
+;;
+;; What it deliberately does NOT stop: the job holds PROD_DB_URL and the S3
+;; keys, because that is its job. The pinned tree (install.sh) is what keeps
+;; unreviewed code from ever holding them.
+;;
+;; `allow default` + targeted denies, not `deny default`: node, tsx/esbuild and
+;; the PyInstaller yt-dlp binary need a long tail of system reads/mach services
+;; that a deny-default profile breaks in opaque ways. The secrets all live under
+;; $HOME or behind the keychain, and those are what is walled off.
+
+(version 1)
+(allow default)
+
+;; --- reads: $HOME is off-limits except the job's own two directories ------
+(deny file-read* (subpath (param "USER_HOME")))
+(allow file-read*
+    (subpath (param "TREE"))
+    (subpath (param "SANDBOX_HOME")))
+;; Path resolution (realpath/lstat walking /Users/<me>/Library/…) needs
+;; metadata on parent dirs. Metadata is names/sizes, never contents, and
+;; directory listings stay denied (that is file-read-data).
+(allow file-read-metadata)
+
+;; --- writes: only scratch space -------------------------------------------
+(deny file-write*)
+(allow file-write*
+    (subpath (param "SANDBOX_HOME"))
+    (subpath "/private/tmp")
+    (subpath "/private/var/folders")
+    (literal "/dev/null")
+    (literal "/dev/zero")
+    (literal "/dev/tty")
+    (literal "/dev/dtracehelper")
+    (regex #"^/dev/fd/"))
+
+;; --- no credential stores, no driving other apps, no persistence ----------
+(deny mach-lookup
+    (global-name "com.apple.SecurityServer")
+    (global-name "com.apple.securityd")
+    (global-name "com.apple.security.agent")
+    (global-name "com.apple.secd")
+    (global-name "com.apple.trustd.agent"))
+(deny appleevent-send)
+(deny process-exec
+    (literal "/bin/launchctl")
+    (literal "/usr/bin/osascript")
+    (literal "/usr/bin/open")
+    (literal "/usr/bin/security")
+    (literal "/usr/bin/sudo")
+    (literal "/usr/bin/crontab"))

@@ -15,7 +15,7 @@
 #                                (a machine-wide daemon; shared with other repos)
 #   2. The YouTube archiver     — com.hubandspoke.yt-archive runs hourly via launchd,
 #                                 driven by ~/Library/Application Support/
-#                                 hubandspoke-yt-archive/wrapper.sh → scripts/archive-yt-local.ts
+#                                 hubandspoke-yt-archive/wrapper.sh → pinned tree, sandboxed
 #
 # This is a VERIFY + LOAD tool. The one-time INSTALL (laying down the wrapper,
 # plist, env + identity marker) is home-machine/yt-archive/install.sh — run that
@@ -95,25 +95,32 @@ fi
 [ -f "$CFG/yt-archive.env" ] && ok "env/creds present (~/.config/hubandspoke/yt-archive.env)" \
   || bad "env MISSING ($CFG/yt-archive.env) — run home-machine/yt-archive/install.sh"
 
-# Installed wrapper + the repo path it points at (catches a moved/renamed repo).
+# Installed wrapper + the pinned, sandboxed tree it runs (install.sh lays both down;
+# the wrapper never pulls — see home-machine/yt-archive/README.md).
+APPDIR="$(dirname "$WRAPPER")"
+TREE="$APPDIR/tree"
 if [ -f "$WRAPPER" ]; then
   ok "wrapper.sh installed"
-  repo="$(sed -n 's/^export REPO_DIR="\(.*\)"/\1/p' "$WRAPPER" | head -1)"
-  repo="${repo:-$HOME/code/hubandspoke}"
-  [ -d "$repo/.git" ] && ok "wrapper REPO_DIR is a git checkout ($repo)" \
-    || bad "wrapper REPO_DIR=$repo is not a git checkout — fix the export line in $WRAPPER"
+  if grep -q "git pull" "$WRAPPER" 2>/dev/null; then
+    bad "installed wrapper still git-pulls main every hour (pre-sandbox) — run home-machine/yt-archive/install.sh --no-prompt"
+  fi
 else
   bad "wrapper.sh MISSING ($WRAPPER) — run home-machine/yt-archive/install.sh"
-  repo="$HOME/code/hubandspoke"
 fi
+if [ -f "$TREE/.pinned-sha" ]; then
+  ok "pinned tree: $(cat "$TREE/.pinned-subject" 2>/dev/null || head -c 12 "$TREE/.pinned-sha")"
+else
+  bad "pinned tree MISSING ($TREE) — run home-machine/yt-archive/install.sh --no-prompt"
+fi
+[ -f "$APPDIR/sandbox.sb" ] && ok "sandbox profile installed" \
+  || bad "sandbox.sb MISSING ($APPDIR) — run home-machine/yt-archive/install.sh --no-prompt"
 
 # Tools the wrapper + archiver invoke (all must be on the launchd homebrew PATH).
 need "node"        node
-need "npx (tsx)"   npx
 need "heroku CLI"  heroku
-need "git"         git
-need "ffmpeg"      ffmpeg
-need "yt-dlp binary" "$repo/node_modules/.yt-dlp-bin/yt-dlp"
+need "sandbox-exec" sandbox-exec
+need "tsx (pinned tree)"     "$TREE/node_modules/.bin/tsx"
+need "yt-dlp binary (pinned tree)" "$TREE/node_modules/.yt-dlp-bin/yt-dlp"
 [ -d "/Applications/Google Chrome.app" ] && ok "Google Chrome present (yt-dlp cookies)" \
   || warn "Google Chrome not found — bot-gated videos will fail (best-effort, OK)"
 

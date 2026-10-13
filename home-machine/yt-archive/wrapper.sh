@@ -2,15 +2,24 @@
 # wrapper.sh — what launchd actually runs every hour.
 #
 # Lives at: ~/Library/Application Support/hubandspoke-yt-archive/wrapper.sh
-#           (copied there by install.sh — NOT executed directly from the
-#            repo checkout, so a `git pull` mid-run can't rewrite it.)
+#           (copied there by install.sh — NOT executed from the repo.)
 #
 # Flow:
 #   1. Identity gate — bail if marker missing or hostname mismatched.
 #   2. Source env file with secrets + run-tunable knobs.
-#   3. Best-effort `git pull --ff-only` so script tweaks land automatically.
+#   3. Check the PINNED tree install.sh laid down next to this file.
 #   4. Fetch DATABASE_URL via heroku CLI (always-current; tokens are long-lived).
-#   5. Run archive-yt-local.ts with polite-mode flags and a small batch limit.
+#   5. Run archive-yt-local.ts from the pinned tree, inside a macOS sandbox
+#      (sandbox.sb) with a scrubbed env, polite-mode flags, small batch limit.
+#
+# Pinned + sandboxed since 2026-10-12 (security lap S-068). This used to
+# `git pull --ff-only` and run `npx tsx` from ~/code/hubandspoke every hour,
+# so anyone who could push to main (unprotected, public repo) got their code
+# run on this Mac within the hour, as Pat, next to every credential on it.
+# Now nothing pushed to GitHub runs here until a human re-runs install.sh
+# (which prints the commit it pins), and even pinned code only ever sees the
+# pinned tree, its own scratch home, temp dirs, and the five env vars below.
+# Do NOT reintroduce a pull/auto-update step here.
 #
 # Exit codes:
 #   0  — ran cleanly, all candidates archived
@@ -76,7 +85,10 @@ trap on_exit EXIT
 
 # --- config (overridable via env file) -----------------------------------
 
-REPO_DIR="${REPO_DIR:-$HOME/code/hubandspoke}"
+APP_DIR="${APP_DIR:-$HOME/Library/Application Support/hubandspoke-yt-archive}"
+TREE_DIR="$APP_DIR/tree"              # pinned code + node_modules (read-only to the job)
+SANDBOX_HOME="$APP_DIR/sandbox-home"  # the job's $HOME: yt-dlp cache, cookies copy
+SANDBOX_PROFILE="$APP_DIR/sandbox.sb"
 CONFIG_DIR="${CONFIG_DIR:-$HOME/.config/hubandspoke}"
 ENV_FILE="$CONFIG_DIR/yt-archive.env"
 MARKER_FILE="$CONFIG_DIR/yt-archive.enabled"
@@ -131,26 +143,21 @@ RUN_SINCE_DAYS="${RUN_SINCE_DAYS:-2}"
 RUN_SLEEP_MIN="${RUN_SLEEP_MIN:-2}"
 RUN_SLEEP_MAX="${RUN_SLEEP_MAX:-6}"
 
-# --- repo --------------------------------------------------------------
+# --- pinned tree ---------------------------------------------------------
 
-if [[ ! -d "$REPO_DIR/.git" ]]; then
-    log "REPO_DIR=$REPO_DIR is not a git checkout — exiting"
-    exit 4
-fi
-
-cd "$REPO_DIR"
-
-# --ff-only means a divergent branch or unrelated history aborts cleanly
-# instead of creating a merge commit. We log and continue — stale code is
-# fine for one run; we'll surface the failure for human inspection next time.
-if git pull --ff-only --quiet 2>>/tmp/yt-archive-pull.err; then
-    log "git pull ok — head=$(git rev-parse --short HEAD)"
-else
-    log "git pull failed (continuing with current HEAD=$(git rev-parse --short HEAD))"
-    if [[ -s /tmp/yt-archive-pull.err ]]; then
-        log "git pull stderr: $(tail -c 400 /tmp/yt-archive-pull.err)"
+TSX="$TREE_DIR/node_modules/.bin/tsx"
+for f in "$TREE_DIR/scripts/archive-yt-local.ts" "$TSX" "$SANDBOX_PROFILE"; do
+    if [[ ! -e "$f" ]]; then
+        log "missing $f — pinned tree not installed. re-run home-machine/yt-archive/install.sh"
+        exit 4
     fi
-fi
+done
+command -v sandbox-exec >/dev/null 2>&1 || { log "sandbox-exec not found — refusing to run unsandboxed"; exit 4; }
+mkdir -p "$SANDBOX_HOME"
+
+log "pinned tree $(head -c 12 "$TREE_DIR/.pinned-sha" 2>/dev/null || echo '?') ($(cat "$TREE_DIR/.pinned-subject" 2>/dev/null))"
+
+cd "$TREE_DIR"
 
 # --- host health preflight -----------------------------------------------
 
@@ -305,9 +312,28 @@ if [[ -z "$PROD_DB_URL" ]]; then
     exit 7
 fi
 
-export PROD_DB_URL
-export HUBANDSPOKE_S3_BUCKET HUBANDSPOKE_S3_PREFIX
-export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION
+# Every node/tsx child runs through this: `env -i` so the job never inherits
+# HEROKU_API_KEY (or anything else in the env file / launchd env), and
+# sandbox-exec so it can't read $HOME or write outside its scratch space.
+# Add a var here only if archive-yt-local.ts actually reads it.
+SANDBOXED=(
+    env -i
+    PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+    HOME="$SANDBOX_HOME"
+    TMPDIR="${TMPDIR:-/tmp}"
+    LANG="${LANG:-en_US.UTF-8}"
+    PROD_DB_URL="$PROD_DB_URL"
+    HUBANDSPOKE_S3_BUCKET="$HUBANDSPOKE_S3_BUCKET"
+    HUBANDSPOKE_S3_PREFIX="${HUBANDSPOKE_S3_PREFIX:-}"
+    AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
+    AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
+    AWS_REGION="${AWS_REGION:-us-east-1}"
+    ${WHISPER_TRANSCRIBE_LIVE:+WHISPER_TRANSCRIBE_LIVE="$WHISPER_TRANSCRIBE_LIVE"}
+    sandbox-exec -f "$SANDBOX_PROFILE"
+        -D USER_HOME="$HOME"
+        -D TREE="$TREE_DIR"
+        -D SANDBOX_HOME="$SANDBOX_HOME"
+)
 
 # --- is there anything to do? --------------------------------------------
 
@@ -320,7 +346,7 @@ export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION
 # (a guard that quietly does nothing) is exactly what cost us 2026-07-31.
 CANDIDATE_COUNT=""
 set +e
-COUNT_OUT="$(timeout 240 npx --no-install tsx scripts/archive-yt-local.ts \
+COUNT_OUT="$(timeout 240 "${SANDBOXED[@]}" "$TSX" scripts/archive-yt-local.ts \
     --brands="$BRANDS" \
     --since-days="$RUN_SINCE_DAYS" \
     --limit="$RUN_LIMIT" \
@@ -355,8 +381,13 @@ set +e
 # Falls back to cookieless if the file is missing (re-export with:
 #   yt-dlp --cookies-from-browser chrome --cookies "$CONFIG_DIR/cookies.txt" \
 #          --skip-download --simulate https://www.youtube.com/watch?v=<id> ).
+#
+# The sandbox can't read ~/.config, so the job gets a COPY in its own home and
+# yt-dlp's refreshed jar is copied back after the run.
+SANDBOX_COOKIES="$SANDBOX_HOME/cookies.txt"
 if [ -f "$CONFIG_DIR/cookies.txt" ]; then
-  COOKIE_ARG="--cookies=$CONFIG_DIR/cookies.txt"
+  install -m 600 "$CONFIG_DIR/cookies.txt" "$SANDBOX_COOKIES"
+  COOKIE_ARG="--cookies=$SANDBOX_COOKIES"
 else
   COOKIE_ARG="--cookies-from-browser=none"
 fi
@@ -364,7 +395,7 @@ fi
 # timeout, but that only covers yt-dlp children — a starved host can stall the
 # node process itself, and an overrunning instance blocks every later tick
 # (launchd won't overlap a StartInterval job). 50 min leaves the next tick clean.
-timeout 3000 npx --no-install tsx scripts/archive-yt-local.ts \
+timeout 3000 "${SANDBOXED[@]}" "$TSX" scripts/archive-yt-local.ts \
     --brands="$BRANDS" \
     --since-days="$RUN_SINCE_DAYS" \
     --limit="$RUN_LIMIT" \
@@ -373,6 +404,13 @@ timeout 3000 npx --no-install tsx scripts/archive-yt-local.ts \
     "$COOKIE_ARG"
 SCRIPT_EXIT=$?
 set -e
+
+# Copy the refreshed cookie jar back — only if it still looks like a Netscape
+# cookies file, so a truncated/garbled write can't clobber the good one.
+if [[ -s "$SANDBOX_COOKIES" ]] && head -n1 "$SANDBOX_COOKIES" | grep -q "Netscape HTTP Cookie File"; then
+    install -m 600 "$SANDBOX_COOKIES" "$CONFIG_DIR/cookies.txt"
+fi
+rm -f "$SANDBOX_COOKIES"
 
 if [[ $SCRIPT_EXIT -eq 124 ]]; then
     log "archive exceeded the 50min ceiling and was killed — next tick starts clean"

@@ -71,7 +71,9 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
      missing media, published in the last 7 days;
    - db size vs the 64 GB plan and connection count vs 200.
 5. **This Mac (one bash block)** — yt-archive last exit (`launchctl list`; decoder in
-   `docs/automation.md`; on nonzero read the log tail) · disk free on `/System/Volumes/Data`
+   `docs/automation.md`; on nonzero read the log tail; exit 4 = pinned tree/sandbox missing →
+   `home-machine/yt-archive/install.sh --no-prompt`. The archiver is pinned + sandboxed and
+   never pulls: a merged archiver change is NOT live until that is re-run) · disk free on `/System/Volumes/Data`
    (yt-archive needs tmp space) · swap free (persistent exhaustion = the ollama-contention
    class; the archiver will be skipping) · the ops-loop recovery agent still loaded
    (`launchctl list | grep ops-loop-recovery`).

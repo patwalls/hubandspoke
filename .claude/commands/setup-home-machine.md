@@ -18,8 +18,9 @@ This covers the **Hub & Spoke** home-machine pieces:
    fix needs sudo.)
 2. **YouTube archiver** — `com.hubandspoke.yt-archive` LaunchAgent runs
    `~/Library/Application Support/hubandspoke-yt-archive/wrapper.sh` hourly, which
-   `git pull`s the repo, fetches a fresh `DATABASE_URL` from Heroku, and runs
-   `scripts/archive-yt-local.ts`. Gated by an identity marker (only the
+   fetches a fresh `DATABASE_URL` from Heroku and runs `scripts/archive-yt-local.ts`
+   from a **pinned tree inside a macOS sandbox**. It never pulls; new code lands only via
+   `home-machine/yt-archive/install.sh --no-prompt`. Gated by an identity marker (only the
    designated Mac runs it) + an env file with AWS creds.
 
 ## Do this
@@ -37,7 +38,7 @@ This covers the **Hub & Spoke** home-machine pieces:
 2. **If the summary is all green**, report that and stop — done. (To smoke-test a
    live run: `launchctl kickstart -k gui/$UID/com.hubandspoke.yt-archive` then
    `tail ~/Library/Logs/hubandspoke-yt-archive.log` — expect `identity ok` →
-   `git pull ok` → `archive exit=0`.)
+   `pinned tree <sha>` → `archive exit=0`, or `0 candidates`.)
 
 3. **If anything is ✗**, triage it. The script prints the exact fix for the
    common cases:
@@ -47,12 +48,12 @@ This covers the **Hub & Spoke** home-machine pieces:
      `! sudo launchctl bootstrap system /Library/LaunchDaemons/com.pwalls.nosleep.plist`
      If `pmset` idle sleep isn't 0: `! sudo pmset -a sleep 0 disksleep 0`.
    - **plist / wrapper / env / identity-marker MISSING**, or **identity mismatch**,
-     or **wrapper REPO_DIR isn't a git checkout** → the one-time install is gone or
-     stale (e.g. the repo was moved). Re-run the installer, which re-lays the
-     wrapper + plist + marker and bakes the current repo path:
-     `home-machine/yt-archive/install.sh` (see `home-machine/yt-archive/README.md`).
-   - **A dependency is missing** (node/npx/heroku/git/ffmpeg/yt-dlp/Chrome) →
-     restore just that one. yt-dlp: `node scripts/install-yt-dlp.mjs`. The cron's
+     or **pinned tree / sandbox.sb missing**, or **installed wrapper still git-pulls** →
+     the install is gone or predates the sandbox. Re-run the installer (it re-pins
+     HEAD of the checkout and re-lays wrapper + profile + plist + marker):
+     `home-machine/yt-archive/install.sh --no-prompt` (see `home-machine/yt-archive/README.md`).
+   - **A dependency is missing** (node/heroku/sandbox-exec/Chrome) → restore just that
+     one. tsx or yt-dlp missing from the pinned tree → `install.sh --no-prompt` rebuilds it. The cron's
      launchd PATH is the Homebrew one, so these must resolve under `/opt/homebrew/bin`
      (a node that only exists via nvm won't be seen by launchd).
    - **Heroku auth warning** → `heroku login` (the wrapper reads `DATABASE_URL`
