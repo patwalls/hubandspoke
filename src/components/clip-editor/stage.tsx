@@ -21,12 +21,15 @@ import type { CaptionsLayer, ClipEditDoc, ImageLayer, TextLayer, TextStyle } fro
 import { EMOJI_FONT, FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
 import type { TextBlockLayout } from "@/lib/clip-editor/layout";
 import type { RenderPlan } from "@/lib/clip-editor/plan";
-import { resolveVideoBox } from "@/lib/clip-editor/video-box";
-import { activeCaptionAt, type Scene } from "@/lib/clip-editor/scene";
+import { MAX_VIDEO_SCALE_PCT } from "@/lib/clip-editor/doc";
+import { centreVideoAt, resolveVideoBox } from "@/lib/clip-editor/video-box";
+import { useFraming, usePlayingSectionId } from "./framing";
+import { activeCaptionAt, blockBoxRect, type Scene } from "@/lib/clip-editor/scene";
+import { TextToolbar } from "./text-toolbar";
 import type { PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
-import { ImageIcon, MagnetIcon, PlayIcon, TypeIcon } from "lucide-react";
-import { createImageLayer, createTextLayer } from "@/lib/clip-editor/doc";
+import { ChevronDownIcon, ImageIcon, MagnetIcon, PlayIcon, TypeIcon } from "lucide-react";
+import { createImageLayer, createTextElement, type TextElementKind } from "@/lib/clip-editor/doc";
 import { LogoPicker } from "@/components/editor/logo-picker";
 import { readSnapEnabled, snapMove, snapThreshold, writeSnapEnabled, type SnapGuide, type SnapTarget } from "@/lib/editor/snap";
 
@@ -129,14 +132,30 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
   const selection = isPreview ? null : editSelection;
   const setSelection = useEditor((s) => s.setStageSelection);
   const registerImageUrl = useEditor((s) => s.registerImageUrl);
+  const doc = useEditor((s) => s.doc);
+  // The framing on screen = the picked scene's, else the playing scene's.
+  const framing = useFraming(engine, plan, doc);
+  const sourceSize = { width: sourceAspect * 1080, height: 1080 };
 
-  const addText = () => {
-    const layer = createTextLayer({ text: "Your text", canvas: plan.canvas });
+  // Scene-scoped text (title cards) shows only while its scene plays.
+  const playingSectionId = usePlayingSectionId(engine, plan);
+  const sceneSelection = useEditor((s) => s.sceneSelection);
+  /** Where new text / logos go — the same rule as framing: the scene picked
+   *  on the timeline, else the whole clip (null). */
+  const addTo = sceneSelection && doc.sections.some((x) => x.id === sceneSelection) ? sceneSelection : null;
+  const addToIndex = addTo ? doc.sections.findIndex((x) => x.id === addTo) + 1 : null;
+  /** What the format bar's "Scene N only" / "Move to scene N" pins to: the
+   *  picked scene, else the one under the playhead. */
+  const currentScene = sceneSelection ?? playingSectionId ?? doc.sections[0]?.id ?? null;
+  const [addMenu, setAddMenu] = useState(false);
+  const addText = (kind: TextElementKind) => {
+    setAddMenu(false);
+    const layer = createTextElement({ kind, canvas: plan.canvas, sectionId: addTo });
     apply(commands.addLayer(layer));
     setSelection({ kind: "layer", id: layer.id });
   };
   const addImage = (logo: { src: ImageLayer["src"]; previewUrl: string }) => {
-    const layer = createImageLayer({ src: logo.src, canvas: plan.canvas });
+    const layer = { ...createImageLayer({ src: logo.src, canvas: plan.canvas }), sectionId: addTo };
     registerImageUrl(layer.id, logo.previewUrl);
     apply(commands.addLayer(layer));
     setSelection({ kind: "layer", id: layer.id });
@@ -165,8 +184,8 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
   // Same geometry function the exporter uses — see video-box.ts. The source
   // size only matters as a ratio here, so any multiple of the aspect works.
   const box = useMemo(
-    () => resolveVideoBox(plan.canvas, plan.video, { width: sourceAspect * 1080, height: 1080 }),
-    [plan.canvas, plan.video, sourceAspect],
+    () => resolveVideoBox(plan.canvas, framing.video, { width: sourceAspect * 1080, height: 1080 }),
+    [plan.canvas, framing.video, sourceAspect],
   );
   const videoBox = { left: box.x, top: box.y, width: box.width, height: box.height };
 
@@ -301,20 +320,36 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
     );
   };
 
+  /** Drag the video: its centre follows the pointer, as far as its fit and
+   *  zoom allow (a contained video narrower than the canvas only moves up and
+   *  down; zoomed in, it pans freely across what overflows). */
   const dragVideo = (e: PointerEvent) => {
     setSelection({ kind: "video" });
-    const start = { ...plan.video };
-    const overflowX = videoBox.width - W;
+    const start = { ...framing.video };
+    const c0 = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const patch = framing.patch;
+    startDrag(e, (dx, dy) => patch(centreVideoAt(plan.canvas, start, sourceSize, c0.x + dx, c0.y + dy)), "drag-video");
+  };
+
+  /** Corner handle: scale the video about its centre (Descript-style) — up
+   *  to MAX_VIDEO_SCALE_PCT, past the canvas edges for a zoomed-in look. */
+  const resizeVideo = (e: PointerEvent, corner: Handle) => {
+    setSelection({ kind: "video" });
+    const start = { ...framing.video };
+    const c0 = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const p0 = { x: corner.includes("w") ? box.x : box.x + box.width, y: corner.startsWith("n") ? box.y : box.y + box.height };
+    const d0 = Math.hypot(p0.x - c0.x, p0.y - c0.y) || 1;
+    const minPct = start.fit === "cover" ? 100 : 30;
+    const patch = framing.patch;
     startDrag(
       e,
-      (dx, dy) =>
-        start.fit === "contain"
-          ? commands.patchVideo({ yPct: clampPct(start.yPct + (dy / H) * 100) })
-          : commands.patchVideo({
-              panXPct:
-                overflowX > 0 ? clampPct(start.panXPct - (dx / overflowX) * 100) : 50,
-            }),
-      "drag-video",
+      (dx, dy) => {
+        const f = Math.hypot(p0.x + dx - c0.x, p0.y + dy - c0.y) / d0;
+        const scalePct = Math.round(Math.max(minPct, Math.min(MAX_VIDEO_SCALE_PCT, start.scalePct * f)));
+        const next = { ...start, scalePct };
+        return patch({ scalePct, ...centreVideoAt(plan.canvas, next, sourceSize, c0.x, c0.y) });
+      },
+      "resize-video",
     );
   };
 
@@ -398,6 +433,63 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
       onPointerDown={() => !isPreview && setSelection(null)}
     >
       <style dangerouslySetInnerHTML={{ __html: fontFaceCss() }} />
+      {/* The selected video's full outline + corner handles, drawn OVER the
+          canvas and not clipped by it, so a zoomed-in video shows where it
+          spills past the frame (like Descript). */}
+      {(() => {
+        if (selection?.kind !== "layer" || isPreview || scale === 0) return null;
+        const block = scene.textBlocks.find((b) => b.layer.id === selection.id);
+        if (!block) return null;
+        const layer = block.layer;
+        const rect = textRect(layer, block.layout);
+        const above = rect.y * scale > 48;
+        const indexOf = (id: string | null) => (id ? doc.sections.findIndex((x) => x.id === id) + 1 || null : null);
+        return (
+          <div
+            className="pointer-events-none absolute left-1/2 top-1/2 z-30"
+            style={{ width: W * scale, height: H * scale, transform: "translate(-50%, -50%)" }}
+          >
+            <div
+              className="absolute -translate-x-1/2"
+              style={{ left: (rect.x + rect.w / 2) * scale, top: above ? rect.y * scale - 44 : (rect.y + rect.h) * scale + 8 }}
+            >
+              <TextToolbar
+                layer={layer}
+                ownSceneIndex={indexOf(layer.sectionId)}
+                currentSceneIndex={indexOf(currentScene)}
+                onStyle={(patch, key) =>
+                  apply(commands.patchLayer<TextLayer>(layer.id, (l) => ({ ...l, style: { ...l.style, ...patch } })), key ? `${key}-${layer.id}` : undefined)
+                }
+                onScope={(sceneOnly) => apply(commands.patchLayer<TextLayer>(layer.id, (l) => ({ ...l, sectionId: sceneOnly ? currentScene : null })))}
+              />
+            </div>
+          </div>
+        );
+      })()}
+      {selection?.kind === "video" && !isPreview && scale > 0 && (
+        <div
+          className="pointer-events-none absolute left-1/2 top-1/2 z-20"
+          style={{ width: W * scale, height: H * scale, transform: "translate(-50%, -50%)" }}
+        >
+          <div
+            className="absolute border-2 border-violet-500"
+            style={{ left: box.x * scale, top: box.y * scale, width: box.width * scale, height: box.height * scale, borderRadius: box.radius * scale }}
+          />
+          {(["nw", "ne", "sw", "se"] as const).map((h) => (
+            <div
+              key={h}
+              data-video-handle={h}
+              onPointerDown={(e) => resizeVideo(e, h)}
+              className="pointer-events-auto absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-violet-500 bg-white shadow"
+              style={{
+                left: (h.includes("w") ? box.x : box.x + box.width) * scale,
+                top: (h.startsWith("n") ? box.y : box.y + box.height) * scale,
+                cursor: h === "nw" || h === "se" ? "nwse-resize" : "nesw-resize",
+              }}
+            />
+          ))}
+        </div>
+      )}
       <div
         className={cn(
           "relative shrink-0 overflow-hidden",
@@ -420,7 +512,6 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
           <div
             className={cn(
               "absolute cursor-grab overflow-hidden active:cursor-grabbing",
-              selection?.kind === "video" && "outline-dashed outline-[6px] outline-sky-400",
             )}
             style={{ ...videoBox, borderRadius: box.radius }}
             onPointerDown={dragVideo}
@@ -478,12 +569,15 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
           {plan.imageLayers.map((layer) => {
             const rect = imageRect(layer);
             const selected = selection?.kind === "layer" && selection.id === layer.id;
+            // Another scene's logo: hidden, or faded while selected.
+            const elsewhere = !!layer.sectionId && layer.sectionId !== playingSectionId;
+            if (elsewhere && !selected) return null;
             return (
               <div
                 key={layer.id}
                 data-image-layer={layer.id}
                 className={cn("absolute cursor-grab active:cursor-grabbing", selected && "outline-dashed outline-[6px] outline-sky-400")}
-                style={{ left: rect.x, top: rect.y, width: rect.w, opacity: layer.opacity }}
+                style={{ left: rect.x, top: rect.y, width: rect.w, opacity: layer.opacity * (elsewhere ? 0.35 : 1) }}
                 onPointerDown={(e) => dragImage(e, layer)}
               >
                 {imageUrls[layer.id] ? (
@@ -514,6 +608,14 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
           {scene.textBlocks.map((block) => {
             const rect = textRect(block.layer, block.layout);
             const layer = block.layer;
+            const isSelected = selection?.kind === "layer" && selection.id === layer.id;
+            // Another scene's title card isn't on screen now. Selected, it
+            // stays reachable — faded, dashed and labelled with its scene —
+            // so it never looks like it belongs to this one.
+            const elsewhere = !!layer.sectionId && layer.sectionId !== playingSectionId;
+            if (elsewhere && !isSelected) return null;
+            const ownIndex = layer.sectionId ? doc.sections.findIndex((x) => x.id === layer.sectionId) + 1 || null : null;
+            const blockBox = layer.style.box?.mode === "block" ? blockBoxRect(layer.style, block.layout) : null;
             return (
             <TextBlock
               key={layer.id}
@@ -526,9 +628,25 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
               handles={layer.fitHeightPct == null ? SIDE_AND_CORNER_HANDLES : HANDLES}
               onHandleDown={(e, h) => resizeText(e, layer, rect, h)}
             >
-              {block.layout.lines.map((line, i) => (
-                <LineBox key={`box-${i}`} style={block.layer.style} layout={block.layout} line={line} />
-              ))}
+              {elsewhere && (
+                <div
+                  className="pointer-events-none absolute whitespace-nowrap rounded bg-violet-600 font-semibold text-white"
+                  style={{ left: rect.x, top: rect.y - 30 / Math.max(scale, 0.05), fontSize: 11 / Math.max(scale, 0.05), padding: `${2 / Math.max(scale, 0.05)}px ${6 / Math.max(scale, 0.05)}px` }}
+                >
+                  {ownIndex ? `Scene ${ownIndex} only — not in this scene` : "Its scene was deleted"}
+                </div>
+              )}
+              <div style={{ opacity: elsewhere ? 0.35 : 1 }}>
+              {blockBox ? (
+                <div
+                  className="absolute"
+                  style={{ left: blockBox.x, top: blockBox.y, width: blockBox.w, height: blockBox.h, borderRadius: blockBox.r, background: rgba(layer.style.box!.color, layer.style.box!.alpha) }}
+                />
+              ) : (
+                block.layout.lines.map((line, i) => (
+                  <LineBox key={`box-${i}`} style={block.layer.style} layout={block.layout} line={line} />
+                ))
+              )}
               {block.layout.lines.map((line, i) => (
                 <div
                   key={i}
@@ -542,6 +660,7 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
                   {line.text}
                 </div>
               ))}
+              </div>
             </TextBlock>
             );
           })}
@@ -563,14 +682,39 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
         {/* Add things: a line of text, or a logo from the brand's library. */}
         {!isPreview && (<>
         <div className="absolute left-2 top-2 z-10 flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={addText}
-            title="Add a line of text"
-            className="inline-flex items-center gap-1 rounded-md border border-border bg-background/90 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-          >
-            <TypeIcon className="size-3" /> Text
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setAddMenu((o) => !o)}
+              title={addToIndex ? `Add text to scene ${addToIndex} only` : "Add text to the whole clip (pick a scene on the timeline to add it to just that scene)"}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-background/90 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+            >
+              <TypeIcon className="size-3" /> Text <ChevronDownIcon className="size-3" />
+            </button>
+            {addMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setAddMenu(false)} />
+                <div className="absolute left-0 top-full z-40 mt-1 w-44 rounded-lg border border-border bg-popover p-1 shadow-lg">
+                  {(
+                    [
+                      ["text", "Text", "text-[13px] font-medium"],
+                      ["subtitle", "Subtitle", "text-[14px] font-semibold"],
+                      ["title", "Title card", "text-[17px] font-extrabold"],
+                    ] as const
+                  ).map(([kind, label, cls]) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => addText(kind)}
+                      className="flex w-full flex-col items-start rounded-md px-2.5 py-1.5 text-left hover:bg-muted"
+                    >
+                      <span className={cls}>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <LogoPicker
             brand={brand}
             onPick={addImage}

@@ -9,7 +9,7 @@ import type { TextStyle } from "./doc";
 import { EMOJI_FONT, FONTS, assFontSizeFactor, splitEmojiRuns, type EmojiFontDefinition, type FontDefinition } from "./fonts";
 import type { LaidOutLine, TextBlockLayout } from "./layout";
 import type { RenderPlan } from "./plan";
-import type { Scene } from "./scene";
+import { blockBoxRect, type Scene } from "./scene";
 
 /** "#RRGGBB" → ASS &HAABBGGRR (alpha 00 = opaque). */
 function assColor(hex: string): string {
@@ -135,6 +135,12 @@ function boxEvent(start: number, end: number, styleName: string, style: TextStyl
   const w = line.widthPx + pad * 2;
   const h = layout.linePitchPx;
   const r = Math.min((style.box.radiusPct / 100) * layout.fontSizePx, w / 2, h / 2);
+  return rectEvent(start, end, styleName, style.box, { x: line.x - pad, y: line.topY, w, h, r }, layer);
+}
+
+/** A filled rounded rectangle as an ASS vector drawing at canvas (x, y). */
+function rectEvent(start: number, end: number, styleName: string, box: NonNullable<TextStyle["box"]>, rect: { x: number; y: number; w: number; h: number; r: number }, layer: number): string {
+  const { w, h, r } = rect;
   const f = (n: number) => n.toFixed(1);
   // Cubic beziers with both control points on the corner ≈ a quarter circle.
   const path =
@@ -142,7 +148,7 @@ function boxEvent(start: number, end: number, styleName: string, style: TextStyl
     `l ${f(w)} ${f(h - r)} b ${f(w)} ${f(h)} ${f(w)} ${f(h)} ${f(w - r)} ${f(h)} ` +
     `l ${f(r)} ${f(h)} b 0 ${f(h)} 0 ${f(h)} 0 ${f(h - r)} ` +
     `l 0 ${f(r)} b 0 0 0 0 ${f(r)} 0`;
-  const tags = `{\\an7\\pos(${f(line.x - pad)},${f(line.topY)})\\bord0\\shad0\\c${assInlineColor(style.box.color)}\\1a${assAlpha(style.box.alpha)}\\p1}`;
+  const tags = `{\\an7\\pos(${f(rect.x)},${f(rect.y)})\\bord0\\shad0\\c${assInlineColor(box.color)}\\1a${assAlpha(box.alpha)}\\p1}`;
   return `Dialogue: ${layer},${assTime(start)},${assTime(end)},${styleName},,0,0,0,,${tags}${path}{\\p0}`;
 }
 
@@ -169,16 +175,22 @@ export function buildAssScript(plan: RenderPlan, scene: Scene): string {
   scene.textBlocks.forEach((block, bi) => {
     const name = `Text${bi}`;
     styles.push(styleLine(name, block.layer.style, block.layout.fontSizePx));
+    // A scene's text (a title card) shows for that scene only.
+    const t0 = block.window?.startSec ?? 0;
+    const t1 = block.window ? block.window.endSec : plan.durationSec + 1;
+    if (!(t1 > t0)) return;
+    const blockBox = block.layer.style.box?.mode === "block" ? blockBoxRect(block.layer.style, block.layout) : null;
+    if (blockBox) events.push(rectEvent(t0, t1, name, block.layer.style.box!, blockBox, 8 + bi));
     for (const line of block.layout.lines) {
-      const bx = boxEvent(0, plan.durationSec + 1, name, block.layer.style, block.layout, line, 8 + bi);
+      const bx = blockBox ? null : boxEvent(t0, t1, name, block.layer.style, block.layout, line, 8 + bi);
       if (bx) events.push(bx);
       const text = assText(line.text, block.layer.style, block.layout.fontSizePx);
-      const sh = shadowEvent(0, plan.durationSec + 1, name, block.layer.style, block.layout, line, text, lineAnchorX(line, block.layer.style.align), posY(block.layer.style, block.layout, line), 9 + bi);
+      const sh = shadowEvent(t0, t1, name, block.layer.style, block.layout, line, text, lineAnchorX(line, block.layer.style.align), posY(block.layer.style, block.layout, line), 9 + bi);
       if (sh) events.push(sh);
       events.push(
         event(
-          0,
-          plan.durationSec + 1,
+          t0,
+          t1,
           name,
           lineAnchorX(line, block.layer.style.align),
           posY(block.layer.style, block.layout, line),

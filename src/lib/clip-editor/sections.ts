@@ -78,3 +78,37 @@ export function retimeSectionInDoc(
   sorted[i] = next;
   return { ...doc, sections: sorted };
 }
+
+/** A blade cut can't leave a piece shorter than this. */
+export const MIN_SPLIT_PIECE_SEC = 0.1;
+
+/**
+ * Blade: cut one section in two at source time `atSec`. Both halves keep
+ * playing back to back exactly as before — the cut only makes them separate
+ * pieces on the timeline (to select, delete, and later give their own
+ * layout). The left half keeps the id. No-op when `atSec` is too close to an
+ * edge.
+ */
+export function splitSectionAt(doc: ClipEditDoc, id: string, atSec: number): ClipEditDoc {
+  const i = doc.sections.findIndex((s) => s.id === id);
+  const s = doc.sections[i];
+  if (!s || atSec < s.startSec + MIN_SPLIT_PIECE_SEC || atSec > s.endSec - MIN_SPLIT_PIECE_SEC) return doc;
+  const cut = Math.round(atSec * 1000) / 1000;
+  const left = retimeSection(s, { startSec: s.startSec, endSec: cut });
+  const right: Section = {
+    ...retimeSection(s, { startSec: cut, endSec: s.endSec }),
+    id: sectionId(cut, new Set(doc.sections.map((x) => x.id))),
+    role: "body",
+  };
+  const sections = [...doc.sections];
+  sections.splice(i, 1, left, right);
+  return { ...doc, sections };
+}
+
+/** Delete a whole piece of the clip. Its words go back to being "the rest of
+ *  the video" (add them again from the transcript, or undo). The clip always
+ *  keeps at least one section. */
+export function deleteSection(doc: ClipEditDoc, id: string): ClipEditDoc {
+  if (doc.sections.length <= 1 || !doc.sections.some((s) => s.id === id)) return doc;
+  return { ...doc, sections: doc.sections.filter((s) => s.id !== id) };
+}

@@ -16,11 +16,13 @@ import { colorsInClipDoc } from "@/lib/clip-editor/colors";
 import { ColorPicker } from "@/components/editor/color-picker";
 import { layoutTextBlock, textToLayoutWords } from "@/lib/clip-editor/layout";
 import { fittedStyle } from "@/lib/clip-editor/scene";
+import { MAX_VIDEO_SCALE_PCT } from "@/lib/clip-editor/doc";
+import type { Framing } from "./framing";
 import { commands, useEditor } from "./store";
 
 const HIGHLIGHTS = ["#FFE14D", "#4ADE80", "#38BDF8", "#FB7185", "#FFFFFF"];
 
-export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDoc; disabled: boolean; brand: string; className?: string }) {
+export function Inspector({ doc, framing, disabled, brand, className }: { doc: ClipEditDoc; framing: Framing; disabled: boolean; brand: string; className?: string }) {
   const apply = useEditor((s) => s.apply);
   const selection = useEditor((s) => s.stageSelection);
   const setSelection = useEditor((s) => s.setStageSelection);
@@ -28,6 +30,7 @@ export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDo
   const hook = findHookLayer(doc);
   const captions = findCaptionsLayer(doc);
   const vertical = doc.canvas.height > doc.canvas.width;
+  const video = framing.video;
 
   const patchCaptions = (patch: (l: CaptionsLayer) => CaptionsLayer, key?: string) =>
     captions && apply(commands.patchLayer<CaptionsLayer>(captions.id, patch), key);
@@ -196,6 +199,7 @@ export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDo
       )}
 
       <Panel title="Video" active={selection?.kind === "video"}>
+        <VideoScope doc={doc} framing={framing} onReset={(id) => apply(commands.resetSceneVideo(id))} />
         <ColorRow usedColors={usedColors} label="Background" value={doc.canvas.background} onChange={(bg) => apply(commands.setBackground(bg), "canvas-bg")} />
         <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-0.5 text-xs">
           {(
@@ -208,10 +212,10 @@ export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDo
               key={fit}
               type="button"
               title={title}
-              onClick={() => apply(commands.patchVideo({ fit }))}
+              onClick={() => apply(framing.patch({ fit, ...(fit === "cover" && video.scalePct < 100 ? { scalePct: 100 } : {}) }))}
               className={cn(
                 "rounded px-2 py-1 font-medium transition-colors",
-                doc.video.fit === fit
+                video.fit === fit
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               )}
@@ -220,48 +224,58 @@ export function Inspector({ doc, disabled, brand, className }: { doc: ClipEditDo
             </button>
           ))}
         </div>
-        {doc.video.fit === "contain" ? (
-          <>
-            <Slider
-              label="Size"
-              hint="below 100 leaves a margin"
-              value={doc.video.scalePct}
-              min={50}
-              max={100}
-              step={1}
-              format={(v) => `${Math.round(v)}%`}
-              onChange={(scalePct) => apply(commands.patchVideo({ scalePct }), "video-scale")}
-            />
-            <Slider
-              label="Rounded corners"
-              value={doc.video.radiusPct}
-              min={0}
-              max={25}
-              step={0.5}
-              format={(v) => (v === 0 ? "Off" : v.toFixed(1))}
-              onChange={(radiusPct) => apply(commands.patchVideo({ radiusPct }), "video-radius")}
-            />
-            {(vertical || doc.video.scalePct < 100) && (
-              <Slider
-                label="Position"
-                hint="or drag the video"
-                value={doc.video.yPct}
-                min={0}
-                max={100}
-                step={0.5}
-                onChange={(yPct) => apply(commands.patchVideo({ yPct }), "video-y")}
-              />
-            )}
-          </>
-        ) : (
+        <Slider
+          label="Size"
+          hint={video.fit === "contain" ? "or drag its corners · over 100 zooms in" : "or drag its corners"}
+          value={video.scalePct}
+          min={video.fit === "contain" ? 50 : 100}
+          max={MAX_VIDEO_SCALE_PCT}
+          step={1}
+          format={(v) => `${Math.round(v)}%`}
+          onChange={(scalePct) => apply(framing.patch({ scalePct }), `video-scale-${framing.sectionId ?? "all"}`)}
+        />
+        {video.fit === "contain" && video.scalePct <= 100 && (
           <Slider
-            label="Pan"
+            label="Rounded corners"
+            value={video.radiusPct}
+            min={0}
+            max={25}
+            step={0.5}
+            format={(v) => (v === 0 ? "Off" : v.toFixed(1))}
+            onChange={(radiusPct) => apply(framing.patch({ radiusPct }), `video-radius-${framing.sectionId ?? "all"}`)}
+          />
+        )}
+        {(video.fit === "cover" || video.scalePct > 100) && (
+          <Slider
+            label="Left / right"
             hint="or drag the video"
-            value={doc.video.panXPct}
+            value={video.panXPct}
             min={0}
             max={100}
             step={1}
-            onChange={(panXPct) => apply(commands.patchVideo({ panXPct }), "video-pan")}
+            onChange={(panXPct) => apply(framing.patch({ panXPct }), `video-pan-${framing.sectionId ?? "all"}`)}
+          />
+        )}
+        {video.fit === "contain" && (vertical || video.scalePct !== 100) && (
+          <Slider
+            label={video.scalePct > 100 ? "Up / down" : "Position"}
+            hint="or drag the video"
+            value={video.yPct}
+            min={0}
+            max={100}
+            step={0.5}
+            onChange={(yPct) => apply(framing.patch({ yPct }), `video-y-${framing.sectionId ?? "all"}`)}
+          />
+        )}
+        {video.fit === "cover" && video.scalePct > 100 && (
+          <Slider
+            label="Up / down"
+            hint="or drag the video"
+            value={video.panYPct}
+            min={0}
+            max={100}
+            step={1}
+            onChange={(panYPct) => apply(framing.patch({ panYPct }), `video-pany-${framing.sectionId ?? "all"}`)}
           />
         )}
       </Panel>
@@ -519,6 +533,7 @@ function TextEffects({ style, usedColors, onChange }: { style: TextStyle; usedCo
           <Slider label="Box opacity" value={style.box.alpha} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(alpha) => onChange({ box: { ...style.box!, alpha } }, "box-a")} />
           <Slider label="Corners" value={style.box.radiusPct} min={0} max={60} step={1} format={(v) => `${Math.round(v)}%`} onChange={(radiusPct) => onChange({ box: { ...style.box!, radiusPct } }, "box-r")} />
           <Slider label="Padding" value={style.box.padPct} min={0} max={60} step={1} format={(v) => `${Math.round(v)}%`} onChange={(padPct) => onChange({ box: { ...style.box!, padPct } }, "box-p")} />
+          <Check label="One box behind the text (title card)" checked={style.box.mode === "block"} onChange={(on) => onChange({ box: { ...style.box!, mode: on ? "block" : "line" } })} />
         </>
       )}
     </>
@@ -624,5 +639,30 @@ function Check({
       />
       {label}
     </label>
+  );
+}
+
+/** Which framing the Video panel is editing: one scene, or the whole clip. */
+function VideoScope({ doc, framing, onReset }: { doc: ClipEditDoc; framing: Framing; onReset: (sectionId: string) => void }) {
+  if (doc.sections.length < 2 && !framing.sectionId) return null;
+  if (!framing.sectionId) {
+    return (
+      <p className="rounded-md bg-muted px-2 py-1.5 text-[11px] text-muted-foreground">
+        Editing <span className="font-semibold text-foreground">the whole clip</span>. Pick a scene on the timeline to frame it on its own.
+      </p>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md bg-violet-50 px-2 py-1.5 text-[11px] text-violet-900 dark:bg-violet-950/50 dark:text-violet-200">
+      <span>
+        Editing <span className="font-semibold">scene {framing.sceneIndex}</span>
+        {framing.own ? " (its own framing)" : " — changes apply to this scene only"}
+      </span>
+      {framing.own && (
+        <button type="button" onClick={() => onReset(framing.sectionId!)} className="shrink-0 font-semibold underline-offset-2 hover:underline">
+          Match the rest
+        </button>
+      )}
+    </div>
   );
 }

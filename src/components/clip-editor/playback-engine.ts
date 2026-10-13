@@ -305,9 +305,10 @@ export class PlaybackEngine {
       return;
     }
     this.segIndex += 1;
-    const continuous =
-      next.inputIndex === current.inputIndex &&
-      Math.abs(next.sourceStartSec - current.sourceEndSec) < CONTIGUOUS_EPSILON_SEC;
+    // Both elements play the same file, so footage that runs on in the
+    // source (e.g. across a blade cut between two sections) just keeps
+    // playing — no hand-off, no seek.
+    const continuous = Math.abs(next.sourceStartSec - current.sourceEndSec) < CONTIGUOUS_EPSILON_SEC;
     if (continuous) return;
 
     const outgoing = this.els[this.active];
@@ -335,9 +336,7 @@ export class PlaybackEngine {
     while (i + 1 < this.segments.length) {
       const a = this.segments[i];
       const b = this.segments[i + 1];
-      const continuous =
-        a.inputIndex === b.inputIndex &&
-        Math.abs(b.sourceStartSec - a.sourceEndSec) < CONTIGUOUS_EPSILON_SEC;
+      const continuous = Math.abs(b.sourceStartSec - a.sourceEndSec) < CONTIGUOUS_EPSILON_SEC;
       if (!continuous) {
         standby.pause();
         standby.currentTime = b.sourceStartSec;

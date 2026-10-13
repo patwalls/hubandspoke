@@ -23,8 +23,20 @@ describe("compileRenderPlan — timeline", () => {
     expect(plan.totalFrames).toBe(300);
     expect(plan.durationSec).toBe(10);
     expect(plan.inputs).toEqual([
-      { sectionId: "body", seekSec: 100, readDurationSec: 11 },
+      { sectionId: "body", seekSec: 100, readDurationSec: 11, video: plan.video },
     ]);
+  });
+
+  it("each input carries its scene's framing: its own, else the doc's", () => {
+    const plan = compileRenderPlan(
+      (() => {
+        const d = createDefaultDoc({ startSec: 100, endSec: 110, hook: "" });
+        d.sections = [{ ...d.sections[0], endSec: 104 }, { ...d.sections[0], id: "b2", startSec: 104, video: { ...d.video, scalePct: 200 } }];
+        return d;
+      })(),
+      [],
+    );
+    expect(plan.inputs.map((i) => i.video.scalePct)).toEqual([100, 200]);
   });
 
   it("removals close the gap on the output timeline", () => {

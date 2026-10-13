@@ -156,6 +156,43 @@ describe("buildFilterGraph", () => {
     expect(g).toContain("pad=1080:1920:54:687"); // centered: (1080-972)/2, 960-273
   });
 
+  it("zooms past fit by overlaying onto the background, cropping what falls off", () => {
+    const g = buildFilterGraph(
+      planFor((doc) => { doc.video = { ...doc.video, scalePct: 200, panXPct: 25 }; }),
+      { assPath: null, fontsDir: "/f", sourceSize: HD },
+    );
+    expect(g).toContain("scale=2160:1216");
+    expect(g).toContain("overlay=x=-270:y=352"); // 25% of the 1080px overflow; centred at yPct 50
+    expect(g).not.toContain("pad=");
+  });
+
+  it("frames each scene on its own when scenes differ, then concats placed frames", () => {
+    const plan = planFor((doc) => {
+      const [body] = doc.sections;
+      doc.sections = [
+        { ...body, endSec: 104 },
+        { ...body, id: "b2", startSec: 104, video: { ...doc.video, scalePct: 200 } },
+      ];
+    });
+    const g = buildFilterGraph(plan, { assPath: null, fontsDir: "/f", sourceSize: HD });
+    // scene 1: plain fit; scene 2: zoomed — each placed before the concat
+    expect(g).toContain("[vr0]scale=1080:608:flags=lanczos,setsar=1,pad=1080:1920:0:656");
+    expect(g).toContain("[vr1]scale=2160:1216:flags=lanczos,setsar=1[vz1]");
+    expect(g).toContain("trim=end_frame=180[bg1]"); // scene 2 is 6s × 30fps
+    expect(g).toContain("[v0][a0][v1][a1]concat=n=2");
+    expect(g).toContain("[vcat]null,format=yuv420p[vout]");
+  });
+
+  it("keeps the single-placement graph when every scene is framed alike", () => {
+    const plan = planFor((doc) => {
+      const [body] = doc.sections;
+      doc.sections = [{ ...body, endSec: 104 }, { ...body, id: "b2", startSec: 104 }];
+    });
+    const g = buildFilterGraph(plan, { assPath: null, fontsDir: "/f", sourceSize: HD });
+    expect(g).toContain("[vcat]scale=1080:608");
+    expect(g).not.toContain("[vr0]");
+  });
+
   it("overlays image layers between the placed video and the text, as extra inputs", () => {
     const logo = createImageLayer({ src: { kind: "asset", path: "/watermarks/x.png" }, canvas: { width: 1080, height: 1920 } });
     const plan = planFor((doc) => {
@@ -268,7 +305,7 @@ describe("createDefaultDoc hook auto-fit", () => {
 
 describe("resolveVideoBox", () => {
   const canvas = { width: 1080, height: 1920 };
-  const base = { fit: "contain" as const, yPct: 50, panXPct: 50, scalePct: 100, radiusPct: 0 };
+  const base = { fit: "contain" as const, yPct: 50, panXPct: 50, panYPct: 50, scalePct: 100, radiusPct: 0 };
 
   it("always yields even dimensions (yuv420 / libx264 reject odd ones)", () => {
     for (const scalePct of [100, 97, 93, 61, 33]) {

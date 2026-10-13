@@ -14,7 +14,7 @@ import { createStore, useStore, type StoreApi } from "zustand";
 import type { ClipEditDoc, Layer, RemovalReason, Section } from "@/lib/clip-editor/doc";
 import { wordEditKey } from "@/lib/clip-editor/doc";
 import { addRemoval, restoreRange, restoreReason } from "@/lib/clip-editor/removals";
-import { includeRange, retimeSectionInDoc } from "@/lib/clip-editor/sections";
+import { deleteSection, includeRange, retimeSectionInDoc, splitSectionAt } from "@/lib/clip-editor/sections";
 import type { TimeRange } from "@/lib/clip-editor/doc";
 
 const HISTORY_LIMIT = 200;
@@ -42,6 +42,9 @@ export interface EditorState {
   /** Selected transcript words, as positions in the editor's display list. */
   wordSelection: { anchor: number; focus: number } | null;
   stageSelection: StageSelection;
+  /** The scene (section) picked on the timeline — framing edits in the
+   *  preview and the Video panel apply to it alone. Null = no pick. */
+  sceneSelection: string | null;
   /** Browser URL per image layer id — resolved by the session for stored
    *  layers, registered by the logo picker for layers added here. Not part
    *  of the doc (URLs expire; the doc keeps the durable source). */
@@ -55,6 +58,7 @@ export interface EditorState {
   markSaveFailed: (kind: "error" | "conflict") => void;
   setWordSelection: (sel: EditorState["wordSelection"]) => void;
   setStageSelection: (sel: StageSelection) => void;
+  setSceneSelection: (sectionId: string | null) => void;
   registerImageUrl: (layerId: string, url: string) => void;
 }
 
@@ -88,6 +92,7 @@ export function createEditorStore(init: {
     saveState: init.recoveredDoc ? "dirty" : "saved",
     wordSelection: null,
     stageSelection: null,
+    sceneSelection: null,
     imageUrls: init.imageUrls ?? {},
 
     apply: (mutate, coalesceKey) => {
@@ -146,6 +151,7 @@ export function createEditorStore(init: {
     markSaveFailed: (kind) => set({ saveState: kind }),
     setWordSelection: (wordSelection) => set({ wordSelection }),
     setStageSelection: (stageSelection) => set({ stageSelection }),
+    setSceneSelection: (sceneSelection) => set({ sceneSelection }),
     registerImageUrl: (layerId, url) => set({ imageUrls: { ...get().imageUrls, [layerId]: url } }),
   }));
 }
@@ -216,6 +222,13 @@ export const commands = {
   retime: (sectionId: string, window: TimeRange) => (doc: ClipEditDoc) =>
     retimeSectionInDoc(doc, sectionId, window),
 
+  /** Blade: cut a section in two at a source time. */
+  split: (sectionId: string, atSec: number) => (doc: ClipEditDoc) =>
+    splitSectionAt(doc, sectionId, atSec),
+
+  /** Delete a whole piece of the clip (never the last one). */
+  deleteSection: (sectionId: string) => (doc: ClipEditDoc) => deleteSection(doc, sectionId),
+
   /** Add source ranges to the clip — new sections, or extensions of the
    *  sections they touch. */
   include: (ranges: TimeRange[]) => (doc: ClipEditDoc) =>
@@ -237,6 +250,20 @@ export const commands = {
     if (!layer || layer.type === "captions" || (layer.type === "text" && layer.role === "hook")) return doc;
     return { ...doc, layers: doc.layers.filter((l) => l.id !== layerId) };
   },
+
+  /** Change one scene's framing; its first change starts from what it shows
+   *  now (the doc's framing), so only what you touched differs. */
+  patchSceneVideo: (sectionId: string, patch: Partial<ClipEditDoc["video"]>) => (doc: ClipEditDoc) =>
+    mapSection(doc, sectionId, (s) => ({ ...s, video: { ...(s.video ?? doc.video), ...patch } })),
+
+  /** Drop a scene's own framing — it follows the rest of the clip again. */
+  resetSceneVideo: (sectionId: string) => (doc: ClipEditDoc) =>
+    mapSection(doc, sectionId, (s) => {
+      if (!s.video) return s;
+      const { video: _drop, ...rest } = s;
+      void _drop;
+      return rest;
+    }),
 
   patchVideo: (patch: Partial<ClipEditDoc["video"]>) => (doc: ClipEditDoc) => ({
     ...doc,

@@ -58,6 +58,8 @@ export interface PlanInput {
   seekSec: number;
   /** How much source to read from seekSec. */
   readDurationSec: number;
+  /** How this scene's video is framed: its own override, else the doc's. */
+  video: VideoPlacement;
 }
 
 export interface CaptionCueWord {
@@ -144,6 +146,7 @@ export function compileRenderPlan(
       seekSec,
       // One extra second so the decoder never starves the final frames.
       readDurationSec: lastFrame / fps + 1,
+      video: section.video ?? doc.video,
     });
   }
 
@@ -285,6 +288,13 @@ export function outputToSource(
     }
   }
   return null;
+}
+
+/** When a section plays, in output time (null when it has no footage). */
+export function sectionOutWindow(plan: RenderPlan, sectionId: string): { startSec: number; endSec: number } | null {
+  const segs = plan.segments.filter((s) => s.sectionId === sectionId);
+  if (segs.length === 0) return null;
+  return { startSec: segs[0].outStartSec, endSec: segs[segs.length - 1].outEndSec };
 }
 
 /**

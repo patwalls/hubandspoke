@@ -21,6 +21,7 @@ import { Inspector } from "./inspector";
 import { PlaybackEngine } from "./playback-engine";
 import { Stage } from "./stage";
 import { EditorStoreContext, createEditorStore, useEditor, useEditorStoreApi } from "./store";
+import { framingFor } from "./framing";
 
 const AUTOSAVE_DELAY_MS = 900;
 
@@ -142,7 +143,7 @@ function LookWorkspace({ formatId, formatName, brand, onSaved, onClose }: { form
         <div className="relative min-h-0 min-w-0">
           <Stage plan={plan} scene={scene} engine={engine} videoUrl={null} brand={brand} />
         </div>
-        <Inspector doc={doc} disabled={false} brand={brand} />
+        <Inspector doc={doc} framing={framingFor(doc, null, null)} disabled={false} brand={brand} />
       </div>
       <footer className="flex items-center gap-3 border-t border-border px-4 py-2.5">
         <p className="text-[11px] text-muted-foreground">Style the hook, captions, video placement and layers. Every new clip of this format starts from this look — with its own AI-written hook; the text here is a placeholder.</p>

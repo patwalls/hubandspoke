@@ -1,22 +1,22 @@
 "use client";
 
 /**
- * Transport: play/pause, the output-time scrub bar, and the source-time trim
- * strip.
+ * Transport: the Descript-style timeline (see timeline.tsx) and the
+ * source-time trim strip.
  *
- * Two different timelines on purpose. The SCRUB BAR is the clip as it will
- * export (cuts closed up). The TRIM STRIP is the raw source around the clip,
- * showing what's in, what's cut, and what's outside — with drag handles for
- * the in/out points. The strip is where a waveform goes later.
+ * Two different timelines on purpose. The TIMELINE is the clip as it will
+ * export (cuts closed up) — filmstrip, playhead, blade. The TRIM STRIP is the
+ * raw source around the clip, showing what's in, what's cut, and what's
+ * outside — with drag handles for the in/out points.
  */
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { PauseIcon, PlayIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Section, TimeRange } from "@/lib/clip-editor/doc";
 import type { RenderPlan } from "@/lib/clip-editor/plan";
 import type { EditorWord } from "@/lib/clip-editor/words";
 import type { EngineSnapshot, PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
+import { Timeline } from "./timeline";
 
 function fmt(sec: number): string {
   const t = Math.max(0, sec);
@@ -42,34 +42,18 @@ export function Transport({
   engine,
   sections,
   words,
+  videoUrl,
   readOnly,
 }: {
   plan: RenderPlan;
   engine: PlaybackEngine;
   sections: Section[];
   words: EditorWord[];
+  videoUrl: string;
   readOnly: boolean;
 }) {
   const [snap, setSnap] = useState<EngineSnapshot>(() => engine.snapshot());
   useEffect(() => engine.subscribe(setSnap), [engine]);
-
-  const scrubRef = useRef<HTMLDivElement | null>(null);
-  const scrubTo = (clientX: number) => {
-    const rect = scrubRef.current?.getBoundingClientRect();
-    if (!rect || plan.durationSec === 0) return;
-    const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    engine.seek(f * plan.durationSec);
-  };
-  const onScrubDown = (e: PointerEvent) => {
-    scrubTo(e.clientX);
-    const move = (ev: globalThis.PointerEvent) => scrubTo(ev.clientX);
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
 
   const previewing = snap.mode === "preview";
   const playingSectionId = plan.segments[snap.segmentIndex]?.sectionId;
@@ -88,79 +72,9 @@ export function Transport({
     [...sections].sort((a, b) => b.endSec - b.startSec - (a.endSec - a.startSec))[0] ??
     null;
 
-  const pct = (sec: number) =>
-    plan.durationSec > 0 ? `${(sec / plan.durationSec) * 100}%` : "0%";
-
   return (
     <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-3">
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => engine.toggle()}
-          aria-label={snap.playing ? "Pause" : "Play"}
-          className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-105",
-            previewing ? "bg-amber-400 text-black" : "bg-foreground text-background",
-          )}
-        >
-          {snap.playing ? (
-            <PauseIcon className="size-4" fill="currentColor" />
-          ) : (
-            <PlayIcon className="size-4 translate-x-px" fill="currentColor" />
-          )}
-        </button>
-        <span className="w-24 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-          {previewing ? (
-            <span className="text-amber-700 dark:text-amber-400">
-              source {fmt(snap.sourceSec ?? 0)}
-            </span>
-          ) : (
-            <>
-              {fmt(snap.outSec)} / {fmt(plan.durationSec)}
-            </>
-          )}
-        </span>
-
-        <div
-          ref={scrubRef}
-          onPointerDown={onScrubDown}
-          className={cn(
-            "relative h-6 flex-1 cursor-pointer touch-none transition-opacity",
-            // This bar is the CLIP's timeline. While previewing, the playhead
-            // isn't on it — so it dims, parked where you left the clip.
-            previewing && "opacity-35",
-          )}
-        >
-          <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-muted">
-            <div className="h-full bg-sky-500/80" style={{ width: pct(snap.outSec) }} />
-          </div>
-          {/* A tick wherever the export jumps in the source — i.e. every cut. */}
-          {plan.segments.slice(1).map((seg, i) => (
-            <div
-              key={i}
-              className="absolute top-1/2 h-3 w-px -translate-y-1/2 bg-foreground/35"
-              style={{ left: pct(seg.outStartSec) }}
-            />
-          ))}
-          <div
-            className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-600 shadow ring-2 ring-background"
-            style={{ left: pct(snap.outSec) }}
-          />
-        </div>
-        {previewing ? (
-          <button
-            type="button"
-            onClick={() => engine.exitPreview()}
-            className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
-          >
-            Back to clip
-          </button>
-        ) : (
-          <span className="shrink-0 text-[11px] text-muted-foreground">
-            {plan.segments.length - 1} cut{plan.segments.length - 1 === 1 ? "" : "s"}
-          </span>
-        )}
-      </div>
+      <Timeline plan={plan} engine={engine} snap={snap} videoUrl={videoUrl} words={words} readOnly={readOnly} />
 
       {focus && (
         <TrimStrip
@@ -179,7 +93,7 @@ export function Transport({
           previewing={previewing}
           partLabel={
             sections.length > 1
-              ? `Part ${[...sections].sort((a, b) => a.startSec - b.startSec).indexOf(focus) + 1}/${sections.length}`
+              ? `Source · part ${sections.indexOf(focus) + 1}/${sections.length}`
               : "Source"
           }
           readOnly={readOnly}

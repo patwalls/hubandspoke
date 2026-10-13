@@ -29,32 +29,75 @@ export function resolveVideoBox(
   const { width: W, height: H } = canvas;
   const sourceAspect = source.width / source.height;
   const wide = sourceAspect > W / H;
+  const zoom = video.scalePct / 100;
+  /** Offset of an axis that overflows the canvas, panned 0…100 across it. */
+  const pan = (size: number, room: number, panPct: number) => 0 - Math.round(((size - room) * panPct) / 100);
 
   if (video.fit === "cover") {
-    const width = wide ? even(H * sourceAspect) : W;
-    const height = wide ? H : even(W / sourceAspect);
+    // Fill never insets: below 100 it still fills, above it zooms further.
+    const s = Math.max(1, zoom);
+    const width = even((wide ? H * sourceAspect : W) * s);
+    const height = even((wide ? H : W / sourceAspect) * s);
     return {
-      x: -Math.round(((width - W) * video.panXPct) / 100),
-      y: -Math.round((height - H) / 2),
+      x: width > W ? pan(width, W, video.panXPct) : Math.round((W - width) / 2),
+      y: height > H ? pan(height, H, video.panYPct ?? 50) : Math.round((H - height) / 2),
       width,
       height,
       radius: 0,
     };
   }
 
-  const scale = video.scalePct / 100;
-  const width = even((wide ? W : H * sourceAspect) * scale);
-  const height = even((wide ? W / sourceAspect : H) * scale);
-  const y = Math.round(
-    Math.max(0, Math.min(H - height, (H * video.yPct) / 100 - height / 2)),
-  );
+  const width = even((wide ? W : H * sourceAspect) * zoom);
+  const height = even((wide ? W / sourceAspect : H) * zoom);
+  // yPct puts the video's centre (kept on canvas at or below 100%); once
+  // taller than the canvas, yPct pans across the overflow instead (50 =
+  // centred either way).
+  // Zoomed (but still shorter than the canvas) it may hang off an edge.
+  const centreY = (H * video.yPct) / 100 - height / 2;
+  const y =
+    height > H
+      ? pan(height, H, video.yPct)
+      : zoom > 1
+        ? Math.round(centreY)
+        : Math.round(Math.max(0, Math.min(H - height, centreY)));
+  const x = width > W ? pan(width, W, video.panXPct) : Math.round((W - width) / 2);
+  const inside = width <= W && height <= H;
   return {
-    x: Math.round((W - width) / 2),
+    x,
     y,
     width,
     height,
-    radius: Math.round((video.radiusPct / 100) * Math.min(width, height)),
+    radius: inside ? Math.round((video.radiusPct / 100) * Math.min(width, height)) : 0,
   };
+}
+
+/**
+ * The inverse of resolveVideoBox for position: the pan / y values that put
+ * the video's centre at canvas point (cx, cy), as near as its fit allows (a
+ * contained video narrower than the canvas always stays centred across).
+ */
+export function centreVideoAt(
+  canvas: Pick<Canvas, "width" | "height">,
+  video: VideoPlacement,
+  source: { width: number; height: number },
+  cx: number,
+  cy: number,
+): Partial<VideoPlacement> {
+  const { width: W, height: H } = canvas;
+  const { width: w, height: h } = resolveVideoBox(canvas, video, source);
+  const clamp = (n: number) => Math.max(0, Math.min(100, n));
+  const panFor = (size: number, room: number, centre: number) => clamp(((size / 2 - centre) / (size - room)) * 100);
+  const patch: Partial<VideoPlacement> = {};
+  if (w > W) patch.panXPct = panFor(w, W, cx);
+  if (video.fit === "contain") patch.yPct = h > H ? panFor(h, H, cy) : clamp((cy / H) * 100);
+  else if (h > H) patch.panYPct = panFor(h, H, cy);
+  return patch;
+}
+
+/** True when the box covers the whole canvas or spills past it — export has
+ *  to crop it rather than pad it. */
+export function boxOverflows(canvas: Pick<Canvas, "width" | "height">, box: VideoBox): boolean {
+  return box.x < 0 || box.y < 0 || box.x + box.width > canvas.width || box.y + box.height > canvas.height;
 }
 
 /**

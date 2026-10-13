@@ -57,6 +57,7 @@ import {
   useEditor,
   useEditorStoreApi,
 } from "./store";
+import { framingFor, useFraming } from "./framing";
 import { TranscriptEditor, type SpeakerLabels } from "./transcript-editor";
 import { speakerColor, speakerLabel } from "@/components/dashboard/transcript-speakers";
 import { Transport } from "./transport";
@@ -193,6 +194,7 @@ function EditorWorkspace({
   const [postDrafting, setPostDrafting] = useState(session.post?.state === "drafting");
 
   const plan = useMemo(() => compileRenderPlan(doc, session.words), [doc, session.words]);
+  const framing = useFraming(engine, plan, doc);
   const scene = useMemo(() => resolveScene(plan), [plan]);
   const view = useMemo(() => buildTranscriptView(doc, session.words), [doc, session.words]);
   const speakerLabels = useMemo<SpeakerLabels>(() => {
@@ -344,11 +346,15 @@ function EditorWorkspace({
         const [dx, dy] = [arrow[0] * step, arrow[1] * step];
         const clamp = (n: number) => Math.max(0, Math.min(100, n));
         if (stageSelection.kind === "video") {
-          const v = current.video;
+          const playing = plan.segments[engine.snapshot().segmentIndex]?.sectionId ?? null;
+          const f = framingFor(current, storeApi.getState().sceneSelection, playing);
+          const v = f.video;
+          const pans = v.fit === "cover" || v.scalePct > 100;
           apply(
-            v.fit === "contain"
-              ? commands.patchVideo({ yPct: clamp(v.yPct + dy) })
-              : commands.patchVideo({ panXPct: clamp(v.panXPct + dx) }),
+            f.patch({
+              ...(v.fit === "contain" ? { yPct: clamp(v.yPct + dy) } : v.scalePct > 100 ? { panYPct: clamp(v.panYPct - dy) } : {}),
+              ...(pans ? { panXPct: clamp(v.panXPct - dx) } : {}),
+            }),
             "nudge-video",
           );
         } else {
@@ -368,7 +374,7 @@ function EditorWorkspace({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [engine, undo, redo, apply, storeApi]);
+  }, [engine, plan, undo, redo, apply, storeApi]);
 
   // ── Bulk clean-up ────────────────────────────────────────────────────────
   const fillerCount = doc.sections.reduce(
@@ -693,7 +699,7 @@ function EditorWorkspace({
           </div>
         )}
 
-        <Inspector doc={doc} disabled={locked} brand={brand} className={tab !== "clip" ? "hidden" : undefined} />
+        <Inspector doc={doc} framing={framing} disabled={locked} brand={brand} className={tab !== "clip" ? "hidden" : undefined} />
 
         {session.post && (
           <div className={cn("mx-auto h-full min-h-0 w-full min-w-0 max-w-4xl", tab !== "post" && "hidden")}>
@@ -716,6 +722,7 @@ function EditorWorkspace({
           engine={engine}
           sections={doc.sections}
           words={session.words}
+          videoUrl={session.source.videoUrl}
           readOnly={locked}
         />
       </div>

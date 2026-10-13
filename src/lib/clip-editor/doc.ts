@@ -59,6 +59,33 @@ const removalSchema = z
   .refine((r) => r.endSec > r.startSec, "endSec must be after startSec");
 export type Removal = z.infer<typeof removalSchema>;
 
+/** How far the video can be zoomed (scalePct). */
+export const MAX_VIDEO_SCALE_PCT = 400;
+
+const videoPlacementSchema = z.object({
+  /** contain = whole frame visible, letterboxed (never crops a two-shot).
+   *  cover = fill the canvas, cropping the overflow. */
+  fit: z.enum(["contain", "cover"]),
+  /** Vertical center of the video, % of canvas height (contain only). */
+  yPct: pct,
+  /** Horizontal pan across the cropped overflow, 0 = left … 100 = right
+   *  (cover only). */
+  panXPct: pct,
+  /** Size relative to "fit", 100 = touches the canvas edges. Below 100
+   *  insets the video so the background shows around it (contain only);
+   *  above 100 ZOOMS — the video overflows the canvas and is cropped, panned
+   *  with panXPct / yPct (contain) or panXPct / panYPct (cover). Defaulted so
+   *  docs saved before this field existed still parse. */
+  scalePct: z.number().finite().min(30).max(MAX_VIDEO_SCALE_PCT).default(100),
+  /** Vertical pan across the cropped overflow, 0 = top … 100 = bottom
+   *  (cover only; contain pans with yPct). */
+  panYPct: pct.default(50),
+  /** Corner radius as % of the video's shorter side; 50 = fully round ends
+   *  (contain only). */
+  radiusPct: z.number().finite().min(0).max(50).default(0),
+});
+export type VideoPlacement = z.infer<typeof videoPlacementSchema>;
+
 /**
  * A contiguous window of the source, minus the ranges removed inside it.
  * Sections play in array order, so reordering footage (e.g. pulling the
@@ -73,6 +100,9 @@ const sectionSchema = z
     endSec: sec,
     /** Sorted, non-overlapping, clamped to the window. See removals.ts. */
     removals: z.array(removalSchema),
+    /** This scene's own framing (zoom / position / fit). Absent = the doc's
+     *  `video`, like every other scene. */
+    video: videoPlacementSchema.optional(),
   })
   .refine((s) => s.endSec > s.startSec, "endSec must be after startSec");
 export type Section = z.infer<typeof sectionSchema>;
@@ -87,24 +117,6 @@ const canvasSchema = z.object({
 });
 export type Canvas = z.infer<typeof canvasSchema>;
 
-const videoPlacementSchema = z.object({
-  /** contain = whole frame visible, letterboxed (never crops a two-shot).
-   *  cover = fill the canvas, cropping the overflow. */
-  fit: z.enum(["contain", "cover"]),
-  /** Vertical center of the video, % of canvas height (contain only). */
-  yPct: pct,
-  /** Horizontal pan across the cropped overflow, 0 = left … 100 = right
-   *  (cover only). */
-  panXPct: pct,
-  /** Size relative to "fit", 100 = touches the canvas edges; lower insets the
-   *  video so the background shows around it (contain only). Defaulted so
-   *  docs saved before this field existed still parse. */
-  scalePct: z.number().finite().min(30).max(100).default(100),
-  /** Corner radius as % of the video's shorter side; 50 = fully round ends
-   *  (contain only). */
-  radiusPct: z.number().finite().min(0).max(50).default(0),
-});
-export type VideoPlacement = z.infer<typeof videoPlacementSchema>;
 
 // ─── Overlay layers ─────────────────────────────────────────────────────────
 
@@ -147,9 +159,10 @@ const textStyleSchema = z.object({
     .object({ color: hexColor, alpha: z.number().min(0).max(1), blurPct: z.number().min(0).max(40), xPct: z.number().min(-40).max(40), yPct: z.number().min(-40).max(40) })
     .nullable()
     .default(null),
-  /** A rounded box behind each line (the TikTok / Notes look). */
+  /** A rounded box behind each line (the TikTok / Notes look) — or, with
+   *  mode "block", ONE box behind the whole text (a title card). */
   box: z
-    .object({ color: hexColor, alpha: z.number().min(0).max(1), radiusPct: z.number().min(0).max(60), padPct: z.number().min(0).max(60) })
+    .object({ color: hexColor, alpha: z.number().min(0).max(1), radiusPct: z.number().min(0).max(60), padPct: z.number().min(0).max(60), mode: z.enum(["line", "block"]).optional() })
     .nullable()
     .default(null),
 });
@@ -210,6 +223,9 @@ const textLayerSchema = z.object({
    *  off — the block is as tall as its lines. */
   fitHeightPct: z.number().finite().min(2).max(100).nullable().default(null),
   style: textStyleSchema,
+  /** Shown only while this section (scene) plays — a title card. null = the
+   *  whole clip. A scene that no longer exists shows it nowhere. */
+  sectionId: z.string().nullable().default(null),
 });
 export type TextLayer = z.infer<typeof textLayerSchema>;
 
@@ -241,6 +257,8 @@ const imageLayerSchema = z.object({
   widthPct: z.number().finite().min(2).max(100),
   /** 0–1. */
   opacity: z.number().finite().min(0).max(1).default(1),
+  /** Shown only while this section (scene) plays. null = the whole clip. */
+  sectionId: z.string().nullable().default(null),
 });
 export type ImageLayer = z.infer<typeof imageLayerSchema>;
 
@@ -328,6 +346,44 @@ export function createTextLayer(args: { text: string; canvas: { width: number; h
     widthPct: 80,
     fitHeightPct: null,
     style: { ...DEFAULT_TEXT_STYLE, sizePct: args.canvas.height > args.canvas.width ? 3.2 : 4.5 },
+    sectionId: null,
+  };
+}
+
+/** Descript's Text / Subtitle / Title elements. */
+export type TextElementKind = "text" | "subtitle" | "title";
+
+/**
+ * A new text element, for the scene passed in (null = the whole clip) — the
+ * same rule as framing: pick a scene on the timeline and what you add
+ * belongs to it. A title is a title card: bold text on ONE filled box.
+ */
+export function createTextElement(args: { kind: TextElementKind; canvas: { width: number; height: number }; sectionId: string | null }): TextLayer {
+  const base = createTextLayer({ text: args.kind === "title" ? "Your title" : args.kind === "subtitle" ? "Your subtitle" : "Your text", canvas: args.canvas });
+  const vertical = args.canvas.height > args.canvas.width;
+  if (args.kind === "text") return { ...base, sectionId: args.sectionId };
+  if (args.kind === "subtitle") {
+    return {
+      ...base,
+      sectionId: args.sectionId,
+      yPct: 72,
+      widthPct: 76,
+      style: { ...base.style, fontId: "inter-semibold", sizePct: vertical ? 2.4 : 3.2, outlinePct: 0, shadow: { color: "#000000", alpha: 0.55, blurPct: 14, xPct: 0, yPct: 5 } },
+    };
+  }
+  return {
+    ...base,
+    sectionId: args.sectionId,
+    yPct: 62,
+    widthPct: 64,
+    style: {
+      ...base.style,
+      fontId: "montserrat-bold",
+      sizePct: vertical ? 2.8 : 4,
+      outlinePct: 0,
+      lineHeight: 1.12,
+      box: { color: "#2F7FB8", alpha: 1, radiusPct: 10, padPct: 34, mode: "block" },
+    },
   };
 }
 
@@ -348,6 +404,7 @@ export function createImageLayer(args: { src: ImageLayer["src"]; canvas: { width
     anchor: vertical ? "top" : "center",
     widthPct: vertical ? 32 : 16,
     opacity: 1,
+    sectionId: null,
   };
 }
 
@@ -432,6 +489,7 @@ export function createDefaultDoc(args: {
       fit: vertical ? "contain" : "cover",
       yPct: 50,
       panXPct: 50,
+      panYPct: 50,
       scalePct: 100,
       radiusPct: 0,
     },
@@ -449,6 +507,7 @@ export function createDefaultDoc(args: {
         anchor: vertical ? "bottom" : "center",
         widthPct: hookWidthPct,
         fitHeightPct: null,
+        sectionId: null,
         style: hookStyle,
       },
       {
