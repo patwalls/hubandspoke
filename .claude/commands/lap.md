@@ -48,12 +48,18 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
 2. **Sentry** (org `pat-walls`, project `hubandspoke`; token in `~/.zshenv`):
    unresolved issues, `statsPeriod=24h`. Only NEW issues (vs health log) or event-count
    spikes matter.
-3. **Heroku (2 calls)** — `heroku ps` (web+worker `up`) + `heroku releases -n 1` (a
-   `release failed` = broken deploy pipeline, CRIT). Then one `heroku logs --num 300`
+3. **Heroku (2 calls)** — `hk ps hubandspoke` (web+worker `up`) + `hk builds hubandspoke`
+   (latest build `status` ≠ `succeeded`, or a dyno that never came back after a build =
+   broken deploy pipeline, CRIT). **Every Heroku call in this lap is `hk …`**
+   (`~/.local/bin/hk`, the heroku broker, security S-042 2026-10-12): this lap holds NO
+   Heroku credential — `~/.netrc` is unreadable here by design and `heroku …` itself
+   fails; that is correct. Verbs: ps, builds, logs, restart, psql (read-only role),
+   cron. Then one `hk logs hubandspoke -n 300`
    pass reused for BOTH memory errors (`R14|R15|H12|H13`) and **request times**: parse
    router `service=NNNms`, ignoring media/upload routes (`/api/files`, `/api/uploads`,
    `/api/media-proxy`, `/api/image-proxy`, `/_next/`).
-4. **Database sweep — ONE `heroku pg:psql` call** returning one row of named columns:
+4. **Database sweep — ONE `hk psql hubandspoke -- "<sql>"` call** (a read-only Postgres
+   role in a read-only transaction, 30 s, SELECT-shaped only) returning one row of named columns:
    - queue: total jobs · **tripwire** `count(*)` vs `count(DISTINCT identifier)` on
      `_private_tasks` · max rows per identifier · oldest due unlocked age ·
      `attempts>=max_attempts` corpses · locks older than 4h;
@@ -151,7 +157,7 @@ the lap also gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, sa
 `home-machine/yt-archive/wrapper.sh`) so Pat's alerting fires.
 
 **Rung 1 — ops actions (no code):**
-- worker/web dyno crashed → `heroku ps:restart <dyno>` once; verify it comes back `up`.
+- worker/web dyno crashed → `hk restart hubandspoke <dyno>` once (3/h at the broker); verify it comes back `up`.
   *Crashed* means `ps` shows it down. A worker that is `up` with a frozen heartbeat and
   long-locked jobs is usually BUSY, not hung — check progress first (`sync_logs` rows or
   `items_fetched` climbing for that job). Restarting it kills the in-flight run, and the
@@ -163,9 +169,9 @@ the lap also gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, sa
   exact recovery used 2026-08-09). Dead publish job ("No job found") → stamp
   `descript_publish_error` so the UI shows Retry; never re-render automatically (that
   spends Descript credits).
-- Dead cron (last_execution stale) → `GET /api/cron/tick?name=<task>` with
-  `Authorization: Bearer $CRON_SECRET` (from `heroku config:get CRON_SECRET`) fires one
-  catch-up run; if it's dead again next lap, that's CRIT.
+- Dead cron (last_execution stale) → `hk cron hubandspoke <task>` fires one catch-up run
+  (the broker holds CRON_SECRET and calls `/api/cron/tick`; the secret never reaches this
+  lap; 6/h); if it's dead again next lap, that's CRIT.
 - Recovery agent unloaded → `launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.hubandspoke.ops-loop-recovery.plist`.
 - Any documented runbook in `docs/automation.md` whose trigger signature matches exactly —
   including the queue-corruption runbook (pause worker → purge amplified rows → restore
