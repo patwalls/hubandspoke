@@ -101,7 +101,7 @@ APPDIR="$(dirname "$WRAPPER")"
 TREE="$APPDIR/tree"
 if [ -f "$WRAPPER" ]; then
   ok "wrapper.sh installed"
-  if grep -q "git pull" "$WRAPPER" 2>/dev/null; then
+  if grep -qE "^[[:space:]]*(if )?git pull" "$WRAPPER" 2>/dev/null; then
     bad "installed wrapper still git-pulls main every hour (pre-sandbox) — run home-machine/yt-archive/install.sh --no-prompt"
   fi
 else
