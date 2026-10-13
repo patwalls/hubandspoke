@@ -58,8 +58,9 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
    pass reused for BOTH memory errors (`R14|R15|H12|H13`) and **request times**: parse
    router `service=NNNms`, ignoring media/upload routes (`/api/files`, `/api/uploads`,
    `/api/media-proxy`, `/api/image-proxy`, `/_next/`).
-4. **Database sweep — ONE `hk psql hubandspoke -- "<sql>"` call** (a read-only Postgres
-   role in a read-only transaction, 30 s, SELECT-shaped only) returning one row of named columns:
+4. **Database sweep — ONE `hk psql hubandspoke -f <file.sql>` call** (a read-only Postgres
+   role in a read-only transaction, 30 s, one SELECT-shaped statement; `--` and `/* */`
+   comments are fine) returning one row of named columns:
    - queue: total jobs · **tripwire** `count(*)` vs `count(DISTINCT identifier)` on
      `_private_tasks` · max rows per identifier · oldest due unlocked age ·
      `attempts>=max_attempts` corpses · locks older than 4h;
@@ -76,13 +77,15 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
    - **exhausted YouTube downloads**: items at `youtube_download_attempts >= 3` still
      missing media, published in the last 7 days;
    - db size vs the 64 GB plan and connection count vs 200.
-5. **This Mac (one bash block)** — yt-archive last exit (`launchctl list`; decoder in
+5. **This Mac (one bash block)** — yt-archive last exit (`launchctl print gui/$(id -u)/com.hubandspoke.yt-archive | grep -E "state|last exit"` — `launchctl list` prints nothing inside this lap's sandbox, `print` works; decoder in
    `docs/automation.md`; on nonzero read the log tail; exit 4 = pinned tree/sandbox missing →
    `home-machine/yt-archive/install.sh --no-prompt`. The archiver is pinned + sandboxed and
    never pulls: a merged archiver change is NOT live until that is re-run) · disk free on `/System/Volumes/Data`
-   (yt-archive needs tmp space) · swap free (persistent exhaustion = the ollama-contention
-   class; the archiver will be skipping) · the ops-loop recovery agent still loaded
-   (`launchctl list | grep ops-loop-recovery`).
+   (yt-archive needs tmp space; `df -g`) · memory pressure (`memory_pressure | tail -2` for the
+   free percentage and `vm_stat | grep -E "Swapins|Swapouts"`; `sysctl vm.swapusage` is denied
+   in the sandbox — a free percentage under 15% or swapouts climbing lap over lap is the
+   ollama-contention class; the archiver will be skipping) · the ops-loop recovery agent still
+   loaded (`launchctl print gui/$(id -u)/com.hubandspoke.ops-loop-recovery | grep state`).
 
 ### Thresholds (Pat-tunable — edit here)
 
@@ -104,7 +107,7 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
 | DB size / connections | > 32 GB / > 120 | > 55 GB / > 180 |
 | Sentry issue events/24h | new issue | > 50 on one issue |
 | heartbeat | ageSeconds > threshold | 503 / unreachable |
-| Mac disk free / swap free | < 25 GB / < 1 GB sustained | < 10 GB |
+| Mac disk free / memory free % | < 25 GB / < 15% sustained | < 10 GB |
 | recovery agent | — | not loaded in launchctl |
 
 **Why `sync_logs errors/24h` is set at 25, not 3.** The per-account content sweep makes
@@ -180,8 +183,8 @@ the lap also gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, sa
 **Rung 2 — code fixes (the "within reason" push authority):**
 
 **Deploy-regression protocol (check EVERY lap, first among rung-2 work):** any
-Sentry issue whose `firstSeen` is AFTER the latest release timestamp
-(`heroku releases -n 1`) is presumed a shipped regression. For client-side
+Sentry issue whose `firstSeen` is AFTER the latest build timestamp
+(`hk builds hubandspoke`, `updated_at`) is presumed a shipped regression. For client-side
 errors on page routes this is CRITICAL — a user is seeing "Application
 error". Response, in order of preference:
 1. **`git revert` the offending commit and push** — identify it from the
