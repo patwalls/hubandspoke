@@ -260,8 +260,18 @@ fi
 # Capture the status with `|| HEROKU_RC=$?`, NOT `if ! cmd; then HEROKU_RC=$?`.
 # In the latter, `$?` inside the branch is the status of the negation (always 0),
 # so every failure logged a useless "rc=0" — which it did on 2026-08-06.
+# Least privilege (2026-10-12): the job gets the URL of the restricted
+# `yt_archive` Heroku PG credential (column-level grants in db-grants.sql),
+# never the owner DATABASE_URL. Fetched fresh each run so Heroku's credential
+# rotation is a non-event. Fails closed — there is no fallback to the owner URL.
+fetch_db_url() {
+    local out
+    out="$(timeout 120 heroku pg:credentials:url DATABASE --name yt_archive --app hubandspoke 2>/tmp/yt-archive-heroku.err)" || return $?
+    printf '%s\n' "$out" | grep -oE 'postgres(ql)?://[^[:space:]"]+' | head -1
+}
+
 HEROKU_RC=0
-PROD_DB_URL="$(timeout 120 heroku config:get DATABASE_URL --app hubandspoke 2>/tmp/yt-archive-heroku.err)" || HEROKU_RC=$?
+PROD_DB_URL="$(fetch_db_url)" || HEROKU_RC=$?
 
 # A 120s timeout here is the host-starvation signature, not a heroku problem
 # (2026-08-07, 2026-08-16, 2026-09-01 — every occurrence in this log). The
@@ -278,16 +288,16 @@ PROD_DB_URL="$(timeout 120 heroku config:get DATABASE_URL --app hubandspoke 2>/t
 # ("skipping run"), which attributes the hour correctly instead of blaming the
 # heroku CLI.
 if [[ $HEROKU_RC -eq 124 ]]; then
-    log "heroku config:get timed out after 120s — running memory guard, then retrying once"
+    log "heroku pg:credentials:url timed out after 120s — running memory guard, then retrying once"
     ensure_memory_or_exit
     HEROKU_RC=0
-    PROD_DB_URL="$(timeout 120 heroku config:get DATABASE_URL --app hubandspoke 2>/tmp/yt-archive-heroku.err)" || HEROKU_RC=$?
+    PROD_DB_URL="$(fetch_db_url)" || HEROKU_RC=$?
 fi
 
 if [[ $HEROKU_RC -ne 0 ]]; then
     HEROKU_ERR="$(tail -c 400 /tmp/yt-archive-heroku.err 2>/dev/null)"
     if [[ $HEROKU_RC -eq 124 ]]; then
-        log "heroku config:get timed out after 120s — host starved or heroku CLI wedged"
+        log "heroku pg:credentials:url timed out after 120s — host starved or heroku CLI wedged"
     elif [[ "$HEROKU_ERR" == *"open up the browser to login"* || "$HEROKU_ERR" == *"Invalid credentials"* ]]; then
         # Chronic: 35 occurrences in this log since 2026-05-18. The CLI drops to
         # an interactive browser prompt, which under launchd dies as
@@ -301,14 +311,14 @@ if [[ $HEROKU_RC -ne 0 ]]; then
         log "fix permanently: heroku login && heroku authorizations:create -d 'yt-archive home cron'"
         log "then add HEROKU_API_KEY=<token> to $ENV_FILE"
     else
-        log "heroku config:get failed (rc=$HEROKU_RC)"
+        log "heroku pg:credentials:url --name yt_archive failed (rc=$HEROKU_RC)"
     fi
     log "stderr: $HEROKU_ERR"
     exit 6
 fi
 
 if [[ -z "$PROD_DB_URL" ]]; then
-    log "heroku returned empty DATABASE_URL — refusing to run"
+    log "no URL for the yt_archive credential (deleted? see db-grants.sql) — refusing to run"
     exit 7
 fi
 

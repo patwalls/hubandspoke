@@ -47,9 +47,18 @@ is exactly that.
   running the job as a separate macOS user closes that. YouTube cookies
   are copied into `sandbox-home/` for the run, and the refreshed jar is
   copied back afterwards.
-- **What it does not stop:** the job holds the prod DB URL and S3 keys,
-  because writing archives is its job. Pinning is what keeps unreviewed
-  code from ever holding them.
+- **Least-privilege creds.** The DB URL the job gets is the restricted
+  Heroku credential `yt_archive`, not the owner's `DATABASE_URL`. It has
+  column-level SELECT on the 4 tables it reads, UPDATE on only the 8 archive
+  columns of `production_items`, no DELETE, no other tables, and no job
+  queue beyond `yt_archive_enqueue_whisper(uuid)`. Grants live in
+  `db-grants.sql`: **change a query in `archive-yt-local.ts` → update that
+  file and re-apply it** (`heroku pg:psql --app hubandspoke -f home-machine/yt-archive/db-grants.sql`).
+  Uploads send `If-None-Match: *` (create-only) so the S3 key can be a
+  create-only IAM user.
+- **What it does not stop:** within those grants, bad pinned code could
+  still corrupt archive columns or upload junk. Pinning is what keeps
+  unreviewed code from running at all.
 
 ### Shipping a change to the archiver
 
