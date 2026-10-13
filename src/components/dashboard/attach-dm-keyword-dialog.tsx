@@ -320,7 +320,7 @@ export function AttachDmKeywordDialog({
         <DialogHeader>
           <DialogTitle>
             {view === "edit"
-              ? `DM keyword: ${selectedSlug}`
+              ? `DM keyword: ${rebrandly ? (commentKeywordFor(brand, selectedSlug) ?? selectedSlug) : selectedSlug}`
               : view === "new"
               ? "Create new slug"
               : "Attach DM keyword"}
@@ -368,7 +368,7 @@ export function AttachDmKeywordDialog({
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-[11px] font-mono uppercase tracking-wider text-muted-foreground sticky top-0">
                   <tr>
-                    <th className="text-left px-3 py-2">Slug</th>
+                    <th className="text-left px-3 py-2">{rebrandly ? "Keyword" : "Slug"}</th>
                     <th className="text-left px-3 py-2 w-24">Last click</th>
                     <th className="text-left px-3 py-2 w-16">Clicks</th>
                     <th className="text-left px-3 py-2">Currently points to</th>
@@ -398,7 +398,7 @@ export function AttachDmKeywordDialog({
                                   (inUse ? " line-through text-muted-foreground" : "")
                                 }
                               >
-                                {link.slug}
+                                {rebrandly ? (commentKeywordFor(brand, link.slug) ?? link.slug) : link.slug}
                               </code>
                               {inUse && (
                                 <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-amber-800">
@@ -513,7 +513,7 @@ export function AttachDmKeywordDialog({
                   }}
                   disabled={saving}
                 >
-                  ← Pick different slug
+                  ← Pick different {rebrandly ? "keyword" : "slug"}
                 </Button>
                 {currentSlug === selectedSlug && (
                   <Button

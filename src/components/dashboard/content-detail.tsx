@@ -73,7 +73,7 @@ const ClipIdeasPanel = dynamic(() => import("./clip-ideas-panel").then((m) => m.
 const RepostTriagePanel = dynamic(() => import("./repost-triage-dialog").then((m) => m.RepostTriagePanel), { ssr: false });
 const CrossPostTriagePanel = dynamic(() => import("./cross-post-triage-dialog").then((m) => m.CrossPostTriagePanel), { ssr: false });
 import type { BrandAccount } from "@/lib/services/cross-post-candidates";
-import { REBRANDLY_DM_BASE_URL, isBrandDmSlashtag, usesCtaOffer, usesRebrandlyDm } from "@/lib/cta-offer-brands";
+import { REBRANDLY_DM_BASE_URL, commentKeywordFor, isBrandDmSlashtag, usesCtaOffer, usesRebrandlyDm } from "@/lib/cta-offer-brands";
 import { TranscriptButton } from "./transcript-dialog";
 import { EnrichmentButton, type EnrichmentMedia } from "./enrichment-dialog";
 import { coverImageUrl } from "@/lib/cover-image";
@@ -1504,6 +1504,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   // Where this brand's DM keyword links live: clickhubspot.com (Rebrandly)
   // for MATG / MFM, go.starterstory.com for everyone else.
   const dmBaseUrl = usesRebrandlyDm(itemBrand) ? REBRANDLY_DM_BASE_URL : shortLinksBaseUrl;
+  // What editors see as the keyword: the word people comment ("acquirekit"),
+  // not the Rebrandly link name ("mfm-acquirekit"). Starter Story slugs are
+  // the word itself.
+  const dmKeywordLabel = usesRebrandlyDm(itemBrand) ? commentKeywordFor(itemBrand, slugAttached) ?? slugAttached : slugAttached;
   useEffect(() => {
     if (!slugAttached) {
       setDmDestinationUrl(null);
@@ -2974,7 +2978,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 >
                   <LinkIcon className="size-3" />
                   {item.shortLinkSlug ? (
-                    <span className="font-mono">{item.shortLinkSlug}</span>
+                    <span className="font-mono">{dmKeywordLabel}</span>
                   ) : (
                     <span className="italic">No DM keyword</span>
                   )}
@@ -2986,9 +2990,18 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   {item.shortLinkSlug ? (
                     <>
                       <div className="flex items-center gap-2 flex-wrap text-xs">
-                        <code className="px-1.5 py-0.5 rounded bg-muted text-foreground">
-                          {item.shortLinkSlug}
-                        </code>
+                        {usesRebrandlyDm(itemBrand) ? (
+                          <span className="text-foreground">
+                            Keyword:{" "}
+                            <code className="px-1.5 py-0.5 rounded bg-muted font-semibold">
+                              {dmKeywordLabel?.toUpperCase()}
+                            </code>
+                          </span>
+                        ) : (
+                          <code className="px-1.5 py-0.5 rounded bg-muted text-foreground">
+                            {item.shortLinkSlug}
+                          </code>
+                        )}
                         <span className="text-muted-foreground">→</span>
                         <a
                           href={`${dmBaseUrl}/${item.shortLinkSlug}`}
