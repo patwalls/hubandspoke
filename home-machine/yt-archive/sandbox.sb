@@ -56,6 +56,32 @@
     (global-name "com.apple.secd")
     (global-name "com.apple.trustd.agent"))
 (deny appleevent-send)
+
+;; --- no signalling Pat's other processes (hardening 2026-10-12) -----------
+;; Same uid, so without this the job could kill any loop. Children inherit
+;; this sandbox, so killing its own yt-dlp/ffmpeg children still works.
+;; (`(deny signal (target others))` alone does NOT work — tested; it has to be
+;; deny-all + allow same-sandbox.)
+(deny signal)
+(allow signal (target same-sandbox))
+;; KNOWN GAP, tested 2026-10-12: the job can still read the argv + environment
+;; of Pat's other processes via sysctl KERN_PROCARGS2. The sandbox does not
+;; gate it — process-info*, sysctl-read by name, even a blanket
+;; `(deny sysctl-read)` all leave it readable. Only a different uid closes it
+;; (run the job as a dedicated macOS user).
+
+;; --- no clipboard (it can hold a just-copied password) ---------------------
+(deny mach-lookup
+    (global-name "com.apple.pasteboard.1")
+    (global-name "com.apple.pboard"))
+
+;; --- no local services ------------------------------------------------------
+;; The job talks only to remote hosts (prod Postgres, S3, YouTube). Every
+;; unauthenticated thing listening on this Mac (loops / Cockpit APIs, dev
+;; servers, ollama) is off-limits. Unix sockets too, except DNS.
+(deny network-outbound (remote ip "localhost:*"))
+(deny network-outbound (remote unix-socket))
+(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
 (deny process-exec
     (literal "/bin/launchctl")
     (literal "/usr/bin/osascript")

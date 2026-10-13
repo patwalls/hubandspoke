@@ -38,7 +38,13 @@ is exactly that.
   (the wrapper uses that itself to fetch the DB URL). It can't read anything
   under `$HOME` except the pinned tree and its own `sandbox-home/`, can only
   write to `sandbox-home/` and the temp dirs, and can't reach the keychain,
-  Apple Events, `launchctl`, `osascript`, `open` or `security`. YouTube cookies
+  Apple Events, `launchctl`, `osascript`, `open` or `security`. It also can't
+  read the clipboard, connect to anything listening on this Mac (localhost /
+  unix sockets, so no loops/Cockpit/dev-server/ollama APIs), or signal Pat's
+  other processes.
+  **Known gap:** it can still read the argv + environment of Pat's other
+  processes (sysctl `KERN_PROCARGS2` isn't gated by the macOS sandbox). Only
+  running the job as a separate macOS user closes that. YouTube cookies
   are copied into `sandbox-home/` for the run, and the refreshed jar is
   copied back afterwards.
 - **What it does not stop:** the job holds the prod DB URL and S3 keys,
