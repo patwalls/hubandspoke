@@ -302,6 +302,10 @@ async function archiveOne(
         Key: key,
         Body: createReadStream(tmpPath),
         ContentType: "video/mp4",
+        // Create-only: the archiver's IAM user is allowed to write new keys
+        // but never overwrite (its policy requires If-None-Match on object
+        // creation). Keys are random UUIDs, so this never fires legitimately.
+        IfNoneMatch: "*",
       },
     }).done();
 
@@ -358,14 +362,9 @@ async function archiveOne(
           [item.id],
         );
         if (!existing.rows[0]?.has_text) {
-          await pool.query(
-            `SELECT graphile_worker.add_job(
-               'transcribe-whisper',
-               payload => $1::json,
-               job_key => $2
-             )`,
-            [JSON.stringify({ productionItemId: item.id }), `transcribe-whisper:${item.id}`],
-          );
+          // Narrow SECURITY DEFINER wrapper (drizzle/0114) — the restricted
+          // `yt_archive` DB credential can't call graphile_worker.add_job.
+          await pool.query(`SELECT yt_archive_enqueue_whisper($1::uuid)`, [item.id]);
         }
       } catch (err) {
         console.warn(`  [transcribe enqueue] ${item.id}: ${(err as Error).message}`);

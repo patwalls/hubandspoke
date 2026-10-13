@@ -257,6 +257,15 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
     keychain. **A merged change to `archive-yt-local.ts` or the wrapper is not
     live until `install.sh --no-prompt` is re-run on the home Mac.** Details:
     `home-machine/yt-archive/README.md`.
+  - **Least-privilege creds (2026-10-12):** the job connects as the Heroku PG
+    credential `yt_archive` (column-level grants in
+    `home-machine/yt-archive/db-grants.sql`; the wrapper fetches its URL with
+    `heroku pg:credentials:url --name yt_archive`). It can't touch the job queue
+    except via `yt_archive_enqueue_whisper(uuid)` (drizzle/0114, SECURITY DEFINER,
+    transcribe-whisper only). Uploads use `IfNoneMatch: "*"` so its dedicated IAM
+    user can create objects but never overwrite. **Changing a query in
+    `archive-yt-local.ts` means updating `db-grants.sql` and re-applying it**, or
+    the next run fails with permission denied.
   - **Brand scope is `--brands=auto` (2026-08-20):** the script resolves the
     brand list from the prod DB on every run — every brand with an active
     (non-deleted) YouTube account whose brand isn't disabled. Adding a brand +
