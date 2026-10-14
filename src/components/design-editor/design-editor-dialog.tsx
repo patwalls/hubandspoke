@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { EstimatedProgressBar } from "@/components/ui/estimated-progress-bar";
 import { cn } from "@/lib/utils";
 import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, resizeCanvas, shadeElement, type DesignDoc, type DesignImageElement, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
 import { applyPhotoPick, hasEmptyCutoutSlot } from "@/lib/design-editor/template-fill";
@@ -71,6 +72,9 @@ import { DesignStoreContext, commands, createDesignStore, useDesign, useDesignSt
 const AUTOSAVE_DELAY_MS = 900;
 const FRAMES_POLL_MS = 2500;
 const PHOTOS_POLL_MS = 3000;
+// The first-open AI draft ("Usually 15–25 seconds"). Raise it as the draft
+// step does more work, so the loading bar stays honest.
+const DRAFT_EXPECTED_MS = 20_000;
 
 export interface DesignEditorDialogProps {
   open: boolean;
@@ -123,6 +127,7 @@ export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand
             <SparklesIcon className="size-6 animate-pulse text-pink-500" />
             <span className="text-sm font-medium text-foreground">Drafting your post…</span>
             <span className="max-w-sm text-center text-xs">Reading the video&apos;s transcript and your best past posts of this format. Usually 15–25 seconds the first time.</span>
+            <EstimatedProgressBar expectedMs={DRAFT_EXPECTED_MS} className="mt-2 max-w-64" />
           </div>
         )}
       </DialogContent>
