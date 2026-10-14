@@ -75,6 +75,9 @@ const PHOTOS_POLL_MS = 3000;
 // The first-open AI draft ("Usually 15–25 seconds"). Raise it as the draft
 // step does more work, so the loading bar stays honest.
 const DRAFT_EXPECTED_MS = 20_000;
+const DRAFT_POLL_MS = 2000;
+const DRAFT_GIVE_UP_MS = 3 * 60_000;
+const DRAFT_MAX_BLIPS = 5;
 
 export interface DesignEditorDialogProps {
   open: boolean;
@@ -98,16 +101,28 @@ export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand
     let cancelled = false;
     setSession(null);
     void (async () => {
-      try {
-        const res = await fetch(`/api/production-items/${productionItemId}/design`);
+      // The first open's AI draft runs on the worker: 202 means "still
+      // drafting", so poll. A JSON error is the route's verdict (no template,
+      // no transcript, the draft failed). Anything else — a dropped
+      // connection, Heroku's router page during a deploy — is retried a few
+      // times; giving up always says why, never a silent fallback.
+      const started = Date.now();
+      let blips = 0;
+      while (!cancelled) {
+        const res = await fetch(`/api/production-items/${productionItemId}/design`).catch(() => null);
         if (cancelled) return;
-        if (!res.ok) {
-          const json = (await res.json().catch(() => ({}))) as { error?: string };
-          return onUnsupported(json.error);
+        if (res?.status === 200) {
+          const json = (await res.json().catch(() => null)) as DesignEditorSession | null;
+          if (cancelled) return;
+          if (json) return setSession(json);
+        } else if (res && res.status !== 202) {
+          const json = (await res.json().catch(() => null)) as { error?: string } | null;
+          if (cancelled) return;
+          if (json) return onUnsupported(json.error ?? `Couldn't open the editor (HTTP ${res.status})`);
         }
-        setSession((await res.json()) as DesignEditorSession);
-      } catch {
-        if (!cancelled) onUnsupported();
+        if (res?.status !== 202 && ++blips >= DRAFT_MAX_BLIPS) return onUnsupported("Couldn't reach the server to load the draft. Try again in a minute.");
+        if (Date.now() - started > DRAFT_GIVE_UP_MS) return onUnsupported("The draft is taking much longer than usual. Try again in a minute.");
+        await new Promise((r) => setTimeout(r, DRAFT_POLL_MS));
       }
     })();
     return () => {

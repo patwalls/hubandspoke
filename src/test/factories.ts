@@ -305,6 +305,8 @@ export interface CreateTestFormatOptions {
   descriptLayoutPackId?: string | null;
   ctaStrategy?: string | null;
   ctaFixedUrl?: string | null;
+  /** A stored design template — the design editor can draft this format. */
+  designTemplate?: (typeof formats.$inferInsert)["designTemplate"];
 }
 
 /**
@@ -329,6 +331,7 @@ export async function createTestFormat(
       descriptLayoutPackId: opts.descriptLayoutPackId ?? null,
       ctaStrategy: opts.ctaStrategy ?? null,
       ctaFixedUrl: opts.ctaFixedUrl ?? null,
+      designTemplate: opts.designTemplate ?? null,
     })
     .returning();
   trackCleanup("formats", row.id);

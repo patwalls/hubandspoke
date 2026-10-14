@@ -12,14 +12,16 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-/** Open the design editor (drafts the post with AI on first open — allow
- *  ~20s). 422 with `unsupported` → the dialog falls back to the classic UI. */
+/** Open the design editor. On first open the AI draft runs on the worker:
+ *  202 `{ drafting: true }` until it lands — the dialog polls. 422 with
+ *  `unsupported` → the dialog falls back to the classic UI. */
 export async function GET(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
   try {
-    return NextResponse.json(await loadDesignEditorSession({ productionItemId: id, userId: guard.session.user.id as string }));
+    const session = await loadDesignEditorSession({ productionItemId: id, userId: guard.session.user.id as string });
+    return NextResponse.json(session, { status: "drafting" in session ? 202 : 200 });
   } catch (err) {
     if (err instanceof DesignItemNotFoundError) return NextResponse.json({ error: err.message }, { status: 404 });
     if (err instanceof DesignUnsupportedError) {

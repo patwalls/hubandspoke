@@ -23,6 +23,7 @@ import { listBrandLogos } from "@/lib/services/brand-logos";
 import { listFrames, pickedFrame, requestAutoFrames, storyFrames, type DesignFramesState } from "./frames";
 import { cutoutFor, listPhotos, type DesignPhoto, type DesignPhotosState } from "./photos";
 import { seedCaption } from "./export";
+import { enqueue } from "@/jobs/enqueue";
 import type { ClipPost } from "@/lib/services/clip-editor/post-draft";
 import { toDesignRenderStatus, type DesignRenderStatus } from "./render-status";
 
@@ -43,6 +44,14 @@ export class DesignUnsupportedError extends Error {
           : `The AI couldn't draft this post${detail ? `: ${detail}` : ""}`,
     );
     this.name = "DesignUnsupportedError";
+  }
+
+  /** A `design-draft` job that failed: the worker stored the thrown message
+   *  (already user-facing when it was one of these) as `last_error`. */
+  static draftFailed(lastError: string | null): DesignUnsupportedError {
+    const err = new DesignUnsupportedError("ai_failed");
+    if (lastError) err.message = lastError.startsWith("The ") ? lastError : `The AI couldn't draft this post: ${lastError}`;
+    return err;
   }
 }
 
@@ -85,10 +94,25 @@ export interface DesignEditorSession {
   latestRender: DesignRenderStatus | null;
 }
 
+/** The first open's AI draft is still running on the worker — poll again. */
+export interface DesignDraftPending {
+  drafting: true;
+}
+
+export const designDraftJobKey = (productionItemId: string) => `design-draft:${productionItemId}`;
+
+/**
+ * Open the editor. The FIRST open has no document yet: the AI draft takes
+ * 15–25s+, past Heroku's 30s router limit on a slow run (the 503 dropped the
+ * dialog to the classic view with no message, 2026-10-14), so it runs on the
+ * worker (`design-draft`) and this returns `{ drafting: true }` until the
+ * document exists. A failed draft is thrown as DesignUnsupportedError once —
+ * its job is removed, so the next open tries again.
+ */
 export async function loadDesignEditorSession(args: {
   productionItemId: string;
   userId: string;
-}): Promise<DesignEditorSession> {
+}): Promise<DesignEditorSession | DesignDraftPending> {
   const item = await loadItem(args.productionItemId);
   const template = item.format ? await loadFormatTemplate(item.brand, item.format) : null;
   if (!template) throw new DesignUnsupportedError("no_template");
@@ -99,17 +123,15 @@ export async function loadDesignEditorSession(args: {
 
   let design = await selectDesign(item.id);
   if (!design) {
-    // A template with a DM-keyword CTA gets the post a keyword up front —
-    // the best free one from the ManyChat pool, pointed at the post's
-    // suggested destination — so the CTA never shows a placeholder.
-    if (hasDmKeywordSlot(template.doc)) await ensureDmKeyword(item.id).catch((err) => console.error("[design-editor] ensureDmKeyword failed:", err));
-    const draft = await draftDoc(item.id, item.sourceItemId, template.doc, null);
-    await db
-      .insert(designDocs)
-      .values({ productionItemId: item.id, doc: draft.doc, brief: draft.fill as unknown as Record<string, unknown>, createdByUserId: args.userId })
-      .onConflictDoNothing({ target: designDocs.productionItemId });
-    design = await selectDesign(item.id);
-    if (!design) throw new Error("Failed to create design");
+    const key = designDraftJobKey(item.id);
+    const job = await draftJobState(key);
+    if (job && job.attempts >= job.max_attempts) {
+      await db.execute(sql`SELECT graphile_worker.remove_job(${key})`);
+      throw DesignUnsupportedError.draftFailed(job.last_error);
+    }
+    // unsafe_dedupe: every poll lands here while the draft runs; never start a second one.
+    if (!job) await enqueue("design-draft", { productionItemId: item.id, userId: args.userId }, { jobKey: key, jobKeyMode: "unsafe_dedupe", maxAttempts: 1 });
+    return { drafting: true };
   } else {
     // The pick landed after the draft was made (or the last editor closed
     // before it did): put it in the photo slots now, before anyone holds
@@ -138,6 +160,31 @@ export async function loadDesignEditorSession(args: {
     await seedCaption(item.id, brief.caption, args.userId).catch((err) => console.error("[design-editor] seedCaption at open failed:", err));
   }
   return finishSession(item, design);
+}
+
+async function draftJobState(key: string) {
+  const rows = await db.execute<{ attempts: number; max_attempts: number; last_error: string | null }>(
+    sql`SELECT attempts, max_attempts, last_error FROM graphile_worker.jobs WHERE key = ${key}`,
+  );
+  return (rows as unknown as Array<{ attempts: number; max_attempts: number; last_error: string | null }>)[0] ?? null;
+}
+
+/** Worker side of the first open (`design-draft` task). A no-op once the
+ *  item has a document, so a duplicate run costs nothing. */
+export async function draftFirstDesign(args: { productionItemId: string; userId: string }): Promise<void> {
+  const item = await loadItem(args.productionItemId);
+  if (await selectDesign(item.id)) return;
+  const template = item.format ? await loadFormatTemplate(item.brand, item.format) : null;
+  if (!template) throw new DesignUnsupportedError("no_template");
+  // A template with a DM-keyword CTA gets the post a keyword up front —
+  // the best free one from the ManyChat pool, pointed at the post's
+  // suggested destination — so the CTA never shows a placeholder.
+  if (hasDmKeywordSlot(template.doc)) await ensureDmKeyword(item.id).catch((err) => console.error("[design-editor] ensureDmKeyword failed:", err));
+  const draft = await draftDoc(item.id, item.sourceItemId, template.doc, null);
+  await db
+    .insert(designDocs)
+    .values({ productionItemId: item.id, doc: draft.doc, brief: draft.fill as unknown as Record<string, unknown>, createdByUserId: args.userId })
+    .onConflictDoNothing({ target: designDocs.productionItemId });
 }
 
 export async function regenerateDesign(args: {
