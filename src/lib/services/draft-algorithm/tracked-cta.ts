@@ -45,7 +45,7 @@ const BASE_URL = process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.co
 
 export interface TrackedCtaResult {
   cta: string;
-  /** Null for CTA_OFFER_BRANDS posts — they get the full offer URL, no
+  /** Null for usesCtaOffer posts — they get the full offer URL, no
    *  go.starterstory.com link. */
   slug: string | null;
   destinationUrl: string;
@@ -75,7 +75,7 @@ interface CtaPlan {
 export async function generateTrackedCta(
   args: GenerateTrackedCtaArgs,
 ): Promise<TrackedCtaResult> {
-  // CTA_OFFER_BRANDS (MATG) use the per-format offer rule instead: no Opus
+  // usesCtaOffer brands (all but Starter Story) use the per-format offer rule instead: no Opus
   // pick, no Starter Story catalog, no go.starterstory.com link.
   const [itemBrand] = await db
     .select({ brand: productionItems.brand })

@@ -58,7 +58,7 @@ import { applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { FormatTemplatesSection } from "@/components/design-editor/format-templates-section";
 import { FormatStatusBadge } from "./format-status-badge";
-import { usesCtaOffer } from "@/lib/cta-offer-brands";
+import { defaultCtaStrategy, usesCtaOffer } from "@/lib/cta-offer-brands";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
 import {
   PropertyRow,
@@ -1576,9 +1576,10 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               <select
                 id="cta-strategy"
                 aria-label="CTA offer"
-                value={ctaStrategy}
+                value={ctaStrategy || defaultCtaStrategy(data?.format?.brand)}
                 onChange={(e) => {
-                  const next = e.target.value || null;
+                  // The brand's default choice is stored as null.
+                  const next = e.target.value === defaultCtaStrategy(data?.format?.brand) ? null : e.target.value;
                   setCtaStrategy(next ?? "");
                   void persistField({ ctaStrategy: next });
                 }}
@@ -1586,7 +1587,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               >
                 <option value="pillar_offer">Source Video Offer</option>
                 <option value="pillar_video">Full Source Video</option>
-                <option value="">Brand Default Offer</option>
+                <option value="brand_default">Brand Default Offer</option>
                 {/* "Fixed link" retired as a choice (same job as the brand
                     fallback). Still shown for formats already set to it so
                     the select doesn't misreport what the backend uses. */}
@@ -1712,7 +1713,8 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                       id="clip-target-post-type"
                       value={clipTargetPostType}
                       onChange={(e) => {
-                        const next = e.target.value || null;
+                        // The brand's default choice is stored as null.
+                  const next = e.target.value === defaultCtaStrategy(data?.format?.brand) ? null : e.target.value;
                         setClipTargetPostType(next ?? "");
                         void persistField({ clipTargetPostType: next });
                       }}
@@ -1769,7 +1771,8 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                       id="clip-aspect-ratio"
                       value={clipAspectRatio}
                       onChange={(e) => {
-                        const next = e.target.value || null;
+                        // The brand's default choice is stored as null.
+                  const next = e.target.value === defaultCtaStrategy(data?.format?.brand) ? null : e.target.value;
                         setClipAspectRatio(next ?? "");
                         void persistField({ clipAspectRatio: next });
                       }}

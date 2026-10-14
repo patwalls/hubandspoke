@@ -2,13 +2,15 @@
 // (src/lib/services/cta-offer.ts). Kept DB-free so the format page and brand
 // settings UI can gate on them.
 
-export const CTA_OFFER_BRANDS: ReadonlySet<string> = new Set(["matg", "my-first-million"]);
+// Every brand except Starter Story, which keeps its own tracked-CTA logic
+// (lead-magnet catalog + go.starterstory.com/cta-… links).
+export const CTA_OFFER_EXCLUDED_BRANDS: ReadonlySet<string> = new Set(["starter-story"]);
 
 /** True when `brand` uses the per-format offer path instead of Starter
  *  Story's tracked-CTA logic. Every branch added for this feature is gated
- *  on this — Starter Story and all other brands never reach it. */
+ *  on this — Starter Story never reaches it. */
 export function usesCtaOffer(brand: string | null | undefined): boolean {
-  return !!brand && CTA_OFFER_BRANDS.has(brand);
+  return !!brand && !CTA_OFFER_EXCLUDED_BRANDS.has(brand);
 }
 
 // ── Brand short names ─────────────────────────────────────────────────────
@@ -75,14 +77,22 @@ export function commentKeywordFor(brand: string | null | undefined, slug: string
   return slug.slice(brandShortName(brand!).length + 1);
 }
 
-export const CTA_STRATEGIES = ["pillar_offer", "pillar_video", "fixed"] as const;
+export const CTA_STRATEGIES = ["pillar_offer", "pillar_video", "brand_default", "fixed"] as const;
+// A format with no strategy set: MATG + MFM (set up first, formats already
+// configured) keep the brand fallback; every other brand uses the source
+// video's offer so existing formats work without anyone touching them.
+const BRAND_DEFAULT_STRATEGY_BRANDS: ReadonlySet<string> = new Set(["matg", "my-first-million"]);
+
+export function defaultCtaStrategy(brand: string | null | undefined): "pillar_offer" | "brand_default" {
+  return brand && BRAND_DEFAULT_STRATEGY_BRANDS.has(brand) ? "brand_default" : "pillar_offer";
+}
 export type CtaStrategy = (typeof CTA_STRATEGIES)[number];
 
 export function isCtaStrategy(v: unknown): v is CtaStrategy {
   return typeof v === "string" && (CTA_STRATEGIES as readonly string[]).includes(v);
 }
 
-// ── CTA UTMs (every CTA_OFFER_BRANDS brand) ───────────────────────────────
+// ── CTA UTMs (every usesCtaOffer brand) ───────────────────────────────
 // One fixed rule for every non–Starter Story brand — nothing to configure
 // per brand. {{brand}} → the brand's short name, {{platform}} → the platform
 // (x, linkedin, threads, youtube, instagram), {{cta_utm}} → the post's CTA
@@ -133,7 +143,7 @@ export function renderUtmTemplate(
   return out;
 }
 
-/** The UTMs for one post on a CTA_OFFER_BRANDS brand. */
+/** The UTMs for one post on a usesCtaOffer brand. */
 export function offerUtms(args: { brand: string; channel: string; ctaUtm: string | null }): Partial<Record<UtmKey, string>> {
   return renderUtmTemplate(OFFER_UTM_RULE, { brand: brandShortName(args.brand), channel: args.channel, ctaUtm: args.ctaUtm });
 }

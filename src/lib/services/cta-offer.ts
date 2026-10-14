@@ -3,7 +3,7 @@
 //
 // Starter Story keeps its own path (tracked-cta.ts: Opus picks an episode or
 // lead magnet, then mints a go.starterstory.com link). Brands listed in
-// CTA_OFFER_BRANDS (MATG only today) instead get a rule set on the post's
+// usesCtaOffer (every brand but Starter Story) instead get a rule set on the post's
 // FORMAT (`formats.cta_strategy`):
 //
 //   pillar_offer — the offer link in the pillar video's YouTube description
@@ -14,7 +14,9 @@
 //                  cache the clean URL on the pillar.
 //   pillar_video — the pillar video itself ("watch the full video").
 //   fixed        — `formats.cta_fixed_url`.
-//   (none)       — the brand's `brands.cta_fallback_url`.
+//   brand_default — the brand's `brands.cta_fallback_url`.
+//   (none)       — defaultCtaStrategy(brand): brand_default for MATG/MFM,
+//                  pillar_offer for every other brand.
 //
 // Any strategy that can't produce a link falls through to the brand fallback;
 // with no fallback the result is null and the caller leaves the CTA blank.
@@ -25,9 +27,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, productionItems } from "@/lib/db/schema";
-import { isCtaStrategy, offerUtms, usesCtaOffer, type CtaStrategy } from "@/lib/cta-offer-brands";
+import { defaultCtaStrategy, isCtaStrategy, offerUtms, usesCtaOffer, type CtaStrategy } from "@/lib/cta-offer-brands";
 
-export { CTA_OFFER_BRANDS, CTA_STRATEGIES, isCtaStrategy, usesCtaOffer, type CtaStrategy } from "@/lib/cta-offer-brands";
+export { CTA_STRATEGIES, isCtaStrategy, usesCtaOffer, type CtaStrategy } from "@/lib/cta-offer-brands";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
@@ -300,7 +302,7 @@ export async function resolveCtaOffer(
         .where(and(eq(formats.brand, item.brand), eq(formats.name, item.format)))
         .limit(1)
     : [];
-  const strategy = isCtaStrategy(fmt?.ctaStrategy) ? fmt.ctaStrategy : null;
+  const strategy: CtaStrategy = isCtaStrategy(fmt?.ctaStrategy) ? fmt.ctaStrategy : defaultCtaStrategy(item.brand);
 
   const [brandRow] = await db
     .select({ ctaFallbackUrl: brands.ctaFallbackUrl })

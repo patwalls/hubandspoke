@@ -1369,14 +1369,17 @@ export const formats = pgTable(
     // 9:16; X / YouTube long → 16:9). Author can override per-format.
     clipAspectRatio: text("clip_aspect_ratio"),
     // Where this format's posts get their CTA offer link, for brands on the
-    // per-format offer path (`CTA_OFFER_BRANDS` in
-    // src/lib/services/cta-offer.ts — MATG only today; Starter Story and
-    // every other brand ignore these). One of:
+    // per-format offer path (`usesCtaOffer` in
+    // src/lib/cta-offer-brands.ts — every brand but Starter Story, which
+    // ignores these). One of:
     //   "pillar_offer" — the offer link in the pillar video's YouTube
     //                    description, resolved past clickhubspot redirects
     //   "pillar_video" — the pillar video itself ("watch the full video")
+    //   "brand_default" — the brand's `cta_fallback_url`
     //   "fixed"        — `cta_fixed_url`
-    // NULL → the brand's `cta_fallback_url`. The post's UTMs are applied on top.
+    // NULL → `defaultCtaStrategy(brand)`: "brand_default" for MATG/MFM,
+    // "pillar_offer" for every other brand. Any miss falls back to `cta_fallback_url`. The
+    // post's UTMs are applied on top.
     ctaStrategy: text("cta_strategy"),
     ctaFixedUrl: text("cta_fixed_url"),
     // Which Descript layout pack Underlord applies to clips in this format.
@@ -2137,7 +2140,7 @@ export const brands = pgTable(
     watermarkS3Key: text("watermark_s3_key"),
     brandGuidelines: text("brand_guidelines"),
     // Default CTA offer for brands on the per-format offer path
-    // (`CTA_OFFER_BRANDS`, MATG only today) — used when a post's format has
+    // (`usesCtaOffer`, every brand but Starter Story) — used when a post's format has
     // no `cta_strategy` or its strategy can't produce a link. Unused by
     // Starter Story and every other brand.
     ctaFallbackUrl: text("cta_fallback_url"),

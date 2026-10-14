@@ -11,11 +11,11 @@ import {
 } from "./cta-offer";
 
 describe("usesCtaOffer", () => {
-  it("is on for MATG and My First Million only", () => {
+  it("is on for every brand except Starter Story", () => {
     expect(usesCtaOffer("matg")).toBe(true);
     expect(usesCtaOffer("my-first-million")).toBe(true);
     expect(usesCtaOffer("starter-story")).toBe(false);
-    expect(usesCtaOffer("futurepedia")).toBe(false);
+    expect(usesCtaOffer("futurepedia")).toBe(true);
     expect(usesCtaOffer(null)).toBe(false);
   });
 });

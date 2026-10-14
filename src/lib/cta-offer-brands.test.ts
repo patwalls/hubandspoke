@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { brandShortName, commentKeywordFor, isBrandDmSlashtag, perPostDmSlashtag, usesRebrandlyDm } from "./cta-offer-brands";
+import { brandShortName, defaultCtaStrategy, commentKeywordFor, isBrandDmSlashtag, perPostDmSlashtag, usesRebrandlyDm } from "./cta-offer-brands";
 
 describe("Rebrandly DM keyword brands", () => {
   it("MATG and MFM use Rebrandly; Starter Story doesn't", () => {
@@ -32,5 +32,12 @@ describe("Rebrandly DM keyword brands", () => {
     expect(commentKeywordFor("matg", "playbook")).toBeNull();
     expect(commentKeywordFor("starter-story", "playbook")).toBe("playbook");
     expect(commentKeywordFor("matg", null)).toBeNull();
+  });
+
+  it("default CTA strategy: brand fallback for MATG/MFM, source video offer for everyone else", () => {
+    expect(defaultCtaStrategy("matg")).toBe("brand_default");
+    expect(defaultCtaStrategy("my-first-million")).toBe("brand_default");
+    expect(defaultCtaStrategy("futurepedia")).toBe("pillar_offer");
+    expect(defaultCtaStrategy("the-hustle")).toBe("pillar_offer");
   });
 });

@@ -205,6 +205,26 @@ describe("resolveCtaOffer (MATG)", () => {
     expect(await resolveCtaOffer({ productionItemId: a.id, channel: "x" })).toBeNull();
   });
 
+  it("MATG: brand_default skips the source video offer", async () => {
+    await db.update(brands).set({ ctaFallbackUrl: "https://offers.hubspot.com/main" }).where(eq(brands.slug, "matg"));
+    const brandFmt = await createTestFormat({ brand: "matg", ctaStrategy: "brand_default" });
+    const pillar = await matgPillar();
+    const b = await createTestProductionItem({ brand: "matg", accountId: null, format: brandFmt.name, pillarContentItemId: pillar.id });
+    const { client, create } = fakeClient({ found: true, label: "unused", url: "https://clickhubspot.com/cfmu" });
+    expect(await resolveCtaOffer({ productionItemId: b.id, channel: "x" }, { client })).toMatchObject({ source: "fallback" });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("MATG: no strategy still means the brand fallback, even with a pillar offer", async () => {
+    await db.update(brands).set({ ctaFallbackUrl: "https://offers.hubspot.com/main" }).where(eq(brands.slug, "matg"));
+    const plain = await createTestFormat({ brand: "matg" });
+    const pillar = await matgPillar();
+    const a = await createTestProductionItem({ brand: "matg", accountId: null, format: plain.name, pillarContentItemId: pillar.id });
+    const { client, create } = fakeClient({ found: true, label: "unused", url: "https://clickhubspot.com/cfmu" });
+    expect(await resolveCtaOffer({ productionItemId: a.id, channel: "x" }, { client })).toMatchObject({ source: "fallback" });
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("generateTrackedCta for MATG writes the offer CTA without the Starter Story path or a go link", async () => {
     const fmt = await createTestFormat({ brand: "matg", ctaStrategy: "pillar_video" });
     const pillar = await matgPillar();
@@ -232,13 +252,13 @@ describe("resolveCtaOffer (MATG)", () => {
   });
 });
 
-describe("Starter Story and other brands are unchanged", () => {
+describe("Starter Story is unchanged", () => {
   beforeEach(() => {
     listLeadMagnets.mockReset();
     listLeadMagnets.mockRejectedValue(new Error("starter-story path reached"));
   });
 
-  for (const brand of ["starter-story", "futurepedia"]) {
+  for (const brand of ["starter-story"]) {
     it(`${brand}: still goes through the Starter Story CTA logic, even with a cta_strategy set`, async () => {
       const fmt = await createTestFormat({ brand, ctaStrategy: "pillar_video" });
       const post = await createTestProductionItem({ brand, accountId: null, format: fmt.name, postType: "x" });
@@ -255,6 +275,38 @@ describe("Starter Story and other brands are unchanged", () => {
       expect(await resolveCtaOffer({ productionItemId: post.id, channel: "x" })).toBeNull();
     });
   }
+
+  it("other brands (futurepedia) use the per-format offer, not the Starter Story path", async () => {
+    const fmt = await createTestFormat({ brand: "futurepedia", ctaStrategy: "pillar_video" });
+    const pillar = await createTestProductionItem({
+      brand: "futurepedia",
+      accountId: null,
+      postType: "youtube_long",
+      youtubeUrl: "https://www.youtube.com/watch?v=fp1",
+    });
+    const post = await createTestProductionItem({ brand: "futurepedia", accountId: null, format: fmt.name, postType: "x", pillarContentItemId: pillar.id });
+    expect(await resolveCtaOffer({ productionItemId: post.id, channel: "x" })).toMatchObject({
+      url: "https://www.youtube.com/watch?v=fp1&utm_source=futurepedia&utm_medium=email-media-newsletter&utm_campaign=owned&utm_content=Social&utm_term=x",
+      source: "pillar_video",
+    });
+    expect(listLeadMagnets).not.toHaveBeenCalled();
+  });
+
+  it("other brands: a format with no strategy uses the source video offer", async () => {
+    const fmt = await createTestFormat({ brand: "futurepedia" });
+    const pillar = await createTestProductionItem({
+      brand: "futurepedia",
+      accountId: null,
+      postType: "youtube_long",
+      description: DESCRIPTION,
+      youtubeUrl: "https://www.youtube.com/watch?v=fp2",
+    });
+    const post = await createTestProductionItem({ brand: "futurepedia", accountId: null, format: fmt.name, postType: "x", pillarContentItemId: pillar.id });
+    const { client } = fakeClient({ found: true, label: "Free Muse AI guide", url: "https://clickhubspot.com/cfmu" });
+    expect(
+      await resolveCtaOffer({ productionItemId: post.id, channel: "x" }, { client, fetchImpl: fakeFetch() as unknown as typeof fetch }),
+    ).toMatchObject({ source: "pillar_offer" });
+  });
 
   it("suggestCtaDestination keeps the Starter Story path for starter-story items", async () => {
     const post = await createTestProductionItem({ brand: "starter-story", accountId: null, postType: "instagram_reel" });
