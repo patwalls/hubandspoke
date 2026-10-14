@@ -47,10 +47,17 @@ export class DesignUnsupportedError extends Error {
   }
 
   /** A `design-draft` job that failed: the worker stored the thrown message
-   *  (already user-facing when it was one of these) as `last_error`. */
-  static draftFailed(lastError: string | null): DesignUnsupportedError {
+   *  (already user-facing when it was one of these) as `last_error`. Never
+   *  a bare "couldn't draft" — always says why, even when nothing was kept. */
+  static draftFailed(lastError: string | null, attempts: number): DesignUnsupportedError {
     const err = new DesignUnsupportedError("ai_failed");
-    if (lastError) err.message = lastError.startsWith("The ") ? lastError : `The AI couldn't draft this post: ${lastError}`;
+    const tries = attempts > 1 ? ` (tried ${attempts} times)` : "";
+    const reason = lastError?.trim().split("\n")[0];
+    err.message = !reason
+      ? `The AI couldn't draft this post${tries}: the worker stopped without recording an error — likely a restart mid-draft. Open it again to retry.`
+      : reason.startsWith("The ")
+        ? `${reason}${tries}`
+        : `The AI couldn't draft this post${tries}: ${reason}`;
     return err;
   }
 }
@@ -100,6 +107,7 @@ export interface DesignDraftPending {
 }
 
 export const designDraftJobKey = (productionItemId: string) => `design-draft:${productionItemId}`;
+export const DESIGN_DRAFT_MAX_ATTEMPTS = 3;
 
 /**
  * Open the editor. The FIRST open has no document yet: the AI draft takes
@@ -125,12 +133,18 @@ export async function loadDesignEditorSession(args: {
   if (!design) {
     const key = designDraftJobKey(item.id);
     const job = await draftJobState(key);
-    if (job && job.attempts >= job.max_attempts) {
+    // Graphile counts an attempt when it PICKS the job up, so a running draft
+    // already reads attempts = max_attempts. Only a job the worker has let go
+    // of (unlocked) with no tries left has failed — reading the running one
+    // as failed showed "couldn't draft" 2s in while the draft went on to
+    // succeed (2026-10-14).
+    if (job && !job.locked_at && job.attempts >= job.max_attempts) {
       await db.execute(sql`SELECT graphile_worker.remove_job(${key})`);
-      throw DesignUnsupportedError.draftFailed(job.last_error);
+      throw DesignUnsupportedError.draftFailed(job.last_error, job.attempts);
     }
     // unsafe_dedupe: every poll lands here while the draft runs; never start a second one.
-    if (!job) await enqueue("design-draft", { productionItemId: item.id, userId: args.userId }, { jobKey: key, jobKeyMode: "unsafe_dedupe", maxAttempts: 1 });
+    // 3 tries: a flaky AI call retries on its own (backoff ~3s, ~7s) before anyone sees an error.
+    if (!job) await enqueue("design-draft", { productionItemId: item.id, userId: args.userId }, { jobKey: key, jobKeyMode: "unsafe_dedupe", maxAttempts: DESIGN_DRAFT_MAX_ATTEMPTS });
     return { drafting: true };
   } else {
     // The pick landed after the draft was made (or the last editor closed
@@ -163,10 +177,9 @@ export async function loadDesignEditorSession(args: {
 }
 
 async function draftJobState(key: string) {
-  const rows = await db.execute<{ attempts: number; max_attempts: number; last_error: string | null }>(
-    sql`SELECT attempts, max_attempts, last_error FROM graphile_worker.jobs WHERE key = ${key}`,
-  );
-  return (rows as unknown as Array<{ attempts: number; max_attempts: number; last_error: string | null }>)[0] ?? null;
+  type Row = { attempts: number; max_attempts: number; last_error: string | null; locked_at: Date | string | null };
+  const rows = await db.execute<Row>(sql`SELECT attempts, max_attempts, last_error, locked_at FROM graphile_worker.jobs WHERE key = ${key}`);
+  return (rows as unknown as Row[])[0] ?? null;
 }
 
 /** Worker side of the first open (`design-draft` task). A no-op once the
@@ -221,7 +234,7 @@ async function draftDoc(itemId: string, sourceItemId: string, template: DesignDo
   const result = await generateDesignFill({ productionItemId: itemId, template, instruction, dmKeyword: await currentDmKeyword(itemId) });
   if (!result.ok) {
     if (result.failure.reason === "no-transcript") throw new DesignUnsupportedError("no_transcript");
-    throw new DesignUnsupportedError("ai_failed", result.failure.message ?? result.failure.reason);
+    throw new DesignUnsupportedError("ai_failed", describeFillFailure(result.failure));
   }
   const source = await loadSource(sourceItemId);
   const words = await loadWords(sourceItemId);
@@ -237,6 +250,26 @@ async function draftDoc(itemId: string, sourceItemId: string, template: DesignDo
   const photo: DesignImageSource | null = (await coverPhotoFor(sourceItemId)) ?? (source ? null : (await sourceImageCandidates(sourceItemId))[0]?.src ?? null);
   const ctx = await designContext(itemId, sourceItemId, photo, source);
   return { fill, doc: fillTemplate(template, fill, ctx) };
+}
+
+/** Every fill failure in words Pat can act on — never just the reason code. */
+export function describeFillFailure(failure: { reason: string; message?: string }): string {
+  switch (failure.reason) {
+    case "no-item":
+      return "the post's production item is gone";
+    case "no-slots":
+      return "this format's design template has no AI text slots — add one on the format page";
+    case "llm-error":
+      return `the AI call errored (${failure.message ?? "no message"})`;
+    case "llm-no-tool-call":
+      return failure.message === "fill cut off at max_tokens"
+        ? "the AI ran out of room before it finished filling the template"
+        : failure.message === "fill incomplete"
+          ? "the AI's fill didn't cover the template's slots, twice"
+          : "the AI answered without filling the template, twice";
+    default:
+      return failure.message ? `${failure.reason}: ${failure.message}` : failure.reason;
+  }
 }
 
 /** Everything a template fill needs from the item besides the AI's values. */

@@ -74,9 +74,11 @@ const FRAMES_POLL_MS = 2500;
 const PHOTOS_POLL_MS = 3000;
 // The first-open AI draft ("Usually 15–25 seconds"). Raise it as the draft
 // step does more work, so the loading bar stays honest.
-const DRAFT_EXPECTED_MS = 20_000;
+// The worker draft measured 39.7s in prod (2026-10-14).
+const DRAFT_EXPECTED_MS = 35_000;
 const DRAFT_POLL_MS = 2000;
-const DRAFT_GIVE_UP_MS = 3 * 60_000;
+// Room for the job's 3 tries (~40s each + backoff) before giving up.
+const DRAFT_GIVE_UP_MS = 5 * 60_000;
 const DRAFT_MAX_BLIPS = 5;
 
 export interface DesignEditorDialogProps {
@@ -121,7 +123,7 @@ export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand
           if (json) return onUnsupported(json.error ?? `Couldn't open the editor (HTTP ${res.status})`);
         }
         if (res?.status !== 202 && ++blips >= DRAFT_MAX_BLIPS) return onUnsupported("Couldn't reach the server to load the draft. Try again in a minute.");
-        if (Date.now() - started > DRAFT_GIVE_UP_MS) return onUnsupported("The draft is taking much longer than usual. Try again in a minute.");
+        if (Date.now() - started > DRAFT_GIVE_UP_MS) return onUnsupported("The AI draft is still running after 5 minutes — the worker may be stuck or restarting. Try again in a minute.");
         await new Promise((r) => setTimeout(r, DRAFT_POLL_MS));
       }
     })();
@@ -141,7 +143,7 @@ export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand
             <DialogTitle className="sr-only">Design</DialogTitle>
             <SparklesIcon className="size-6 animate-pulse text-pink-500" />
             <span className="text-sm font-medium text-foreground">Drafting your post…</span>
-            <span className="max-w-sm text-center text-xs">Reading the video&apos;s transcript and your best past posts of this format. Usually 15–25 seconds the first time.</span>
+            <span className="max-w-sm text-center text-xs">Reading the video&apos;s transcript and your best past posts of this format. Usually 20–40 seconds the first time.</span>
             <EstimatedProgressBar expectedMs={DRAFT_EXPECTED_MS} className="mt-2 max-w-64" />
           </div>
         )}

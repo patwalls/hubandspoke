@@ -250,6 +250,8 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
   // Opus 5.5 rejects forced tool_choice ("tool"/"any" → 400), so the call
   // runs on "auto" with the prompt naming fill_design — and "auto" doesn't
   // guarantee the call, so retry once with a nudge when it's missing.
+  // An incomplete fill (slots missing) gets the same second chance.
+  let incomplete = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     let response: Anthropic.Message;
     try {
@@ -271,7 +273,15 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
             content:
               attempt === 0
                 ? prompt
-                : [...prompt, { type: "text", text: "Your previous reply did not call fill_design. Call fill_design now, exactly once." }],
+                : [
+                    ...prompt,
+                    {
+                      type: "text",
+                      text: incomplete
+                        ? "Your previous fill_design call left slots empty. Call fill_design again, exactly once, with a value for every slot."
+                        : "Your previous reply did not call fill_design. Call fill_design now, exactly once.",
+                    },
+                  ],
           },
         ],
       });
@@ -284,9 +294,10 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
     for (const block of response.content) {
       if (block.type !== "tool_use" || block.name !== "fill_design") continue;
       const fill = coerceFill(block.input, slots);
-      if (!fill) return { ok: false, failure: { reason: "llm-no-tool-call", message: "fill incomplete" } };
-      return { ok: true, fill, usage: { input: response.usage.input_tokens, output: response.usage.output_tokens } };
+      if (fill) return { ok: true, fill, usage: { input: response.usage.input_tokens, output: response.usage.output_tokens } };
+      incomplete = true;
+      break;
     }
   }
-  return { ok: false, failure: { reason: "llm-no-tool-call" } };
+  return { ok: false, failure: { reason: "llm-no-tool-call", ...(incomplete ? { message: "fill incomplete" } : {}) } };
 }

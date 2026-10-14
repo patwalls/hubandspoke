@@ -30,7 +30,7 @@ describe("loadDesignEditorSession — first open", () => {
     expect(enqueue).toHaveBeenCalledWith(
       "design-draft",
       { productionItemId: item.id, userId },
-      expect.objectContaining({ jobKey: designDraftJobKey(item.id), jobKeyMode: "unsafe_dedupe", maxAttempts: 1 }),
+      expect.objectContaining({ jobKey: designDraftJobKey(item.id), jobKeyMode: "unsafe_dedupe", maxAttempts: 3 }),
     );
   });
 
@@ -50,6 +50,27 @@ describe("loadDesignEditorSession — first open", () => {
     } finally {
       await db.execute(sql`SELECT graphile_worker.remove_job(${key})`);
     }
+  });
+
+  // Graphile bumps attempts when it picks a job up: a running single-try job
+  // reads attempts = max_attempts. That read as "failed" 2s in while the
+  // draft went on to succeed (2026-10-14).
+  it("keeps polling while the worker is still running its last try", async () => {
+    const { item, userId } = await draftableItem();
+    const key = designDraftJobKey(item.id);
+    await db.execute(sql`SELECT graphile_worker.add_job('design-draft', '{}'::json, job_key := ${key}, max_attempts := 1, run_at := now() + interval '1 day')`);
+    await db.execute(sql`UPDATE graphile_worker._private_jobs SET attempts = 1, locked_at = now(), locked_by = 'test-worker' WHERE key = ${key}`);
+    try {
+      const res = await loadDesignEditorSession({ productionItemId: item.id, userId });
+      expect(res).toEqual({ drafting: true });
+    } finally {
+      await db.execute(sql`DELETE FROM graphile_worker._private_jobs WHERE key = ${key}`);
+    }
+  });
+
+  it("says why even when the failed job recorded no error", () => {
+    expect(DesignUnsupportedError.draftFailed(null, 3).message).toMatch(/tried 3 times.*without recording an error/);
+    expect(DesignUnsupportedError.draftFailed("Error: 529 overloaded\n    at stack", 3).message).toBe("The AI couldn't draft this post (tried 3 times): Error: 529 overloaded");
   });
 
   it("opens the document once the worker has written it", async () => {
