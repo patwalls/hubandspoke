@@ -293,8 +293,8 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Trigger:** cron `5 * * * *` (hourly at :05). Was `*/30` before 2026-04-27 — halved frequency to cut SC spend; the PUT-time auto-fetch on operator-pasted publish links handles the common discovery case.
 - **Cost:** ~22 SC credits per sweep at current volume (3 IG + 3 LinkedIn + 2 Threads + 3 TikTok + 3 X + 4 YouTube × 2 endpoints). 24 sweeps/day → ~528 SC calls/day. Tunable via `CRONTAB` in `src/jobs/crontab.ts`.
 - **Files:** `src/jobs/tasks/scheduled.ts` (`accountContentSyncSweepTask`)
-- **Inputs:** every active `accounts` row on an SC-supported platform
-  (`youtube, instagram, tiktok, linkedin, x, threads, facebook`)
+- **Inputs:** every active, non-deleted (`deleted_at IS NULL`) `accounts` row
+  on an SC-supported platform (`youtube, instagram, tiktok, linkedin, x, threads, facebook`)
 - **Outputs:** enqueues one `account-content-sync` per row with `mode=latest`, `jobKey: account-content-sync-{id}-latest`
 - **Downstream:** `account-content-sync`
 - **Rules:**
@@ -452,6 +452,10 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   `is_active=false` and the task returns cleanly — no retry. Everything else
   (SC 5xx etc.) throws so graphile retries with backoff. A later successful sync
   (e.g. a manual Sync after correcting the URL) re-activates the account.
+- **Deleted accounts:** an account deleted from the brand's account list
+  (`deleted_at` set) is a clean no-op — no SC call, no account write, no retry —
+  whichever path enqueued it. Without this, the success path above re-activated
+  deleted rows and the hourly sweep kept syncing them.
 - **Cross-account uniqueness:** `uniq_production_items_platform_content_id_global`
   (added 2026-04-29) makes `platform_content_id` globally unique across
   all accounts, not just per-account. The same X tweet / IG reel / YT video
@@ -841,7 +845,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 ### `account-refresh-sweep` — weekly metadata refresh
 - **Trigger:** cron `0 17 * * 1` (Mondays 17:00 UTC)
 - **Files:** `src/jobs/tasks/scheduled.ts:125-147`
-- **Inputs:** active `accounts` on SC-supported platforms (`youtube, instagram, x, tiktok, linkedin, threads, facebook`)
+- **Inputs:** active, non-deleted `accounts` on SC-supported platforms (`youtube, instagram, x, tiktok, linkedin, threads, facebook`)
 - **Outputs:** enqueues one `account-refresh` job per account, `jobKey: account-refresh-{id}`
 - **Downstream:** `account-refresh`
 - **Rules:** explicitly skips `newsletter` and `other` (no SC coverage)

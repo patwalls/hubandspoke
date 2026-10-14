@@ -220,7 +220,7 @@ export const accountContentSyncSweepTask: Task = async (_payload, helpers) => {
       handle: accounts.handle,
     })
     .from(accounts)
-    .where(eq(accounts.isActive, true));
+    .where(and(eq(accounts.isActive, true), isNull(accounts.deletedAt)));
   let enqueued = 0;
   for (const row of rows) {
     if (!platformSupportsLatest(row.platform)) continue;
@@ -498,6 +498,7 @@ export const accountRefreshSweepTask: Task = async (_payload, helpers) => {
     .where(
       and(
         eq(accounts.isActive, true),
+        isNull(accounts.deletedAt),
         inArray(accounts.platform, ["youtube", "instagram", "x", "tiktok", "linkedin", "threads"])
       )
     );

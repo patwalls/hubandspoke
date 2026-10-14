@@ -191,6 +191,9 @@ export interface CreateTestAccountOptions {
   /** Zernio ConnectedAccount id — set for tests that need a TikTok account
    *  "connected" for draft posting. */
   zernioAccountId?: string | null;
+  isActive?: boolean;
+  /** Set to simulate an account deleted from the brand's account list. */
+  deletedAt?: Date | null;
 }
 
 /**
@@ -219,6 +222,8 @@ export async function createTestAccount(
       platform: opts.platform ?? "x",
       handle: opts.handle ?? `vitest-acct-${randomSuffix()}`,
       zernioAccountId: opts.zernioAccountId ?? null,
+      isActive: opts.isActive ?? true,
+      deletedAt: opts.deletedAt ?? null,
     })
     .returning();
   trackCleanup("accounts", row.id);

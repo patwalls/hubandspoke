@@ -1141,6 +1141,7 @@ export async function syncAccountContent(
       url: accounts.url,
       brandSlug: brands.slug,
       isActive: accounts.isActive,
+      deletedAt: accounts.deletedAt,
     })
     .from(accounts)
     .innerJoin(brands, eq(brands.id, accounts.brandId))
@@ -1163,6 +1164,11 @@ export async function syncAccountContent(
     skippedDuplicates: 0,
   };
   const startedAt = new Date();
+
+  // Deleted from the brand's account list → never sync again. Return a clean
+  // no-op (no SC call, no account write) so a job already in the queue doesn't
+  // retry, and the success path below can't flip `isActive` back to true.
+  if (row.deletedAt) return result;
 
   if (!LATEST_SUPPORTED.has(row.platform)) {
     const msg = `platform ${row.platform} has no SC content-list support`;
