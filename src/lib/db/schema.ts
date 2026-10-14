@@ -1008,6 +1008,42 @@ export const designFrames = pgTable(
 );
 
 /**
+ * A SOURCE video's extra picture library beyond the filmstrip: photos of the
+ * founder the team uploaded, background-removed cutouts (made in the browser —
+ * src/lib/design-editor/cutout-client.ts), and the dashboard / revenue screens
+ * the `design-screens` job found in the video. Keyed by the PILLAR like
+ * `design_frames`, so every post made from the video shares them.
+ */
+export const designPhotos = pgTable(
+  "design_photos",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    productionItemId: uuid("production_item_id")
+      .notNull()
+      .references(() => productionItems.id, { onDelete: "cascade" }),
+    /** upload | cutout | screen */
+    kind: text("kind").notNull(),
+    label: text("label").notNull(),
+    s3Bucket: text("s3_bucket").notNull(),
+    s3Key: text("s3_key").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    /** cutout: `imageSourceKey` of the picture it was cut from (one cutout per picture). */
+    sourceKey: text("source_key"),
+    /** screen: where in the video, seconds. */
+    sec: decimal("sec", { precision: 10, scale: 2 }),
+    /** screen: 1 = the AI's best, 2… the rest; null for other kinds. */
+    rank: integer("rank"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("design_photos_item_idx").on(table.productionItemId),
+    uniqueIndex("design_photos_item_key_uniq").on(table.productionItemId, table.s3Key),
+  ]
+);
+
+/**
  * A format template imported from an uploaded PDF (a Canva export): the
  * format page uploads the file, the `design-template-import` job has Claude
  * read it into a DesignDoc, the page polls this row and opens the result in

@@ -4,7 +4,8 @@
  * A template file (playbook-template.ts, tech-stack-template.ts) composes
  * these into its pages; nothing here knows about any one format's brief.
  */
-import { DEFAULT_CROP, DM_KEYWORD_TOKEN, IG_SQUARE, PHOTO_PLACEHOLDER, newElementId, type DesignChannelElement, type DesignElement, type DesignImageSource, type DesignPage, type DesignSlot, type DesignSpan, type DesignTextElement, type DesignTextStyle } from "./doc";
+import { DEFAULT_CROP, DM_KEYWORD_TOKEN, IG_SQUARE, PHOTO_PLACEHOLDER, newElementId, type DesignChannelElement, type DesignElement, type DesignImageElement, type DesignImageSource, type DesignPage, type DesignSlot, type DesignSpan, type DesignStatCardElement, type DesignTextElement, type DesignTextStyle } from "./doc";
+import { defaultSeries } from "./stat-card";
 
 export { DM_KEYWORD_TOKEN };
 
@@ -20,6 +21,14 @@ export interface DesignContext {
   /** Stills of the source video for `frame` slots, best first, the cover
    *  pick excluded. Empty while the filmstrip is still being made. */
   frames?: DesignImageSource[];
+  /** The founder cut out of the cover photo (a PNG with alpha), with its
+   *  pixel size so the cutout box can take its shape. null until made —
+   *  the slot keeps the placeholder and the editor fills it when the
+   *  browser cutout lands. */
+  cutout?: { src: DesignImageSource; width: number | null; height: number | null } | null;
+  /** Dashboard / revenue screenshots found in the video, best first. A
+   *  `screen` slot takes the first; none → the element is dropped. */
+  screens?: DesignImageSource[];
 }
 
 export interface ClipPick {
@@ -63,14 +72,38 @@ export interface Box {
 
 /** The founder-photo slot: shows the placeholder in the template, the
  *  picked frame once a post is drafted (template-fill.ts). */
-export function photoSlot(box: Box, src: DesignImageSource = PHOTO_PLACEHOLDER): DesignElement {
+export function photoSlot(box: Box, src: DesignImageSource = PHOTO_PLACEHOLDER): DesignImageElement {
   return { id: newElementId("img"), name: "Photo", type: "image", ...box, opacity: 1, locked: false, src, fit: "cover", radius: 0, crop: { ...DEFAULT_CROP }, slot: sys("photo"), stack: null };
 }
 
 /** A picture slot that gets its own still of the video (not the cover
  *  pick): the n-th frame slot of a document takes the n-th best frame. */
-export function frameSlot(box: Box, src: DesignImageSource = PHOTO_PLACEHOLDER): DesignElement {
+export function frameSlot(box: Box, src: DesignImageSource = PHOTO_PLACEHOLDER): DesignImageElement {
   return { ...photoSlot(box, src), name: "Frame", slot: sys("frame") };
+}
+
+/** The founder cut out of the cover photo. `fit: contain` so the whole
+ *  person shows; the box is re-shaped to the cutout's aspect when it lands
+ *  (`fitCutoutBox`). */
+export function cutoutSlot(box: Box, src: DesignImageSource = PHOTO_PLACEHOLDER): DesignImageElement {
+  return { ...photoSlot(box, src), name: "Founder cutout", fit: "contain", slot: sys("cutout") };
+}
+
+/** A dashboard / revenue screenshot found in the video; dropped when the
+ *  video has none. */
+export function screenSlot(box: Box, over: Partial<Pick<DesignImageElement, "radius" | "rotation">> = {}): DesignImageElement {
+  return { ...photoSlot(box, PHOTO_PLACEHOLDER), name: "Screen", slot: sys("screen"), radius: 24, ...over };
+}
+
+/** A stat card ("Revenue · $160,324 · Last 28 days" + chart). With an `ai`
+ *  slot the model fills label/value/sub from the transcript. */
+export function statCard(box: Box, over: Partial<Omit<DesignStatCardElement, "id" | "type">> = {}): DesignStatCardElement {
+  const value = over.value ?? "$160,324";
+  return {
+    id: newElementId("sc"), name: "Stat card", type: "statCard", ...box, opacity: 1, locked: false, slot: null, stack: null,
+    label: "Revenue", value, sub: "Last 28 days", series: defaultSeries(value), accent: "#22E07A", theme: "dark", showChart: true, shadow: true, radius: 28,
+    ...over,
+  };
 }
 
 function rect(name: string, box: Box, fill: string, radius: number): DesignElement {

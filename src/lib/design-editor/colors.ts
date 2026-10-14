@@ -19,6 +19,8 @@ export function colorsInDesignDoc(doc: DesignDoc): string[] {
       } else if (el.type === "rect") {
         add(el.fill.color);
         add(el.gradientTo?.color);
+      } else if (el.type === "statCard") {
+        add(el.accent);
       }
     }
   }

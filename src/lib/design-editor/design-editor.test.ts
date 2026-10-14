@@ -354,3 +354,78 @@ describe("channel element", () => {
     expect(layoutChannel({ ...el, showFollowers: false }, yt).followers).toBeNull();
   });
 });
+
+describe("hero cover: stat cards, cutouts, screens, tilt", async () => {
+  const { buildHeroCover, buildPlaybookHeroTemplate } = await import("./hero-cover-template");
+  const { statCardSlotKey, hasEmptyCutoutSlot } = await import("./template-fill");
+  const { layoutStatCard } = await import("./stat-card");
+  const { screenSlot } = await import("./shared");
+
+  it("the hero preset is a valid document and the stat card is three text slots to the AI", () => {
+    const doc = buildPlaybookHeroTemplate();
+    expect(parseDesignDoc(doc).ok).toBe(true);
+    const slots = listSlots(doc);
+    const card = doc.pages[0].elements.find((e) => e.type === "statCard")!;
+    expect(slots.filter((s) => s.key.startsWith(card.id)).map((s) => s.key)).toEqual(["label", "value", "sub"].map((f) => statCardSlotKey(card.id, f as "label")));
+    expect(slots.find((s) => s.key === statCardSlotKey(card.id, "value"))!.maxChars).toBe(14);
+  });
+
+  it("fills the stat card from its three values and regenerates the chart; no number → no card", () => {
+    const doc = { version: 1 as const, canvas: { ...IG_SQUARE }, template: "t", pages: [buildHeroCover()] };
+    const card = doc.pages[0].elements.find((e) => e.type === "statCard")!;
+    const headline = doc.pages[0].elements.find((e) => e.name === "Headline")!;
+    const base: DesignFillValue[] = [{ key: headline.id, text: "She hit $4.5M/year" }];
+    const filled = fillTemplate(doc, { caption: "", values: [...base, { key: statCardSlotKey(card.id, "value"), text: "$4.5M" }, { key: statCardSlotKey(card.id, "label"), text: "ARR" }] }, noPhoto);
+    const out = filled.pages[0].elements.find((e) => e.type === "statCard")!;
+    expect(out.type === "statCard" && out.value).toBe("$4.5M");
+    expect(out.type === "statCard" && out.label).toBe("ARR");
+    expect(out.type === "statCard" && out.sub).toBe("");
+    expect(out.type === "statCard" && out.series).not.toEqual(card.type === "statCard" ? card.series : []);
+    const without = fillTemplate(doc, { caption: "", values: base }, noPhoto);
+    expect(without.pages[0].elements.some((e) => e.type === "statCard")).toBe(false);
+  });
+
+  it("a cutout slot keeps the placeholder until a cutout exists, then takes its shape bottom-aligned", () => {
+    const doc = { version: 1 as const, canvas: { ...IG_SQUARE }, template: "t", pages: [buildHeroCover()] };
+    const headline = doc.pages[0].elements.find((e) => e.name === "Headline")!;
+    const fill = { caption: "", values: [{ key: headline.id, text: "x" }] };
+    const empty = fillTemplate(doc, fill, noPhoto);
+    expect(hasEmptyCutoutSlot(empty)).toBe(true);
+    const slot = empty.pages[0].elements.find((e) => e.slot?.kind === "cutout")!;
+    const landed = applyPhotoPick(empty, null, [], { src: { kind: "s3", bucket: null, key: "cut.png" }, width: 400, height: 1000 })!;
+    const el = landed.doc.pages[0].elements.find((e) => e.slot?.kind === "cutout")!;
+    expect(el.type === "image" && el.src).toEqual({ kind: "s3", bucket: null, key: "cut.png" });
+    expect(el.y + el.h).toBe(slot.y + slot.h);
+    expect(el.h).toBe(slot.h);
+    expect(el.w).toBe(Math.round((slot.h * 400) / 1000));
+    expect(hasEmptyCutoutSlot(landed.doc)).toBe(false);
+    const direct = fillTemplate(doc, fill, { ...noPhoto, cutout: { src: { kind: "s3", bucket: null, key: "cut.png" }, width: 400, height: 1000 } });
+    expect(direct.pages[0].elements.find((e) => e.slot?.kind === "cutout")!.w).toBe(el.w);
+  });
+
+  it("a screen slot takes the first screen and is dropped without one", () => {
+    const page = { id: "p", background: "#000", elements: [screenSlot({ x: 0, y: 0, w: 500, h: 300 })] };
+    const doc = { version: 1 as const, canvas: { ...IG_SQUARE }, template: "t", pages: [page] };
+    expect(fillTemplate(doc, { caption: "", values: [] }, noPhoto).pages[0].elements).toHaveLength(0);
+    const withScreen = fillTemplate(doc, { caption: "", values: [] }, { ...noPhoto, screens: [{ kind: "s3", bucket: null, key: "screen.jpg" }] });
+    expect(withScreen.pages[0].elements[0].type === "image" && withScreen.pages[0].elements[0].src).toEqual({ kind: "s3", bucket: null, key: "screen.jpg" });
+  });
+
+  it("tilted elements and stat cards render as rotated wrappers in the satori tree", () => {
+    const page = buildHeroCover();
+    const tree = pageToSatoriTree(page, IG_SQUARE, {});
+    const nodes = (tree.props.children as Array<{ props: { style: Record<string, unknown>; children?: unknown } }>);
+    const rotated = nodes.filter((n) => typeof n.props.style.transform === "string");
+    expect(rotated.length).toBe(1);
+    expect(rotated[0].props.style.transform).toBe("rotate(-6deg)");
+    const card = page.elements.find((e) => e.type === "statCard")!;
+    const l = layoutStatCard(card as never);
+    const children = rotated[0].props.children as Array<{ type: string; props: { src?: string } }>;
+    expect(children.some((c) => c.type === "img" && c.props.src?.startsWith("data:image/svg+xml;base64,"))).toBe(true);
+    expect(l.chart).not.toBeNull();
+    expect(fontsUsed(page).map((f) => f.metrics.file)).toEqual(expect.arrayContaining(["Inter-Bold.ttf", "Inter-SemiBold.ttf"]));
+    // Old documents without `rotation` still parse.
+    const parsed = parseDesignDoc({ version: 1, canvas: IG_SQUARE, template: "t", pages: [{ id: "p", background: "#000000", elements: [{ ...page.elements.find((e) => e.type === "rect")!, rotation: undefined }] }] });
+    expect(parsed.ok).toBe(true);
+  });
+});

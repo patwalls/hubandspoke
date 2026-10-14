@@ -6,9 +6,10 @@
  * URLs (the render task does that — this module stays pure).
  */
 import { FONTS } from "@/lib/clip-editor/fonts";
-import type { DesignElement, DesignPage, DesignTextElement, Rgba } from "./doc";
+import type { DesignElement, DesignPage, DesignStatCardElement, DesignTextElement, Rgba } from "./doc";
 import { coverGeometry, layoutDesignText } from "./layout";
 import { layoutChannel, type ChannelInfo } from "./channel";
+import { layoutStatCard, sparklineSvg, svgDataUrl } from "./stat-card";
 
 type Node = { type: string; props: Record<string, unknown> };
 
@@ -25,7 +26,15 @@ function rgba(c: Rgba): string {
   return `rgba(${r},${g},${b},${c.alpha})`;
 }
 
-function textNodes(el: DesignTextElement): Node[] {
+/** `transform: rotate()` for a tilted element's outer box — the stage's
+ *  div gets the same string, so both turn about the box centre. */
+function rotation(el: { rotation?: number }): Record<string, string> {
+  return el.rotation ? { transform: `rotate(${el.rotation}deg)`, transformOrigin: "center" } : {};
+}
+
+/** The lines of a text element. With `origin`, positioned relative to it
+ *  (for lines inside a wrapper div) instead of in canvas coordinates. */
+function textNodes(el: DesignTextElement, origin: { x: number; y: number } = { x: 0, y: 0 }): Node[] {
   const layout = layoutDesignText(el);
   const font = FONTS[el.style.fontId];
   const shadow = el.style.shadow
@@ -37,8 +46,8 @@ function textNodes(el: DesignTextElement): Node[] {
       key: `${el.id}-${i}`,
       style: {
         position: "absolute",
-        left: line.x,
-        top: line.y,
+        left: line.x - origin.x,
+        top: line.y - origin.y,
         height: layout.linePitchPx,
         lineHeight: `${layout.linePitchPx}px`,
         fontSize: layout.fontSizePx,
@@ -63,17 +72,20 @@ function textNodes(el: DesignTextElement): Node[] {
   }));
 }
 
+/** Channel row: one wrapper div at the element's box (so a tilt rotates the
+ *  whole row), avatar and text positioned inside it. */
 function channelNodes(el: DesignElement & { type: "channel" }, images: ResolvedImages, channels: ResolvedChannels): Node[] {
   const info = channels[el.id] ?? null;
   const l = layoutChannel(el, info);
   const avatar = images[el.id];
+  const origin = { x: el.x, y: el.y };
   const nodes: Node[] = [];
   if (avatar) {
     const g = coverGeometry({ width: avatar.width, height: avatar.height }, { w: l.avatar.d, h: l.avatar.d }, { x: 0.5, y: 0.5, zoom: 1 });
     nodes.push({
       type: "div",
       props: {
-        style: { position: "absolute", left: l.avatar.x, top: l.avatar.y, width: l.avatar.d, height: l.avatar.d, borderRadius: l.avatar.d / 2, overflow: "hidden", display: "flex", opacity: el.opacity },
+        style: { position: "absolute", left: l.avatar.x - origin.x, top: l.avatar.y - origin.y, width: l.avatar.d, height: l.avatar.d, borderRadius: l.avatar.d / 2, overflow: "hidden", display: "flex" },
         children: { type: "img", props: { src: avatar.src, width: g.width, height: g.height, style: { position: "absolute", left: g.left, top: g.top, width: g.width, height: g.height } } },
       },
     });
@@ -81,19 +93,48 @@ function channelNodes(el: DesignElement & { type: "channel" }, images: ResolvedI
     nodes.push({
       type: "div",
       props: {
-        style: { position: "absolute", left: l.avatar.x, top: l.avatar.y, width: l.avatar.d, height: l.avatar.d, borderRadius: l.avatar.d / 2, backgroundColor: el.theme === "light" ? "#111111" : "#FFFFFF", color: el.theme === "light" ? "#FFFFFF" : "#111111", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONTS.anton.cssFamily, fontSize: Math.round(l.avatar.d * 0.58), opacity: el.opacity },
+        style: { position: "absolute", left: l.avatar.x - origin.x, top: l.avatar.y - origin.y, width: l.avatar.d, height: l.avatar.d, borderRadius: l.avatar.d / 2, backgroundColor: el.theme === "light" ? "#111111" : "#FFFFFF", color: el.theme === "light" ? "#FFFFFF" : "#111111", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONTS.anton.cssFamily, fontSize: Math.round(l.avatar.d * 0.58) },
         children: l.initial,
       },
     });
   }
-  nodes.push(...textNodes({ ...l.name, opacity: el.opacity }));
-  if (l.followers) nodes.push(...textNodes({ ...l.followers, opacity: el.opacity }));
-  return nodes;
+  nodes.push(...textNodes(l.name, origin));
+  if (l.followers) nodes.push(...textNodes(l.followers, origin));
+  return [{ type: "div", props: { style: { position: "absolute", left: el.x, top: el.y, width: el.w, height: el.h, display: "flex", opacity: el.opacity, ...rotation(el) }, children: nodes } }];
+}
+
+/** Stat card: the card div (fill, border, radius, shadow, tilt) with its
+ *  label / value / sub laid out inside and the chart as an SVG image —
+ *  the same bytes the stage's <img> shows. */
+function statCardNodes(el: DesignStatCardElement): Node[] {
+  const l = layoutStatCard(el);
+  const children: Node[] = [...textNodes(l.label), ...textNodes(l.value), ...(l.sub ? textNodes(l.sub) : [])];
+  if (l.chart) {
+    children.push({ type: "img", props: { src: svgDataUrl(sparklineSvg(el, l.chart.w, l.chart.h)), width: l.chart.w, height: l.chart.h, style: { position: "absolute", left: l.chart.x, top: l.chart.y, width: l.chart.w, height: l.chart.h } } });
+  }
+  return [{
+    type: "div",
+    props: {
+      style: {
+        position: "absolute", left: el.x, top: el.y, width: el.w, height: el.h, display: "flex", overflow: "hidden",
+        backgroundColor: l.bg, border: `2px solid ${l.border}`, borderRadius: el.radius, opacity: el.opacity,
+        ...(el.shadow ? { boxShadow: "0 30px 60px rgba(0,0,0,0.55)" } : {}),
+        ...rotation(el),
+      },
+      children,
+    },
+  }];
 }
 
 function elementNodes(el: DesignElement, images: ResolvedImages, channels: ResolvedChannels): Node[] {
-  if (el.type === "text") return textNodes(el);
+  if (el.type === "text") {
+    if (!el.rotation) return textNodes(el);
+    // Tilted text: the lines go inside a wrapper at the box so they turn
+    // together about its centre.
+    return [{ type: "div", props: { style: { position: "absolute", left: el.x, top: el.y, width: el.w, height: el.h, display: "flex", ...rotation(el) }, children: textNodes(el, { x: el.x, y: el.y }) } }];
+  }
   if (el.type === "channel") return channelNodes(el, images, channels);
+  if (el.type === "statCard") return statCardNodes(el);
   if (el.type === "rect") {
     return [
       {
@@ -107,6 +148,7 @@ function elementNodes(el: DesignElement, images: ResolvedImages, channels: Resol
             height: el.h,
             borderRadius: el.radius,
             opacity: el.opacity,
+            ...rotation(el),
             ...(el.gradientTo
               ? { backgroundImage: `linear-gradient(${el.gradientDirection === "up" ? 0 : 180}deg, ${rgba(el.fill)} 0%, ${rgba(el.gradientTo)} 100%)` }
               : { backgroundColor: rgba(el.fill) }),
@@ -137,6 +179,7 @@ function elementNodes(el: DesignElement, images: ResolvedImages, channels: Resol
           opacity: el.opacity,
           overflow: "hidden",
           display: "flex",
+          ...rotation(el),
         },
         children: {
           type: "img",
@@ -192,7 +235,7 @@ export function videoPageLayers(page: DesignPage): { under: DesignPage; over: De
 /** The fonts a page needs, for satori's `fonts` option. */
 export function fontsUsed(page: DesignPage): Array<(typeof FONTS)[keyof typeof FONTS]> {
   const ids = new Set(
-    page.elements.flatMap((el) => (el.type === "text" || el.type === "captions" ? [el.style.fontId] : el.type === "channel" ? (["inter-semibold", "inter-regular", "anton"] as const) : [])),
+    page.elements.flatMap((el) => (el.type === "text" || el.type === "captions" ? [el.style.fontId] : el.type === "channel" ? (["inter-semibold", "inter-regular", "anton"] as const) : el.type === "statCard" ? (["inter-semibold", "inter-bold", "inter-regular"] as const) : [])),
   );
   return [...ids].map((id) => FONTS[id]);
 }

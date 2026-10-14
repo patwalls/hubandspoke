@@ -12,9 +12,21 @@
  * substitutes them, fills the system slots from the item (photo, video
  * title, channel), drops what couldn't be filled, and reflows the stacks.
  */
-import { DM_KEYWORD_TOKEN, IG_SQUARE, PHOTO_PLACEHOLDER, isPhotoPlaceholder, newElementId, type DesignDoc, type DesignElement, type DesignImageSource, type DesignPage, type DesignSpan, type DesignTextElement } from "./doc";
+import { DM_KEYWORD_TOKEN, IG_SQUARE, PHOTO_PLACEHOLDER, isPhotoPlaceholder, newElementId, type DesignDoc, type DesignElement, type DesignImageSource, type DesignPage, type DesignSpan, type DesignStatCardElement, type DesignTextElement } from "./doc";
 import { layoutDesignText } from "./layout";
 import type { DesignContext } from "./shared";
+import { defaultSeries } from "./stat-card";
+import { fitCutoutBox } from "./cutout-geometry";
+
+/** A stat card with an `ai` slot is three text slots to the model. */
+export const STAT_CARD_FIELDS = ["label", "value", "sub"] as const;
+export type StatCardField = (typeof STAT_CARD_FIELDS)[number];
+const STAT_CARD_FIELD_HINTS: Record<StatCardField, { hint: string; maxChars: number }> = {
+  label: { hint: "The metric's name as a dashboard would label it: \"Revenue\", \"MRR\", \"Monthly users\", \"Profit\". 1–2 words.", maxChars: 18 },
+  value: { hint: "The number exactly as the dashboard would show it, with currency/unit: \"$160,324\", \"$4.5M\", \"12,480 users\". Digits the founder actually stated — never invented.", maxChars: 14 },
+  sub: { hint: "The period or qualifier under the number: \"Last 28 days\", \"This month\", \"All time\", \"Per month\". Leave EMPTY if the transcript doesn't say.", maxChars: 24 },
+};
+export const statCardSlotKey = (elementId: string, field: StatCardField) => `${elementId}:${field}`;
 
 export const HIGHLIGHT_COLORS = { red: "#FF3B3B", green: "#22E07A", yellow: "#FFE14D" } as const;
 export type HighlightColor = keyof typeof HIGHLIGHT_COLORS;
@@ -67,6 +79,11 @@ export function listSlots(doc: DesignDoc): DesignSlotSpec[] {
         out.push({ key: el.id, kind: "text", name: el.name, hint: el.slot.hint, pageIndex, sample, maxChars, highlightColors: [...colors] });
       } else if (el.type === "video") {
         out.push({ key: el.id, kind: "video", name: el.name, hint: el.slot.hint, pageIndex, sample: "", maxChars: null, highlightColors: [] });
+      } else if (el.type === "statCard") {
+        for (const field of STAT_CARD_FIELDS) {
+          const f = STAT_CARD_FIELD_HINTS[field];
+          out.push({ key: statCardSlotKey(el.id, field), kind: "text", name: `${el.name} · ${field}`, hint: `${el.slot.hint} ${f.hint}`.trim(), pageIndex, sample: el[field], maxChars: f.maxChars, highlightColors: [] });
+        }
       }
     }
   });
@@ -124,14 +141,15 @@ export function fillTemplate(template: DesignDoc, fill: DesignFill, ctx: DesignC
     let aiText = 0;
     let aiTextFilled = 0;
     for (const el of page.elements) {
-      if (el.slot?.kind === "ai" && el.type === "text") aiText++;
-      const filled = fillElement(el, byKey.get(el.id), ctx, frames);
+      const countsAsText = el.slot?.kind === "ai" && (el.type === "text" || el.type === "statCard");
+      if (countsAsText) aiText++;
+      const filled = fillElement(el, byKey, ctx, frames);
       if (filled === "drop-page") {
         dropPage = true;
         break;
       }
       if (filled) {
-        if (el.slot?.kind === "ai" && el.type === "text") aiTextFilled++;
+        if (countsAsText) aiTextFilled++;
         elements.push({ ...filled, id: newElementId(prefixFor(filled)) });
       }
     }
@@ -142,11 +160,22 @@ export function fillTemplate(template: DesignDoc, fill: DesignFill, ctx: DesignC
 }
 
 function prefixFor(el: DesignElement): string {
-  return el.type === "text" ? "t" : el.type === "image" ? "img" : el.type === "video" ? "v" : el.type === "captions" ? "c" : el.type === "channel" ? "ch" : "r";
+  return el.type === "text" ? "t" : el.type === "image" ? "img" : el.type === "video" ? "v" : el.type === "captions" ? "c" : el.type === "channel" ? "ch" : el.type === "statCard" ? "sc" : "r";
 }
 
-function fillElement(el: DesignElement, value: DesignFillValue | undefined, ctx: DesignContext, frames: { list: DesignImageSource[]; next: number }): DesignElement | null | "drop-page" {
+/** The model's three values for a stat card. The value is required (no
+ *  number → no card); label falls back to the template's, sub may be empty. */
+export function fillStatCard(el: DesignStatCardElement, byKey: Map<string, DesignFillValue>): DesignStatCardElement | null {
+  const get = (field: StatCardField) => byKey.get(statCardSlotKey(el.id, field))?.text?.trim() ?? "";
+  const value = get("value");
+  if (!value) return null;
+  const label = get("label") || el.label;
+  return { ...el, label: label.slice(0, 40), value: value.slice(0, 24), sub: get("sub").slice(0, 40), series: defaultSeries(value) };
+}
+
+function fillElement(el: DesignElement, byKey: Map<string, DesignFillValue>, ctx: DesignContext, frames: { list: DesignImageSource[]; next: number }): DesignElement | null | "drop-page" {
   if (!el.slot) return el;
+  const value = byKey.get(el.id);
   switch (el.slot.kind) {
     case "frame": {
       if (el.type !== "image") return el;
@@ -163,10 +192,22 @@ function fillElement(el: DesignElement, value: DesignFillValue | undefined, ctx:
         if (!ctx.source || value?.startSec === undefined || value?.endSec === undefined || value.endSec <= value.startSec) return "drop-page";
         return { ...el, src: { kind: "s3", bucket: ctx.source.bucket, key: ctx.source.key }, startSec: value.startSec, endSec: value.endSec };
       }
+      if (el.type === "statCard") return fillStatCard(el, byKey);
       return el;
     }
     case "photo":
       return el.type === "image" ? { ...el, src: ctx.photo ?? PHOTO_PLACEHOLDER } : el;
+    case "cutout": {
+      if (el.type !== "image") return el;
+      if (!ctx.cutout) return { ...el, src: PHOTO_PLACEHOLDER };
+      const box = fitCutoutBox(el, ctx.cutout.width && ctx.cutout.height ? { width: ctx.cutout.width, height: ctx.cutout.height } : null);
+      return { ...el, ...box, src: ctx.cutout.src };
+    }
+    case "screen": {
+      if (el.type !== "image") return el;
+      const src = ctx.screens?.[0];
+      return src ? { ...el, src } : null;
+    }
     case "videoTitle":
       return el.type === "text" ? { ...el, spans: [{ text: ctx.source?.title ?? el.spans.map((s) => s.text).join("") }] } : el;
     case "channelName":
@@ -206,6 +247,11 @@ export function applyDmKeyword(doc: DesignDoc, keyword: string | null): DesignDo
 
 export function hasDmKeywordSlot(doc: DesignDoc): boolean {
   return doc.pages.some((p) => p.elements.some((el) => el.slot?.kind === "dmKeyword"));
+}
+
+/** Cutout slots still waiting for their picture. */
+export function hasEmptyCutoutSlot(doc: DesignDoc): boolean {
+  return doc.pages.some((p) => p.elements.some((el) => el.type === "image" && el.slot?.kind === "cutout" && isPhotoPlaceholder(el.src)));
 }
 
 /** How much a stack may grow to fill its page — a five-line stack list is
@@ -262,11 +308,11 @@ export function reflowStacks(page: DesignPage, canvas: { width: number; height: 
 }
 
 /** After the frames arrive: put the picked frame into every photo slot
- *  that still shows the placeholder, and a different still into every
- *  frame slot still showing it (in document order, cycling through
- *  `frames`). Returns the new sources by element id, or null when nothing
- *  changed. */
-export function applyPhotoPick(doc: DesignDoc, photo: DesignImageSource | null, frames: DesignImageSource[] = []): { doc: DesignDoc; elementIds: string[]; sources: Record<string, DesignImageSource> } | null {
+ *  that still shows the placeholder, a different still into every frame
+ *  slot still showing it (in document order, cycling through `frames`),
+ *  and the cutout — box re-shaped to its aspect — into every cutout slot.
+ *  Returns the new sources by element id, or null when nothing changed. */
+export function applyPhotoPick(doc: DesignDoc, photo: DesignImageSource | null, frames: DesignImageSource[] = [], cutout: DesignContext["cutout"] = null): { doc: DesignDoc; elementIds: string[]; sources: Record<string, DesignImageSource> } | null {
   const ids: string[] = [];
   const sources: Record<string, DesignImageSource> = {};
   let next = 0;
@@ -275,12 +321,17 @@ export function applyPhotoPick(doc: DesignDoc, photo: DesignImageSource | null, 
     elements: page.elements.map((el) => {
       if (el.type !== "image" || !isPhotoPlaceholder(el.src)) return el;
       let src: DesignImageSource | null = null;
+      let box: { x: number; y: number; w: number; h: number } | null = null;
       if (el.slot?.kind === "photo") src = photo;
       else if (el.slot?.kind === "frame" && frames.length > 0) src = frames[next++ % frames.length];
+      else if (el.slot?.kind === "cutout" && cutout) {
+        src = cutout.src;
+        box = fitCutoutBox(el, cutout.width && cutout.height ? { width: cutout.width, height: cutout.height } : null);
+      }
       if (!src) return el;
       ids.push(el.id);
       sources[el.id] = src;
-      return { ...el, src };
+      return { ...el, ...(box ?? {}), src };
     }),
   }));
   return ids.length > 0 ? { doc: { ...doc, pages }, elementIds: ids, sources } : null;

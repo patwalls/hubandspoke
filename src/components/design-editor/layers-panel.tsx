@@ -17,6 +17,7 @@ import {
   ImageIcon,
   LockIcon,
   SquareIcon,
+  TrendingUpIcon,
   TypeIcon,
   UnlockIcon,
   XIcon,
@@ -31,6 +32,7 @@ const TYPE_ICON: Record<DesignElement["type"], typeof TypeIcon> = {
   video: ClapperboardIcon,
   captions: CaptionsIcon,
   rect: SquareIcon,
+  statCard: TrendingUpIcon,
   channel: AtSignIcon,
 };
 

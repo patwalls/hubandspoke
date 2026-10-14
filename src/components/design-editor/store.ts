@@ -199,6 +199,10 @@ export const commands = {
   removePage: (index: number) => (doc: DesignDoc) =>
     doc.pages.length <= 1 ? doc : { ...doc, pages: doc.pages.filter((_, i) => i !== index) },
 
+  /** Swap a whole page in (the AI's hero cover for page 1). Undoable. */
+  replacePage: (index: number, page: DesignPage) => (doc: DesignDoc) =>
+    doc.pages[index] ? { ...doc, pages: doc.pages.map((p, i) => (i === index ? page : p)) } : doc,
+
   movePage: (index: number, dir: -1 | 1) => (doc: DesignDoc) => {
     const j = index + dir;
     if (j < 0 || j >= doc.pages.length) return doc;

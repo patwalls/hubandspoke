@@ -12,11 +12,13 @@ import { buildStoryTemplate } from "./story-template";
 import { buildTmzTemplate } from "./tmz-template";
 import { buildAppsTemplate } from "./apps-template";
 import { buildQuoteCarouselTemplate } from "./quote-carousel-template";
+import { buildPlaybookHeroTemplate } from "./hero-cover-template";
 
-export type DesignPresetId = "playbook" | "tech-stack" | "story" | "tmz" | "apps" | "quote-carousel" | "blank";
+export type DesignPresetId = "playbook" | "playbook-hero" | "tech-stack" | "story" | "tmz" | "apps" | "quote-carousel" | "blank";
 
 export const DESIGN_PRESETS: Record<DesignPresetId, { label: string; description: string; build: () => DesignDoc }> = {
   playbook: { label: "Playbook", description: "Photo + stat + headline, iOS Notes playbook, a clip as a YouTube card, a comment-to-DM CTA.", build: buildPlaybookTemplate },
+  "playbook-hero": { label: "Playbook · Hero cover", description: "The founder cut out of the photo over a tilted revenue card, Anton headline — then the Notes playbook, a clip and the DM CTA.", build: buildPlaybookHeroTemplate },
   "tech-stack": { label: "Tech Stack", description: "Photo cover with a plain headline, the stack as a Notes list, a clip, a comment-to-DM CTA.", build: buildTechStackTemplate },
   story: { label: "Full Story", description: "Photo cover with an all-caps headline, up to 9 story beats over stills of the video, a sign-off slide.", build: buildStoryTemplate },
   tmz: { label: "TMZ", description: "One image: the founder over a black band with a first-person quote in condensed caps.", build: buildTmzTemplate },

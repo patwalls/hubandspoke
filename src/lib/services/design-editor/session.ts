@@ -21,6 +21,7 @@ import { loadFormatTemplate } from "./format-template";
 import { previewUrlFor, sourceImageCandidates, youtubeThumbnailFor, type ImageCandidate } from "./assets";
 import { listBrandLogos } from "@/lib/services/brand-logos";
 import { listFrames, pickedFrame, requestAutoFrames, storyFrames, type DesignFramesState } from "./frames";
+import { cutoutFor, listPhotos, type DesignPhoto, type DesignPhotosState } from "./photos";
 import { seedCaption } from "./export";
 import type { ClipPost } from "@/lib/services/clip-editor/post-draft";
 import { toDesignRenderStatus, type DesignRenderStatus } from "./render-status";
@@ -65,6 +66,8 @@ export interface DesignEditorSession {
   images: ImageCandidate[];
   /** The source video's photo library (+ whether more frames are coming). */
   frames: DesignFramesState;
+  /** The source's extra pictures: uploads, cutouts, screens found in the video. */
+  photos: DesignPhotosState;
   /** The YouTube thumbnail — the cover's last resort when frames can't come. */
   thumbnail: ImageCandidate | null;
   /** The post this design goes out with — its caption is seeded from the
@@ -113,7 +116,8 @@ export async function loadDesignEditorSession(args: {
     // the doc.
     const photo = await coverPhotoFor(item.sourceItemId);
     const frames = storyFrames((await listFrames(item.sourceItemId)).frames).map((f) => f.src);
-    let next = photo || frames.length ? applyPhotoPick(design.doc, photo, frames)?.doc ?? null : null;
+    const cutout = photo ? cutoutContext(await cutoutFor(item.sourceItemId, photo)) : null;
+    let next = photo || frames.length || cutout ? applyPhotoPick(design.doc, photo, frames, cutout)?.doc ?? null : null;
     // A keyword attached after the draft (content page) fills the CTA now.
     const slug = await currentDmKeyword(item.id);
     if (slug && JSON.stringify(next ?? design.doc).includes(DM_KEYWORD_TOKEN)) next = applyDmKeyword(next ?? design.doc, slug);
@@ -184,14 +188,26 @@ async function draftDoc(itemId: string, sourceItemId: string, template: DesignDo
   // thumbnail is worse than nothing: it's usually a YouTube thumbnail with
   // its own text baked in. Only image-only sources use their pictures.
   const photo: DesignImageSource | null = (await coverPhotoFor(sourceItemId)) ?? (source ? null : (await sourceImageCandidates(sourceItemId))[0]?.src ?? null);
-  const ctx: DesignContext = {
+  const ctx = await designContext(itemId, sourceItemId, photo, source);
+  return { fill, doc: fillTemplate(template, fill, ctx) };
+}
+
+/** Everything a template fill needs from the item besides the AI's values. */
+export async function designContext(itemId: string, sourceItemId: string, photo: DesignImageSource | null, source: Awaited<ReturnType<typeof loadSource>>): Promise<DesignContext> {
+  const library = await listPhotos(sourceItemId);
+  return {
     photo,
     frames: storyFrames((await listFrames(sourceItemId)).frames).map((f) => f.src),
+    cutout: photo ? cutoutContext(await cutoutFor(sourceItemId, photo)) : null,
+    screens: library.photos.filter((p) => p.kind === "screen").map((p) => p.src),
     source: source ? { bucket: source.bucket, key: source.key, title: source.title } : null,
     channel: await loadChannel(itemId),
     dmKeyword: await currentDmKeyword(itemId),
   };
-  return { fill, doc: fillTemplate(template, fill, ctx) };
+}
+
+export function cutoutContext(photo: DesignPhoto | null): DesignContext["cutout"] {
+  return photo ? { src: photo.src, width: photo.width, height: photo.height } : null;
 }
 
 /** Move a clip's edges to word boundaries so it never starts mid-word, and
@@ -216,7 +232,7 @@ export function snapClipToWords(clip: { startSec: number; endSec: number; label:
   return { ...clip, startSec: Math.round(start * 100) / 100, endSec: Math.round(end * 100) / 100 };
 }
 
-async function loadSource(sourceItemId: string) {
+export async function loadSource(sourceItemId: string) {
   const [row] = await db
     .select({ key: productionItems.mediaS3Key, bucket: productionItems.mediaS3Bucket, title: productionItems.title })
     .from(productionItems)
@@ -243,7 +259,7 @@ async function loadWords(sourceItemId: string): Promise<EditorWord[]> {
  * real photo of the founder beats an empty slide. While the filmstrip is
  * still being made, null — the editor fills it the moment it lands.
  */
-async function coverPhotoFor(sourceItemId: string): Promise<DesignImageSource | null> {
+export async function coverPhotoFor(sourceItemId: string): Promise<DesignImageSource | null> {
   const pick = await pickedFrame(sourceItemId);
   if (pick?.src) return pick.src;
   const { pending } = await listFrames(sourceItemId);
@@ -251,7 +267,7 @@ async function coverPhotoFor(sourceItemId: string): Promise<DesignImageSource | 
   return (await youtubeThumbnailFor(sourceItemId))?.src ?? null;
 }
 
-async function currentDmKeyword(itemId: string): Promise<string | null> {
+export async function currentDmKeyword(itemId: string): Promise<string | null> {
   const [row] = await db.select({ slug: productionItems.shortLinkSlug, brand: productionItems.brand }).from(productionItems).where(eq(productionItems.id, itemId)).limit(1);
   // The word people comment ("ideavault"), not a Rebrandly slashtag ("mfm-ideavault").
   return commentKeywordFor(row?.brand, row?.slug);
@@ -275,7 +291,7 @@ async function loadChannel(itemId: string): Promise<DesignContext["channel"]> {
   return { name: acct.displayName ?? acct.label ?? acct.handle ?? fallback.name, subscribers: subs };
 }
 
-async function loadItem(id: string) {
+export async function loadItem(id: string) {
   const [row] = await db
     .select({
       id: productionItems.id,
@@ -331,6 +347,7 @@ async function finishSession(item: Awaited<ReturnType<typeof loadItem>>, design:
     imageUrls,
     images: dedupeImages([...(await sourceImageCandidates(item.sourceItemId)), ...(thumb ? [thumb] : []), ...(await listBrandLogos(item.brand))]),
     frames: await listFrames(item.sourceItemId),
+    photos: await listPhotos(item.sourceItemId),
     thumbnail: thumb,
     post: { productionItemId: item.id, postType: item.postType, state: "ready" },
     source: source ? { ...source, videoUrl: await getPresignedGetUrl(source.key, 4 * 3600, { bucket: source.bucket ?? undefined }) } : null,

@@ -58,11 +58,13 @@ export type DesignSpan = z.infer<typeof spanSchema>;
  * hint tells it what); the others are filled from the item itself —
  * `photo` is THE founder picture (the filmstrip's pick), `frame` is a
  * different still of the video per slot, in library order, for story
- * slides that each want their own picture. Static
+ * slides that each want their own picture; `cutout` is the founder cut out
+ * of the cover photo (background removed — the hero cover's trick) and
+ * `screen` a dashboard / revenue screenshot found in the video. Static
  * elements (logos, pills, the Notes chrome) have no slot. Slots survive into
  * the item's document so the editor can still tell what an element was.
  */
-export const SLOT_KINDS = ["ai", "photo", "frame", "videoTitle", "channelName", "channelSubscribers", "dmKeyword"] as const;
+export const SLOT_KINDS = ["ai", "photo", "frame", "cutout", "screen", "videoTitle", "channelName", "channelSubscribers", "dmKeyword"] as const;
 /** In a `dmKeyword` text slot, this token becomes the post's attached
  *  ManyChat keyword ("BOOTSTRAP"). Structural placeholder, not content. */
 export const DM_KEYWORD_TOKEN = "{{keyword}}";
@@ -90,6 +92,10 @@ const elementBase = {
    *  layout, the whole stack shrunk to fit the page). How the Notes page
    *  survives a 3-phase vs 5-phase playbook. */
   stack: z.string().max(40).nullable().default(null),
+  /** Tilt in degrees, about the box centre (a revenue card thrown onto the
+   *  cover at -6°). Absent/0 = upright. Ignored by video and captions —
+   *  ffmpeg draws those. */
+  rotation: z.number().min(-180).max(180).optional(),
 };
 
 const textElementSchema = z.object({
@@ -202,6 +208,30 @@ const channelElementSchema = z.object({
 });
 export type DesignChannelElement = z.infer<typeof channelElementSchema>;
 
+/**
+ * A dashboard-style stat card — the "Revenue · $160,324 · Last 28 days" tile
+ * with a green area chart that the best covers throw behind the founder.
+ * Label / value / sub are plain strings (an `ai` slot fills all three from
+ * the transcript); the chart is `series`, any scale, normalised when drawn
+ * (stat-card.ts) — a shape, not data. Drawn identically by the stage and
+ * satori from `layoutStatCard`.
+ */
+const statCardElementSchema = z.object({
+  ...elementBase,
+  type: z.literal("statCard"),
+  label: z.string().max(40),
+  value: z.string().max(24),
+  sub: z.string().max(40),
+  series: z.array(z.number().finite()).min(2).max(60),
+  /** The chart (and nothing else) is this colour. */
+  accent: hexColor,
+  theme: z.enum(["dark", "light"]),
+  showChart: z.boolean(),
+  shadow: z.boolean(),
+  radius: px.min(0),
+});
+export type DesignStatCardElement = z.infer<typeof statCardElementSchema>;
+
 /** Discriminated on `type`; array order = z-order, last on top. */
 export const designElementSchema = z.discriminatedUnion("type", [
   textElementSchema,
@@ -210,6 +240,7 @@ export const designElementSchema = z.discriminatedUnion("type", [
   videoElementSchema,
   captionsElementSchema,
   channelElementSchema,
+  statCardElementSchema,
 ]);
 export type DesignElement = z.infer<typeof designElementSchema>;
 

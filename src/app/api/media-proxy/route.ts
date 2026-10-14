@@ -20,8 +20,11 @@ export const dynamic = "force-dynamic";
  *
  * Security: the bucket is app-owned but I still validate that the key
  * exists somewhere in our schema (`production_items.media_s3_key` /
- * `poster_s3_key` / `production_item_media.s3_key`) so an authed user
- * can't probe arbitrary S3 keys. 404 on miss.
+ * `poster_s3_key` / `production_item_media.s3_key` / account avatars /
+ * the design editor's frames and photos) so an authed user can't probe
+ * arbitrary S3 keys. 404 on miss. The design editor's browser cutout reads
+ * its source picture through here when the bucket's CORS policy rejects
+ * the page's origin (localhost in dev).
  *
  * Bytes pass through the web dyno; for the operator-driven download
  * volumes this surface sees (handful per hour) that's a non-issue. If
@@ -51,6 +54,10 @@ export async function GET(request: NextRequest) {
       SELECT 1 FROM production_item_media WHERE s3_key = ${key}
       UNION ALL
       SELECT 1 FROM accounts WHERE avatar_s3_key = ${key}
+      UNION ALL
+      SELECT 1 FROM design_frames WHERE s3_key = ${key}
+      UNION ALL
+      SELECT 1 FROM design_photos WHERE s3_key = ${key}
     ) AS exists
   `);
   if (!rows[0]?.exists) {

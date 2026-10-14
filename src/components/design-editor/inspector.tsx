@@ -5,18 +5,20 @@
 import { createContext, useContext, useMemo, useRef, useState } from "react";
 import { ColorPicker } from "@/components/editor/color-picker";
 import { colorsInDesignDoc } from "@/lib/design-editor/colors";
-import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, ImageIcon, Loader2Icon, LockIcon, Trash2Icon, UnlockIcon, UploadIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, ImageIcon, Loader2Icon, LockIcon, MonitorIcon, ScissorsIcon, Trash2Icon, UnlockIcon, UploadIcon, XIcon } from "lucide-react";
 import { LogoPicker } from "@/components/editor/logo-picker";
 import { cn } from "@/lib/utils";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
 import { FONTS } from "@/lib/clip-editor/fonts";
-import type { DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignSlot, DesignTextElement, DesignVideoElement } from "@/lib/design-editor/doc";
+import type { DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignSlot, DesignStatCardElement, DesignTextElement, DesignVideoElement } from "@/lib/design-editor/doc";
+import { defaultSeries } from "@/lib/design-editor/stat-card";
 import { DM_KEYWORD_TOKEN } from "@/lib/design-editor/doc";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
 import { formatFollowers } from "@/lib/design-editor/channel";
 import { layoutDesignText } from "@/lib/design-editor/layout";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFrame, DesignFramesState } from "@/lib/services/design-editor/frames";
+import type { DesignPhoto, DesignPhotosState } from "@/lib/services/design-editor/photos";
 import { commands, useDesign } from "./store";
 
 export interface InspectorProps {
@@ -25,13 +27,22 @@ export interface InspectorProps {
   mode: "item" | "template";
   images: ImageCandidate[];
   frames: DesignFramesState;
+  /** The source's extra pictures: uploads, cutouts, screens. */
+  photos: DesignPhotosState;
   source: { videoUrl: string; title: string | null } | null;
   /** For the brand logo library in the picture panel. */
   brand: string;
   onPickImage: (elementId: string, c: ImageCandidate) => void;
   /** Grab a frame of the source at `sec` and put it in this element when it lands. */
   onGrabFrame: (elementId: string | null, sec: number) => void;
-  onUpload: (elementId: string | null, file: File) => Promise<void>;
+  onUpload: (elementId: string | null, files: File[]) => Promise<void>;
+  /** Cut the person out of this picture (browser model) and swap it in. */
+  onCutout?: (elementId: string) => void;
+  /** A cutout is being made right now (for this or another element). */
+  cutoutBusy?: string | null;
+  /** Scan the video for dashboard / revenue screens (`force` rescans). */
+  onFindScreens?: (force: boolean) => void;
+  onDeletePhoto?: (photo: DesignPhoto) => void;
   /** Enter adjust (pan/zoom) mode on this picture or clip. */
   onAdjust: (elementId: string) => void;
   /** Jump the page's clip preview to this clip time. */
@@ -56,7 +67,7 @@ export function formatSec(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function Inspector({ doc, mode, images, frames, source, brand, onPickImage, onGrabFrame, onUpload, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword, onRerunFrames }: InspectorProps) {
+export function Inspector({ doc, mode, images, frames, photos, source, brand, onPickImage, onGrabFrame, onUpload, onCutout, cutoutBusy, onFindScreens, onDeletePhoto, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword, onRerunFrames }: InspectorProps) {
   const apply = useDesign((s) => s.apply);
   const selection = useDesign((s) => s.selection);
   const select = useDesign((s) => s.select);
@@ -101,12 +112,15 @@ export function Inspector({ doc, mode, images, frames, source, brand, onPickImag
           ))}
         </div>
         <Slider label="Opacity" value={el.opacity} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => patch((e) => ({ ...e, opacity: v }), "opacity")} />
+        {el.type !== "video" && el.type !== "captions" && (
+          <Slider label="Tilt" value={el.rotation ?? 0} min={-30} max={30} step={0.5} format={(v) => `${v}°`} onChange={(v) => patch((e) => ({ ...e, rotation: v === 0 ? undefined : v }), "tilt")} />
+        )}
         <button type="button" onClick={() => { apply(commands.removeElement(pi, el.id)); select({ pageIndex: pi, elementId: null }); }} className="inline-flex items-center gap-1 self-start rounded-md border border-red-200 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-50">
           <Trash2Icon className="size-3" /> Delete
         </button>
       </Panel>
 
-      {mode === "template" && (el.type === "text" || el.type === "image" || el.type === "video") && (
+      {mode === "template" && (el.type === "text" || el.type === "image" || el.type === "video" || el.type === "statCard") && (
         <SlotPanel el={el} patch={(fn, key) => patch<DesignElement>(fn, key)} />
       )}
       {el.type === "channel" && <ChannelPanel el={el} channels={channels} patch={(fn, key) => patch<DesignChannelElement>(fn, key)} />}
@@ -138,6 +152,7 @@ export function Inspector({ doc, mode, images, frames, source, brand, onPickImag
         </p>
       )}
       {el.type === "text" && <TextPanel el={el} patch={(fn, key) => patch<DesignTextElement>(fn, key)} />}
+      {el.type === "statCard" && <StatCardPanel el={el} patch={(fn, key) => patch<DesignStatCardElement>(fn, key)} />}
       {el.type === "rect" && (
         <Panel title="Fill">
           <div className="grid grid-cols-2 gap-1">
@@ -187,10 +202,15 @@ export function Inspector({ doc, mode, images, frames, source, brand, onPickImag
             </>
           )}
           <Slider label="Rounded corners" value={el.radius} min={0} max={200} step={2} format={(v) => `${v}`} onChange={(v) => patch<DesignImageElement | DesignVideoElement>((e) => ({ ...e, radius: v }), "radius")} />
+          {el.type === "image" && onCutout && (
+            <button type="button" disabled={!!cutoutBusy} onClick={() => onCutout(el.id)} title="Cut the person out of this picture — the background goes transparent. Runs in your browser; the first time downloads the model (~115 MB)." className="inline-flex items-center gap-1.5 self-start rounded-md border border-pink-300 bg-pink-50 px-2 py-1 text-[11px] font-medium text-pink-900 hover:bg-pink-100 disabled:opacity-50 dark:bg-pink-950/40 dark:text-pink-200">
+              {cutoutBusy === el.id ? <Loader2Icon className="size-3 animate-spin" /> : <ScissorsIcon className="size-3" />} Remove background
+            </button>
+          )}
         </Panel>
       )}
       {el.type === "image" && (
-        <PicturePicker title="Swap picture" images={images} frames={frames} source={source} brand={brand} onPick={(c) => onPickImage(el.id, c)} onGrabFrame={(sec) => onGrabFrame(el.id, sec)} onUpload={(file) => onUpload(el.id, file)} onRerunFrames={onRerunFrames} />
+        <PicturePicker title="Swap picture" images={images} frames={frames} photos={photos} source={source} brand={brand} onPick={(c) => onPickImage(el.id, c)} onGrabFrame={(sec) => onGrabFrame(el.id, sec)} onUpload={(files) => onUpload(el.id, files)} onRerunFrames={onRerunFrames} onFindScreens={onFindScreens} onDeletePhoto={onDeletePhoto} />
       )}
       {el.type === "captions" && <CaptionsPanel el={el} patch={(fn, key) => patch<DesignCaptionsElement>(fn, key)} />}
     </div>
@@ -205,17 +225,19 @@ export function Inspector({ doc, mode, images, frames, source, brand, onPickImag
  * whether it stacks with its neighbours.
  */
 const SLOT_OPTIONS: Array<{ value: DesignSlot["kind"] | "static"; label: string; for: Array<DesignElement["type"]> }> = [
-  { value: "static", label: "Static — same on every post", for: ["text", "image", "video"] },
-  { value: "ai", label: "AI writes this per post", for: ["text", "video"] },
+  { value: "static", label: "Static — same on every post", for: ["text", "image", "video", "statCard"] },
+  { value: "ai", label: "AI writes this per post", for: ["text", "video", "statCard"] },
   { value: "photo", label: "Founder photo (the video's best shot)", for: ["image"] },
   { value: "frame", label: "A different still of the video per slide", for: ["image"] },
+  { value: "cutout", label: "Founder cutout (background removed)", for: ["image"] },
+  { value: "screen", label: "A dashboard / revenue screen from the video", for: ["image"] },
   { value: "videoTitle", label: "The source video's title", for: ["text"] },
   { value: "channelName", label: "Channel name", for: ["text"] },
   { value: "channelSubscribers", label: "Subscriber count", for: ["text"] },
   { value: "dmKeyword", label: "ManyChat DM keyword — {{keyword}} in the text", for: ["text"] },
 ];
 
-function SlotPanel({ el, patch }: { el: DesignTextElement | DesignImageElement | DesignVideoElement; patch: (fn: (e: DesignElement) => DesignElement, key?: string) => void }) {
+function SlotPanel({ el, patch }: { el: DesignTextElement | DesignImageElement | DesignVideoElement | DesignStatCardElement; patch: (fn: (e: DesignElement) => DesignElement, key?: string) => void }) {
   const kind = el.slot?.kind ?? "static";
   const setKind = (value: string) =>
     patch((e) => ({ ...e, slot: value === "static" ? null : { kind: value as DesignSlot["kind"], hint: e.slot?.hint ?? "" } }));
@@ -234,13 +256,15 @@ function SlotPanel({ el, patch }: { el: DesignTextElement | DesignImageElement |
             onChange={(e) => patch((cur) => ({ ...cur, slot: { kind: "ai", hint: e.target.value.slice(0, 400) } }), "slot-hint")}
             onKeyDown={(e) => e.stopPropagation()}
             rows={4}
-            placeholder={el.type === "video" ? "e.g. the 20–60s moment where the founder walks through the tech stack" : "e.g. the founder's biggest revenue number, like \"$720K\""}
+            placeholder={el.type === "video" ? "e.g. the 20–60s moment where the founder walks through the tech stack" : el.type === "statCard" ? "e.g. the founder's headline metric — the same number as the headline" : "e.g. the founder's biggest revenue number, like \"$720K\""}
             className="rounded-md border border-border bg-background px-2 py-1.5 text-[12px] leading-snug text-foreground"
           />
-          <span>{el.type === "text" ? "The text on the element now is the AI's style example — keep it real. Colours in it become allowed highlight colours." : "The AI picks the clip's start/end from the transcript."}</span>
+          <span>{el.type === "text" ? "The text on the element now is the AI's style example — keep it real. Colours in it become allowed highlight colours." : el.type === "statCard" ? "The AI fills the label, the number and the period from the transcript; the chart is a shape, not data." : "The AI picks the clip's start/end from the transcript."}</span>
         </label>
       )}
       {kind === "photo" && <p className="text-[11px] text-muted-foreground">Filled with the best frame of the source video (AI-picked); the placeholder shows where it goes.</p>}
+      {kind === "cutout" && <p className="text-[11px] leading-snug text-muted-foreground">The founder cut out of the cover photo (background removed in the browser). The box is reshaped to the cutout and bottom-aligned when it lands — put it where the person should stand.</p>}
+      {kind === "screen" && <p className="text-[11px] leading-snug text-muted-foreground">The best dashboard / revenue screenshot the scan found in the video. Dropped from the post when the video has none.</p>}
       {kind === "dmKeyword" && (
         <p className="text-[11px] leading-snug text-muted-foreground">
           Write the CTA with <code className="rounded bg-muted px-1">{DM_KEYWORD_TOKEN}</code> where the keyword goes, e.g. comment &quot;{DM_KEYWORD_TOKEN}&quot; and i&apos;ll DM you the full video. Each post gets a real keyword from the ManyChat pool automatically.
@@ -302,16 +326,73 @@ function ClipTrim({ el, patch, onSeekClip }: { el: DesignVideoElement; patch: (f
  * AI's pick starred), a scrubber to grab any exact moment, the source's own
  * pictures + wordmarks, and an upload.
  */
-export function PicturePicker({ title, images, frames, source, brand, onPick, onGrabFrame, onUpload, onRerunFrames }: {
-  title: string; images: ImageCandidate[]; frames: DesignFramesState; source: { videoUrl: string } | null; brand: string;
-  onPick: (c: ImageCandidate) => void; onGrabFrame: (sec: number) => void; onUpload: (file: File) => Promise<void>; onRerunFrames?: () => void;
+export function PicturePicker({ title, images, frames, photos, source, brand, onPick, onGrabFrame, onUpload, onRerunFrames, onFindScreens, onDeletePhoto }: {
+  title: string; images: ImageCandidate[]; frames: DesignFramesState; photos: DesignPhotosState; source: { videoUrl: string } | null; brand: string;
+  onPick: (c: ImageCandidate) => void; onGrabFrame: (sec: number) => void; onUpload: (files: File[]) => Promise<void>; onRerunFrames?: () => void;
+  onFindScreens?: (force: boolean) => void; onDeletePhoto?: (photo: DesignPhoto) => void;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const doneFrames = frames.frames.filter((f) => f.status === "done");
   const failedOnly = !frames.pending && doneFrames.length === 0 && frames.frames.some((f) => f.status === "failed");
+  const uploads = photos.photos.filter((p) => p.kind === "upload");
+  const cutouts = photos.photos.filter((p) => p.kind === "cutout");
+  const screens = photos.photos.filter((p) => p.kind === "screen");
+  const library = (list: DesignPhoto[], checker = false) => (
+    <div className="grid grid-cols-3 gap-1">
+      {list.map((p) => (
+        <div key={p.id} className="group relative">
+          <button type="button" title={p.label} onClick={() => onPick(p)} className={cn("aspect-square w-full overflow-hidden rounded border border-border hover:ring-2 hover:ring-sky-400", checker ? "bg-[conic-gradient(#d4d4d8_25%,#f4f4f5_0_50%,#d4d4d8_0_75%,#f4f4f5_0)] bg-[length:14px_14px]" : "bg-black/80")}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={p.previewUrl} alt={p.label} className={cn("h-full w-full", checker ? "object-contain" : "object-cover")} />
+            {p.sec !== null && <span className="absolute bottom-0 left-0 rounded-tr bg-black/70 px-1 text-[9px] text-white">{formatSec(p.sec)}</span>}
+            {p.rank === 1 && <span className="absolute left-0 top-0 rounded-br bg-amber-400 px-1 text-[9px] font-semibold text-black">best</span>}
+          </button>
+          {onDeletePhoto && (
+            <button type="button" aria-label={`Remove ${p.label}`} onClick={() => onDeletePhoto(p)} className="absolute right-0.5 top-0.5 hidden size-4 items-center justify-center rounded-full bg-black/70 text-white group-hover:flex">
+              <XIcon className="size-2.5" />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
   return (
     <Panel title={title}>
+      {/* The founder's own pictures: uploads land on the source video, so
+          every post made from it (now and later) has them. */}
+      <span className="text-[11px] text-muted-foreground">Photos of the founder{uploads.length ? ` · ${uploads.length}` : ""}</span>
+      {uploads.length > 0 && library(uploads)}
+      <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={async (e) => {
+        const files = Array.from(e.target.files ?? []);
+        e.target.value = "";
+        if (files.length === 0) return;
+        setUploading(true);
+        try { await onUpload(files); } finally { setUploading(false); }
+      }} />
+      <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()} title="Add photos of the founder — several at once is fine. They're kept with the source video for every future post made from it." className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border px-2 py-1.5 text-[11px] font-medium hover:bg-muted disabled:opacity-50">
+        {uploading ? <Loader2Icon className="size-3 animate-spin" /> : <UploadIcon className="size-3" />} Upload photos of the founder
+      </button>
+      {cutouts.length > 0 && (
+        <>
+          <span className="text-[11px] text-muted-foreground">Cutouts (background removed)</span>
+          {library(cutouts, true)}
+        </>
+      )}
+      {(screens.length > 0 || photos.screensPending || onFindScreens) && (
+        <>
+          <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            Screens from the video{screens.length ? ` · ${screens.length}` : ""} {photos.screensPending && <Loader2Icon className="size-3 animate-spin" />}
+          </span>
+          {screens.length > 0 && library(screens)}
+          {onFindScreens && !photos.screensPending && (
+            <button type="button" onClick={() => onFindScreens(screens.length > 0)} title="Scan the video for revenue dashboards, charts and payout screens the founder showed on camera" className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border px-2 py-1.5 text-[11px] font-medium hover:bg-muted">
+              <MonitorIcon className="size-3" /> {screens.length > 0 ? "Scan the video again" : "Find revenue screens in the video"}
+            </button>
+          )}
+          {photos.screensPending && <span className="text-[11px] text-muted-foreground">Scanning the video for dashboards… a minute or two.</span>}
+        </>
+      )}
       {failedOnly && onRerunFrames && (
         <button type="button" onClick={onRerunFrames} className="self-start rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100">
           Frames couldn&apos;t be grabbed — try again
@@ -361,17 +442,7 @@ export function PicturePicker({ title, images, frames, source, brand, onPick, on
           </div>
         </>
       )}
-      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={async (e) => {
-        const file = e.target.files?.[0];
-        e.target.value = "";
-        if (!file) return;
-        setUploading(true);
-        try { await onUpload(file); } finally { setUploading(false); }
-      }} />
-      <div className="grid grid-cols-2 gap-1.5">
-        <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()} className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-[11px] font-medium hover:bg-muted disabled:opacity-50">
-          {uploading ? <Loader2Icon className="size-3 animate-spin" /> : <UploadIcon className="size-3" />} Upload a picture
-        </button>
+      <div className="grid grid-cols-1 gap-1.5">
         {/* The brand's logo library — the same one the clip editor uses. */}
         <LogoPicker
           brand={brand}
@@ -401,6 +472,43 @@ function FrameScrubber({ videoUrl, onGrab }: { videoUrl: string; onGrab: (sec: n
         </button>
       </div>
     </div>
+  );
+}
+
+/** Label / number / period, the chart's colour and shape, dark or light. */
+function StatCardPanel({ el, patch }: { el: DesignStatCardElement; patch: (fn: (e: DesignStatCardElement) => DesignStatCardElement, key?: string) => void }) {
+  const field = (label: string, key: "label" | "value" | "sub", max: number) => (
+    <label className="flex flex-col gap-0.5 text-[10px] uppercase text-muted-foreground">
+      {label}
+      <input
+        value={el[key]}
+        onChange={(e) => patch((cur) => ({ ...cur, [key]: e.target.value.slice(0, max), ...(key === "value" ? { series: defaultSeries(e.target.value) } : {}) }), `stat-${key}`)}
+        onKeyDown={(e) => e.stopPropagation()}
+        className="rounded border border-border bg-background px-1.5 py-1 text-[13px] normal-case text-foreground"
+      />
+    </label>
+  );
+  return (
+    <Panel title="Stat card">
+      {field("Label", "label", 40)}
+      {field("Number", "value", 24)}
+      {field("Period", "sub", 40)}
+      <Color label="Chart colour" value={el.accent} onChange={(v) => patch((e) => ({ ...e, accent: v }), "accent")} />
+      <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-0.5 text-xs">
+        {(["dark", "light"] as const).map((t) => (
+          <button key={t} type="button" onClick={() => patch((e) => ({ ...e, theme: t }))} className={cn("rounded px-2 py-1 font-medium", el.theme === t ? "bg-background shadow-sm" : "text-muted-foreground")}>
+            {t === "dark" ? "Dark card" : "Light card"}
+          </button>
+        ))}
+      </div>
+      <Check label="Show the chart" checked={el.showChart} onChange={(showChart) => patch((e) => ({ ...e, showChart }))} />
+      <Check label="Drop shadow" checked={el.shadow} onChange={(shadow) => patch((e) => ({ ...e, shadow }))} />
+      <button type="button" onClick={() => patch((e) => ({ ...e, series: defaultSeries(`${e.value}:${Date.now()}`) }))} className="self-start rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted">
+        New chart shape
+      </button>
+      <p className="text-[11px] leading-snug text-muted-foreground">The chart is a shape, not data — the number is the claim. Prefer a real screenshot when the video has one (Pictures → Screens from the video).</p>
+      <Slider label="Rounded corners" value={el.radius} min={0} max={80} step={2} format={(v) => `${v}`} onChange={(v) => patch((e) => ({ ...e, radius: v }), "radius")} />
+    </Panel>
   );
 }
 

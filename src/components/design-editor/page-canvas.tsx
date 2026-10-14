@@ -13,8 +13,9 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type P
 import { cn } from "@/lib/utils";
 import { FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
 import type { EditorWord } from "@/lib/clip-editor/words";
-import type { DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignPage, DesignSpan, DesignTextElement, DesignVideoElement, Rgba } from "@/lib/design-editor/doc";
+import type { DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignPage, DesignSpan, DesignStatCardElement, DesignTextElement, DesignVideoElement, Rgba } from "@/lib/design-editor/doc";
 import { layoutChannel, type ChannelInfo } from "@/lib/design-editor/channel";
+import { layoutStatCard, sparklineSvg, svgDataUrl } from "@/lib/design-editor/stat-card";
 import { pageVideo } from "@/lib/design-editor/doc";
 import { activeCue, buildDesignCaptionCues, layoutCaptionCue } from "@/lib/design-editor/captions";
 import { coverGeometry, cropForOffset, layoutDesignText } from "@/lib/design-editor/layout";
@@ -254,7 +255,7 @@ export function PageCanvas({
           page.elements.map((el) =>
             el.slot ? (
               <div key={`slot-${el.id}`} className="pointer-events-none absolute rounded-br-md px-2 py-0.5 text-[18px] font-semibold text-white" style={{ left: el.x, top: el.y, background: el.slot.kind === "ai" ? "#DB2777" : "#0EA5E9" }}>
-                {el.slot.kind === "ai" ? "AI" : el.slot.kind === "photo" ? "Photo" : el.slot.kind === "frame" ? "Frame" : el.slot.kind === "videoTitle" ? "Video title" : el.slot.kind === "channelName" ? "Channel" : el.slot.kind === "dmKeyword" ? "DM keyword" : "Subscribers"}
+                {el.slot.kind === "ai" ? "AI" : el.slot.kind === "photo" ? "Photo" : el.slot.kind === "frame" ? "Frame" : el.slot.kind === "cutout" ? "Cutout" : el.slot.kind === "screen" ? "Screen" : el.slot.kind === "videoTitle" ? "Video title" : el.slot.kind === "channelName" ? "Channel" : el.slot.kind === "dmKeyword" ? "DM keyword" : "Subscribers"}
                 {el.stack ? ` · ${el.stack}` : ""}
               </div>
             ) : null,
@@ -331,6 +332,9 @@ function ElementView({
     height: el.h,
     opacity: el.opacity,
     cursor: interactive && !el.locked ? "move" : "default",
+    // Tilt — the same transform the exporter applies (render-tree.ts);
+    // video/captions are drawn by ffmpeg, which doesn't rotate.
+    ...(el.rotation && el.type !== "video" && el.type !== "captions" ? { transform: `rotate(${el.rotation}deg)`, transformOrigin: "center" } : {}),
     ...(inert ? { pointerEvents: "none" as const } : {}),
   };
   const hover = interactive && !selected && !el.locked ? "hover:outline hover:outline-[3px] hover:outline-sky-300/70" : "";
@@ -365,6 +369,9 @@ function ElementView({
   }
   if (el.type === "channel") {
     return <ChannelView el={el} info={channel} base={base} hover={hover} onPointerDown={onPointerDown} />;
+  }
+  if (el.type === "statCard") {
+    return <StatCardView el={el} base={base} hover={hover} onPointerDown={onPointerDown} />;
   }
   return (
     <TextView el={el} base={base} hover={hover} editing={editing} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} onCommitText={onCommitText} />
@@ -547,6 +554,22 @@ function ChannelView({ el, info, base, hover, onPointerDown }: { el: DesignChann
 }
 
 /** A laid-out text element drawn relative to a parent box. */
+/** The stat card, from the same layout the exporter draws: card, label /
+ *  value / sub, and the chart as an <img> of the identical SVG bytes. */
+function StatCardView({ el, base, hover, onPointerDown }: { el: DesignStatCardElement; base: React.CSSProperties; hover: string; onPointerDown: (e: ReactPointerEvent) => void }) {
+  const l = useMemo(() => layoutStatCard(el), [el]);
+  const chartUrl = useMemo(() => (l.chart ? svgDataUrl(sparklineSvg(el, l.chart.w, l.chart.h)) : null), [el, l.chart]);
+  return (
+    <div className={hover} onPointerDown={onPointerDown} style={{ ...base, overflow: "hidden", backgroundColor: l.bg, border: `2px solid ${l.border}`, borderRadius: el.radius, ...(el.shadow ? { boxShadow: "0 30px 60px rgba(0,0,0,0.55)" } : {}) }}>
+      {[l.label, l.value, l.sub].map((t) => (t ? <StaticText key={t.id} el={t} originX={0} originY={0} /> : null))}
+      {l.chart && chartUrl && (
+        // eslint-disable-next-line @next/next/no-img-element -- the exporter draws this exact SVG
+        <img src={chartUrl} alt="" draggable={false} className="pointer-events-none absolute max-w-none" style={{ left: l.chart.x, top: l.chart.y, width: l.chart.w, height: l.chart.h }} />
+      )}
+    </div>
+  );
+}
+
 function StaticText({ el, originX, originY }: { el: DesignTextElement; originX: number; originY: number }) {
   const layout = useMemo(() => layoutDesignText(el), [el]);
   const font = FONTS[el.style.fontId];

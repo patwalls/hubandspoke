@@ -35,14 +35,18 @@ import {
   Redo2Icon,
   SparklesIcon,
   SquareIcon,
+  TrendingUpIcon,
   TypeIcon,
   Undo2Icon,
+  WandSparklesIcon,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, resizeCanvas, shadeElement, type DesignDoc, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
-import { applyPhotoPick } from "@/lib/design-editor/template-fill";
+import { applyPhotoPick, hasEmptyCutoutSlot } from "@/lib/design-editor/template-fill";
+import { statCard } from "@/lib/design-editor/shared";
+import { cutOutPicture, cutoutSupported } from "@/lib/design-editor/cutout-client";
 import { BRAND_WORDMARKS } from "@/lib/design-editor/brand-assets";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
 import { applyDmKeyword } from "@/lib/design-editor/template-fill";
@@ -51,6 +55,8 @@ import { readSnapEnabled, writeSnapEnabled } from "@/lib/editor/snap";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFramesState } from "@/lib/services/design-editor/frames";
+import type { DesignPhoto, DesignPhotosState } from "@/lib/services/design-editor/photos";
+import type { HeroCoverResult } from "@/lib/services/design-editor/hero";
 import { storyFrames } from "@/lib/design-editor/story-frames";
 import { PostPane } from "@/components/clip-editor/post-pane";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
@@ -63,6 +69,7 @@ import { DesignStoreContext, commands, createDesignStore, useDesign, useDesignSt
 
 const AUTOSAVE_DELAY_MS = 900;
 const FRAMES_POLL_MS = 2500;
+const PHOTOS_POLL_MS = 3000;
 
 export interface DesignEditorDialogProps {
   open: boolean;
@@ -170,6 +177,7 @@ export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName,
         imageUrls: { ...(json.imageUrls ?? {}), ...(initial?.imageUrls ?? {}) },
         images: json.images ?? BRAND_WORDMARKS,
         frames: { frames: [], pending: false },
+        photos: { photos: [], screensPending: false },
         thumbnail: null,
         post: null,
         source: null,
@@ -222,11 +230,15 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   const editingId = useDesign((s) => s.editingElementId);
 
   const [imageUrls, setImageUrls] = useState<Record<string, string>>(session.imageUrls);
-  const [images, setImages] = useState<ImageCandidate[]>(session.images);
+  /** The source's own pictures + brand logos; uploads go to `photos`. */
+  const images: ImageCandidate[] = session.images;
   const [frames, setFrames] = useState<DesignFramesState>(session.frames);
+  const [photos, setPhotos] = useState<DesignPhotosState>(session.photos);
+  /** The element a cutout is being made for ("hero" for the hero cover). */
+  const [cutoutBusy, setCutoutBusy] = useState<string | null>(null);
   /** A frame grab the user asked for; swapped in when the worker delivers it. */
   const pendingGrab = useRef<{ elementId: string | null; pageIndex: number; sec: number } | null>(null);
-  const [busy, setBusy] = useState<null | "regen" | "export">(null);
+  const [busy, setBusy] = useState<null | "regen" | "export" | "hero">(null);
   const [dmKeyword, setDmKeyword] = useState<string | null>(session.dmKeyword);
   const [keywordOpen, setKeywordOpen] = useState(false);
   const channelsInDoc = useMemo(() => resolveChannelsInDoc(doc, session.channels), [doc, session.channels]);
@@ -403,6 +415,93 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frames]);
 
+  // ── The source's photo library (uploads, cutouts, screens) ──────────────
+  useEffect(() => {
+    if (!photos.screensPending || isTemplate) return;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/production-items/${session.item.id}/design/photos`);
+        if (res.ok) {
+          const next = (await res.json()) as DesignPhotosState;
+          setPhotos(next);
+          if (!next.screensPending) {
+            const n = next.photos.filter((p) => p.kind === "screen").length;
+            toast(n ? `Found ${n} screen${n === 1 ? "" : "s"} in the video` : "No dashboards or charts found in the video", { description: n ? "They're in the picture panel under “Screens from the video”." : undefined });
+          }
+        }
+      } catch {
+        /* next tick */
+      }
+    }, PHOTOS_POLL_MS);
+    return () => clearTimeout(t);
+  }, [photos, session.item.id, isTemplate]);
+
+  const findScreens = async (force: boolean) => {
+    const res = await fetch(`/api/production-items/${session.item.id}/design/photos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scan: true, force }) });
+    if (!res.ok) return void toast.error("Couldn't start the scan");
+    setPhotos({ ...((await res.json()) as DesignPhotosState), screensPending: true });
+    toast("Scanning the video for revenue screens…", { description: "Dashboards, charts and payout pages the founder showed. A minute or two." });
+  };
+
+  const deletePhoto = async (p: DesignPhoto) => {
+    const res = await fetch(`/api/production-items/${session.item.id}/design/photos?photoId=${encodeURIComponent(p.id)}`, { method: "DELETE" });
+    if (!res.ok) return void toast.error("Couldn't remove that picture");
+    setPhotos((s) => ({ ...s, photos: s.photos.filter((x) => x.id !== p.id) }));
+  };
+
+  /** Store a picture in the source's library; returns the entry. */
+  const uploadToLibrary = async (file: File | Blob, name: string, kind: "upload" | "cutout", cutoutOf: DesignImageSource | null = null): Promise<DesignPhoto | null> => {
+    const body = new FormData();
+    body.append("file", file, name);
+    body.append("kind", kind);
+    if (cutoutOf) body.append("cutoutOf", JSON.stringify(cutoutOf));
+    const res = await fetch(`/api/production-items/${session.item.id}/design/upload`, { method: "POST", body });
+    const json = (await res.json().catch(() => ({}))) as { photo?: DesignPhoto; error?: string };
+    if (!res.ok || !json.photo) {
+      toast.error(json.error ?? "Upload failed");
+      return null;
+    }
+    const photo = json.photo;
+    setPhotos((s) => ({ ...s, photos: [photo, ...s.photos.filter((x) => !(x.kind === "cutout" && photo.kind === "cutout" && x.sourceKey === photo.sourceKey))] }));
+    return photo;
+  };
+
+  /** Cut the person out of a picture in the browser → the library. */
+  const makeCutout = async (previewUrl: string, name: string, cutoutOf: DesignImageSource): Promise<DesignPhoto | null> => {
+    if (!cutoutSupported()) {
+      toast.error("Cutouts need a browser");
+      return null;
+    }
+    const id = `cutout-${name}`;
+    toast.loading("Cutting the person out…", { id, description: "Runs on your machine. The first time downloads the model (about 115 MB)." });
+    try {
+      const result = await cutOutPicture({ url: previewUrl, src: cutoutOf }, (msg) => toast.loading(msg, { id }));
+      const photo = await uploadToLibrary(result.blob, `${name.replace(/\.[^.]+$/, "")}.png`, "cutout", cutoutOf);
+      if (photo) toast.success("Background removed", { id, description: "The cutout is saved with the video for every post made from it." });
+      else toast.dismiss(id);
+      return photo;
+    } catch (err) {
+      toast.error("Couldn't remove the background", { id, description: err instanceof Error ? err.message : undefined });
+      return null;
+    }
+  };
+
+  const cutoutElement = async (elementId: string) => {
+    const el = page.elements.find((e) => e.id === elementId);
+    const url = imageUrls[elementId];
+    if (!el || el.type !== "image" || !url || cutoutBusy) return;
+    setCutoutBusy(elementId);
+    try {
+      const photo = await makeCutout(url, el.name || "picture", el.src);
+      if (!photo) return;
+      const ratio = photo.width && photo.height ? photo.height / photo.width : null;
+      setImageUrls((m) => ({ ...m, [elementId]: photo.previewUrl }));
+      apply(commands.patchElement(pageIndex, elementId, (cur) => (cur.type === "image" ? { ...cur, src: photo.src, name: photo.label, fit: "contain", crop: { ...DEFAULT_CROP }, ...(ratio ? { h: Math.round(cur.w * ratio) } : {}) } : cur)));
+    } finally {
+      setCutoutBusy(null);
+    }
+  };
+
   const grabFrame = async (elementId: string | null, sec: number) => {
     pendingGrab.current = { elementId, pageIndex, sec: Math.round(sec * 100) / 100 };
     const res = await fetch(`/api/production-items/${session.item.id}/design/frames`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ atSec: sec }) });
@@ -418,15 +517,18 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     toast("Grabbing frames again…");
   };
 
-  const upload = async (elementId: string | null, file: File) => {
-    const body = new FormData();
-    body.append("file", file);
-    const res = await fetch(`/api/production-items/${session.item.id}/design/upload`, { method: "POST", body });
-    const json = (await res.json().catch(() => ({}))) as { image?: ImageCandidate; error?: string };
-    if (!res.ok || !json.image) return void toast.error(json.error ?? "Upload failed");
-    setImages((list) => [json.image!, ...list]);
-    if (elementId) swapImage(elementId, json.image);
-    else addImage(json.image);
+  /** Upload photos of the founder into the source's library; the first
+   *  one goes into the element (or onto the page) right away. */
+  const upload = async (elementId: string | null, files: File[]) => {
+    let first: DesignPhoto | null = null;
+    for (const file of files) {
+      const photo = await uploadToLibrary(file, file.name, "upload");
+      if (photo && !first) first = photo;
+    }
+    if (!first) return;
+    if (elementId) swapImage(elementId, first);
+    else addImage(first);
+    if (files.length > 1) toast.success(`${files.length} photos added`, { description: "They stay with the source video for every post made from it." });
   };
 
   // ── Adding things ────────────────────────────────────────────────────────
@@ -448,6 +550,12 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     // z-order a shade needs to do its job.
     const lastImage = page.elements.map((e, i) => (e.type === "image" || e.type === "video" ? i : -1)).filter((i) => i >= 0).pop();
     apply(commands.addElement(pageIndex, el, lastImage === undefined ? 0 : lastImage + 1));
+    select({ pageIndex, elementId: el.id });
+  };
+  const addStatCard = () => {
+    const W = doc.canvas.width;
+    const el = statCard({ x: Math.round(W * 0.06), y: Math.round(doc.canvas.height * 0.17), w: Math.round(W * 0.5), h: Math.round(doc.canvas.height * 0.3) }, { rotation: -6 });
+    apply(commands.addElement(pageIndex, el));
     select({ pageIndex, elementId: el.id });
   };
   const addRect = () => {
@@ -510,6 +618,50 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       setImageUrls(json.imageUrls);
       storeApi.getState().replaceDoc(json.design.doc, json.design.revision);
       toast.success("New draft ready", { description: "Undo history starts fresh from this draft." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Rebuild page 1 as the hero cover: AI fill on the server, then the
+   *  cutout in the browser if the library doesn't have one yet. */
+  const heroCover = async () => {
+    setBusy("hero");
+    const toastId = "hero-cover";
+    toast.loading("Designing the hero cover…", { id: toastId, description: "Headline, footer and the stat card from the transcript — about 15 seconds." });
+    try {
+      const cover = doc.pages[0];
+      const currentHeadline = cover?.elements
+        .filter((e): e is Extract<typeof e, { type: "text" }> => e.type === "text" && e.slot?.kind === "ai")
+        .sort((a, b) => b.style.sizePx - a.style.sizePx)[0]
+        ?.spans.map((s) => s.text).join("") ?? null;
+      const res = await fetch(`/api/production-items/${session.item.id}/design/hero`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ canvas: doc.canvas, currentHeadline, instruction: instruction || null }),
+      });
+      const json = (await res.json().catch(() => ({}))) as HeroCoverResult & { error?: string };
+      if (!res.ok || !json.page) return void toast.error(json.error ?? `Couldn't design the cover (${res.status})`, { id: toastId });
+      setImageUrls((m) => ({ ...m, ...json.imageUrls }));
+      apply(commands.replacePage(0, json.page));
+      select({ pageIndex: 0, elementId: null });
+      const needsCutout = hasEmptyCutoutSlot({ ...doc, pages: [json.page] });
+      if (!needsCutout) return void toast.success("Hero cover ready", { id: toastId, description: "Undo (⌘Z) brings the old cover back." });
+      if (!json.pick) return void toast.success("Hero cover ready — no cover photo yet", { id: toastId, description: "The video's frames are still being made. Select the cutout slot and swap a picture in, then Remove background." });
+      toast.success("Hero cover ready — cutting the founder out next", { id: toastId });
+      setCutoutBusy("hero");
+      try {
+        const photo = await makeCutout(json.pick.previewUrl, "cover", json.pick.src);
+        if (!photo) return;
+        const { doc: cur } = storeApi.getState();
+        const patched = applyPhotoPick(cur, null, [], { src: photo.src, width: photo.width, height: photo.height });
+        if (patched) {
+          setImageUrls((m) => ({ ...m, ...Object.fromEntries(patched.elementIds.map((id) => [id, photo.previewUrl])) }));
+          apply(() => patched.doc);
+        }
+      } finally {
+        setCutoutBusy(null);
+      }
     } finally {
       setBusy(null);
     }
@@ -668,13 +820,14 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
             <Tool onClick={addText} disabled={locked}><TypeIcon className="size-3.5" /> Text</Tool>
             <Tool onClick={addRect} disabled={locked}><SquareIcon className="size-3.5" /> Box</Tool>
             <Tool onClick={addShade} disabled={locked} title="A clear-to-black fade over the lower part of the photo so white text reads on top"><BlendIcon className="size-3.5" /> Shade</Tool>
+            <Tool onClick={addStatCard} disabled={locked} title="A dashboard-style revenue card (label, number, period, chart) — tilt it and put the founder's cutout over it"><TrendingUpIcon className="size-3.5" /> Stat card</Tool>
             <div className="relative">
               <details className="group">
                 <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[12px] font-medium hover:bg-muted">
                   <ImageIcon className="size-3.5" /> Picture
                 </summary>
                 <div className="absolute left-0 top-full z-20 mt-1 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg" onClick={(e) => { if ((e.target as HTMLElement).closest("button[title]")) (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; }}>
-                  <PicturePicker title="Add a picture" images={images} frames={frames} source={session.source} brand={brand} onPick={addImage} onGrabFrame={(sec) => void grabFrame(null, sec)} onUpload={(file) => upload(null, file)} />
+                  <PicturePicker title="Add a picture" images={images} frames={frames} photos={photos} source={session.source} brand={brand} onPick={addImage} onGrabFrame={(sec) => void grabFrame(null, sec)} onUpload={(files) => upload(null, files)} onFindScreens={isTemplate ? undefined : (force) => void findScreens(force)} onDeletePhoto={isTemplate ? undefined : (p) => void deletePhoto(p)} />
                 </div>
               </details>
             </div>
@@ -735,7 +888,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
           )}
         </div>
 
-        <Inspector doc={doc} mode={mode} images={images} frames={frames} source={session.source} brand={brand} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
+        <Inspector doc={doc} mode={mode} images={images} frames={frames} photos={photos} source={session.source} brand={brand} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onCutout={isTemplate ? undefined : (id) => void cutoutElement(id)} cutoutBusy={cutoutBusy} onFindScreens={isTemplate ? undefined : (force) => void findScreens(force)} onDeletePhoto={isTemplate ? undefined : (p) => void deletePhoto(p)} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
         {!isTemplate && (
           <AttachDmKeywordDialog
             open={keywordOpen}
@@ -765,6 +918,10 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
         <Button type="button" variant="outline" size="sm" onClick={() => void regenerate()} disabled={busy !== null || locked}>
           {busy === "regen" ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : <SparklesIcon className="mr-1.5 size-3.5" />}
           Regenerate
+        </Button>
+        <Button type="button" size="sm" onClick={() => void heroCover()} disabled={busy !== null || locked || !!cutoutBusy} title="Rebuild the cover like the top posts: the founder cut out of the photo over a dimmed backdrop, a tilted revenue card behind them, the headline in Anton. The instruction on the left steers it." className="bg-pink-600 text-white hover:bg-pink-700">
+          {busy === "hero" || cutoutBusy === "hero" ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : <WandSparklesIcon className="mr-1.5 size-3.5" />}
+          Hero cover
         </Button>
       </div>}
 

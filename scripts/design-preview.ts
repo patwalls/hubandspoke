@@ -3,7 +3,7 @@
  * page, without the worker or S3 — for eyeballing a template against real
  * posts. Bundled assets come from public/; other pictures are fetched.
  *
- *   npx tsx --env-file=.env.local scripts/design-preview.ts <preset|doc.json> <outDir> [substitutePhoto.jpg]
+ *   npx tsx --env-file=.env.local scripts/design-preview.ts <preset|doc.json> <outDir> [substitutePhoto.jpg] [cutout.png]
  */
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
@@ -12,7 +12,7 @@ import { Resvg } from "@resvg/resvg-js";
 import { imageSize } from "image-size";
 
 async function main() {
-  const [what, outDir, photoFile] = process.argv.slice(2);
+  const [what, outDir, photoFile, cutoutFile] = process.argv.slice(2);
   if (!what || !outDir) throw new Error("usage: design-preview.ts <preset|doc.json> <outDir> [photo.jpg]");
   const { DESIGN_PRESETS, isDesignPresetId } = await import("../src/lib/design-editor/templates");
   const { parseDesignDoc } = await import("../src/lib/design-editor/doc");
@@ -28,6 +28,13 @@ async function main() {
   await mkdir(outDir, { recursive: true });
   const FONT_DIR = path.join(process.cwd(), "public", "fonts", "clip-editor");
   const photo = photoFile ? await readFile(photoFile) : null;
+  const cutout = cutoutFile ? await readFile(cutoutFile) : null;
+  if (cutout) {
+    // Shape the cutout slots like the editor does when a cutout lands.
+    const { fitCutoutBox } = await import("../src/lib/design-editor/cutout-geometry");
+    const dims = imageSize(cutout);
+    for (const page of doc.pages) for (const el of page.elements) if (el.type === "image" && el.slot?.kind === "cutout") Object.assign(el, fitCutoutBox(el, { width: dims.width ?? 1, height: dims.height ?? 1 }));
+  }
   const images: Record<string, { src: string; width: number; height: number }> = {};
   for (const page of doc.pages) {
     for (const el of page.elements) {
@@ -35,7 +42,9 @@ async function main() {
       let buf: Buffer;
       let type = "image/png";
       const isPlaceholder = el.src.kind === "asset" && el.src.path.includes("placeholder");
-      if (isPlaceholder && photo && (el.slot?.kind === "photo" || el.slot?.kind === "frame")) {
+      if (isPlaceholder && cutout && el.slot?.kind === "cutout") {
+        buf = cutout;
+      } else if (isPlaceholder && photo && (el.slot?.kind === "photo" || el.slot?.kind === "frame")) {
         buf = photo;
         type = "image/jpeg";
       } else if (el.src.kind === "asset") {
