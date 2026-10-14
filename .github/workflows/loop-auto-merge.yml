@@ -1,46 +1,90 @@
-# Arms GitHub auto-merge on the PRs the ship broker opens for agent loops
-# (`ship web hubandspoke`, branch `app-loop/*`). GitHub merges only once the
-# required `build` check (ci.yml) is green; red leaves the PR open. Veto by
-# closing the PR or labelling it `hold` (disarms). Interactive sessions where
-# Pat asks for a fix push straight to main and never come through here.
+# Merges the pull requests the ship broker opens for agent loops (`ship web hubandspoke --branch
+# app-loop/<slug>`), and only those, once the unprivileged `build` check (ci.yml) is green on
+# the exact commit. The loops run on closet-mbp with no GitHub access of their own; the PR is
+# opened from Pat's MacBook Pro. Pat vetoes by closing the PR or labelling it `hold`.
 #
-# pull_request_target, so THIS file runs from main, not from the PR — a loop
-# can't edit its own gate. Never check out PR code in this workflow. A PR
-# that touches .github/ (which could rewrite what `build` checks) is left for
-# a human. See docs/conventions.md → CI & Dependabot.
+# Guard rails (Pat, 2026-10-14: "someone can't do something crazy"): a PR is left for a human when
+# it touches the gate or the supply chain (.github/, Dockerfile*, docker-compose*, deploy/,
+# package.json, package-lock.json, any *.sh under scripts/ or deploy/), when it is large
+# (> 600 changed lines), when it was not opened by Pat's account, or when its head is not in
+# this repository. pull_request_target: this file runs from main, never from the PR, and
+# never checks the PR's code out — the build check does that with a read-only token.
 name: Loop auto-merge
 
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, labeled, unlabeled]
+  check_suite:
+    types: [completed]
 
 permissions:
   contents: write
   pull-requests: write
+  checks: read
 
 jobs:
   auto-merge:
-    if: >-
-      github.repository == 'patwalls/hubandspoke' &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'app-loop/')
+    if: github.repository == 'patwalls/hubandspoke'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
-      - name: Arm or disarm auto-merge
+      - name: Find the loop PR behind this event
+        id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HOLD: ${{ contains(github.event.pull_request.labels.*.name, 'hold') }}
+          EVENT: ${{ github.event_name }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          SUITE_SHA: ${{ github.event.check_suite.head_sha }}
         run: |
-          if [ "$HOLD" = "true" ]; then
-            gh pr merge "$PR" --disable-auto || true
-            echo "labelled hold: left for a human"; exit 0
+          if [ "$EVENT" = "pull_request_target" ]; then n="$PR_NUM"; else
+            n="$(gh pr list --state open --json number,headRefOid --jq ".[] | select(.headRefOid==\"$SUITE_SHA\") | .number" | head -1)"; fi
+          [ -n "$n" ] || { echo "no open PR for this event"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; }
+          gh pr view "$n" --json number,headRefName,headRefOid,baseRefName,author,labels,isCrossRepository,additions,deletions,url \
+            --jq '"num=\(.number)\nbranch=\(.headRefName)\nsha=\(.headRefOid)\nbase=\(.baseRefName)\nauthor=\(.author.login)\ncross=\(.isCrossRepository)\nhold=\(any(.labels[]; .name=="hold"))\nlines=\(.additions + .deletions)\nurl=\(.url)"' >> "$GITHUB_OUTPUT"
+      - name: Guard rails
+        if: steps.pr.outputs.skip != '1'
+        id: guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          NUM: ${{ steps.pr.outputs.num }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          BASE: ${{ steps.pr.outputs.base }}
+          AUTHOR: ${{ steps.pr.outputs.author }}
+          CROSS: ${{ steps.pr.outputs.cross }}
+          HOLD: ${{ steps.pr.outputs.hold }}
+          LINES: ${{ steps.pr.outputs.lines }}
+        run: |
+          why=""
+          case "$BRANCH" in app-loop/*) ;; *) why="branch $BRANCH is not a loop branch (app-loop/*)";; esac
+          [ "$BASE" = "main" ] || why="${why:-base is $BASE, not main}"
+          [ "$CROSS" = "false" ] || why="${why:-head is in another repository}"
+          [ "$AUTHOR" = "patwalls" ] || why="${why:-opened by $AUTHOR, not the ship broker}"
+          [ "$HOLD" = "false" ] || why="${why:-labelled hold}"
+          [ "$LINES" -le 600 ] || why="${why:-$LINES changed lines (cap 600)}"
+          touched="$(gh pr diff "$NUM" --name-only | grep -E '^(\.github/|Dockerfile|docker-compose|deploy/|package\.json$|package-lock\.json$|scripts/.*\.sh$)' || true)"
+          [ -z "$touched" ] || why="${why:-touches $(echo "$touched" | head -3 | tr '\n' ' ')}"
+          if [ -n "$why" ]; then
+            echo "left for a human: $why"
+            gh pr comment "$NUM" --body "Loop auto-merge left this for a human: $why" >/dev/null 2>&1 || true
+            echo "skip=1" >> "$GITHUB_OUTPUT"
           fi
-          if gh pr diff "$PR" --name-only | grep -q '^\.github/'; then
-            gh pr merge "$PR" --disable-auto || true
-            echo "touches .github/: left for a human"; exit 0
-          fi
-          gh pr merge "$PR" --auto --squash --delete-branch --match-head-commit "$HEAD_SHA"
+      - name: Wait for the build check on this exact commit, then merge
+        if: steps.pr.outputs.skip != '1' && steps.guard.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          NUM: ${{ steps.pr.outputs.num }}
+          SHA: ${{ steps.pr.outputs.sha }}
+          URL: ${{ steps.pr.outputs.url }}
+        run: |
+          for i in $(seq 1 60); do
+            state="$(gh api "repos/$GH_REPO/commits/$SHA/check-runs" --jq '[.check_runs[] | select(.name=="build")] | if length==0 then "none" else (.[0].conclusion // "pending") end')"
+            case "$state" in
+              success) echo "build green on $SHA"; gh pr merge "$NUM" --squash --delete-branch --match-head-commit "$SHA"; exit $?;;
+              failure|cancelled|timed_out|action_required|startup_failure) echo "build $state on $SHA: nothing merges"; exit 0;;
+              *) sleep 30;;
+            esac
+          done
+          echo "build never reported for $SHA within 30 minutes; nothing merges"
