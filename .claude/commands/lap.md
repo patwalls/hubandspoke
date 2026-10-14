@@ -45,7 +45,7 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
 
 1. **Liveness (2 curls)** — `https://hubandspoke.starterstory.com/api/health/worker`
    (`ok:true`, small ageSeconds) and `/login` (200, and note the response time).
-2. **Sentry** (org `pat-walls`, project `hubandspoke`; token in `~/.zshenv`):
+2. **Sentry** (org `pat-walls`, project `hubandspoke`): `hk sentry --project hubandspoke --hours 24` — the token lives with the heroku broker on the MacBook Pro, never here; read-only (no Sentry event from this lap on closet-mbp: say CRIT in the escalation instead). Was: token in `~/.zshenv`.
    unresolved issues, `statsPeriod=24h`. Only NEW issues (vs health log) or event-count
    spikes matter.
 3. **Heroku (2 calls)** — `hk ps hubandspoke` (web+worker `up`) + `hk builds hubandspoke`
@@ -233,6 +233,8 @@ git push -u origin ops/<short-slug>
   --fingerprint "<stable-key>" --severity warn \
   --title "<what's broken>" --body-file <evidence.md> --branch ops/<short-slug>
 ```
+
+> **closet-mbp (2026-10-14):** yt-archive and the recovery agent are launchd jobs on the MacBook Pro, not on this machine. Do not look for them here; report both as `tracked-only (runs on the MBP)` once per lap and move on. Sentry is `hk sentry`. Git: this checkout is moved by `ship sync hubandspoke` (never `git pull`; there is no GitHub access here).
 
 Draft, never ready-for-review — a human opens it. **Never push the branch to `main`** and
 never merge it yourself; pushing `main` auto-deploys. Tests must pass before the push, same
