@@ -218,6 +218,15 @@ is a judgment one) — write it anyway, on a branch, and hand it over as a draft
 ```bash
 git checkout -b ops/<short-slug>
 # …write the fix, run `npx tsc --noEmit` and `npm run test:unit`…
+
+> **Since 2026-10-14 this lap runs on closet-mbp**, while the ship broker and its checkout stay on the
+> MacBook Pro. Commit your work on a `app-loop/<slug>` branch here, then name it on every ship call:
+> `ship run hubandspoke <action> --branch <your branch> -- …` builds and tests THAT commit (a file you
+> named in the args, like a simshot png, is copied back to you); `ship web hubandspoke --branch <your
+> branch>` opens the PR, which merges itself once CI's `build` is green unless it touches the
+> workflows, Dockerfile, deploy, package files or shell scripts, grows past 600 lines, or is labelled
+> `hold` — then a human looks. There is no `ship push` to master any more. `ship sync hubandspoke` moves
+> this checkout to the merged base.
 git commit -am "proposal: <what and why, with the production evidence>"
 git push -u origin ops/<short-slug>
 ~/.local/bin/ship run hubandspoke escalate -- report \
