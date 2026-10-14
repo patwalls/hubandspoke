@@ -1563,116 +1563,62 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               </PopoverContent>
             </Popover>
             </PropertyRow>
-            <PropertyRow label="Descript layout pack" tooltip="The layout pack Underlord applies to this format's Descript compositions (framing, hook-text track, captions). Prompts get a canonical apply-by-id instruction from the pack registry — it supersedes any pack link written in the Skill. New packs are validated against the Descript API before they can be selected.">
-            <Popover
-              open={packPopoverOpen}
-              onOpenChange={(open) => {
-                setPackPopoverOpen(open);
-                if (!open) {
-                  setAddPackOpen(false);
-                  setAddPackError(null);
-                }
-              }}
-            >
-              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
-                {(() => {
-                  const selected = layoutPacks.find((p) => p.id === descriptLayoutPackId);
-                  return selected ? (
-                    <span className="truncate">{selected.name}</span>
-                  ) : (
-                    <span className="text-muted-foreground">Select layout pack…</span>
-                  );
-                })()}
-                <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-              </PopoverTrigger>
-              <PopoverContent className="w-80 p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search layout packs…" />
-                  <CommandList>
-                    <CommandEmpty>No matching pack.</CommandEmpty>
-                    <CommandGroup>
-                      <CommandItem
-                        onSelect={() => {
-                          setDescriptLayoutPackId(null);
-                          setPackPopoverOpen(false);
-                          void persistField({ descriptLayoutPackId: null });
-                        }}
-                      >
-                        <span className="text-sm text-muted-foreground">None — use Skill text as-is</span>
-                      </CommandItem>
-                      {layoutPacks.map((p) => (
-                        <CommandItem
-                          key={p.id}
-                          value={p.name}
-                          onSelect={() => {
-                            setDescriptLayoutPackId(p.id);
-                            setPackPopoverOpen(false);
-                            void persistField({ descriptLayoutPackId: p.id });
-                          }}
-                          data-checked={descriptLayoutPackId === p.id ? "true" : undefined}
-                        >
-                          <span className="text-sm">{p.name}</span>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-                <div className="border-t border-border p-2">
-                  {!addPackOpen ? (
-                    <button
-                      type="button"
-                      className="text-xs text-primary underline underline-offset-2"
-                      onClick={() => setAddPackOpen(true)}
-                    >
-                      Register a new pack…
-                    </button>
-                  ) : (
-                    <div className="space-y-1.5">
-                      <Input
-                        value={newPackName}
-                        onChange={(e) => setNewPackName(e.target.value)}
-                        placeholder='Pack name, e.g. "Reels Layout"'
-                        className="h-8 text-xs"
-                      />
-                      <Input
-                        value={newPackUrl}
-                        onChange={(e) => setNewPackUrl(e.target.value)}
-                        placeholder="Paste the pack page link"
-                        className="h-8 text-xs"
-                      />
-                      {addPackError && (
-                        <p className="text-[11px] text-destructive">{addPackError}</p>
-                      )}
-                      <div className="flex gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="h-7 text-xs"
-                          disabled={addPackBusy || !newPackName.trim() || !newPackUrl.trim()}
-                          onClick={() => void addLayoutPack()}
-                        >
-                          {addPackBusy ? "Validating…" : "Validate & add"}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs"
-                          onClick={() => {
-                            setAddPackOpen(false);
-                            setAddPackError(null);
-                          }}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
-            </PropertyRow>
           </PropertyRowGroup>
+          {usesCtaOffer(data?.format?.brand) && (
+            <PropertyRowSolo>
+              <div className="px-3 py-3 space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="cta-strategy" className="text-xs">
+                    CTA offer
+                  </Label>
+                  <select
+                    id="cta-strategy"
+                    value={ctaStrategy}
+                    onChange={(e) => {
+                      const next = e.target.value || null;
+                      setCtaStrategy(next ?? "");
+                      void persistField({ ctaStrategy: next });
+                    }}
+                    className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                  >
+                    <option value="">Brand fallback offer</option>
+                    <option value="pillar_offer">Offer from the pillar video&apos;s description</option>
+                    <option value="pillar_video">Link to the full pillar video</option>
+                    {/* "Fixed link" retired as a choice (same job as the brand
+                        fallback). Still shown for formats already set to it so
+                        the select doesn't misreport what the backend uses. */}
+                    {ctaStrategy === "fixed" && (
+                      <option value="fixed">A fixed link (legacy)</option>
+                    )}
+                  </select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Which link this format&apos;s posts send people to. The post&apos;s UTMs are added automatically. &quot;Offer from the pillar&quot; follows the clickhubspot link in the YouTube description to the real offer page. If a rule can&apos;t find a link, the brand&apos;s fallback offer (Brand Assets settings) is used.
+                  </p>
+                </div>
+                {ctaStrategy === "fixed" && (
+                  <div className="space-y-1">
+                    <Label htmlFor="cta-fixed-url" className="text-xs">
+                      Fixed offer link
+                    </Label>
+                    <Input
+                      id="cta-fixed-url"
+                      type="url"
+                      value={ctaFixedUrl}
+                      onChange={(e) => setCtaFixedUrl(e.target.value)}
+                      onBlur={() => {
+                        void persistField({ ctaFixedUrl: ctaFixedUrl.trim() || null });
+                      }}
+                      placeholder="https://offers.hubspot.com/…"
+                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Paste the real offer page, not a clickhubspot short link.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </PropertyRowSolo>
+          )}
 
           {data?.format && (
             <FormatTemplatesSection brand={brand} formatId={formatId} formatName={data.format.name} isClippableFormat={isClippableFormat} />
@@ -1875,56 +1821,117 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </div>
           </PropertyRowSolo>
 
-          {usesCtaOffer(data?.format?.brand) && (
-            <PropertyRowSolo>
-              <div className="px-3 py-3 space-y-3">
-                <div className="space-y-1">
-                  <Label htmlFor="cta-strategy" className="text-xs">
-                    CTA offer
-                  </Label>
-                  <select
-                    id="cta-strategy"
-                    value={ctaStrategy}
-                    onChange={(e) => {
-                      const next = e.target.value || null;
-                      setCtaStrategy(next ?? "");
-                      void persistField({ ctaStrategy: next });
-                    }}
-                    className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                  >
-                    <option value="">Brand fallback offer</option>
-                    <option value="pillar_offer">Offer from the pillar video&apos;s description</option>
-                    <option value="pillar_video">Link to the full pillar video</option>
-                    <option value="fixed">A fixed link</option>
-                  </select>
-                  <p className="text-[11px] text-muted-foreground">
-                    Which link this format&apos;s posts send people to. The post&apos;s UTMs are added automatically. &quot;Offer from the pillar&quot; follows the clickhubspot link in the YouTube description to the real offer page. If a rule can&apos;t find a link, the brand&apos;s fallback offer (Brand Assets settings) is used.
-                  </p>
+          <PropertyRowGroup single>
+            <PropertyRow label="Descript layout pack" tooltip="The layout pack Underlord applies to this format's Descript compositions (framing, hook-text track, captions). Prompts get a canonical apply-by-id instruction from the pack registry — it supersedes any pack link written in the Skill. New packs are validated against the Descript API before they can be selected.">
+            <Popover
+              open={packPopoverOpen}
+              onOpenChange={(open) => {
+                setPackPopoverOpen(open);
+                if (!open) {
+                  setAddPackOpen(false);
+                  setAddPackError(null);
+                }
+              }}
+            >
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
+                {(() => {
+                  const selected = layoutPacks.find((p) => p.id === descriptLayoutPackId);
+                  return selected ? (
+                    <span className="truncate">{selected.name}</span>
+                  ) : (
+                    <span className="text-muted-foreground">Select layout pack…</span>
+                  );
+                })()}
+                <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search layout packs…" />
+                  <CommandList>
+                    <CommandEmpty>No matching pack.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        onSelect={() => {
+                          setDescriptLayoutPackId(null);
+                          setPackPopoverOpen(false);
+                          void persistField({ descriptLayoutPackId: null });
+                        }}
+                      >
+                        <span className="text-sm text-muted-foreground">None — use Skill text as-is</span>
+                      </CommandItem>
+                      {layoutPacks.map((p) => (
+                        <CommandItem
+                          key={p.id}
+                          value={p.name}
+                          onSelect={() => {
+                            setDescriptLayoutPackId(p.id);
+                            setPackPopoverOpen(false);
+                            void persistField({ descriptLayoutPackId: p.id });
+                          }}
+                          data-checked={descriptLayoutPackId === p.id ? "true" : undefined}
+                        >
+                          <span className="text-sm">{p.name}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+                <div className="border-t border-border p-2">
+                  {!addPackOpen ? (
+                    <button
+                      type="button"
+                      className="text-xs text-primary underline underline-offset-2"
+                      onClick={() => setAddPackOpen(true)}
+                    >
+                      Register a new pack…
+                    </button>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <Input
+                        value={newPackName}
+                        onChange={(e) => setNewPackName(e.target.value)}
+                        placeholder='Pack name, e.g. "Reels Layout"'
+                        className="h-8 text-xs"
+                      />
+                      <Input
+                        value={newPackUrl}
+                        onChange={(e) => setNewPackUrl(e.target.value)}
+                        placeholder="Paste the pack page link"
+                        className="h-8 text-xs"
+                      />
+                      {addPackError && (
+                        <p className="text-[11px] text-destructive">{addPackError}</p>
+                      )}
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={addPackBusy || !newPackName.trim() || !newPackUrl.trim()}
+                          onClick={() => void addLayoutPack()}
+                        >
+                          {addPackBusy ? "Validating…" : "Validate & add"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            setAddPackOpen(false);
+                            setAddPackError(null);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {ctaStrategy === "fixed" && (
-                  <div className="space-y-1">
-                    <Label htmlFor="cta-fixed-url" className="text-xs">
-                      Fixed offer link
-                    </Label>
-                    <Input
-                      id="cta-fixed-url"
-                      type="url"
-                      value={ctaFixedUrl}
-                      onChange={(e) => setCtaFixedUrl(e.target.value)}
-                      onBlur={() => {
-                        void persistField({ ctaFixedUrl: ctaFixedUrl.trim() || null });
-                      }}
-                      placeholder="https://offers.hubspot.com/…"
-                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      Paste the real offer page, not a clickhubspot short link.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </PropertyRowSolo>
-          )}
+              </PopoverContent>
+            </Popover>
+            </PropertyRow>
+          </PropertyRowGroup>
         </div>
 
         {ancestors.length > 0 && (
