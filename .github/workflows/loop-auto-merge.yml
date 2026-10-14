@@ -22,6 +22,11 @@ permissions:
   pull-requests: write
   checks: read
 
+# one merge attempt per PR at a time: label flips and check suites would otherwise race each other
+concurrency:
+  group: loop-auto-merge-${{ github.event.pull_request.number || github.event.check_suite.head_sha }}
+  cancel-in-progress: true
+
 jobs:
   auto-merge:
     if: github.repository == 'patwalls/hubandspoke'
