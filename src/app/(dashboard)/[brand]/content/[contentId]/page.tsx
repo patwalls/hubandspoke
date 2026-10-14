@@ -10,6 +10,7 @@ import { getBrandStatuses } from "@/lib/db/brand-statuses";
 import { ContentDetail } from "@/components/dashboard/content-detail";
 import { getProductionItemDetail } from "@/lib/services/production-item-detail";
 import { auth } from "@/lib/auth";
+import { isUuid } from "@/lib/uuid";
 
 interface ContentDetailPageProps {
   params: Promise<{ brand: string; contentId: string }>;
@@ -19,6 +20,7 @@ export async function generateMetadata({
   params,
 }: ContentDetailPageProps): Promise<Metadata> {
   const { contentId } = await params;
+  if (!isUuid(contentId)) return { title: "Post" };
   const [item] = await db
     .select({ title: productionItems.title })
     .from(productionItems)
@@ -33,7 +35,9 @@ export default async function BrandContentDetailPage({
   const { brand, contentId } = await params;
   const brandConfig = await fetchBrandBySlug(brand);
 
-  if (!brandConfig) {
+  // A malformed id (e.g. a pasted link with trailing `**`) would make the
+  // uuid query throw and page Sentry — it's just a missing page.
+  if (!brandConfig || !isUuid(contentId)) {
     notFound();
   }
 

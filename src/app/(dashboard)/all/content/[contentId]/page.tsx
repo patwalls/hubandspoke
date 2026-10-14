@@ -7,6 +7,7 @@ import { getAccounts } from "@/lib/db/accounts";
 import { getBrandStatuses } from "@/lib/db/brand-statuses";
 import { ContentDetail } from "@/components/dashboard/content-detail";
 import { auth } from "@/lib/auth";
+import { isUuid } from "@/lib/uuid";
 
 interface AllContentDetailPageProps {
   params: Promise<{ contentId: string }>;
@@ -16,6 +17,7 @@ export async function generateMetadata({
   params,
 }: AllContentDetailPageProps): Promise<Metadata> {
   const { contentId } = await params;
+  if (!isUuid(contentId)) return { title: "Post" };
   const [item] = await db
     .select({ title: productionItems.title })
     .from(productionItems)
@@ -28,6 +30,9 @@ export default async function AllContentDetailPage({
   params,
 }: AllContentDetailPageProps) {
   const { contentId } = await params;
+  if (!isUuid(contentId)) {
+    notFound();
+  }
 
   // Each item knows its own brand. Look it up here so the detail component
   // can run with the per-brand wiring (cross-post target picker, format
