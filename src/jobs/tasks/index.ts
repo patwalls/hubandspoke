@@ -23,6 +23,7 @@ import { designRenderTask, type DesignRenderPayload } from "./design-render";
 import { designFramesTask, type DesignFramesPayload } from "./design-frames";
 import { designTemplateImportTask, type DesignTemplateImportPayload } from "./design-template-import";
 import { designScreensTask, type DesignScreensPayload } from "./design-screens";
+import { designStyleExtractTask, type DesignStyleExtractPayload } from "./design-style-extract";
 import { designDraftTask, type DesignDraftPayload } from "./design-draft";
 import {
   diarizeTranscriptTask,
@@ -129,6 +130,7 @@ export interface TaskPayloads {
   "design-frames": DesignFramesPayload;
   "design-template-import": DesignTemplateImportPayload;
   "design-screens": DesignScreensPayload;
+  "design-style-extract": DesignStyleExtractPayload;
   "design-draft": DesignDraftPayload;
   "diarize-transcript": DiarizeTranscriptPayload;
   "descript-derivative-create": DescriptDerivativeCreatePayload;
@@ -192,6 +194,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "design-frames": designFramesTask,
   "design-template-import": designTemplateImportTask,
   "design-screens": designScreensTask,
+  "design-style-extract": designStyleExtractTask,
   "design-draft": designDraftTask,
   "diarize-transcript": diarizeTranscriptTask,
   "descript-derivative-create": descriptDerivativeCreateTask,

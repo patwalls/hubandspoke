@@ -24,6 +24,7 @@ import {
   BlendIcon,
   ImageIcon,
   LayersIcon,
+  LayoutGridIcon,
   LayoutTemplateIcon,
   LinkIcon,
   Loader2Icon,
@@ -59,6 +60,8 @@ import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFramesState } from "@/lib/services/design-editor/frames";
 import type { DesignPhoto, DesignPhotosState } from "@/lib/services/design-editor/photos";
 import type { HeroCoverResult } from "@/lib/services/design-editor/hero";
+import type { CoverStyleCard, CoverStyleState } from "@/lib/services/design-editor/cover-styles";
+import { CoverStylesPanel } from "./cover-styles-panel";
 import { storyFrames } from "@/lib/design-editor/story-frames";
 import { PostPane } from "@/components/clip-editor/post-pane";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
@@ -261,7 +264,10 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   const [cutoutBusy, setCutoutBusy] = useState<string | null>(null);
   /** A frame grab the user asked for; swapped in when the worker delivers it. */
   const pendingGrab = useRef<{ elementId: string | null; pageIndex: number; sec: number } | null>(null);
-  const [busy, setBusy] = useState<null | "regen" | "export" | "hero">(null);
+  const [busy, setBusy] = useState<null | "regen" | "export" | "hero" | "style">(null);
+  const [stylesOpen, setStylesOpen] = useState(false);
+  /** The gallery card being applied (its tile shows a spinner). */
+  const [styleBusyId, setStyleBusyId] = useState<string | null>(null);
   const [dmKeyword, setDmKeyword] = useState<string | null>(session.dmKeyword);
   const [keywordOpen, setKeywordOpen] = useState(false);
   const channelsInDoc = useMemo(() => resolveChannelsInDoc(doc, session.channels), [doc, session.channels]);
@@ -678,6 +684,40 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     }
   };
 
+  /** The cover's main AI-written text — kept when the cover is rebuilt. */
+  const currentHeadlineOf = (d: DesignDoc): string | null =>
+    d.pages[0]?.elements
+      .filter((e): e is Extract<typeof e, { type: "text" }> => e.type === "text" && e.slot?.kind === "ai")
+      .sort((a, b) => b.style.sizePx - a.style.sizePx)[0]
+      ?.spans.map((s) => s.text).join("") ?? null;
+
+  /** Put a server-built cover page in as page 1 (undoable), then make the
+   *  cutout in the browser when the page has an empty cutout slot and the
+   *  library doesn't have one yet. Shared by the hero cover and cover styles. */
+  const installCover = async (json: HeroCoverResult, toastId: string, label: string, cutoutKey: string) => {
+    setImageUrls((m) => ({ ...m, ...json.imageUrls }));
+    apply(commands.replacePage(0, json.page));
+    select({ pageIndex: 0, elementId: null });
+    const needsCutout = hasEmptyCutoutSlot({ ...doc, pages: [json.page] });
+    if (!needsCutout) return void toast.success(`${label} ready`, { id: toastId, description: "Undo (⌘Z) brings the old cover back." });
+    if (!json.pick) return void toast.success(`${label} ready — no cover photo yet`, { id: toastId, description: "The video's frames are still being made. Select the cutout slot and swap a picture in, then Remove background." });
+    toast.success(`${label} ready — cutting the founder out next`, { id: toastId });
+    setCutoutBusy(cutoutKey);
+    try {
+      const made = await makeCutout(json.pick.previewUrl, "cover", json.pick.src);
+      if (!made) return;
+      const { photo } = made;
+      const { doc: cur } = storeApi.getState();
+      const patched = applyPhotoPick(cur, null, [], { src: photo.src, width: photo.width, height: photo.height });
+      if (patched) {
+        setImageUrls((m) => ({ ...m, ...Object.fromEntries(patched.elementIds.map((id) => [id, photo.previewUrl])) }));
+        apply(() => patched.doc);
+      }
+    } finally {
+      setCutoutBusy(null);
+    }
+  };
+
   /** Rebuild page 1 as the hero cover: AI fill on the server, then the
    *  cutout in the browser if the library doesn't have one yet. */
   const heroCover = async () => {
@@ -685,41 +725,54 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     const toastId = "hero-cover";
     toast.loading("Designing the hero cover…", { id: toastId, description: "Headline, footer and the stat card from the transcript — about 15 seconds." });
     try {
-      const cover = doc.pages[0];
-      const currentHeadline = cover?.elements
-        .filter((e): e is Extract<typeof e, { type: "text" }> => e.type === "text" && e.slot?.kind === "ai")
-        .sort((a, b) => b.style.sizePx - a.style.sizePx)[0]
-        ?.spans.map((s) => s.text).join("") ?? null;
       const res = await fetch(`/api/production-items/${session.item.id}/design/hero`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ canvas: doc.canvas, currentHeadline, instruction: instruction || null }),
+        body: JSON.stringify({ canvas: doc.canvas, currentHeadline: currentHeadlineOf(doc), instruction: instruction || null }),
       });
       const json = (await res.json().catch(() => ({}))) as HeroCoverResult & { error?: string };
       if (!res.ok || !json.page) return void toast.error(json.error ?? `Couldn't design the cover (${res.status})`, { id: toastId });
-      setImageUrls((m) => ({ ...m, ...json.imageUrls }));
-      apply(commands.replacePage(0, json.page));
-      select({ pageIndex: 0, elementId: null });
-      const needsCutout = hasEmptyCutoutSlot({ ...doc, pages: [json.page] });
-      if (!needsCutout) return void toast.success("Hero cover ready", { id: toastId, description: "Undo (⌘Z) brings the old cover back." });
-      if (!json.pick) return void toast.success("Hero cover ready — no cover photo yet", { id: toastId, description: "The video's frames are still being made. Select the cutout slot and swap a picture in, then Remove background." });
-      toast.success("Hero cover ready — cutting the founder out next", { id: toastId });
-      setCutoutBusy("hero");
-      try {
-        const made = await makeCutout(json.pick.previewUrl, "cover", json.pick.src);
-        if (!made) return;
-        const { photo } = made;
-        const { doc: cur } = storeApi.getState();
-        const patched = applyPhotoPick(cur, null, [], { src: photo.src, width: photo.width, height: photo.height });
-        if (patched) {
-          setImageUrls((m) => ({ ...m, ...Object.fromEntries(patched.elementIds.map((id) => [id, photo.previewUrl])) }));
-          apply(() => patched.doc);
-        }
-      } finally {
-        setCutoutBusy(null);
-      }
+      await installCover(json, toastId, "Hero cover", "hero");
     } finally {
       setBusy(null);
+    }
+  };
+
+  /** Rebuild page 1 in a published cover's style: the layout is read once
+   *  on the worker (first click on that cover, ~30s), then filled for this
+   *  post like the hero cover. Resolves with the style's state for the tile. */
+  const applyStyle = async (card: CoverStyleCard): Promise<CoverStyleState | null> => {
+    setBusy("style");
+    setStyleBusyId(card.productionItemId);
+    const toastId = "cover-style";
+    let state: CoverStyleState | null = null;
+    try {
+      toast.loading(card.status === "done" ? "Rebuilding your cover in this style…" : "Reading that cover's layout…", { id: toastId, description: card.status === "done" ? "Headline and stat from the transcript — about 15 seconds." : "First time for this cover — about 30 seconds. After that it's one step." });
+      const started = await fetch("/api/design/styles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productionItemId: card.productionItemId }) });
+      state = (await started.json().catch(() => null)) as (CoverStyleState & { error?: string }) | null;
+      if (!started.ok || !state?.id) return void toast.error((state as { error?: string } | null)?.error ?? `Couldn't read that cover (${started.status})`, { id: toastId }), null;
+      const t0 = Date.now();
+      while (state.status === "pending") {
+        if (Date.now() - t0 > 3 * 60_000) return void toast.error("Reading that cover is taking too long — the worker may be busy. Try again in a minute.", { id: toastId }), state;
+        await new Promise((r) => setTimeout(r, 2000));
+        const res = await fetch(`/api/design/styles/${state.id}`).catch(() => null);
+        const json = (await res?.json().catch(() => null)) as (CoverStyleState & { error?: string }) | null;
+        if (res && res.status === 422) return void toast.error(json?.error ?? "Couldn't read that cover", { id: toastId }), (json ?? state);
+        if (json?.status) state = json;
+      }
+      toast.loading("Rebuilding your cover in this style…", { id: toastId, description: "Headline and stat from the transcript — about 15 seconds." });
+      const res = await fetch(`/api/production-items/${session.item.id}/design/style`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ styleId: state.id, canvas: doc.canvas, currentHeadline: currentHeadlineOf(doc), instruction: instruction || null }),
+      });
+      const json = (await res.json().catch(() => ({}))) as HeroCoverResult & { error?: string };
+      if (!res.ok || !json.page) return void toast.error(json.error ?? `Couldn't rebuild the cover (${res.status})`, { id: toastId }), state;
+      await installCover(json, toastId, "Restyled cover", "style");
+      return state;
+    } finally {
+      setBusy(null);
+      setStyleBusyId(null);
     }
   };
 
@@ -847,7 +900,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
           </div>
         </div>
       )}
-      <div className={cn("grid min-h-0 flex-1 grid-cols-[150px_minmax(0,1fr)_300px] gap-4 px-5 py-4", tab !== "design" && "hidden")}>
+      <div className={cn("grid min-h-0 flex-1 gap-4 px-5 py-4", stylesOpen && !isTemplate ? "grid-cols-[150px_minmax(0,1fr)_440px]" : "grid-cols-[150px_minmax(0,1fr)_300px]", tab !== "design" && "hidden")}>
         {/* Pages */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
           {doc.pages.map((p, i) => (
@@ -944,7 +997,11 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
           )}
         </div>
 
+        {stylesOpen && !isTemplate ? (
+          <CoverStylesPanel brand={brand} format={session.item.format} busyId={styleBusyId} onPick={applyStyle} onClose={() => setStylesOpen(false)} />
+        ) : (
         <Inspector doc={doc} mode={mode} images={images} frames={frames} photos={photos} source={session.source} brand={brand} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onCutout={isTemplate ? undefined : (id) => void cutoutElement(id)} onSplit={isTemplate ? undefined : (id) => void splitElement(id)} cutoutBusy={cutoutBusy} onFindScreens={isTemplate ? undefined : (force) => void findScreens(force)} onDeletePhoto={isTemplate ? undefined : (p) => void deletePhoto(p)} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
+        )}
         {!isTemplate && (
           <AttachDmKeywordDialog
             open={keywordOpen}
@@ -978,6 +1035,10 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
         <Button type="button" size="sm" onClick={() => void heroCover()} disabled={busy !== null || locked || !!cutoutBusy} title="Rebuild the cover like the top posts: the founder cut out of the photo over a dimmed backdrop, a tilted revenue card behind them, the headline in Anton. The instruction on the left steers it." className="bg-pink-600 text-white hover:bg-pink-700">
           {busy === "hero" || cutoutBusy === "hero" ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : <WandSparklesIcon className="mr-1.5 size-3.5" />}
           Hero cover
+        </Button>
+        <Button type="button" size="sm" variant={stylesOpen ? "default" : "outline"} onClick={() => setStylesOpen((o) => !o)} aria-pressed={stylesOpen} title="Rebuild the cover in the layout of a post we've already published — pick from a gallery of our best covers">
+          {busy === "style" || cutoutBusy === "style" ? <Loader2Icon className="mr-1.5 size-3.5 animate-spin" /> : <LayoutGridIcon className="mr-1.5 size-3.5" />}
+          Cover styles
         </Button>
       </div>}
 

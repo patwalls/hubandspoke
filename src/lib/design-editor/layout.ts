@@ -35,15 +35,22 @@ type ParaWord = LaidOutWord & { color: string | null; blankBefore?: number };
 function spanWords(spans: DesignSpan[], uppercase: boolean): ParaWord[] {
   const out: ParaWord[] = [];
   let blank = 0;
+  // A span that ENDS with "\n" (a highlighted phrase starting the next line
+  // is its own span) is a hard break into the next span — not a blank line.
+  // Counting it as one gave headlines a paragraph gap at every coloured
+  // line start (2026-10-14).
+  let pendingBreak = false;
   spans.forEach((span, si) => {
-    span.text.split(/\r?\n/).forEach((line, li) => {
+    const segments = span.text.split(/\r?\n/);
+    segments.forEach((line, li) => {
       const tokens = line.split(/\s+/).filter(Boolean);
       if (tokens.length === 0) {
-        if (li > 0) blank += 1;
+        if (li > 0 && li < segments.length - 1) blank += 1;
+        else if (li > 0) pendingBreak = true;
         return;
       }
       tokens.forEach((t, wi) => {
-        const first = wi === 0 && out.length > 0 && (li > 0 || blank > 0);
+        const first = wi === 0 && out.length > 0 && (li > 0 || blank > 0 || pendingBreak);
         out.push({
           text: uppercase ? t.toUpperCase() : t,
           ref: si,
@@ -51,7 +58,10 @@ function spanWords(spans: DesignSpan[], uppercase: boolean): ParaWord[] {
           ...(first ? { hardBreakBefore: true } : {}),
           ...(first && blank > 0 ? { blankBefore: blank } : {}),
         });
-        if (wi === 0) blank = 0;
+        if (wi === 0) {
+          blank = 0;
+          pendingBreak = false;
+        }
       });
     });
   });

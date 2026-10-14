@@ -86,3 +86,31 @@ describe("normalizeHex / nearestCanvas", () => {
     expect(nearestCanvas(1000, 1000)).toEqual({ width: 1080, height: 1080 });
   });
 });
+
+describe("normalizeImportedTemplate — cover-style elements (2026-10-14)", () => {
+  it("reads a tilted stat card, a cutout and the brand wordmark into real elements", () => {
+    const r = normalizeImportedTemplate({
+      pageWidth: 1080, pageHeight: 1080,
+      pages: [page([
+        { type: "picture", name: "Backdrop", x: 0, y: 0, w: 1080, h: 1080, slot: "photo" },
+        { type: "statCard", name: "Revenue", x: 60, y: 180, w: 540, h: 320, label: "MRR", value: "$30K", sub: "4 days in", accent: "#ff00ff", rotation: -6 },
+        { type: "picture", name: "Founder", x: 320, y: 60, w: 740, h: 1020, slot: "cutout" },
+        { type: "picture", name: "Logo", x: 740, y: 40, w: 300, h: 70, slot: "wordmark", theme: "dark" },
+        { type: "text", name: "Headline", x: 50, y: 560, w: 980, h: 380, text: "HER SAAS HIT $30K MRR", fontId: "anton", sizePx: 96, color: "#FFFFFF", slot: "ai", hint: "The result.", rotation: 400 },
+      ])],
+    });
+    if (!r.ok) throw new Error(r.error);
+    const [backdrop, card, founder, logo, headline] = r.doc.pages[0].elements;
+    expect(backdrop.type === "image" && backdrop.slot?.kind).toBe("photo");
+    expect(card.type).toBe("statCard");
+    if (card.type !== "statCard") return;
+    expect(card).toMatchObject({ label: "MRR", value: "$30K", sub: "4 days in", accent: "#FF00FF", rotation: -6, slot: { kind: "ai" } });
+    expect(card.series.length).toBeGreaterThan(1);
+    expect(founder.type === "image" && founder.slot?.kind).toBe("cutout");
+    expect(founder.type === "image" && founder.fit).toBe("contain");
+    expect(logo.type === "image" && logo.src).toEqual({ kind: "asset", path: "/watermarks/starter-story-hubspot-media-white.png" });
+    expect(logo.slot).toBeNull();
+    // An out-of-range tilt is clamped, not rejected.
+    expect(headline.rotation).toBe(180);
+  });
+});

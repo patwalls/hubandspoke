@@ -12,13 +12,18 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { FONT_IDS, type FontId } from "@/lib/clip-editor/doc";
 import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, parseDesignDoc, type DesignDoc, type DesignElement, type DesignPage, type DesignSlot } from "./doc";
-import { baseText } from "./shared";
+import { baseText, statCard, WORDMARK_DARK, WORDMARK_WHITE } from "./shared";
 import { HIGHLIGHT_COLORS, applyHighlights } from "./template-fill";
 
 export const PDF_IMPORT_TEMPLATE = "pdf-import-v1";
 
 const TEXT_SLOTS = ["static", "ai", "videoTitle", "channelName", "dmKeyword"] as const;
-const PICTURE_SLOTS = ["photo", "frame", "placeholder"] as const;
+/** `cutout` / `screen` came with the cover styles (2026-10-14): the person
+ *  cut out of their photo, a dashboard screenshot. `wordmark` is the brand's
+ *  own logo — drawn from our asset, never a placeholder. */
+const PICTURE_SLOTS = ["photo", "frame", "placeholder", "cutout", "screen", "wordmark"] as const;
+/** What a stat card with an `ai` slot asks the model for, per post. */
+export const STAT_CARD_HINT = "The founder's headline metric as a dashboard would show it — the SAME number as the headline when the headline has one: label (\"Revenue\", \"MRR\", \"Downloads\"), value (\"$160,324\"), sub (\"Last 28 days\", \"Per month\").";
 
 export const IMPORT_TOOL: Anthropic.Tool = {
   name: "build_template",
@@ -43,13 +48,13 @@ export const IMPORT_TOOL: Anthropic.Tool = {
                 type: "object",
                 required: ["type", "name", "x", "y", "w", "h"],
                 properties: {
-                  type: { type: "string", enum: ["text", "picture", "rect", "video", "channel"] },
+                  type: { type: "string", enum: ["text", "picture", "rect", "video", "channel", "statCard"] },
                   name: { type: "string", description: "Short editor label: \"Headline\", \"Quote 1\", \"Photo · guest close-up\"." },
                   x: { type: "number" },
                   y: { type: "number" },
                   w: { type: "number" },
                   h: { type: "number" },
-                  slot: { type: "string", enum: [...TEXT_SLOTS, ...PICTURE_SLOTS], description: "text: static | ai | videoTitle | channelName | dmKeyword. picture: photo (THE founder/guest photo — use once, on the cover) | frame (a different still of the video per slot) | placeholder (a logo/graphic the user swaps in)." },
+                  slot: { type: "string", enum: [...TEXT_SLOTS, ...PICTURE_SLOTS], description: "text: static | ai | videoTitle | channelName | dmKeyword. picture: photo (THE founder/guest photo — use once, on the cover) | frame (a different still of the video per slot) | cutout (the person CUT OUT of their photo — no background, crisp edge, standing over whatever is behind) | screen (a dashboard / revenue screenshot) | wordmark (the brand's own logo) | placeholder (any other logo/graphic the user swaps in)." },
                   hint: { type: "string", description: "For ai text and video: what the AI should write/pick for every post, specific and with a length (\"The guest's opening line, 8–20 words, verbatim from the episode…\")." },
                   text: { type: "string", description: "text: the text as shown in the PDF, placeholder brackets removed. \\n for hard line breaks the design depends on (not soft wraps)." },
                   highlights: { type: "array", items: { type: "object", required: ["phrase", "color"], properties: { phrase: { type: "string", description: "Exact substring of text." }, color: { type: "string", description: "#RRGGBB" } } } },
@@ -67,7 +72,13 @@ export const IMPORT_TOOL: Anthropic.Tool = {
                   gradientDirection: { type: "string", enum: ["down", "up"], description: "rect: down = fill at top; up = fill at bottom." },
                   radius: { type: "number", description: "Corner radius in page units." },
                   platform: { type: "string", enum: ["youtube", "instagram", "x", "tiktok", "linkedin", "threads"] },
-                  theme: { type: "string", enum: ["light", "dark"] },
+                  theme: { type: "string", enum: ["light", "dark"], description: "channel / statCard: dark card on a dark page, light on a light one. wordmark: dark = the white logo." },
+                  rotation: { type: "number", description: "Tilt in degrees about the box centre (−180…180), e.g. -6 for a card thrown onto the page. 0/absent = upright." },
+                  label: { type: "string", description: "statCard: the small label (\"Revenue\")." },
+                  value: { type: "string", description: "statCard: the big number (\"$160,324\")." },
+                  sub: { type: "string", description: "statCard: the small line under it (\"Last 28 days\")." },
+                  accent: { type: "string", description: "statCard: the chart colour #RRGGBB." },
+                  showChart: { type: "boolean", description: "statCard: whether it has a chart." },
                 },
               },
             },
@@ -122,12 +133,19 @@ export function normalizeImportedTemplate(raw: unknown): NormalizeResult {
   const canvas = nearestCanvas(pageW, pageH);
   const sx = canvas.width / pageW;
   const sy = canvas.height / pageH;
+  // Type scales with the LARGER stretch: a 6:5 cover pulled to square gets
+  // a taller headline band, and text that stayed the same size would sit
+  // small in it (autoFit shrinks what then overflows; nothing grows it).
+  const sText = Math.max(sx, sy);
   const box = (e: Raw) => {
     const x = clamp(Math.round(num(e.x, 0) * sx), -canvas.width, canvas.width * 2);
     const y = clamp(Math.round(num(e.y, 0) * sy), -canvas.height, canvas.height * 2);
     return { x, y, w: Math.max(1, Math.round(num(e.w, canvas.width) * sx)), h: Math.max(1, Math.round(num(e.h, 60) * sy)) };
   };
-  const base = (e: Raw, fallbackName: string) => ({ name: str(e.name, fallbackName).slice(0, 60) || fallbackName, ...box(e), opacity: 1, locked: false, stack: null });
+  const base = (e: Raw, fallbackName: string) => {
+    const rotation = clamp(num(e.rotation, 0), -180, 180);
+    return { name: str(e.name, fallbackName).slice(0, 60) || fallbackName, ...box(e), opacity: 1, locked: false, stack: null, ...(rotation ? { rotation } : {}) };
+  };
 
   const pages: DesignPage[] = rawPages.slice(0, 20).map((p) => {
     const elements: DesignElement[] = [];
@@ -140,7 +158,7 @@ export function normalizeImportedTemplate(raw: unknown): NormalizeResult {
         if (!text.trim()) continue;
         const color = normalizeHex(e.color, "#FFFFFF");
         const highlights = (Array.isArray(e.highlights) ? e.highlights.filter(isObj) : []).map((h) => ({ phrase: str(h.phrase), color: normalizeHex(h.color, HIGHLIGHT_COLORS.yellow) })).filter((h) => h.phrase.trim());
-        const sizePx = clamp(Math.round(num(e.sizePx, 32) * sx), 8, 600);
+        const sizePx = clamp(Math.round(num(e.sizePx, 32) * sText), 8, 600);
         elements.push({
           id: newElementId("t"), type: "text", ...base(e, "Text"),
           spans: applyHighlights(text, highlights).map((s) => (s.color && s.color.toUpperCase() === color ? { text: s.text } : s)),
@@ -161,11 +179,27 @@ export function normalizeImportedTemplate(raw: unknown): NormalizeResult {
         });
       } else if (type === "picture") {
         const kind = oneOf(e.slot, PICTURE_SLOTS, "frame");
+        const name = kind === "placeholder" ? "Graphic" : kind === "cutout" ? "Founder cutout" : kind === "screen" ? "Screen" : kind === "wordmark" ? "Logo" : "Photo";
         elements.push({
-          id: newElementId("img"), type: "image", ...base(e, kind === "placeholder" ? "Graphic" : "Photo"),
-          src: { ...PHOTO_PLACEHOLDER }, fit: kind === "placeholder" ? "contain" : "cover", radius: Math.max(0, Math.round(num(e.radius, 0) * sx)), crop: { ...DEFAULT_CROP },
-          slot: slotFor(kind, ""),
+          id: newElementId("img"), type: "image", ...base(e, name),
+          // The wordmark is ours: the white one on dark pages. A cutout shows
+          // the whole person (contain); the box is reshaped when it lands.
+          src: kind === "wordmark" ? { ...(oneOf(e.theme, ["light", "dark"] as const, "dark") === "dark" ? WORDMARK_WHITE : WORDMARK_DARK) } : { ...PHOTO_PLACEHOLDER },
+          fit: kind === "placeholder" || kind === "wordmark" || kind === "cutout" ? "contain" : "cover",
+          radius: Math.max(0, Math.round(num(e.radius, 0) * sx)), crop: { ...DEFAULT_CROP },
+          slot: kind === "wordmark" ? null : slotFor(kind, ""),
         });
+      } else if (type === "statCard") {
+        const value = str(e.value, "$160,324").slice(0, 24) || "$160,324";
+        elements.push(
+          statCard(box(e), {
+            ...base(e, "Stat card"),
+            label: str(e.label, "Revenue").slice(0, 40) || "Revenue", value, sub: str(e.sub, "Last 28 days").slice(0, 40),
+            accent: normalizeHex(e.accent, "#22E07A"), theme: oneOf(e.theme, ["dark", "light"] as const, "dark"),
+            showChart: e.showChart !== false, radius: Math.max(0, Math.round(num(e.radius, 28) * sx)),
+            slot: { kind: "ai", hint: (str(e.hint) || STAT_CARD_HINT).slice(0, 800) },
+          }),
+        );
       } else if (type === "rect") {
         const g = isObj(e.gradientTo) ? { color: normalizeHex(e.gradientTo.color, "#000000"), alpha: clamp(num(e.gradientTo.alpha, 1), 0, 1) } : null;
         elements.push({

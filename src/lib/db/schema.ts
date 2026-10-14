@@ -1069,6 +1069,31 @@ export const designTemplateImports = pgTable("design_template_imports", {
 });
 
 /**
+ * A cover STYLE: the layout of a published post's cover (production_item_media
+ * index 0), read once by Opus into a one-page template (slots for the text,
+ * photo / cutout / stat card where the original has them) so the design
+ * editor can rebuild any post's cover "like that one" — deterministic after
+ * the first read, only the text fill is per post. One row per source post.
+ */
+export const designCoverStyles = pgTable("design_cover_styles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  productionItemId: uuid("production_item_id")
+    .notNull()
+    .unique()
+    .references(() => productionItems.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"), // pending | done | failed
+  mediaS3Bucket: text("media_s3_bucket"),
+  mediaS3Key: text("media_s3_key").notNull(),
+  doc: jsonb("doc").$type<DesignDoc>(),
+  /** One line on the look ("Founder cut out over a dimmed backdrop, tilted revenue card, Anton headline"). */
+  summary: text("summary"),
+  notes: text("notes"),
+  error: text("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
  * V2 (Splice v10, 2026-05-22): format-agnostic section detection. The
  * section picker runs once per pillar — Sonnet 4.6 reads the transcript
  * and picks 8-15 "interesting moments," each one a cue-aligned window

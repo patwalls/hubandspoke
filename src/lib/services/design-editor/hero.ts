@@ -9,14 +9,14 @@
  * otherwise the slot keeps its placeholder and the editor fills it when
  * the cutout lands — the same contract as the filmstrip.
  */
-import { IG_SQUARE, type DesignPage } from "@/lib/design-editor/doc";
+import { IG_SQUARE, type DesignDoc, type DesignPage } from "@/lib/design-editor/doc";
 import { buildHeroCover, HERO_COVER_TEMPLATE } from "@/lib/design-editor/hero-cover-template";
 import { fillTemplate } from "@/lib/design-editor/template-fill";
 import type { ImageCandidate } from "@/lib/design-editor/brand-assets";
 import { generateDesignFill } from "./fill-brief";
 import { previewUrlFor } from "./assets";
 import { cutoutFor, type DesignPhoto } from "./photos";
-import { coverPhotoFor, currentDmKeyword, designContext, DesignUnsupportedError, loadItem, loadSource, resolveImageUrls } from "./session";
+import { coverPhotoFor, currentDmKeyword, describeFillFailure, designContext, DesignUnsupportedError, loadItem, loadSource, resolveImageUrls } from "./session";
 
 export interface HeroCoverResult {
   page: DesignPage;
@@ -39,22 +39,41 @@ export async function buildHeroCoverForItem(args: {
   const item = await loadItem(args.productionItemId);
   const canvas = args.canvas ?? IG_SQUARE;
   const template = { version: 1 as const, canvas, template: HERO_COVER_TEMPLATE, pages: [buildHeroCover(canvas)] };
+  return buildCoverFromTemplate({ item, template, currentHeadline: args.currentHeadline, instruction: args.instruction, label: "the hero cover" });
+}
+
+/**
+ * Fill a one-page cover template for a post — the hero cover and every
+ * cover STYLE (cover-styles.ts) go through here. One Opus fill steered to
+ * keep the post's current headline; the photo / cutout / screen slots come
+ * from the item's library, the cutout slot staying empty when there is no
+ * cutout yet (the editor makes it).
+ */
+export async function buildCoverFromTemplate(args: {
+  item: Awaited<ReturnType<typeof loadItem>>;
+  template: DesignDoc;
+  currentHeadline: string | null;
+  instruction: string | null;
+  /** Named in the error when the fill comes back empty. */
+  label: string;
+}): Promise<HeroCoverResult> {
+  const { item, template } = args;
   const steer = [
     args.instruction?.trim() ?? "",
     args.currentHeadline?.trim()
-      ? `The post's current headline is: "${args.currentHeadline.trim()}". Keep it (tightened only if it is over the room) unless the instruction above asks for a different one. The stat card must show the same number the headline leads with.`
+      ? `The post's current headline is: "${args.currentHeadline.trim()}". Keep it (tightened only if it is over the room) unless the instruction above asks for a different one. A stat card must show the same number the headline leads with.`
       : "",
   ].filter(Boolean).join("\n");
   const fill = await generateDesignFill({ productionItemId: item.id, template, instruction: steer || null, dmKeyword: await currentDmKeyword(item.id) });
   if (!fill.ok) {
     if (fill.failure.reason === "no-transcript") throw new DesignUnsupportedError("no_transcript");
-    throw new DesignUnsupportedError("ai_failed", fill.failure.message ?? fill.failure.reason);
+    throw new DesignUnsupportedError("ai_failed", describeFillFailure(fill.failure));
   }
   const photo = await coverPhotoFor(item.sourceItemId);
   const ctx = await designContext(item.id, item.sourceItemId, photo, await loadSource(item.sourceItemId));
   const filled = fillTemplate(template, fill.fill, ctx);
   const page = filled.pages[0];
-  if (!page || page.elements.length === 0) throw new DesignUnsupportedError("ai_failed", "the hero cover came back empty");
+  if (!page || page.elements.length === 0) throw new DesignUnsupportedError("ai_failed", `${args.label} came back empty`);
   return {
     page,
     imageUrls: await resolveImageUrls(filled),

@@ -37,6 +37,7 @@ export interface ClipPick {
   label: string;
 }
 
+export const WORDMARK_WHITE: DesignImageSource = { kind: "asset", path: "/watermarks/starter-story-hubspot-media-white.png" };
 export const WORDMARK_DARK: DesignImageSource = { kind: "asset", path: "/watermarks/starter-story-hubspot-media-black.png" };
 export const PILL_PURPLE = "#6B5BFF";
 export const NOTES_BG = "#F7F5EF";

@@ -429,3 +429,23 @@ describe("hero cover: stat cards, cutouts, screens, tilt", async () => {
     expect(parsed.ok).toBe(true);
   });
 });
+
+describe("layoutDesignText — hard breaks across spans (2026-10-14)", () => {
+  const headline = (spans: DesignTextElement["spans"]): DesignTextElement => ({
+    id: "t", name: "Headline", type: "text", x: 0, y: 0, w: 1050, h: 600, opacity: 1, locked: false, slot: null, stack: null, spans,
+    style: { fontId: "anton", sizePx: 96, lineHeight: 1.07, letterSpacing: 0, color: "#FFFFFF", align: "center", valign: "top", uppercase: true, shadow: null, autoFit: false, minSizePx: 40 },
+  });
+  it("a highlighted phrase starting the next line is a line break, not a paragraph gap", () => {
+    const plain = layoutDesignText(headline([{ text: "HE VIBE CODED THIS APP IN\n14 DAYS. IT NOW MAKES\n$20K PER MONTH" }]));
+    const highlighted = layoutDesignText(headline([{ text: "HE VIBE CODED THIS APP IN\n" }, { text: "14 DAYS.", color: "#22E07A" }, { text: " IT NOW MAKES\n" }, { text: "$20K PER MONTH", color: "#22E07A" }]));
+    expect(plain.lines.length).toBe(3);
+    expect(highlighted.lines.length).toBe(3);
+    expect(highlighted.blockHeightPx).toBeCloseTo(plain.blockHeightPx, 3);
+    expect(highlighted.blockHeightPx).toBeCloseTo(3 * 96 * 1.07, 3);
+  });
+  it("a blank line still makes a paragraph gap, also when it ends a span", () => {
+    const gap = layoutDesignText(headline([{ text: "ONE\n\n" }, { text: "TWO", color: "#22E07A" }]));
+    expect(gap.lines.length).toBe(2);
+    expect(gap.blockHeightPx).toBeGreaterThan(2 * 96 * 1.07 + 1);
+  });
+});
