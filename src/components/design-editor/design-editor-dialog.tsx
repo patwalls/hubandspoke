@@ -43,10 +43,11 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, resizeCanvas, shadeElement, type DesignDoc, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
+import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, resizeCanvas, shadeElement, type DesignDoc, type DesignImageElement, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
 import { applyPhotoPick, hasEmptyCutoutSlot } from "@/lib/design-editor/template-fill";
 import { statCard } from "@/lib/design-editor/shared";
-import { cutOutPicture, cutoutSupported } from "@/lib/design-editor/cutout-client";
+import { cutOutPicture, cutoutSupported, type CutoutResult } from "@/lib/design-editor/cutout-client";
+import { subjectLayerGeometry } from "@/lib/design-editor/cutout-geometry";
 import { BRAND_WORDMARKS } from "@/lib/design-editor/brand-assets";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
 import { applyDmKeyword } from "@/lib/design-editor/template-fill";
@@ -467,7 +468,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   };
 
   /** Cut the person out of a picture in the browser → the library. */
-  const makeCutout = async (previewUrl: string, name: string, cutoutOf: DesignImageSource): Promise<DesignPhoto | null> => {
+  const makeCutout = async (previewUrl: string, name: string, cutoutOf: DesignImageSource): Promise<{ photo: DesignPhoto; cut: CutoutResult } | null> => {
     if (!cutoutSupported()) {
       toast.error("Cutouts need a browser");
       return null;
@@ -479,7 +480,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       const photo = await uploadToLibrary(result.blob, `${name.replace(/\.[^.]+$/, "")}.png`, "cutout", cutoutOf);
       if (photo) toast.success("Background removed", { id, description: "The cutout is saved with the video for every post made from it." });
       else toast.dismiss(id);
-      return photo;
+      return photo ? { photo, cut: result } : null;
     } catch (err) {
       toast.error("Couldn't remove the background", { id, description: err instanceof Error ? err.message : undefined });
       return null;
@@ -492,11 +493,43 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     if (!el || el.type !== "image" || !url || cutoutBusy) return;
     setCutoutBusy(elementId);
     try {
-      const photo = await makeCutout(url, el.name || "picture", el.src);
-      if (!photo) return;
+      const made = await makeCutout(url, el.name || "picture", el.src);
+      if (!made) return;
+      const { photo } = made;
       const ratio = photo.width && photo.height ? photo.height / photo.width : null;
       setImageUrls((m) => ({ ...m, [elementId]: photo.previewUrl }));
       apply(commands.patchElement(pageIndex, elementId, (cur) => (cur.type === "image" ? { ...cur, src: photo.src, name: photo.label, fit: "contain", crop: { ...DEFAULT_CROP }, ...(ratio ? { h: Math.round(cur.w * ratio) } : {}) } : cur)));
+    } finally {
+      setCutoutBusy(null);
+    }
+  };
+
+  /** Remove background as two layers: the picture stays put (renamed
+   *  "· background") and the cut-out person lands on a new layer right
+   *  above it, lined up to the pixel — so whatever goes between the two
+   *  (a stat card, a shape, text) sits behind the person. One undo step. */
+  const splitElement = async (elementId: string) => {
+    const el = page.elements.find((e) => e.id === elementId);
+    const url = imageUrls[elementId];
+    if (!el || el.type !== "image" || !url || cutoutBusy) return;
+    setCutoutBusy(elementId);
+    try {
+      const made = await makeCutout(url, el.name || "picture", el.src);
+      if (!made) return;
+      const { photo, cut } = made;
+      const { doc: cur } = storeApi.getState();
+      const base = cur.pages[pageIndex]?.elements.find((e) => e.id === elementId);
+      if (!base || base.type !== "image") return;
+      const geo = subjectLayerGeometry(base, cut.source, cut.bounds);
+      if (!geo) return void toast.error("The person is outside this picture's frame", { description: "Reposition the picture so they're in view, then try again." });
+      const name = (base.name || "picture").replace(/ · background$/, "");
+      const subject: DesignImageElement = { ...base, ...geo, id: newElementId("image"), name: `${name} · subject`, src: photo.src, radius: 0, slot: null, stack: null, locked: false };
+      if (!geo.rotation) delete subject.rotation;
+      setImageUrls((m) => ({ ...m, [subject.id]: photo.previewUrl }));
+      const at = cur.pages[pageIndex].elements.findIndex((e) => e.id === elementId) + 1;
+      apply((d) => commands.addElement(pageIndex, subject, at)(commands.patchElement(pageIndex, elementId, (e) => ({ ...e, name: `${name} · background` }))(d)));
+      select({ pageIndex, elementId: subject.id });
+      toast.success("Split into two layers", { description: "The person is its own layer above the background. Add a stat card or shape, then drag it between them in Layers." });
     } finally {
       setCutoutBusy(null);
     }
@@ -651,8 +684,9 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       toast.success("Hero cover ready — cutting the founder out next", { id: toastId });
       setCutoutBusy("hero");
       try {
-        const photo = await makeCutout(json.pick.previewUrl, "cover", json.pick.src);
-        if (!photo) return;
+        const made = await makeCutout(json.pick.previewUrl, "cover", json.pick.src);
+        if (!made) return;
+        const { photo } = made;
         const { doc: cur } = storeApi.getState();
         const patched = applyPhotoPick(cur, null, [], { src: photo.src, width: photo.width, height: photo.height });
         if (patched) {
@@ -888,7 +922,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
           )}
         </div>
 
-        <Inspector doc={doc} mode={mode} images={images} frames={frames} photos={photos} source={session.source} brand={brand} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onCutout={isTemplate ? undefined : (id) => void cutoutElement(id)} cutoutBusy={cutoutBusy} onFindScreens={isTemplate ? undefined : (force) => void findScreens(force)} onDeletePhoto={isTemplate ? undefined : (p) => void deletePhoto(p)} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
+        <Inspector doc={doc} mode={mode} images={images} frames={frames} photos={photos} source={session.source} brand={brand} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onCutout={isTemplate ? undefined : (id) => void cutoutElement(id)} onSplit={isTemplate ? undefined : (id) => void splitElement(id)} cutoutBusy={cutoutBusy} onFindScreens={isTemplate ? undefined : (force) => void findScreens(force)} onDeletePhoto={isTemplate ? undefined : (p) => void deletePhoto(p)} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
         {!isTemplate && (
           <AttachDmKeywordDialog
             open={keywordOpen}

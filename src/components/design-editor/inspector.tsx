@@ -5,7 +5,7 @@
 import { createContext, useContext, useMemo, useRef, useState } from "react";
 import { ColorPicker } from "@/components/editor/color-picker";
 import { colorsInDesignDoc } from "@/lib/design-editor/colors";
-import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, ImageIcon, Loader2Icon, LockIcon, MonitorIcon, ScissorsIcon, Trash2Icon, UnlockIcon, UploadIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, ImageIcon, Layers2Icon, Loader2Icon, LockIcon, MonitorIcon, ScissorsIcon, Trash2Icon, UnlockIcon, UploadIcon, XIcon } from "lucide-react";
 import { LogoPicker } from "@/components/editor/logo-picker";
 import { cn } from "@/lib/utils";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
@@ -19,6 +19,7 @@ import { layoutDesignText } from "@/lib/design-editor/layout";
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFrame, DesignFramesState } from "@/lib/services/design-editor/frames";
 import type { DesignPhoto, DesignPhotosState } from "@/lib/services/design-editor/photos";
+import { imageSourceKey } from "@/lib/editor/image-source";
 import { commands, useDesign } from "./store";
 
 export interface InspectorProps {
@@ -38,6 +39,8 @@ export interface InspectorProps {
   onUpload: (elementId: string | null, files: File[]) => Promise<void>;
   /** Cut the person out of this picture (browser model) and swap it in. */
   onCutout?: (elementId: string) => void;
+  /** Remove background as two layers (background + subject above it). */
+  onSplit?: (elementId: string) => void;
   /** A cutout is being made right now (for this or another element). */
   cutoutBusy?: string | null;
   /** Scan the video for dashboard / revenue screens (`force` rescans). */
@@ -67,7 +70,7 @@ export function formatSec(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function Inspector({ doc, mode, images, frames, photos, source, brand, onPickImage, onGrabFrame, onUpload, onCutout, cutoutBusy, onFindScreens, onDeletePhoto, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword, onRerunFrames }: InspectorProps) {
+export function Inspector({ doc, mode, images, frames, photos, source, brand, onPickImage, onGrabFrame, onUpload, onCutout, onSplit, cutoutBusy, onFindScreens, onDeletePhoto, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword, onRerunFrames }: InspectorProps) {
   const apply = useDesign((s) => s.apply);
   const selection = useDesign((s) => s.selection);
   const select = useDesign((s) => s.select);
@@ -202,10 +205,22 @@ export function Inspector({ doc, mode, images, frames, photos, source, brand, on
             </>
           )}
           <Slider label="Rounded corners" value={el.radius} min={0} max={200} step={2} format={(v) => `${v}`} onChange={(v) => patch<DesignImageElement | DesignVideoElement>((e) => ({ ...e, radius: v }), "radius")} />
-          {el.type === "image" && onCutout && (
-            <button type="button" disabled={!!cutoutBusy} onClick={() => onCutout(el.id)} title="Cut the person out of this picture — the background goes transparent. Runs in your browser; the first time downloads the model (~115 MB)." className="inline-flex items-center gap-1.5 self-start rounded-md border border-pink-300 bg-pink-50 px-2 py-1 text-[11px] font-medium text-pink-900 hover:bg-pink-100 disabled:opacity-50 dark:bg-pink-950/40 dark:text-pink-200">
-              {cutoutBusy === el.id ? <Loader2Icon className="size-3 animate-spin" /> : <ScissorsIcon className="size-3" />} Remove background
-            </button>
+          {el.type === "image" && (onCutout || onSplit) && !photos.photos.some((p) => p.kind === "cutout" && imageSourceKey(p.src) === imageSourceKey(el.src)) && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-muted-foreground">Remove background</span>
+              <div className="flex flex-wrap gap-1">
+                {onSplit && (
+                  <button type="button" disabled={!!cutoutBusy} onClick={() => onSplit(el.id)} title="Keep this picture as the background layer and put the cut-out person on a new layer right above it, lined up exactly — so you can slide a stat card, shape or text between them. Runs in your browser; the first time downloads the model." className="inline-flex items-center gap-1.5 rounded-md border border-pink-300 bg-pink-50 px-2 py-1 text-[11px] font-medium text-pink-900 hover:bg-pink-100 disabled:opacity-50 dark:bg-pink-950/40 dark:text-pink-200">
+                    {cutoutBusy === el.id ? <Loader2Icon className="size-3 animate-spin" /> : <Layers2Icon className="size-3" />} Split into layers
+                  </button>
+                )}
+                {onCutout && (
+                  <button type="button" disabled={!!cutoutBusy} onClick={() => onCutout(el.id)} title="Replace this picture with the cut-out person — the background goes transparent. Runs in your browser; the first time downloads the model." className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50">
+                    <ScissorsIcon className="size-3" /> Erase only
+                  </button>
+                )}
+              </div>
+            </div>
           )}
         </Panel>
       )}

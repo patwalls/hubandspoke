@@ -22,7 +22,7 @@
  * plus its WASM) rather than bundled: the package's WebGPU build and its
  * worker/WASM assets don't survive Next's bundler cleanly.
  */
-import { alphaBounds } from "./cutout-geometry";
+import { alphaBounds, type CutoutBounds } from "./cutout-geometry";
 import type { ImageSource } from "@/lib/editor/image-source";
 
 const ORT_VERSION = "1.23.2";
@@ -252,6 +252,11 @@ export interface CutoutResult {
   blob: Blob;
   width: number;
   height: number;
+  /** Where the trimmed subject sat in the picture (0–1 fractions) — what
+   *  "split into layers" lines the cutout up with. */
+  bounds: CutoutBounds;
+  /** The picture it was cut from, in px. */
+  source: { width: number; height: number };
   /** Which model/device made it. */
   model: string;
 }
@@ -309,5 +314,5 @@ export async function cutOutPicture(picture: { url: string; src: ImageSource }, 
   progress?.("Saving the cutout…");
   const png = await new Promise<Blob | null>((resolve) => trimmed.toBlob(resolve, "image/png"));
   if (!png) throw new Error("Couldn't encode the cutout");
-  return { blob: png, width: bounds.w, height: bounds.h, model: attemptLabel(used) };
+  return { blob: png, width: bounds.w, height: bounds.h, bounds: { x: bounds.x / width, y: bounds.y / height, w: bounds.w / width, h: bounds.h / height }, source: { width, height }, model: attemptLabel(used) };
 }
