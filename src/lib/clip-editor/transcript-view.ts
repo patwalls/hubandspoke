@@ -35,6 +35,10 @@ export interface ViewWord {
    *  that cover an edge but not the middle. 0 when untouched. */
   trimStartSec: number;
   trimEndSec: number;
+  /** "main" for everything shown in recorded order; a moved scene's id for
+   *  the words of a scene dragged out of order (shown where it plays). A
+   *  highlight never spans two blocks — they aren't next to each other. */
+  block: string;
 }
 
 export interface ViewGap {
@@ -68,9 +72,13 @@ export interface ViewSpeakerChange {
 export type ViewToken = ViewWord | ViewGap | ViewMarker | ViewSpeakerChange;
 
 export interface TranscriptView {
+  /** Display order — recorded order, except scenes dragged out of order on
+   *  the timeline, whose text shows where they now play. */
   tokens: ViewToken[];
-  /** Every word of the source, in order. */
+  /** Every word of the source, in SOURCE order (`words[pos].pos === pos`). */
   words: ViewWord[];
+  /** Word positions in display order (what ← / → walk). */
+  displayOrder: number[];
 }
 
 export function buildTranscriptView(
@@ -106,7 +114,8 @@ export function buildTranscriptView(
         kind: "marker",
         key: `m:${section.id}`,
         sectionId: section.id,
-        index: sections.indexOf(section) + 1,
+        // Play order — scenes can be dragged out of recorded order.
+        index: doc.sections.indexOf(section) + 1,
         startSec: section.startSec,
         endSec: section.endSec,
       });
@@ -122,6 +131,7 @@ export function buildTranscriptView(
       state: !section ? "outside" : removal ? "removed" : "kept",
       reason: removal?.reason ?? null,
       ...(section && !removal ? wordTrims(section, word, words[i - 1], words[i + 1]) : { trimStartSec: 0, trimEndSec: 0 }),
+      block: "main",
     };
     flat.push(view);
     tokens.push(view);
@@ -146,7 +156,96 @@ export function buildTranscriptView(
     });
   });
 
-  return { tokens, words: flat };
+  return reorderForPlay(doc, tokens, flat);
+}
+
+/**
+ * Scenes dragged out of recorded order on the timeline: lift each one's text
+ * (marker, words, pauses) to right after the scene that plays before it. The
+ * scenes that stay put are the largest (by duration) set whose play order
+ * agrees with the recording, so the body never jumps — only what you moved
+ * moves. With nothing out of order this returns the tokens untouched.
+ */
+function reorderForPlay(doc: ClipEditDoc, tokens: ViewToken[], flat: ViewWord[]): TranscriptView {
+  const anchored = inOrderSections(doc.sections);
+  const plain = () => ({ tokens, words: flat, displayOrder: flat.map((w) => w.pos) });
+  if (anchored.size === doc.sections.length) return plain();
+
+  const ownerOf = (t: ViewToken): string | null =>
+    t.kind === "word" ? t.sectionId : t.kind === "gap" || t.kind === "marker" ? t.sectionId : null;
+  // Pull out moved scenes' tokens; speaker labels are recomputed below.
+  const main: ViewToken[] = [];
+  const moved = new Map<string, ViewToken[]>();
+  for (const t of tokens) {
+    if (t.kind === "speaker") continue;
+    const owner = ownerOf(t);
+    if (owner && !anchored.has(owner)) {
+      const list = moved.get(owner);
+      if (list) list.push(t);
+      else moved.set(owner, [t]);
+      if (t.kind === "word") t.block = owner;
+    } else main.push(t);
+  }
+  // Which moved scenes follow which anchored one, in play order ("" = before
+  // the first anchored scene).
+  const followers = new Map<string, string[]>();
+  let lead = "";
+  for (const sec of doc.sections) {
+    if (anchored.has(sec.id)) lead = sec.id;
+    else followers.set(lead, [...(followers.get(lead) ?? []), sec.id]);
+  }
+  const lastIndexOf = new Map<string, number>();
+  main.forEach((t, i) => {
+    const o = ownerOf(t);
+    if (o) lastIndexOf.set(o, i);
+  });
+  const firstAnchored = main.findIndex((t) => t.kind === "marker");
+  const out: ViewToken[] = [];
+  const emit = (ids: string[] | undefined) => ids?.forEach((id) => out.push(...(moved.get(id) ?? [])));
+  main.forEach((t, i) => {
+    if (i === firstAnchored) emit(followers.get(""));
+    out.push(t);
+    const o = ownerOf(t);
+    if (o && lastIndexOf.get(o) === i) emit(followers.get(o));
+  });
+  if (firstAnchored < 0) emit(followers.get(""));
+
+  // Speaker labels for the new reading order.
+  const withSpeakers: ViewToken[] = [];
+  let lastSpeaker: string | undefined;
+  for (const t of out) {
+    if (t.kind === "word" && t.word.speakerId && t.word.speakerId !== lastSpeaker) {
+      withSpeakers.push({ kind: "speaker", key: `s:${t.pos}`, speakerId: t.word.speakerId });
+      lastSpeaker = t.word.speakerId;
+    }
+    withSpeakers.push(t);
+  }
+  const displayOrder = withSpeakers.flatMap((t) => (t.kind === "word" ? [t.pos] : []));
+  return { tokens: withSpeakers, words: flat, displayOrder };
+}
+
+/** The scenes that stay where they are in the recording: the heaviest (by
+ *  duration) subsequence of the play order that is also in source order. */
+function inOrderSections(sections: Section[]): Set<string> {
+  const n = sections.length;
+  const best: number[] = [];
+  const prev: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const len = sections[i].endSec - sections[i].startSec;
+    best[i] = len;
+    prev[i] = -1;
+    for (let j = 0; j < i; j++) {
+      if (sections[j].startSec < sections[i].startSec && best[j] + len > best[i]) {
+        best[i] = best[j] + len;
+        prev[i] = j;
+      }
+    }
+  }
+  const out = new Set<string>();
+  let k = -1;
+  for (let i = 0; i < n; i++) if (k < 0 || best[i] > best[k]) k = i;
+  for (; k >= 0; k = prev[k]) out.add(sections[k].id);
+  return out;
 }
 
 export interface SelectionActions {

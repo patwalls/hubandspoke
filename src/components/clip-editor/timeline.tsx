@@ -92,6 +92,7 @@ export function Timeline({
   const apply = useEditor((s) => s.apply);
   const setWordSelection = useEditor((s) => s.setWordSelection);
   const wordSelection = useEditor((s) => s.wordSelection);
+  const stageSelection = useEditor((s) => s.stageSelection);
   const pieces = useMemo(() => timelinePieces(plan), [plan]);
   const [tool, setTool] = useState<Tool>("select");
   const [toolMenu, setToolMenu] = useState(false);
@@ -115,6 +116,8 @@ export function Timeline({
   }, [videoUrl]);
 
   const duration = Math.max(plan.durationSec, 0.1);
+  /** A scene being dragged to a new place: its offset and where it'd land. */
+  const [dragMove, setDragMove] = useState<{ sectionId: string; dx: number; slot: { toIndex: number; x: number } } | null>(null);
   // While an edge is being dragged the clip's length changes under the
   // pointer; hold the scale still so the edge tracks the mouse.
   const [frozenPx, setFrozenPx] = useState<number | null>(null);
@@ -237,7 +240,10 @@ export function Timeline({
       else if (k === "h") setTool("hand");
       else if (k === "b") setTool("blade");
       else if (k === "s") splitAt(engine.snapshot().outSec);
-      else if ((e.key === "Backspace" || e.key === "Delete") && selectedId && !wordSelection) {
+      // ⌫ deletes the picked scene only when nothing more specific is
+      // selected — highlighted words or a layer / the video on the preview
+      // get ⌫ first (deleting a title card must never delete its scene).
+      else if ((e.key === "Backspace" || e.key === "Delete") && selectedId && !wordSelection && !stageSelection) {
         e.preventDefault();
         e.stopImmediatePropagation();
         deleteSelected();
@@ -253,7 +259,7 @@ export function Timeline({
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [engine, splitAt, deleteSelected, selectedId, setSelectedId, wordSelection]);
+  }, [engine, splitAt, deleteSelected, selectedId, setSelectedId, wordSelection, stageSelection]);
 
   /** Snap a source time to the nearest word edge within 0.2s. */
   const snapToWord = (sec: number, edge: "start" | "end") => {
@@ -337,8 +343,42 @@ export function Timeline({
       return;
     }
     setWordSelection(null);
-    scrub(e);
-    setSelectedId(pieceAt(pieces, t)?.sectionId ?? null);
+    const grabbed = pieceAt(pieces, t);
+    if (previewing) engine.exitPreview();
+    engine.seek(t);
+    setSelectedId(grabbed?.sectionId ?? null);
+    // Drag a scene sideways to move it in the play order (Descript-style).
+    // A plain click just moves the playhead and picks the scene.
+    if (!grabbed || pieces.length < 2 || readOnly) return;
+    const x0 = e.clientX;
+    let moving = false;
+    const move = (ev: globalThis.PointerEvent) => {
+      if (!moving && Math.abs(ev.clientX - x0) < 6) return;
+      moving = true;
+      const at = timeAt(ev.clientX);
+      setDragMove({ sectionId: grabbed.sectionId, dx: ev.clientX - x0, slot: dropSlot(grabbed.sectionId, at) });
+    };
+    const up = (ev: globalThis.PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDragMove(null);
+      if (!moving) return;
+      const slot = dropSlot(grabbed.sectionId, timeAt(ev.clientX));
+      apply(commands.moveSection(grabbed.sectionId, slot.toIndex));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  /** Where a dragged scene would land if dropped at output time `t`: before
+   *  the first other scene whose middle is past `t`. `toIndex` is its new
+   *  index in doc.sections; `x` is where to draw the insertion line. */
+  const dropSlot = (draggedId: string, t: number): { toIndex: number; x: number } => {
+    const others = pieces.filter((p) => p.sectionId !== draggedId);
+    const before = others.find((p) => (p.outStartSec + p.outEndSec) / 2 > t);
+    const order = doc.sections.map((s) => s.id).filter((id) => id !== draggedId);
+    if (!before) return { toIndex: order.length, x: xOf(others[others.length - 1]?.outEndSec ?? 0) };
+    return { toIndex: order.indexOf(before.sectionId), x: xOf(before.outStartSec) };
   };
 
   // ── Ruler ticks (only the visible stretch) ──────────────────────────────
@@ -496,8 +536,12 @@ export function Timeline({
                 readOnly={readOnly}
                 titles={doc.layers.filter((l) => (l.type === "text" || l.type === "image") && l.sectionId === p.sectionId).length}
                 onTrimStart={(e, edge) => startTrim(e, p.sectionId, edge)}
+                dragOffset={dragMove?.sectionId === p.sectionId ? dragMove.dx : null}
               />
             ))}
+            {dragMove && (
+              <div className="pointer-events-none absolute inset-y-[-6px] z-20 w-1 -translate-x-1/2 rounded-full bg-violet-600 shadow" style={{ left: dragMove.slot.x }} />
+            )}
             {hoverSec !== null && (
               <div className="pointer-events-none absolute inset-y-[-4px] w-0.5 bg-rose-500" style={{ left: xOf(hoverSec) - 1 }} />
             )}
@@ -528,6 +572,7 @@ function PieceBlock({
   readOnly,
   titles,
   onTrimStart,
+  dragOffset,
 }: {
   piece: TimelinePiece;
   left: number;
@@ -542,6 +587,8 @@ function PieceBlock({
   /** Title cards / subtitles that belong to this scene. */
   titles: number;
   onTrimStart: (e: ReactPointerEvent, edge: "start" | "end") => void;
+  /** Pixels it's being dragged sideways (null = not being dragged). */
+  dragOffset: number | null;
 }) {
   const version = useSyncExternalStore(cache?.subscribe ?? noopSubscribe, cache?.getVersion ?? zero, zero);
   const tileH = TRACK_H - 4;
@@ -566,7 +613,11 @@ function PieceBlock({
         "absolute inset-y-0 overflow-hidden rounded-md bg-zinc-900 ring-1 ring-inset",
         selected ? "ring-2 ring-sky-500" : "ring-black/20",
       )}
-      style={{ left, width: Math.max(width - 2, 1) }}
+      style={{
+        left,
+        width: Math.max(width - 2, 1),
+        ...(dragOffset !== null ? { transform: `translateX(${dragOffset}px) translateY(-4px)`, opacity: 0.85, zIndex: 15, boxShadow: "0 8px 20px rgba(0,0,0,.35)", cursor: "grabbing" } : {}),
+      }}
     >
       {tiles.map((t) => (
         <Thumb key={t.x} cache={cache} sec={t.sec} x={t.x} w={tileW} h={tileH} version={version} />

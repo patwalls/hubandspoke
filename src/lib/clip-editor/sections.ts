@@ -1,11 +1,12 @@
 /**
  * Document-level section operations.
  *
- * A clip is an ordered list of source sections. In the editor they are always
- * kept in SOURCE order and never overlap — the transcript is the whole video,
- * read top to bottom, and "what plays" is simply the highlighted parts of it
- * in the order you read them. (The doc model itself allows any order; if a
- * reorder feature ever lands, it lifts this invariant deliberately.)
+ * A clip is an ordered list of source sections, played in ARRAY order. They
+ * never overlap in the source, but their play order is free — scenes can be
+ * dragged around the timeline (`moveSection`) — so nothing here may re-sort
+ * `doc.sections` by source time. Source order is only used to find a
+ * section's neighbours in the recording (the transcript still reads in
+ * recorded order; its part chips show the play order).
  */
 import type { ClipEditDoc, Section, TimeRange } from "./doc";
 import { normalizeRemovals, retimeSection } from "./removals";
@@ -21,8 +22,10 @@ function sectionId(startSec: number, taken: Set<string>): string {
 
 /**
  * Add a source range to the clip. If it overlaps or touches existing
- * sections they fuse into one (keeping every removal made inside them);
- * otherwise it becomes a new section at its place in source order.
+ * sections they fuse into one (keeping every removal made inside them), in
+ * the play-order slot of the first of them; otherwise it becomes a new
+ * section, played right after the part that precedes it in the recording
+ * (or first, when nothing does).
  */
 export function includeRange(doc: ClipEditDoc, range: TimeRange): ClipEditDoc {
   if (!(range.endSec > range.startSec)) return doc;
@@ -49,10 +52,34 @@ export function includeRange(doc: ClipEditDoc, range: TimeRange): ClipEditDoc {
       { startSec, endSec },
     ),
   };
-  return {
-    ...doc,
-    sections: [...others, merged].sort((a, b) => a.startSec - b.startSec),
-  };
+  // `touching` keeps play order, so nothing it holds comes before its first.
+  const sections = doc.sections.filter((s) => !touching.includes(s));
+  const slot = touching.length > 0 ? doc.sections.indexOf(touching[0]) : afterSourcePredecessor(sections, startSec);
+  sections.splice(slot, 0, merged);
+  return { ...doc, sections };
+}
+
+/** Play-order index just after the section that precedes `startSec` in the
+ *  recording (0 when none does). */
+function afterSourcePredecessor(sections: Section[], startSec: number): number {
+  let best = -1;
+  sections.forEach((s, i) => {
+    if (s.startSec < startSec && (best < 0 || s.startSec > sections[best].startSec)) best = i;
+  });
+  return best + 1;
+}
+
+/** Drag a scene on the timeline: play section `id` at position `toIndex`
+ *  (0 = first) instead. The footage, its cuts, framing and text go with it. */
+export function moveSection(doc: ClipEditDoc, id: string, toIndex: number): ClipEditDoc {
+  const from = doc.sections.findIndex((s) => s.id === id);
+  if (from < 0) return doc;
+  const to = Math.max(0, Math.min(doc.sections.length - 1, toIndex));
+  if (to === from) return doc;
+  const sections = [...doc.sections];
+  const [moved] = sections.splice(from, 1);
+  sections.splice(to, 0, moved);
+  return { ...doc, sections };
 }
 
 /**
@@ -75,8 +102,8 @@ export function retimeSectionInDoc(
   };
   const next = retimeSection(sorted[i], clamped);
   if (next === sorted[i]) return doc;
-  sorted[i] = next;
-  return { ...doc, sections: sorted };
+  // Neighbours come from source order; the result keeps the PLAY order.
+  return { ...doc, sections: doc.sections.map((s) => (s.id === id ? next : s)) };
 }
 
 /** A blade cut can't leave a piece shorter than this. */

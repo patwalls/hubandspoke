@@ -14,7 +14,7 @@ import { createStore, useStore, type StoreApi } from "zustand";
 import type { ClipEditDoc, Layer, RemovalReason, Section } from "@/lib/clip-editor/doc";
 import { wordEditKey } from "@/lib/clip-editor/doc";
 import { addRemoval, restoreRange, restoreReason } from "@/lib/clip-editor/removals";
-import { deleteSection, includeRange, retimeSectionInDoc, splitSectionAt } from "@/lib/clip-editor/sections";
+import { deleteSection, includeRange, moveSection, retimeSectionInDoc, splitSectionAt } from "@/lib/clip-editor/sections";
 import type { TimeRange } from "@/lib/clip-editor/doc";
 
 const HISTORY_LIMIT = 200;
@@ -221,6 +221,9 @@ export const commands = {
   /** Move a section's in/out points (clamped to its neighbours). */
   retime: (sectionId: string, window: TimeRange) => (doc: ClipEditDoc) =>
     retimeSectionInDoc(doc, sectionId, window),
+
+  /** Drag a scene to another place in the play order. */
+  moveSection: (sectionId: string, toIndex: number) => (doc: ClipEditDoc) => moveSection(doc, sectionId, toIndex),
 
   /** Blade: cut a section in two at a source time. */
   split: (sectionId: string, atSec: number) => (doc: ClipEditDoc) =>

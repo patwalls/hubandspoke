@@ -95,19 +95,19 @@ export function TextToolbar({
       </IconBtn>
       {layer.role !== "hook" && (<>
       <Sep />
-      <div className="flex rounded-md bg-muted p-0.5" title="When it shows">
+      <div className="flex gap-0.5 rounded-md bg-muted p-0.5" title="When it shows">
         <button
           type="button"
           disabled={!layer.sectionId && currentSceneIndex === null}
           onClick={() => !layer.sectionId && onScope(true)}
-          className={cn("rounded px-1.5 py-0.5 font-medium disabled:opacity-40", layer.sectionId ? "bg-background shadow-sm" : "text-muted-foreground")}
+          className={cn("rounded px-1.5 py-0.5 font-medium disabled:opacity-40", layer.sectionId ? "bg-sky-50 text-sky-900 ring-1 ring-sky-400 dark:bg-sky-950/40 dark:text-sky-200" : "text-muted-foreground hover:text-foreground")}
         >
           {layer.sectionId ? `Scene ${ownSceneIndex ?? "?"} only` : `Scene ${currentSceneIndex ?? "?"} only`}
         </button>
         <button
           type="button"
           onClick={() => onScope(false)}
-          className={cn("rounded px-1.5 py-0.5 font-medium", !layer.sectionId ? "bg-background shadow-sm" : "text-muted-foreground")}
+          className={cn("rounded px-1.5 py-0.5 font-medium", !layer.sectionId ? "bg-sky-50 text-sky-900 ring-1 ring-sky-400 dark:bg-sky-950/40 dark:text-sky-200" : "text-muted-foreground hover:text-foreground")}
         >
           Whole clip
         </button>

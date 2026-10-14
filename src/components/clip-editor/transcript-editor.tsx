@@ -71,6 +71,7 @@ function chunkTokens(tokens: ViewToken[]): Chunk[] {
     chunks.push({ key: `c${chunks.length}`, tokens: current, firstPos, lastPos });
     current = [];
     firstPos = -1;
+    lastPos = -1;
     count = 0;
   };
   for (const t of tokens) {
@@ -78,8 +79,10 @@ function chunkTokens(tokens: ViewToken[]): Chunk[] {
     if (count >= WORDS_PER_CHUNK && t.kind !== "gap") flush();
     current.push(t);
     if (t.kind === "word") {
-      if (firstPos < 0) firstPos = t.pos;
-      lastPos = t.pos;
+      // A scene moved out of recorded order shows away from its neighbours,
+      // so a chunk's positions are a span (min…max), not first…last.
+      firstPos = firstPos < 0 ? t.pos : Math.min(firstPos, t.pos);
+      lastPos = Math.max(lastPos, t.pos);
       count++;
     }
   }
@@ -108,6 +111,14 @@ export function TranscriptEditor({
   const apply = useEditor((s) => s.apply);
   const selection = useEditor((s) => s.wordSelection);
   const setSelection = useEditor((s) => s.setWordSelection);
+  const stageSelection = useEditor((s) => s.stageSelection);
+  /** A scene picked on the timeline: its text is highlighted (Descript's
+   *  lavender) and scrolled into view. */
+  const sceneSelection = useEditor((s) => s.sceneSelection);
+  const setStageSelection = useEditor((s) => s.setStageSelection);
+  /** The text cursor (Descript-style): it sits AFTER the word at this
+   *  position (-1 = before the first word). ← / → move it a word at a time. */
+  const [caret, setCaret] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
@@ -207,6 +218,20 @@ export function TranscriptEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Keep a highlight inside one block: a scene moved out of order shows
+   *  apart from the words around it in the recording. */
+  const clampFocus = useCallback(
+    (anchor: number, focus: number) => {
+      const block = view.words[anchor]?.block;
+      if (!block || view.words[focus]?.block === block) return focus;
+      const step = focus > anchor ? 1 : -1;
+      let p = anchor;
+      while (view.words[p + step]?.block === block && p !== focus) p += step;
+      return p;
+    },
+    [view],
+  );
+
   // ── Selection by click / shift-click / drag ─────────────────────────────
   const posFromEvent = (e: MouseEvent): number | null => {
     const el = (e.target as HTMLElement).closest("[data-pos]");
@@ -224,8 +249,19 @@ export function TranscriptEditor({
     e.preventDefault(); // we draw our own highlight; suppress the native one
     draggingRef.current = true;
     setDragging(true);
-    if (e.shiftKey && selection) setSelection({ anchor: selection.anchor, focus: pos });
+    // The transcript takes the arrow keys back from the preview.
+    if (stageSelection) setStageSelection(null);
+    if (e.shiftKey && selection) setSelection({ anchor: selection.anchor, focus: clampFocus(selection.anchor, pos) });
     else setSelection({ anchor: pos, focus: pos });
+    // Park the cursor on the nearer side of the clicked word.
+    const box = (e.target as HTMLElement).closest("[data-pos]")?.getBoundingClientRect();
+    // "Before this word" = after the word shown just before it (a moved
+    // scene's first word follows whatever precedes it on screen).
+    const shownBefore = () => {
+      const i = view.displayOrder.indexOf(pos);
+      return i > 0 ? view.displayOrder[i - 1] : -1;
+    };
+    setCaret(e.shiftKey || !box ? pos : e.clientX < box.left + box.width / 2 ? shownBefore() : pos);
     const w = view.words[pos];
     clickRef.current = null;
     if (!w || e.shiftKey) return;
@@ -242,7 +278,8 @@ export function TranscriptEditor({
 
   const onMouseOver = (e: MouseEvent) => {
     if (!draggingRef.current || !selection) return;
-    const pos = posFromEvent(e);
+    const raw = posFromEvent(e);
+    const pos = raw === null ? null : clampFocus(selection.anchor, raw);
     if (pos !== null && pos !== selection.focus) {
       clickRef.current = null; // it became a drag
       setSelection({ anchor: selection.anchor, focus: pos });
@@ -425,6 +462,73 @@ export function TranscriptEditor({
     run(commands.include(actions.include));
   }, [actions, run]);
 
+  // Picking a scene on the timeline scrolls the transcript to its first word.
+  useEffect(() => {
+    if (!sceneSelection) return;
+    const first = view.displayOrder.find((p) => view.words[p]?.sectionId === sceneSelection);
+    if (first === undefined) return;
+    scrollRef.current?.querySelector(`[data-pos="${first}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+    // only when the pick changes, not on every edit of the doc
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneSelection]);
+
+  // ← / → move the cursor word by word (Descript-style), the playhead
+  // following it through the clip; ⇧ extends the highlight a word at a time.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const t = e.target as HTMLElement;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable) return;
+      if (stageSelection || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (caret === null && !selection) return;
+      e.preventDefault();
+      // Walk words in DISPLAY order (a moved scene reads where it plays).
+      const order = view.displayOrder;
+      const n = order.length;
+      const idxOf = new Map(order.map((p, i) => [p, i]));
+      const at = (i: number) => (i < 0 ? -1 : order[Math.min(i, n - 1)]);
+      const ix = (p: number | null) => (p === null || p < 0 ? -1 : (idxOf.get(p) ?? -1));
+      const dir = e.key === "ArrowRight" ? 1 : -1;
+      const clampI = (i: number) => Math.max(0, Math.min(n - 1, i));
+      const lo = selection ? Math.min(ix(selection.anchor), ix(selection.focus)) : null;
+      const hi = selection ? Math.max(ix(selection.anchor), ix(selection.focus)) : null;
+      let next: number;
+      if (e.shiftKey) {
+        if (selection) {
+          // Grow / shrink the highlight from its moving end (within its block).
+          const focus = clampFocus(selection.anchor, at(clampI(ix(selection.focus) + dir)));
+          setSelection({ anchor: selection.anchor, focus });
+          next = dir > 0 ? focus : at(ix(focus) - 1);
+        } else {
+          // Start a highlight at the word on that side of the cursor.
+          const w = at(clampI(dir > 0 ? ix(caret) + 1 : ix(caret)));
+          setSelection({ anchor: w, focus: w });
+          next = dir > 0 ? w : at(ix(w) - 1);
+        }
+      } else if (selection && (lo !== hi || caret === null)) {
+        // A highlight collapses to its edge, like any text editor.
+        next = dir > 0 ? at(hi!) : at(lo! - 1);
+        setSelection(null);
+      } else {
+        next = at(Math.max(-1, Math.min(n - 1, ix(caret) + dir)));
+        if (selection) setSelection(null);
+      }
+      setCaret(next);
+      // The playhead follows: to the start of the word right after the cursor.
+      const after = ix(next) + 1;
+      const w = view.words[after < n ? order[after] : order[n - 1]];
+      if (w?.state === "kept") {
+        const out = sourceToOutput(plan, (after < n ? w.word.startSec : w.word.endSec) + 0.001, w.sectionId ?? undefined);
+        if (out !== null) engine.seek(out);
+      }
+      scrollRef.current?.querySelector(`[data-pos="${Math.max(0, next)}"]`)?.scrollIntoView({ block: "nearest" });
+    };
+    // Capture phase: something inside the dialog stops arrow keys before
+    // they bubble back up to the window (the timeline's keys work the same).
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [caret, selection, stageSelection, view, plan, engine, setSelection, clampFocus]);
+
   // ⌫ / Delete removes (or restores); Enter adds dim words to the clip.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -496,6 +600,9 @@ export function TranscriptEditor({
                   ? editingPos
                   : null
               }
+              caretAfter={caret !== null && (caret === -1 || (caret >= chunk.firstPos && caret <= chunk.lastPos)) ? caret : null}
+              firstShownPos={view.displayOrder[0] ?? 0}
+              sceneHighlight={sceneSelection}
               readOnly={readOnly}
               speakers={speakers}
               onToggleGap={toggleGap}
@@ -604,6 +711,9 @@ const TranscriptChunk = memo(function TranscriptChunk({
   selLo,
   selHi,
   editingPos,
+  caretAfter,
+  firstShownPos,
+  sceneHighlight,
   readOnly,
   speakers,
   onToggleGap,
@@ -614,6 +724,13 @@ const TranscriptChunk = memo(function TranscriptChunk({
   selLo: number;
   selHi: number;
   editingPos: number | null;
+  /** The cursor sits after the word at this position (-1 = before the
+   *  first word); null when it isn't in this chunk. */
+  caretAfter: number | null;
+  /** The first word on screen (where a cursor at -1 is drawn). */
+  firstShownPos: number;
+  /** The scene picked on the timeline — its words get a lavender wash. */
+  sceneHighlight: string | null;
   readOnly: boolean;
   onToggleGap: (gap: ViewGap) => void;
   onCorrect: (word: ViewWord, text: string | null) => void;
@@ -684,6 +801,7 @@ const TranscriptChunk = memo(function TranscriptChunk({
           // The trailing real space is load-bearing: without it the browser
           // sees one unbreakable word and the transcript never wraps.
           <Fragment key={t.pos}>
+            {caretAfter === -1 && t.pos === firstShownPos && <span aria-hidden className="relative inline-block h-[1.15em] w-0.5 translate-y-[0.2em] animate-pulse bg-foreground" />}
             <span
               data-pos={t.pos}
               className={cn(
@@ -696,11 +814,16 @@ const TranscriptChunk = memo(function TranscriptChunk({
                 t.state === "kept" && t.trimStartSec > 0 && "border-l-2 border-rose-400/80",
                 t.state === "kept" && t.trimEndSec > 0 && "border-r-2 border-rose-400/80",
                 t.corrected && "underline decoration-dotted decoration-sky-500 underline-offset-4",
-                t.pos >= selLo && t.pos <= selHi && "bg-sky-200/80 !text-foreground dark:bg-sky-800/70",
+                t.pos >= selLo && t.pos <= selHi
+                  ? "bg-sky-200/80 !text-foreground dark:bg-sky-800/70"
+                  : sceneHighlight !== null && t.sectionId === sceneHighlight && "rounded-none bg-violet-200/60 dark:bg-violet-900/40",
               )}
             >
               {t.text}
-            </span>{" "}
+            </span>
+            {caretAfter === t.pos && <span aria-hidden className="relative -ml-px inline-block h-[1.15em] w-0.5 translate-y-[0.2em] animate-pulse bg-foreground" />}
+            {/* The space too, so a picked scene reads as one continuous band. */}
+            {sceneHighlight !== null && t.sectionId === sceneHighlight ? <span className="bg-violet-200/60 py-[3px] dark:bg-violet-900/40"> </span> : " "}
           </Fragment>
         );
       })}
