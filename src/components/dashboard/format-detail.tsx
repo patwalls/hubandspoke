@@ -1565,59 +1565,47 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </PropertyRow>
           </PropertyRowGroup>
           {usesCtaOffer(data?.format?.brand) && (
-            <PropertyRowSolo>
-              <div className="px-3 py-3 space-y-3">
-                <div className="space-y-1">
-                  <Label htmlFor="cta-strategy" className="text-xs">
-                    CTA offer
-                  </Label>
-                  <select
-                    id="cta-strategy"
-                    value={ctaStrategy}
-                    onChange={(e) => {
-                      const next = e.target.value || null;
-                      setCtaStrategy(next ?? "");
-                      void persistField({ ctaStrategy: next });
-                    }}
-                    className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                  >
-                    <option value="">Brand fallback offer</option>
-                    <option value="pillar_offer">Offer from the pillar video&apos;s description</option>
-                    <option value="pillar_video">Link to the full pillar video</option>
-                    {/* "Fixed link" retired as a choice (same job as the brand
-                        fallback). Still shown for formats already set to it so
-                        the select doesn't misreport what the backend uses. */}
-                    {ctaStrategy === "fixed" && (
-                      <option value="fixed">A fixed link (legacy)</option>
-                    )}
-                  </select>
-                  <p className="text-[11px] text-muted-foreground">
-                    Which link this format&apos;s posts send people to. The post&apos;s UTMs are added automatically. &quot;Offer from the pillar&quot; follows the clickhubspot link in the YouTube description to the real offer page. If a rule can&apos;t find a link, the brand&apos;s fallback offer (Brand Assets settings) is used.
-                  </p>
-                </div>
+            <PropertyRowGroup>
+              <PropertyRow label="CTA offer" tooltip={"Which link this format's posts send people to. The post's UTMs are added automatically. \"Offer from the pillar\" follows the clickhubspot link in the YouTube description to the real offer page. If a rule can't find a link, the brand's fallback offer (Brand Assets settings) is used."}>
+              <select
+                id="cta-strategy"
+                aria-label="CTA offer"
+                value={ctaStrategy}
+                onChange={(e) => {
+                  const next = e.target.value || null;
+                  setCtaStrategy(next ?? "");
+                  void persistField({ ctaStrategy: next });
+                }}
+                className={cn(PROPERTY_INPUT_CLASS, "w-full text-sm cursor-pointer")}
+              >
+                <option value="">Brand fallback offer</option>
+                <option value="pillar_offer">Offer from the pillar video&apos;s description</option>
+                <option value="pillar_video">Link to the full pillar video</option>
+                {/* "Fixed link" retired as a choice (same job as the brand
+                    fallback). Still shown for formats already set to it so
+                    the select doesn't misreport what the backend uses. */}
                 {ctaStrategy === "fixed" && (
-                  <div className="space-y-1">
-                    <Label htmlFor="cta-fixed-url" className="text-xs">
-                      Fixed offer link
-                    </Label>
-                    <Input
-                      id="cta-fixed-url"
-                      type="url"
-                      value={ctaFixedUrl}
-                      onChange={(e) => setCtaFixedUrl(e.target.value)}
-                      onBlur={() => {
-                        void persistField({ ctaFixedUrl: ctaFixedUrl.trim() || null });
-                      }}
-                      placeholder="https://offers.hubspot.com/…"
-                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      Paste the real offer page, not a clickhubspot short link.
-                    </p>
-                  </div>
+                  <option value="fixed">A fixed link (legacy)</option>
                 )}
-              </div>
-            </PropertyRowSolo>
+              </select>
+              </PropertyRow>
+              {ctaStrategy === "fixed" && (
+                <PropertyRow label="Fixed offer link" tooltip="Paste the real offer page, not a clickhubspot short link.">
+                <Input
+                  id="cta-fixed-url"
+                  aria-label="Fixed offer link"
+                  type="url"
+                  value={ctaFixedUrl}
+                  onChange={(e) => setCtaFixedUrl(e.target.value)}
+                  onBlur={() => {
+                    void persistField({ ctaFixedUrl: ctaFixedUrl.trim() || null });
+                  }}
+                  placeholder="https://offers.hubspot.com/…"
+                  className={PROPERTY_INPUT_CLASS}
+                />
+                </PropertyRow>
+              )}
+            </PropertyRowGroup>
           )}
 
           {data?.format && (
