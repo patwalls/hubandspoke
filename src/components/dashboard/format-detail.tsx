@@ -1566,7 +1566,13 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
           </PropertyRowGroup>
           {usesCtaOffer(data?.format?.brand) && (
             <PropertyRowGroup>
-              <PropertyRow label="CTA offer" tooltip={"Which link this format's posts send people to. The post's UTMs are added automatically. \"Offer from the pillar\" follows the clickhubspot link in the YouTube description to the real offer page. If a rule can't find a link, the brand's fallback offer (Brand Assets settings) is used."}>
+              <PropertyRow label="CTA offer" tooltip={
+                <span className="block space-y-1">
+                  <span className="block"><strong>Source Video Offer</strong> — Pulls the offer from the YouTube description</span>
+                  <span className="block"><strong>Full Source Video</strong> — Links to the original YouTube video</span>
+                  <span className="block"><strong>Brand Default Offer</strong> — Uses the offer set in Brand Assets</span>
+                </span>
+              }>
               <select
                 id="cta-strategy"
                 aria-label="CTA offer"
@@ -1578,9 +1584,9 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                 }}
                 className={cn(PROPERTY_INPUT_CLASS, "w-full text-sm cursor-pointer")}
               >
-                <option value="">Brand fallback offer</option>
-                <option value="pillar_offer">Offer from the pillar video&apos;s description</option>
-                <option value="pillar_video">Link to the full pillar video</option>
+                <option value="pillar_offer">Source Video Offer</option>
+                <option value="pillar_video">Full Source Video</option>
+                <option value="">Brand Default Offer</option>
                 {/* "Fixed link" retired as a choice (same job as the brand
                     fallback). Still shown for formats already set to it so
                     the select doesn't misreport what the backend uses. */}

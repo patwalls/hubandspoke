@@ -15,7 +15,7 @@ export function PropertyRow({
   children,
 }: {
   label: string;
-  tooltip?: string;
+  tooltip?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
