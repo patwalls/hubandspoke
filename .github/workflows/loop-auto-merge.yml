@@ -1,0 +1,46 @@
+# Arms GitHub auto-merge on the PRs the ship broker opens for agent loops
+# (`ship web hubandspoke`, branch `app-loop/*`). GitHub merges only once the
+# required `build` check (ci.yml) is green; red leaves the PR open. Veto by
+# closing the PR or labelling it `hold` (disarms). Interactive sessions where
+# Pat asks for a fix push straight to main and never come through here.
+#
+# pull_request_target, so THIS file runs from main, not from the PR — a loop
+# can't edit its own gate. Never check out PR code in this workflow. A PR
+# that touches .github/ (which could rewrite what `build` checks) is left for
+# a human. See docs/conventions.md → CI & Dependabot.
+name: Loop auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: >-
+      github.repository == 'patwalls/hubandspoke' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'app-loop/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Arm or disarm auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HOLD: ${{ contains(github.event.pull_request.labels.*.name, 'hold') }}
+        run: |
+          if [ "$HOLD" = "true" ]; then
+            gh pr merge "$PR" --disable-auto || true
+            echo "labelled hold: left for a human"; exit 0
+          fi
+          if gh pr diff "$PR" --name-only | grep -q '^\.github/'; then
+            gh pr merge "$PR" --disable-auto || true
+            echo "touches .github/: left for a human"; exit 0
+          fi
+          gh pr merge "$PR" --auto --squash --delete-branch --match-head-commit "$HEAD_SHA"

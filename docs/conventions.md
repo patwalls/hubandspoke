@@ -310,6 +310,17 @@ It needs no secrets (Sentry source-map upload skips itself without
   --squash` on grouped, non-major Dependabot PRs. GitHub only merges once
   `build` passes; the merge to `main` then deploys through Heroku's GitHub
   integration like any other push. A red build leaves the PR open for a human.
+- **Loop PRs auto-merge** (`loop-auto-merge.yml`, 2026-10-14). Two ways code
+  reaches `main`:
+  - *Interactive session, Pat asking for a fix* → push straight to `main`.
+  - *Autonomous loop* → never pushes `main`. It commits on an `app-loop/<slug>`
+    branch and runs `ship web hubandspoke` (the ship broker pushes the branch
+    and opens the PR). The workflow arms `gh pr merge --auto --squash` pinned to
+    the head SHA; GitHub merges once `build` is green, and the merge deploys.
+    Red = the PR stays open. Veto: close it or label it `hold` (disarms).
+  It runs on `pull_request_target`, i.e. from `main`'s copy of the file, so a
+  PR can't loosen its own gate; it never checks out PR code. Any PR touching
+  `.github/` is left for a human, since it could rewrite what `build` checks.
 - Third-party actions are pinned by commit SHA; Dependabot bumps the pins.
 
 ## End-to-end testing (Playwright)
