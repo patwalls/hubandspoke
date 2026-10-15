@@ -20,6 +20,8 @@ export function usesCtaOffer(brand: string | null | undefined): boolean {
 export const BRAND_SHORT_NAME: Readonly<Record<string, string>> = {
   matg: "matg",
   "my-first-million": "mfm",
+  // utm_source only — Starter Story isn't a Rebrandly brand.
+  "starter-story": "starterstory",
 };
 
 export function brandShortName(brand: string): string {

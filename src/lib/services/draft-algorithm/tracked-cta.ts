@@ -23,6 +23,9 @@ import {
 } from "@/lib/services/starter-story-content";
 import { renderCtaExemplars, type CtaChannel } from "./cta-exemplars";
 import { formatOfferCta, resolveCtaOffer, usesCtaOffer } from "@/lib/services/cta-offer";
+import { offerUtms } from "@/lib/cta-offer-brands";
+
+const STARTER_STORY_BRAND = "starter-story";
 
 // Shared "smart, tracked CTA" generator used by BOTH the Regenerate CTA button
 // (regenerate-cta.ts) and the full draft algorithm (run.ts). It:
@@ -215,29 +218,31 @@ export async function suggestCtaDestination(args: {
 }
 
 // ── Destination URL construction (pure, unit-tested) ───────────────────────
-// Appends utm_source (always) and utm_campaign (when present) to the chosen
-// target URL. Uses the URL API so existing query params are preserved and
-// separators (?/&) are always correct.
+// Starter Story links use the same UTM rule as every other brand
+// (OFFER_UTM_RULE): utm_medium=email-media-newsletter, utm_source=starterstory,
+// utm_campaign=owned, utm_content=Social, utm_term=<platform>, and the post's
+// slug in utm_id (dropped when the post has none). The minted short link still
+// stores the slug as its own utm_campaign field — Starter Story counts leads by
+// matching that against lead_conversions.content OR utm_id. Any utm_* already on
+// the target is replaced; other query params are preserved.
 export function buildDestinationUrl(
   targetUrl: string,
   channel: string,
   utmCampaign: string | null,
 ): string {
+  const utms = offerUtms({ brand: STARTER_STORY_BRAND, channel, ctaUtm: utmCampaign });
   try {
     const u = new URL(targetUrl);
-    u.searchParams.set("utm_source", channel);
-    if (utmCampaign && utmCampaign.trim()) {
-      u.searchParams.set("utm_campaign", utmCampaign.trim());
+    for (const key of Array.from(u.searchParams.keys())) {
+      if (key.toLowerCase().startsWith("utm_")) u.searchParams.delete(key);
     }
+    for (const [k, v] of Object.entries(utms)) if (v) u.searchParams.set(k, v);
     return u.toString();
   } catch {
     // targetUrl wasn't absolute/parseable — fall back to manual append so we
     // still produce a usable link rather than throwing mid-generation.
     const sep = targetUrl.includes("?") ? "&" : "?";
-    const params = new URLSearchParams({ utm_source: channel });
-    if (utmCampaign && utmCampaign.trim()) {
-      params.set("utm_campaign", utmCampaign.trim());
-    }
+    const params = new URLSearchParams(utms as Record<string, string>);
     return `${targetUrl}${sep}${params.toString()}`;
   }
 }
