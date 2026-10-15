@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import { runWatchedProcess } from "./ffmpeg-process";
 
 // Uses /bin/sh instead of ffmpeg so the watchdogs are tested, not the codec.
+// `sleep 30; true` (two commands) forces the shell to FORK sleep instead of
+// exec'ing it, so these tests prove the kill reaches grandchildren — a
+// single-command `sh -c` passes on macOS (bash execs) and hangs on Linux.
 
 describe("runWatchedProcess watchdogs", () => {
   it("resolves on exit 0 and feeds progress lines to onProgress", async () => {
@@ -16,7 +19,7 @@ describe("runWatchedProcess watchdogs", () => {
   it("kills a silent process once the stall timeout passes", async () => {
     const t0 = Date.now();
     await expect(
-      runWatchedProcess("/bin/sh", ["-c", "sleep 30"], { stallTimeoutMs: 300, maxRuntimeMs: 0 }),
+      runWatchedProcess("/bin/sh", ["-c", "sleep 30; true"], { stallTimeoutMs: 300, maxRuntimeMs: 0 }),
     ).rejects.toThrow(/killed \(stalled: no output for 0s\)/);
     expect(Date.now() - t0).toBeLessThan(5_000);
   });
@@ -33,7 +36,7 @@ describe("runWatchedProcess watchdogs", () => {
 
   it("kills the process when the abort signal fires and says why", async () => {
     const ac = new AbortController();
-    const p = runWatchedProcess("/bin/sh", ["-c", "sleep 30"], {
+    const p = runWatchedProcess("/bin/sh", ["-c", "sleep 30; true"], {
       stallTimeoutMs: 0,
       maxRuntimeMs: 0,
       signal: ac.signal,

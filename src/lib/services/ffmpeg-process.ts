@@ -92,7 +92,13 @@ export function runWatchedProcess(
   const stallMs = opts.stallTimeoutMs ?? FFMPEG_STALL_TIMEOUT_MS;
   const maxMs = opts.maxRuntimeMs ?? FFMPEG_MAX_RUNTIME_MS;
   return new Promise((resolve, reject) => {
-    const proc = spawn(bin, argv, { stdio: ["ignore", "pipe", "pipe"] });
+    // Own process group (`detached`) so a kill reaches every descendant:
+    // killing only the direct child leaves a grandchild holding the stdio
+    // pipes open and `close` never fires. (Seen in CI on Linux, where
+    // `sh -c cmd` forks rather than execs; the same shape as an ffmpeg that
+    // spawned a helper.) Heroku's SIGTERM on restart still reaches the
+    // group — the dyno signals every process, not just the session leader.
+    const proc = spawn(bin, argv, { stdio: ["ignore", "pipe", "pipe"], detached: true });
     let stderr = "";
     let killReason: string | null = null;
     const startedAt = Date.now();
@@ -100,7 +106,12 @@ export function runWatchedProcess(
     const kill = (reason: string) => {
       if (killReason) return;
       killReason = reason;
-      proc.kill("SIGKILL");
+      try {
+        if (proc.pid) process.kill(-proc.pid, "SIGKILL");
+        else proc.kill("SIGKILL");
+      } catch {
+        proc.kill("SIGKILL");
+      }
     };
 
     let stallTimer: NodeJS.Timeout | null = null;
