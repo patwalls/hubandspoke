@@ -339,5 +339,6 @@ Do not write regex (or other brittle pattern-matching) to classify or transform 
 Regex is fine for **structural** string handling — URLs, slugs, identifiers, placeholders like `{{hook}}`, file extensions, host parsing. The rule is about **content meaning**, not string shape.
 
 ## Critical Rules
-- NEVER commit or push without explicit user permission
+- **Interactive sessions on Pat's MacBook Pro** (Pat is talking to you, from the terminal, phone or cockpit): commit and push fixes he asked for straight to `main` without asking first (Pat, 2026-10-15). Use `/commit` — it stages only this session's files.
+- **Loop laps and any other autonomous run** (ops loop, `app-loop/*`, `loops fix`, scheduled agents) — and any other machine: NEVER push to `main` yourself. Loops ship through their PR path (`ship web hubandspoke`); everything else asks Pat first.
 - NEVER expose API keys or secrets
