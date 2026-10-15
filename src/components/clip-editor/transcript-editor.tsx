@@ -31,7 +31,7 @@ import {
 } from "react";
 import { ChevronsLeftRightIcon, PlusIcon, RotateCcwIcon, ScissorsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ClipEditDoc } from "@/lib/clip-editor/doc";
+import { isSourceSection, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import type { RenderPlan } from "@/lib/clip-editor/plan";
 import { sourceToOutput } from "@/lib/clip-editor/plan";
 import {
@@ -154,10 +154,12 @@ export function TranscriptEditor({
     }
     return map;
   }, [view]);
-  const liveRef = useRef({ keptBySection, plan, words: view.words });
+  // Preview plays the source only, so only its words can light up there.
+  const sourceWords = useMemo(() => view.words.filter((w) => !w.word.mediaId), [view]);
+  const liveRef = useRef({ keptBySection, plan, words: sourceWords });
   useEffect(() => {
-    liveRef.current = { keptBySection, plan, words: view.words };
-  }, [keptBySection, plan, view]);
+    liveRef.current = { keptBySection, plan, words: sourceWords };
+  }, [keptBySection, plan, sourceWords]);
 
   useEffect(() => {
     let activeEl: Element | null = null;
@@ -206,7 +208,7 @@ export function TranscriptEditor({
   // Open on the clip, not on minute zero of the source. If an earlier part
   // (an intro) is also in the clip, open on the LONGEST part — the body.
   useEffect(() => {
-    const longest = [...doc.sections].sort(
+    const longest = doc.sections.filter(isSourceSection).sort(
       (a, b) => b.endSec - b.startSec - (a.endSec - a.startSec),
     )[0];
     const first = view.words.find((w) => w.sectionId === longest?.id);
@@ -265,7 +267,9 @@ export function TranscriptEditor({
     const w = view.words[pos];
     clickRef.current = null;
     if (!w || e.shiftKey) return;
-    if (w.state === "kept") {
+    if (w.state === "kept" || w.word.mediaId) {
+      // A cut word of an uploaded clip can't be auditioned (preview plays
+      // the source) — go to where its scene resumes instead.
       const out = sourceToOutput(plan, w.word.startSec + 0.001, w.sectionId ?? undefined);
       if (out !== null) engine.seek(out);
     } else {

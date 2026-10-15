@@ -103,9 +103,41 @@ const sectionSchema = z
     /** This scene's own framing (zoom / position / fit). Absent = the doc's
      *  `video`, like every other scene. */
     video: videoPlacementSchema.optional(),
+    /** Footage from an uploaded clip (`doc.media`) instead of the source
+     *  video. Times are then on THAT file's timeline, and the scene has no
+     *  transcript words — see `isSourceSection`. Absent = the source. */
+    mediaId: z.string().min(1).optional(),
   })
   .refine((s) => s.endSec > s.startSec, "endSec must be after startSec");
 export type Section = z.infer<typeof sectionSchema>;
+
+/**
+ * A video file uploaded into this edit (an intro recorded separately, say) —
+ * not part of the source recording. Always in the app's own bucket; only the
+ * key is stored. Size and duration are read in the browser at upload time.
+ */
+const mediaSchema = z.object({
+  id: z.string().min(1),
+  key: z.string().min(1).max(1024),
+  name: z.string().max(200),
+  durationSec: z.number().finite().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  /** Whisper's words for this file, on ITS timeline (0 = the file's first
+   *  frame). Absent until transcribed, or when the file has no speech. */
+  words: z
+    .array(z.object({ text: z.string().max(100), startSec: z.number().finite().min(0), endSec: z.number().finite().min(0) }))
+    .max(5000)
+    .optional(),
+});
+export type MediaAsset = z.infer<typeof mediaSchema>;
+
+/** True for a scene cut from the source recording (the one with a
+ *  transcript); false for an uploaded clip. Everything word-based —
+ *  transcript, captions, fillers, silences — only looks at these. */
+export function isSourceSection(s: Section): boolean {
+  return !s.mediaId;
+}
 
 // ─── Canvas + video placement ───────────────────────────────────────────────
 
@@ -280,12 +312,15 @@ export const clipEditDocSchema = z.object({
   sections: z.array(sectionSchema).min(1).max(20),
   video: videoPlacementSchema,
   layers: z.array(layerSchema).max(50),
+  /** Uploaded clips scenes can play from (`section.mediaId`). Defaulted so
+   *  docs saved before uploads existed still parse. */
+  media: z.array(mediaSchema).max(20).default([]),
   /**
    * Transcript corrections, keyed by the word's start time in ms (stable
    * across re-windowing; array indexes are not). Affects captions only —
    * correcting "Shopfy" → "Shopify" must not change the cut.
    */
-  wordEdits: z.record(z.string().regex(/^\d+$/), z.string().max(80)),
+  wordEdits: z.record(z.string().regex(/^(?:[\w-]+@)?\d+$/), z.string().max(80)),
 });
 export type ClipEditDoc = z.infer<typeof clipEditDocSchema>;
 
@@ -419,8 +454,11 @@ const CANVAS_BY_ASPECT: Record<AspectRatio, { width: number; height: number }> =
     "1:1": { width: 1080, height: 1080 },
   };
 
-export function wordEditKey(startSec: number): string {
-  return String(Math.round(startSec * 1000));
+/** An uploaded clip's words share times with the source's, so their
+ *  corrections are keyed under the clip's id. */
+export function wordEditKey(startSec: number, mediaId?: string): string {
+  const ms = String(Math.round(startSec * 1000));
+  return mediaId ? `${mediaId}@${ms}` : ms;
 }
 
 /**
@@ -485,6 +523,7 @@ export function createDefaultDoc(args: {
     version: CLIP_EDIT_DOC_VERSION,
     canvas,
     sections,
+    media: [],
     video: {
       fit: vertical ? "contain" : "cover",
       yPct: 50,

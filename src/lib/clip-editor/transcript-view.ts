@@ -8,9 +8,9 @@
  * sections or removals itself.
  */
 import type { ClipEditDoc, RemovalReason, Section, TimeRange } from "./doc";
-import { wordEditKey } from "./doc";
+import { isSourceSection, wordEditKey } from "./doc";
 import { removalAt } from "./removals";
-import { rangeForWordRun, type EditorWord } from "./words";
+import { isWordInRange, mediaEditorWords, rangeForWordRun, type EditorWord } from "./words";
 
 /** Pauses at least this long get their own chip in the transcript. */
 export const GAP_CHIP_MIN_SEC = 0.6;
@@ -85,7 +85,10 @@ export function buildTranscriptView(
   doc: ClipEditDoc,
   words: EditorWord[],
 ): TranscriptView {
-  const sections = [...doc.sections].sort((a, b) => a.startSec - b.startSec);
+  // The source's words land in its scenes; uploaded clips' words (on other
+  // files) are added per scene below.
+  const sourceSections = doc.sections.filter(isSourceSection);
+  const sections = [...sourceSections].sort((a, b) => a.startSec - b.startSec);
   const tokens: ViewToken[] = [];
   const flat: ViewWord[] = [];
   const marked = new Set<string>();
@@ -97,16 +100,12 @@ export function buildTranscriptView(
     return s && mid >= s.startSec ? s : null;
   };
 
-  let lastSpeaker: string | undefined;
-  words.forEach((word, i) => {
-    if (word.speakerId && word.speakerId !== lastSpeaker) {
-      tokens.push({ kind: "speaker", key: `s:${i}`, speakerId: word.speakerId });
-      lastSpeaker = word.speakerId;
-    }
+  // One word (and the pause after it) of `section`. `prev`/`next` are its
+  // neighbours on the same file.
+  const emit = (word: EditorWord, section: Section | null, prev?: EditorWord, next?: EditorWord) => {
     const mid = (word.startSec + word.endSec) / 2;
-    const section = sectionFor(mid);
     const removal = section ? removalAt(section, mid) : null;
-    const correction = doc.wordEdits[wordEditKey(word.startSec)];
+    const correction = doc.wordEdits[wordEditKey(word.startSec, word.mediaId)];
 
     if (section && !marked.has(section.id)) {
       marked.add(section.id);
@@ -130,14 +129,13 @@ export function buildTranscriptView(
       sectionId: section?.id ?? null,
       state: !section ? "outside" : removal ? "removed" : "kept",
       reason: removal?.reason ?? null,
-      ...(section && !removal ? wordTrims(section, word, words[i - 1], words[i + 1]) : { trimStartSec: 0, trimEndSec: 0 }),
+      ...(section && !removal ? wordTrims(section, word, prev, next) : { trimStartSec: 0, trimEndSec: 0 }),
       block: "main",
     };
     flat.push(view);
     tokens.push(view);
 
     // A pause chip, only for pauses wholly inside one section.
-    const next = words[i + 1];
     if (!section || !next) return;
     const gap = next.startSec - word.endSec;
     if (gap < GAP_CHIP_MIN_SEC) return;
@@ -154,6 +152,25 @@ export function buildTranscriptView(
       durationSec: gap,
       removed: removalAt(section, (range.startSec + range.endSec) / 2) != null,
     });
+  };
+
+  let lastSpeaker: string | undefined;
+  words.forEach((word, i) => {
+    if (word.speakerId && word.speakerId !== lastSpeaker) {
+      tokens.push({ kind: "speaker", key: `s:${i}`, speakerId: word.speakerId });
+      lastSpeaker = word.speakerId;
+    }
+    emit(word, sectionFor((word.startSec + word.endSec) / 2), words[i - 1], words[i + 1]);
+  });
+
+  // An uploaded clip's scene shows its own file's words — those inside its
+  // trim. They never sit in recorded order with the source's, so
+  // reorderForPlay lifts them to where the scene plays.
+  doc.sections.forEach((section) => {
+    const slot = doc.media.findIndex((m) => m.id === section.mediaId);
+    if (slot < 0) return;
+    const own = mediaEditorWords(doc.media[slot], slot).filter((w) => isWordInRange(w, section));
+    own.forEach((word, i) => emit(word, section, own[i - 1], own[i + 1]));
   });
 
   return reorderForPlay(doc, tokens, flat);
@@ -167,7 +184,9 @@ export function buildTranscriptView(
  * moves. With nothing out of order this returns the tokens untouched.
  */
 function reorderForPlay(doc: ClipEditDoc, tokens: ViewToken[], flat: ViewWord[]): TranscriptView {
-  const anchored = inOrderSections(doc.sections);
+  // Only the source's scenes have a recorded order; uploaded clips always
+  // follow whatever plays before them.
+  const anchored = inOrderSections(doc.sections.filter(isSourceSection));
   const plain = () => ({ tokens, words: flat, displayOrder: flat.map((w) => w.pos) });
   if (anchored.size === doc.sections.length) return plain();
 
@@ -337,8 +356,11 @@ export function selectionActions(
       } else {
         const before = all[runStart - 1];
         const after = all[p];
-        const prevSection = before?.sectionId ? sectionById.get(before.sectionId) : undefined;
-        const nextSection = after?.sectionId ? sectionById.get(after.sectionId) : undefined;
+        // Only a source neighbour can be fused with — an uploaded clip's
+        // times are on another file.
+        const source = (w: ViewWord | undefined) => (w?.sectionId && !w.word.mediaId ? sectionById.get(w.sectionId) : undefined);
+        const prevSection = source(before);
+        const nextSection = source(after);
         include.push({
           startSec: prevSection
             ? Math.min(prevSection.endSec, first.word.startSec)

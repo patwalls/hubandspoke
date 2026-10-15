@@ -135,11 +135,21 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
   const doc = useEditor((s) => s.doc);
   // The framing on screen = the picked scene's, else the playing scene's.
   const framing = useFraming(engine, plan, doc);
-  const sourceSize = { width: sourceAspect * 1080, height: 1080 };
 
   // Scene-scoped text (title cards) shows only while its scene plays.
   const playingSectionId = usePlayingSectionId(engine, plan);
   const sceneSelection = useEditor((s) => s.sceneSelection);
+  const mediaUrls = useEditor((s) => s.mediaUrls);
+  useEffect(() => {
+    if (videoUrl) engine.setSources(videoUrl, mediaUrls);
+  }, [engine, videoUrl, mediaUrls]);
+  // The box is shaped like the footage on screen: an uploaded clip (a phone
+  // intro, say) has its own size, the source has the one its <video> reports.
+  const shownId = framing.sectionId ?? (previewing ? null : playingSectionId);
+  const shownMediaId = doc.sections.find((x) => x.id === shownId)?.mediaId;
+  const shownMedia = shownMediaId ? doc.media.find((m) => m.id === shownMediaId) : undefined;
+  const aspect = shownMedia ? shownMedia.width / shownMedia.height : sourceAspect;
+  const sourceSize = { width: aspect * 1080, height: 1080 };
   /** Where new text / logos go — the same rule as framing: the scene picked
    *  on the timeline, else the whole clip (null). */
   const addTo = sceneSelection && doc.sections.some((x) => x.id === sceneSelection) ? sceneSelection : null;
@@ -184,8 +194,8 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
   // Same geometry function the exporter uses — see video-box.ts. The source
   // size only matters as a ratio here, so any multiple of the aspect works.
   const box = useMemo(
-    () => resolveVideoBox(plan.canvas, framing.video, { width: sourceAspect * 1080, height: 1080 }),
-    [plan.canvas, framing.video, sourceAspect],
+    () => resolveVideoBox(plan.canvas, framing.video, { width: aspect * 1080, height: 1080 }),
+    [plan.canvas, framing.video, aspect],
   );
   const videoBox = { left: box.x, top: box.y, width: box.width, height: box.height };
 
@@ -534,7 +544,9 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
               style={{ opacity: 1 }}
               onLoadedMetadata={(e) => {
                 const v = e.currentTarget;
-                if (v.videoWidth && v.videoHeight) {
+                // Only the source sets the source's shape; this element
+                // also loads uploaded clips.
+                if (v.videoWidth && v.videoHeight && engine.mediaOf(v) === null) {
                   setSourceAspect(v.videoWidth / v.videoHeight);
                   engine.seek(engine.snapshot().outSec);
                 }

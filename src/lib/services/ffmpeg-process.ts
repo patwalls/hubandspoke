@@ -164,7 +164,7 @@ export function runWatchedProcess(
 
 /** `ffmpeg -i <url>` with no output exits non-zero by design, but prints the
  *  stream banner first — over https that is a ranged read of the header. */
-export function probeSource(input: string): Promise<{ width: number; height: number; durationSec: number | null } | null> {
+export function probeSource(input: string): Promise<{ width: number; height: number; durationSec: number | null; hasAudio: boolean } | null> {
   return new Promise((resolve) => {
     const proc = spawn(ffmpegInstaller.path, ["-hide_banner", "-i", input], { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
@@ -176,7 +176,7 @@ export function probeSource(input: string): Promise<{ width: number; height: num
     proc.on("close", () => {
       clearTimeout(timer);
       const dims = parseSourceDimensions(stderr);
-      resolve(dims ? { ...dims, durationSec: parseSourceDuration(stderr) } : null);
+      resolve(dims ? { ...dims, durationSec: parseSourceDuration(stderr), hasAudio: /Stream #\d+:\d+.*: Audio:/.test(stderr) } : null);
     });
   });
 }

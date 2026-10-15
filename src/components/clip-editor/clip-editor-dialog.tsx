@@ -39,11 +39,11 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { KillIdeaDialog } from "@/components/dashboard/kill-idea-dialog";
-import { lookFromDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
+import { isSourceSection, lookFromDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
 import { resolveScene } from "@/lib/clip-editor/scene";
 import { buildTranscriptView } from "@/lib/clip-editor/transcript-view";
-import { findSilences, rangeForWordRun } from "@/lib/clip-editor/words";
+import { findSilences, mediaEditorWords, rangeForWordRun } from "@/lib/clip-editor/words";
 import type { ClipEditorSession } from "@/lib/services/clip-editor/session";
 import { Inspector } from "./inspector";
 import { clearBackup, takeBackup, writeBackup } from "./local-backup";
@@ -142,7 +142,7 @@ function EditorRoot(props: {
     const { clipIdea, edit } = props.session;
     const recoveredDoc = takeBackup(clipIdea.id, edit.revision, edit.doc);
     return {
-      store: createEditorStore({ doc: edit.doc, revision: edit.revision, recoveredDoc, imageUrls: props.session.imageUrls }),
+      store: createEditorStore({ doc: edit.doc, revision: edit.revision, recoveredDoc, imageUrls: props.session.imageUrls, mediaUrls: props.session.mediaUrls }),
       recovered: recoveredDoc !== null,
     };
   });
@@ -393,7 +393,7 @@ function EditorWorkspace({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ranges: doc.sections.map((s) => ({ startSec: s.startSec, endSec: s.endSec })),
+          ranges: doc.sections.filter(isSourceSection).map((s) => ({ startSec: s.startSec, endSec: s.endSec })),
         }),
       });
       const json = (await res.json().catch(() => ({}))) as {
@@ -442,7 +442,11 @@ function EditorWorkspace({
     let found = 0;
     apply((d) =>
       d.sections.reduce((acc, section) => {
-        const silences = findSilences(session.words, section);
+        // An uploaded clip's pauses come from its own words (none until
+        // it's transcribed).
+        const slot = d.media.findIndex((m) => m.id === section.mediaId);
+        const words = isSourceSection(section) ? session.words : slot >= 0 ? mediaEditorWords(d.media[slot], slot) : [];
+        const silences = findSilences(words, section);
         found += silences.length;
         return commands.remove(section.id, silences, "silence")(acc);
       }, d),
@@ -723,6 +727,7 @@ function EditorWorkspace({
           sections={doc.sections}
           words={session.words}
           videoUrl={session.source.videoUrl}
+          uploadItemId={session.source.productionItemId}
           readOnly={locked}
         />
       </div>

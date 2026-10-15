@@ -32,7 +32,7 @@ import {
   loadAndGuardClipIdea,
   loadClipProductionItemId,
 } from "@/lib/services/promote-clip-idea";
-import { findHookLayer, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
+import { findHookLayer, isSourceSection, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
 
 export class ClipEditNotFoundError extends Error {
@@ -207,8 +207,10 @@ function escapeHtml(text: string): string {
  *  for the test; the feed prefixes the author's name, so this reads as
  *  "Pat Walls: Created a clip from the queue · 04:22–05:07 (40s)". */
 export function buildClipCreatedComment(doc: ClipEditDoc, hook: string): string {
-  const startSec = Math.min(...doc.sections.map((s) => s.startSec));
-  const endSec = Math.max(...doc.sections.map((s) => s.endSec));
+  const fromSource = doc.sections.filter(isSourceSection);
+  const span = fromSource.length > 0 ? fromSource : doc.sections;
+  const startSec = Math.min(...span.map((s) => s.startSec));
+  const endSec = Math.max(...span.map((s) => s.endSec));
   // What actually plays, after cuts — not the span it was taken from.
   const durationSec = Math.round(compileRenderPlan(doc, []).durationSec);
   return [

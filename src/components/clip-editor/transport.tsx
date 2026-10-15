@@ -11,7 +11,7 @@
  */
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
-import type { Section, TimeRange } from "@/lib/clip-editor/doc";
+import { isSourceSection, type Section, type TimeRange } from "@/lib/clip-editor/doc";
 import type { RenderPlan } from "@/lib/clip-editor/plan";
 import type { EditorWord } from "@/lib/clip-editor/words";
 import type { EngineSnapshot, PlaybackEngine } from "./playback-engine";
@@ -43,6 +43,7 @@ export function Transport({
   sections,
   words,
   videoUrl,
+  uploadItemId,
   readOnly,
 }: {
   plan: RenderPlan;
@@ -50,6 +51,8 @@ export function Transport({
   sections: Section[];
   words: EditorWord[];
   videoUrl: string;
+  /** Where uploaded clips are filed in S3. */
+  uploadItemId: string;
   readOnly: boolean;
 }) {
   const [snap, setSnap] = useState<EngineSnapshot>(() => engine.snapshot());
@@ -57,24 +60,28 @@ export function Transport({
 
   const previewing = snap.mode === "preview";
   const playingSectionId = plan.segments[snap.segmentIndex]?.sectionId;
+  // The strip shows source time; an uploaded clip isn't on it.
+  const sourceSections = sections.filter(isSourceSection);
+  const playingUpload = !previewing && sections.some((s) => s.id === playingSectionId && !isSourceSection(s));
   // While previewing, show the part of the clip NEAREST the preview playhead
   // — auditioning the lead-in to a part is the common case, and this keeps
   // both the playhead and that part's handles on screen together.
   const nearest =
     previewing && snap.sourceSec !== null
-      ? [...sections].sort(
+      ? [...sourceSections].sort(
           (a, b) => distanceTo(a, snap.sourceSec!) - distanceTo(b, snap.sourceSec!),
         )[0]
       : undefined;
-  const focus =
-    nearest ??
-    sections.find((s) => s.id === playingSectionId) ??
-    [...sections].sort((a, b) => b.endSec - b.startSec - (a.endSec - a.startSec))[0] ??
-    null;
+  const focus = playingUpload
+    ? null
+    : (nearest ??
+      sourceSections.find((s) => s.id === playingSectionId) ??
+      [...sourceSections].sort((a, b) => b.endSec - b.startSec - (a.endSec - a.startSec))[0] ??
+      null);
 
   return (
     <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-3">
-      <Timeline plan={plan} engine={engine} snap={snap} videoUrl={videoUrl} words={words} readOnly={readOnly} />
+      <Timeline plan={plan} engine={engine} snap={snap} videoUrl={videoUrl} words={words} uploadItemId={uploadItemId} readOnly={readOnly} />
 
       {focus && (
         <TrimStrip
@@ -83,7 +90,7 @@ export function Transport({
           // pulled from minute one plus the body from minute five can't
           // share a useful scale).
           body={focus}
-          neighbours={sections.filter((s) => s.id !== focus.id)}
+          neighbours={sourceSections.filter((s) => s.id !== focus.id)}
           context={{
             startSec: Math.max(0, focus.startSec - STRIP_PAD_SEC),
             endSec: focus.endSec + STRIP_PAD_SEC,

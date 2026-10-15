@@ -24,7 +24,7 @@ import type {
 } from "./doc";
 import { wordEditKey } from "./doc";
 import { keptRanges } from "./removals";
-import type { EditorWord } from "./words";
+import { mediaEditorWords, type EditorWord } from "./words";
 import { endsClause, endsSentence, stripCaptionPunctuation } from "@/lib/transcripts/punctuate-words";
 
 /** A kept run shorter than this is an artifact between two removals (a
@@ -40,6 +40,9 @@ export interface PlanSegment {
   sectionId: string;
   /** Index into `plan.inputs`. */
   inputIndex: number;
+  /** Which file plays: an uploaded clip's id (`doc.media`), or null for the
+   *  source video. Source times below are on that file's timeline. */
+  mediaId: string | null;
   /** Snapped source range that plays. */
   sourceStartSec: number;
   sourceEndSec: number;
@@ -60,6 +63,8 @@ export interface PlanInput {
   readDurationSec: number;
   /** How this scene's video is framed: its own override, else the doc's. */
   video: VideoPlacement;
+  /** The file to open: an uploaded clip's id, or null for the source. */
+  mediaId: string | null;
 }
 
 export interface CaptionCueWord {
@@ -121,6 +126,7 @@ export function compileRenderPlan(
       sectionSegments.push({
         sectionId: section.id,
         inputIndex,
+        mediaId: section.mediaId ?? null,
         sourceStartSec: 0,
         sourceEndSec: 0,
         outStartSec: 0,
@@ -147,6 +153,7 @@ export function compileRenderPlan(
       // One extra second so the decoder never starves the final frames.
       readDurationSec: lastFrame / fps + 1,
       video: section.video ?? doc.video,
+      mediaId: section.mediaId ?? null,
     });
   }
 
@@ -195,11 +202,15 @@ function buildCaptionCues(
   // segment-first (not word-first) is what makes a source moment that appears
   // twice — an intro line that's also inside the body — caption both times.
   const timed: TimedWord[] = [];
+  // An uploaded clip's segments caption from that file's own words — the
+  // source's words at the same times belong to a different recording.
+  const mediaWords = new Map(doc.media.map((m, slot) => [m.id, mediaEditorWords(m, slot)]));
   segments.forEach((seg, segmentIndex) => {
-    for (const w of words) {
+    const pool = seg.mediaId ? (mediaWords.get(seg.mediaId) ?? []) : words;
+    for (const w of pool) {
       const mid = (w.startSec + w.endSec) / 2;
       if (mid < seg.sourceStartSec || mid >= seg.sourceEndSec) continue;
-      const text = (doc.wordEdits[wordEditKey(w.startSec)] ?? w.text).trim();
+      const text = (doc.wordEdits[wordEditKey(w.startSec, w.mediaId)] ?? w.text).trim();
       if (!text) continue;
       const start = Math.max(w.startSec, seg.sourceStartSec);
       const end = Math.min(Math.max(w.endSec, start), seg.sourceEndSec);
@@ -310,7 +321,7 @@ export function sourceToOutput(
 ): number | null {
   const candidates = sectionId
     ? plan.segments.filter((s) => s.sectionId === sectionId)
-    : plan.segments;
+    : plan.segments.filter((s) => !s.mediaId);
   for (const seg of candidates) {
     if (sourceSec >= seg.sourceStartSec && sourceSec < seg.sourceEndSec) {
       return seg.outStartSec + (sourceSec - seg.sourceStartSec);

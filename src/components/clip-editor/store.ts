@@ -11,10 +11,10 @@
  */
 import { createContext, useContext } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
-import type { ClipEditDoc, Layer, RemovalReason, Section } from "@/lib/clip-editor/doc";
+import type { ClipEditDoc, Layer, MediaAsset, RemovalReason, Section } from "@/lib/clip-editor/doc";
 import { wordEditKey } from "@/lib/clip-editor/doc";
 import { addRemoval, restoreRange, restoreReason } from "@/lib/clip-editor/removals";
-import { deleteSection, includeRange, moveSection, retimeSectionInDoc, splitSectionAt } from "@/lib/clip-editor/sections";
+import { deleteSection, includeRange, insertMediaScene, moveSection, retimeSectionInDoc, splitSectionAt } from "@/lib/clip-editor/sections";
 import type { TimeRange } from "@/lib/clip-editor/doc";
 
 const HISTORY_LIMIT = 200;
@@ -49,6 +49,8 @@ export interface EditorState {
    *  layers, registered by the logo picker for layers added here. Not part
    *  of the doc (URLs expire; the doc keeps the durable source). */
   imageUrls: Record<string, string>;
+  /** Playable URL per uploaded clip id (`doc.media`) — same deal. */
+  mediaUrls: Record<string, string>;
 
   apply: (mutate: (doc: ClipEditDoc) => ClipEditDoc, coalesceKey?: string) => void;
   undo: () => void;
@@ -60,6 +62,7 @@ export interface EditorState {
   setStageSelection: (sel: StageSelection) => void;
   setSceneSelection: (sectionId: string | null) => void;
   registerImageUrl: (layerId: string, url: string) => void;
+  registerMediaUrl: (mediaId: string, url: string) => void;
 }
 
 /**
@@ -81,6 +84,7 @@ export function createEditorStore(init: {
    *  opens on them, already dirty, so the normal autosave sends them up. */
   recoveredDoc?: ClipEditDoc | null;
   imageUrls?: Record<string, string>;
+  mediaUrls?: Record<string, string>;
 }): StoreApi<EditorState> {
   return createStore<EditorState>((set, get) => ({
     doc: init.recoveredDoc ?? init.doc,
@@ -94,6 +98,7 @@ export function createEditorStore(init: {
     stageSelection: null,
     sceneSelection: null,
     imageUrls: init.imageUrls ?? {},
+    mediaUrls: init.mediaUrls ?? {},
 
     apply: (mutate, coalesceKey) => {
       const { doc, past, lastChange, saveState } = get();
@@ -153,6 +158,7 @@ export function createEditorStore(init: {
     setStageSelection: (stageSelection) => set({ stageSelection }),
     setSceneSelection: (sceneSelection) => set({ sceneSelection }),
     registerImageUrl: (layerId, url) => set({ imageUrls: { ...get().imageUrls, [layerId]: url } }),
+    registerMediaUrl: (mediaId, url) => set({ mediaUrls: { ...get().mediaUrls, [mediaId]: url } }),
   }));
 }
 
@@ -224,6 +230,12 @@ export const commands = {
 
   /** Drag a scene to another place in the play order. */
   moveSection: (sectionId: string, toIndex: number) => (doc: ClipEditDoc) => moveSection(doc, sectionId, toIndex),
+  insertMediaScene: (media: MediaAsset, atIndex: number) => (doc: ClipEditDoc) => insertMediaScene(doc, media, atIndex),
+  /** An uploaded clip's transcript arrived. */
+  setMediaWords: (mediaId: string, words: NonNullable<MediaAsset["words"]>) => (doc: ClipEditDoc) =>
+    doc.media.some((m) => m.id === mediaId)
+      ? { ...doc, media: doc.media.map((m) => (m.id === mediaId ? { ...m, words } : m)) }
+      : doc,
 
   /** Blade: cut a section in two at a source time. */
   split: (sectionId: string, atSec: number) => (doc: ClipEditDoc) =>
@@ -279,9 +291,9 @@ export const commands = {
   /** Correct a transcript word. Setting it back to the original text clears
    *  the override rather than storing a no-op. */
   correctWord:
-    (word: { startSec: number; text: string }, text: string) =>
+    (word: { startSec: number; text: string; mediaId?: string }, text: string) =>
     (doc: ClipEditDoc) => {
-      const key = wordEditKey(word.startSec);
+      const key = wordEditKey(word.startSec, word.mediaId);
       const next = { ...doc.wordEdits };
       const trimmed = text.trim();
       if (!trimmed || trimmed === word.text) delete next[key];

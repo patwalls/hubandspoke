@@ -8,7 +8,7 @@
  * section's neighbours in the recording (the transcript still reads in
  * recorded order; its part chips show the play order).
  */
-import type { ClipEditDoc, Section, TimeRange } from "./doc";
+import { isSourceSection, type ClipEditDoc, type MediaAsset, type Section, type TimeRange } from "./doc";
 import { normalizeRemovals, retimeSection } from "./removals";
 
 const TOUCH_EPSILON_SEC = 0.001;
@@ -32,7 +32,9 @@ export function includeRange(doc: ClipEditDoc, range: TimeRange): ClipEditDoc {
   const touching: Section[] = [];
   const others: Section[] = [];
   for (const s of doc.sections) {
+    // `range` is source time; an uploaded clip's times are on its own file.
     const overlaps =
+      isSourceSection(s) &&
       s.startSec <= range.endSec + TOUCH_EPSILON_SEC &&
       s.endSec >= range.startSec - TOUCH_EPSILON_SEC;
     (overlaps ? touching : others).push(s);
@@ -64,7 +66,7 @@ export function includeRange(doc: ClipEditDoc, range: TimeRange): ClipEditDoc {
 function afterSourcePredecessor(sections: Section[], startSec: number): number {
   let best = -1;
   sections.forEach((s, i) => {
-    if (s.startSec < startSec && (best < 0 || s.startSec > sections[best].startSec)) best = i;
+    if (isSourceSection(s) && s.startSec < startSec && (best < 0 || s.startSec > sections[best].startSec)) best = i;
   });
   return best + 1;
 }
@@ -91,11 +93,16 @@ export function retimeSectionInDoc(
   id: string,
   window: TimeRange,
 ): ClipEditDoc {
-  const sorted = [...doc.sections].sort((a, b) => a.startSec - b.startSec);
-  const i = sorted.findIndex((s) => s.id === id);
-  if (i < 0) return doc;
+  const target = doc.sections.find((s) => s.id === id);
+  if (!target) return doc;
+  // An uploaded clip has no neighbours in its file — it stops at the ends.
+  const media = target.mediaId ? doc.media.find((m) => m.id === target.mediaId) : undefined;
+  const sorted = target.mediaId
+    ? [target]
+    : doc.sections.filter(isSourceSection).sort((a, b) => a.startSec - b.startSec);
+  const i = sorted.indexOf(target);
   const floor = i > 0 ? sorted[i - 1].endSec : 0;
-  const ceiling = i < sorted.length - 1 ? sorted[i + 1].startSec : Number.POSITIVE_INFINITY;
+  const ceiling = i < sorted.length - 1 ? sorted[i + 1].startSec : (media?.durationSec ?? Number.POSITIVE_INFINITY);
   const clamped = {
     startSec: Math.max(window.startSec, floor),
     endSec: Math.min(window.endSec, ceiling),
@@ -130,6 +137,31 @@ export function splitSectionAt(doc: ClipEditDoc, id: string, atSec: number): Cli
   const sections = [...doc.sections];
   sections.splice(i, 1, left, right);
   return { ...doc, sections };
+}
+
+/**
+ * Put an uploaded clip into the edit as its own scene, whole, played at
+ * `atIndex` (0 = first). Registers the file in `doc.media` as well.
+ */
+export function insertMediaScene(doc: ClipEditDoc, media: MediaAsset, atIndex: number): ClipEditDoc {
+  const taken = new Set(doc.sections.map((s) => s.id));
+  let id = `sec-${media.id}`;
+  for (let n = 2; taken.has(id); n++) id = `sec-${media.id}-${n}`;
+  const scene: Section = {
+    id,
+    role: "body",
+    startSec: 0,
+    endSec: Math.round(media.durationSec * 1000) / 1000,
+    removals: [],
+    mediaId: media.id,
+  };
+  const sections = [...doc.sections];
+  sections.splice(Math.max(0, Math.min(sections.length, atIndex)), 0, scene);
+  // Files no scene plays any more (deleted scenes) are dropped here, so
+  // `doc.media` can't fill up; undo still brings them back.
+  const used = new Set(sections.map((s) => s.mediaId));
+  const kept = doc.media.filter((m) => m.id !== media.id && used.has(m.id));
+  return { ...doc, sections, media: [...kept, media] };
 }
 
 /** Delete a whole piece of the clip. Its words go back to being "the rest of

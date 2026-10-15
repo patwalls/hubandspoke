@@ -2,7 +2,7 @@
  * Transcript words as the editor sees them, plus the word⇄time-range mapping
  * that turns "delete these words" into a removal on the source timeline.
  */
-import type { TimeRange } from "./doc";
+import type { MediaAsset, TimeRange } from "./doc";
 
 export interface EditorWord {
   /** Index into the FULL transcript `words` array — stable for the lifetime
@@ -14,6 +14,23 @@ export interface EditorWord {
   endSec: number;
   /** Who says it, when speaker detection has run (multi-speaker audio). */
   speakerId?: string;
+  /** Set on an uploaded clip's words: their times are on that file. */
+  mediaId?: string;
+}
+
+/** Keeps uploaded clips' word indexes clear of the source transcript's. */
+const MEDIA_INDEX_BASE = 10_000_000;
+
+/** An uploaded clip's words, in the editor's shape. `slot` is the clip's
+ *  position in `doc.media`, which keeps indexes unique across clips. */
+export function mediaEditorWords(media: MediaAsset, slot: number): EditorWord[] {
+  return (media.words ?? []).map((w, i) => ({
+    index: MEDIA_INDEX_BASE * (slot + 1) + i,
+    text: w.text,
+    startSec: w.startSec,
+    endSec: Math.max(w.endSec, w.startSec),
+    mediaId: media.id,
+  }));
 }
 
 interface TranscriptWord {
@@ -169,7 +186,9 @@ export function rangeForWordRun(
   const a = words[first];
   const b = words[last];
   if (!a || !b || last < first) return null;
-  const next = words[last + 1];
+  // The next word only counts when it's on the same file.
+  const after = words[last + 1];
+  const next = after && after.mediaId === b.mediaId ? after : undefined;
   const endSec =
     next && next.startSec - b.endSec <= SWALLOW_GAP_SEC
       ? Math.max(b.endSec, next.startSec)

@@ -11,7 +11,7 @@ import {
   productionItems,
   transcripts,
 } from "@/lib/db/schema";
-import { bucketName, buildKey, getPresignedGetUrl, putObjectFromFile } from "@/lib/s3";
+import { bucketName, buildKey, getPresignedGetUrl, keyPrefix, putObjectFromFile } from "@/lib/s3";
 import { recordToolAction } from "@/lib/services/content-events";
 import { installRenderedClipMedia } from "@/lib/services/clip-editor/install-rendered-media";
 import { parseDoc } from "@/lib/clip-editor/doc";
@@ -161,6 +161,23 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
       images.push(file);
     }
 
+    // Uploaded clips (an intro recorded separately): each a local file too,
+    // probed for its own size and whether it has sound at all. Always read
+    // from our own bucket — the doc only stores the key.
+    const media: Record<string, string> = {};
+    const mediaSizes: Record<string, { width: number; height: number }> = {};
+    const silentMedia: string[] = [];
+    const usedMedia = new Set(plan.inputs.flatMap((input) => (input.mediaId ? [input.mediaId] : [])));
+    for (const asset of parsed.doc.media.filter((m) => usedMedia.has(m.id))) {
+      if (!asset.key.startsWith(`${keyPrefix()}/`)) throw new Error(`Uploaded clip ${asset.id} is outside the uploads folder`);
+      const file = path.join(workDir, `media-${asset.id}`);
+      await downloadToFile(await getPresignedGetUrl(asset.key, 3600), file, { signal: helpers.abortSignal });
+      const probed = await probeSource(file);
+      media[asset.id] = file;
+      mediaSizes[asset.id] = probed ? { width: probed.width, height: probed.height } : { width: asset.width, height: asset.height };
+      if (probed && !probed.hasAudio) silentMedia.push(asset.id);
+    }
+
     const filterScriptPath = path.join(workDir, "graph.txt");
     await writeFile(
       filterScriptPath,
@@ -169,6 +186,8 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
         fontsDir: path.join(process.cwd(), "public", "fonts", "clip-editor"),
         sourceSize,
         imageCount: images.length,
+        mediaSizes,
+        silentMedia,
       }),
     );
     const outputPath = path.join(workDir, "clip.mp4");
@@ -180,7 +199,7 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
     const onProgress = makeProgressWriter(render.id, plan.durationSec);
     const started = Date.now();
     await runFfmpeg(
-      buildRenderArgs({ plan, input: localSource, images, filterScriptPath, outputPath }),
+      buildRenderArgs({ plan, input: localSource, media, images, filterScriptPath, outputPath }),
       { onProgress, signal: helpers.abortSignal },
     );
     const renderSeconds = (Date.now() - started) / 1000;

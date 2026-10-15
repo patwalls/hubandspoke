@@ -71,6 +71,9 @@ export interface ClipEditorSession {
   /** A browser URL per image layer id in the doc (logos). Layers added in
    *  the session bring their own URL from the logo picker. */
   imageUrls: Record<string, string>;
+  /** A playable URL per uploaded clip in the doc (`doc.media`). Clips
+   *  uploaded in the session bring their own. */
+  mediaUrls: Record<string, string>;
   source: {
     productionItemId: string;
     title: string | null;
@@ -206,6 +209,7 @@ export async function loadClipEditorSession(args: {
     post: await ensureClipPostDraft(row.id),
     edit,
     imageUrls: await resolveLayerImageUrls(edit.doc),
+    mediaUrls: await resolveMediaUrls(edit.doc),
     source: {
       productionItemId: row.sourceProductionItemId,
       title: row.sourceTitle,
@@ -224,6 +228,12 @@ async function resolveLayerImageUrls(doc: ClipEditDoc): Promise<Record<string, s
   for (const layer of doc.layers) {
     if (layer.type === "image") out[layer.id] = await previewUrlFor(layer.src);
   }
+  return out;
+}
+
+async function resolveMediaUrls(doc: ClipEditDoc): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const m of doc.media) out[m.id] = await getPresignedGetUrl(m.key, 4 * 3600);
   return out;
 }
 

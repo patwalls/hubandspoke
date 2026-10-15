@@ -14,6 +14,11 @@
  * old element for the cut after that. Seeks still happen — just never while
  * anyone is watching them.
  *
+ * Uploaded clips (segments with a `mediaId`) are other files: an element is
+ * pointed at whichever file the segment it's cued for plays from, so a cut
+ * into or out of one is a hand-off like any other — the standby loads and
+ * parks on the clip ahead of time.
+ *
  * Deliberately framework-free: React renders the two elements and hands them
  * over; the engine owns play state, the clock, and element visibility. Time
  * updates go out through `subscribe` at rAF rate so they never pass through
@@ -50,6 +55,11 @@ export interface EngineSnapshot {
 
 type Listener = (snapshot: EngineSnapshot) => void;
 
+/** Footage that runs straight on in the same file — no hand-off needed. */
+function continuousCut(a: PlanSegment, b: PlanSegment): boolean {
+  return a.mediaId === b.mediaId && Math.abs(b.sourceStartSec - a.sourceEndSec) < CONTIGUOUS_EPSILON_SEC;
+}
+
 export class PlaybackEngine {
   private els: [HTMLVideoElement, HTMLVideoElement] | null = null;
   private active = 0;
@@ -67,6 +77,22 @@ export class PlaybackEngine {
   /** Where the clip playhead was when preview began — "Back to clip" and the
    *  frozen scrub bar both use it. */
   private heldOutSec = 0;
+  private sourceUrl: string | null = null;
+  private mediaUrls: Record<string, string> = {};
+  /** Which file each element has loaded (null = the source, which React
+   *  gives them to start with). */
+  private loaded = new WeakMap<HTMLVideoElement, string | null>();
+
+  /** The files segments can play from: the source and each uploaded clip. */
+  setSources(sourceUrl: string, mediaUrls: Record<string, string>): void {
+    this.sourceUrl = sourceUrl;
+    this.mediaUrls = mediaUrls;
+  }
+
+  /** The uploaded clip an element is showing, or null for the source. */
+  mediaOf(el: HTMLVideoElement): string | null {
+    return this.loaded.get(el) ?? null;
+  }
 
   attach(a: HTMLVideoElement, b: HTMLVideoElement): void {
     this.els = [a, b];
@@ -207,7 +233,7 @@ export class PlaybackEngine {
     this.mode = "preview";
     const el = this.els[this.active];
     this.els[1 - this.active].pause();
-    el.currentTime = Math.max(0, sourceSec);
+    this.cue(el, null, Math.max(0, sourceSec));
     this.emit();
     if (opts.autoplay ?? true) this.play();
   }
@@ -233,7 +259,7 @@ export class PlaybackEngine {
     if (!mapped) return;
     this.segIndex = mapped.segmentIndex;
     const el = this.els[this.active];
-    el.currentTime = mapped.sourceSec;
+    this.cue(el, this.segments[this.segIndex].mediaId, mapped.sourceSec);
     this.cueStandby();
     this.emit();
   }
@@ -268,7 +294,7 @@ export class PlaybackEngine {
     if (this.mode === "preview") {
       const t = el.currentTime;
       const into = this.segments.findIndex(
-        (s) => t >= s.sourceStartSec && t < s.sourceEndSec - SWITCH_LEAD_SEC,
+        (s) => !s.mediaId && t >= s.sourceStartSec && t < s.sourceEndSec - SWITCH_LEAD_SEC,
       );
       if (into >= 0) {
         // Ran into the edit: same element, same instant — only the mode (and
@@ -308,15 +334,14 @@ export class PlaybackEngine {
     // Both elements play the same file, so footage that runs on in the
     // source (e.g. across a blade cut between two sections) just keeps
     // playing — no hand-off, no seek.
-    const continuous = Math.abs(next.sourceStartSec - current.sourceEndSec) < CONTIGUOUS_EPSILON_SEC;
-    if (continuous) return;
+    if (continuousCut(current, next)) return;
 
     const outgoing = this.els[this.active];
     const incoming = this.els[1 - this.active];
     // The standby should already be parked here; if an edit moved the cut
     // since it was cued, correct it (costs one visible seek, once).
-    if (Math.abs(incoming.currentTime - next.sourceStartSec) > 0.05) {
-      incoming.currentTime = next.sourceStartSec;
+    if (this.mediaOf(incoming) !== next.mediaId || Math.abs(incoming.currentTime - next.sourceStartSec) > 0.05) {
+      this.cue(incoming, next.mediaId, next.sourceStartSec);
     }
     incoming.muted = false;
     outgoing.muted = true;
@@ -336,14 +361,26 @@ export class PlaybackEngine {
     while (i + 1 < this.segments.length) {
       const a = this.segments[i];
       const b = this.segments[i + 1];
-      const continuous = Math.abs(b.sourceStartSec - a.sourceEndSec) < CONTIGUOUS_EPSILON_SEC;
-      if (!continuous) {
+      if (!continuousCut(a, b)) {
         standby.pause();
-        standby.currentTime = b.sourceStartSec;
+        this.cue(standby, b.mediaId, b.sourceStartSec);
         return;
       }
       i += 1;
     }
+  }
+
+  /** Point `el` at the file `mediaId` plays from (if it isn't already) and
+   *  seek it to `sec` on that file's timeline. */
+  private cue(el: HTMLVideoElement, mediaId: string | null, sec: number): void {
+    if (this.mediaOf(el) !== mediaId) {
+      const url = mediaId ? this.mediaUrls[mediaId] : this.sourceUrl;
+      if (url) {
+        this.loaded.set(el, mediaId);
+        el.src = url;
+      }
+    }
+    el.currentTime = sec;
   }
 
   private reveal(): void {

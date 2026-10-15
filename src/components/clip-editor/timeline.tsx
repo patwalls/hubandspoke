@@ -14,6 +14,8 @@
  * Drag a piece's left / right edge (any tool) to trim it, or to extend it
  * into the footage around it — snapped to word boundaries.
  * Zoom with − / +, or ⌘/Ctrl + scroll. A plain scroll pans.
+ * "Add clip" (or dropping a video file on the track) uploads a clip that
+ * isn't in the source — an intro recorded separately — as its own scene.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -29,7 +31,9 @@ import {
   PlusIcon,
   SliceIcon,
   SquareSplitHorizontalIcon,
+  UploadIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { outputToSource, type RenderPlan } from "@/lib/clip-editor/plan";
 import {
@@ -43,6 +47,7 @@ import {
   type TimelinePiece,
 } from "@/lib/clip-editor/timeline";
 import { FrameCache } from "./frame-cache";
+import { transcribeClip, uploadClip } from "./media-upload";
 import { usePlayingSectionId } from "./framing";
 import type { EditorWord } from "@/lib/clip-editor/words";
 import type { EngineSnapshot, PlaybackEngine } from "./playback-engine";
@@ -80,6 +85,7 @@ export function Timeline({
   snap,
   videoUrl,
   words,
+  uploadItemId,
   readOnly,
 }: {
   plan: RenderPlan;
@@ -87,6 +93,7 @@ export function Timeline({
   snap: EngineSnapshot;
   videoUrl: string;
   words: EditorWord[];
+  uploadItemId: string;
   readOnly: boolean;
 }) {
   const apply = useEditor((s) => s.apply);
@@ -114,10 +121,23 @@ export function Timeline({
     setCache(c);
     return () => c.destroy();
   }, [videoUrl]);
+  // One more per uploaded clip — its own file, its own frames.
+  const mediaUrls = useEditor((s) => s.mediaUrls);
+  const registerMediaUrl = useEditor((s) => s.registerMediaUrl);
+  const [mediaCaches, setMediaCaches] = useState<Record<string, FrameCache>>({});
+  const mediaUrlsKey = JSON.stringify(mediaUrls);
+  useEffect(() => {
+    const urls = JSON.parse(mediaUrlsKey) as Record<string, string>;
+    const made = Object.fromEntries(Object.entries(urls).map(([id, url]) => [id, new FrameCache(url)]));
+    setMediaCaches(made);
+    return () => Object.values(made).forEach((c) => c.destroy());
+  }, [mediaUrlsKey]);
 
   const duration = Math.max(plan.durationSec, 0.1);
   /** A scene being dragged to a new place: its offset and where it'd land. */
   const [dragMove, setDragMove] = useState<{ sectionId: string; dx: number; slot: { toIndex: number; x: number } } | null>(null);
+  /** Where a video file dragged over the track would land. */
+  const [fileSlot, setFileSlot] = useState<{ toIndex: number; x: number } | null>(null);
   // While an edge is being dragged the clip's length changes under the
   // pointer; hold the scale still so the edge tracks the mouse.
   const [frozenPx, setFrozenPx] = useState<number | null>(null);
@@ -286,6 +306,8 @@ export function Timeline({
     const section = doc.sections.find((s) => s.id === sectionId);
     if (!section) return;
     const start = { startSec: section.startSec, endSec: section.endSec };
+    // Word boundaries are the source's; an uploaded clip trims freely.
+    const snapEdge = section.mediaId ? (sec: number) => sec : snapToWord;
     const x0 = e.clientX;
     const px = pxPerSec;
     setFrozenPx(px);
@@ -295,8 +317,8 @@ export function Timeline({
       const d = (ev.clientX - x0) / px;
       const window =
         edge === "start"
-          ? { startSec: Math.max(0, Math.min(snapToWord(start.startSec + d, "start"), start.endSec - MIN_PIECE_SEC)), endSec: start.endSec }
-          : { startSec: start.startSec, endSec: Math.max(snapToWord(start.endSec + d, "end"), start.startSec + MIN_PIECE_SEC) };
+          ? { startSec: Math.max(0, Math.min(snapEdge(start.startSec + d, "start"), start.endSec - MIN_PIECE_SEC)), endSec: start.endSec }
+          : { startSec: start.startSec, endSec: Math.max(snapEdge(start.endSec + d, "end"), start.startSec + MIN_PIECE_SEC) };
       apply(commands.retime(sectionId, window), key);
     };
     const up = () => {
@@ -307,6 +329,40 @@ export function Timeline({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+
+  // ── Upload a clip ───────────────────────────────────────────────────────
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [fileOver, setFileOver] = useState(false);
+  /** Upload `file` and play it as a new scene at `toIndex` (default: right
+   *  after the scene under the playhead). */
+  const addClip = async (file: File, toIndex?: number) => {
+    if (readOnly || uploadPct !== null) return;
+    const playing = plan.segments[snap.segmentIndex]?.sectionId;
+    const at = toIndex ?? (playing ? doc.sections.findIndex((s) => s.id === playing) + 1 : doc.sections.length);
+    setUploadPct(0);
+    try {
+      const { media, localUrl } = await uploadClip({ file, itemId: uploadItemId, onProgress: setUploadPct });
+      registerMediaUrl(media.id, localUrl);
+      apply(commands.insertMediaScene(media, at));
+      toast.success(`Added ${media.name} as scene ${at + 1} — drag it to move it`);
+      setUploadPct(null);
+      // Its words, so it can be cut and captioned like the rest. Runs after
+      // the scene is in: editing carries on while Whisper works.
+      void transcribeClip(file).then(
+        (words) => {
+          apply(commands.setMediaWords(media.id, words));
+          toast.success(words.length > 0 ? `${media.name} is transcribed — its words are in the transcript` : `${media.name} has no speech to transcribe`);
+        },
+        (err) => toast.error(err instanceof Error ? err.message : "Couldn't transcribe the clip"),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploadPct(null);
+    }
+  };
+  const isFileDrag = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
 
   // ── Pointer ─────────────────────────────────────────────────────────────
   const drag = (onMove: (ev: globalThis.PointerEvent) => void) => {
@@ -442,6 +498,26 @@ export function Timeline({
           >
             <SquareSplitHorizontalIcon className="size-4" /> Split
           </button>
+          <button
+            type="button"
+            disabled={readOnly || uploadPct !== null}
+            onClick={() => fileInput.current?.click()}
+            title="Upload a video clip that isn't in the source (an intro, say) as its own scene — or drop a file on the timeline"
+            className="flex h-8 items-center gap-1.5 rounded-md px-2 text-[13px] font-medium hover:bg-muted disabled:opacity-40"
+          >
+            <UploadIcon className="size-4" /> {uploadPct === null ? "Add clip" : `Uploading ${uploadPct}%`}
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void addClip(file);
+            }}
+          />
         </div>
 
         <div className="flex flex-1 items-center justify-end gap-1">
@@ -500,7 +576,28 @@ export function Timeline({
       <div
         ref={scrollRef}
         onScroll={(e) => setScrollX(e.currentTarget.scrollLeft)}
-        className={cn("relative select-none overflow-x-auto overflow-y-hidden rounded-md border border-border bg-muted/30 [scrollbar-width:thin]", previewing && "opacity-60")}
+        onDragOver={(e) => {
+          if (readOnly || !isFileDrag(e)) return;
+          e.preventDefault();
+          setFileOver(true);
+          setDragMove(null);
+          const slot = dropSlot("", timeAt(e.clientX));
+          setFileSlot(slot);
+        }}
+        onDragLeave={() => {
+          setFileOver(false);
+          setFileSlot(null);
+        }}
+        onDrop={(e) => {
+          if (readOnly || !isFileDrag(e)) return;
+          e.preventDefault();
+          const file = e.dataTransfer.files[0];
+          const slot = dropSlot("", timeAt(e.clientX));
+          setFileOver(false);
+          setFileSlot(null);
+          if (file) void addClip(file, slot.toIndex);
+        }}
+        className={cn("relative select-none overflow-x-auto overflow-y-hidden rounded-md border border-border bg-muted/30 [scrollbar-width:thin]", previewing && "opacity-60", fileOver && "border-violet-500 bg-violet-50/50 dark:bg-violet-950/20")}
       >
         <div className="relative" style={{ width: contentW, height: RULER_H + TRACK_H + 10 }}>
           <div onPointerDown={scrub} className="absolute inset-x-0 top-0 cursor-pointer border-b border-border/60" style={{ height: RULER_H }}>
@@ -531,7 +628,8 @@ export function Timeline({
                 pxPerSec={pxPerSec}
                 visible={[scrollX - xOf(p.outStartSec) - 200, scrollX + viewW - xOf(p.outStartSec) + 200]}
                 plan={plan}
-                cache={cache}
+                cache={p.mediaId ? (mediaCaches[p.mediaId] ?? null) : cache}
+                mediaName={p.mediaId ? doc.media.find((m) => m.id === p.mediaId)?.name : undefined}
                 selected={p.sectionId === selectedId}
                 readOnly={readOnly}
                 titles={doc.layers.filter((l) => (l.type === "text" || l.type === "image") && l.sectionId === p.sectionId).length}
@@ -539,8 +637,8 @@ export function Timeline({
                 dragOffset={dragMove?.sectionId === p.sectionId ? dragMove.dx : null}
               />
             ))}
-            {dragMove && (
-              <div className="pointer-events-none absolute inset-y-[-6px] z-20 w-1 -translate-x-1/2 rounded-full bg-violet-600 shadow" style={{ left: dragMove.slot.x }} />
+            {(dragMove ?? fileSlot) && (
+              <div className="pointer-events-none absolute inset-y-[-6px] z-20 w-1 -translate-x-1/2 rounded-full bg-violet-600 shadow" style={{ left: (dragMove?.slot ?? fileSlot)!.x }} />
             )}
             {hoverSec !== null && (
               <div className="pointer-events-none absolute inset-y-[-4px] w-0.5 bg-rose-500" style={{ left: xOf(hoverSec) - 1 }} />
@@ -568,6 +666,7 @@ function PieceBlock({
   visible,
   plan,
   cache,
+  mediaName,
   selected,
   readOnly,
   titles,
@@ -582,6 +681,8 @@ function PieceBlock({
   visible: [number, number];
   plan: RenderPlan;
   cache: FrameCache | null;
+  /** Set for an uploaded clip (not from the source). */
+  mediaName?: string;
   selected: boolean;
   readOnly: boolean;
   /** Title cards / subtitles that belong to this scene. */
@@ -626,6 +727,15 @@ function PieceBlock({
         <div key={s} className="absolute inset-y-0 w-px bg-white/70" style={{ left: (s - piece.outStartSec) * pxPerSec }} title="Cut" />
       ))}
       <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 font-mono text-[9px] font-semibold leading-3.5 text-white">{piece.index}</span>
+      {mediaName !== undefined && (
+        <span
+          title={`Uploaded clip: ${mediaName}`}
+          className="absolute right-2 top-0.5 flex items-center gap-0.5 rounded bg-emerald-600 px-1 font-mono text-[9px] font-bold leading-3.5 text-white"
+        >
+          <UploadIcon className="size-2.5" />
+          {width > 110 ? "Upload" : ""}
+        </span>
+      )}
       {width > 70 && (
         <span className="absolute bottom-0.5 right-2 rounded bg-black/60 px-1 font-mono text-[9px] font-semibold leading-3.5 text-white">
           {(piece.outEndSec - piece.outStartSec).toFixed(1)}s

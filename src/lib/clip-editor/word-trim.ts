@@ -44,8 +44,11 @@ export interface WordTrimWindow {
 export function wordTrimWindow(section: Section, words: EditorWord[], index: number, texts?: (i: number) => string): WordTrimWindow | null {
   const word = words[index];
   if (!word) return null;
-  const prev = words[index - 1];
-  const next = words[index + 1];
+  // Neighbours on another file (an uploaded clip's words sit next to the
+  // source's in the list) don't bound this word.
+  const sameFile = (w: EditorWord | undefined) => (w && w.mediaId === word.mediaId ? w : undefined);
+  const prev = sameFile(words[index - 1]);
+  const next = sameFile(words[index + 1]);
   const minSec = round3(Math.max(section.startSec, prev ? Math.max(prev.endSec, word.startSec - REACH_SEC) : word.startSec - REACH_SEC));
   const maxSec = round3(Math.min(section.endSec, next ? Math.min(next.startSec, word.endSec + REACH_SEC) : word.endSec + REACH_SEC));
   if (maxSec - minSec < MIN_KEEP_SEC) return null;
@@ -62,6 +65,7 @@ export function wordTrimWindow(section: Section, words: EditorWord[], index: num
   const neighbours: WordTrimWindow["neighbours"] = [];
   for (let i = Math.max(0, index - 3); i < Math.min(words.length, index + 4); i++) {
     const w = words[i];
+    if (w.mediaId !== word.mediaId) continue;
     if (w.endSec <= minSec - REACH_SEC || w.startSec >= maxSec + REACH_SEC) continue;
     neighbours.push({ text: texts ? texts(i) : w.text, startSec: w.startSec, endSec: w.endSec, self: i === index });
   }

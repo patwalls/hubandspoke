@@ -4,7 +4,8 @@
  *
  * Shape of the graph:
  *
- *   per plan input (one seeked open of the source per section)
+ *   per plan input (one seeked open of the source — or of an uploaded clip
+ *   — per section)
  *     video: fps → select(kept frames) → setpts
  *     audio: aresample → asetnsamples(one video frame of samples) → aselect → asetpts
  *   concat the inputs → place on the canvas (scale + pad | crop)
@@ -18,6 +19,7 @@
  * both streams — sync cannot drift (see plan.ts, "Frame grid").
  */
 import { sectionOutWindow, type PlanSegment, type RenderPlan } from "./plan";
+import type { VideoPlacement } from "./doc";
 import { boxOverflows, resolveVideoBox, type VideoBox } from "./video-box";
 
 export const AUDIO_SAMPLE_RATE = 48000;
@@ -69,6 +71,10 @@ export function buildFilterGraph(
     /** Image layers as extra inputs, in the order `buildRenderArgs` adds
      *  them after the video inputs (one per `plan.imageLayers` entry). */
     imageCount?: number;
+    /** Display size of each uploaded clip, by media id. */
+    mediaSizes?: Record<string, { width: number; height: number }>;
+    /** Uploaded clips with no audio track — they play silence. */
+    silentMedia?: string[];
   },
 ): string {
   const { width: W, height: H, fps } = plan.canvas;
@@ -89,12 +95,18 @@ export function buildFilterGraph(
   // per-scene framing) = place once, after the concat. Scenes framed
   // differently = place each input on its own, then concat the placed
   // frames. Without the source size there is no exact box, so per-scene
-  // framing falls back to the doc's.
+  // framing falls back to the doc's. An uploaded clip is always placed on
+  // its own: it's a different file, usually a different size, and concat
+  // needs every stream the same size.
+  const hasMedia = plan.inputs.some((input) => input.mediaId);
   const perScene =
-    !!opts.sourceSize &&
-    plan.inputs.some((input) => JSON.stringify(input.video) !== JSON.stringify(plan.inputs[0].video));
+    hasMedia ||
+    (!!opts.sourceSize &&
+      plan.inputs.some((input) => JSON.stringify(input.video) !== JSON.stringify(plan.inputs[0].video)));
   const framesOf = (i: number) =>
     plan.segments.filter((s) => s.inputIndex === i).reduce((n, s) => n + s.frameEnd - s.frameStart, 0);
+  const sizeOf = (mediaId: string | null) => (mediaId ? opts.mediaSizes?.[mediaId] : opts.sourceSize) ?? null;
+  const silent = new Set(opts.silentMedia ?? []);
 
   plan.inputs.forEach((input, i) => {
     const predicate = framePredicate(
@@ -103,13 +115,25 @@ export function buildFilterGraph(
     const decoded = `[${i}:v]fps=${fps}:start_time=0,select='${predicate}',setpts=N/${fps}/TB`;
     if (perScene) {
       chains.push(`${decoded}[vr${i}]`);
-      placeExact(chains, `vr${i}`, `v${i}`, `${i}`, resolveVideoBox(plan.canvas, input.video, opts.sourceSize!), input.video.fit, { W, H, fps, bg, frames: framesOf(i) });
+      const size = sizeOf(input.mediaId);
+      if (size) {
+        placeExact(chains, `vr${i}`, `v${i}`, `${i}`, resolveVideoBox(plan.canvas, input.video, size), input.video.fit, { W, H, fps, bg, frames: framesOf(i) });
+      } else {
+        chains.push(`[vr${i}]${aspectPlacement(input.video, W, H, bg)},setsar=1[v${i}]`);
+      }
     } else {
       chains.push(`${decoded}[v${i}]`);
     }
-    chains.push(
-      `[${i}:a]aresample=${AUDIO_SAMPLE_RATE}:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,asetnsamples=n=${samplesPerFrame}:p=0,aselect='${predicate}',asetpts=N/SR/TB[a${i}]`,
-    );
+    if (input.mediaId && silent.has(input.mediaId)) {
+      // No audio track to cut — the same number of samples of silence.
+      chains.push(
+        `anullsrc=channel_layout=stereo:sample_rate=${AUDIO_SAMPLE_RATE},atrim=end_sample=${framesOf(i) * samplesPerFrame},aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=N/SR/TB[a${i}]`,
+      );
+    } else {
+      chains.push(
+        `[${i}:a]aresample=${AUDIO_SAMPLE_RATE}:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,asetnsamples=n=${samplesPerFrame}:p=0,aselect='${predicate}',asetpts=N/SR/TB[a${i}]`,
+      );
+    }
   });
 
   const n = plan.inputs.length;
@@ -156,15 +180,7 @@ export function buildFilterGraph(
 
   const video = plan.inputs[0]?.video ?? plan.video;
   if (!opts.sourceSize) {
-    // Dimension-free fallback (source couldn't be probed): ffmpeg works the
-    // fit out itself from the input aspect `a`. Cannot inset, zoom or round
-    // the video — all need the exact box — so those settings are ignored.
-    const canvasAspect = (W / H).toFixed(6);
-    const place =
-      video.fit === "contain"
-        ? `scale=w='if(gt(a,${canvasAspect}),${W},-2)':h='if(gt(a,${canvasAspect}),-2,${H})':flags=lanczos,pad=${W}:${H}:'(ow-iw)/2':'max(0,min(oh-ih,oh*${video.yPct}/100-ih/2))':color=${bg}`
-        : `scale=w='if(gt(a,${canvasAspect}),-2,${W})':h='if(gt(a,${canvasAspect}),${H},-2)':flags=lanczos,crop=${W}:${H}:'(iw-${W})*${video.panXPct}/100':'(ih-${H})/2'`;
-    chains.push(`[vcat]${place},setsar=1[vplaced]`);
+    chains.push(`[vcat]${aspectPlacement(video, W, H, bg)},setsar=1[vplaced]`);
     finish("vplaced");
     return chains.join(";\n");
   }
@@ -174,6 +190,18 @@ export function buildFilterGraph(
   finish("vplaced");
 
   return chains.join(";\n");
+}
+
+/**
+ * Dimension-free fallback (the file couldn't be probed): ffmpeg works the
+ * fit out itself from the input aspect `a`. Cannot inset, zoom or round the
+ * video — all need the exact box — so those settings are ignored.
+ */
+function aspectPlacement(video: VideoPlacement, W: number, H: number, bg: string): string {
+  const canvasAspect = (W / H).toFixed(6);
+  return video.fit === "contain"
+    ? `scale=w='if(gt(a,${canvasAspect}),${W},-2)':h='if(gt(a,${canvasAspect}),-2,${H})':flags=lanczos,pad=${W}:${H}:'(ow-iw)/2':'max(0,min(oh-ih,oh*${video.yPct}/100-ih/2))':color=${bg}`
+    : `scale=w='if(gt(a,${canvasAspect}),-2,${W})':h='if(gt(a,${canvasAspect}),${H},-2)':flags=lanczos,crop=${W}:${H}:'(iw-${W})*${video.panXPct}/100':'(ih-${H})/2'`;
 }
 
 /**
@@ -231,13 +259,14 @@ export function buildRenderArgs(args: {
   plan: RenderPlan;
   /** Local path or (presigned) https URL of the source media. */
   input: string;
+  /** Local path of each uploaded clip, by media id. */
+  media?: Record<string, string>;
   /** Local files for `plan.imageLayers`, same order. Added as inputs after
    *  the video inputs — `buildFilterGraph` refers to them by that index. */
   images?: string[];
   filterScriptPath: string;
   outputPath: string;
 }): string[] {
-  const isHttp = /^https?:\/\//i.test(args.input);
   const argv: string[] = [
     "-hide_banner",
     "-loglevel",
@@ -248,6 +277,9 @@ export function buildRenderArgs(args: {
     "-y",
   ];
   for (const input of args.plan.inputs) {
+    const file = input.mediaId ? args.media?.[input.mediaId] : args.input;
+    if (!file) throw new Error(`No file for uploaded clip ${input.mediaId}`);
+    const isHttp = /^https?:\/\//i.test(file);
     // -ss/-t BEFORE -i = input seek: decode starts at the section, so a clip
     // an hour into a podcast doesn't decode the hour before it. Over https
     // this is a ranged read — the source is never downloaded whole.
@@ -269,7 +301,7 @@ export function buildRenderArgs(args: {
       "-t",
       input.readDurationSec.toFixed(3),
       "-i",
-      args.input,
+      file,
     );
   }
   for (const image of args.images ?? []) argv.push("-i", image);

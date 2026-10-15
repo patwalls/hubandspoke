@@ -23,7 +23,7 @@ describe("compileRenderPlan — timeline", () => {
     expect(plan.totalFrames).toBe(300);
     expect(plan.durationSec).toBe(10);
     expect(plan.inputs).toEqual([
-      { sectionId: "body", seekSec: 100, readDurationSec: 11, video: plan.video },
+      { sectionId: "body", seekSec: 100, readDurationSec: 11, video: plan.video, mediaId: null },
     ]);
   });
 

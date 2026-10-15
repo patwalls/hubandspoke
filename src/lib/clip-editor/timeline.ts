@@ -17,6 +17,8 @@ export interface TimelinePiece {
   outEndSec: number;
   /** Output times inside the piece where the footage jumps (removed words). */
   seams: number[];
+  /** An uploaded clip's id; null when the piece is cut from the source. */
+  mediaId: string | null;
 }
 
 export function timelinePieces(plan: RenderPlan): TimelinePiece[] {
@@ -28,7 +30,7 @@ export function timelinePieces(plan: RenderPlan): TimelinePiece[] {
       last.outEndSec = seg.outEndSec;
       continue;
     }
-    pieces.push({ sectionId: seg.sectionId, index: pieces.length + 1, outStartSec: seg.outStartSec, outEndSec: seg.outEndSec, seams: [] });
+    pieces.push({ sectionId: seg.sectionId, index: pieces.length + 1, outStartSec: seg.outStartSec, outEndSec: seg.outEndSec, seams: [], mediaId: seg.mediaId });
   }
   return pieces;
 }

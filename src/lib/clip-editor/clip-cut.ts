@@ -8,7 +8,7 @@
  * (an intro pulled from later in the video reads first, as it plays), one
  * paragraph each, so a stitched clip reads as its beats. Pure.
  */
-import type { ClipEditDoc } from "./doc";
+import { isSourceSection, type ClipEditDoc } from "./doc";
 import { buildTranscriptView } from "./transcript-view";
 import type { EditorWord } from "./words";
 
@@ -35,9 +35,12 @@ export function clipCutFromDoc(doc: ClipEditDoc, words: EditorWord[]): ClipCut |
     (sum, s) => sum + (s.endSec - s.startSec) - s.removals.reduce((r, x) => r + (x.endSec - x.startSec), 0),
     0,
   );
+  // The span in the SOURCE — uploaded clips' times are on their own files.
+  const fromSource = sections.filter(isSourceSection);
+  const span = fromSource.length > 0 ? fromSource : sections;
   return {
-    startSec: Math.min(...sections.map((s) => s.startSec)),
-    endSec: Math.max(...sections.map((s) => s.endSec)),
+    startSec: Math.min(...span.map((s) => s.startSec)),
+    endSec: Math.max(...span.map((s) => s.endSec)),
     durationSec: Math.max(0, durationSec),
     transcript: paragraphs.join("\n\n"),
   };
