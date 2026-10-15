@@ -19,6 +19,9 @@ export type SaveState = "saved" | "dirty" | "saving" | "error" | "conflict";
 export interface DesignSelection {
   pageIndex: number;
   elementId: string | null;
+  /** Set when the whole group `elementId` belongs to is selected (the first
+   *  click on a grouped element); null/absent = just that element. */
+  groupId?: string | null;
 }
 
 export interface DesignEditorState {
@@ -149,6 +152,17 @@ export const commands = {
       return { ...p, elements: [...p.elements.slice(0, i), element, ...p.elements.slice(i)] };
     }),
 
+  /** Patch every element of a group (move, opacity) as one change. */
+  patchGroup: (pageIndex: number, groupId: string, patch: (el: DesignElement) => DesignElement) => (doc: DesignDoc) =>
+    mapPage(doc, pageIndex, (p) => ({ ...p, elements: p.elements.map((el) => (el.group === groupId ? patch(el) : el)) })),
+
+  removeGroup: (pageIndex: number, groupId: string) => (doc: DesignDoc) =>
+    mapPage(doc, pageIndex, (p) => ({ ...p, elements: p.elements.filter((el) => el.group !== groupId) })),
+
+  /** Dissolve a group; its elements stay where they are. */
+  ungroup: (pageIndex: number, groupId: string) => (doc: DesignDoc) =>
+    mapPage(doc, pageIndex, (p) => ({ ...p, elements: p.elements.map((el) => (el.group === groupId ? { ...el, group: null } : el)) })),
+
   removeElement: (pageIndex: number, id: string) => (doc: DesignDoc) =>
     mapPage(doc, pageIndex, (p) => ({ ...p, elements: p.elements.filter((el) => el.id !== id) })),
 
@@ -178,7 +192,7 @@ export const commands = {
     mapPage(doc, pageIndex, (p) => {
       const el = p.elements.find((e) => e.id === id);
       if (!el) return p;
-      return { ...p, elements: [...p.elements, { ...el, id: newElementId(el.type), x: el.x + 24, y: el.y + 24, name: `${el.name} copy` }] };
+      return { ...p, elements: [...p.elements, { ...el, id: newElementId(el.type), x: el.x + 24, y: el.y + 24, name: `${el.name} copy`, group: null }] };
     }),
 
   setPageBackground: (pageIndex: number, background: string) => (doc: DesignDoc) =>

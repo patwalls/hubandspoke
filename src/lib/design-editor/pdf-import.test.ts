@@ -113,4 +113,25 @@ describe("normalizeImportedTemplate — cover-style elements (2026-10-14)", () =
     // An out-of-range tilt is clamped, not rejected.
     expect(headline.rotation).toBe(180);
   });
+
+  it("arrows come in as tail/head points and land with the tip where the cover had it", () => {
+    const r = normalizeImportedTemplate({
+      pageWidth: 1080, pageHeight: 1080,
+      pages: [page([
+        { type: "arrow", name: "Arrow to logo", from: { x: 860, y: 760 }, to: { x: 930, y: 560 }, bend: 0.25, thickness: 9, color: "#22e07a", heads: "end", headStyle: "open" },
+        { type: "arrow", name: "Degenerate", from: { x: 10, y: 10 }, to: { x: 12, y: 11 } },
+        { type: "arrow", name: "No points" },
+      ])],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const els = r.doc.pages[0].elements;
+    expect(els).toHaveLength(1);
+    const a = els[0];
+    if (a.type !== "arrow") throw new Error("not an arrow");
+    expect(a).toMatchObject({ color: "#22E07A", bend: 0.25, endHead: "open", startHead: "none", thickness: 9 });
+    const t = ((a.rotation ?? 0) * Math.PI) / 180;
+    expect(a.x + a.w / 2 + (Math.cos(t) * a.w) / 2).toBeCloseTo(930, -1);
+    expect(a.y + a.h / 2 + (Math.sin(t) * a.w) / 2).toBeCloseTo(560, -1);
+  });
 });

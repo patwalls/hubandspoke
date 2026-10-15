@@ -36,6 +36,10 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_PER_FORMAT = 48;
 
 export const COVER_STYLE_TEMPLATE = "cover-style-v1";
+/** Bump when the reader gets meaningfully better: a style read by an older
+ *  reader is re-read once, the next time someone picks it. v2 (2026-10-15):
+ *  arrows. */
+export const COVER_STYLE_READER_VERSION = 2;
 export const coverStyleJobKey = (styleId: string) => `design-style-extract:${styleId}`;
 
 export type CoverStyleStatus = "none" | "pending" | "done" | "failed";
@@ -153,7 +157,9 @@ export async function ensureCoverStyle(productionItemId: string): Promise<CoverS
       .onConflictDoNothing({ target: designCoverStyles.productionItemId })
       .returning();
     if (!row) [row] = await db.select().from(designCoverStyles).where(eq(designCoverStyles.productionItemId, productionItemId)).limit(1);
-  } else if (row.status === "failed") {
+  } else if (row.status === "failed" || (row.status === "done" && row.readerVersion < COVER_STYLE_READER_VERSION)) {
+    // Failed: retry. Read by an older reader: read again with this one (the
+    // old template stays until the new one lands; the gallery shows "reading").
     [row] = await db.update(designCoverStyles).set({ status: "pending", error: null, updatedAt: sql`now()` }).where(eq(designCoverStyles.id, row.id)).returning();
   }
   if (row.status === "pending") await enqueue("design-style-extract", { styleId: row.id }, { jobKey: coverStyleJobKey(row.id), maxAttempts: 2 });
@@ -201,6 +207,7 @@ What the editor can draw — use only this:
 - rect: a flat or linearly-faded box (fill → gradientTo, down or up): dark fades under text over photos, colour bands, cards, a dimming layer over the whole photo (black at ~0.5–0.7).
 - text: one font (from the bundled list), size, line height, letter spacing, colour, alignment, uppercase, soft drop shadow. Coloured phrases (highlights) inside the text — colour only.
 - channel: the brand's avatar + name + follower row, if shown.
+- arrow: a drawn arrow (hand-drawn swoops included) — give from (the tail) and to (the TIP of the head) as points, bend for the curve (+ bulges left of travel, − right; follow the drawn curve — a swoop that rises then hooks toward a logo is usually ±0.2–0.35), thickness, colour, heads and headStyle (open = a two-stroke V). Arrows are kept exactly where they are, so they keep pointing at whatever sits at their tip in the layout (a logo, the stat card, the headline).
 
 How to read it:
 - EVERY piece of copy that changes per post (headline, sub-line, footer teaser, stat numbers) is slot "ai": text = exactly what the cover says (it becomes the style example — length matters), hint = what to write for another post (role, length in words, tone, what to highlight in which colour). The headline's hint must say to lead with the founder's real result/number. Keep fixed copy (a CTA like "See his playbook →", a handle) as "static" only if it is truly the same on every post; teasers that mention the post's content are "ai".
@@ -209,7 +216,7 @@ How to read it:
 - Text over a photo needs the fade the cover has between them — and get its STRENGTH right, it is what makes the headline readable. Look at where the picture is still clearly visible and where it has become black: the fade rect covers ONLY that transition band (often just 120–300px tall, fill black alpha 0 → gradientTo black alpha 0.95–1), and the fully black area below it is a separate SOLID black rect (alpha 0.95–1) running to the bottom edge. The headline box must sit on the solid part, never on the half-transparent band. A single gentle fade over the whole lower half is almost always wrong.
 - Headline box: measure it generously (the full width the lines span, the full height of all lines) and give the font size of the CAPITAL letters as drawn; valign "middle" when the lines are centred in a dark band.
 - Text: no "\\n" in the copy — the lines you see are soft wraps of one paragraph; the editor re-wraps for each post. Only a deliberate blank line between paragraphs (a quote and its attribution) is a real break.
-- Hand-drawn arrows, scribbles, stickers, emoji and other decorations that point at something in the photo: SKIP them (say so in the notes) — they can't be redrawn for another photo. Don't invent elements the cover doesn't have. Skip Instagram UI chrome if any is visible.
+- Arrows: ALWAYS describe them (as arrow elements) — they are part of the look. Scribbles, circles drawn around things, stickers and emoji: skip them (say so in the notes). Don't invent elements the cover doesn't have. Skip Instagram UI chrome if any is visible.
 
 Then write "notes": ONE sentence naming the look for a gallery tooltip ("Founder cut out over a dimmed backdrop, tilted revenue card behind, Anton headline with green number"). Call build_template exactly once.`;
 
@@ -249,7 +256,7 @@ const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as co
 async function finish(styleId: string, patch: { status: "done" | "failed"; doc?: DesignDoc; summary?: string | null; error?: string | null }) {
   await db
     .update(designCoverStyles)
-    .set({ status: patch.status, doc: patch.doc ?? null, summary: patch.summary ?? null, error: patch.error ?? null, updatedAt: sql`now()` })
+    .set({ status: patch.status, doc: patch.doc ?? null, summary: patch.summary ?? null, error: patch.error ?? null, ...(patch.status === "done" ? { readerVersion: COVER_STYLE_READER_VERSION } : {}), updatedAt: sql`now()` })
     .where(eq(designCoverStyles.id, styleId));
 }
 

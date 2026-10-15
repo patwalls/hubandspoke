@@ -1,0 +1,1 @@
+ALTER TABLE "design_cover_styles" ADD COLUMN "reader_version" integer DEFAULT 1 NOT NULL;

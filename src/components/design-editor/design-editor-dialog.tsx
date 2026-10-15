@@ -40,14 +40,15 @@ import {
   TypeIcon,
   Undo2Icon,
   WandSparklesIcon,
+  MoveUpRightIcon,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { EstimatedProgressBar } from "@/components/ui/estimated-progress-bar";
 import { cn } from "@/lib/utils";
-import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, resizeCanvas, shadeElement, type DesignDoc, type DesignImageElement, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
+import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, resizeCanvas, shadeElement, type DesignDoc, type DesignElement, type DesignImageElement, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
 import { applyPhotoPick, hasEmptyCutoutSlot } from "@/lib/design-editor/template-fill";
-import { statCard } from "@/lib/design-editor/shared";
+import { arrow, statCard } from "@/lib/design-editor/shared";
 import { cutOutPicture, cutoutSupported, type CutoutResult } from "@/lib/design-editor/cutout-client";
 import { subjectLayerGeometry } from "@/lib/design-editor/cutout-geometry";
 import { BRAND_WORDMARKS } from "@/lib/design-editor/brand-assets";
@@ -378,14 +379,15 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       }
       if (e.key === "Backspace" || e.key === "Delete") {
         e.preventDefault();
-        apply(commands.removeElement(sel.pageIndex, sel.elementId));
+        apply(sel.groupId ? commands.removeGroup(sel.pageIndex, sel.groupId) : commands.removeElement(sel.pageIndex, sel.elementId));
         select({ pageIndex: sel.pageIndex, elementId: null });
       } else if (e.key.startsWith("Arrow")) {
         e.preventDefault();
         const d = e.shiftKey ? 10 : 1;
         const dx = e.key === "ArrowLeft" ? -d : e.key === "ArrowRight" ? d : 0;
         const dy = e.key === "ArrowUp" ? -d : e.key === "ArrowDown" ? d : 0;
-        apply(commands.patchElement(sel.pageIndex, sel.elementId, (el) => ({ ...el, x: el.x + dx, y: el.y + dy })), "nudge");
+        const nudge = (el: DesignElement) => ({ ...el, x: el.x + dx, y: el.y + dy });
+        apply(sel.groupId ? commands.patchGroup(sel.pageIndex, sel.groupId, nudge) : commands.patchElement(sel.pageIndex, sel.elementId, nudge), "nudge");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -555,9 +557,12 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       if (!geo.rotation) delete subject.rotation;
       setImageUrls((m) => ({ ...m, [subject.id]: photo.previewUrl }));
       const at = cur.pages[pageIndex].elements.findIndex((e) => e.id === elementId) + 1;
-      apply((d) => commands.addElement(pageIndex, subject, at)(commands.patchElement(pageIndex, elementId, (e) => ({ ...e, name: `${name} · background` }))(d)));
-      select({ pageIndex, elementId: subject.id });
-      toast.success("Split into two layers", { description: "The person is its own layer above the background. Add a stat card or shape, then drag it between them in Layers." });
+      // Grouped, so the photo still moves as one; click again to pick a layer.
+      const group = base.group ?? newElementId("grp");
+      subject.group = group;
+      apply((d) => commands.addElement(pageIndex, subject, at)(commands.patchElement(pageIndex, elementId, (e) => ({ ...e, name: `${name} · background`, group }))(d)));
+      select({ pageIndex, elementId: subject.id, groupId: group });
+      toast.success("Split into two layers", { description: "Grouped: drag moves both. Click the photo again to pick one layer; drag a stat card or shape between them in Layers." });
     } finally {
       setCutoutBusy(null);
     }
@@ -613,6 +618,14 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
     apply(commands.addElement(pageIndex, el, lastImage === undefined ? 0 : lastImage + 1));
     select({ pageIndex, elementId: el.id });
   };
+  const addArrow = () => {
+    const W = doc.canvas.width;
+    const H = doc.canvas.height;
+    const el = arrow({ x: Math.round(W * 0.38), y: Math.round(H * 0.5) }, { x: Math.round(W * 0.62), y: Math.round(H * 0.34) }, { bend: 0.18 });
+    apply(commands.addElement(pageIndex, el));
+    select({ pageIndex, elementId: el.id });
+  };
+
   const addStatCard = () => {
     const W = doc.canvas.width;
     const el = statCard({ x: Math.round(W * 0.06), y: Math.round(doc.canvas.height * 0.17), w: Math.round(W * 0.5), h: Math.round(doc.canvas.height * 0.3) }, { rotation: -6 });
@@ -925,43 +938,33 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
 
         {/* Stage */}
         <div className="flex min-h-0 min-w-0 flex-col gap-2">
-          <div className="flex items-center gap-1.5">
-            <Tool onClick={addText} disabled={locked}><TypeIcon className="size-3.5" /> Text</Tool>
-            <Tool onClick={addRect} disabled={locked}><SquareIcon className="size-3.5" /> Box</Tool>
-            <Tool onClick={addShade} disabled={locked} title="A clear-to-black fade over the lower part of the photo so white text reads on top"><BlendIcon className="size-3.5" /> Shade</Tool>
-            <Tool onClick={addStatCard} disabled={locked} title="A dashboard-style revenue card (label, number, period, chart) — tilt it and put the founder's cutout over it"><TrendingUpIcon className="size-3.5" /> Stat card</Tool>
-            <div className="relative">
-              <details className="group">
-                <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[12px] font-medium hover:bg-muted">
-                  <ImageIcon className="size-3.5" /> Picture
-                </summary>
-                <div className="absolute left-0 top-full z-20 mt-1 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg" onClick={(e) => { if ((e.target as HTMLElement).closest("button[title]")) (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; }}>
-                  <PicturePicker title="Add a picture" images={images} frames={frames} photos={photos} source={session.source} brand={brand} onPick={addImage} onGrabFrame={(sec) => void grabFrame(null, sec)} onUpload={(files) => upload(null, files)} onFindScreens={isTemplate ? undefined : (force) => void findScreens(force)} onDeletePhoto={isTemplate ? undefined : (p) => void deletePhoto(p)} />
-                </div>
-              </details>
+          {/* One row: what you can add (labels fold to icons when the column is narrow), then the two view toggles. */}
+          <div className="@container">
+            <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-xs">
+                <Tool onClick={addText} disabled={locked} icon={TypeIcon} label="Text" title="Add text — double-click it on the page to type" />
+                <Tool onClick={addRect} disabled={locked} icon={SquareIcon} label="Box" title="Add a box — a colour band, a card, a pill behind text" />
+                <Tool onClick={addShade} disabled={locked} icon={BlendIcon} label="Shade" title="A clear-to-black fade over the lower part of the photo so white text reads on top" />
+                <Tool onClick={addStatCard} disabled={locked} icon={TrendingUpIcon} label="Stat" title="A dashboard-style revenue card (label, number, period, chart) — tilt it and put the founder's cutout over it" />
+                <Tool onClick={addArrow} disabled={locked} icon={MoveUpRightIcon} label="Arrow" title="An arrow — drag its ends to aim it, the middle to curve it" />
+                <details className="group relative">
+                  <summary title="Add a picture — the video's frames, your uploads, cutouts, screens" className={cn(TOOL_CLASS, "cursor-pointer list-none [&::-webkit-details-marker]:hidden", locked && "pointer-events-none opacity-50")}>
+                    <ImageIcon className="size-3.5 shrink-0" /> <span className="hidden @[40rem]:inline">Picture</span>
+                  </summary>
+                  <div className="absolute left-0 top-full z-20 mt-1 max-h-[70vh] w-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg" onClick={(e) => { if ((e.target as HTMLElement).closest("button[title]")) (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; }}>
+                    <PicturePicker title="Add a picture" images={images} frames={frames} photos={photos} source={session.source} brand={brand} onPick={addImage} onGrabFrame={(sec) => void grabFrame(null, sec)} onUpload={(files) => upload(null, files)} onFindScreens={isTemplate ? undefined : (force) => void findScreens(force)} onDeletePhoto={isTemplate ? undefined : (p) => void deletePhoto(p)} />
+                  </div>
+                </details>
+                {(session.source || isTemplate) && <Tool onClick={addClip} disabled={locked || !!pageClip} icon={ClapperboardIcon} label="Clip" title={pageClip ? "This page already has its clip" : "A clip of the video — makes this page a video slide"} />}
+                {pageClip && <Tool onClick={addCaptions} disabled={locked} icon={CaptionsIcon} label="Captions" title="Burned-in captions for this page's clip" />}
+                {isTemplate && <Tool onClick={addPhotoSlot} disabled={locked} icon={ImageIcon} label="Photo slot" title="Where each post's founder photo goes" />}
+                <Tool onClick={addChannel} disabled={locked} icon={AtSignIcon} label="Channel" title="The channel's avatar, name and follower count" />
+              </div>
+              <div className="ml-auto flex shrink-0 items-center gap-1">
+                <Toggle on={snap} onClick={() => { const next = !snap; setSnap(next); writeSnapEnabled(next); }} icon={MagnetIcon} title={`Snap to the canvas centre, edges and other elements — ${snap ? "on" : "off"} (hold ⌥ to drag freely)`} />
+                <Toggle on={layersOpen} onClick={() => setLayersOpen((o) => !o)} icon={LayersIcon} title="Layers — everything on this page, top first (⌘] / ⌘[ to move)" />
+              </div>
             </div>
-            {(session.source || isTemplate) && <Tool onClick={addClip} disabled={locked || !!pageClip}><ClapperboardIcon className="size-3.5" /> Clip</Tool>}
-            {isTemplate && <Tool onClick={addPhotoSlot} disabled={locked}><ImageIcon className="size-3.5" /> Photo slot</Tool>}
-            {pageClip && <Tool onClick={addCaptions} disabled={locked}><CaptionsIcon className="size-3.5" /> Captions</Tool>}
-            <Tool onClick={addChannel} disabled={locked}><AtSignIcon className="size-3.5" /> Channel</Tool>
-            <button
-              type="button"
-              onClick={() => { const next = !snap; setSnap(next); writeSnapEnabled(next); }}
-              title="Snap to the canvas centre, edges and other elements while dragging (hold ⌥ to drag freely)"
-              className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] font-medium", snap ? "border-pink-300 bg-pink-50 text-pink-800 dark:bg-pink-950/40 dark:text-pink-200" : "border-border bg-background text-muted-foreground hover:bg-muted")}
-            >
-              <MagnetIcon className="size-3.5" /> Snap
-            </button>
-            <button
-              type="button"
-              onClick={() => setLayersOpen((o) => !o)}
-              aria-pressed={layersOpen}
-              title="Everything on this page, top first — click to select, drag or use the arrows to send things forward and back (⌘] / ⌘[)"
-              className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] font-medium", layersOpen ? "border-sky-300 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200" : "border-border bg-background text-muted-foreground hover:bg-muted")}
-            >
-              <LayersIcon className="size-3.5" /> Layers
-            </button>
-            <span className="ml-auto text-[11px] text-muted-foreground">Page {pageIndex + 1} of {doc.pages.length} · double-click text to edit · ⌫ deletes · arrows nudge</span>
           </div>
           <PlaybackContext.Provider value={playback}>
             {/* Clicking the grey around the page deselects — the page then shows exactly what exports, no editor chrome. */}
@@ -976,6 +979,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
               )}
             </div>
           </PlaybackContext.Provider>
+          {!pageClip && <p className="text-center text-[11px] text-muted-foreground">Page {pageIndex + 1} of {doc.pages.length} · double-click text to type · ⌫ deletes · arrow keys nudge</p>}
           {pageClip && (
             <div className="flex items-center gap-3 rounded-md border border-border bg-background px-3 py-1.5">
               <button type="button" aria-label={playing ? "Pause" : "Play clip"} onClick={() => setPlaying(!playing)} className="flex size-7 items-center justify-center rounded-full bg-foreground text-background">
@@ -1085,10 +1089,23 @@ function IconButton({ label, disabled, onClick, children }: { label: string; dis
   );
 }
 
-function Tool({ onClick, disabled, title, children }: { onClick: () => void; disabled?: boolean; title?: string; children: React.ReactNode }) {
+const TOOL_CLASS = "inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-[12px] font-medium text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40";
+
+/** An "add this" button: icon + a one-word label that folds away on a narrow stage. */
+function Tool({ onClick, disabled, title, icon: Icon, label }: { onClick: () => void; disabled?: boolean; title?: string; icon: React.ComponentType<{ className?: string }>; label: string }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} title={title} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[12px] font-medium hover:bg-muted disabled:opacity-50">
-      {children}
+    <button type="button" onClick={onClick} disabled={disabled} title={title ?? label} aria-label={label} className={TOOL_CLASS}>
+      <Icon className="size-3.5 shrink-0" />
+      <span className="hidden @[40rem]:inline">{label}</span>
+    </button>
+  );
+}
+
+/** A view toggle (snap, layers): icon only, filled when on. */
+function Toggle({ on, onClick, icon: Icon, title }: { on: boolean; onClick: () => void; icon: React.ComponentType<{ className?: string }>; title: string }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={on} title={title} aria-label={title} className={cn("inline-flex size-8 items-center justify-center rounded-md border", on ? "border-sky-300 bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200" : "border-border bg-background text-muted-foreground hover:bg-muted")}>
+      <Icon className="size-4" />
     </button>
   );
 }

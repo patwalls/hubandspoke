@@ -96,6 +96,11 @@ const elementBase = {
    *  cover at -6°). Absent/0 = upright. Ignored by video and captions —
    *  ffmpeg draws those. */
   rotation: z.number().min(-180).max(180).optional(),
+  /** Elements on a page sharing a group id select and move as one (a
+   *  "split into layers" photo: background + the person cut out of it).
+   *  Click selects the group, click again drills into one layer. Absent =
+   *  not grouped. Editor-only: the export ignores it. */
+  group: z.string().max(40).nullable().optional(),
 };
 
 const textElementSchema = z.object({
@@ -232,6 +237,25 @@ const statCardElementSchema = z.object({
 });
 export type DesignStatCardElement = z.infer<typeof statCardElementSchema>;
 
+/**
+ * An arrow — straight or curved, one or two heads, any colour/weight. A box
+ * + rotation like everything else; the shaft runs along the box's centre
+ * line, tail at the left edge, head at the right, and `bend` (a fraction of
+ * the length, + = bulges left of travel) curves it. Geometry and drawing:
+ * arrow.ts.
+ */
+export const ARROW_HEADS = ["none", "open", "filled"] as const;
+const arrowElementSchema = z.object({
+  ...elementBase,
+  type: z.literal("arrow"),
+  color: hexColor,
+  thickness: z.number().min(1).max(80),
+  bend: z.number().min(-0.5).max(0.5),
+  startHead: z.enum(ARROW_HEADS),
+  endHead: z.enum(ARROW_HEADS),
+});
+export type DesignArrowElement = z.infer<typeof arrowElementSchema>;
+
 /** Discriminated on `type`; array order = z-order, last on top. */
 export const designElementSchema = z.discriminatedUnion("type", [
   textElementSchema,
@@ -241,6 +265,7 @@ export const designElementSchema = z.discriminatedUnion("type", [
   captionsElementSchema,
   channelElementSchema,
   statCardElementSchema,
+  arrowElementSchema,
 ]);
 export type DesignElement = z.infer<typeof designElementSchema>;
 

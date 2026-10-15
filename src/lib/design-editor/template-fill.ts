@@ -160,7 +160,7 @@ export function fillTemplate(template: DesignDoc, fill: DesignFill, ctx: DesignC
 }
 
 function prefixFor(el: DesignElement): string {
-  return el.type === "text" ? "t" : el.type === "image" ? "img" : el.type === "video" ? "v" : el.type === "captions" ? "c" : el.type === "channel" ? "ch" : el.type === "statCard" ? "sc" : "r";
+  return el.type === "text" ? "t" : el.type === "image" ? "img" : el.type === "video" ? "v" : el.type === "captions" ? "c" : el.type === "channel" ? "ch" : el.type === "statCard" ? "sc" : el.type === "arrow" ? "ar" : "r";
 }
 
 /** The model's three values for a stat card. The value is required (no

@@ -6,7 +6,8 @@
  * URLs (the render task does that — this module stays pure).
  */
 import { FONTS } from "@/lib/clip-editor/fonts";
-import type { DesignElement, DesignPage, DesignStatCardElement, DesignTextElement, Rgba } from "./doc";
+import type { DesignArrowElement, DesignElement, DesignPage, DesignStatCardElement, DesignTextElement, Rgba } from "./doc";
+import { arrowSvg } from "./arrow";
 import { coverGeometry, layoutDesignText } from "./layout";
 import { layoutChannel, type ChannelInfo } from "./channel";
 import { layoutStatCard, sparklineSvg, svgDataUrl } from "./stat-card";
@@ -126,6 +127,19 @@ function statCardNodes(el: DesignStatCardElement): Node[] {
   }];
 }
 
+/** Arrow: the same SVG the stage draws, as an <img> spilling `margin` past
+ *  the box (heads, round caps) inside a wrapper that turns about the box. */
+function arrowNodes(el: DesignArrowElement): Node[] {
+  const { svg, margin } = arrowSvg(el);
+  return [{
+    type: "div",
+    props: {
+      style: { position: "absolute", left: el.x, top: el.y, width: el.w, height: el.h, display: "flex", opacity: el.opacity, ...rotation(el) },
+      children: [{ type: "img", props: { src: svgDataUrl(svg), width: el.w + 2 * margin, height: el.h + 2 * margin, style: { position: "absolute", left: -margin, top: -margin, width: el.w + 2 * margin, height: el.h + 2 * margin } } }],
+    },
+  }];
+}
+
 function elementNodes(el: DesignElement, images: ResolvedImages, channels: ResolvedChannels): Node[] {
   if (el.type === "text") {
     if (!el.rotation) return textNodes(el);
@@ -135,6 +149,7 @@ function elementNodes(el: DesignElement, images: ResolvedImages, channels: Resol
   }
   if (el.type === "channel") return channelNodes(el, images, channels);
   if (el.type === "statCard") return statCardNodes(el);
+  if (el.type === "arrow") return arrowNodes(el);
   if (el.type === "rect") {
     return [
       {

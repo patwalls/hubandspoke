@@ -4,7 +4,8 @@
  * A template file (playbook-template.ts, tech-stack-template.ts) composes
  * these into its pages; nothing here knows about any one format's brief.
  */
-import { DEFAULT_CROP, DM_KEYWORD_TOKEN, IG_SQUARE, PHOTO_PLACEHOLDER, newElementId, type DesignChannelElement, type DesignElement, type DesignImageElement, type DesignImageSource, type DesignPage, type DesignSlot, type DesignSpan, type DesignStatCardElement, type DesignTextElement, type DesignTextStyle } from "./doc";
+import { DEFAULT_CROP, DM_KEYWORD_TOKEN, IG_SQUARE, PHOTO_PLACEHOLDER, newElementId, type DesignArrowElement, type DesignChannelElement, type DesignElement, type DesignImageElement, type DesignImageSource, type DesignPage, type DesignSlot, type DesignSpan, type DesignStatCardElement, type DesignTextElement, type DesignTextStyle } from "./doc";
+import { arrowFromEnds } from "./arrow";
 import { defaultSeries } from "./stat-card";
 
 export { DM_KEYWORD_TOKEN };
@@ -104,6 +105,19 @@ export function statCard(box: Box, over: Partial<Omit<DesignStatCardElement, "id
     id: newElementId("sc"), name: "Stat card", type: "statCard", ...box, opacity: 1, locked: false, slot: null, stack: null,
     label: "Revenue", value, sub: "Last 28 days", series: defaultSeries(value), accent: "#22E07A", theme: "dark", showChart: true, shadow: true, radius: 28,
     ...over,
+  };
+}
+
+/** An arrow from `tail` to `head` (canvas px): the hand-drawn pointer the
+ *  covers aim at a logo or a number. */
+export function arrow(tail: { x: number; y: number }, head: { x: number; y: number }, over: Partial<Pick<DesignArrowElement, "color" | "thickness" | "bend" | "startHead" | "endHead" | "name">> = {}): DesignArrowElement {
+  const color = over.color ?? "#22E07A";
+  const thickness = over.thickness ?? 12;
+  const bend = over.bend ?? 0;
+  return {
+    id: newElementId("ar"), name: over.name ?? "Arrow", type: "arrow", opacity: 1, locked: false, slot: null, stack: null,
+    color, thickness, bend, startHead: over.startHead ?? "none", endHead: over.endHead ?? "open",
+    ...arrowFromEnds(tail, head, bend, thickness),
   };
 }
 

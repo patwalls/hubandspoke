@@ -13,9 +13,10 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type P
 import { cn } from "@/lib/utils";
 import { FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
 import type { EditorWord } from "@/lib/clip-editor/words";
-import type { DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignPage, DesignSpan, DesignStatCardElement, DesignTextElement, DesignVideoElement, Rgba } from "@/lib/design-editor/doc";
+import type { DesignArrowElement, DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignPage, DesignSpan, DesignStatCardElement, DesignTextElement, DesignVideoElement, Rgba } from "@/lib/design-editor/doc";
 import { layoutChannel, type ChannelInfo } from "@/lib/design-editor/channel";
 import { layoutStatCard, sparklineSvg, svgDataUrl } from "@/lib/design-editor/stat-card";
+import { arrowBendPoint, arrowEnds, arrowFromEnds, arrowSvg, bendFromPoint, snapAngle } from "@/lib/design-editor/arrow";
 import { pageVideo } from "@/lib/design-editor/doc";
 import { activeCue, buildDesignCaptionCues, layoutCaptionCue } from "@/lib/design-editor/captions";
 import { coverGeometry, cropForOffset, layoutDesignText } from "@/lib/design-editor/layout";
@@ -47,6 +48,26 @@ function rgba(c: Rgba): string {
   const g = parseInt(c.color.slice(3, 5), 16);
   const b = parseInt(c.color.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${c.alpha})`;
+}
+
+/** The axis-aligned box around some elements as drawn — tilted ones by
+ *  their turned corners (a group's frame and its snapping box). */
+function unionBox(els: Array<{ x: number; y: number; w: number; h: number; rotation?: number }>): { x: number; y: number; w: number; h: number } {
+  if (els.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const e of els) {
+    const t = ((e.rotation ?? 0) * Math.PI) / 180;
+    const cx = e.x + e.w / 2;
+    const cy = e.y + e.h / 2;
+    for (const [dx, dy] of [[-e.w / 2, -e.h / 2], [e.w / 2, -e.h / 2], [e.w / 2, e.h / 2], [-e.w / 2, e.h / 2]]) {
+      xs.push(cx + dx * Math.cos(t) - dy * Math.sin(t));
+      ys.push(cy + dx * Math.sin(t) + dy * Math.cos(t));
+    }
+  }
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  return { x: x0, y: y0, w: Math.max(...xs) - x0, h: Math.max(...ys) - y0 };
 }
 
 const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
@@ -91,6 +112,7 @@ export function PageCanvas({
   const setEditing = useDesign((s) => s.setEditing);
   const apply = useDesign((s) => s.apply);
   const selectedId = interactive && selection.pageIndex === pageIndex ? selection.elementId : null;
+  const selectedGroup = selectedId && selection.groupId ? selection.groupId : null;
   /** Pixel size of each picture/clip once loaded — the crop needs it. */
   const naturalSizes = useRef<Record<string, { width: number; height: number }>>({});
   /** Guide lines while a drag is snapping. */
@@ -113,6 +135,7 @@ export function PageCanvas({
     e: ReactPointerEvent,
     onMove: (dx: number, dy: number, shift: boolean, alt: boolean) => (d: DesignDoc) => DesignDoc,
     key: string,
+    onUp?: () => void,
   ) => {
     e.preventDefault();
     e.stopPropagation();
@@ -128,6 +151,7 @@ export function PageCanvas({
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setGuides([]);
+      onUp?.();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -152,6 +176,46 @@ export function PageCanvas({
           `pan-${el.id}`,
         );
       }
+      return;
+    }
+    // A grouped element: the first click takes the whole group (and a drag
+    // moves it); a click — no drag — on an already-selected group drills
+    // into this one layer. Canva's rule.
+    // Already working inside this group (one layer selected) → stay inside.
+    const insideGroup = !!el.group && !selectedGroup && page.elements.some((m) => m.id === selectedId && m.group === el.group);
+    if (el.group && !insideGroup) {
+      const groupId = el.group;
+      const drillIn = selectedGroup === groupId;
+      select({ pageIndex, elementId: el.id, groupId });
+      const members = page.elements.filter((m) => m.group === groupId);
+      const startBox = unionBox(members);
+      const starts = new Map(members.map((m) => [m.id, { x: m.x, y: m.y }]));
+      const targets = elementSnapTargets(page.elements.filter((m) => m.group !== groupId).map((m) => ({ x: m.x, y: m.y, w: m.w, h: m.h })), { width: W, height: H }, { margin: 40 });
+      let moved = false;
+      startDrag(
+        e,
+        (dx, dy, shift, alt) => {
+          moved = moved || Math.abs(dx) + Math.abs(dy) > 2;
+          let x = shift ? startBox.x : startBox.x + dx;
+          let y = startBox.y + dy;
+          if (snap && !alt) {
+            const s = snapMove({ x, y, w: startBox.w, h: startBox.h }, targets, snapThreshold(scale));
+            x = shift ? x : s.x;
+            y = s.y;
+            setGuides(s.guides.filter((g) => !(shift && g.axis === "x")));
+          } else setGuides([]);
+          const ddx = Math.round(x - startBox.x);
+          const ddy = Math.round(y - startBox.y);
+          return commands.patchGroup(pageIndex, groupId, (m) => {
+            const s0 = starts.get(m.id);
+            return s0 ? { ...m, x: s0.x + ddx, y: s0.y + ddy } : m;
+          });
+        },
+        `move-group-${groupId}`,
+        () => {
+          if (drillIn && !moved) select({ pageIndex, elementId: el.id, groupId: null });
+        },
+      );
       return;
     }
     select({ pageIndex, elementId: el.id });
@@ -201,6 +265,40 @@ export function PageCanvas({
           return { ...cur, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
         }),
       `resize-${el.id}`,
+    );
+  };
+
+  /** Drag an arrow's tail or head: the other end stays put; shift snaps
+   *  the angle to 15°. */
+  const onArrowEndDown = (e: ReactPointerEvent, el: DesignArrowElement, end: "tail" | "head") => {
+    const start = arrowEnds(el);
+    startDrag(
+      e,
+      (dx, dy, shift) =>
+        commands.patchElement<DesignArrowElement>(pageIndex, el.id, (cur) => {
+          const fixed = end === "head" ? start.tail : start.head;
+          let moved = { x: start[end].x + dx, y: start[end].y + dy };
+          if (shift) moved = snapAngle(fixed, moved);
+          const [tail, head] = end === "head" ? [fixed, moved] : [moved, fixed];
+          return { ...cur, ...arrowFromEnds(tail, head, cur.bend, cur.thickness) };
+        }),
+      `arrow-${end}-${el.id}`,
+    );
+  };
+
+  /** Drag the middle handle sideways to curve the arrow. */
+  const onArrowBendDown = (e: ReactPointerEvent, el: DesignArrowElement) => {
+    const start = arrowBendPoint(el);
+    const ends = arrowEnds(el);
+    startDrag(
+      e,
+      (dx, dy) =>
+        commands.patchElement<DesignArrowElement>(pageIndex, el.id, (cur) => {
+          const bend = bendFromPoint(cur, { x: start.x + dx, y: start.y + dy });
+          // Re-derive the box so its height fits the new bulge, ends fixed.
+          return { ...cur, bend, ...arrowFromEnds(ends.tail, ends.head, bend, cur.thickness) };
+        }),
+      `arrow-bend-${el.id}`,
     );
   };
 
@@ -265,6 +363,29 @@ export function PageCanvas({
           (() => {
             const el = page.elements.find((x) => x.id === selectedId);
             if (!el || el.locked) return null;
+            if (selectedGroup) {
+              const b = unionBox(page.elements.filter((m) => m.group === selectedGroup));
+              return (
+                <div className="pointer-events-none absolute border-sky-500" style={{ left: b.x, top: b.y, width: b.w, height: b.h, borderWidth: 2 / scale, borderStyle: "dashed" }}>
+                  <span className="absolute left-0 rounded-b bg-sky-500 font-semibold text-white" style={{ top: "100%", fontSize: 11 / scale, padding: `${1 / scale}px ${5 / scale}px` }}>Group · click again for one layer</span>
+                </div>
+              );
+            }
+            if (el.type === "arrow") {
+              const { tail, head } = arrowEnds(el);
+              const mid = arrowBendPoint(el);
+              // Sized in SCREEN px (the stage is scaled down ~3×).
+              const d = 16 / scale;
+              const ring = { width: d, height: d, borderWidth: 3 / scale };
+              const dot = "absolute rounded-full border-sky-500 bg-white shadow";
+              return (
+                <>
+                  <div onPointerDown={(e) => onArrowEndDown(e, el, "tail")} title="Drag to move the tail (shift snaps the angle)" className={dot} style={{ ...ring, left: tail.x - d / 2, top: tail.y - d / 2, cursor: "crosshair" }} />
+                  <div onPointerDown={(e) => onArrowEndDown(e, el, "head")} title="Drag to move the head (shift snaps the angle)" className={dot} style={{ ...ring, left: head.x - d / 2, top: head.y - d / 2, cursor: "crosshair" }} />
+                  <div onPointerDown={(e) => onArrowBendDown(e, el)} title="Drag sideways to curve the arrow" className="absolute rounded-full border-pink-500 bg-white shadow" style={{ ...ring, left: mid.x - d / 2, top: mid.y - d / 2, cursor: "grab" }} />
+                </>
+              );
+            }
             return (
               <>
                 <div
@@ -372,6 +493,9 @@ function ElementView({
   }
   if (el.type === "statCard") {
     return <StatCardView el={el} base={base} hover={hover} onPointerDown={onPointerDown} />;
+  }
+  if (el.type === "arrow") {
+    return <ArrowView el={el} base={base} interactive={interactive} onPointerDown={onPointerDown} />;
   }
   return (
     <TextView el={el} base={base} hover={hover} editing={editing} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} onCommitText={onCommitText} />
@@ -565,6 +689,24 @@ function StatCardView({ el, base, hover, onPointerDown }: { el: DesignStatCardEl
       {l.chart && chartUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- the exporter draws this exact SVG
         <img src={chartUrl} alt="" draggable={false} className="pointer-events-none absolute max-w-none" style={{ left: l.chart.x, top: l.chart.y, width: l.chart.w, height: l.chart.h }} />
+      )}
+    </div>
+  );
+}
+
+/** An arrow: the exporter's SVG drawn inline, spilling past its box. Only
+ *  the stroke is clickable (a fat invisible path along the shaft), so the
+ *  empty corners of a curved arrow's box don't steal clicks from what's
+ *  under it. */
+function ArrowView({ el, base, interactive, onPointerDown }: { el: DesignArrowElement; base: React.CSSProperties; interactive: boolean; onPointerDown: (e: ReactPointerEvent) => void }) {
+  const a = useMemo(() => arrowSvg(el), [el]);
+  return (
+    <div onPointerDown={onPointerDown} style={{ ...base, pointerEvents: "none" }}>
+      <div className="absolute" style={{ left: -a.margin, top: -a.margin, width: a.width, height: a.height }} dangerouslySetInnerHTML={{ __html: a.svg }} />
+      {interactive && !el.locked && (
+        <svg className="absolute overflow-visible" style={{ left: -a.margin, top: -a.margin, width: a.width, height: a.height }} viewBox={`0 0 ${a.width} ${a.height}`}>
+          <path d={a.centerline} fill="none" stroke="transparent" strokeWidth={Math.max(el.thickness + 24, 36)} strokeLinecap="round" style={{ pointerEvents: "stroke", cursor: "move" }} />
+        </svg>
       )}
     </div>
   );

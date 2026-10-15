@@ -67,4 +67,27 @@ describe("rehighlight", () => {
   it("drops a phrase that no longer exists", () => {
     expect(rehighlight("plain", [{ phrase: "gone", color: "#FF3B3B" }])).toEqual([{ text: "plain" }]);
   });
+
+  it("groups: patch/remove/ungroup act on the members only; a duplicate leaves the group", () => {
+    const store = createDesignStore({ doc: doc(), revision: 1 });
+    const { apply } = store.getState();
+    const [a, b, c] = store.getState().doc.pages[0].elements;
+    apply(commands.patchElement(0, a.id, (e) => ({ ...e, group: "g1" })));
+    apply(commands.patchElement(0, b.id, (e) => ({ ...e, group: "g1" })));
+    apply(commands.patchGroup(0, "g1", (e) => ({ ...e, x: e.x + 50 })));
+    const els = () => store.getState().doc.pages[0].elements;
+    expect(els().find((e) => e.id === a.id)!.x).toBe(a.x + 50);
+    expect(els().find((e) => e.id === b.id)!.x).toBe(b.x + 50);
+    expect(els().find((e) => e.id === c.id)!.x).toBe(c.x);
+    apply(commands.duplicateElement(0, a.id));
+    expect(els().at(-1)!.group).toBeNull();
+    apply(commands.ungroup(0, "g1"));
+    expect(els().some((e) => e.group === "g1")).toBe(false);
+    apply(commands.patchElement(0, a.id, (e) => ({ ...e, group: "g2" })));
+    apply(commands.patchElement(0, c.id, (e) => ({ ...e, group: "g2" })));
+    const before = els().length;
+    apply(commands.removeGroup(0, "g2"));
+    expect(els()).toHaveLength(before - 2);
+    expect(els().some((e) => e.id === b.id)).toBe(true);
+  });
 });

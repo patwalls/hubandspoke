@@ -14,9 +14,11 @@ import {
   ChevronsDownIcon,
   ChevronsUpIcon,
   ClapperboardIcon,
+  GroupIcon,
   ImageIcon,
   LockIcon,
   SquareIcon,
+  MoveUpRightIcon,
   TrendingUpIcon,
   TypeIcon,
   UnlockIcon,
@@ -33,6 +35,7 @@ const TYPE_ICON: Record<DesignElement["type"], typeof TypeIcon> = {
   captions: CaptionsIcon,
   rect: SquareIcon,
   statCard: TrendingUpIcon,
+  arrow: MoveUpRightIcon,
   channel: AtSignIcon,
 };
 
@@ -46,6 +49,7 @@ export function LayersPanel({ page, pageIndex, disabled, onClose }: { page: Desi
   const apply = useDesign((s) => s.apply);
   const select = useDesign((s) => s.select);
   const selectedId = useDesign((s) => (s.selection.pageIndex === pageIndex ? s.selection.elementId : null));
+  const selectedGroup = useDesign((s) => (s.selection.pageIndex === pageIndex && s.selection.elementId ? (s.selection.groupId ?? null) : null));
   const [dragId, setDragId] = useState<string | null>(null);
   const [overZ, setOverZ] = useState<number | null>(null);
 
@@ -67,7 +71,7 @@ export function LayersPanel({ page, pageIndex, disabled, onClose }: { page: Desi
           {[...page.elements].reverse().map((el, d) => {
             const z = n - 1 - d;
             const Icon = TYPE_ICON[el.type];
-            const selected = el.id === selectedId;
+            const selected = selectedGroup ? el.group === selectedGroup : el.id === selectedId;
             const sub = preview(el);
             return (
               <li
@@ -87,6 +91,7 @@ export function LayersPanel({ page, pageIndex, disabled, onClose }: { page: Desi
                 )}
               >
                 <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                {el.group && <GroupIcon aria-label="In a group" className="-ml-1 size-3 shrink-0 text-sky-600 dark:text-sky-300" />}
                 <span className="flex min-w-0 flex-1 flex-col leading-tight">
                   <span className="truncate text-[12px] font-medium">{el.name || el.type}</span>
                   {sub && <span className="truncate text-[10px] text-muted-foreground">{sub}</span>}

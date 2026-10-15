@@ -1085,6 +1085,10 @@ export const designCoverStyles = pgTable("design_cover_styles", {
   mediaS3Bucket: text("media_s3_bucket"),
   mediaS3Key: text("media_s3_key").notNull(),
   doc: jsonb("doc").$type<DesignDoc>(),
+  /** Which reader produced `doc` (COVER_STYLE_READER_VERSION). A style read
+   *  by an older reader is re-read once on its next use — how arrows (v2,
+   *  2026-10-15) reached styles extracted before the reader could see them. */
+  readerVersion: integer("reader_version").notNull().default(1),
   /** One line on the look ("Founder cut out over a dimmed backdrop, tilted revenue card, Anton headline"). */
   summary: text("summary"),
   notes: text("notes"),

@@ -5,12 +5,12 @@
 import { createContext, useContext, useMemo, useRef, useState } from "react";
 import { ColorPicker } from "@/components/editor/color-picker";
 import { colorsInDesignDoc } from "@/lib/design-editor/colors";
-import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, ImageIcon, Layers2Icon, Loader2Icon, LockIcon, MonitorIcon, ScissorsIcon, Trash2Icon, UnlockIcon, UploadIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, GroupIcon, ImageIcon, Layers2Icon, Loader2Icon, LockIcon, MonitorIcon, ScissorsIcon, Trash2Icon, UngroupIcon, UnlockIcon, UploadIcon, XIcon } from "lucide-react";
 import { LogoPicker } from "@/components/editor/logo-picker";
 import { cn } from "@/lib/utils";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
 import { FONTS } from "@/lib/clip-editor/fonts";
-import type { DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignSlot, DesignStatCardElement, DesignTextElement, DesignVideoElement } from "@/lib/design-editor/doc";
+import type { DesignArrowElement, DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignRectElement, DesignSlot, DesignStatCardElement, DesignTextElement, DesignVideoElement } from "@/lib/design-editor/doc";
 import { defaultSeries } from "@/lib/design-editor/stat-card";
 import { DM_KEYWORD_TOKEN } from "@/lib/design-editor/doc";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
@@ -20,6 +20,8 @@ import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFrame, DesignFramesState } from "@/lib/services/design-editor/frames";
 import type { DesignPhoto, DesignPhotosState } from "@/lib/services/design-editor/photos";
 import { imageSourceKey } from "@/lib/editor/image-source";
+import { ARROW_HEADS, newElementId } from "@/lib/design-editor/doc";
+import { arrowEnds, arrowFromEnds } from "@/lib/design-editor/arrow";
 import { commands, useDesign } from "./store";
 
 export interface InspectorProps {
@@ -94,7 +96,44 @@ export function Inspector({ doc, mode, images, frames, photos, source, brand, on
     );
   }
 
+  const groupId = selection.groupId && el.group === selection.groupId ? selection.groupId : null;
+  if (groupId) {
+    const members = page.elements.filter((e) => e.group === groupId).reverse(); // top first, like Layers
+    return (
+      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+        <Panel title={`Group · ${members.length} layers`}>
+          <p className="text-[11px] leading-snug text-muted-foreground">These move together. Click one on the page again (or below) to edit just that layer.</p>
+          <div className="flex flex-col gap-1">
+            {members.map((m) => (
+              <button key={m.id} type="button" onClick={() => select({ pageIndex: pi, elementId: m.id, groupId: null })} className="truncate rounded-md border border-border px-2 py-1 text-left text-[12px] hover:bg-muted">
+                {m.name || m.type}
+              </button>
+            ))}
+          </div>
+          <Slider label="Opacity" value={members[0]?.opacity ?? 1} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => apply(commands.patchGroup(pi, groupId, (e) => ({ ...e, opacity: v })), "group-opacity")} />
+          <div className="flex gap-1">
+            <button type="button" onClick={() => { apply(commands.ungroup(pi, groupId)); select({ pageIndex: pi, elementId: el.id, groupId: null }); }} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted">
+              <UngroupIcon className="size-3" /> Ungroup
+            </button>
+            <button type="button" onClick={() => { apply(commands.removeGroup(pi, groupId)); select({ pageIndex: pi, elementId: null }); }} className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-50">
+              <Trash2Icon className="size-3" /> Delete group
+            </button>
+          </div>
+        </Panel>
+      </div>
+    );
+  }
+
   const patch = <E extends DesignElement>(fn: (e: E) => E, key?: string) => apply(commands.patchElement<E>(pi, el.id, fn), key);
+  const index = page.elements.findIndex((e) => e.id === el.id);
+  const below = index > 0 ? page.elements[index - 1] : null;
+  /** Group with the layer right under it (joins that layer's group if it has one). */
+  const groupWithBelow = () => {
+    if (!below) return;
+    const g = below.group ?? el.group ?? newElementId("grp");
+    apply((d) => commands.patchElement(pi, below.id, (e) => ({ ...e, group: g }))(commands.patchElement(pi, el.id, (e) => ({ ...e, group: g }))(d)));
+    select({ pageIndex: pi, elementId: el.id, groupId: g });
+  };
 
   return (
     <UsedColorsContext.Provider value={usedColors}>
@@ -115,12 +154,22 @@ export function Inspector({ doc, mode, images, frames, photos, source, brand, on
           ))}
         </div>
         <Slider label="Opacity" value={el.opacity} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => patch((e) => ({ ...e, opacity: v }), "opacity")} />
-        {el.type !== "video" && el.type !== "captions" && (
+        {el.type !== "video" && el.type !== "captions" && el.type !== "arrow" && (
           <Slider label="Tilt" value={el.rotation ?? 0} min={-30} max={30} step={0.5} format={(v) => `${v}°`} onChange={(v) => patch((e) => ({ ...e, rotation: v === 0 ? undefined : v }), "tilt")} />
         )}
         <button type="button" onClick={() => { apply(commands.removeElement(pi, el.id)); select({ pageIndex: pi, elementId: null }); }} className="inline-flex items-center gap-1 self-start rounded-md border border-red-200 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-50">
           <Trash2Icon className="size-3" /> Delete
         </button>
+        {el.group ? (
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span>In a group.</span>
+            <button type="button" onClick={() => select({ pageIndex: pi, elementId: el.id, groupId: el.group })} className="font-medium text-sky-700 hover:underline dark:text-sky-300">Select the group</button>
+          </div>
+        ) : below ? (
+          <button type="button" onClick={groupWithBelow} title={`Group "${el.name || el.type}" with "${below.name || below.type}" so they move together`} className="inline-flex items-center gap-1 self-start rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted">
+            <GroupIcon className="size-3" /> Group with the layer below
+          </button>
+        ) : null}
       </Panel>
 
       {mode === "template" && (el.type === "text" || el.type === "image" || el.type === "video" || el.type === "statCard") && (
@@ -156,6 +205,7 @@ export function Inspector({ doc, mode, images, frames, photos, source, brand, on
       )}
       {el.type === "text" && <TextPanel el={el} patch={(fn, key) => patch<DesignTextElement>(fn, key)} />}
       {el.type === "statCard" && <StatCardPanel el={el} patch={(fn, key) => patch<DesignStatCardElement>(fn, key)} />}
+      {el.type === "arrow" && <ArrowPanel el={el} patch={(fn, key) => patch<DesignArrowElement>(fn, key)} />}
       {el.type === "rect" && (
         <Panel title="Fill">
           <div className="grid grid-cols-2 gap-1">
@@ -523,6 +573,42 @@ function StatCardPanel({ el, patch }: { el: DesignStatCardElement; patch: (fn: (
       </button>
       <p className="text-[11px] leading-snug text-muted-foreground">The chart is a shape, not data — the number is the claim. Prefer a real screenshot when the video has one (Pictures → Screens from the video).</p>
       <Slider label="Rounded corners" value={el.radius} min={0} max={80} step={2} format={(v) => `${v}`} onChange={(v) => patch((e) => ({ ...e, radius: v }), "radius")} />
+    </Panel>
+  );
+}
+
+/** Heads, colour, weight, curve, direction. Changing the weight or curve
+ *  keeps both ends where they are (the box is re-derived to fit). */
+function ArrowPanel({ el, patch }: { el: DesignArrowElement; patch: (fn: (e: DesignArrowElement) => DesignArrowElement, key?: string) => void }) {
+  const reshape = (cur: DesignArrowElement, over: Partial<Pick<DesignArrowElement, "bend" | "thickness">>): DesignArrowElement => {
+    const { tail, head } = arrowEnds(cur);
+    const next = { ...cur, ...over };
+    return { ...next, ...arrowFromEnds(tail, head, next.bend, next.thickness) };
+  };
+  const heads = (label: string, key: "startHead" | "endHead") => (
+    <div className="flex flex-col gap-1">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <div className="grid grid-cols-3 gap-1 rounded-md bg-muted p-0.5 text-xs">
+        {ARROW_HEADS.map((h) => (
+          <button key={h} type="button" onClick={() => patch((e) => ({ ...e, [key]: h }))} className={cn("rounded px-2 py-1 font-medium", el[key] === h ? "bg-background shadow-sm" : "text-muted-foreground")}>
+            {h === "none" ? "None" : h === "open" ? "Open" : "Solid"}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <Panel title="Arrow">
+      <p className="text-[11px] leading-snug text-muted-foreground">Drag the white dots to aim it, the pink one to curve it. Shift snaps the angle.</p>
+      <Color label="Colour" value={el.color} onChange={(v) => patch((e) => ({ ...e, color: v }), "arrow-color")} />
+      <Slider label="Thickness" value={el.thickness} min={2} max={40} step={1} format={(v) => `${v}`} onChange={(v) => patch((e) => reshape(e, { thickness: v }), "arrow-thickness")} />
+      <Slider label="Curve" value={el.bend} min={-0.5} max={0.5} step={0.01} format={(v) => (v === 0 ? "Straight" : `${Math.round(v * 100)}`)} onChange={(v) => patch((e) => reshape(e, { bend: v }), "arrow-bend")} />
+      <Slider label="Direction" value={el.rotation ?? 0} min={-180} max={180} step={1} format={(v) => `${v}°`} onChange={(v) => patch((e) => ({ ...e, rotation: v === 0 ? undefined : v }), "arrow-direction")} />
+      {heads("Head", "endHead")}
+      {heads("Tail", "startHead")}
+      <button type="button" onClick={() => patch((e) => ({ ...e, startHead: e.endHead, endHead: e.startHead }))} className="self-start rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted">
+        Point the other way
+      </button>
     </Panel>
   );
 }

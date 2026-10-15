@@ -12,7 +12,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { FONT_IDS, type FontId } from "@/lib/clip-editor/doc";
 import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, parseDesignDoc, type DesignDoc, type DesignElement, type DesignPage, type DesignSlot } from "./doc";
-import { baseText, statCard, WORDMARK_DARK, WORDMARK_WHITE } from "./shared";
+import { arrow, baseText, statCard, WORDMARK_DARK, WORDMARK_WHITE } from "./shared";
 import { HIGHLIGHT_COLORS, applyHighlights } from "./template-fill";
 
 export const PDF_IMPORT_TEMPLATE = "pdf-import-v1";
@@ -46,11 +46,11 @@ export const IMPORT_TOOL: Anthropic.Tool = {
               description: "Back to front (z-order). Boxes in page units, origin top-left.",
               items: {
                 type: "object",
-                required: ["type", "name", "x", "y", "w", "h"],
+                required: ["type", "name"],
                 properties: {
-                  type: { type: "string", enum: ["text", "picture", "rect", "video", "channel", "statCard"] },
+                  type: { type: "string", enum: ["text", "picture", "rect", "video", "channel", "statCard", "arrow"] },
                   name: { type: "string", description: "Short editor label: \"Headline\", \"Quote 1\", \"Photo · guest close-up\"." },
-                  x: { type: "number" },
+                  x: { type: "number", description: "Box left. Every type but arrow needs x/y/w/h." },
                   y: { type: "number" },
                   w: { type: "number" },
                   h: { type: "number" },
@@ -62,7 +62,7 @@ export const IMPORT_TOOL: Anthropic.Tool = {
                   sizePx: { type: "number", description: "Font size in page units." },
                   lineHeight: { type: "number", description: "Line pitch / font size, e.g. 1.2." },
                   letterSpacing: { type: "number", description: "Extra spacing in em, e.g. 0.2 for wide tracking." },
-                  color: { type: "string", description: "text: #RRGGBB. rect: fill #RRGGBB." },
+                  color: { type: "string", description: "text: #RRGGBB. rect: fill #RRGGBB. arrow: stroke #RRGGBB." },
                   align: { type: "string", enum: ["left", "center", "right"] },
                   valign: { type: "string", enum: ["top", "middle", "bottom"] },
                   uppercase: { type: "boolean" },
@@ -79,6 +79,12 @@ export const IMPORT_TOOL: Anthropic.Tool = {
                   sub: { type: "string", description: "statCard: the small line under it (\"Last 28 days\")." },
                   accent: { type: "string", description: "statCard: the chart colour #RRGGBB." },
                   showChart: { type: "boolean", description: "statCard: whether it has a chart." },
+                  from: { type: "object", required: ["x", "y"], properties: { x: { type: "number" }, y: { type: "number" } }, description: "arrow: where the line STARTS (the tail end, without a head) in page units." },
+                  to: { type: "object", required: ["x", "y"], properties: { x: { type: "number" }, y: { type: "number" } }, description: "arrow: where the line ENDS — the tip of the arrowhead — in page units." },
+                  bend: { type: "number", description: "arrow: how curved, −0.5…0.5 — the curve's middle sits bend × length off the straight line from→to. 0 = straight; positive bulges to the LEFT of the direction of travel (from → to), negative to the right. A gentle hand-drawn swoop is about ±0.15–0.3." },
+                  thickness: { type: "number", description: "arrow: stroke width in page units." },
+                  heads: { type: "string", enum: ["end", "both", "none"], description: "arrow: which ends have a head. Default end." },
+                  headStyle: { type: "string", enum: ["open", "filled"], description: "arrow: open = two strokes (a hand-drawn V), filled = a solid triangle." },
                 },
               },
             },
@@ -198,6 +204,25 @@ export function normalizeImportedTemplate(raw: unknown): NormalizeResult {
             accent: normalizeHex(e.accent, "#22E07A"), theme: oneOf(e.theme, ["dark", "light"] as const, "dark"),
             showChart: e.showChart !== false, radius: Math.max(0, Math.round(num(e.radius, 28) * sx)),
             slot: { kind: "ai", hint: (str(e.hint) || STAT_CARD_HINT).slice(0, 800) },
+          }),
+        );
+      } else if (type === "arrow") {
+        const from = isObj(e.from) ? e.from : null;
+        const to = isObj(e.to) ? e.to : null;
+        if (!from || !to) continue;
+        const tail = { x: num(from.x, 0) * sx, y: num(from.y, 0) * sy };
+        const head = { x: num(to.x, 0) * sx, y: num(to.y, 0) * sy };
+        if (Math.hypot(head.x - tail.x, head.y - tail.y) < 8) continue;
+        const heads = oneOf(e.heads, ["end", "both", "none"] as const, "end");
+        const style = oneOf(e.headStyle, ["open", "filled"] as const, "open");
+        elements.push(
+          arrow(tail, head, {
+            name: str(e.name, "Arrow").slice(0, 60) || "Arrow",
+            color: normalizeHex(e.color, "#22E07A"),
+            thickness: clamp(Math.round(num(e.thickness, 10) * sText), 2, 60),
+            bend: clamp(num(e.bend, 0), -0.5, 0.5),
+            endHead: heads === "none" ? "none" : style,
+            startHead: heads === "both" ? style : "none",
           }),
         );
       } else if (type === "rect") {
