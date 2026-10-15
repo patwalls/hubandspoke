@@ -84,9 +84,12 @@ if [ "$overall_red" -eq 1 ]; then
 elif [ "$unknown" -eq 1 ]; then
   log "inconclusive — leaving state alone (streak=$streak)"
 else
-  if [ "$streak" -gt 0 ]; then
-    echo 0 > "$STREAK_FILE"
-    [ -x "$LOOPS_BIN" ] && "$LOOPS_BIN" alert resolve --key hubandspoke/health >/dev/null 2>&1 && log "resolved page"
+  # Resolve on every green tick, not only when our streak says we paged: the
+  # streak file can be reset (by hand, or by a probe upgrade) while the page is
+  # still open, and `resolve` is a no-op unless the key is firing.
+  [ "$streak" -gt 0 ] && echo 0 > "$STREAK_FILE"
+  if [ -x "$LOOPS_BIN" ] && "$LOOPS_BIN" alert list 2>/dev/null | grep -q 'hubandspoke/health'; then
+    "$LOOPS_BIN" alert resolve --key hubandspoke/health >/dev/null 2>&1 && log "resolved page"
   fi
 fi
 exit 0
