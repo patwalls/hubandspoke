@@ -827,6 +827,13 @@
       "when": 1792081841844,
       "tag": "0117_bored_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1792086500383,
+      "tag": "0118_flashy_norrin_radd",
+      "breakpoints": true
     }
   ]
 }

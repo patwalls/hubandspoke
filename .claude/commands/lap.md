@@ -43,8 +43,11 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
 
 `git pull --rebase --autostash` first (docs/runbooks may have moved). Then, batched:
 
-1. **Liveness (2 curls)** — `https://hubandspoke.starterstory.com/api/health/worker`
-   (`ok:true`, small ageSeconds) and `/login` (200, and note the response time).
+1. **Liveness (3 curls)** — `https://hubandspoke.starterstory.com/api/health/worker`
+   (`ok:true`, small ageSeconds), `/api/health/queue` (`ok:true`; a 503 names the
+   reason: a due job waiting > 15 min, a lock held by a dead pool > 5 min, or a stalled
+   clip render — that is the "media-heavy wedged" signal and it is **CRIT**, see the
+   threshold table), and `/login` (200, and note the response time).
 2. **Sentry** (org `pat-walls`, project `hubandspoke`): `hk sentry --project hubandspoke --hours 24` — the token lives with the heroku broker on the MacBook Pro, never here; read-only (no Sentry event from this lap on closet-mbp: say CRIT in the escalation instead). Was: token in `~/.zshenv`.
    unresolved issues, `statsPeriod=24h`. Only NEW issues (vs health log) or event-count
    spikes matter.
@@ -98,7 +101,7 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
 | queue total | > 500 | > 5,000 or growing across 2 laps |
 | tasks tripwire | — | ANY divergence (2026-08-09 incident) |
 | one identifier pending | > 1,000 | > 10,000 |
-| oldest due job / stale locks | > 1h / any 4h+ lock | > 6h |
+| oldest due job / stale locks | > 1h / any 4h+ lock | > 6h, **or `/api/health/queue` 503 for a dead-pool lock or a stalled clip render** (renders are user-facing: a 40-min "Clip queued" is an outage for the editors, not a WARN — 2026-10-15) |
 | cron last-fired | > 2.5× its period | notion-sync or performance-decay dead > 6h |
 | stuck Descript renders | any ≥ 2h | ≥ 5 items, or any ≥ 12h |
 | event storm (one item/24h) | > 25 events | > 100 events |
@@ -167,7 +170,13 @@ the lap also gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, sa
   `items_fetched` climbing for that job). Restarting it kills the in-flight run, and the
   orphaned lock reads as the next lap's "hang" (2026-08-22: two restarts, both retracted).
 - yt-archive exit 8 + eviction-race log signature → one `launchctl kickstart`, verify.
-- Stale graphile locks held by dead workers → clear per the runbook.
+- Stale graphile locks held by dead workers → **the worker clears these itself** since
+  2026-10-15 (`src/jobs/lock-reconcile.ts`, at boot + every 60s; log line
+  `[worker] lock-reconcile(...) acted=true`). If `/api/health/queue` still reports a
+  dead-pool lock > 5 min, the self-heal is broken: that is CRIT, quote the endpoint body
+  and the last `lock-reconcile` log lines, and put the manual SQL from
+  `docs/automation.md` → *Queue health and lock reconciliation* on `--blocked`. Never
+  propose unlocking the pool id shown in `worker_heartbeat.pool_id` — that is the live one.
 - **Stuck Descript render** with a still-live publish job → re-enqueue one keyed poll via
   `graphile_worker.add_job` (jobKey `descript-publish:<id>`, queue `media-heavy` — the
   exact recovery used 2026-08-09). Dead publish job ("No job found") → stamp

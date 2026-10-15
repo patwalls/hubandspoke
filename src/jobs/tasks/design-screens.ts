@@ -62,7 +62,7 @@ export const designScreensTask: Task = async (rawPayload, helpers) => {
     for (const sec of times) {
       const file = path.join(workDir, `s-${sec.toFixed(2).replace(".", "_")}.jpg`);
       try {
-        await runFfmpeg(buildFrameGrabArgs({ input: local, sec, maxWidth: SAMPLE_WIDTH, outputPath: file }), { timeoutMs: 60_000 });
+        await runFfmpeg(buildFrameGrabArgs({ input: local, sec, maxWidth: SAMPLE_WIDTH, outputPath: file }), { maxRuntimeMs: 60_000, signal: helpers.abortSignal });
         samples.push({ sec, file });
       } catch (err) {
         helpers.logger.warn(`design-screens: frame at ${sec}s failed: ${err instanceof Error ? err.message : err}`);
@@ -88,7 +88,7 @@ export const designScreensTask: Task = async (rawPayload, helpers) => {
       const secStr = pick.sec.toFixed(2);
       const file = path.join(workDir, `screen-${secStr.replace(".", "_")}.jpg`);
       try {
-        await runFfmpeg(buildFrameGrabArgs({ input: local, sec: pick.sec, maxWidth: FRAME_MAX_WIDTH, outputPath: file }), { timeoutMs: 120_000 });
+        await runFfmpeg(buildFrameGrabArgs({ input: local, sec: pick.sec, maxWidth: FRAME_MAX_WIDTH, outputPath: file }), { maxRuntimeMs: 120_000, signal: helpers.abortSignal });
         const buf = await readFile(file);
         const dims = imageSize(buf);
         const s3Key = buildKey(sourceItemId, `design-screen-${secStr}.jpg`);

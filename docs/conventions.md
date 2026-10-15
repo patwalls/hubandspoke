@@ -274,6 +274,20 @@ task that takes longer than ~20s:
   `descriptClipResolveTask` for reference.
 - Carry a `deadlineAt` (epoch ms) in the payload so the chain doesn't loop
   forever; throw on expiry so graphile-worker stops retrying.
+- **If the work genuinely can't be chunked (an ffmpeg encode), it must be
+  bounded and abortable instead:** every download and child process goes
+  through `src/lib/services/ffmpeg-process.ts` (`downloadToFile`, `runFfmpeg`
+  / `runWatchedProcess` — timeout, stall watchdog, hard cap) and receives
+  `helpers.abortSignal`, so a deploy's SIGTERM ends the task with a thrown
+  error inside graphile's 20s grace and the job + its named-queue lock are
+  released. A task that can hang past that window turns into an orphaned
+  lock that blocks its whole serial queue (2026-10-15). The worker's lock
+  reconciler is the safety net, not the plan — see `docs/automation.md` →
+  Queue health and lock reconciliation.
+- **Serial queues (`queueName: "media-heavy"`, `"diarize"`) are a shared
+  resource.** One hung job stops every job behind it. Put a task on one only
+  when two of them running at once would actually hurt (memory), and keep
+  its per-invocation ceiling short.
 
 ## Connection budget
 

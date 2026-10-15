@@ -2469,6 +2469,10 @@ export const workerHeartbeat = pgTable("worker_heartbeat", {
     .defaultNow()
     .notNull(),
   workerDyno: text("worker_dyno"), // e.g. "worker.1" — informational
+  // graphile-worker pool id of the live process (`pool-<hex>`, new on every
+  // boot). Lets /api/health/queue tell a lock held by the running worker
+  // from one orphaned by a dead process — see src/jobs/lock-reconcile.ts.
+  poolId: text("pool_id"),
 });
 
 

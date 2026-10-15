@@ -15,6 +15,13 @@ updates:
     # (Security updates ignore cooldown and still arrive immediately.)
     cooldown:
       default-days: 7
+    ignore:
+      # The job runtime. 0.16.6 → 0.18.0 auto-merged on 2026-10-12 (minor
+      # group) and changed lock semantics under us; three wedged queues
+      # followed on 2026-10-15. Patches still flow; minors/majors are a
+      # deliberate upgrade with the release notes read and a worktree test.
+      - dependency-name: graphile-worker
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
     groups:
       npm-minor-patch:
         applies-to: version-updates

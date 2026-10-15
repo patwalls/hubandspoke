@@ -29,7 +29,8 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 - Graphile Worker (Postgres-backed background job queue)
 - Deployed on Heroku (auto-deploy on push to `main` via Heroku's GitHub integration)
   - CI (`.github/workflows/ci.yml`): `build` = typecheck + unit tests + `next build`; required to merge PRs, bypassed by direct pushes. Grouped Dependabot minor/patch PRs and loop `app-loop/*` PRs (opened via `ship web hubandspoke`) auto-merge when green; interactive fixes Pat asks for push straight to `main` — see `docs/conventions.md` → CI & Dependabot
-  - Two dynos: `web` (Basic) + `worker` (Basic) — see `Procfile`
+  - Two dynos: `web` (Standard-1X, 512 MB) + `worker` (Standard-2X, 1 GB) — see `Procfile`
+  - Health: `GET /api/health/worker` (process alive) and `GET /api/health/queue` (work moving); both public, both polled every 5 min by `.github/workflows/health-monitor.yml` and the home-Mac launchd probe. Logs drain to the Papertrail add-on (free plan). See `docs/automation.md` → Queue health and lock reconciliation
 
 ## Development
 - `npm run dev` - Start dev server (main worktree uses port 3000)
@@ -246,8 +247,12 @@ gets retries with backoff, and doesn't block HTTP responses.
 
 ### Heroku setup
 
-- **Worker dyno:** provisioned once via `heroku ps:scale worker=1:Basic --app hubandspoke`
-  ($7/mo). Same `Procfile` line runs locally via `npm run worker`.
+- **Worker dyno:** one `worker` dyno, Standard-2X since 2026-10 (originally
+  `heroku ps:scale worker=1:Basic`). Same `Procfile` line runs locally via `npm run worker`.
+- **Locks heal themselves:** `src/jobs/lock-reconcile.ts` runs at boot and every
+  minute, releasing graphile locks left by a dead process (orphans) or locks we
+  hold on paper but aren't running (ghosts). Every media task must be bounded
+  and pass `helpers.abortSignal` — `docs/conventions.md` → Long-running jobs.
 - **Release phase** (`Procfile: release:`) runs `npm run db:migrate && npm run worker:migrate`
   in that order. A failed migration fails the deploy — schema and code ship
   together.

@@ -1,8 +1,15 @@
 /**
  * Spawning ffmpeg from a worker task: run an argv with `-progress pipe:1`
  * parsing, and read a source's size/duration from the `-i` banner. Shared by
- * the design editor's tasks (clip-render.ts predates this and keeps its own
- * copies for now).
+ * the clip editor's `clip-render` and the design editor's tasks.
+ *
+ * Every entry point here is bounded. A worker task that can hang holds a
+ * serial queue (`media-heavy`) hostage and survives a graceful shutdown as
+ * an orphaned lock — 2026-10-15 lost most of a day of clip renders to
+ * exactly that. So: downloads time out, ffmpeg is killed when it stops
+ * making progress or runs past a hard cap, and both honor an AbortSignal
+ * (pass graphile's `helpers.abortSignal`) so a deploy's SIGTERM turns into a
+ * clean failure + retry instead of a 4h stale lock.
  */
 import { spawn } from "child_process";
 import { createWriteStream } from "fs";
@@ -13,38 +20,133 @@ import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { parseProgressSeconds } from "@/lib/clip-editor/ffmpeg-args";
 import { parseSourceDimensions, parseSourceDuration } from "@/lib/clip-editor/video-box";
 
+/** A 1 GB podcast lands from S3 in ~15 s; ten minutes is "the network is gone". */
+export const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+/** ffmpeg reports progress ~2×/s while encoding; three silent minutes is a hang. */
+export const FFMPEG_STALL_TIMEOUT_MS = 3 * 60_000;
+/** No single render legitimately takes longer than this on a dyno. */
+export const FFMPEG_MAX_RUNTIME_MS = 30 * 60_000;
+
+export interface DownloadOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 /**
  * ffmpeg reads its inputs from LOCAL FILES on the worker. The dyno's static
  * ffmpeg build (2018) segfaults on any https input (verified 2026-09-19 on a
  * one-off dyno: every `-i https://…` form dies with SIGSEGV in ~150 ms, with
  * or without the reconnect flags), while locally installed builds range-read
  * https fine — which is exactly how this went unnoticed. So every task
- * downloads the source first; the disk is ephemeral and a 1 GB podcast
- * lands in ~15 s from S3.
+ * downloads the source first; the disk is ephemeral.
  */
-export async function downloadToFile(url: string, destPath: string): Promise<void> {
-  const res = await fetch(url);
+export async function downloadToFile(
+  url: string,
+  destPath: string,
+  opts: DownloadOptions = {},
+): Promise<void> {
+  const signal = combineSignals(opts.timeoutMs ?? DOWNLOAD_TIMEOUT_MS, opts.signal);
+  let res: Response;
+  try {
+    res = await fetch(url, { signal });
+  } catch (err) {
+    throw describeAbort(err, "download", signal);
+  }
   if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`);
-  await pipeline(Readable.fromWeb(res.body as unknown as NodeReadableStream), createWriteStream(destPath));
+  try {
+    await pipeline(
+      Readable.fromWeb(res.body as unknown as NodeReadableStream),
+      createWriteStream(destPath),
+      { signal },
+    );
+  } catch (err) {
+    throw describeAbort(err, "download", signal);
+  }
 }
 
-export function runFfmpeg(argv: string[], opts: { onProgress?: (renderedSec: number) => void; timeoutMs?: number } = {}): Promise<void> {
+export interface RunProcessOptions {
+  onProgress?: (renderedSec: number) => void;
+  /** Kill if no stdout/stderr output for this long. 0 disables. */
+  stallTimeoutMs?: number;
+  /** Kill unconditionally after this long. 0 disables. */
+  maxRuntimeMs?: number;
+  /** Kill when this aborts (graceful shutdown). */
+  signal?: AbortSignal;
+}
+
+export function runFfmpeg(argv: string[], opts: RunProcessOptions = {}): Promise<void> {
+  return runWatchedProcess(ffmpegInstaller.path, argv, opts);
+}
+
+/**
+ * Spawn `bin argv`, resolve on exit 0, reject with the tail of stderr
+ * otherwise. Progress lines on stdout feed `onProgress`; ANY output resets
+ * the stall timer. Exposed (not ffmpeg-specific) so the watchdogs can be
+ * tested with `sleep`.
+ */
+export function runWatchedProcess(
+  bin: string,
+  argv: string[],
+  opts: RunProcessOptions = {},
+): Promise<void> {
+  const stallMs = opts.stallTimeoutMs ?? FFMPEG_STALL_TIMEOUT_MS;
+  const maxMs = opts.maxRuntimeMs ?? FFMPEG_MAX_RUNTIME_MS;
   return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegInstaller.path, argv, { stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(bin, argv, { stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
-    const timer = opts.timeoutMs ? setTimeout(() => proc.kill("SIGKILL"), opts.timeoutMs) : null;
+    let killReason: string | null = null;
+    const startedAt = Date.now();
+
+    const kill = (reason: string) => {
+      if (killReason) return;
+      killReason = reason;
+      proc.kill("SIGKILL");
+    };
+
+    let stallTimer: NodeJS.Timeout | null = null;
+    const armStall = () => {
+      if (!stallMs) return;
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(
+        () => kill(`stalled: no output for ${Math.round(stallMs / 1000)}s`),
+        stallMs,
+      );
+    };
+    const maxTimer = maxMs
+      ? setTimeout(() => kill(`exceeded max runtime of ${Math.round(maxMs / 1000)}s`), maxMs)
+      : null;
+    const onAbort = () => kill(`aborted: ${abortReason(opts.signal)}`);
+    if (opts.signal?.aborted) onAbort();
+    else opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+    armStall();
     proc.stdout.on("data", (chunk: Buffer) => {
+      armStall();
       const sec = parseProgressSeconds(chunk.toString());
       if (sec !== null) opts.onProgress?.(sec);
     });
     proc.stderr.on("data", (chunk: Buffer) => {
+      armStall();
       stderr = (stderr + chunk.toString()).slice(-4000);
     });
-    proc.on("error", reject);
+
+    const cleanup = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      if (maxTimer) clearTimeout(maxTimer);
+      opts.signal?.removeEventListener("abort", onAbort);
+    };
+    proc.on("error", (err) => {
+      cleanup();
+      reject(err);
+    });
     proc.on("close", (code, signal) => {
-      if (timer) clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited ${code ?? signal}${stderr ? `: ${stderr.trim().slice(-600)}` : ""}`));
+      cleanup();
+      if (code === 0) return resolve();
+      const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
+      const why = killReason
+        ? `process killed (${killReason}) after ${elapsed}s`
+        : `process exited ${code ?? signal}`;
+      reject(new Error(`${why}${stderr ? `: ${stderr.trim().slice(-600)}` : ""}`));
     });
   });
 }
@@ -66,4 +168,21 @@ export function probeSource(input: string): Promise<{ width: number; height: num
       resolve(dims ? { ...dims, durationSec: parseSourceDuration(stderr) } : null);
     });
   });
+}
+
+function combineSignals(timeoutMs: number, outer?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return outer ? AbortSignal.any([timeout, outer]) : timeout;
+}
+
+function abortReason(signal?: AbortSignal): string {
+  const r: unknown = signal?.reason;
+  if (r instanceof Error) return r.name === "TimeoutError" ? "timed out" : r.message || r.name;
+  return r ? String(r) : "worker shutting down";
+}
+
+/** Turn the DOMException soup fetch/pipeline throw on abort into one clear message. */
+function describeAbort(err: unknown, what: string, signal: AbortSignal): Error {
+  if (signal.aborted) return new Error(`${what} ${abortReason(signal)}`);
+  return err instanceof Error ? err : new Error(String(err));
 }

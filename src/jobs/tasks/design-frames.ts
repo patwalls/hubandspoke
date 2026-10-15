@@ -59,7 +59,7 @@ export const designFramesTask: Task = async (rawPayload, helpers) => {
     helpers.logger.info(`design-frames: source downloaded in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
     if (atSec !== undefined) {
-      await grabOne(sourceItemId, local, atSec, workDir, "user");
+      await grabOne(sourceItemId, local, atSec, workDir, "user", helpers.abortSignal);
       return;
     }
 
@@ -76,7 +76,7 @@ export const designFramesTask: Task = async (rawPayload, helpers) => {
 
     const done: Array<{ sec: number; file: string }> = [];
     for (const sec of secs) {
-      const file = await grabOne(sourceItemId, local, sec, workDir, "auto");
+      const file = await grabOne(sourceItemId, local, sec, workDir, "auto", helpers.abortSignal);
       if (file) done.push({ sec, file });
     }
     if (done.length === 0) throw new Error("no frame could be extracted");
@@ -104,12 +104,12 @@ async function loadTranscript(sourceItemId: string) {
 }
 
 /** Grab, upload and stamp one frame. Returns the local file on success. */
-async function grabOne(sourceItemId: string, localSource: string, sec: number, workDir: string, origin: "auto" | "user"): Promise<string | null> {
+async function grabOne(sourceItemId: string, localSource: string, sec: number, workDir: string, origin: "auto" | "user", signal?: AbortSignal): Promise<string | null> {
   const secStr = round2(sec).toFixed(2);
   await db.insert(designFrames).values({ productionItemId: sourceItemId, sec: secStr, origin, status: "pending" }).onConflictDoNothing();
   const file = path.join(workDir, `frame-${secStr.replace(".", "_")}.jpg`);
   try {
-    await runFfmpeg(buildFrameGrabArgs({ input: localSource, sec, maxWidth: FRAME_MAX_WIDTH, outputPath: file }), { timeoutMs: 120_000 });
+    await runFfmpeg(buildFrameGrabArgs({ input: localSource, sec, maxWidth: FRAME_MAX_WIDTH, outputPath: file }), { maxRuntimeMs: 120_000, signal });
     const buf = await readFile(file);
     if (buf.length === 0) throw new Error("empty frame");
     const dims = imageSize(buf);

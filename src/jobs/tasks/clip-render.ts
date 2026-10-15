@@ -1,10 +1,8 @@
-import { spawn } from "child_process";
 import { copyFile, mkdtemp, rm, stat, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import path from "path";
 import type { Task } from "graphile-worker";
 import { desc, eq } from "drizzle-orm";
-import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { db } from "@/lib/db";
 import {
   clipEdits,
@@ -20,14 +18,9 @@ import { parseDoc } from "@/lib/clip-editor/doc";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
 import { resolveScene } from "@/lib/clip-editor/scene";
 import { buildAssScript } from "@/lib/clip-editor/ass";
-import {
-  buildFilterGraph,
-  buildRenderArgs,
-  parseProgressSeconds,
-} from "@/lib/clip-editor/ffmpeg-args";
+import { buildFilterGraph, buildRenderArgs } from "@/lib/clip-editor/ffmpeg-args";
 import { resolveTranscriptWords } from "@/lib/clip-editor/words";
-import { parseSourceDimensions } from "@/lib/clip-editor/video-box";
-import { downloadToFile } from "./descript-upload-helpers";
+import { downloadToFile, probeSource, runFfmpeg } from "@/lib/services/ffmpeg-process";
 
 export interface ClipRenderPayload {
   renderId: string;
@@ -44,9 +37,16 @@ const PROGRESS_WRITE_INTERVAL_MS = 3000;
  *
  * Unlike the Descript tasks this is a single long invocation, not a
  * self-re-enqueueing poll chain: an ffmpeg encode can't be resumed, so there
- * is nothing to checkpoint. A deploy's SIGTERM reaches ffmpeg too (same
- * process group) → it exits non-zero → this throws → graphile retries on the
- * new dyno from the top. Idempotency guards at each step make that safe.
+ * is nothing to checkpoint. Idempotency guards at each step make a retry
+ * from the top safe.
+ *
+ * Bounded, always (2026-10-15): the source download times out, ffmpeg is
+ * killed if it stops producing progress or runs past a hard cap, and both
+ * honor graphile's `helpers.abortSignal` so a deploy's SIGTERM ends the job
+ * with a thrown error inside the 20s grace window — graphile then releases
+ * the job + the `media-heavy` queue lock and retries on the new dyno. Before
+ * this, a hung download or encode held the serial queue until a human ran
+ * `force_unlock_workers`, and the queue sat wedged most of a day.
  *
  * Failure contract: EVERY failure path stamps status='failed' + error before
  * rethrowing, and the heartbeat covers the one case that can't (SIGKILL) —
@@ -135,13 +135,13 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
     // silently ignored in every prod export (2026-09-19).
     const localSource = path.join(workDir, "source");
     const t0 = Date.now();
-    await downloadToFile(sourceUrl, localSource);
+    await downloadToFile(sourceUrl, localSource, { signal: helpers.abortSignal });
     helpers.logger.info(`clip-render: source downloaded in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
     // Exact placement (inset, rounded corners) needs the source's pixel size.
     // A failed probe isn't fatal: the graph falls back to aspect expressions
     // and just can't inset/round.
-    const sourceSize = await probeSourceSize(localSource);
+    const sourceSize = await probeSource(localSource);
     if (!sourceSize) {
       helpers.logger.warn(`clip-render: couldn't probe source size for render=${render.id}; using aspect fallback`);
     }
@@ -156,7 +156,7 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
         await copyFile(path.join(process.cwd(), "public", layer.src.path), file);
       } else {
         const url = layer.src.kind === "s3" ? await getPresignedGetUrl(layer.src.key, 3600, { bucket: layer.src.bucket ?? undefined }) : layer.src.url;
-        await downloadToFile(url, file);
+        await downloadToFile(url, file, { signal: helpers.abortSignal });
       }
       images.push(file);
     }
@@ -181,7 +181,7 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
     const started = Date.now();
     await runFfmpeg(
       buildRenderArgs({ plan, input: localSource, images, filterScriptPath, outputPath }),
-      onProgress,
+      { onProgress, signal: helpers.abortSignal },
     );
     const renderSeconds = (Date.now() - started) / 1000;
 
@@ -242,26 +242,6 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
   }
 };
 
-/** `ffmpeg -i <url>` with no output: exits non-zero by design, but prints
- *  the stream banner to stderr first — a ranged read of just the header. */
-function probeSourceSize(input: string): Promise<{ width: number; height: number } | null> {
-  return new Promise((resolve) => {
-    const proc = spawn(ffmpegInstaller.path, ["-hide_banner", "-i", input], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    const timer = setTimeout(() => proc.kill("SIGKILL"), 30_000);
-    proc.stderr.on("data", (c: Buffer) => {
-      stderr = (stderr + c.toString()).slice(-20_000);
-    });
-    proc.on("error", () => resolve(null));
-    proc.on("close", () => {
-      clearTimeout(timer);
-      resolve(parseSourceDimensions(stderr));
-    });
-  });
-}
-
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -282,28 +262,4 @@ function makeProgressWriter(renderId: string, durationSec: number) {
         // Progress is cosmetic — never fail a render over it.
       });
   };
-}
-
-function runFfmpeg(argv: string[], onProgress: (renderedSec: number) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegInstaller.path, argv, { stdio: ["ignore", "pipe", "pipe"] });
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => {
-      const sec = parseProgressSeconds(chunk.toString());
-      if (sec !== null) onProgress(sec);
-    });
-    proc.stderr.on("data", (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString()).slice(-4000);
-    });
-    proc.on("error", reject);
-    proc.on("close", (code, signal) => {
-      if (code === 0) resolve();
-      else
-        reject(
-          new Error(
-            `ffmpeg exited ${code ?? signal}${stderr ? `: ${stderr.trim().slice(-600)}` : ""}`,
-          ),
-        );
-    });
-  });
 }

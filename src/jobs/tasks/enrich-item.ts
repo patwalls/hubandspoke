@@ -23,10 +23,14 @@ export const enrichItemTask: Task = async (rawPayload, helpers) => {
   const { productionItemId, force, withMedia } =
     rawPayload as EnrichItemPayload;
   const start = Date.now();
-  helpers.logger.info(`enrich-item start item=${productionItemId}`);
+  // Debug, not info: the hourly sweep enqueues hundreds of these and almost
+  // all skip. At three info lines each they flushed Heroku's 1500-line log
+  // buffer in ~7 minutes (2026-10-15), erasing the record of a worker
+  // restart we needed. One line per job that actually did work.
+  helpers.logger.debug(`enrich-item start item=${productionItemId}`);
   const result = await enrichSingleItem(productionItemId, { force, withMedia });
   if (!result) {
-    helpers.logger.info(
+    helpers.logger.debug(
       `enrich-item skipped item=${productionItemId} reason=already-enriched-or-no-enricher`
     );
     return;

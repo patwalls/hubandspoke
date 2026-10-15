@@ -17,9 +17,19 @@ export function buildPgPool(overrides: Partial<PoolConfig> = {}): Pool {
     process.env.DATABASE_SSL === "off"
       ? false
       : { rejectUnauthorized: false };
-  return new Pool({
+  const pool = new Pool({
     connectionString,
     ssl,
     ...overrides,
   });
+  // An idle pooled client that loses its connection (Heroku Postgres
+  // maintenance, a network blip) emits 'error' on the pool. With no listener
+  // that is an uncaught exception → the whole dyno dies mid-job and leaves
+  // graphile locks behind (graphile-worker 0.18 warns about exactly this at
+  // boot: "Your pool doesn't have error handlers!"). Log it and carry on; the
+  // pool discards the broken client on its own.
+  pool.on("error", (err) => {
+    console.error(`[pg-pool] idle client error: ${err.message}`);
+  });
+  return pool;
 }

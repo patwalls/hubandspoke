@@ -1,0 +1,89 @@
+# External health monitor — the "page Pat" trigger docs/automation.md asked
+# for since 2026-05-15 and nobody wired. Runs OFF Heroku so a dead dyno,
+# a wedged worker or a stuck queue is noticed by something that is not
+# the thing that is broken.
+#
+# What it checks (both endpoints are public, no auth, no secrets):
+#   GET /api/health/worker — heartbeat row older than 180s → 503
+#   GET /api/health/queue  — due-but-unrun jobs > 15 min, a lock held by a
+#                            dead pool > 5 min, or a stalled clip render → 503
+#
+# On a 503 (or no answer) the run FAILS, which emails the repo owner, and
+# the step opens or updates one issue labelled `health-monitor` with the
+# response body so the ops lap / Pat can see what tripped. When it clears,
+# the issue is closed automatically. GitHub's cron is best-effort (ticks
+# can slip 10–20 min under load); the home-Mac probe in
+# home-machine/health-probe/ is the fast path, this is the independent one.
+name: health-monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: health-monitor
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_URL: https://hubandspoke.starterstory.com
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Probe health endpoints
+        id: probe
+        shell: bash
+        run: |
+          set -uo pipefail
+          fail=0; report=""
+          for ep in worker queue; do
+            body="$(curl -sS --max-time 20 -w '\n%{http_code}' "$BASE_URL/api/health/$ep" 2>&1 || true)"
+            code="${body##*$'\n'}"; json="${body%$'\n'*}"
+            echo "/api/health/$ep -> $code"
+            echo "$json" | head -c 2000; echo
+            if [ "$code" != "200" ]; then fail=1; fi
+            report+=$'\n'"### /api/health/$ep → HTTP ${code:-none}"$'\n''```json'$'\n'"$(echo "$json" | head -c 3000)"$'\n''```'$'\n'
+          done
+          {
+            echo "fail=$fail"
+            echo "report<<EOF_REPORT"
+            echo "$report"
+            echo "EOF_REPORT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the alert issue
+        if: steps.probe.outputs.fail == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Health monitor: hubandspoke is unhealthy"
+          body="$(printf '%s\n\n%s\n\n%s\n' \
+            "<!-- health-monitor -->Automated probe from \`.github/workflows/health-monitor.yml\` (runs every 5 min). Last failing run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            "${{ steps.probe.outputs.report }}" \
+            "Runbook: docs/automation.md → *Queue health and lock reconciliation*. The worker self-heals orphaned locks within a minute of boot; if this stays red, read \`heroku logs --dyno worker\` for \`lock-reconcile\` lines first. This issue closes itself when the probe goes green.")"
+          num="$(gh issue list --repo "$GITHUB_REPOSITORY" --label health-monitor --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$num" ]; then
+            gh label create health-monitor --repo "$GITHUB_REPOSITORY" --color B60205 --description "Opened by the external health monitor" --force >/dev/null
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label health-monitor --body "$body"
+          else
+            gh issue edit "$num" --repo "$GITHUB_REPOSITORY" --body "$body" >/dev/null
+          fi
+
+      - name: Close the alert issue when green
+        if: steps.probe.outputs.fail == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          num="$(gh issue list --repo "$GITHUB_REPOSITORY" --label health-monitor --state open --json number --jq '.[0].number // empty')"
+          [ -n "$num" ] && gh issue close "$num" --repo "$GITHUB_REPOSITORY" --comment "Probe green again at $(date -u +%FT%TZ) ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." || true
+
+      - name: Fail the run so the owner is emailed
+        if: steps.probe.outputs.fail == '1'
+        run: exit 1

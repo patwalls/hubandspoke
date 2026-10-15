@@ -1,6 +1,7 @@
 import type { Task } from "graphile-worker";
 import { db } from "@/lib/db";
 import { workerHeartbeat } from "@/lib/db/schema";
+import { getPoolId } from "../worker-identity";
 
 /**
  * Per-minute liveness ping. Upserts the singleton `worker_heartbeat` row
@@ -14,6 +15,10 @@ import { workerHeartbeat } from "@/lib/db/schema";
  * one user's `refresh-item-metrics`) never ran. A wedged worker can't
  * fire this task either, which is precisely why a stale row is the
  * signal.
+ *
+ * Also publishes this process's graphile pool id so the web dyno's
+ * `/api/health/queue` can judge whether a held lock belongs to a live
+ * worker (src/jobs/lock-reconcile.ts explains the pool-id semantics).
  */
 export const workerHeartbeatTask: Task = async () => {
   await db
@@ -22,12 +27,14 @@ export const workerHeartbeatTask: Task = async () => {
       id: "singleton",
       lastSeenAt: new Date(),
       workerDyno: process.env.DYNO ?? null,
+      poolId: getPoolId(),
     })
     .onConflictDoUpdate({
       target: workerHeartbeat.id,
       set: {
         lastSeenAt: new Date(),
         workerDyno: process.env.DYNO ?? null,
+        poolId: getPoolId(),
       },
     });
 };

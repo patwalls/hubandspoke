@@ -1454,7 +1454,8 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
 - **Workflow side effects live in the export service, not the task** — and mirror `createClipIdeaInDescriptPreciseCut` exactly so a clip made here is indistinguishable downstream: queue item → `Assigned` + `editorUserId` + title/hook/contentBody; idea → `assigned` + `acceptedProductionItemId`; an activity comment (deliberately terser than the Descript paths' — range, played duration and hook only, `buildClipCreatedComment`); fire-and-forget `draft-algorithm-run` as a safety net (the post is normally already written — it is drafted when the editor opens, see `draft-algorithm-run` → "Drafted when the clip editor opens"). No `repurpose_triggers` row and no `descript_*` columns are written, so `DescriptStatusPill` stays hidden for these items. **Re-export** (idea already `assigned` *by this editor*, i.e. it has a prior `clip_renders` row) queues a new render and skips the one-time steps; an idea decided any other way (killed, promoted via Descript) is refused with 409.
 - **How the render works:** one ffmpeg pass. One input-seeked open of the source per doc section (`-ss`/`-t` before `-i`, read straight from a presigned S3 URL by HTTP range — the source is **not** downloaded; on failure the task falls back to download-then-render). Cuts are `select`/`aselect` on **frame number** after `fps=30` and `asetnsamples=1600` (1600 samples @ 48 kHz = exactly one video frame), so a clip with dozens of filler-word cuts is a single predicate, and audio and video are cut at the identical instant — sync cannot drift (verified with a beep/timecode source: onsets land frame-exact). Then the video is placed on the canvas using **exact pixel geometry from `resolveVideoBox` (`video-box.ts`) — the same function the browser stage uses** — which needs the source's display size: the task probes it by parsing the `ffmpeg -i` banner (`parseSourceDimensions`; there is no ffprobe in `@ffmpeg-installer`; rotation metadata is honored). Fit = scale+pad, Fill = scale+crop; **rounded corners** = an `alphamerge` mask whose rounded-rect distance field is evaluated by `geq` for ONE frame and looped (per-frame `geq` would be ~100× slower than the encode), composited with `overlay` onto a `color` background. **Both generated streams are `trim`med to the plan's exact frame count — an unbounded looped mask makes ffmpeg encode forever (it did, in development).** If the probe fails the graph falls back to aspect expressions and ignores inset/rounding. Verified on a dyno with prod's 2018 ffmpeg: rounded path 244 MB peak. Finally hook + captions are burned in with the `ass` filter (libass) using the fonts in `public/fonts/clip-editor/`. Text layout (line breaks, baselines) is computed once in `layout.ts` and both the browser preview and the ASS script draw the same pre-broken lines — that is what keeps preview == export.
 - **Rules:**
-  - **Single long invocation, deliberately not a self-re-enqueue chain** — an encode can't be checkpointed. A deploy's SIGTERM reaches ffmpeg (same process group) → non-zero exit → throw → graphile retries on the new dyno from the top (`maxAttempts: 3`).
+  - **Single long invocation, deliberately not a self-re-enqueue chain** — an encode can't be checkpointed. A deploy's SIGTERM aborts `helpers.abortSignal` → the download/ffmpeg helper kills its child → the task throws inside graphile's 20s grace → the job AND the `media-heavy` queue lock are released cleanly → retry on the new dyno from the top (`maxAttempts: 3`).
+  - **Bounded, always (2026-10-15):** every blocking step has a ceiling — source/image download 10 min (`DOWNLOAD_TIMEOUT_MS`), ffmpeg killed after 3 min without progress (`FFMPEG_STALL_TIMEOUT_MS`) or 30 min total (`FFMPEG_MAX_RUNTIME_MS`), all in `src/lib/services/ffmpeg-process.ts` (shared with the design tasks; `clip-render.ts` no longer has its own spawn code). Before this, a hung download/encode held the serial `media-heavy` queue for every other render and survived restarts as an orphaned lock — see *Queue health and lock reconciliation* below. Any new media task MUST go through these helpers and pass `helpers.abortSignal`.
   - **Every failure path stamps `status='failed'` + `error` before rethrowing**, and `heartbeat_at` ticks with ffmpeg progress so a SIGKILLed render (no exception to catch) reads as **`stalled`** after 5 min instead of "rendering" forever (`toRenderStatus` in `render-status.ts` — derived, never stored). This is the lesson from the stranded Descript publish `78b7cc20` above.
   - jobKey `clip-render:<clipEditId>` (`replace`) → at most one pending render per edit; `queueName: "media-heavy"` serializes it behind precise-cut / Descript publish work. A newer export marks older `queued`/`rendering` rows `superseded`, and the task re-checks "am I still the newest render for this edit?" on pickup.
   - Idempotent: `done`/`superseded` rows return early; `installRenderedClipMedia` finds its own `source_url` and no-ops on retry. Re-export replaces only rows with the `clip-editor://render/` prefix — manual uploads and Descript renders on the item survive — and **renumbers** the remaining media to 1…n (a blind +1 shift would leave a gap that grows with every export).
@@ -1901,6 +1902,104 @@ tick (deploy restart, brief blip) without paging. Anything longer than
 Fix-on-page: `heroku ps:restart worker --app hubandspoke`. No locked
 jobs to interrupt during a wedge (the worker isn't running anything —
 that's the whole problem) and all queued tasks are designed idempotent.
+
+**Who actually polls it (wired 2026-10-15 — until then nobody did):** see
+*External monitors* under the next section.
+
+### Queue health and lock reconciliation (2026-10-15)
+
+A live worker is not the same as a moving queue. On 2026-10-15 the heartbeat
+was green all day while the serial `media-heavy` queue sat wedged three
+separate times behind a graphile lock held by a process that no longer
+existed; editors' clip exports showed "Clip queued" for 40 min – 2 h, and
+the ops lap could only hand Pat the SQL (its DB role is read-only since the
+`hk` broker). Two mechanisms close that gap.
+
+**1. The worker heals its own locks** (`src/jobs/lock-reconcile.ts`, wired in
+`src/jobs/worker.ts`). graphile-worker ≥0.17 stamps `locked_by` with the
+process's *pool id* (`pool-<hex>`, new on every boot — the `worker-<hex>` ids
+in log lines are per-slot and never appear in `locked_by`). Heroku stops the
+old worker dyno before starting the new one, so:
+
+- **Orphan** — a lock whose holder ≠ our pool id AND `locked_at` < our boot
+  time can only belong to a dead process → `graphile_worker.force_unlock_workers(holder)`.
+- **Ghost** — a lock held by *our* pool id for > 2 min on a job that is not in
+  the in-memory in-flight set (fed by the runner's `job:start`/`job:complete`
+  events) → that row's lock (and its queue's) is cleared directly. This is the
+  "fetched but never executed" shape seen at 13:55Z and 17:14Z.
+- A foreign holder with a lock *newer* than our boot (a second worker, a
+  one-off dyno, someone's local `npm run worker` against prod) is reported,
+  never touched.
+
+Runs at boot (`lock-reconcile(boot)` log line) and every 60 s. Every action
+logs `[worker] lock-reconcile(...) acted=true …` and sends one Sentry
+*warning* (fingerprint `graphile-lock-reconcile`) — the point is a visible
+count of how often this still happens, since each one was a render that sat
+queued until the pass ran. Unit-tested classifier
+(`lock-reconcile.test.ts`), integration-tested against the real graphile
+tables (`lock-reconcile.integration.test.ts`).
+
+The `worker-heartbeat` task now also publishes the live pool id
+(`worker_heartbeat.pool_id`) so the web dyno can judge locks too.
+
+**2. `GET /api/health/queue`** (`src/app/api/health/queue/route.ts`,
+`src/lib/services/queue-health.ts`) — public, 503 with `reasons[]` when any of:
+
+| check | red when | why that number |
+|---|---|---|
+| oldest due, unlocked, retryable job | waited > 15 min | hourly crons tolerate it; a stuck serial queue trips it within one render's worth of waiting |
+| lock held by a pool ≠ `worker_heartbeat.pool_id` | > 5 min | the worker reconciles within 60 s of boot; 5 min means the self-heal itself is broken |
+| `clip_renders` stalled (render-status.ts rules) | any | `queued` > 20 min or `rendering` with no heartbeat > 5 min |
+
+A live worker's own long lock (a 20-minute render) is *not* red.
+
+**External monitors (both poll `/api/health/worker` + `/api/health/queue`):**
+
+- **`.github/workflows/health-monitor.yml`** — every 5 min from GitHub (so it
+  survives anything on Heroku or at home). A red probe fails the run (GitHub
+  emails the repo owner) and opens/updates one issue labelled
+  `health-monitor` with the response bodies; it closes the issue itself when
+  green. GitHub's cron can slip 10–20 min — this is the independent path,
+  not the fast one.
+- **Home-Mac probe** — `home-machine/health-probe/probe.sh`, launchd
+  `com.hubandspoke.health-probe` every 300 s (install/verify:
+  `home-machine/health-probe/install.sh`; log
+  `~/Library/Logs/hubandspoke-health-probe.log`). Two consecutive red ticks →
+  `loops alert fire --key hubandspoke/health --priority urgent` (phone +
+  email via the cockpit); green → `loops alert resolve`. 404 / unreachable
+  count as inconclusive, never red.
+- **The ops lap** (`.claude/commands/lap.md`) curls both every lap; a 503 on
+  the queue endpoint is CRIT.
+
+**Log retention:** Heroku keeps 1,500 lines, which the `enrich-item` sweep
+used to flush in ~7 min (three info lines per skipped item — now `debug`).
+The free Papertrail add-on (`papertrail:choklad`, added 2026-10-15) is the
+drain: `heroku addons:open papertrail --app hubandspoke`, search
+`lock-reconcile` or `clip-render`.
+
+**Runbook — queue wedged / render stuck "queued":**
+
+1. `curl -s https://hubandspoke.starterstory.com/api/health/queue | jq` — the
+   `reasons` say which of the three tripped.
+2. `heroku logs --app hubandspoke --dyno worker -n 300 | grep lock-reconcile`
+   — `acted=true` lines mean the worker already freed it; `clean` lines with
+   a still-red endpoint mean the lock holder is **our live pool and the job
+   is genuinely running** (check `clip_renders.heartbeat_at` ticking) — wait.
+3. Manual fallback, only if the worker is down or the reconcile log is absent:
+   ```sql
+   SELECT queue_name, locked_at, locked_by FROM graphile_worker._private_job_queues WHERE locked_by IS NOT NULL;
+   SELECT pool_id, last_seen_at FROM worker_heartbeat;           -- the live holder
+   SELECT graphile_worker.force_unlock_workers(ARRAY['pool-<dead>']);
+   ```
+   Never unlock the live `pool_id` — that un-locks jobs that are actually running.
+4. A render still shows "queued" after the queue moved → the editor's status
+   pill offers Retry (`stalled` state); re-export is also safe (jobKey replace).
+
+**Dependency pin:** `graphile-worker` is excluded from Dependabot's
+auto-merged minor group (`.github/dependabot.yml`). 0.16.6 → 0.18.0 arrived
+that way on 2026-10-12 and the incident rate went from ~one orphaned lock
+per two weeks to three in one day; migration 19 is marked breaking so there
+is no rollback. Upgrade it on purpose, release notes read, in a worktree.
 
 ---
 

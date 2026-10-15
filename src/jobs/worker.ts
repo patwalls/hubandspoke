@@ -4,26 +4,55 @@
 // in-flight jobs finish before Heroku SIGKILLs us at the 30s mark.
 
 import "./instrument"; // initializes Sentry — must come first
+import { EventEmitter } from "events";
 import * as Sentry from "@sentry/node";
-import { run } from "graphile-worker";
+import { run, type WorkerEvents } from "graphile-worker";
 import { taskList } from "./tasks";
 import { CRONTAB } from "./crontab";
 import { buildPgPool } from "./pg-pool";
+import {
+  getBootAt,
+  getInFlightJobs,
+  getPoolId,
+  markJobFinished,
+  markJobStarted,
+  setPoolId,
+} from "./worker-identity";
+import { RECONCILE_INTERVAL_MS, reconcileLocks } from "./lock-reconcile";
 
 async function main() {
   // Own pool with explicit SSL — Heroku Postgres requires it, and
   // graphile-worker's `connectionString` shortcut doesn't negotiate it.
   const pgPool = buildPgPool({ max: 6 });
 
+  // Hand graphile an emitter we own so listeners are attached BEFORE the
+  // pool boots — `pool:create` fires inside run(), too early to subscribe
+  // on the returned runner.
+  const events: WorkerEvents = new EventEmitter();
+  events.on("pool:create", ({ workerPool }) => {
+    setPoolId(workerPool.id);
+    console.log(`[worker] pool=${workerPool.id}`);
+  });
+  events.on("job:start", ({ job }) => {
+    markJobStarted({
+      id: String(job.id),
+      taskIdentifier: job.task_identifier,
+      queueId: job.job_queue_id == null ? null : String(job.job_queue_id),
+      startedAt: new Date(),
+    });
+  });
+  events.on("job:complete", ({ job }) => {
+    markJobFinished(String(job.id));
+  });
+
   const runner = await run({
     pgPool,
-    // Dropped from 4 → 2 (2026-05-06): clip-idea-precise-cut's ffmpeg
-    // re-encode uses ~200–300 MB and the Basic worker dyno only has
-    // 512 MB total. Running 4 in parallel was hitting Heroku R14
-    // (memory quota exceeded), SIGKILLing the worker mid-task and
-    // leaking the job lock for graphile-worker's default 4h timeout —
-    // every precise-cut promotion was getting stuck. Bump back to 4
-    // when the worker upgrades past Basic.
+    events,
+    // Dropped from 4 → 2 (2026-05-06) when the worker was a 512 MB Basic
+    // dyno and two parallel ffmpeg re-encodes hit R14. The dyno is a
+    // Standard-2X (1 GB) now, but every ffmpeg job is serialized on the
+    // `media-heavy` queue anyway, so 2 still fits: one media slot plus one
+    // for everything else. Bump deliberately, with memory numbers.
     concurrency: 2,
     pollInterval: 2000,
     // Heroku sends SIGKILL 30s after SIGTERM; 20s of grace lets jobs finish
@@ -47,11 +76,58 @@ async function main() {
     });
   });
 
+  // ── Lock reconciliation (see lock-reconcile.ts) ─────────────────────────
+  // At boot: release whatever the previous process left locked. Then every
+  // minute: catch locks we hold on paper but aren't running.
+  const reconcile = async (reason: string) => {
+    const poolId = getPoolId();
+    if (!poolId) return;
+    try {
+      const r = await reconcileLocks({
+        pool: pgPool,
+        selfPoolId: poolId,
+        bootAt: getBootAt(),
+        inFlight: getInFlightJobs().map((j) => ({ id: j.id, queueId: j.queueId })),
+      });
+      if (r.acted || r.foreignLiveHolders.length > 0) {
+        const summary =
+          `orphans=${r.orphanHolders.join(",") || "-"} ` +
+          `ghostJobs=${r.ghostJobIds.join(",") || "-"} ` +
+          `ghostQueues=${r.ghostQueueIds.join(",") || "-"} ` +
+          `foreignLive=${r.foreignLiveHolders.join(",") || "-"}`;
+        console.warn(`[worker] lock-reconcile(${reason}) acted=${r.acted} ${summary}`);
+        // Warning, not error: the worker healed itself. The point is a
+        // visible trail of HOW OFTEN this happens, since each one is a
+        // render that sat queued until this pass ran.
+        Sentry.captureMessage(`graphile lock reconciled (${reason})`, {
+          level: "warning",
+          tags: { source: "graphile-worker", kind: "lock-reconcile" },
+          fingerprint: ["graphile-lock-reconcile"],
+          extra: { ...r, reason, poolId },
+        });
+      } else {
+        console.log(`[worker] lock-reconcile(${reason}) clean`);
+      }
+    } catch (err) {
+      console.error(`[worker] lock-reconcile(${reason}) failed:`, err);
+      Sentry.captureException(err, { tags: { source: "graphile-worker", kind: "lock-reconcile" } });
+    }
+  };
+  await reconcile("boot");
+  const reconcileTimer = setInterval(() => void reconcile("interval"), RECONCILE_INTERVAL_MS);
+  reconcileTimer.unref();
+
   let shuttingDown = false;
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`[worker] ${signal} received — shutting down gracefully`);
+    clearInterval(reconcileTimer);
+    const inFlight = getInFlightJobs();
+    console.log(
+      `[worker] ${signal} received — shutting down gracefully (in-flight=${inFlight.length}${
+        inFlight.length ? ": " + inFlight.map((j) => `${j.taskIdentifier}#${j.id}`).join(", ") : ""
+      })`,
+    );
     try {
       await runner.stop();
     } catch (err) {
