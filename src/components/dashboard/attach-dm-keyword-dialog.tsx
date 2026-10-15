@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DM_LINK_PREFIX_BY_BRAND, commentKeywordFor, usesRebrandlyDm } from "@/lib/cta-offer-brands";
+import { isDefaultDestination, prefillDestination } from "@/lib/dm-destination-prefill";
 
 // Mirror of ShortLink from lib/services/short-links, but redeclared here so
 // the client component doesn't have to import a server-only module.
@@ -122,12 +123,15 @@ export function AttachDmKeywordDialog({
   const [filter, setFilter] = useState("");
 
   // Apply the smart suggestion only over an empty or bare-homepage default —
-  // never clobber a real, hand-entered destination.
-  const smartDest = useCallback((current: string): string => {
-    return isDefaultDestination(current) && suggestedRef.current
-      ? suggestedRef.current
-      : current;
-  }, []);
+  // never clobber a real, hand-entered destination. A Starter Story keyword's
+  // saved destination is a go.starterstory.com per-post link (keyword → per-post
+  // link → page), never the page itself: prefilling it would chain this post
+  // onto another post's link (DM clicks + leads credited there) or onto its own
+  // (a loop). So a go link is never carried over — suggestion, else empty.
+  const smartDest = useCallback(
+    (current: string): string => prefillDestination(current, suggestedRef.current),
+    [],
+  );
 
   const loadSuggestion = useCallback(async () => {
     setSuggesting(true);
@@ -612,13 +616,6 @@ export function AttachDmKeywordDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-// A destination we're allowed to auto-replace with the smart suggestion: empty,
-// or the bare Starter Story homepage that the field defaults to.
-function isDefaultDestination(value: string): boolean {
-  const v = value.trim().replace(/\/$/, "");
-  return v === "" || v === "https://www.starterstory.com" || v === "https://starterstory.com";
 }
 
 function isHttpsUrl(value: string): boolean {
