@@ -17,7 +17,7 @@ import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { createShortLink, findShortLinksByContent, getShortLink, listShortLinks, updateShortLink, ShortLinksApiError, type ShortLink } from "@/lib/services/short-links";
-import { suggestCtaDestination } from "@/lib/services/draft-algorithm/tracked-cta";
+import { buildDestinationUrl, suggestCtaDestination } from "@/lib/services/draft-algorithm/tracked-cta";
 import { usesCtaOffer } from "@/lib/services/cta-offer";
 import { REBRANDLY_DM_BASE_URL, brandShortName, isBrandDmSlashtag, perPostDmSlashtag, usesRebrandlyDm } from "@/lib/cta-offer-brands";
 import { createLink, getLinkBySlashtag, listWorkspaceLinks, updateLinkDestination, type RebrandlyLink } from "@/lib/services/rebrandly";
@@ -42,13 +42,17 @@ export async function attachDmKeyword(args: { itemId: string; keywordSlug: strin
   if (!item) throw new ShortLinksApiError(404, "Item not found");
   if (usesRebrandlyDm(item.brand)) return attachRebrandlyDmKeyword({ itemId: item.id, brand: item.brand, keywordSlug, destinationUrl: args.destinationUrl });
 
-  const perPostSlug = await ensurePerPostLink({ itemId: args.itemId, utmCampaign: item.utmCampaign ?? null, destinationUrl: args.destinationUrl });
+  // Re-stamp the shared UTM rule on whatever target the dialog sent — it
+  // prefills an already-attached post with its saved destination, which may
+  // still carry the pre-2026-10-15 utm_source=instagram&utm_campaign=<slug>.
+  const destinationUrl = buildDestinationUrl(args.destinationUrl, "instagram", item.utmCampaign ?? null);
+  const perPostSlug = await ensurePerPostLink({ itemId: args.itemId, utmCampaign: item.utmCampaign ?? null, destinationUrl });
   const perPostGoUrl = `${BASE_URL}/${perPostSlug}`;
   const existingKeyword = await getShortLink(keywordSlug);
   if (existingKeyword) await updateShortLink(keywordSlug, { destinationUrl: perPostGoUrl, tag: DM_TAG, archived: false });
   else await createShortLink({ slug: keywordSlug, destinationUrl: perPostGoUrl, tag: DM_TAG });
   await db.update(productionItems).set({ shortLinkSlug: keywordSlug, updatedAt: new Date() }).where(eq(productionItems.id, args.itemId));
-  return { keywordSlug, perPostSlug, perPostGoUrl, destinationUrl: args.destinationUrl };
+  return { keywordSlug, perPostSlug, perPostGoUrl, destinationUrl };
 }
 
 /**

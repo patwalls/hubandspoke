@@ -154,4 +154,23 @@ describe("Starter Story DM keywords are unchanged", () => {
     for (const fn of Object.values(rb)) expect(fn).not.toHaveBeenCalled();
     expect(await slugOf(post.id)).toBe("playbook");
   });
+
+  it("re-saving a post's old destination swaps its UTMs for the shared rule", async () => {
+    const post = await createTestProductionItem({ brand: "starter-story", accountId: null, postType: "instagram_reel", utmCampaign: `i-make-25k-${Date.now()}` });
+    shortLinks.findShortLinksByContent.mockResolvedValue([{ slug: "cta-b83ccae3", archived: false }]);
+    shortLinks.getShortLink.mockResolvedValue({ slug: "playbook" });
+    shortLinks.updateShortLink.mockResolvedValue({});
+    // What the dialog prefills for an already-attached post: the saved, pre-switch URL.
+    const old = `https://www.starterstory.com/data/one-page-websites?utm_source=instagram&utm_campaign=${post.utmCampaign}`;
+    const chain = await attachDmKeyword({ itemId: post.id, keywordSlug: "playbook", destinationUrl: old });
+
+    const params = Object.fromEntries(new URL(chain.destinationUrl).searchParams);
+    expect(chain.destinationUrl.startsWith("https://www.starterstory.com/data/one-page-websites?")).toBe(true);
+    expect(params).toMatchObject({ utm_source: "starterstory", utm_campaign: "owned", utm_term: "instagram", utm_id: post.utmCampaign });
+    // The per-post link keeps the slug as its own utm_campaign — what Starter Story counts leads on.
+    expect(shortLinks.updateShortLink).toHaveBeenCalledWith(
+      "cta-b83ccae3",
+      expect.objectContaining({ destinationUrl: chain.destinationUrl, utmCampaign: post.utmCampaign }),
+    );
+  });
 });
