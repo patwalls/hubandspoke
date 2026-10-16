@@ -58,6 +58,7 @@ import {
   productionItemMedia,
   users,
   type ContentDraftContent,
+  transcripts,
 } from "@/lib/db/schema";
 
 type CleanupTable =
@@ -269,6 +270,26 @@ export async function createTestMedia(
     })
     .returning();
   trackCleanup("productionItemMedia", row.id);
+  return row;
+}
+
+/**
+ * Insert a `transcripts` row for an item from timed lines. Cleaned up by
+ * the FK cascade when the owning item is deleted — no tracking needed.
+ */
+export async function createTestTranscript(opts: {
+  productionItemId: string;
+  segments: Array<{ startSec: number; endSec: number; text: string }>;
+}): Promise<typeof transcripts.$inferSelect> {
+  const [row] = await db
+    .insert(transcripts)
+    .values({
+      productionItemId: opts.productionItemId,
+      segments: opts.segments,
+      fullText: opts.segments.map((s) => s.text).join(" "),
+      durationSec: String(opts.segments.at(-1)?.endSec ?? 0),
+    })
+    .returning();
   return row;
 }
 

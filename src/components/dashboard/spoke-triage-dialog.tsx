@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { useDesignTemplates } from "@/components/design-editor/use-design-templates";
+import { useClipPostFormats } from "@/components/clip-editor/use-clip-post-formats";
+import { CLIP_PARAM } from "@/components/clip-editor/drafts";
 import { readUrlParam, replaceUrlParam, useDialogUrl } from "./use-dialog-url";
 
 // Lazy: only a browser whose user has the `designEditor` flag AND opens a
@@ -12,8 +14,13 @@ const DesignEditorDialog = dynamic(
   () => import("@/components/design-editor/design-editor-dialog").then((m) => m.DesignEditorDialog),
   { ssr: false },
 );
+// Same for the clip editor and video posts on X.
+const ClipEditorDialog = dynamic(
+  () => import("@/components/clip-editor/clip-editor-dialog").then((m) => m.ClipEditorDialog),
+  { ssr: false },
+);
 import Link from "next/link";
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -52,36 +59,107 @@ function formatCompact(n: number | null | undefined): string {
 }
 
 /**
- * Entry point for the Repurposed (SPOKE) queue's modal. With the
- * `designEditor` flag, a candidate whose format has a design template opens
- * the in-app design editor: the derivative item is created (or reused) first
- * — the same item "Assign editor" would create — and the editor opens on it.
- * Everyone else, and every other format, gets the classic dialog below.
+ * Entry point for the Repurposed (SPOKE) queue's modal. Opening a candidate
+ * starts the work instead of asking who should do it:
+ *  - a video post on X (`clipEditor` flag; formats from
+ *    /api/clip-editor/post-formats) opens the clip editor on the Post tab —
+ *    the copy is what matters there, the video is one tab over;
+ *  - a format with a design template (`designEditor`) opens the design
+ *    editor.
+ * Either way the derivative item is created (or reused) first — the same item
+ * "Assign editor" would create. Everyone else, every other format, and any
+ * candidate the editor can't take gets the classic dialog below.
  */
 export function SpokeTriageDialog(props: SpokeTriageDialogProps) {
   const flags = useFeatureFlags();
-  // `?candidate=<id>` — the open candidate has a link; once the design
-  // editor has made its item, `&item=<id>` is added in place (below).
-  const [detached] = useState(() => !!readUrlParam("item"));
+  // `?candidate=<id>` — the open candidate has a link; once an editor has
+  // made its item, `&item=<id>` / `&clip=<id>` is added in place (below).
+  const [detached] = useState(() => !!readUrlParam("item") || !!readUrlParam(CLIP_PARAM));
   useDialogUrl({ param: "candidate", id: props.candidate.id, open: props.open, onOpenChange: props.onOpenChange, enabled: !detached });
   const templates = useDesignTemplates(!!flags?.designEditor, props.brand);
+  const clipPostFormats = useClipPostFormats(!!flags?.clipEditor, props.brand);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
+  const onUnsupported = (message?: string) => {
+    if (message) toast.message("Opening the classic view", { description: message });
+    setUnsupported((prev) => new Set(prev).add(props.candidate.id));
+  };
+  if (!!flags?.clipEditor && !!clipPostFormats?.has(props.candidate.format.name) && !unsupported.has(props.candidate.id)) {
+    return <ClipPostFromCandidate {...props} onUnsupported={onUnsupported} />;
+  }
   const useDesigner =
     !!flags?.designEditor &&
     !!templates?.has(props.candidate.format.name) &&
     !unsupported.has(props.candidate.id);
   if (useDesigner) {
-    return (
-      <DesignFromCandidate
-        {...props}
-        onUnsupported={(message) => {
-          if (message) toast.message("Opening the classic view", { description: message });
-          setUnsupported((prev) => new Set(prev).add(props.candidate.id));
-        }}
-      />
-    );
+    return <DesignFromCandidate {...props} onUnsupported={onUnsupported} />;
   }
   return <ClassicSpokeTriageDialog {...props} />;
+}
+
+/** Resolves the candidate to a clip idea + post (AI picks the stretch of
+ *  the pillar the format uses — a few seconds), then hands off to the clip
+ *  editor, which opens on the Post tab for X. */
+function ClipPostFromCandidate({
+  open,
+  onOpenChange,
+  candidate,
+  brand,
+  onActioned,
+  onUnsupported,
+}: SpokeTriageDialogProps & { onUnsupported: (message?: string) => void }) {
+  const [clipIdeaId, setClipIdeaId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) {
+      setClipIdeaId(null);
+      return;
+    }
+    let cancelled = false;
+    // Fetch the editor's code while the clip is being picked, so the hand-off
+    // doesn't leave a blank gap.
+    void import("@/components/clip-editor/clip-editor-dialog");
+    void (async () => {
+      try {
+        const res = await fetch("/api/clip-editor/from-candidate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pillarId: candidate.pillar.id, targetFormatId: candidate.format.id }),
+        });
+        const json = (await res.json().catch(() => ({}))) as { clipIdeaId?: string; error?: string };
+        if (cancelled) return;
+        if (!res.ok || !json.clipIdeaId) return onUnsupported(json.error);
+        setClipIdeaId(json.clipIdeaId);
+        replaceUrlParam(CLIP_PARAM, json.clipIdeaId);
+      } catch {
+        if (!cancelled) onUnsupported();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, candidate.pillar.id, candidate.format.id]);
+
+  if (!clipIdeaId) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col items-center justify-center gap-3 p-0 sm:max-w-[min(1560px,97vw)]">
+          <DialogTitle className="sr-only">The Post</DialogTitle>
+          <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">Picking the clip for {candidate.format.name}…</span>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+  return (
+    <ClipEditorDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      clipIdeaId={clipIdeaId}
+      brand={brand}
+      onDone={onActioned}
+      onUnsupported={() => onUnsupported("The clip editor couldn't open this pillar.")}
+    />
+  );
 }
 
 /** Resolves the candidate to a production item, then hands off to the

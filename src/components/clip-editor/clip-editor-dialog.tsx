@@ -18,6 +18,9 @@
  * A second tab, Post, puts the clip's post copy next to the stage
  * (post-pane.tsx). The two tabs share one DOM — panes are hidden, not
  * unmounted — so switching never reloads the video.
+ *
+ * A post on X opens POST FIRST ("The Post": Post | Video): there the copy is
+ * the work and the video rides along — see `postFirst` below.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -190,7 +193,9 @@ function EditorWorkspace({
   const [busy, setBusy] = useState<null | "fillers" | "export" | "kill">(null);
   const [killOpen, setKillOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [tab, setTab] = useState<"clip" | "post">("clip");
+  // X posts lead with the copy; everywhere else the cut comes first.
+  const postFirst = session.post?.postType === "x";
+  const [tab, setTab] = useState<"clip" | "post">(postFirst ? "post" : "clip");
   const [postDrafting, setPostDrafting] = useState(session.post?.state === "drafting");
 
   const plan = useMemo(() => compileRenderPlan(doc, session.words), [doc, session.words]);
@@ -539,7 +544,7 @@ function EditorWorkspace({
     <>
       {/* Header */}
       <div className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-3 pr-12">
-        <DialogTitle className="text-base font-semibold">The Clip</DialogTitle>
+        <DialogTitle className="text-base font-semibold">{postFirst ? "The Post" : "The Clip"}</DialogTitle>
         {session.clipIdea.targetFormat && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
             {session.clipIdea.targetFormat}
@@ -558,7 +563,7 @@ function EditorWorkspace({
         </span>
         {session.post && (
           <div role="tablist" aria-label="Editor tabs" className="ml-4 flex items-center rounded-lg bg-muted p-[3px] text-xs">
-            {(["clip", "post"] as const).map((t) => (
+            {(postFirst ? (["post", "clip"] as const) : (["clip", "post"] as const)).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -570,7 +575,7 @@ function EditorWorkspace({
                   tab === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {t === "clip" ? "Clip" : "Post"}
+                {t === "post" ? "Post" : postFirst ? "Video" : "Clip"}
                 {t === "post" && postDrafting && <Loader2Icon className="size-3 animate-spin" />}
               </button>
             ))}
@@ -767,7 +772,7 @@ function EditorWorkspace({
             disabled={busy !== null || locked || plan.totalFrames === 0}
           >
             {busy === "export" && <Loader2Icon className="mr-1.5 size-3.5 animate-spin" />}
-            {isReExport ? "Re-export clip" : "Export clip"}
+            {postFirst ? (isReExport ? "Re-export post" : "Export post") : isReExport ? "Re-export clip" : "Export clip"}
           </Button>
         </div>
       </div>

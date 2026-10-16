@@ -10,6 +10,7 @@ import { SelectPill } from "./filter-pills";
 const HistoryQueueTable = dynamic(() => import("./history-queue-table").then((m) => m.HistoryQueueTable), { ssr: false });
 const SpokeQueueTable = dynamic(() => import("./spoke-queue-table").then((m) => m.SpokeQueueTable), { ssr: false });
 const RestoredDesignEditor = dynamic(() => import("@/components/design-editor/restored-design-editor").then((m) => m.RestoredDesignEditor), { ssr: false });
+const RestoredClipEditor = dynamic(() => import("@/components/clip-editor/restored-clip-editor").then((m) => m.RestoredClipEditor), { ssr: false });
 const RepostQueueTable = dynamic(() => import("./repost-queue-table").then((m) => m.RepostQueueTable), { ssr: false });
 const CrossPostQueueTable = dynamic(() => import("./cross-post-queue-table").then((m) => m.CrossPostQueueTable), { ssr: false });
 // Static import ON PURPOSE: this is the default tab — dynamic() suspends
@@ -729,6 +730,7 @@ export function QueueView({
         ) : (
           <>
           <RestoredDesignEditor brand={brand} onDone={() => void fetchSpokeQueue(true)} />
+          <RestoredClipEditor brand={brand} onDone={() => void fetchSpokeQueue(true)} />
           <SpokeQueueTable
             items={spokeFiltered}
             brand={brand}
