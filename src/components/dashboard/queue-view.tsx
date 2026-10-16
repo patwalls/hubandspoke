@@ -148,11 +148,13 @@ export function QueueView({
     q: { default: "", debounceMs: 250 },
     platform: { default: "all" },
     format: { default: "all" },
+    pillar: { default: "all" },
   });
   const {
     q: search,
     platform: selectedPlatform,
     format: selectedFormat,
+    pillar: selectedPillar,
   } = filters.values;
   const [selectedSource, setSelectedSource] = useState<QueueSource>(
     initialSource
@@ -465,9 +467,26 @@ export function QueueView({
     });
   }, [repostData, selectedPlatform, selectedFormat, query]);
 
+  // Pillar picker for the SPOKE tab — one option per distinct pillar
+  // video in the candidate list, alphabetical by title.
+  const pillarOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const c of spokeData?.items ?? []) {
+      if (!byId.has(c.pillar.id)) {
+        byId.set(c.pillar.id, c.pillar.title ?? "Untitled pillar");
+      }
+    }
+    return [
+      { value: "all", label: "All pillars" },
+      ...Array.from(byId, ([value, label]) => ({ value, label })).sort(
+        (a, b) => a.label.localeCompare(b.label)
+      ),
+    ];
+  }, [spokeData]);
+
   // SPOKE (pillar × format) candidates — filtered by channel (the pillar's
-  // YouTube account), format, and free-text search across pillar title +
-  // format + channel handle.
+  // YouTube account), pillar, format, and free-text search across pillar
+  // title + format + channel handle.
   const spokeFiltered = useMemo(() => {
     const candidates = spokeData?.items ?? [];
     return candidates.filter((c) => {
@@ -482,6 +501,9 @@ export function QueueView({
         )
       )
         return false;
+      if (selectedPillar !== "all" && c.pillar.id !== selectedPillar) {
+        return false;
+      }
       if (selectedFormat !== "all" && c.format.name !== selectedFormat) {
         return false;
       }
@@ -498,7 +520,7 @@ export function QueueView({
       }
       return true;
     });
-  }, [spokeData, selectedPlatform, selectedFormat, query]);
+  }, [spokeData, selectedPlatform, selectedPillar, selectedFormat, query]);
 
   const sourceCounts = useMemo(() => {
     const counts: Record<string, number> = {
@@ -678,6 +700,15 @@ export function QueueView({
             options={formatOptions}
             onChange={(v) => filters.set("format", v)}
           />
+          {isSpokeTab && (
+            <SelectPill
+              label="Pillar"
+              value={selectedPillar}
+              options={pillarOptions}
+              onChange={(v) => filters.set("pillar", v)}
+              contentClassName="w-96"
+            />
+          )}
         </div>
       )}
 
@@ -737,6 +768,7 @@ export function QueueView({
             emptyMessage={
               query ||
               selectedPlatform !== "all" ||
+              selectedPillar !== "all" ||
               selectedFormat !== "all"
                 ? "No SPOKE candidates match the current filters."
                 : "No SPOKE candidates above the bar right now. Pillars need to clear their channel's typical performance to surface."

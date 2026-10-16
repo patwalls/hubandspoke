@@ -175,7 +175,9 @@ function PillContent({
         </>
       )}
       {icon}
-      <span className="text-foreground font-medium">{value}</span>
+      <span className="text-foreground font-medium truncate max-w-[20rem]">
+        {value}
+      </span>
       <ChevronDownIcon className="h-3.5 w-3.5 text-muted-foreground" />
     </>
   );
@@ -328,11 +330,14 @@ export function SelectPill({
   value,
   options,
   onChange,
+  contentClassName,
 }: {
   label?: string;
   value: string;
   options: { value: string; label: string; icon?: React.ReactNode }[];
   onChange: (v: string) => void;
+  /** Overrides the popover width etc. — e.g. "w-96" for long labels. */
+  contentClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.value === value);
@@ -347,7 +352,10 @@ export function SelectPill({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="w-56 p-1 gap-0.5 max-h-[320px] overflow-y-auto"
+        className={cn(
+          "w-56 p-1 gap-0.5 max-h-[320px] overflow-y-auto",
+          contentClassName
+        )}
       >
         {options.map((o) => (
           <OptionRow
