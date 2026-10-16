@@ -76,10 +76,10 @@ import { DesignStoreContext, commands, createDesignStore, useDesign, useDesignSt
 const AUTOSAVE_DELAY_MS = 900;
 const FRAMES_POLL_MS = 2500;
 const PHOTOS_POLL_MS = 3000;
-// The first-open AI draft ("Usually 15–25 seconds"). Raise it as the draft
-// step does more work, so the loading bar stays honest.
-// The worker draft measured 39.7s in prod (2026-10-14).
-const DRAFT_EXPECTED_MS = 35_000;
+// The first-open AI draft. Raise it as the draft step does more work, so
+// the loading bar stays honest. The worker draft measured 39.7s in prod
+// (2026-10-14); with the founder look-up (web search) 89s locally (2026-10-16).
+const DRAFT_EXPECTED_MS = 75_000;
 const DRAFT_POLL_MS = 2000;
 // Room for the job's 3 tries (~40s each + backoff) before giving up.
 const DRAFT_GIVE_UP_MS = 5 * 60_000;
@@ -147,7 +147,7 @@ export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand
             <DialogTitle className="sr-only">Design</DialogTitle>
             <SparklesIcon className="size-6 animate-pulse text-pink-500" />
             <span className="text-sm font-medium text-foreground">Drafting your post…</span>
-            <span className="max-w-sm text-center text-xs">Reading the video&apos;s transcript and your best past posts of this format. Usually 20–40 seconds the first time.</span>
+            <span className="max-w-sm text-center text-xs">Reading the video&apos;s transcript and your best past posts of this format — and looking the founder up when the video leaves something out. Usually 30–90 seconds the first time.</span>
             <EstimatedProgressBar expectedMs={DRAFT_EXPECTED_MS} className="mt-2 max-w-64" />
           </div>
         )}
@@ -276,6 +276,8 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   const [tab, setTab] = useState<"design" | "post">("design");
   const [postDrafting, setPostDrafting] = useState(false);
   const [instruction, setInstruction] = useState(session.design.briefInstruction ?? "");
+  /** The AI's brief for the open document — replaced on regenerate. */
+  const [brief, setBrief] = useState(session.design.brief);
   const [stageBox, setStageBox] = useState({ w: 0, h: 0 });
   const [snap, setSnap] = useState(() => (typeof window === "undefined" ? true : readSnapEnabled()));
   const [layersOpen, setLayersOpen] = useState(false);
@@ -679,6 +681,10 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   };
 
   // ── AI / export ──────────────────────────────────────────────────────────
+  // The re-draft runs on the worker (it may web-search the founder, longer
+  // than the router allows): the POST answers 202 and the session route
+  // says 'drafting' until the new revision is there — poll it, like the
+  // first open.
   const regenerate = async () => {
     setBusy("regen");
     try {
@@ -687,11 +693,32 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ instruction }),
       });
-      const json = (await res.json().catch(() => ({}))) as DesignEditorSession & { error?: string };
-      if (!res.ok) return void toast.error(json.error ?? `Couldn't regenerate (${res.status})`);
-      setImageUrls(json.imageUrls);
-      storeApi.getState().replaceDoc(json.design.doc, json.design.revision);
-      toast.success("New draft ready", { description: "Undo history starts fresh from this draft." });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        return void toast.error(json.error ?? `Couldn't regenerate (${res.status})`);
+      }
+      const started = Date.now();
+      let blips = 0;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, DRAFT_POLL_MS));
+        const poll = await fetch(`/api/production-items/${session.item.id}/design`).catch(() => null);
+        if (poll?.status === 200) {
+          const json = (await poll.json().catch(() => null)) as DesignEditorSession | null;
+          if (!json) continue;
+          // The old revision is still what's open: the worker hasn't written yet.
+          if (json.design.revision <= storeApi.getState().revision) continue;
+          setImageUrls(json.imageUrls);
+          setBrief(json.design.brief);
+          storeApi.getState().replaceDoc(json.design.doc, json.design.revision);
+          return void toast.success("New draft ready", { description: json.design.brief?.notes ? "The AI left notes under the page." : "Undo history starts fresh from this draft." });
+        }
+        if (poll && poll.status !== 202) {
+          const json = (await poll.json().catch(() => null)) as { error?: string } | null;
+          return void toast.error(json?.error ?? `Couldn't regenerate (${poll.status})`);
+        }
+        if (poll?.status !== 202 && ++blips >= DRAFT_MAX_BLIPS) return void toast.error("Couldn't reach the server while the AI was re-drafting. Reopen the post in a minute.");
+        if (Date.now() - started > DRAFT_GIVE_UP_MS) return void toast.error("The AI re-draft is still running after 5 minutes — reopen the post in a minute.");
+      }
     } finally {
       setBusy(null);
     }
@@ -1047,11 +1074,18 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       </div>}
 
       <div className="flex shrink-0 items-center justify-between border-t border-border px-5 py-3">
-        <span className="text-xs text-muted-foreground">
-          {isTemplate
-            ? "Select anything to mark it as a slot the AI fills per post (or a photo / video-title / channel slot). Sample text stays as the style example. Autosaves."
-            : `${doc.pages.some((p) => pageVideo(p)) ? "Video slides render on the worker — allow a minute or two. " : ""}${session.design.brief?.caption ? "Export also writes the AI caption into the post draft (if the caption is still empty)." : ""}`}
-        </span>
+        <div className="min-w-0 flex-1 pr-4 text-xs text-muted-foreground">
+          {!isTemplate && brief?.notes && (
+            <p className="line-clamp-2 whitespace-pre-line text-amber-700 dark:text-amber-400" title={brief.notes}>
+              <span className="font-medium">AI notes:</span> {brief.notes}
+            </p>
+          )}
+          <span>
+            {isTemplate
+              ? "Select anything to mark it as a slot the AI fills per post (or a photo / video-title / channel slot). Sample text stays as the style example. Autosaves."
+              : `${doc.pages.some((p) => pageVideo(p)) ? "Video slides render on the worker — allow a minute or two. " : ""}${brief?.caption ? "Export also writes the AI caption into the post draft (if the caption is still empty)." : ""}`}
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           {isTemplate ? (
             <Button type="button" onClick={async () => { if (await save()) { toast.success("Template saved"); onClose(); } else toast.error("Couldn't save the template"); }}>

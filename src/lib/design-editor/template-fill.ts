@@ -59,6 +59,9 @@ export interface DesignFillValue {
 export interface DesignFill {
   caption: string;
   values: DesignFillValue[];
+  /** Short lines for the editor: what the AI looked up (with URLs), slides
+   *  it left empty and why, what to add by hand. */
+  notes?: string;
 }
 
 export function listSlots(doc: DesignDoc): DesignSlotSpec[] {

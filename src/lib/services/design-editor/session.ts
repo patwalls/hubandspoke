@@ -147,6 +147,19 @@ export async function loadDesignEditorSession(args: {
     if (!job) await enqueue("design-draft", { productionItemId: item.id, userId: args.userId }, { jobKey: key, jobKeyMode: "unsafe_dedupe", maxAttempts: DESIGN_DRAFT_MAX_ATTEMPTS });
     return { drafting: true };
   } else {
+    // A regenerate runs on the worker under the same key (it can web-search,
+    // which outlasts the router): while it runs this answers 'drafting' —
+    // the editor's Regenerate polls here — and a failed one is reported
+    // once, like a failed first draft.
+    const key = designDraftJobKey(item.id);
+    const job = await draftJobState(key);
+    if (job) {
+      if (!job.locked_at && job.attempts >= job.max_attempts) {
+        await db.execute(sql`SELECT graphile_worker.remove_job(${key})`);
+        throw DesignUnsupportedError.draftFailed(job.last_error, job.attempts);
+      }
+      return { drafting: true };
+    }
     // The pick landed after the draft was made (or the last editor closed
     // before it did): put it in the photo slots now, before anyone holds
     // the doc.
@@ -209,11 +222,34 @@ export async function draftFirstDesign(args: { productionItemId: string; userId:
     .onConflictDoNothing({ target: designDocs.productionItemId });
 }
 
+/** Request side of Regenerate: queue it on the worker (same key as the
+ *  first draft, so one AI run per item at a time) and answer 'drafting' —
+ *  the editor polls `GET …/design` until the new revision is there. The
+ *  draft used to run in this request; with research it can take a minute. */
+export async function requestDesignRegenerate(args: {
+  productionItemId: string;
+  instruction: string | null;
+  userId: string;
+}): Promise<DesignDraftPending> {
+  const item = await loadItem(args.productionItemId);
+  const template = item.format ? await loadFormatTemplate(item.brand, item.format) : null;
+  if (!template) throw new DesignUnsupportedError("no_template");
+  const key = designDraftJobKey(item.id);
+  const job = await draftJobState(key);
+  // A leftover failed job would make the open report an old failure: clear it.
+  if (job && !job.locked_at && job.attempts >= job.max_attempts) await db.execute(sql`SELECT graphile_worker.remove_job(${key})`);
+  else if (job) return { drafting: true };
+  await enqueue("design-draft", { productionItemId: item.id, userId: args.userId, regenerate: true, instruction: args.instruction }, { jobKey: key, jobKeyMode: "unsafe_dedupe", maxAttempts: DESIGN_DRAFT_MAX_ATTEMPTS });
+  return { drafting: true };
+}
+
+/** Worker side of Regenerate (`design-draft` task with `regenerate`):
+ *  re-draft and replace the document as a new revision. */
 export async function regenerateDesign(args: {
   productionItemId: string;
   instruction: string | null;
   userId: string;
-}): Promise<DesignEditorSession> {
+}): Promise<void> {
   const item = await loadItem(args.productionItemId);
   const template = item.format ? await loadFormatTemplate(item.brand, item.format) : null;
   if (!template) throw new DesignUnsupportedError("no_template");
@@ -234,13 +270,11 @@ export async function regenerateDesign(args: {
         updatedAt: new Date(),
       },
     });
-  const design = await selectDesign(item.id);
-  if (!design) throw new Error("Design vanished");
-  return finishSession(item, design);
 }
 
 async function draftDoc(itemId: string, sourceItemId: string, template: DesignDoc, instruction: string | null) {
-  const result = await generateDesignFill({ productionItemId: itemId, template, instruction, dmKeyword: await currentDmKeyword(itemId) });
+  // Worker-only path (first draft + regenerate): research is on.
+  const result = await generateDesignFill({ productionItemId: itemId, template, instruction, dmKeyword: await currentDmKeyword(itemId), research: true });
   if (!result.ok) {
     if (result.failure.reason === "no-transcript") throw new DesignUnsupportedError("no_transcript");
     throw new DesignUnsupportedError("ai_failed", describeFillFailure(result.failure));
