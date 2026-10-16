@@ -17,6 +17,7 @@ import { layoutDesignText } from "./layout";
 import type { DesignContext } from "./shared";
 import { defaultSeries } from "./stat-card";
 import { fitCutoutBox } from "./cutout-geometry";
+import { imageSourceKey } from "@/lib/editor/image-source";
 
 /** A stat card with an `ai` slot is three text slots to the model. */
 export const STAT_CARD_FIELDS = ["label", "value", "sub"] as const;
@@ -335,4 +336,22 @@ export function applyPhotoPick(doc: DesignDoc, photo: DesignImageSource | null, 
     }),
   }));
   return ids.length > 0 ? { doc: { ...doc, pages }, elementIds: ids, sources } : null;
+}
+
+/** Put the founder photo into every photo slot that still holds one of the
+ *  automatic stand-ins (`auto`: the AI's frame pick, the YouTube thumbnail).
+ *  A picture someone swapped in by hand is left alone. Null when nothing
+ *  changed. */
+export function preferFounderPhoto(doc: DesignDoc, founder: DesignImageSource, auto: DesignImageSource[]): DesignDoc | null {
+  const autoKeys = new Set(auto.map(imageSourceKey));
+  let changed = false;
+  const pages = doc.pages.map((page) => ({
+    ...page,
+    elements: page.elements.map((el) => {
+      if (el.type !== "image" || el.slot?.kind !== "photo" || !autoKeys.has(imageSourceKey(el.src))) return el;
+      changed = true;
+      return { ...el, src: founder };
+    }),
+  }));
+  return changed ? { ...doc, pages } : null;
 }

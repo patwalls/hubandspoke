@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { accounts, brands, designDocs, designRenders, formats, productionItems, transcripts } from "@/lib/db/schema";
 import { parseDesignDoc, type DesignDoc, type DesignImageSource } from "@/lib/design-editor/doc";
 import type { DesignContext } from "@/lib/design-editor/shared";
-import { applyDmKeyword, applyPhotoPick, fillTemplate, hasDmKeywordSlot, type DesignFill } from "@/lib/design-editor/template-fill";
+import { applyDmKeyword, applyPhotoPick, fillTemplate, preferFounderPhoto, hasDmKeywordSlot, type DesignFill } from "@/lib/design-editor/template-fill";
 import { DM_KEYWORD_TOKEN } from "@/lib/design-editor/doc";
 import { commentKeywordFor } from "@/lib/cta-offer-brands";
 import type { ChannelInfo } from "@/lib/design-editor/channel";
@@ -21,7 +21,7 @@ import { loadFormatTemplate } from "./format-template";
 import { previewUrlFor, sourceImageCandidates, youtubeThumbnailFor, type ImageCandidate } from "./assets";
 import { listBrandLogos } from "@/lib/services/brand-logos";
 import { listFrames, pickedFrame, requestAutoFrames, storyFrames, type DesignFramesState } from "./frames";
-import { cutoutFor, listPhotos, type DesignPhoto, type DesignPhotosState } from "./photos";
+import { cutoutFor, founderPhotoFor, listPhotos, type DesignPhoto, type DesignPhotosState } from "./photos";
 import { seedCaption } from "./export";
 import { enqueue } from "@/jobs/enqueue";
 import type { ClipPost } from "@/lib/services/clip-editor/post-draft";
@@ -154,6 +154,15 @@ export async function loadDesignEditorSession(args: {
     const frames = storyFrames((await listFrames(item.sourceItemId)).frames).map((f) => f.src);
     const cutout = photo ? cutoutContext(await cutoutFor(item.sourceItemId, photo)) : null;
     let next = photo || frames.length || cutout ? applyPhotoPick(design.doc, photo, frames, cutout)?.doc ?? null : null;
+    // Founder photos uploaded after this draft (often on another post from
+    // the same video) replace the automatic stand-ins — the frame pick or
+    // the YouTube thumbnail — in its photo slots. A picture someone chose
+    // stays.
+    const founder = await founderPhotoFor(item.sourceItemId);
+    if (founder) {
+      const auto = [(await pickedFrame(item.sourceItemId))?.src, (await youtubeThumbnailFor(item.sourceItemId))?.src].filter((s): s is DesignImageSource => !!s);
+      next = preferFounderPhoto(next ?? design.doc, founder, auto) ?? next;
+    }
     // A keyword attached after the draft (content page) fills the CTA now.
     const slug = await currentDmKeyword(item.id);
     if (slug && JSON.stringify(next ?? design.doc).includes(DM_KEYWORD_TOKEN)) next = applyDmKeyword(next ?? design.doc, slug);
@@ -333,13 +342,16 @@ async function loadWords(sourceItemId: string): Promise<EditorWord[]> {
 }
 
 /**
- * The cover photo for a video: the AI's pick from its frames. When the
+ * The cover photo for a video: a founder photo the team uploaded (gold —
+ * always first), else the AI's pick from its frames. When the
  * frames can't come (no filmstrip pending, none picked — the job failed or
  * the video has no archive), the YouTube thumbnail: text baked in, but a
  * real photo of the founder beats an empty slide. While the filmstrip is
  * still being made, null — the editor fills it the moment it lands.
  */
 export async function coverPhotoFor(sourceItemId: string): Promise<DesignImageSource | null> {
+  const founder = await founderPhotoFor(sourceItemId);
+  if (founder) return founder;
   const pick = await pickedFrame(sourceItemId);
   if (pick?.src) return pick.src;
   const { pending } = await listFrames(sourceItemId);

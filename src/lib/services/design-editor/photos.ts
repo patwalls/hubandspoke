@@ -60,6 +60,19 @@ export async function listPhotos(sourceItemId: string): Promise<DesignPhotosStat
   return { photos: await Promise.all(rows.map(toPhoto)), screensPending: await screensPending(sourceItemId) };
 }
 
+/** The founder photo the team uploaded for this video, if any — the first
+ *  one uploaded (the one the upload put on the page). Real photos of the
+ *  founder beat any still of the video, so the cover prefers this. */
+export async function founderPhotoFor(sourceItemId: string): Promise<DesignImageSource | null> {
+  const [row] = await db
+    .select({ s3Bucket: designPhotos.s3Bucket, s3Key: designPhotos.s3Key })
+    .from(designPhotos)
+    .where(and(eq(designPhotos.productionItemId, sourceItemId), eq(designPhotos.kind, "upload")))
+    .orderBy(asc(designPhotos.createdAt))
+    .limit(1);
+  return row ? { kind: "s3", bucket: row.s3Bucket, key: row.s3Key } : null;
+}
+
 /** The cutout made from this picture, if there is one. */
 export async function cutoutFor(sourceItemId: string, source: DesignImageSource): Promise<DesignPhoto | null> {
   const [row] = await db

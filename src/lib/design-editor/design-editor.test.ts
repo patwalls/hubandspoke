@@ -7,7 +7,7 @@ import { buildStoryTemplate } from "./story-template";
 import { buildTmzTemplate } from "./tmz-template";
 import { buildAppsTemplate } from "./apps-template";
 import { DESIGN_PRESETS } from "./templates";
-import { applyDmKeyword, applyHighlights, applyPhotoPick, fillTemplate, listSlots, reflowStacks, type DesignFill, type DesignFillValue } from "./template-fill";
+import { applyDmKeyword, applyHighlights, applyPhotoPick, fillTemplate, preferFounderPhoto, listSlots, reflowStacks, type DesignFill, type DesignFillValue } from "./template-fill";
 import { formatFollowers, layoutChannel, resolveChannel } from "./channel";
 import { fontsUsed, pageToSatoriTree, videoPageLayers } from "./render-tree";
 import { buildDesignCaptionCues, activeCue } from "./captions";
@@ -171,6 +171,20 @@ describe("fillTemplate", () => {
     const picked = applyPhotoPick(doc, { kind: "url", url: "https://x/y.jpg" })!;
     expect(picked.elementIds).toHaveLength(1);
     expect(applyPhotoPick(picked.doc, { kind: "url", url: "https://x/z.jpg" })).toBeNull();
+  });
+
+  it("preferFounderPhoto replaces the automatic stand-ins in photo slots only, matching sources by identity not key order", () => {
+    const t = buildTechStackTemplate();
+    const pick = { kind: "s3" as const, bucket: "b", key: "frame.jpg" };
+    const doc = applyPhotoPick(fillTemplate(t, fillFor(t), withSource), pick)!.doc;
+    const founder = { kind: "s3" as const, bucket: "b", key: "founder.jpg" };
+    // Postgres JSONB hands the source back with its keys reordered.
+    const out = preferFounderPhoto(doc, founder, [{ key: "frame.jpg", kind: "s3", bucket: "b" } as typeof pick])!;
+    const photos = out.pages.flatMap((p) => p.elements.filter((e) => e.type === "image" && e.slot?.kind === "photo"));
+    expect(photos.length).toBeGreaterThan(0);
+    expect(photos.every((e) => e.type === "image" && e.src === founder)).toBe(true);
+    // A picture that isn't an automatic stand-in stays.
+    expect(preferFounderPhoto(doc, founder, [{ kind: "url", url: "https://i.ytimg.com/vi/x/maxresdefault.jpg" }])).toBeNull();
   });
 
   it("DM keyword: the CTA keeps its wording, the token becomes the post's keyword, and can be re-substituted later", () => {

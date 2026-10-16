@@ -48,6 +48,8 @@ import {
   contentDrafts,
   descriptLayoutPacks,
   designDocs,
+  designFrames,
+  designPhotos,
   designRenders,
   formats,
   formatChannels,
@@ -707,6 +709,44 @@ export async function createTestDesignRender(
       outputKeys:
         opts.outputKeys ?? [`vitest/${randomSuffix()}-1.png`, `vitest/${randomSuffix()}-2.png`],
       finishedAt: new Date(),
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * A picture in a source video's design library (`design_photos`). Cleaned
+ * up by the FK cascade from the owning item.
+ */
+export async function createTestDesignPhoto(opts: { productionItemId: string; kind?: "upload" | "cutout" | "screen"; s3Key?: string; createdAt?: Date }): Promise<typeof designPhotos.$inferSelect> {
+  const [row] = await db
+    .insert(designPhotos)
+    .values({
+      productionItemId: opts.productionItemId,
+      kind: opts.kind ?? "upload",
+      label: "vitest photo",
+      s3Bucket: "vitest-bucket",
+      s3Key: opts.s3Key ?? `vitest/photo-${randomSuffix()}.jpg`,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * A still of a source video (`design_frames`), done by default. Cleaned up
+ * by the FK cascade from the owning item.
+ */
+export async function createTestDesignFrame(opts: { productionItemId: string; sec?: number; isPick?: boolean; s3Key?: string }): Promise<typeof designFrames.$inferSelect> {
+  const [row] = await db
+    .insert(designFrames)
+    .values({
+      productionItemId: opts.productionItemId,
+      sec: String(opts.sec ?? 10),
+      status: "done",
+      s3Bucket: "vitest-bucket",
+      s3Key: opts.s3Key ?? `vitest/frame-${randomSuffix()}.jpg`,
+      isPick: opts.isPick ?? false,
     })
     .returning();
   return row;
