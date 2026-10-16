@@ -323,6 +323,17 @@ export function trimRangeFor(word: EditorWord, edge: "start" | "end", current: n
   return edge === "start" ? { startSec: word.startSec, endSec: round3(word.startSec + next) } : { startSec: round3(word.endSec - next), endSec: word.endSec };
 }
 
+/**
+ * The highlighted words as plain text, for the clipboard. Struck words are
+ * left out (you copy what the clip says) unless everything highlighted is
+ * struck — then you get exactly what you highlighted.
+ */
+export function selectionText(view: TranscriptView, lo: number, hi: number): string {
+  const picked = view.words.slice(Math.max(0, lo), hi + 1);
+  const said = picked.filter((w) => w.state !== "removed");
+  return (said.length ? said : picked).map((w) => w.text).join(" ");
+}
+
 /** What can be done with the words at positions [lo, hi]. */
 export function selectionActions(
   view: TranscriptView,

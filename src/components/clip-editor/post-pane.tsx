@@ -232,7 +232,7 @@ export function PostPane({
   const draft = detail?.currentDraft ?? null;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <h3 className="mr-auto text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Post

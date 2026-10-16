@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createDefaultDoc, wordEditKey } from "./doc";
 import { addRemoval } from "./removals";
 import { includeRange, retimeSectionInDoc } from "./sections";
-import { buildTranscriptView, selectionActions } from "./transcript-view";
+import { buildTranscriptView, selectionActions, selectionText } from "./transcript-view";
 import type { EditorWord } from "./words";
 
 // The WHOLE source: one word per second, 0.8s long, 0s..119s. Clip is 100–110.
@@ -139,5 +139,25 @@ describe("retimeSectionInDoc", () => {
     d = retimeSectionInDoc(d, "body", { startSec: 40, endSec: 110 }); // drag start way past the neighbour
     const body = d.sections.find((s) => s.id === "body")!;
     expect(body.startSec).toBe(60);
+  });
+});
+
+describe("selectionText", () => {
+  it("copies what the clip says — corrections in, struck words out", () => {
+    const d = doc();
+    d.wordEdits[wordEditKey(101)] = "Shopify";
+    d.sections[0] = addRemoval(d.sections[0], { startSec: 102, endSec: 102.9 }, "filler");
+    const view = buildTranscriptView(d, words);
+    expect(selectionText(view, 100, 103)).toBe("w100 Shopify w103");
+  });
+
+  it("copies struck words when the highlight is nothing but struck words", () => {
+    const d = doc();
+    d.sections[0] = addRemoval(d.sections[0], { startSec: 102, endSec: 103.9 }, "manual");
+    expect(selectionText(buildTranscriptView(d, words), 102, 103)).toBe("w102 w103");
+  });
+
+  it("copies dim words outside the clip as-is", () => {
+    expect(selectionText(buildTranscriptView(doc(), words), 5, 7)).toBe("w5 w6 w7");
   });
 });

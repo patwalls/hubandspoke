@@ -29,13 +29,14 @@ import {
   useState,
   type MouseEvent,
 } from "react";
-import { ChevronsLeftRightIcon, PlusIcon, RotateCcwIcon, ScissorsIcon } from "lucide-react";
+import { CheckIcon, ChevronsLeftRightIcon, CopyIcon, PlusIcon, RotateCcwIcon, ScissorsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isSourceSection, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import type { RenderPlan } from "@/lib/clip-editor/plan";
 import { sourceToOutput } from "@/lib/clip-editor/plan";
 import {
   selectionActions,
+  selectionText,
   type TranscriptView,
   type ViewGap,
   type ViewToken,
@@ -466,6 +467,14 @@ export function TranscriptEditor({
     run(commands.include(actions.include));
   }, [actions, run]);
 
+  // The highlight is ours, not the browser's, so ⌘C needs wiring by hand.
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setCopied(false), [lo, hi]);
+  const copySelection = useCallback(() => {
+    if (lo < 0) return;
+    void navigator.clipboard.writeText(selectionText(view, lo, hi)).then(() => setCopied(true));
+  }, [view, lo, hi]);
+
   // Picking a scene on the timeline scrolls the transcript to its first word.
   useEffect(() => {
     if (!sceneSelection) return;
@@ -539,7 +548,10 @@ export function TranscriptEditor({
       const t = e.target as HTMLElement;
       if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
       if (!actions) return;
-      if ((e.key === "Backspace" || e.key === "Delete") && actions.ranges.length) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "c" && !window.getSelection()?.toString()) {
+        e.preventDefault();
+        copySelection();
+      } else if ((e.key === "Backspace" || e.key === "Delete") && actions.ranges.length) {
         e.preventDefault();
         if (actions.allRemoved) restoreSelection();
         else removeSelection();
@@ -550,7 +562,7 @@ export function TranscriptEditor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [actions, removeSelection, restoreSelection, addSelection]);
+  }, [actions, removeSelection, restoreSelection, addSelection, copySelection]);
 
   const toggleGap = useCallback(
     (gap: ViewGap) => {
@@ -704,6 +716,10 @@ export function TranscriptEditor({
               Fix text
             </ToolbarButton>
           )}
+          <ToolbarButton tone="quiet" onClick={copySelection}>
+            {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+            {copied ? "Copied" : "Copy"}
+          </ToolbarButton>
         </div>
       )}
     </div>
