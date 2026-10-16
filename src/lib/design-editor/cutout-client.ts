@@ -1,5 +1,13 @@
 /**
- * Background removal IN THE BROWSER with onnxruntime-web. The matting models
+ * Background removal. First choice: BiRefNet in the cloud — the picture's
+ * ImageSource goes to /api/design/cutout, which hands a presigned URL to the
+ * `hs-cutout` Cloudflare Worker (cloudflare/cutout/); the transparent PNG
+ * (≤ 2048 px) comes back and we stretch its alpha onto the full picture. Tested 2026-10-16 on founder uploads: ISNet turned
+ * held laptops/hands see-through and kept houseplants; BiRefNet didn't.
+ * If the cloud fails (or isn't configured locally), the browser runs its
+ * own model as before:
+ *
+ * IN THE BROWSER with onnxruntime-web. The matting models
  * that do this well need far more memory at inference than a 512 MB worker
  * dyno has (BiRefNet: ~7 GB; ISNet: ~1 GB), while a laptop does it in a
  * second or two, so the editor makes the cutout itself and uploads the PNG
@@ -248,6 +256,29 @@ async function matte(i: number, bitmap: ImageBitmap, progress?: CutoutProgress):
   return alpha;
 }
 
+/** Set once the server says cloud cutouts aren't configured (local dev). */
+let cloudOff = false;
+
+/** BiRefNet via the server → Cloudflare (which fetches the picture itself and
+ *  returns it ≤ 2048 px): the alpha mask stretched to the picture's size. */
+async function cloudMatte(src: ImageSource, bitmap: ImageBitmap, progress?: CutoutProgress): Promise<Uint8ClampedArray> {
+  progress?.("Finding the person…");
+  const res = await fetch("/api/design/cutout", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ src }) });
+  if (res.status === 503) cloudOff = true;
+  if (!res.ok) throw new Error(`Cloud cutout failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  const cut = await createImageBitmap(await res.blob());
+  const full = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const fctx = full.getContext("2d");
+  if (!fctx) throw new Error("No canvas");
+  fctx.imageSmoothingQuality = "high";
+  fctx.drawImage(cut, 0, 0, bitmap.width, bitmap.height);
+  cut.close();
+  const px = fctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+  const alpha = new Uint8ClampedArray(bitmap.width * bitmap.height);
+  for (let i = 0; i < alpha.length; i++) alpha[i] = px[i * 4 + 3];
+  return alpha;
+}
+
 export interface CutoutResult {
   blob: Blob;
   width: number;
@@ -278,12 +309,20 @@ export async function cutOutPicture(picture: { url: string; src: ImageSource }, 
   const height = bitmap.height;
 
   let alpha: Uint8ClampedArray | null = null;
-  let used: Attempt | null = null;
+  let used: string | null = null;
   let lastError: unknown = null;
-  for (const i of candidates()) {
+  if (!cloudOff) {
+    try {
+      alpha = await cloudMatte(picture.src, bitmap, progress);
+      used = "BiRefNet (cloud)";
+    } catch (err) {
+      console.warn("[cutout] cloud cutout failed, using the browser model:", err instanceof Error ? err.message : err);
+    }
+  }
+  if (!alpha) for (const i of candidates()) {
     try {
       alpha = await matte(i, bitmap, progress);
-      used = ATTEMPTS[i];
+      used = attemptLabel(ATTEMPTS[i]);
       break;
     } catch (err) {
       lastError = err;
@@ -324,5 +363,5 @@ export async function cutOutPicture(picture: { url: string; src: ImageSource }, 
   progress?.("Saving the cutout…");
   const png = await new Promise<Blob | null>((resolve) => trimmed.toBlob(resolve, "image/png"));
   if (!png) throw new Error("Couldn't encode the cutout");
-  return { blob: png, width: outW, height: outH, bounds: { x: bounds.x / width, y: bounds.y / height, w: bounds.w / width, h: bounds.h / height }, source: { width, height }, model: attemptLabel(used) };
+  return { blob: png, width: outW, height: outH, bounds: { x: bounds.x / width, y: bounds.y / height, w: bounds.w / width, h: bounds.h / height }, source: { width, height }, model: used };
 }

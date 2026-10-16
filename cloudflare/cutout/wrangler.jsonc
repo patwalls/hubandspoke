@@ -1,0 +1,21 @@
+// The background-removal Worker the design editor's cutouts call
+// (src/app/api/design/cutout/route.ts → here). Cloudflare Images'
+// `segment: "foreground"` runs BiRefNet on Cloudflare's GPUs, which neither
+// the browser (WebGPU kernels fail, ~7 GB on WASM) nor our dynos can.
+//
+// It lives on a starterstory.com custom domain because the account is on
+// Images' legacy billing: the Images *binding* refuses ("not available using
+// legacy billing"), but fetch() with `cf.image` works on a zone that has
+// transformations enabled — starterstory.com does.
+//
+// Deploy: `npx wrangler@4 deploy` from this folder; the shared secret is
+// `npx wrangler@4 secret put CUTOUT_SECRET` (same value as Heroku's
+// CUTOUT_WORKER_SECRET).
+{
+  "name": "hs-cutout",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "hs-cutout.starterstory.com", "custom_domain": true }],
+  "observability": { "enabled": true }
+}

@@ -65,3 +65,6 @@ next-env.d.ts
 # autonomous ops loop artifacts (runner lock/log — see .claude/commands/go.md)
 .loop.log
 .loop.pid
+
+# wrangler scratch (cloudflare/*)
+.wrangler/

@@ -507,7 +507,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       return null;
     }
     const id = `cutout-${name}`;
-    toast.loading("Cutting the person out…", { id, description: "Runs on your machine. The first time downloads the model (about 115 MB)." });
+    toast.loading("Cutting the person out…", { id });
     try {
       const result = await cutOutPicture({ url: previewUrl, src: cutoutOf }, (msg) => toast.loading(msg, { id }));
       const photo = await uploadToLibrary(result.blob, `${name.replace(/\.[^.]+$/, "")}.png`, "cutout", cutoutOf);
