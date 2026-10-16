@@ -68,6 +68,7 @@ import { PostPane } from "@/components/clip-editor/post-pane";
 import type { DesignEditorSession } from "@/lib/services/design-editor/session";
 import { ClipTrimmer } from "./clip-trimmer";
 import { LayersPanel } from "./layers-panel";
+import { cr3ToJpegFile, isCr3 } from "@/lib/design-editor/cr3";
 import { DesignPostPreview } from "./post-preview";
 import { Inspector, PicturePicker, formatSec, frameCandidate } from "./inspector";
 import { PageCanvas, PlaybackContext, type PlaybackState } from "./page-canvas";
@@ -589,7 +590,16 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
    *  one goes into the element (or onto the page) right away. */
   const upload = async (elementId: string | null, files: File[]) => {
     let first: DesignPhoto | null = null;
-    for (const file of files) {
+    for (let file of files) {
+      // Canon RAW: swap in the JPEG the camera embedded, quietly.
+      if (isCr3(file)) {
+        try {
+          file = await cr3ToJpegFile(file);
+        } catch (err) {
+          toast.error((err as Error).message);
+          continue;
+        }
+      }
       const photo = await uploadToLibrary(file, file.name, "upload");
       if (photo && !first) first = photo;
     }

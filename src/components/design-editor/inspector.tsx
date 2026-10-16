@@ -428,7 +428,7 @@ export function PicturePicker({ title, images, frames, photos, source, brand, on
           every post made from it (now and later) has them. */}
       <span className="text-[11px] text-muted-foreground">Photos of the founder{uploads.length ? ` · ${uploads.length}` : ""}</span>
       {uploads.length > 0 && library(uploads)}
-      <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={async (e) => {
+      <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,.cr3,image/x-canon-cr3" className="hidden" onChange={async (e) => {
         const files = Array.from(e.target.files ?? []);
         e.target.value = "";
         if (files.length === 0) return;
