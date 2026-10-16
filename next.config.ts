@@ -15,6 +15,11 @@ const nextConfig: NextConfig = {
     staleTimes: {
       dynamic: 0,
     },
+    // Requests pass through src/middleware.ts, which by default keeps only
+    // the first 10 MB of a body — a bigger upload arrived truncated and
+    // failed as "No file". Routes enforce their own caps (design photos:
+    // 15 MB).
+    proxyClientMaxBodySize: "25mb",
   },
 };
 

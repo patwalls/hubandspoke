@@ -261,6 +261,9 @@ export interface CutoutResult {
   model: string;
 }
 
+/** Longest side of a saved cutout — 2× the 1080 canvas is plenty. */
+const CUTOUT_MAX_SIDE = 2400;
+
 /**
  * Cut the subject out of a picture: alpha from the matting model, the
  * picture trimmed to the opaque pixels (with a little padding) so the PNG
@@ -307,12 +310,19 @@ export async function cutOutPicture(picture: { url: string; src: ImageSource }, 
   const bounds = alphaBounds(alpha, width, height, 16, Math.round(Math.max(width, height) * 0.015));
   if (!bounds) throw new Error("Couldn't find anyone in the picture");
   ctx.putImageData(pixels, 0, 0);
+  // Capped so the PNG stays a few MB: a full-res camera photo makes a
+  // 10 MB+ cutout, past what the upload accepts.
+  const scale = Math.min(1, CUTOUT_MAX_SIDE / Math.max(bounds.w, bounds.h));
+  const outW = Math.max(1, Math.round(bounds.w * scale));
+  const outH = Math.max(1, Math.round(bounds.h * scale));
   const trimmed = document.createElement("canvas");
-  trimmed.width = bounds.w;
-  trimmed.height = bounds.h;
-  trimmed.getContext("2d")!.drawImage(canvas, bounds.x, bounds.y, bounds.w, bounds.h, 0, 0, bounds.w, bounds.h);
+  trimmed.width = outW;
+  trimmed.height = outH;
+  const tctx = trimmed.getContext("2d")!;
+  tctx.imageSmoothingQuality = "high";
+  tctx.drawImage(canvas, bounds.x, bounds.y, bounds.w, bounds.h, 0, 0, outW, outH);
   progress?.("Saving the cutout…");
   const png = await new Promise<Blob | null>((resolve) => trimmed.toBlob(resolve, "image/png"));
   if (!png) throw new Error("Couldn't encode the cutout");
-  return { blob: png, width: bounds.w, height: bounds.h, bounds: { x: bounds.x / width, y: bounds.y / height, w: bounds.w / width, h: bounds.h / height }, source: { width, height }, model: attemptLabel(used) };
+  return { blob: png, width: outW, height: outH, bounds: { x: bounds.x / width, y: bounds.y / height, w: bounds.w / width, h: bounds.h / height }, source: { width, height }, model: attemptLabel(used) };
 }
