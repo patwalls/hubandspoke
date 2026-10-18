@@ -9,6 +9,10 @@
 # (> 600 changed lines), when it was not opened by Pat's account, or when its head is not in
 # this repository. pull_request_target: this file runs from main, never from the PR, and
 # never checks the PR's code out — the build check does that with a read-only token.
+# Also left for a human (S-104, idea 53082d): what Claude Code loads OUTSIDE the lap sandbox on
+# the next lap — .claude/settings*, hooks/, skills/, agents/, launch.json and .mcp.json. A lap can
+# commit them with git plumbing without writing the denied file; .claude/commands/ (lap.md) still
+# merges. The ship broker labels such a PR `hold` too, so this list is the second gate, not the only one.
 name: Loop auto-merge
 
 on:
@@ -68,7 +72,7 @@ jobs:
           [ "$AUTHOR" = "patwalls" ] || why="${why:-opened by $AUTHOR, not the ship broker}"
           [ "$HOLD" = "false" ] || why="${why:-labelled hold}"
           [ "$LINES" -le 600 ] || why="${why:-$LINES changed lines (cap 600)}"
-          touched="$(gh pr diff "$NUM" --name-only | grep -E '^(\.github/|Dockerfile|docker-compose|deploy/|package\.json$|package-lock\.json$|scripts/.*\.sh$)' || true)"
+          touched="$(gh pr diff "$NUM" --name-only | grep -E '^(\.github/|Dockerfile|docker-compose|deploy/|package\.json$|package-lock\.json$|scripts/.*\.sh$|\.claude/(settings[^/]*$|hooks/|skills/|agents/|launch\.json$)|\.mcp\.json$)' || true)"
           [ -z "$touched" ] || why="${why:-touches $(echo "$touched" | head -3 | tr '\n' ' ')}"
           if [ -n "$why" ]; then
             echo "left for a human: $why"
