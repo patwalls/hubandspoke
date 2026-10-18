@@ -289,6 +289,25 @@ task that takes longer than ~20s:
   when two of them running at once would actually hurt (memory), and keep
   its per-invocation ceiling short.
 
+## Log volume — the drain has a daily cap
+
+Logs drain to SolarWinds/Papertrail on the free plan; past the daily cap every
+new line is dropped until midnight UTC (hit 2026-10-16). Every line counts, and
+the Heroku router writes one per HTTP request. So:
+
+- **Client polling goes through `startVisibleInterval`** (`src/lib/visible-interval.ts`),
+  not raw `setInterval`. Hidden tabs skip ticks and catch up on return. Poll
+  only while there is something to wait for (a render in flight, a run going);
+  idle pollers slow to ≥30s. A forgotten 5s poller on a detail page was ~17k
+  router lines/day per tab.
+- **Worker logs: one info line per job, about the result.** The worker's logger
+  (`src/jobs/worker-logger.ts`) already drops a task's `"<task-id> start…"`
+  line and graphile's success line for fast first-attempt jobs, so write the
+  result line with numbers and skip per-item / per-iteration `info` inside
+  loops (use `debug`). Errors and warnings always pass.
+- **Anything on a per-minute timer logs only on change**, or on a sparse
+  heartbeat (lock-reconcile: a `clean` line every 15th pass).
+
 ## Connection budget
 
 Heroku Postgres Essential-0 = 20 connections. Splits roughly:

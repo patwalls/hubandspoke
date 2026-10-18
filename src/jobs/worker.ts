@@ -19,6 +19,7 @@ import {
   setPoolId,
 } from "./worker-identity";
 import { RECONCILE_INTERVAL_MS, reconcileLocks } from "./lock-reconcile";
+import { workerLogger } from "./worker-logger";
 
 async function main() {
   // Own pool with explicit SSL — Heroku Postgres requires it, and
@@ -48,6 +49,8 @@ async function main() {
   const runner = await run({
     pgPool,
     events,
+    // Drops routine success/start lines — docs/automation.md → Log volume.
+    logger: workerLogger,
     // Dropped from 4 → 2 (2026-05-06) when the worker was a 512 MB Basic
     // dyno and two parallel ffmpeg re-encodes hit R14. The dyno is a
     // Standard-2X (1 GB) now, but every ffmpeg job is serialized on the
@@ -78,7 +81,10 @@ async function main() {
 
   // ── Lock reconciliation (see lock-reconcile.ts) ─────────────────────────
   // At boot: release whatever the previous process left locked. Then every
-  // minute: catch locks we hold on paper but aren't running.
+  // minute: catch locks we hold on paper but aren't running. A clean pass
+  // logs at boot and then every 15th pass (log drain cap), so "a clean line
+  // in the last 15 min" is the proof the reconciler is alive.
+  let cleanPasses = 0;
   const reconcile = async (reason: string) => {
     const poolId = getPoolId();
     if (!poolId) return;
@@ -105,7 +111,7 @@ async function main() {
           fingerprint: ["graphile-lock-reconcile"],
           extra: { ...r, reason, poolId },
         });
-      } else {
+      } else if (reason === "boot" || ++cleanPasses % 15 === 0) {
         console.log(`[worker] lock-reconcile(${reason}) clean`);
       }
     } catch (err) {
