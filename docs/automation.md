@@ -1980,12 +1980,28 @@ The free Papertrail add-on (`papertrail:choklad`, added 2026-10-15) is the
 drain: `heroku addons:open papertrail --app hubandspoke`, search
 `lock-reconcile` or `clip-render`.
 
+**Log volume (2026-10-17):** the free plan has a *daily* cap. On 2026-10-16
+SolarWinds reported 100% used, and past the cap every new line is dropped. The
+steady-state sources and what keeps them down:
+
+| Source | Before | Now |
+|---|---|---|
+| Content-detail tab: `draft-algorithm-status` every 5s, forever | ~17k router lines/day per open tab | 5s while a run is going, 30s idle, none while the tab is hidden |
+| Content-detail tab: `descript-status` every 10s (stale-closure bug kept it on) | ~8.6k/day per tab | only while work is in flight, never while hidden |
+| Dashboard layout: 3 banners at 60s + bell at 30s + scheduled review at 30s | ~10k/day per background tab | hidden tabs skip ticks (`startVisibleInterval`) |
+| Worker: cron fire / sweep child = `start` + result + graphile `Completed task` | 3 lines per job | 1 (`src/jobs/worker-logger.ts` drops the start line and fast first-attempt successes; slow ≥10s or retried keep theirs) |
+| Worker: `lock-reconcile(interval) clean` | 1,440/day | 96/day (boot + every 15th pass; `acted` always logs) |
+| Health probes (GH + home Mac, 2 endpoints, every 5 min) | ~1.2k router lines/day | unchanged — they are the alarm |
+
+Rules for new code are in `docs/conventions.md` → Log volume.
+
 **Runbook — queue wedged / render stuck "queued":**
 
 1. `curl -s https://hubandspoke.starterstory.com/api/health/queue | jq` — the
    `reasons` say which of the three tripped.
 2. `heroku logs --app hubandspoke --dyno worker -n 300 | grep lock-reconcile`
-   — `acted=true` lines mean the worker already freed it; `clean` lines with
+   — `acted=true` lines mean the worker already freed it; a `clean` line in
+   the last 15 min (clean passes log at boot + every 15th minute) with
    a still-red endpoint mean the lock holder is **our live pool and the job
    is genuinely running** (check `clip_renders.heartbeat_at` ticking) — wait.
 3. Manual fallback, only if the worker is down or the reconcile log is absent:

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { BellIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import {
   Popover,
   PopoverContent,
@@ -56,12 +57,12 @@ export function NotificationBell() {
       }
     };
     void load();
-    const t = setInterval(load, POLL_MS);
+    const stopPolling = startVisibleInterval(load, POLL_MS);
     const onFocus = () => void load();
     window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      stopPolling();
       window.removeEventListener("focus", onFocus);
     };
   }, [refetchTick]);

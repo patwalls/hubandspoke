@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangleIcon } from "lucide-react";
+import { startVisibleInterval } from "@/lib/visible-interval";
 
 interface DescriptCreditsState {
   exhausted: boolean;
@@ -48,10 +49,10 @@ export function DescriptCreditsBanner() {
       }
     };
     void poll();
-    const interval = setInterval(() => void poll(), 60_000);
+    const stop = startVisibleInterval(() => void poll(), 60_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
   }, []);
 

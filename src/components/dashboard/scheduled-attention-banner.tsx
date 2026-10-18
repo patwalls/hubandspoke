@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AlertTriangleIcon } from "lucide-react";
+import { startVisibleInterval } from "@/lib/visible-interval";
 
 // Path segments that are never a brand slug — skip polling on them. "all" is a
 // real route but the aggregate view shouldn't carry a per-brand banner.
@@ -45,10 +46,10 @@ export function ScheduledAttentionBanner() {
       }
     };
     void poll();
-    const interval = setInterval(() => void poll(), 60_000);
+    const stop = startVisibleInterval(() => void poll(), 60_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
   }, [active, brand]);
 

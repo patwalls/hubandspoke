@@ -122,6 +122,7 @@ import { UserChip } from "./user-chip";
 import { UserCombobox } from "./user-combobox";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 
 interface BrandFormat {
@@ -518,7 +519,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     if (!data?.item?.id) return;
     const itemId = data.item.id;
     let cancelled = false;
-    let timer: ReturnType<typeof setInterval> | null = null;
+    // Latest response, local to this effect. The interval used to read the
+    // `descriptStatusLive` state captured at setup — always null — so it
+    // polled every 10s for as long as the page was open (~8.6k Heroku
+    // router log lines/day per tab).
+    let latest: DescriptStatusResponse | null = null;
     const fetchStatus = async () => {
       try {
         const res = await fetch(
@@ -526,6 +531,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         );
         if (!res.ok || cancelled) return;
         const json = (await res.json()) as DescriptStatusResponse;
+        latest = json;
         if (!cancelled) setDescriptStatusLive(json);
       } catch {
         // Best-effort; transient fetch errors just leave stale data.
@@ -533,9 +539,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     };
     void fetchStatus();
     // Poll while work is in flight — same trigger as DescriptStatusPill.
-    timer = setInterval(() => {
+    const stop = startVisibleInterval(() => {
       if (cancelled) return;
-      const s = descriptStatusLive;
+      const s = latest;
       const inFlight =
         !s ||
         s.status === "processing" ||
@@ -545,27 +551,20 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     }, 10_000);
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      stop();
     };
-    // descriptStatusLive intentionally omitted from deps — the interval
-    // reads the latest via closure-over-ref-style isn't possible here, so
-    // we accept that the "inFlight" check uses the value at effect-setup
-    // time. The 10s cadence is cheap enough that staying-on after work
-    // finishes for one extra tick is fine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.item?.id]);
 
   // Draft-algorithm poller — separate from descript-status so the two
   // signals stay decoupled. Polls every 5s while running so the lock
-  // releases quickly once the draft commits, then idles. Stops polling
-  // once it sees `idle` (no further wakeups needed until the user
-  // triggers a regenerate, at which point the user-side action can
-  // refetch).
+  // releases quickly once the draft commits; every 30s while idle (a run
+  // can still be auto-fired after the page opens), and not at all while
+  // the tab is hidden. It used to poll every 5s forever — ~17k Heroku
+  // router log lines/day per open tab.
   useEffect(() => {
     if (!data?.item?.id) return;
     const itemId = data.item.id;
     let cancelled = false;
-    let timer: ReturnType<typeof setInterval> | null = null;
     const fetchStatus = async () => {
       try {
         const res = await fetch(
@@ -589,10 +588,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       }
     };
     void fetchStatus();
-    timer = setInterval(() => void fetchStatus(), 5_000);
+    const stop = startVisibleInterval(
+      () => void fetchStatus(),
+      () => (prevDraftRunningRef.current ? 5_000 : 30_000),
+    );
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      stop();
     };
   }, [data?.item?.id]);
 

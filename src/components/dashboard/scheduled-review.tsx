@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowRight, Calendar, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { postTypeLabel } from "@/lib/badge-colors";
 import type {
   ScheduledReviewData,
@@ -302,8 +303,7 @@ export function ScheduledReview({
   // Light polling so an auto-merge / new suggestion from the sweep shows up
   // without a manual reload.
   useEffect(() => {
-    const t = setInterval(refetch, 30_000);
-    return () => clearInterval(t);
+    return startVisibleInterval(() => void refetch(), 30_000);
   }, [refetch]);
 
   function onResolved(id: string) {
