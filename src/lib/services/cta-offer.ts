@@ -31,7 +31,7 @@ import { defaultCtaStrategy, isCtaStrategy, offerUtms, usesCtaOffer, type CtaStr
 
 export { CTA_STRATEGIES, isCtaStrategy, usesCtaOffer, type CtaStrategy } from "@/lib/cta-offer-brands";
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-5-5";
 
 export interface ResolvedCtaOffer {
   /** Final destination with the post's UTMs applied. */
