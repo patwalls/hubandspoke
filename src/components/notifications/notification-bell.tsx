@@ -34,7 +34,10 @@ type ApiShape = {
   unreadCount: number;
 };
 
-const POLL_MS = 30_000;
+// 60s, plus a refetch on window focus. Each poll is a Heroku router log line
+// and the bell is on every dashboard page — at 30s it was the single biggest
+// log source (docs/automation.md → Log volume).
+const POLL_MS = 60_000;
 
 export function NotificationBell() {
   const [data, setData] = useState<ApiShape | null>(null);

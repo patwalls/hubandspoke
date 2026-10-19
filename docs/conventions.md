@@ -305,6 +305,10 @@ the Heroku router writes one per HTTP request. So:
   line and graphile's success line for fast first-attempt jobs, so write the
   result line with numbers and skip per-item / per-iteration `info` inside
   loops (use `debug`). Errors and warnings always pass.
+- **Layout-level pollers (on every dashboard page) run at ≥60s**, and state
+  that changes a few times a day (credit banners, attention banners) at ≥5 min.
+  They multiply by every open tab of every user — at 30–60s they were ~45% of
+  all router lines (2026-10-19).
 - **Anything on a per-minute timer logs only on change**, or on a sparse
   heartbeat (lock-reconcile: a `clean` line every 15th pass).
 

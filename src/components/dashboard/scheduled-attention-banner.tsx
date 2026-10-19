@@ -46,7 +46,9 @@ export function ScheduledAttentionBanner() {
       }
     };
     void poll();
-    const stop = startVisibleInterval(() => void poll(), 60_000);
+    // 5 min: this state changes a few times a day, and every poll is a
+    // router log line on every dashboard page (docs/automation.md → Log volume).
+    const stop = startVisibleInterval(() => void poll(), 300_000);
     return () => {
       cancelled = true;
       stop();
