@@ -14,6 +14,7 @@ import { createStore, useStore, type StoreApi } from "zustand";
 import type { ClipEditDoc, Layer, MediaAsset, RemovalReason, Section } from "@/lib/clip-editor/doc";
 import { wordEditKey } from "@/lib/clip-editor/doc";
 import { addRemoval, restoreRange, restoreReason } from "@/lib/clip-editor/removals";
+import { correctAll, type ShownWord } from "@/lib/clip-editor/word-correct";
 import { deleteSection, includeRange, insertMediaScene, moveSection, pastePieces, retimeSectionInDoc, splitSectionAt, type ClipPiece } from "@/lib/clip-editor/sections";
 import type { TimeRange } from "@/lib/clip-editor/doc";
 
@@ -300,6 +301,10 @@ export const commands = {
 
   /** Correct a transcript word. Setting it back to the original text clears
    *  the override rather than storing a no-op. */
+  /** "Correct all": respell every matching word (see word-correct.ts). */
+  correctAllWords: (words: ShownWord[], target: ShownWord, text: string) => (doc: ClipEditDoc) =>
+    correctAll(doc, words, target, text),
+
   correctWord:
     (word: { startSec: number; text: string; mediaId?: string }, text: string) =>
     (doc: ClipEditDoc) => {

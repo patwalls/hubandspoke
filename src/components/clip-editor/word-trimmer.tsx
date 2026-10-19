@@ -22,6 +22,8 @@ export function WordTrimmer({
   text,
   onTrim,
   onText,
+  onTextAll,
+  matchCount,
   onAudition,
   onClose,
 }: {
@@ -30,6 +32,10 @@ export function WordTrimmer({
   /** Commit new cut points (undoable; the caller plays the join). */
   onTrim: (inSec: number, outSec: number) => void;
   onText: (text: string) => void;
+  /** "Correct all": the same fix for every word spelled like this one. */
+  onTextAll: (text: string) => void;
+  /** Words "Correct all" would fix, this one included. */
+  matchCount: number;
   onAudition: () => void;
   onClose: () => void;
 }) {
@@ -104,13 +110,31 @@ export function WordTrimmer({
           onBlur={() => spelling.value.trim() !== text && onText(spelling.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
-              onText(spelling.value);
+              // ⌘↵ = Correct all
+              if ((e.metaKey || e.ctrlKey) && matchCount > 1) onTextAll(spelling.value);
+              else onText(spelling.value);
               onClose();
             }
           }}
           aria-label="Word text"
           className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-1 text-[13px] outline-none focus:ring-2 focus:ring-ring"
         />
+        {matchCount > 1 && (
+          <button
+            type="button"
+            // keep focus in the field: a blur would commit just this word first
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              onTextAll(spelling.value);
+              onClose();
+            }}
+            disabled={!spelling.value.trim() || spelling.value.trim() === text}
+            title={`Fix all ${matchCount} words spelled "${text}" (⌘↵)`}
+            className="shrink-0 rounded-md border border-border px-2 py-1 text-[12px] font-medium hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            Correct all ({matchCount})
+          </button>
+        )}
         <button type="button" onClick={onAudition} title="Play the join" className="flex size-7 items-center justify-center rounded-md border border-border hover:bg-muted">
           <PlayIcon className="size-3.5" />
         </button>

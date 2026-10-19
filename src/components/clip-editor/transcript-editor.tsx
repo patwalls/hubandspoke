@@ -50,6 +50,7 @@ import {
 import type { PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
 import { copyPieces, type ClipPiece } from "@/lib/clip-editor/sections";
+import { countMatches } from "@/lib/clip-editor/word-correct";
 import { toast } from "sonner";
 import { applyWordTrim, stepWordTrim, wordTrimAudition, wordTrimWindow } from "@/lib/clip-editor/word-trim";
 import { WordTrimmer } from "./word-trimmer";
@@ -849,6 +850,8 @@ export function TranscriptEditor({
               text={w.text}
               onTrim={(inSec, outSec) => trimWord(trimPos, inSec, outSec)}
               onText={(text) => apply(commands.correctWord(w.word, text))}
+              onTextAll={(text) => apply(commands.correctAllWords(view.words, w, text))}
+              matchCount={countMatches(view.words, w.text)}
               onAudition={() => setAudition({ sectionId: win.sectionId, ...wordTrimAudition(win, win.inSec, win.outSec), key: Date.now() })}
               onClose={() => setTrimPos(null)}
             />
