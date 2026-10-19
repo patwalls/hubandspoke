@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AccountAvatar } from "@/components/ui/account-avatar";
 import { PlatformIcon } from "@/components/ui/platform-icon";
+import { describeAccountError, type AccountErrorTone } from "@/lib/account-error";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,28 @@ function formatCount(n: number | null): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   return n.toLocaleString();
+}
+
+const STATUS_TONE_CLASS: Record<AccountErrorTone, string> = {
+  error: "text-red-600",
+  warning: "text-amber-600",
+  muted: "text-muted-foreground",
+};
+
+/** Last refresh / last sync cell: date, or a labelled error with context.
+ *  Full raw error stays in the hover title. */
+function AccountStatusCell({ at, error }: { at: string | Date | null; error: string | null }) {
+  const date = at ? new Date(at).toLocaleDateString() : "never";
+  if (!error) return <>{date}</>;
+  const view = describeAccountError(error);
+  return (
+    <div title={error} className="w-36">
+      <div className={STATUS_TONE_CLASS[view.tone]}>
+        {view.tone === "warning" ? `${date} · ${view.label}` : view.label}
+      </div>
+      <div className="text-[11px] leading-snug text-muted-foreground">{view.hint}</div>
+    </div>
+  );
 }
 
 interface AccountRow {
@@ -594,29 +617,10 @@ export function AccountsSettingsContent({
                       {formatCount(a.totalViews)}
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {a.lastRefreshError ? (
-                        <span className="text-red-600" title={a.lastRefreshError}>
-                          error
-                        </span>
-                      ) : a.lastRefreshedAt ? (
-                        new Date(a.lastRefreshedAt).toLocaleDateString()
-                      ) : (
-                        "never"
-                      )}
+                      <AccountStatusCell at={a.lastRefreshedAt} error={a.lastRefreshError} />
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {a.lastContentSyncError ? (
-                        <span
-                          className="text-red-600"
-                          title={a.lastContentSyncError}
-                        >
-                          error
-                        </span>
-                      ) : a.lastContentSyncAt ? (
-                        new Date(a.lastContentSyncAt).toLocaleDateString()
-                      ) : (
-                        "never"
-                      )}
+                      <AccountStatusCell at={a.lastContentSyncAt} error={a.lastContentSyncError} />
                     </td>
                     <td className="text-right px-3 py-2">
                       {editingId === a.id ? (
