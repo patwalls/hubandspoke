@@ -14,7 +14,7 @@ import { createStore, useStore, type StoreApi } from "zustand";
 import type { ClipEditDoc, Layer, MediaAsset, RemovalReason, Section } from "@/lib/clip-editor/doc";
 import { wordEditKey } from "@/lib/clip-editor/doc";
 import { addRemoval, restoreRange, restoreReason } from "@/lib/clip-editor/removals";
-import { deleteSection, includeRange, insertMediaScene, moveSection, retimeSectionInDoc, splitSectionAt } from "@/lib/clip-editor/sections";
+import { deleteSection, includeRange, insertMediaScene, moveSection, pastePieces, retimeSectionInDoc, splitSectionAt, type ClipPiece } from "@/lib/clip-editor/sections";
 import type { TimeRange } from "@/lib/clip-editor/doc";
 
 const HISTORY_LIMIT = 200;
@@ -240,6 +240,10 @@ export const commands = {
   /** Blade: cut a section in two at a source time. */
   split: (sectionId: string, atSec: number) => (doc: ClipEditDoc) =>
     splitSectionAt(doc, sectionId, atSec),
+
+  /** Paste copied text (its footage) as new scenes at the cursor. */
+  paste: (pieces: ClipPiece[], at: { sectionId: string; atSec: number }) => (doc: ClipEditDoc) =>
+    pastePieces(doc, pieces, at),
 
   /** Delete a whole piece of the clip (never the last one). */
   deleteSection: (sectionId: string) => (doc: ClipEditDoc) => deleteSection(doc, sectionId),

@@ -10,6 +10,7 @@
 import type { ClipEditDoc, RemovalReason, Section, TimeRange } from "./doc";
 import { isSourceSection, wordEditKey } from "./doc";
 import { removalAt } from "./removals";
+import { primarySourceSections } from "./sections";
 import { isWordInRange, mediaEditorWords, rangeForWordRun, type EditorWord } from "./words";
 
 /** Pauses at least this long get their own chip in the transcript. */
@@ -85,10 +86,10 @@ export function buildTranscriptView(
   doc: ClipEditDoc,
   words: EditorWord[],
 ): TranscriptView {
-  // The source's words land in its scenes; uploaded clips' words (on other
-  // files) are added per scene below.
-  const sourceSections = doc.sections.filter(isSourceSection);
-  const sections = [...sourceSections].sort((a, b) => a.startSec - b.startSec);
+  // The source's words land in the scenes that own their footage; copies
+  // (pasted text) and uploaded clips' words are added per scene below.
+  const primary = primarySourceSections(doc.sections);
+  const sections = doc.sections.filter((s) => primary.has(s.id)).sort((a, b) => a.startSec - b.startSec);
   const tokens: ViewToken[] = [];
   const flat: ViewWord[] = [];
   const marked = new Set<string>();
@@ -166,14 +167,22 @@ export function buildTranscriptView(
   // An uploaded clip's scene shows its own file's words — those inside its
   // trim. They never sit in recorded order with the source's, so
   // reorderForPlay lifts them to where the scene plays.
+  // A copy reads its own words again the same way — where it plays.
+  const sourceWords = words.filter((w) => !w.mediaId);
   doc.sections.forEach((section) => {
-    const slot = doc.media.findIndex((m) => m.id === section.mediaId);
-    if (slot < 0) return;
-    const own = mediaEditorWords(doc.media[slot], slot).filter((w) => isWordInRange(w, section));
+    let own: EditorWord[];
+    if (isSourceSection(section)) {
+      if (primary.has(section.id)) return;
+      own = sourceWords.filter((w) => isWordInRange(w, section));
+    } else {
+      const slot = doc.media.findIndex((m) => m.id === section.mediaId);
+      if (slot < 0) return;
+      own = mediaEditorWords(doc.media[slot], slot).filter((w) => isWordInRange(w, section));
+    }
     own.forEach((word, i) => emit(word, section, own[i - 1], own[i + 1]));
   });
 
-  return reorderForPlay(doc, tokens, flat);
+  return reorderForPlay(doc, tokens, flat, primary);
 }
 
 /**
@@ -183,10 +192,10 @@ export function buildTranscriptView(
  * agrees with the recording, so the body never jumps — only what you moved
  * moves. With nothing out of order this returns the tokens untouched.
  */
-function reorderForPlay(doc: ClipEditDoc, tokens: ViewToken[], flat: ViewWord[]): TranscriptView {
-  // Only the source's scenes have a recorded order; uploaded clips always
-  // follow whatever plays before them.
-  const anchored = inOrderSections(doc.sections.filter(isSourceSection));
+function reorderForPlay(doc: ClipEditDoc, tokens: ViewToken[], flat: ViewWord[], primary: Set<string>): TranscriptView {
+  // Only the scenes that own their footage have a recorded order; copies and
+  // uploaded clips always follow whatever plays before them.
+  const anchored = inOrderSections(doc.sections.filter((s) => primary.has(s.id)));
   const plain = () => ({ tokens, words: flat, displayOrder: flat.map((w) => w.pos) });
   if (anchored.size === doc.sections.length) return plain();
 

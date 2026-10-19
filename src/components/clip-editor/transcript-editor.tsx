@@ -10,6 +10,11 @@
  *   dim words    → Add to clip (scroll up and pull in the intro, a later
  *                  punchline, anything)
  *
+ * ⌘C / ⌘X copy or cut the highlighted words WITH their footage; ⌘V plays
+ * that footage again where the cursor is (Descript). A copy is its own scene
+ * — its words read again where it plays, and editing them leaves the
+ * original alone. Cut = copy, then strike the original.
+ *
  * Performance notes, since a podcast is 10k+ words:
  *   - words render in memoized CHUNKS; a selection change only re-renders the
  *     chunks it touches, and offscreen chunks skip layout/paint entirely
@@ -44,6 +49,8 @@ import {
 } from "@/lib/clip-editor/transcript-view";
 import type { PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
+import { copyPieces, type ClipPiece } from "@/lib/clip-editor/sections";
+import { toast } from "sonner";
 import { applyWordTrim, stepWordTrim, wordTrimAudition, wordTrimWindow } from "@/lib/clip-editor/word-trim";
 import { WordTrimmer } from "./word-trimmer";
 
@@ -236,17 +243,63 @@ export function TranscriptEditor({
   );
 
   // ── Selection by click / shift-click / drag ─────────────────────────────
+  // Google-Docs forgiving: a press anywhere in the text — the gap between
+  // words, past the end of a line, the margin — lands on the nearest word.
+  // A click only parks the cursor; a drag of a few pixels highlights.
   const posFromEvent = (e: MouseEvent): number | null => {
     const el = (e.target as HTMLElement).closest("[data-pos]");
     return el ? Number(el.getAttribute("data-pos")) : null;
   };
 
+  /** The word nearest a point: probe sideways along the line (left first,
+   *  so the end of a line finds its last word), then just above / below. */
+  const wordAtPoint = useCallback((x: number, y: number): { pos: number; box: DOMRect } | null => {
+    const root = scrollRef.current;
+    if (!root) return null;
+    const r = root.getBoundingClientRect();
+    const cx = Math.min(Math.max(x, r.left + 1), r.right - 1);
+    const cy = Math.min(Math.max(y, r.top + 1), r.bottom - 1);
+    const hit = (px: number, py: number) => {
+      const el = document.elementFromPoint(px, py)?.closest<HTMLElement>("[data-pos]");
+      return el && root.contains(el) ? el : null;
+    };
+    for (const dy of [0, -6, 6, -12, 12]) {
+      for (let dx = 0; dx <= r.width; dx += 8) {
+        const el = hit(cx - dx, cy + dy) ?? (dx > 0 ? hit(cx + dx, cy + dy) : null);
+        if (el) return { pos: Number(el.dataset.pos), box: el.getBoundingClientRect() };
+      }
+    }
+    return null;
+  }, []);
+
+  /** "Before this word" = after the word shown just before it (a moved
+   *  scene's first word follows whatever precedes it on screen). */
+  const shownBefore = useCallback(
+    (pos: number) => {
+      const i = view.displayOrder.indexOf(pos);
+      return i > 0 ? view.displayOrder[i - 1] : -1;
+    },
+    [view],
+  );
+  const shownAfter = useCallback(
+    (caretPos: number) => {
+      const order = view.displayOrder;
+      const i = caretPos < 0 ? -1 : order.indexOf(caretPos);
+      return order[Math.min(i + 1, order.length - 1)];
+    },
+    [view],
+  );
+
+  /** A press that hasn't moved far enough to be a drag yet. */
+  const pressRef = useRef<{ x: number; y: number; caret: number; extend: boolean } | null>(null);
+
   const onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
     if (trimPos !== null) setTrimPos(null); // any click in the text closes the trimmer
-    const pos = posFromEvent(e);
-    if (pos === null) {
-      if (!(e.target as HTMLElement).closest("[data-gap]")) setSelection(null);
+    if ((e.target as HTMLElement).closest("[data-gap]")) return; // pause chips toggle themselves
+    const near = wordAtPoint(e.clientX, e.clientY);
+    if (!near) {
+      setSelection(null);
       return;
     }
     e.preventDefault(); // we draw our own highlight; suppress the native one
@@ -254,20 +307,26 @@ export function TranscriptEditor({
     setDragging(true);
     // The transcript takes the arrow keys back from the preview.
     if (stageSelection) setStageSelection(null);
-    if (e.shiftKey && selection) setSelection({ anchor: selection.anchor, focus: clampFocus(selection.anchor, pos) });
-    else setSelection({ anchor: pos, focus: pos });
-    // Park the cursor on the nearer side of the clicked word.
-    const box = (e.target as HTMLElement).closest("[data-pos]")?.getBoundingClientRect();
-    // "Before this word" = after the word shown just before it (a moved
-    // scene's first word follows whatever precedes it on screen).
-    const shownBefore = () => {
-      const i = view.displayOrder.indexOf(pos);
-      return i > 0 ? view.displayOrder[i - 1] : -1;
-    };
-    setCaret(e.shiftKey || !box ? pos : e.clientX < box.left + box.width / 2 ? shownBefore() : pos);
-    const w = view.words[pos];
+    const { pos, box } = near;
+    if (e.shiftKey) {
+      // Extend from the highlight (or from the cursor) to here.
+      const anchor = selection?.anchor ?? (caret !== null ? shownAfter(caret) : pos);
+      setSelection({ anchor, focus: clampFocus(anchor, pos) });
+      setCaret(pos);
+      pressRef.current = null;
+      clickRef.current = null;
+      return;
+    }
+    // Park the cursor on the nearer side of the word.
+    const at = e.clientX < box.left + box.width / 2 ? shownBefore(pos) : pos;
+    setCaret(at);
+    setSelection(null);
+    pressRef.current = { x: e.clientX, y: e.clientY, caret: at, extend: false };
     clickRef.current = null;
-    if (!w || e.shiftKey) return;
+    // Only a press right on a word plays / auditions it.
+    if (posFromEvent(e) !== pos) return;
+    const w = view.words[pos];
+    if (!w) return;
     if (w.state === "kept" || w.word.mediaId) {
       // A cut word of an uploaded clip can't be auditioned (preview plays
       // the source) — go to where its scene resumes instead.
@@ -281,21 +340,65 @@ export function TranscriptEditor({
     }
   };
 
-  const onMouseOver = (e: MouseEvent) => {
-    if (!draggingRef.current || !selection) return;
-    const raw = posFromEvent(e);
-    const pos = raw === null ? null : clampFocus(selection.anchor, raw);
-    if (pos !== null && pos !== selection.focus) {
-      clickRef.current = null; // it became a drag
-      setSelection({ anchor: selection.anchor, focus: pos });
-    }
-  };
+  // While the button is down, the highlight follows the pointer wherever it
+  // goes — gaps, margins, outside the panel — and the text scrolls when it
+  // nears the top or bottom edge.
+  useEffect(() => {
+    if (!dragging) return;
+    let last: { x: number; y: number } | null = null;
+    let frame = 0;
+    const DRAG_START_PX = 4;
+    const EDGE_PX = 36;
+    const extendTo = (x: number, y: number) => {
+      const press = pressRef.current;
+      if (!press) return;
+      if (!press.extend) {
+        if (Math.hypot(x - press.x, y - press.y) < DRAG_START_PX) return;
+        press.extend = true;
+        clickRef.current = null; // it became a drag
+      }
+      const near = wordAtPoint(x, y);
+      if (!near) return;
+      const order = view.displayOrder;
+      const idx = (p: number) => (p < 0 ? -1 : order.indexOf(p));
+      // The highlight grows from the cursor: forward from the word after
+      // it, backward from the word before it.
+      const after = shownAfter(press.caret);
+      const forward = idx(near.pos) >= idx(after);
+      const anchor = forward || press.caret < 0 ? after : press.caret;
+      setSelection({ anchor, focus: clampFocus(anchor, near.pos) });
+      setCaret(forward ? near.pos : shownBefore(near.pos));
+    };
+    const tick = () => {
+      const root = scrollRef.current;
+      if (last && root) {
+        const r = root.getBoundingClientRect();
+        const dy = last.y < r.top + EDGE_PX ? last.y - (r.top + EDGE_PX) : last.y > r.bottom - EDGE_PX ? last.y - (r.bottom - EDGE_PX) : 0;
+        if (dy !== 0 && pressRef.current?.extend) {
+          root.scrollTop += Math.max(-24, Math.min(24, dy / 2));
+          extendTo(last.x, last.y);
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    const move = (ev: globalThis.MouseEvent) => {
+      last = { x: ev.clientX, y: ev.clientY };
+      extendTo(ev.clientX, ev.clientY);
+    };
+    window.addEventListener("mousemove", move);
+    frame = requestAnimationFrame(tick);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      cancelAnimationFrame(frame);
+    };
+  }, [dragging, view, wordAtPoint, shownAfter, shownBefore, clampFocus, setSelection]);
 
   useEffect(() => {
     const up = () => {
       if (!draggingRef.current) return;
       draggingRef.current = false;
       setDragging(false);
+      pressRef.current = null;
       const click = clickRef.current;
       clickRef.current = null;
       if (click) engine.preview(click.sourceSec);
@@ -468,12 +571,76 @@ export function TranscriptEditor({
   }, [actions, run]);
 
   // The highlight is ours, not the browser's, so ⌘C needs wiring by hand.
+  // The text goes to the system clipboard; the footage under it to ours,
+  // for ⌘V.
   const [copied, setCopied] = useState(false);
   useEffect(() => setCopied(false), [lo, hi]);
+  const clipboardRef = useRef<ClipPiece[]>([]);
   const copySelection = useCallback(() => {
     if (lo < 0) return;
+    if (actions?.ranges.length) clipboardRef.current = copyPieces(doc, actions.ranges);
     void navigator.clipboard.writeText(selectionText(view, lo, hi)).then(() => setCopied(true));
-  }, [view, lo, hi]);
+  }, [view, doc, actions, lo, hi]);
+
+  const cutSelection = useCallback(() => {
+    if (!actions?.ranges.length || readOnly) return;
+    copySelection();
+    if (!actions.allRemoved) removeSelection();
+  }, [actions, readOnly, copySelection, removeSelection]);
+
+  /** ⌫ / Delete with just the cursor (no highlight): strike the word
+   *  before / after it, like a doc. Backspace then steps the cursor back,
+   *  so holding it eats words one by one; an already-struck word is just
+   *  stepped over. */
+  const deleteAtCursor = useCallback(
+    (dir: "back" | "forward") => {
+      if (caret === null || readOnly) return false;
+      const pos = dir === "back" ? caret : shownAfter(caret);
+      // (shownAfter stays on the last word at the end of the text)
+      if (pos === undefined || pos < 0 || (dir === "forward" && pos === caret)) return false;
+      const w = view.words[pos];
+      if (!w?.sectionId) return false; // outside the clip: nothing to cut
+      if (w.state === "kept") {
+        const { ranges } = selectionActions(view, doc, pos, pos);
+        apply((d) => ranges.reduce((acc, r) => commands.remove(r.sectionId, [r.range], "manual")(acc), d));
+      }
+      if (dir === "back") setCaret(shownBefore(pos));
+      else setCaret(pos);
+      return true;
+    },
+    [caret, readOnly, view, doc, apply, shownAfter, shownBefore],
+  );
+
+  /** ⌘V: where the cursor sits decides the spot — between two words of one
+   *  scene splits it there; at a scene's edge goes before / after it. */
+  const pasteAtCursor = useCallback(() => {
+    const pieces = clipboardRef.current;
+    if (!pieces.length || readOnly) return false;
+    const ref = caret ?? (selection ? hi : null);
+    if (ref === null) return false;
+    const order = view.displayOrder;
+    const i = ref < 0 ? -1 : order.indexOf(ref);
+    const before = i >= 0 ? view.words[order[i]] : undefined;
+    const after = i + 1 < order.length ? view.words[order[i + 1]] : undefined;
+    const at =
+      before?.sectionId && after?.sectionId === before.sectionId
+        ? { sectionId: before.sectionId, atSec: after.word.startSec }
+        : before?.sectionId
+          ? { sectionId: before.sectionId, atSec: Number.POSITIVE_INFINITY }
+          : after?.sectionId
+            ? { sectionId: after.sectionId, atSec: Number.NEGATIVE_INFINITY }
+            : null;
+    if (!at) {
+      toast.error("Put the cursor inside the clip to paste");
+      return true;
+    }
+    if (commands.paste(pieces, at)(doc) === doc) {
+      toast.error("A clip can have up to 20 scenes — delete one to paste");
+      return true;
+    }
+    run(commands.paste(pieces, at));
+    return true;
+  }, [caret, selection, hi, view, doc, readOnly, run]);
 
   // Picking a scene on the timeline scrolls the transcript to its first word.
   useEffect(() => {
@@ -547,10 +714,21 @@ export function TranscriptEditor({
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
-      if (!actions) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === "c" && !window.getSelection()?.toString()) {
+      const cmd = e.metaKey || e.ctrlKey;
+      if (cmd && e.key === "v" && pasteAtCursor()) {
+        e.preventDefault();
+        return;
+      }
+      if (!actions) {
+        if ((e.key === "Backspace" || e.key === "Delete") && !cmd && deleteAtCursor(e.key === "Backspace" ? "back" : "forward")) e.preventDefault();
+        return;
+      }
+      if (cmd && e.key === "c" && !window.getSelection()?.toString()) {
         e.preventDefault();
         copySelection();
+      } else if (cmd && e.key === "x" && actions.ranges.length) {
+        e.preventDefault();
+        cutSelection();
       } else if ((e.key === "Backspace" || e.key === "Delete") && actions.ranges.length) {
         e.preventDefault();
         if (actions.allRemoved) restoreSelection();
@@ -562,7 +740,7 @@ export function TranscriptEditor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [actions, removeSelection, restoreSelection, addSelection, copySelection]);
+  }, [actions, removeSelection, restoreSelection, addSelection, copySelection, cutSelection, pasteAtCursor, deleteAtCursor]);
 
   const toggleGap = useCallback(
     (gap: ViewGap) => {
@@ -598,7 +776,6 @@ export function TranscriptEditor({
         ref={scrollRef}
         className="min-h-0 flex-1 cursor-text select-none overflow-y-auto px-1 py-3 text-[15px] leading-[2.05]"
         onMouseDown={onMouseDown}
-        onMouseOver={onMouseOver}
         onDoubleClick={onDoubleClick}
       >
         {chunks.map((chunk) => {
