@@ -303,7 +303,7 @@ export function ScheduledReview({
   // Light polling so an auto-merge / new suggestion from the sweep shows up
   // without a manual reload.
   useEffect(() => {
-    return startVisibleInterval(() => void refetch(), 30_000);
+    return startVisibleInterval(() => void refetch(), 60_000);
   }, [refetch]);
 
   function onResolved(id: string) {

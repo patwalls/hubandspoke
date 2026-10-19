@@ -1992,6 +1992,25 @@ steady-state sources and what keeps them down:
 | Worker: cron fire / sweep child = `start` + result + graphile `Completed task` | 3 lines per job | 1 (`src/jobs/worker-logger.ts` drops the start line and fast first-attempt successes; slow ≥10s or retried keep theirs) |
 | Worker: `lock-reconcile(interval) clean` | 1,440/day | 96/day (boot + every 15th pass; `acted` always logs) |
 | Health probes (GH + home Mac, 2 endpoints, every 5 min) | ~1.2k router lines/day | unchanged — they are the alarm |
+| Dashboard layout, visible tabs (2026-10-19): 3 banners at 60s, bell at 30s, scheduled review at 30s | ~45% of all router lines | banners every 5 min, bell + scheduled review every 60s (bell still refetches on window focus) |
+
+**Second cap hit, 2026-10-19.** Measured from `heroku logs -n 1500` (18 min
+of a weekday afternoon): ~1.25k of 1.5k lines and ~90% of bytes were
+`heroku[router]`, i.e. ~40 MB/day against the plan's **10 MB/day**. Code-side
+polling cuts can't close that gap on their own, because router lines scale
+with how many people have the dashboard open. The lever that does is a
+**Papertrail log filter** (Settings → Log Filtering; filtered lines don't count
+toward the cap) that drops successful, fast router lines:
+
+```
+heroku/router at=info .* service=[0-9]{1,4}ms status=[23]
+```
+
+It keeps router errors (`at=error`, H12/H13/…), every 4xx/5xx, and any request
+that took ≥10s. `heroku logs` is unaffected (filters apply to the drain only),
+so the ops-lap request-time checks still see every line.
+
+To measure again: `heroku logs --app hubandspoke -n 1500 | grep 'heroku\[router\]' | grep -o 'path="[^"?]*' | sort | uniq -c | sort -rn | head`.
 
 Rules for new code are in `docs/conventions.md` → Log volume.
 
