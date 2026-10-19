@@ -642,6 +642,39 @@ export function TranscriptEditor({
     return true;
   }, [caret, selection, hi, view, doc, readOnly, run]);
 
+  // Where the highlight plays: the timeline shades it, and once the
+  // highlight settles (mouse up, or each ⇧-arrow step) the playhead jumps to
+  // its start — Descript-style.
+  const setHighlightOut = useEditor((s) => s.setHighlightOut);
+  const highlightOut = useMemo(() => {
+    if (lo < 0) return null;
+    let startSec = Number.POSITIVE_INFINITY;
+    let endSec = Number.NEGATIVE_INFINITY;
+    for (let p = lo; p <= hi; p++) {
+      const w = view.words[p];
+      if (w?.state !== "kept" || !w.sectionId) continue;
+      const a = sourceToOutput(plan, w.word.startSec + 0.001, w.sectionId);
+      const b = sourceToOutput(plan, Math.max(w.word.startSec + 0.001, w.word.endSec - 0.001), w.sectionId);
+      if (a !== null) startSec = Math.min(startSec, a);
+      if (b !== null) endSec = Math.max(endSec, b);
+    }
+    return endSec > startSec ? { startSec, endSec } : null;
+  }, [view, plan, lo, hi]);
+  useEffect(() => setHighlightOut(highlightOut), [highlightOut, setHighlightOut]);
+  useEffect(() => () => setHighlightOut(null), [setHighlightOut]);
+  const seekedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (dragging || !highlightOut) {
+      if (lo < 0) seekedFor.current = null;
+      return;
+    }
+    // Once per highlight — not again on every edit that re-derives the plan.
+    const key = `${lo}:${hi}`;
+    if (seekedFor.current === key) return;
+    seekedFor.current = key;
+    engine.seek(highlightOut.startSec);
+  }, [dragging, highlightOut, lo, hi, engine]);
+
   // Picking a scene on the timeline scrolls the transcript to its first word.
   useEffect(() => {
     if (!sceneSelection) return;

@@ -41,6 +41,9 @@ export interface EditorState {
 
   /** Selected transcript words, as positions in the editor's display list. */
   wordSelection: { anchor: number; focus: number } | null;
+  /** Where the highlighted words play, in OUTPUT time — what the timeline
+   *  shades. Derived by the transcript (it knows the words); null = none. */
+  highlightOut: { startSec: number; endSec: number } | null;
   stageSelection: StageSelection;
   /** The scene (section) picked on the timeline — framing edits in the
    *  preview and the Video panel apply to it alone. Null = no pick. */
@@ -59,6 +62,7 @@ export interface EditorState {
   markSaved: (doc: ClipEditDoc, revision: number) => void;
   markSaveFailed: (kind: "error" | "conflict") => void;
   setWordSelection: (sel: EditorState["wordSelection"]) => void;
+  setHighlightOut: (span: EditorState["highlightOut"]) => void;
   setStageSelection: (sel: StageSelection) => void;
   setSceneSelection: (sectionId: string | null) => void;
   registerImageUrl: (layerId: string, url: string) => void;
@@ -95,6 +99,7 @@ export function createEditorStore(init: {
     savedDoc: init.doc,
     saveState: init.recoveredDoc ? "dirty" : "saved",
     wordSelection: null,
+    highlightOut: null,
     stageSelection: null,
     sceneSelection: null,
     imageUrls: init.imageUrls ?? {},
@@ -155,6 +160,7 @@ export function createEditorStore(init: {
       })),
     markSaveFailed: (kind) => set({ saveState: kind }),
     setWordSelection: (wordSelection) => set({ wordSelection }),
+    setHighlightOut: (highlightOut) => set({ highlightOut }),
     setStageSelection: (stageSelection) => set({ stageSelection }),
     setSceneSelection: (sceneSelection) => set({ sceneSelection }),
     registerImageUrl: (layerId, url) => set({ imageUrls: { ...get().imageUrls, [layerId]: url } }),

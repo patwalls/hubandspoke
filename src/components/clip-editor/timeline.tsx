@@ -99,6 +99,7 @@ export function Timeline({
   const apply = useEditor((s) => s.apply);
   const setWordSelection = useEditor((s) => s.setWordSelection);
   const wordSelection = useEditor((s) => s.wordSelection);
+  const highlightOut = useEditor((s) => s.highlightOut);
   const stageSelection = useEditor((s) => s.stageSelection);
   const pieces = useMemo(() => timelinePieces(plan), [plan]);
   const [tool, setTool] = useState<Tool>("select");
@@ -637,6 +638,13 @@ export function Timeline({
                 dragOffset={dragMove?.sectionId === p.sectionId ? dragMove.dx : null}
               />
             ))}
+            {/* The transcript's highlight, where it plays (Descript's lavender). */}
+            {highlightOut && (
+              <div
+                className="pointer-events-none absolute inset-y-0 z-10 rounded-sm bg-violet-400/35 ring-1 ring-inset ring-violet-500/60"
+                style={{ left: xOf(highlightOut.startSec), width: Math.max((highlightOut.endSec - highlightOut.startSec) * pxPerSec, 2) }}
+              />
+            )}
             {(dragMove ?? fileSlot) && (
               <div className="pointer-events-none absolute inset-y-[-6px] z-20 w-1 -translate-x-1/2 rounded-full bg-violet-600 shadow" style={{ left: (dragMove?.slot ?? fileSlot)!.x }} />
             )}
