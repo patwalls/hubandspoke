@@ -205,3 +205,75 @@ export function WordTrimmer({
     </div>
   );
 }
+
+/**
+ * Fix the spelling of highlighted words — one or a phrase ("Cloud Code" →
+ * "Claude Code"). "Correct all" fixes every place the phrase reads the
+ * same, and only as that phrase, so a "cloud" said on its own stays.
+ */
+export function PhraseCorrector({
+  text,
+  matchCount,
+  onCorrect,
+  onClose,
+}: {
+  text: string;
+  /** Places "Correct all" would fix, this one included. */
+  matchCount: number;
+  onCorrect: (text: string, all: boolean) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(text);
+  const changed = value.trim().length > 0 && value.trim() !== text;
+  const commit = (all: boolean) => {
+    if (changed) onCorrect(value, all);
+    onClose();
+  };
+  return (
+    <div
+      role="dialog"
+      aria-label="Correct text"
+      className="w-[360px] rounded-lg border border-border bg-popover p-2.5 text-xs shadow-lg"
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Escape") onClose();
+      }}
+    >
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onKeyDown={(e) => {
+          // ↵ = this one, ⌘↵ = all
+          if (e.key === "Enter") commit((e.metaKey || e.ctrlKey) && matchCount > 1);
+        }}
+        aria-label="Corrected text"
+        className="w-full rounded border border-border bg-background px-1.5 py-1 text-[13px] outline-none focus:ring-2 focus:ring-ring"
+      />
+      <div className="mt-2 flex items-center justify-end gap-1.5">
+        {matchCount > 1 && (
+          <button
+            type="button"
+            onClick={() => commit(true)}
+            disabled={!changed}
+            title={`Fix all ${matchCount} places that say "${text}" (⌘↵)`}
+            className="rounded-md border border-border px-2 py-1 text-[12px] font-medium hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            Correct all ({matchCount})
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => commit(false)}
+          disabled={!changed}
+          className="rounded-md bg-foreground px-2 py-1 text-[12px] font-medium text-background hover:bg-foreground/90 disabled:opacity-40"
+        >
+          Correct
+        </button>
+      </div>
+    </div>
+  );
+}

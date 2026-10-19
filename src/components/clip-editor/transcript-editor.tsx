@@ -53,7 +53,7 @@ import { copyPieces, type ClipPiece } from "@/lib/clip-editor/sections";
 import { countMatches } from "@/lib/clip-editor/word-correct";
 import { toast } from "sonner";
 import { applyWordTrim, stepWordTrim, wordTrimAudition, wordTrimWindow } from "@/lib/clip-editor/word-trim";
-import { WordTrimmer } from "./word-trimmer";
+import { PhraseCorrector, WordTrimmer } from "./word-trimmer";
 
 const WORDS_PER_CHUNK = 90;
 
@@ -139,6 +139,13 @@ export function TranscriptEditor({
   /** The word whose trim popover is open (double-click), and where it sits. */
   const [trimPos, setTrimPos] = useState<number | null>(null);
   const [trimBox, setTrimBox] = useState<{ top: number; left: number } | null>(null);
+  /** Highlighted words whose spelling is being fixed (the phrase popover —
+   *  it shares the trimmer's spot, under the last word). */
+  const [phrase, setPhrase] = useState<{ lo: number; hi: number } | null>(null);
+  /** A click inside a highlight clears it only once it's clearly not the
+   *  first half of a double-click (which opens the phrase popover). */
+  const clearTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(clearTimer.current), []);
   /** A join to play once the plan has caught up with the last trim. */
   const [audition, setAudition] = useState<{ sectionId: string; startSec: number; endSec: number; key: number } | null>(null);
 
@@ -321,7 +328,11 @@ export function TranscriptEditor({
     // Park the cursor on the nearer side of the word.
     const at = e.clientX < box.left + box.width / 2 ? shownBefore(pos) : pos;
     setCaret(at);
-    setSelection(null);
+    if (phrase) setPhrase(null);
+    window.clearTimeout(clearTimer.current);
+    const insideHighlight = selection && lo !== hi && pos >= lo && pos <= hi && posFromEvent(e) === pos;
+    if (insideHighlight) clearTimer.current = window.setTimeout(() => setSelection(null), 350);
+    else setSelection(null);
     pressRef.current = { x: e.clientX, y: e.clientY, caret: at, extend: false };
     clickRef.current = null;
     // Only a press right on a word plays / auditions it.
@@ -357,6 +368,7 @@ export function TranscriptEditor({
         if (Math.hypot(x - press.x, y - press.y) < DRAG_START_PX) return;
         press.extend = true;
         clickRef.current = null; // it became a drag
+        window.clearTimeout(clearTimer.current);
       }
       const near = wordAtPoint(x, y);
       if (!near) return;
@@ -413,6 +425,13 @@ export function TranscriptEditor({
     const pos = posFromEvent(e);
     const w = pos !== null ? view.words[pos] : undefined;
     if (!w || w.state === "outside") return;
+    // Inside a highlight of several words: fix the phrase's spelling.
+    if (selection && lo !== hi && pos! >= lo && pos! <= hi) {
+      window.clearTimeout(clearTimer.current);
+      setPhrase({ lo, hi });
+      setSelection(null);
+      return;
+    }
     setSelection(null);
     // A kept word opens the trimmer (which has the spelling field too); a
     // cut word only has its text to fix.
@@ -459,15 +478,16 @@ export function TranscriptEditor({
   const placeTrimmer = useCallback(() => {
     const wrap = wrapRef.current;
     const scroller = scrollRef.current;
-    if (!wrap || !scroller || trimPos === null) return setTrimBox(null);
-    const el = scroller.querySelector(`[data-pos="${trimPos}"]`);
+    const anchor = trimPos ?? phrase?.hi ?? null;
+    if (!wrap || !scroller || anchor === null) return setTrimBox(null);
+    const el = scroller.querySelector(`[data-pos="${anchor}"]`);
     if (!el) return setTrimBox(null);
     const word = el.getBoundingClientRect();
     const box = wrap.getBoundingClientRect();
     const port = scroller.getBoundingClientRect();
     if (word.bottom < port.top || word.top > port.bottom) return setTrimBox(null);
     setTrimBox({ top: word.bottom + 6 - box.top, left: Math.min(Math.max(word.left + word.width / 2 - box.left, 185), box.width - 185) });
-  }, [trimPos]);
+  }, [trimPos, phrase]);
   useLayoutEffect(placeTrimmer, [placeTrimmer, view]);
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -850,10 +870,25 @@ export function TranscriptEditor({
               text={w.text}
               onTrim={(inSec, outSec) => trimWord(trimPos, inSec, outSec)}
               onText={(text) => apply(commands.correctWord(w.word, text))}
-              onTextAll={(text) => apply(commands.correctAllWords(view.words, w, text))}
-              matchCount={countMatches(view.words, w.text)}
+              onTextAll={(text) => apply(commands.correctPhrase(view.words, [w], text, true))}
+              matchCount={countMatches(view.words, [w])}
               onAudition={() => setAudition({ sectionId: win.sectionId, ...wordTrimAudition(win, win.inSec, win.outSec), key: Date.now() })}
               onClose={() => setTrimPos(null)}
+            />
+          </div>
+        );
+      })()}
+
+      {phrase && trimPos === null && trimBox && !readOnly && (() => {
+        const run = view.words.slice(phrase.lo, phrase.hi + 1);
+        return (
+          <div className="absolute z-20 -translate-x-1/2" style={{ top: trimBox.top, left: trimBox.left }}>
+            <PhraseCorrector
+              key={`${phrase.lo}:${phrase.hi}`}
+              text={run.map((w) => w.text).join(" ")}
+              matchCount={countMatches(view.words, run)}
+              onCorrect={(text, all) => apply(commands.correctPhrase(view.words, run, text, all))}
+              onClose={() => setPhrase(null)}
             />
           </div>
         );
@@ -918,12 +953,12 @@ export function TranscriptEditor({
               </ToolbarButton>
             </span>
           )}
-          {actions.wordCount === 1 && view.words[lo]?.state !== "outside" && (
+          {actions.ranges.length > 0 && (
             <ToolbarButton
               tone="quiet"
               onClick={() => {
                 setSelection(null);
-                setEditingPos(lo);
+                setPhrase({ lo, hi });
               }}
             >
               Fix text
