@@ -32,13 +32,17 @@ const editKey = (w: ShownWord) => wordEditKey(w.word.startSec, w.word.mediaId);
  *  run only the outer ends may carry punctuation — "cloud. Code" spans a
  *  sentence break and isn't "Cloud Code". */
 function findRuns(words: ShownWord[], phrase: ShownWord[]): ShownWord[][] {
-  const keys = phrase.map((w) => matchKey(w.text));
-  if (keys.length === 0 || keys.some((k) => !k)) return [];
+  // A word matches by what it says now OR what was transcribed — fix one
+  // "Cloud" to "Claude" by hand, then "Correct all" from it still finds the
+  // other "Cloud"s.
+  const keys = phrase.map((w) => new Set([matchKey(w.text), matchKey(w.word.text)].filter(Boolean)));
+  if (keys.length === 0 || keys.some((k) => k.size === 0)) return [];
+  const matches = (w: ShownWord, j: number) => keys[j].has(matchKey(w.text)) || keys[j].has(matchKey(w.word.text));
   const runs: ShownWord[][] = [];
   for (let i = 0; i + keys.length <= words.length; i++) {
     const run = words.slice(i, i + keys.length);
     const ok = run.every((w, j) => {
-      if (matchKey(w.text) !== keys[j] || w.block !== run[0].block) return false;
+      if (!matches(w, j) || w.block !== run[0].block) return false;
       const { lead, trail } = split(w.text);
       return (j === 0 || !lead) && (j === run.length - 1 || !trail);
     });

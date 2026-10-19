@@ -6,7 +6,7 @@
  * nudge with ← →) to cut a blip off either side: the breath after "that.",
  * the onset of the next line, a click before the first word. Every change
  * plays the join back. The spelling field is here too, so double-click still
- * fixes a caption word. Model in src/lib/clip-editor/word-trim.ts.
+ * fixes a caption word — only when Correct / Correct all is pressed. Model in src/lib/clip-editor/word-trim.ts.
  */
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { PlayIcon } from "lucide-react";
@@ -47,6 +47,8 @@ export function WordTrimmer({
   const [spelling, setSpellingState] = useState({ base: text, value: text });
   if (spelling.base !== text) setSpellingState({ base: text, value: text });
   const setSpelling = (value: string) => setSpellingState((s) => ({ ...s, value }));
+  const changed = spelling.value.trim().length > 0 && spelling.value.trim() !== text;
+  const canAll = spelling.value.trim().length > 0 && matchCount > 1;
   const inSec = live?.inSec ?? win.inSec;
   const outSec = live?.outSec ?? win.outSec;
 
@@ -103,40 +105,52 @@ export function WordTrimmer({
         if (e.key === "Escape") onClose();
       }}
     >
-      <div className="mb-2 flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <input
           value={spelling.value}
           onChange={(e) => setSpelling(e.target.value)}
-          onBlur={() => spelling.value.trim() !== text && onText(spelling.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
-              // ⌘↵ = Correct all
-              if ((e.metaKey || e.ctrlKey) && matchCount > 1) onTextAll(spelling.value);
-              else onText(spelling.value);
+              // ↵ = Correct, ⌘↵ = Correct all
+              if ((e.metaKey || e.ctrlKey) && canAll) onTextAll(spelling.value);
+              else if (changed) onText(spelling.value);
               onClose();
             }
           }}
           aria-label="Word text"
           className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-1 text-[13px] outline-none focus:ring-2 focus:ring-ring"
         />
+        <button type="button" onClick={onAudition} title="Play the join" className="flex size-7 items-center justify-center rounded-md border border-border hover:bg-muted">
+          <PlayIcon className="size-3.5" />
+        </button>
+      </div>
+      {/* Nothing is respelled until one of these is pressed. */}
+      <div className="mb-2 mt-1.5 flex items-center justify-end gap-1.5">
         {matchCount > 1 && (
           <button
             type="button"
-            // keep focus in the field: a blur would commit just this word first
-            onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               onTextAll(spelling.value);
               onClose();
             }}
-            disabled={!spelling.value.trim() || spelling.value.trim() === text}
+            disabled={!canAll}
             title={`Fix all ${matchCount} words spelled "${text}" (⌘↵)`}
-            className="shrink-0 rounded-md border border-border px-2 py-1 text-[12px] font-medium hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
+            className="rounded-md border border-border px-2 py-1 text-[12px] font-medium hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
           >
             Correct all ({matchCount})
           </button>
         )}
-        <button type="button" onClick={onAudition} title="Play the join" className="flex size-7 items-center justify-center rounded-md border border-border hover:bg-muted">
-          <PlayIcon className="size-3.5" />
+        <button
+          type="button"
+          onClick={() => {
+            onText(spelling.value);
+            onClose();
+          }}
+          disabled={!changed}
+          title="Fix just this word (↵)"
+          className="rounded-md bg-foreground px-2 py-1 text-[12px] font-medium text-background hover:bg-foreground/90 disabled:opacity-40"
+        >
+          Correct
         </button>
       </div>
 
@@ -225,8 +239,11 @@ export function PhraseCorrector({
 }) {
   const [value, setValue] = useState(text);
   const changed = value.trim().length > 0 && value.trim() !== text;
+  // "Correct all" can still do something when this one already reads right:
+  // fix the others to match it.
+  const canAll = value.trim().length > 0 && matchCount > 1;
   const commit = (all: boolean) => {
-    if (changed) onCorrect(value, all);
+    if (all ? canAll : changed) onCorrect(value, all);
     onClose();
   };
   return (
@@ -258,7 +275,7 @@ export function PhraseCorrector({
           <button
             type="button"
             onClick={() => commit(true)}
-            disabled={!changed}
+            disabled={!canAll}
             title={`Fix all ${matchCount} places that say "${text}" (⌘↵)`}
             className="rounded-md border border-border px-2 py-1 text-[12px] font-medium hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
           >

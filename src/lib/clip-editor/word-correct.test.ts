@@ -62,6 +62,15 @@ describe("correct all — a phrase", () => {
     expect(d.wordEdits).toEqual({ "0": "ChatGPT,", "1000": "", "3000": "ChatGPT", "4000": "" });
   });
 
+  it("still finds the others after this one was already fixed by hand", () => {
+    // "Cloud" at 3 was corrected to "Claude" on its own first.
+    const now = words.map((w, i) => (i === 3 ? { ...w, text: "Claude" } : w));
+    const run = [now[3], now[4]];
+    expect(countMatches(now, run)).toBe(2);
+    const d = correctPhrase({ ...doc, wordEdits: { "3000": "Claude" } }, now, run, "Claude Code.", all);
+    expect(d.wordEdits).toEqual({ "3000": "Claude", "10000": "Claude", "11000": "Code," });
+  });
+
   it("never joins words from different blocks (a moved or copied scene)", () => {
     const w = shown(["Cloud", "Code"]);
     w[1] = { ...w[1], block: "sec-copy" };

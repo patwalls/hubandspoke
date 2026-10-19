@@ -1082,8 +1082,15 @@ const TranscriptChunk = memo(function TranscriptChunk({
                 t.state === "kept" && t.trimStartSec > 0 && "border-l-2 border-rose-400/80",
                 t.state === "kept" && t.trimEndSec > 0 && "border-r-2 border-rose-400/80",
                 t.corrected && "underline decoration-dotted decoration-sky-500 underline-offset-4",
+                // A highlight reads as ONE band (Descript): square inner
+                // edges, the spaces shaded too, and the now-playing word
+                // doesn't punch a darker hole in it.
                 t.pos >= selLo && t.pos <= selHi
-                  ? "bg-sky-200/80 !text-foreground dark:bg-sky-800/70"
+                  ? cn(
+                      "rounded-none bg-sky-200/80 !text-foreground hover:bg-sky-200/80 data-[active=true]:bg-sky-200/80 data-[active=true]:!text-foreground dark:bg-sky-800/70 dark:data-[active=true]:bg-sky-800/70",
+                      t.pos === selLo && "rounded-l-sm",
+                      t.pos === selHi && "rounded-r-sm",
+                    )
                   : sceneHighlight !== null && t.sectionId === sceneHighlight && "rounded-none bg-violet-200/60 dark:bg-violet-900/40",
               )}
             >
@@ -1091,7 +1098,13 @@ const TranscriptChunk = memo(function TranscriptChunk({
             </span>
             {caretAfter === t.pos && <span aria-hidden className="relative -ml-px inline-block h-[1.15em] w-0.5 translate-y-[0.2em] animate-pulse bg-foreground" />}
             {/* The space too, so a picked scene reads as one continuous band. */}
-            {sceneHighlight !== null && t.sectionId === sceneHighlight ? <span className="bg-violet-200/60 py-[3px] dark:bg-violet-900/40"> </span> : " "}
+            {t.pos >= selLo && t.pos < selHi ? (
+              <span className="bg-sky-200/80 py-[3px] dark:bg-sky-800/70"> </span>
+            ) : sceneHighlight !== null && t.sectionId === sceneHighlight ? (
+              <span className="bg-violet-200/60 py-[3px] dark:bg-violet-900/40"> </span>
+            ) : (
+              " "
+            )}
           </Fragment>
         );
       })}
