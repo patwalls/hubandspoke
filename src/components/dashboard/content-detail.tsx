@@ -63,6 +63,7 @@ import { PillarPicker, type PillarOption } from "./pillar-picker";
 import { ContentActivity } from "./content-activity";
 import { ClipRenderStatusPill } from "./clip-render-status-pill";
 import { DesignRenderStatusPill } from "./design-render-status-pill";
+import { DesignEditorLauncher } from "./design-editor-launcher";
 const AttachDmKeywordDialog = dynamic(() => import("@/components/dashboard/attach-dm-keyword-dialog").then((m) => m.AttachDmKeywordDialog), { ssr: false });
 const TiktokDraftDialog = dynamic(() => import("./tiktok-draft-dialog").then((m) => m.TiktokDraftDialog), { ssr: false });
 const PublishScheduleDialog = dynamic(() => import("./publish-schedule-dialog").then((m) => m.PublishScheduleDialog), { ssr: false });
@@ -949,7 +950,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       if (res.ok && json?.id) {
         if (options.redirectOnSuccess) {
           toast.success(`Created ${targetFormatName}`);
-          router.push(`/${brand}/content/${json.id}`);
+          // `?design=1`: open the design editor on arrival when the format has a
+          // template — same as opening this item from the queue.
+          router.push(`/${brand}/content/${json.id}?design=1`);
         }
         return { id: json.id };
       }
@@ -2749,6 +2752,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               productionItemId={item.id}
               brand={item.brand ?? "starter-story"}
               onRendered={() => void load()}
+            />
+            <DesignEditorLauncher
+              item={{ id: item.id, brand: item.brand ?? "starter-story", sourceType: item.sourceType ?? null, format: item.format ?? null }}
+              onDone={() => void load()}
             />
             <TranscriptButton
               itemId={item.id}
