@@ -21,6 +21,8 @@ import { toolWindow, type DraftWindow } from "./window";
 export const NEWSLETTER_MODEL = "claude-opus-5-5";
 const MAX_TURNS = 30;
 const MAX_TOKENS = 32_000;
+/** Per-turn ceiling for one non-streaming call (a long write turn + thinking). */
+const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 const CASE_STUDY_SITE = "https://www.starterstory.com/explore";
 
 
@@ -60,7 +62,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     description:
       "List the brand's published long-form YouTube videos in the window, newest first, with views and whether a transcript is available.",
     input_schema: DAYS_SCHEMA,
-    eager_input_streaming: true,
   },
   {
     name: "get_video_transcript",
@@ -70,20 +71,17 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       properties: { production_item_id: { type: "string" } },
       required: ["production_item_id"],
     },
-    eager_input_streaming: true,
   },
   {
     name: "list_recent_case_studies",
     description:
       "List Starter Story case studies (founder interviews + breakdowns) published on starterstory.com in the window: title, URL, summary, business. Use web_fetch on a URL to read the full case study.",
     input_schema: DAYS_SCHEMA,
-    eager_input_streaming: true,
   },
   {
     name: "list_lead_magnets",
     description: "Starter Story's lead magnets (free guides/tools) with landing-page URLs, for CTAs when the Skill calls for one.",
     input_schema: { type: "object", properties: {} },
-    eager_input_streaming: true,
   },
   {
     name: "submit_newsletter",
@@ -112,7 +110,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       },
       required: ["subject_options", "subject", "preview_text", "body_markdown", "sources"],
     },
-    eager_input_streaming: true,
   },
   {
     type: "web_fetch_20260209",
@@ -225,7 +222,13 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
   let nudged = false;
 
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
-    const stream = client.beta.messages.stream(
+    // Non-streaming on purpose: on the worker dyno Sentry's Anthropic
+    // integration (src/jobs/instrument.ts) swaps a streamed response for its
+    // own async generator, which has no `.controller`, and the SDK's
+    // MessageStream helper crashes reading `controller.signal` after the
+    // last event. An explicit timeout also skips the SDK's "use streaming
+    // for large max_tokens" guard.
+    const message = await client.beta.messages.create(
       {
         model: NEWSLETTER_MODEL,
         max_tokens: MAX_TOKENS,
@@ -237,9 +240,8 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
         tools: TOOLS,
         messages,
       },
-      { signal: args.signal },
+      { signal: args.signal, timeout: REQUEST_TIMEOUT_MS },
     );
-    const message = await stream.finalMessage();
 
     if (message.stop_reason === "refusal") {
       throw new NewsletterAgentError(`model refused (${message.stop_details?.category ?? "unknown"})`);

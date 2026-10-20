@@ -198,7 +198,7 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
                 <span className="font-medium">{d.formatName}</span>
                 <StatusChip status={d.status} />
               </div>
-              <span className="line-clamp-2 text-muted-foreground">{d.subject ?? "Drafting…"}</span>
+              <span className="line-clamp-2 text-muted-foreground">{d.subject ?? (d.status === "failed" ? "Draft failed" : "Drafting…")}</span>
               <span className="text-xs text-muted-foreground">
                 {fmtDate(d.windowStart)} – {fmtDate(d.windowEnd)} · created {fmtDate(d.createdAt)}
                 {d.hubspotStatus === "created" && " · in HubSpot"}
