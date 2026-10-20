@@ -59,7 +59,28 @@ export function emailEditUrl(emailId: string): string {
   return `https://app.hubspot.com/email/${HUBSPOT_PORTAL_ID}/edit/${emailId}/content`;
 }
 
-async function hubspotFetch<T>(path: string, init: { method: string; body?: unknown }): Promise<T> {
+/**
+ * The ONLY HubSpot calls this client may make. The portal-53 key's
+ * `marketing-email` scope can also send/publish (HubSpot has no narrower
+ * scope), so the guarantee that Hub & Spoke never sends, publishes, deletes,
+ * or reaches contacts/CRM lives here: anything not listed is refused before a
+ * request leaves the server. Adding an entry here is a scope change — get it
+ * reviewed. See docs/automation.md → hubspot-newsletter-create-draft.
+ */
+const ALLOWED_CALLS: ReadonlyArray<{ method: string; path: RegExp; why: string }> = [
+  { method: "GET", path: /^\/marketing\/v3\/emails\/\d+$/, why: "read an email (the template, or the clone we just made)" },
+  { method: "POST", path: /^\/marketing\/v3\/emails\/clone$/, why: "copy the template into a new unsent email" },
+  { method: "PATCH", path: /^\/marketing\/v3\/emails\/\d+$/, why: "fill in the clone's name, subject and body" },
+];
+
+/** Throws unless (method, path) is on the allowlist. Exported for tests. */
+export function assertAllowedHubspotCall(method: string, path: string): void {
+  const ok = ALLOWED_CALLS.some((c) => c.method === method.toUpperCase() && c.path.test(path));
+  if (!ok) throw new HubspotEmailError(403, `Blocked HubSpot call ${method} ${path}: not on the allowlist`);
+}
+
+async function hubspotFetch<T>(path: string, init: { method: "GET" | "POST" | "PATCH"; body?: unknown }): Promise<T> {
+  assertAllowedHubspotCall(init.method, path);
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: init.method,
@@ -126,6 +147,10 @@ export async function createDraftEmailFromTemplate(args: {
   // Re-read rather than trusting the clone response to carry full content.
   const full = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, { method: "GET" });
   const widgets = buildBodyWidgetPatch(full, args.bodyHtml);
+  // Belt and braces: only ever edit the email this call just created, never the template.
+  if (String(clone.id) === String(args.templateEmailId)) {
+    throw new HubspotEmailError(500, "clone returned the template's own id; refusing to edit the template");
+  }
   await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, {
     method: "PATCH",
     body: { name: args.name, subject: args.subject, content: { widgets } },

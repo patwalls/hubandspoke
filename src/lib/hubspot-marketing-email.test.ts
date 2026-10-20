@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BODY_MARKER, buildBodyWidgetPatch, templateEmailIdFor } from "./hubspot-marketing-email";
+import { BODY_MARKER, assertAllowedHubspotCall, buildBodyWidgetPatch, templateEmailIdFor } from "./hubspot-marketing-email";
 
 describe("templateEmailIdFor", () => {
   const env = { HUBSPOT_NEWSLETTER_TEMPLATE_EMAILS: JSON.stringify({ "Daily Seinfeld": "111", "Sunday Breakfast": 222 }) };
@@ -36,5 +36,28 @@ describe("buildBodyWidgetPatch", () => {
     expect(() => buildBodyWidgetPatch({ id: "9", content: { widgets: { a: { body: { html: "x" } } } } }, "y")).toThrow(
       /has no rich-text module/,
     );
+  });
+});
+
+describe("assertAllowedHubspotCall", () => {
+  it("allows only reading, cloning and editing marketing emails", () => {
+    expect(() => assertAllowedHubspotCall("GET", "/marketing/v3/emails/123")).not.toThrow();
+    expect(() => assertAllowedHubspotCall("post", "/marketing/v3/emails/clone")).not.toThrow();
+    expect(() => assertAllowedHubspotCall("PATCH", "/marketing/v3/emails/123")).not.toThrow();
+  });
+
+  it("blocks sending, publishing, deleting and anything outside marketing emails", () => {
+    for (const [method, path] of [
+      ["POST", "/marketing/v3/emails/123/publish"],
+      ["POST", "/marketing/v3/emails/123/unpublish"],
+      ["POST", "/marketing/v3/transactional/single-email/send"],
+      ["DELETE", "/marketing/v3/emails/123"],
+      ["GET", "/crm/v3/objects/contacts"],
+      ["GET", "/marketing/v3/emails"],
+      ["PATCH", "/marketing/v3/emails/123/draft"],
+      ["GET", "/marketing/v3/emails/123?archived=true"],
+    ]) {
+      expect(() => assertAllowedHubspotCall(method, path), `${method} ${path}`).toThrow(/Blocked HubSpot call/);
+    }
   });
 });
