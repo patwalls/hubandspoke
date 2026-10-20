@@ -67,6 +67,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1",
     "sanitize-html": "^2.18.0",
     "satori": "^0.35.0",

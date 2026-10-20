@@ -1,9 +1,15 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
-import { ChevronRightIcon } from "lucide-react";
+import {
+  ChartColumnStacked,
+  ChartLine,
+  ChevronRightIcon,
+  LayoutGrid,
+  Table2,
+} from "lucide-react";
 import type { MetricData, Period, PrimaryRowMeta } from "@/types";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { PlatformIcon } from "@/components/ui/platform-icon";
@@ -12,13 +18,48 @@ import { BrandAvatar } from "@/components/ui/brand-avatar";
 import { PLATFORM_META, POST_TYPE_SHORT_LABEL, toPlatform } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { cn } from "@/lib/utils";
+import { capSeries, inProgressIndex } from "@/lib/period-chart";
+import {
+  PeriodChart,
+  formatPeriodRange,
+  type ChartSeries,
+  type ChartView,
+} from "./period-chart";
 
-function formatPeriodTooltip(p: Period): string {
-  const s = new Date(p.start + "T00:00:00");
-  const e = new Date(p.end + "T00:00:00");
-  if (p.start === p.end) return format(s, "EEEE, MMMM do, yyyy");
-  return `${format(s, "EEEE, MMMM do")} to ${format(e, "EEEE, MMMM do")}`;
+type TableView = "table" | ChartView;
+
+// Last-picked view, per browser (shared by every card on the page). The
+// server snapshot is "table", so SSR and hydration agree before storage is read.
+const VIEW_STORAGE_KEY = "hs:period-table-view";
+const VIEWS: TableView[] = ["table", "lines", "multiples", "stacked"];
+const viewListeners = new Set<() => void>();
+function readView(): TableView {
+  try {
+    const saved = localStorage.getItem(VIEW_STORAGE_KEY) as TableView | null;
+    if (saved && VIEWS.includes(saved)) return saved;
+  } catch {}
+  return "table";
 }
+function subscribeView(listener: () => void) {
+  viewListeners.add(listener);
+  return () => {
+    viewListeners.delete(listener);
+  };
+}
+function setView(v: TableView) {
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, v);
+  } catch {}
+  for (const l of viewListeners) l();
+}
+
+// What one "Per …" small-multiple tile stands for, by grouping.
+const GROUP_NOUN: Record<GroupDim, string> = {
+  brand: "brand",
+  platform: "platform",
+  account: "account",
+  postType: "post type",
+};
 
 type CellFilter =
   | { kind: "platform"; platform: string }
@@ -118,6 +159,7 @@ export function PeriodTable({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     () => new Set(),
   );
+  const view = useSyncExternalStore(subscribeView, readView, () => "table" as const);
   const rangeStart = periods[0]?.start ?? "";
   const rangeEnd = periods[periods.length - 1]?.end ?? "";
   const linkable = Boolean(brand);
@@ -477,11 +519,99 @@ export function PeriodTable({
     );
   };
 
+  // Stacking a ratio (views per post) would add averages together.
+  const effectiveView: TableView =
+    view === "stacked" && activeTab === "viewsPerPost" ? "lines" : view;
+
+  // Chart series = the table's parent rows (or flat rows), with the same
+  // per-period sums the table shows. Built only when a chart is on screen.
+  const chart = (() => {
+    if (effectiveView === "table") return null;
+    type Base = Omit<ChartSeries, "color"> & { rows: string[] };
+    const withValues = (key: string, label: string, childRows: string[], icon?: ReactNode): Base => ({
+      key,
+      label,
+      icon,
+      rows: childRows,
+      values: periods.map((p) => sumPeriodForRows(childRows, p.label, activeTab)),
+      total: sumRangeForRows(childRows, activeTab),
+    });
+    const base: Base[] = (
+      groups
+        ? [
+            ...groups.groups.map((g) => withValues(g.key, g.label, g.rows, groupParentIcon(g.meta))),
+            ...groups.misc.map((r) => withValues(r, r, [r])),
+          ]
+        : rows.map((r) => withValues(r, r, [r]))
+    ).filter((s) => s.total > 0 || s.values.some((v) => v > 0));
+
+    const series: ChartSeries[] =
+      effectiveView === "multiples"
+        ? base.map((s) => ({ ...s, color: "var(--viz-1)" }))
+        : capSeries(base, (rest) =>
+            withValues("__other", `Other (${rest.length})`, rest.flatMap((s) => s.rows)),
+          ).map((s, i) => ({
+            ...s,
+            color: s.key === "__other" ? "var(--viz-other)" : `var(--viz-${i + 1})`,
+          }));
+    return {
+      series,
+      partialIndex: inProgressIndex(periods, format(new Date(), "yyyy-MM-dd")),
+      periodTotals:
+        activeTab === "viewsPerPost" ? undefined : periods.map((p) => periodTotals[p.label]),
+    };
+  })();
+
+  const noun = rowMeta ? GROUP_NOUN[groupBy] : filterKey;
+  const viewOptions: { key: TableView; label: string; icon: ReactNode; disabled?: boolean }[] = [
+    { key: "table", label: "Table", icon: <Table2 className="size-3.5" /> },
+    { key: "lines", label: "Lines", icon: <ChartLine className="size-3.5" /> },
+    { key: "multiples", label: `Per ${noun}`, icon: <LayoutGrid className="size-3.5" /> },
+    {
+      key: "stacked",
+      label: "Stacked",
+      icon: <ChartColumnStacked className="size-3.5" />,
+      disabled: activeTab === "viewsPerPost",
+    },
+  ];
+
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+      <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+        </div>
+        <div
+          role="radiogroup"
+          aria-label="View"
+          className="inline-flex items-center rounded-lg border border-border bg-accent/40 p-0.5"
+        >
+          {viewOptions.map((o) => {
+            const active = effectiveView === o.key;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                disabled={o.disabled}
+                title={o.disabled ? "Views per post is an average, so it can't stack" : o.label}
+                onClick={() => setView(o.key)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all",
+                  active
+                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                    : "text-muted-foreground hover:text-foreground",
+                  o.disabled && "opacity-40 cursor-not-allowed hover:text-muted-foreground",
+                )}
+              >
+                {o.icon}
+                <span className="hidden sm:inline">{o.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="px-3 sm:px-5 py-2 border-b border-border flex gap-1 bg-accent/30 overflow-x-auto">
@@ -500,6 +630,16 @@ export function PeriodTable({
         ))}
       </div>
 
+      {chart ? (
+        <PeriodChart
+          view={effectiveView as ChartView}
+          series={chart.series}
+          periods={periods}
+          partialIndex={chart.partialIndex}
+          periodTotals={chart.periodTotals}
+          formatValue={(v) => formatValue(v, activeTab)}
+        />
+      ) : (
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
@@ -510,7 +650,7 @@ export function PeriodTable({
               {periods.map((p) => (
                 <th
                   key={p.label}
-                  title={formatPeriodTooltip(p)}
+                  title={formatPeriodRange(p)}
                   className="px-2 py-2.5 text-center font-medium text-muted-foreground min-w-[52px] font-mono uppercase tracking-wider text-[10px] cursor-help"
                 >
                   {p.label}
@@ -604,6 +744,7 @@ export function PeriodTable({
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
