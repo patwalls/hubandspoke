@@ -11,10 +11,12 @@
  */
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "@/lib/utils";
+import { ColorPicker } from "@/components/editor/color-picker";
 import { FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
 import type { EditorWord } from "@/lib/clip-editor/words";
 import type { DesignArrowElement, DesignCaptionsElement, DesignChannelElement, DesignDoc, DesignElement, DesignImageElement, DesignPage, DesignSpan, DesignStatCardElement, DesignTextElement, DesignVideoElement, Rgba } from "@/lib/design-editor/doc";
 import { layoutChannel, type ChannelInfo } from "@/lib/design-editor/channel";
+import { colorsInDesignDoc } from "@/lib/design-editor/colors";
 import { layoutStatCard, sparklineSvg, svgDataUrl } from "@/lib/design-editor/stat-card";
 import { arrowBendPoint, arrowEnds, arrowFromEnds, arrowSvg, bendFromPoint, snapAngle } from "@/lib/design-editor/arrow";
 import { pageVideo } from "@/lib/design-editor/doc";
@@ -798,17 +800,39 @@ function TextEditor({ el, onCommit }: { el: DesignTextElement; onCommit: (spans:
     ref.current?.select();
   }, []);
 
+  const doc = useDesign((s) => s.doc);
+  const usedColors = useMemo(() => colorsInDesignDoc(doc), [doc]);
+  // The custom-colour picker takes focus from the textarea, so remember the
+  // selection when it opens and don't treat that blur as leaving the editor.
+  const pickerOpen = useRef(false);
+  const pickerRange = useRef<[number, number]>([0, 0]);
+  const [pickerValue, setPickerValue] = useState(el.style.color);
+
   const commit = () => onCommit(rehighlight(text, colored));
-  const paint = (color: string | null) => {
+  const selectedPhrase = (start: number, end: number) => text.slice(start, end).trim();
+  const paint = (color: string | null, range?: [number, number]) => {
     const ta = ref.current;
     if (!ta) return;
-    const sel = text.slice(ta.selectionStart, ta.selectionEnd).trim();
+    const sel = range ? selectedPhrase(...range) : selectedPhrase(ta.selectionStart, ta.selectionEnd);
     if (!sel) return;
     setColored((prev) => {
       const rest = prev.filter((c) => c.phrase.toLowerCase() !== sel.toLowerCase());
       return color ? [...rest, { phrase: sel, color }] : rest;
     });
-    ta.focus();
+    if (!range) ta.focus();
+  };
+  const onPickerOpenChange = (open: boolean) => {
+    const ta = ref.current;
+    if (!ta) return;
+    pickerOpen.current = open;
+    if (open) {
+      pickerRange.current = [ta.selectionStart, ta.selectionEnd];
+      const sel = selectedPhrase(ta.selectionStart, ta.selectionEnd).toLowerCase();
+      setPickerValue(colored.find((c) => c.phrase.toLowerCase() === sel)?.color ?? el.style.color);
+    } else {
+      ta.focus();
+      ta.setSelectionRange(...pickerRange.current);
+    }
   };
 
   return (
@@ -817,7 +841,9 @@ function TextEditor({ el, onCommit }: { el: DesignTextElement; onCommit: (spans:
         ref={ref}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onBlur={commit}
+        onBlur={() => {
+          if (!pickerOpen.current) commit();
+        }}
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === "Escape") onCommit(el.spans);
@@ -848,6 +874,17 @@ function TextEditor({ el, onCommit }: { el: DesignTextElement; onCommit: (spans:
             {label}
           </button>
         ))}
+        <ColorPicker
+          value={pickerValue}
+          onChange={(hex) => {
+            setPickerValue(hex);
+            paint(hex, pickerRange.current);
+          }}
+          onOpenChange={onPickerOpenChange}
+          usedColors={usedColors}
+          label="Custom colour"
+          className="px-2 py-1 text-[20px]"
+        />
         <button type="button" onClick={() => paint(null)} className="rounded border border-border px-3 py-1">
           Plain
         </button>

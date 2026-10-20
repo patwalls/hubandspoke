@@ -28,6 +28,7 @@ export const BRAND_PALETTE: Array<{ hex: string; name: string }> = [
   { hex: "#FF3B3B", name: "Highlight red" },
   { hex: "#22E07A", name: "Highlight green" },
   { hex: "#FFE14D", name: "Highlight yellow" },
+  { hex: "#FF5C35", name: "HubSpot orange" },
   { hex: "#6B5BFF", name: "Pill purple" },
   { hex: "#C7891E", name: "Notes accent" },
   { hex: "#FF0000", name: "YouTube red" },
@@ -80,6 +81,7 @@ export function ColorPicker({
   usedColors = [],
   label,
   className,
+  onOpenChange,
 }: {
   value: string;
   onChange: (hex: string) => void;
@@ -88,6 +90,8 @@ export function ColorPicker({
   /** Accessible name for the swatch button. */
   label?: string;
   className?: string;
+  /** Fires when the popover opens or closes. */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpenState] = useState(false);
   const [text, setText] = useState(value.toUpperCase());
@@ -103,6 +107,7 @@ export function ColorPicker({
   const setOpen = (o: boolean) => {
     if (o) setRecent(readRecent());
     setOpenState(o);
+    onOpenChange?.(o);
   };
 
   const current = normalizeColor(value) ?? "#000000";
