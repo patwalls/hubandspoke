@@ -43,6 +43,10 @@ interface PeriodChartProps {
   /** Per-period totals across every row, for the tooltip footer. Omitted
    *  for ratio metrics (views per post) where a sum means nothing. */
   periodTotals?: number[];
+  /** Every row combined (the table's Total row): a toggleable line on
+   *  Lines, a number on Stacked (the stack is the total), the first tile
+   *  on Per <group>. */
+  totalSeries?: ChartSeries;
   formatValue: (v: number) => string;
 }
 
@@ -80,8 +84,12 @@ function SeriesChart({
   periods,
   partialIndex,
   periodTotals,
+  totalSeries,
   formatValue,
 }: PeriodChartProps) {
+  // Off by default: the total dwarfs every series and flattens them.
+  const [showTotal, setShowTotal] = useState(false);
+  const totalLine = view === "lines" && showTotal ? totalSeries : undefined;
   const [hiddenKeys, setHidden] = useState<Set<string>>(() => new Set());
   // Toggles outlive a filter change; ignore keys that left the series, and
   // never let a new series set start fully hidden.
@@ -106,9 +114,14 @@ function SeriesChart({
             row[`s${n}p`] = i >= partialIndex - 1 ? v : null;
           }
         });
+        if (totalSeries) {
+          const v = totalSeries.values[i] ?? 0;
+          row.t = partialIndex === i ? null : v;
+          if (partialIndex !== null) row.tp = i >= partialIndex - 1 ? v : null;
+        }
         return row;
       }),
-    [periods, series, partialIndex, view],
+    [periods, series, partialIndex, view, totalSeries],
   );
 
   const toggle = (key: string) =>
@@ -135,7 +148,7 @@ function SeriesChart({
           <ChartTooltip
             period={periods[i]}
             partial={i === partialIndex}
-            entries={visible.map((s) => ({
+            entries={[...(totalLine ? [totalLine] : []), ...visible].map((s) => ({
               key: s.key,
               label: s.label,
               color: s.color,
@@ -176,13 +189,50 @@ function SeriesChart({
 
   return (
     <div className="px-3 sm:px-5 pt-4 pb-3">
-      <Legend series={series} hidden={hidden} onToggle={toggle} formatValue={formatValue} />
+      <Legend
+        series={series}
+        hidden={hidden}
+        onToggle={toggle}
+        formatValue={formatValue}
+        total={
+          totalSeries && {
+            series: totalSeries,
+            // Stacked bars already add up to the total — no line to toggle.
+            on: view === "lines" ? showTotal : null,
+            onToggle: () => setShowTotal((v) => !v),
+          }
+        }
+      />
       <div style={{ height: CHART_HEIGHT }} className="mt-3 -ml-2">
         <ResponsiveContainer width="100%" height="100%">
           {view === "lines" ? (
             <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
               {axes}
               {tooltip}
+              {totalLine && [
+                <Line
+                  key="t"
+                  dataKey="t"
+                  stroke={totalLine.color}
+                  strokeWidth={2.5}
+                  dot={false}
+                  activeDot={{ r: 4, stroke: "var(--card)", strokeWidth: 2 }}
+                  isAnimationActive={false}
+                />,
+                partialIndex !== null && (
+                  <Line
+                    key="tp"
+                    dataKey="tp"
+                    stroke={totalLine.color}
+                    strokeWidth={2.5}
+                    strokeDasharray="3 4"
+                    strokeOpacity={0.7}
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
+                  />
+                ),
+              ]}
               {series.flatMap((s, n) =>
                 hidden.has(s.key)
                   ? []
@@ -262,14 +312,45 @@ function Legend({
   hidden,
   onToggle,
   formatValue,
+  total,
 }: {
   series: ChartSeries[];
   hidden: Set<string>;
   onToggle: (key: string) => void;
   formatValue: (v: number) => string;
+  /** `on: null` = show the number only (nothing to toggle). */
+  total?: { series: ChartSeries; on: boolean | null; onToggle: () => void };
 }) {
   return (
     <div className="flex flex-wrap gap-x-1 gap-y-1">
+      {total && (
+        <button
+          type="button"
+          onClick={total.on === null ? undefined : total.onToggle}
+          disabled={total.on === null}
+          aria-pressed={total.on ?? undefined}
+          title={total.on === null ? undefined : total.on ? "Hide the total line" : "Plot the total line"}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs transition-colors",
+            total.on !== null && "hover:bg-accent",
+            total.on && "bg-accent",
+          )}
+        >
+          {total.on !== null && (
+            <span
+              className="size-2.5 rounded-[3px] shrink-0"
+              style={{
+                background: total.on ? total.series.color : "transparent",
+                boxShadow: `inset 0 0 0 1.5px ${total.series.color}`,
+              }}
+            />
+          )}
+          <span className="font-semibold text-foreground">{total.series.label}</span>
+          <span className="tabular-nums font-semibold text-foreground">
+            {formatValue(total.series.total)}
+          </span>
+        </button>
+      )}
       {series.map((s) => {
         const off = hidden.has(s.key);
         return (
@@ -342,10 +423,14 @@ function ChartTooltip({
 // One tile per series, each on its own scale so a small brand's trend is as
 // readable as a big one's. Biggest first; the chip answers "is it growing?".
 
-function SmallMultiples({ series, periods, partialIndex, formatValue }: PeriodChartProps) {
+function SmallMultiples({ series, periods, partialIndex, totalSeries, formatValue }: PeriodChartProps) {
+  // The combined tile leads, then biggest first.
   const tiles = useMemo(
-    () => [...series].sort((a, b) => b.total - a.total),
-    [series],
+    () => [
+      ...(totalSeries && series.length > 1 ? [totalSeries] : []),
+      ...[...series].sort((a, b) => b.total - a.total),
+    ],
+    [series, totalSeries],
   );
   return (
     <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 sm:p-5 lg:grid-cols-3 xl:grid-cols-4">

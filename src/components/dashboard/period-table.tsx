@@ -523,6 +523,8 @@ export function PeriodTable({
   const effectiveView: TableView =
     view === "stacked" && activeTab === "viewsPerPost" ? "lines" : view;
 
+  const noun = rowMeta ? GROUP_NOUN[groupBy] : filterKey;
+
   // Chart series = the table's parent rows (or flat rows), with the same
   // per-period sums the table shows. Built only when a chart is on screen.
   const chart = (() => {
@@ -559,10 +561,17 @@ export function PeriodTable({
       partialIndex: inProgressIndex(periods, format(new Date(), "yyyy-MM-dd")),
       periodTotals:
         activeTab === "viewsPerPost" ? undefined : periods.map((p) => periodTotals[p.label]),
+      // Everything combined — the table's Total row, as a series.
+      totalSeries: {
+        key: "__total",
+        label: `All ${noun}s`,
+        values: periods.map((p) => periodTotals[p.label] ?? 0),
+        total: grandTotal,
+        color: "var(--foreground)",
+      },
     };
   })();
 
-  const noun = rowMeta ? GROUP_NOUN[groupBy] : filterKey;
   const viewOptions: { key: TableView; label: string; icon: ReactNode; disabled?: boolean }[] = [
     { key: "table", label: "Table", icon: <Table2 className="size-3.5" /> },
     { key: "lines", label: "Lines", icon: <ChartLine className="size-3.5" /> },
@@ -637,6 +646,7 @@ export function PeriodTable({
           periods={periods}
           partialIndex={chart.partialIndex}
           periodTotals={chart.periodTotals}
+          totalSeries={chart.totalSeries}
           formatValue={(v) => formatValue(v, activeTab)}
         />
       ) : (

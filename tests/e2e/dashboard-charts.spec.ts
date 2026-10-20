@@ -61,3 +61,24 @@ test("year to date on /all loads and shows an updating state on filter change", 
   await expect(page.getByText("Updating report…")).toHaveCount(0, { timeout: 45_000 });
   await expect(page.getByText("Failed to load dashboard data")).toHaveCount(0);
 });
+
+/** The charts carry the table's Total row: an "All brands" chip that plots
+ *  a total line on Lines, and a leading combined tile on Per brand. */
+test("charts show an all-brands total", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto("/all?groupBy=brand");
+  const card = page
+    .locator("div.rounded-lg", { has: page.getByText(/Content Production \(by/) })
+    .last();
+  await expect(card).toBeVisible({ timeout: 45_000 });
+  await card.getByRole("radio", { name: "Lines" }).click();
+  const chip = card.getByRole("button", { name: /^All brands/ });
+  await expect(chip).toHaveAttribute("aria-pressed", "false");
+  const lines = await card.locator(".recharts-line").count();
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  await expect(card.locator(".recharts-line")).not.toHaveCount(lines);
+
+  await card.getByRole("radio", { name: /^Per / }).click();
+  await expect(card.getByText("All brands", { exact: true })).toBeVisible();
+});
