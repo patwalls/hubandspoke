@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { formats, newsletterDrafts } from "@/lib/db/schema";
 import { createDraftEmailFromTemplate, templateEmailIdFor } from "@/lib/hubspot-marketing-email";
 import { markdownToEmailHtml } from "@/lib/newsletter-email-html";
+import { SPECIAL_MARKER, composeBody } from "@/lib/services/newsletter-drafter/special-compose";
 
 export interface HubspotNewsletterCreateDraftPayload {
   newsletterDraftId: string;
@@ -23,6 +24,8 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       status: newsletterDrafts.status,
       subject: newsletterDrafts.subject,
       bodyMarkdown: newsletterDrafts.bodyMarkdown,
+      specialCopy: newsletterDrafts.specialCopy,
+      specialSource: newsletterDrafts.specialSource,
       hubspotEmailId: newsletterDrafts.hubspotEmailId,
       createdAt: newsletterDrafts.createdAt,
       formatName: formats.name,
@@ -44,6 +47,8 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
   };
 
   if (row.status !== "ready" || !row.subject || !row.bodyMarkdown) return fail("draft is not ready");
+  const body = composeBody(row.bodyMarkdown, { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null });
+  if (body.includes(SPECIAL_MARKER)) return fail("The Special has no copy yet — pull it from Asana or fill it in first");
   const templateEmailId = templateEmailIdFor(row.formatName);
   if (!templateEmailId) return fail(`no HubSpot template email configured for "${row.formatName}" (HUBSPOT_NEWSLETTER_TEMPLATE_EMAILS)`);
 
@@ -52,7 +57,7 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       templateEmailId,
       name: `${row.formatName} — ${row.subject} (${new Date().toISOString().slice(0, 10)})`,
       subject: row.subject,
-      bodyHtml: markdownToEmailHtml(row.bodyMarkdown),
+      bodyHtml: markdownToEmailHtml(body),
     });
     await db
       .update(newsletterDrafts)

@@ -24,6 +24,8 @@ const PatchBody = z
     subject: z.string().max(200).optional(),
     previewText: z.string().max(300).optional(),
     bodyMarkdown: z.string().max(100_000).optional(),
+    specialCopy: z.string().max(20_000).optional(),
+    sendDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   })
   .strict();
 

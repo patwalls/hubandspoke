@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts, type NewsletterDraftSource } from "@/lib/db/schema";
 import { NEWSLETTER_MODEL, runNewsletterAgent, type NewsletterSubmission } from "./agent";
+import { findSpecial } from "./promo";
 import { getPastIssues } from "./sources";
 
 export type NewsletterDraftRunResult =
@@ -38,6 +39,7 @@ export async function runNewsletterDraft(
       windowStart: newsletterDrafts.windowStart,
       windowEnd: newsletterDrafts.windowEnd,
       notes: newsletterDrafts.notes,
+      sendDate: newsletterDrafts.sendDate,
       formatName: formats.name,
       formatInstructions: formats.instructions,
     })
@@ -56,7 +58,11 @@ export async function runNewsletterDraft(
     .limit(1);
 
   try {
-    const pastIssues = await getPastIssues(row.brand, row.formatName);
+    const [pastIssues, special] = await Promise.all([
+      getPastIssues(row.brand, row.formatName),
+      findSpecial(row.formatName, row.sendDate),
+    ]);
+    const sponsored = special?.ok ? special : null;
     const result = await runNewsletterAgent({
       brand: row.brand,
       brandLabel: brand?.label ?? row.brand,
@@ -66,6 +72,8 @@ export async function runNewsletterDraft(
       pastIssues,
       window: { start: row.windowStart, end: row.windowEnd },
       notes: row.notes,
+      sendDate: row.sendDate,
+      sponsoredCopy: sponsored?.copy ?? null,
       signal: opts.signal,
     });
     const s = result.submission;
@@ -79,6 +87,11 @@ export async function runNewsletterDraft(
         previewText: s.preview_text,
         bodyMarkdown: s.body_markdown,
         sources,
+        specialCopy: sponsored?.copy ?? null,
+        specialOriginal: sponsored?.copy ?? null,
+        specialMode: sponsored ? "verbatim" : null,
+        specialSource: sponsored?.source ?? null,
+        specialError: special && !special.ok ? special.error : null,
         model: result.model,
         error: null,
         updatedAt: new Date(),

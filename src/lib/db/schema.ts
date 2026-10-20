@@ -2506,6 +2506,20 @@ export type NewsletterDraftSource =
   | { kind: "case_study"; url: string; title: string | null };
 
 /**
+ * Where a newsletter draft's sponsored section ("The Special" in Sunday
+ * Breakfast) came from: the promo-calendar Asana task for the send date.
+ */
+export interface NewsletterSpecialSource {
+  taskGid: string;
+  taskName: string;
+  taskUrl: string;
+  landingUrl: string | null;
+  /** "subtask" = the task's "Final Newsletter Copy" subtask; "focus_field" = the
+   *  form's "What should we focus on in the ad copy?" answer (pilot placeholder). */
+  copyFrom: "subtask" | "focus_field";
+}
+
+/**
  * Newsletter drafter (feature flag `newsletterDrafter`, Starter Story pilot).
  * An agent reads a window of published videos + starterstory.com case studies
  * and drafts one issue in a newsletter format's voice. Kept OUT of
@@ -2534,6 +2548,17 @@ export const newsletterDrafts = pgTable(
     bodyMarkdown: text("body_markdown"),
     /** Editor steer for this issue, e.g. the offer to pitch ("iOS Bootcamp, enrollment closes Fri"). */
     notes: text("notes"),
+    /** The date the issue goes out — picks the promo-calendar task for The Special. */
+    sendDate: date("send_date"),
+    /** The Special as it appears in the issue (verbatim Asana copy, a rewrite, or an edit). */
+    specialCopy: text("special_copy"),
+    /** The Asana copy exactly as pulled, so "Use as written" can restore it. */
+    specialOriginal: text("special_original"),
+    /** verbatim | rewrite */
+    specialMode: text("special_mode"),
+    specialSource: jsonb("special_source").$type<NewsletterSpecialSource>(),
+    /** Why no promo was attached (no task for the date, Asana error) — shown on the page. */
+    specialError: text("special_error"),
     model: text("model"),
     error: text("error"),
     hubspotEmailId: text("hubspot_email_id"),

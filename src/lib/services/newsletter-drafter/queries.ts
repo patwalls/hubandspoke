@@ -70,6 +70,12 @@ export async function getNewsletterDraft(id: string) {
       previewText: newsletterDrafts.previewText,
       bodyMarkdown: newsletterDrafts.bodyMarkdown,
       notes: newsletterDrafts.notes,
+      sendDate: newsletterDrafts.sendDate,
+      specialCopy: newsletterDrafts.specialCopy,
+      specialOriginal: newsletterDrafts.specialOriginal,
+      specialMode: newsletterDrafts.specialMode,
+      specialSource: newsletterDrafts.specialSource,
+      specialError: newsletterDrafts.specialError,
       model: newsletterDrafts.model,
       error: newsletterDrafts.error,
       hubspotEmailId: newsletterDrafts.hubspotEmailId,
@@ -88,6 +94,7 @@ export async function createNewsletterDraft(args: {
   formatId: string;
   days?: number | null;
   notes?: string | null;
+  sendDate?: string | null;
   userId: string | null;
 }): Promise<{ id: string; brand: string } | null> {
   const [format] = await db
@@ -106,6 +113,7 @@ export async function createNewsletterDraft(args: {
       windowStart: w.start,
       windowEnd: w.end,
       notes: args.notes?.trim() || null,
+      sendDate: args.sendDate ?? null,
       createdByUserId: args.userId,
     })
     .returning({ id: newsletterDrafts.id });

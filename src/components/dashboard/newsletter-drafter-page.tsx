@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
-import type { NewsletterDraftSource } from "@/lib/db/schema";
+import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
+import { composeBody } from "@/lib/services/newsletter-drafter/special-compose";
 
 interface FormatOption {
   id: string;
@@ -45,9 +46,27 @@ interface DraftDetail extends DraftSummary {
   hubspotEmailUrl: string | null;
   hubspotError: string | null;
   notes: string | null;
+  sendDate: string | null;
+  specialCopy: string | null;
+  specialOriginal: string | null;
+  specialMode: "verbatim" | "rewrite" | null;
+  specialSource: NewsletterSpecialSource | null;
+  specialError: string | null;
 }
 
 const POLL_MS = 5_000;
+
+function localIsoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Sunday Breakfast goes out on the next Sunday; everything else defaults to tomorrow. */
+function defaultSendDate(formatName: string | undefined, now = new Date()): string {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (formatName?.trim().toLowerCase() === "sunday breakfast") d.setDate(d.getDate() + (7 - d.getDay() || 7));
+  else d.setDate(d.getDate() + 1);
+  return localIsoDate(d);
+}
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -74,6 +93,7 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [formatId, setFormatId] = useState<string>("");
   const [days, setDays] = useState<number>(7);
+  const [sendDate, setSendDate] = useState<string>("");
   const [notes, setNotes] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -106,7 +126,7 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
       const res = await fetch("/api/newsletter-drafts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formatId, days, notes: notes.trim() || null }),
+        body: JSON.stringify({ formatId, days, sendDate: sendDate || null, notes: notes.trim() || null }),
       });
       if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't start the draft");
       const { id } = (await res.json()) as { id: string };
@@ -121,6 +141,11 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
   }
 
   const selectedFormat = formats.find((f) => f.id === formatId);
+  // Re-default the send date whenever the format changes.
+  const selectedName = selectedFormat?.name;
+  useEffect(() => {
+    if (selectedName) setSendDate(defaultSendDate(selectedName));
+  }, [selectedName]);
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6">
@@ -148,6 +173,10 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
               </option>
             ))}
           </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">Send date</span>
+          <Input type="date" className="w-40" value={sendDate} onChange={(e) => setSendDate(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">Look back (days)</span>
@@ -224,6 +253,8 @@ function DraftPane({ id, onChanged }: { id: string; onChanged: () => Promise<voi
   const [subject, setSubject] = useState("");
   const [previewText, setPreviewText] = useState("");
   const [body, setBody] = useState("");
+  const [specialCopy, setSpecialCopy] = useState("");
+  const [specialBusy, setSpecialBusy] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -239,6 +270,7 @@ function DraftPane({ id, onChanged }: { id: string; onChanged: () => Promise<voi
         setSubject(d.subject ?? "");
         setPreviewText(d.previewText ?? "");
         setBody(d.bodyMarkdown ?? "");
+        setSpecialCopy(d.specialCopy ?? "");
       }
       return d;
     });
@@ -262,8 +294,11 @@ function DraftPane({ id, onChanged }: { id: string; onChanged: () => Promise<voi
   const dirty = useMemo(
     () =>
       !!draft &&
-      (subject !== (draft.subject ?? "") || previewText !== (draft.previewText ?? "") || body !== (draft.bodyMarkdown ?? "")),
-    [draft, subject, previewText, body],
+      (subject !== (draft.subject ?? "") ||
+        previewText !== (draft.previewText ?? "") ||
+        body !== (draft.bodyMarkdown ?? "") ||
+        specialCopy !== (draft.specialCopy ?? "")),
+    [draft, subject, previewText, body, specialCopy],
   );
 
   async function save() {
@@ -273,7 +308,7 @@ function DraftPane({ id, onChanged }: { id: string; onChanged: () => Promise<voi
       const res = await fetch(`/api/newsletter-drafts/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, previewText, bodyMarkdown: body }),
+        body: JSON.stringify({ subject, previewText, bodyMarkdown: body, specialCopy }),
       });
       if (!res.ok) throw new Error("Couldn't save");
       const { draft: d } = (await res.json()) as { draft: DraftDetail };
@@ -284,6 +319,31 @@ function DraftPane({ id, onChanged }: { id: string; onChanged: () => Promise<voi
       setMessage((e as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function specialAction(action: "verbatim" | "rewrite" | "refresh") {
+    if (dirty && !window.confirm("You have unsaved edits. Discard them and continue?")) return;
+    setSpecialBusy(action);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/newsletter-drafts/${id}/special`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { draft?: DraftDetail; error?: string };
+      if (!res.ok || !json.draft) throw new Error(json.error ?? "Couldn't update The Special");
+      const d = json.draft;
+      setDraft(d);
+      setSubject(d.subject ?? "");
+      setPreviewText(d.previewText ?? "");
+      setBody(d.bodyMarkdown ?? "");
+      setSpecialCopy(d.specialCopy ?? "");
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setSpecialBusy(null);
     }
   }
 
@@ -340,6 +400,7 @@ function DraftPane({ id, onChanged }: { id: string; onChanged: () => Promise<voi
         <div className="text-sm text-muted-foreground">
           {draft.formatName} · {fmtDate(draft.windowStart)} – {fmtDate(draft.windowEnd)}
           {draft.model && ` · ${draft.model}`}
+          {draft.sendDate && <div className="mt-1 text-xs">Sends {draft.sendDate}</div>}
           {draft.notes && <div className="mt-1 text-xs">Notes: {draft.notes}</div>}
         </div>
         <div className="flex items-center gap-2">
@@ -421,11 +482,67 @@ function DraftPane({ id, onChanged }: { id: string; onChanged: () => Promise<voi
                 hr: () => <hr className="my-4" />,
               }}
             >
-              {body}
+              {composeBody(body, { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null })}
             </ReactMarkdown>
           </div>
         </div>
       </div>
+
+      {(draft.specialSource || draft.specialError) && (
+        <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-col gap-0.5">
+              <span className="font-medium">The Special (from Asana)</span>
+              {draft.specialSource ? (
+                <a className="text-xs text-primary underline" href={draft.specialSource.taskUrl} target="_blank" rel="noreferrer">
+                  {draft.specialSource.taskName}
+                </a>
+              ) : null}
+              {draft.specialSource?.copyFrom === "focus_field" && (
+                <span className="text-xs text-amber-700 dark:text-amber-300">
+                  Placeholder: using the task&apos;s &quot;ad copy focus&quot; answer. Add a &quot;Final Newsletter Copy&quot;
+                  subtask in Asana to pull the real copy.
+                </span>
+              )}
+              {draft.specialError && <span className="text-xs text-destructive">{draft.specialError}</span>}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {draft.specialSource && (
+                <>
+                  <Button
+                    size="sm"
+                    variant={draft.specialMode === "verbatim" ? "secondary" : "outline"}
+                    onClick={() => specialAction("verbatim")}
+                    disabled={specialBusy !== null}
+                  >
+                    {specialBusy === "verbatim" && <Loader2 className="animate-spin" />}
+                    Use as written
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={draft.specialMode === "rewrite" ? "secondary" : "outline"}
+                    onClick={() => specialAction("rewrite")}
+                    disabled={specialBusy !== null}
+                  >
+                    {specialBusy === "rewrite" && <Loader2 className="animate-spin" />}
+                    {draft.specialMode === "rewrite" ? "Rewrite again" : "Rewrite in our voice"}
+                  </Button>
+                </>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => specialAction("refresh")} disabled={specialBusy !== null}>
+                {specialBusy === "refresh" && <Loader2 className="animate-spin" />}
+                Refresh from Asana
+              </Button>
+            </div>
+          </div>
+          {draft.specialSource && (
+            <Textarea className="min-h-32 text-xs" value={specialCopy} onChange={(e) => setSpecialCopy(e.target.value)} />
+          )}
+          {draft.specialSource?.landingUrl && (
+            <span className="break-all text-xs text-muted-foreground">Landing page: {draft.specialSource.landingUrl}</span>
+          )}
+        </div>
+      )}
 
       {draft.sources.length > 0 && (
         <div className="flex flex-col gap-2 text-sm">

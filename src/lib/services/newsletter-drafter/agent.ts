@@ -16,6 +16,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { listLeadMagnets } from "@/lib/services/starter-story-content";
 import { getVideoTranscript, listRecentCaseStudies, listRecentVideos, type PastIssue } from "./sources";
+import { SPECIAL_MARKER } from "./special-compose";
 import { toolWindow, type DraftWindow } from "./window";
 
 export const NEWSLETTER_MODEL = "claude-opus-5-5";
@@ -129,6 +130,11 @@ export interface NewsletterAgentArgs {
   window: DraftWindow;
   /** Editor steer for this issue (e.g. the offer to pitch). */
   notes?: string | null;
+  /** YYYY-MM-DD the issue goes out. */
+  sendDate?: string | null;
+  /** The sponsored section's copy from the promo calendar. When set the agent
+   *  leaves SPECIAL_MARKER in its place instead of writing it. */
+  sponsoredCopy?: string | null;
   signal?: AbortSignal;
   client?: Anthropic;
 }
@@ -208,13 +214,29 @@ async function runClientTool(
 const REVIEW_PROMPT =
   "Draft received. Now review it critically against the format Skill (including any review checklist it contains) and the past issues: voice, structure, length, subject line quality, factual accuracy against the sources you read, and that every link is real. Fix anything that falls short, then call submit_newsletter again with the complete revised issue (all fields, not a diff).";
 
+function buildUserTurn(args: NewsletterAgentArgs): string {
+  const today = args.window.end.toISOString().slice(0, 10);
+  const parts = [
+    `Draft the next "${args.formatName}" issue. Today is ${today}.${args.sendDate ? ` The issue goes out on ${args.sendDate}.` : ""} The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${today}. Case studies are listed at ${CASE_STUDY_SITE}.`,
+  ];
+  if (args.sponsoredCopy?.trim()) {
+    parts.push(
+      `This issue's sponsored section (in Sunday Breakfast, "The Special") is supplied by the promo calendar — do NOT write it and do not pick a lead magnet for it. Write that section's heading where the Skill puts it, then on its own line exactly ${SPECIAL_MARKER} — the sponsor copy is inserted there. For context only (don't repeat or paraphrase it elsewhere):\n${args.sponsoredCopy.trim()}`,
+    );
+  }
+  if (args.notes?.trim()) {
+    parts.push(`Editor notes for this issue (follow them; they override the Skill where they conflict):\n${args.notes.trim()}`);
+  }
+  return parts.join("\n\n");
+}
+
 export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<NewsletterAgentResult> {
   const client = args.client ?? new Anthropic();
   const system = buildSystem(args);
   const messages: Anthropic.Beta.BetaMessageParam[] = [
     {
       role: "user",
-      content: `Draft the next "${args.formatName}" issue. Today is ${args.window.end.toISOString().slice(0, 10)}. The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${args.window.end.toISOString().slice(0, 10)}. Case studies are listed at ${CASE_STUDY_SITE}.${args.notes?.trim() ? `\n\nEditor notes for this issue (follow them; they override the Skill where they conflict):\n${args.notes.trim()}` : ""}`,
+      content: buildUserTurn(args),
     },
   ];
 
@@ -273,6 +295,15 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
             tool_use_id: use.id,
             is_error: true,
             content: `Invalid submission: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. Fix and resubmit.`,
+          });
+          continue;
+        }
+        if (args.sponsoredCopy?.trim() && !parsed.data.body_markdown.includes(SPECIAL_MARKER)) {
+          results.push({
+            type: "tool_result",
+            tool_use_id: use.id,
+            is_error: true,
+            content: `body_markdown must contain ${SPECIAL_MARKER} on its own line where the sponsored section goes. Resubmit.`,
           });
           continue;
         }

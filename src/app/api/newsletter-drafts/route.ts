@@ -22,6 +22,7 @@ const CreateBody = z.object({
   formatId: z.string().uuid(),
   days: z.number().int().min(1).max(31).nullable().optional(),
   notes: z.string().max(4000).nullable().optional(),
+  sendDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 
 /** Start a draft: insert a `drafting` row and enqueue the agent run. */
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
     formatId: parsed.data.formatId,
     days: parsed.data.days,
     notes: parsed.data.notes,
+    sendDate: parsed.data.sendDate,
     userId: (guard.session.user.id as string | undefined) ?? null,
   });
   if (!created) return NextResponse.json({ error: "Format not found" }, { status: 404 });
