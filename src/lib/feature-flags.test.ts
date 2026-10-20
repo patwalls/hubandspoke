@@ -63,7 +63,12 @@ describe("isFeatureEnabled", () => {
 
 describe("resolveFeatureFlags", () => {
   it("returns a boolean per flag and nothing else", () => {
-    expect(resolveFeatureFlags({ email: "sam@example.com" }, {})).toEqual({ clipEditor: true, designEditor: true });
-    expect(resolveFeatureFlags(null, {})).toEqual({ clipEditor: false, designEditor: false });
+    expect(resolveFeatureFlags({ email: "sam@example.com" }, {})).toEqual({
+      clipEditor: true,
+      designEditor: true,
+      newsletterDrafter: false,
+    });
+    expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterDrafter).toBe(true);
+    expect(resolveFeatureFlags(null, {})).toEqual({ clipEditor: false, designEditor: false, newsletterDrafter: false });
   });
 });

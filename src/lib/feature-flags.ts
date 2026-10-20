@@ -57,6 +57,17 @@ const FLAGS = {
     // only so flipping this back off restores the original dogfooders.
     everyone: true,
   },
+  /**
+   * Newsletter drafter (Starter Story pilot): an agent reads the week's
+   * published videos + recent starterstory.com case studies, drafts an issue
+   * in a newsletter format's voice, and can push it to HubSpot portal 53 as
+   * an unsent draft email. Drafts live in `newsletter_drafts`, never in
+   * production_items. See docs/features.md → "Newsletter drafter".
+   */
+  newsletterDrafter: {
+    emails: ["sam@starterstory.com"],
+    envVar: "FEATURE_NEWSLETTER_DRAFTER_EMAILS",
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FeatureFlag = keyof typeof FLAGS;

@@ -25,6 +25,11 @@ import { designTemplateImportTask, type DesignTemplateImportPayload } from "./de
 import { designScreensTask, type DesignScreensPayload } from "./design-screens";
 import { designStyleExtractTask, type DesignStyleExtractPayload } from "./design-style-extract";
 import { designDraftTask, type DesignDraftPayload } from "./design-draft";
+import { newsletterDraftTask, type NewsletterDraftPayload } from "./newsletter-draft";
+import {
+  hubspotNewsletterCreateDraftTask,
+  type HubspotNewsletterCreateDraftPayload,
+} from "./hubspot-newsletter-create-draft";
 import {
   diarizeTranscriptTask,
   type DiarizeTranscriptPayload,
@@ -132,6 +137,8 @@ export interface TaskPayloads {
   "design-screens": DesignScreensPayload;
   "design-style-extract": DesignStyleExtractPayload;
   "design-draft": DesignDraftPayload;
+  "newsletter-draft": NewsletterDraftPayload;
+  "hubspot-newsletter-create-draft": HubspotNewsletterCreateDraftPayload;
   "diarize-transcript": DiarizeTranscriptPayload;
   "descript-derivative-create": DescriptDerivativeCreatePayload;
   "transcribe-whisper": TranscribeWhisperPayload;
@@ -196,6 +203,8 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "design-screens": designScreensTask,
   "design-style-extract": designStyleExtractTask,
   "design-draft": designDraftTask,
+  "newsletter-draft": newsletterDraftTask,
+  "hubspot-newsletter-create-draft": hubspotNewsletterCreateDraftTask,
   "diarize-transcript": diarizeTranscriptTask,
   "descript-derivative-create": descriptDerivativeCreateTask,
   "transcribe-whisper": transcribeWhisperTask,

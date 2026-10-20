@@ -2499,3 +2499,51 @@ export const brandLogos = pgTable(
   },
   (table) => [index("brand_logos_brand_idx").on(table.brand)],
 );
+
+/** One source the newsletter drafter used — a video row or a case-study page. */
+export type NewsletterDraftSource =
+  | { kind: "video"; productionItemId: string; title: string | null; url: string | null }
+  | { kind: "case_study"; url: string; title: string | null };
+
+/**
+ * Newsletter drafter (feature flag `newsletterDrafter`, Starter Story pilot).
+ * An agent reads a window of published videos + starterstory.com case studies
+ * and drafts one issue in a newsletter format's voice. Kept OUT of
+ * production_items on purpose: pilot drafts must never show up in the queue,
+ * reports or metrics. Regenerating inserts a new row so drafts can be compared.
+ * See docs/automation.md → "newsletter-draft".
+ */
+export const newsletterDrafts = pgTable(
+  "newsletter_drafts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** Brand slug (matches `formats.brand`). */
+    brand: text("brand").notNull(),
+    formatId: uuid("format_id")
+      .notNull()
+      .references(() => formats.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id").references(() => accounts.id, { onDelete: "set null" }),
+    /** drafting | ready | failed */
+    status: text("status").notNull().default("drafting"),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    windowEnd: timestamp("window_end", { withTimezone: true }).notNull(),
+    sources: jsonb("sources").$type<NewsletterDraftSource[]>().notNull().default([]),
+    subjectOptions: jsonb("subject_options").$type<string[]>().notNull().default([]),
+    subject: text("subject"),
+    previewText: text("preview_text"),
+    bodyMarkdown: text("body_markdown"),
+    /** Editor steer for this issue, e.g. the offer to pitch ("iOS Bootcamp, enrollment closes Fri"). */
+    notes: text("notes"),
+    model: text("model"),
+    error: text("error"),
+    hubspotEmailId: text("hubspot_email_id"),
+    hubspotEmailUrl: text("hubspot_email_url"),
+    /** null | pending | created | failed */
+    hubspotStatus: text("hubspot_status"),
+    hubspotError: text("hubspot_error"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("newsletter_drafts_brand_created_idx").on(table.brand, table.createdAt)],
+);
