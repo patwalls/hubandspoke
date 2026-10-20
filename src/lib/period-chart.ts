@@ -1,6 +1,14 @@
 // Pure helpers behind the dashboard's chart views (period-chart.tsx).
 // Kept free of React so the trend maths and the series cap are unit-testable.
 
+import { format } from "date-fns";
+
+/** X-axis tick for a period. Weekly labels are ordinals (W1…W104), which
+ *  say nothing on a long range — the axis shows the week's start date. */
+export function periodAxisLabel(p: { label: string; start: string }): string {
+  return /^W\d+$/.test(p.label) ? format(new Date(p.start + "T00:00:00"), "MMM d") : p.label;
+}
+
 /** A period whose end date is today or later is still filling up — the
  *  current week on the weekly view. Charts draw it dashed and trends leave
  *  it out, otherwise every brand looks like it's falling off a cliff on

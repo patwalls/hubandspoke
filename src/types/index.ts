@@ -1,3 +1,4 @@
+import type { ChannelSummaryRow } from "@/lib/export-csv";
 import type { ViewPrediction } from "@/lib/services/view-predictor";
 
 export interface ProductionItem {
@@ -345,6 +346,15 @@ export interface ContentReportData {
   /** Deduplicated account objects, keyed by account id. Items carry only
    *  `accountId`; the client rejoins via rehydrateReportAccounts(). */
   accountsById?: Record<string, ReportAccount>;
+  /** Per-(brand, platform, handle) totals for the dashboard's CSV export,
+   *  over the same filtered item set as the tables. */
+  channelSummary?: ChannelSummaryRow[];
+  /** Set by the route when the requested range exceeded the cap for this
+   *  granularity and the report starts here instead. */
+  clampedStartDate?: string;
+  /** Published items / views since the start of the current week, under
+   *  every filter except the date range. Feeds the "this week" tiles. */
+  thisWeek?: { production: number; views: number };
   /** Per-(format, post_type) P75 view bar (cross-brand, last 90 days).
    *  Used by the Content table's "vs P75" column. Cohort is scoped by
    *  post_type so a tweet isn't compared against a YT short. Formats

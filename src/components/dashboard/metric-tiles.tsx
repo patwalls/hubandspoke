@@ -34,6 +34,10 @@ interface MetricTilesProps {
    *  wide and date-range-independent so the headline tile is stable as
    *  the user scrubs filters. */
   provenSummary?: { proven: number; testing: number; stale: number };
+  /** Current-week totals under the page's filters, independent of the date
+   *  range and granularity. When absent (legacy matg route) the tiles sum
+   *  the last period instead. */
+  thisWeek?: { production: number; views: number };
 }
 
 function formatCompact(n: number): string {
@@ -137,6 +141,7 @@ export function MetricTiles({
   brand,
   weekOverWeek,
   provenSummary,
+  thisWeek,
 }: MetricTilesProps) {
   // Recompute on the client so the fractional day/hour reflects the user's
   // local wall clock (the server runs in UTC). Re-tick every 5 min so the card
@@ -151,8 +156,9 @@ export function MetricTiles({
   }, [weekStartDay]);
   const wp = liveProgress ?? weekProgress;
 
-  const currentPeriodTotal = sumPeriod(productionData, currentPeriodLabel);
-  const viewsThisWeek = sumPeriod(viewsData, currentPeriodLabel);
+  const currentPeriodTotal =
+    thisWeek?.production ?? sumPeriod(productionData, currentPeriodLabel);
+  const viewsThisWeek = thisWeek?.views ?? sumPeriod(viewsData, currentPeriodLabel);
 
   const projection =
     wp && wp.percent > 0

@@ -46,6 +46,9 @@ export async function GET(request: NextRequest) {
     source: "all",
     provenOnly: false,
     origin: "all",
+    // Same key the dashboard home requests (items=0) — that's the
+    // first page anyone hits after a deploy.
+    includeItems: false,
   };
 
   // Sequential on purpose: this runs on the live dyno right after boot —

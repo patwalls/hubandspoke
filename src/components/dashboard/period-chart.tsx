@@ -16,7 +16,7 @@ import {
   YAxis,
 } from "recharts";
 import type { Period } from "@/types";
-import { periodTrend, type Trend } from "@/lib/period-chart";
+import { periodAxisLabel, periodTrend, type Trend } from "@/lib/period-chart";
 import { cn } from "@/lib/utils";
 
 /** The chart views PeriodTable can swap its table for. */
@@ -53,6 +53,11 @@ export function formatPeriodRange(p: Period): string {
   return `${format(s, "EEEE, MMMM do")} to ${format(e, "EEEE, MMMM do")}`;
 }
 
+function inProgressName(p: Period): string {
+  const axis = periodAxisLabel(p);
+  return axis === p.label ? p.label : `The week of ${axis}`;
+}
+
 const compact = new Intl.NumberFormat("en-US", {
   notation: "compact",
   maximumFractionDigits: 1,
@@ -77,7 +82,13 @@ function SeriesChart({
   periodTotals,
   formatValue,
 }: PeriodChartProps) {
-  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const [hiddenKeys, setHidden] = useState<Set<string>>(() => new Set());
+  // Toggles outlive a filter change; ignore keys that left the series, and
+  // never let a new series set start fully hidden.
+  const hidden = useMemo(() => {
+    const live = new Set(series.filter((s) => hiddenKeys.has(s.key)).map((s) => s.key));
+    return live.size >= series.length ? new Set<string>() : live;
+  }, [hiddenKeys, series]);
   const visible = series.filter((s) => !hidden.has(s.key));
 
   // Recharts reads dataKey as a property path, so series are keyed by index
@@ -101,8 +112,8 @@ function SeriesChart({
   );
 
   const toggle = (key: string) =>
-    setHidden((prev) => {
-      const next = new Set(prev);
+    setHidden(() => {
+      const next = new Set(hidden);
       if (next.has(key)) next.delete(key);
       // Never hide the last one — an empty plot reads as "no data".
       else if (next.size < series.length - 1) next.add(key);
@@ -138,6 +149,7 @@ function SeriesChart({
     />
   );
 
+  const axisLabelByPeriod = new Map(periods.map((p) => [p.label, periodAxisLabel(p)]));
   const axes = (
     <>
       <CartesianGrid vertical={false} stroke="var(--border)" />
@@ -149,6 +161,7 @@ function SeriesChart({
         interval="preserveStartEnd"
         minTickGap={8}
         dy={4}
+        tickFormatter={(label: string) => axisLabelByPeriod.get(label) ?? label}
       />
       <YAxis
         tickLine={false}
@@ -236,7 +249,7 @@ function SeriesChart({
       </div>
       {partialIndex !== null && (
         <p className="mt-1 text-[11px] text-muted-foreground">
-          {view === "lines" ? "Dashed" : "Faded"}: {periods[partialIndex].label} is still in
+          {view === "lines" ? "Dashed" : "Faded"}: {inProgressName(periods[partialIndex])} is still in
           progress.
         </p>
       )}
@@ -302,7 +315,7 @@ function ChartTooltip({
   return (
     <div className="min-w-[200px] rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-lg">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="font-semibold text-foreground">{period.label}</span>
+        <span className="font-semibold text-foreground">{periodAxisLabel(period)}</span>
         {partial && <span className="text-[10px] text-muted-foreground">in progress</span>}
       </div>
       <div className="mb-1.5 text-[11px] text-muted-foreground">{formatPeriodRange(period)}</div>
@@ -395,7 +408,7 @@ function MultipleTile({
                 if (!active || i === undefined) return null;
                 return (
                   <div className="rounded-md border border-border bg-popover px-2 py-1 text-[11px] shadow-md">
-                    <span className="text-muted-foreground">{periods[i].label}</span>{" "}
+                    <span className="text-muted-foreground">{periodAxisLabel(periods[i])}</span>{" "}
                     <span className="font-semibold tabular-nums text-foreground">
                       {formatValue(series.values[i] ?? 0)}
                     </span>

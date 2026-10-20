@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts, viewSnapshots, contentEvents } from "@/lib/db/schema";
-import { aliasedTable } from "drizzle-orm";
+import { aliasedTable, getTableColumns } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, isNull, inArray, sql, min } from "drizzle-orm";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
@@ -291,7 +291,7 @@ function normalizeWeekStart(value: number | null | undefined): WeekStartsOn {
   return clamped as WeekStartsOn;
 }
 
-import { startOfWeek } from "date-fns";
+import { format as formatDate, startOfWeek } from "date-fns";
 import {
   buildPeriods,
   findPeriod,
@@ -300,6 +300,7 @@ import {
 } from "@/lib/utils/dates";
 import type { ContentReportData, MetricData, ProductionItem, ReportItem } from "@/types";
 import { REPORT_ITEM_TRIMMED_KEYS } from "@/types";
+import { summarizeChannels } from "@/lib/export-csv";
 import { fetchFormatViewBars } from "@/lib/services/format-view-bars";
 import {
   computeProvenStatusForBrand,
@@ -330,7 +331,29 @@ interface ReportParams {
    *  - "hubandspoke" → anything not stamped `sync:*` (created in this app)
    *  - "synced"      → `sync:*` or NULL (synced from the platform / pre-2026-05-11) */
   origin?: string;
+  /** false = aggregates only (the dashboard): no `items` list, no cover
+   *  presigning, no P75 bars, no row cap. The dashboard never renders
+   *  items, and shipping them made a YTD /all request OOM the web dyno
+   *  (R15 + H12, 2026-10-20). The Content tab still asks for items. */
+  includeItems?: boolean;
 }
+
+// Report rows skip the fat text columns at the DB — they're stripped from
+// the payload anyway (REPORT_ITEM_TRIMMED_KEYS), and on a wide range they
+// were most of the bytes the web dyno held in memory per request.
+const {
+  description: _description,
+  contentBody: _contentBody,
+  newsletterBodyHtml: _newsletterBodyHtml,
+  newsletterPreviewText: _newsletterPreviewText,
+  coverDescription: _coverDescription,
+  overlay: _overlay,
+  ...REPORT_ITEM_COLUMNS
+} = getTableColumns(productionItems);
+
+/** Item-list cap for includeItems; aggregates are never capped (a silent
+ *  cap would make wide-range totals wrong). */
+const REPORT_ITEM_LIMIT = 10000;
 
 /**
  * Week-over-week pacing comparison for the Content Command Center
@@ -486,6 +509,7 @@ export async function getContentReport(
     source,
     provenOnly,
     origin,
+    includeItems = true,
   } = params;
 
   const { weeklyGoal, weeklyViewsGoal, weekStartDay } = await getBrandSettings(brand);
@@ -502,11 +526,11 @@ export async function getContentReport(
   // is the cross-brand sentinel used by the /all view; we drop the brand
   // predicate but keep every other filter (status, dates, etc.) intact so
   // the same page renders unchanged for one brand or all.
+  // Every filter except the date range goes into `conditions`; the range is
+  // added at the item query so the "this week" tiles can reuse the rest.
   const conditions = [
     isNotNull(productionItems.publishedDate),
     eq(productionItems.status, "Published"),
-    gte(productionItems.publishedDate, startDate),
-    lte(productionItems.publishedDate, endDate),
     sql`(${productionItems.accountId} IS NOT NULL OR ${productionItems.sourceType} = 'source_recording')`,
     isNull(productionItems.deletedAt),
   ];
@@ -624,9 +648,9 @@ export async function getContentReport(
   // Join accounts+brands so each item carries a shaped `account` for the
   // UI's AccountBadge. Falls back to null when an item predates the
   // accounts backfill (shouldn't happen in practice; kept defensive).
-  const rows = await db
+  const rowsQuery = db
     .select({
-      item: productionItems,
+      item: REPORT_ITEM_COLUMNS,
       accountId: accounts.id,
       accountPlatform: accounts.platform,
       accountHandle: accounts.handle,
@@ -640,9 +664,17 @@ export async function getContentReport(
     .from(productionItems)
     .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
     .leftJoin(brands, eq(brands.id, accounts.brandId))
-    .where(and(...conditions))
-    .limit(10000);
-  const items = rows.map((r) => r.item);
+    .where(
+      and(
+        ...conditions,
+        gte(productionItems.publishedDate, startDate),
+        lte(productionItems.publishedDate, endDate),
+      )
+    );
+  const rows = includeItems ? await rowsQuery.limit(REPORT_ITEM_LIMIT) : await rowsQuery;
+  // The omitted fat columns are undefined here; mapProductionItem passes
+  // them through and the payload strips them.
+  const items = rows.map((r) => r.item as ProductionItemRow);
   const accountByItemId = new Map(
     rows
       .filter((r) => r.accountId)
@@ -876,9 +908,15 @@ export async function getContentReport(
   const primaryViewsPerPost = calcViewsPerPost(primaryProduction, primaryViews);
   const formatViewsPerPost = calcViewsPerPost(formatProduction, formatViews);
 
-  const mappedItems: ProductionItem[] = items.map((it) =>
-    mapProductionItem(it, { account: accountByItemId.get(it.id) ?? null })
+  const channelSummary = summarizeChannels(
+    items.map((it) => ({ ...it, account: accountByItemId.get(it.id) ?? null }))
   );
+
+  const mappedItems: ProductionItem[] = includeItems
+    ? items.map((it) =>
+        mapProductionItem(it, { account: accountByItemId.get(it.id) ?? null })
+      )
+    : [];
   await attachPresignedCoverUrls(mappedItems);
   // Strip the heavyweight/detail-only fields before the payload leaves the
   // server — this is what took the report response from ~2.7 MB to a fraction.
@@ -909,7 +947,7 @@ export async function getContentReport(
   // Per-format P75 view bars over the last 90 days — used to render the
   // "vs P75" column on the Content table. Cross-brand cohort by design;
   // shares its definition with the cross-post candidate finder.
-  const formatBars = await fetchFormatViewBars();
+  const formatBars = includeItems ? await fetchFormatViewBars() : undefined;
 
   // Week-over-week pacing data for the KPI cards. Brand-scoped (not
   // affected by the platform/account/format filters above — those filters
@@ -921,6 +959,26 @@ export async function getContentReport(
     brand,
     weekStartsOn: weekStartDay,
   });
+
+  // "This week" tiles: the current week under the page's filters, whatever
+  // the date range or granularity (summing the table's last column made the
+  // tile show a whole month on Monthly, or a stale week on "Last quarter").
+  const thisWeekStart = formatDate(
+    startOfWeek(new Date(), { weekStartsOn: weekStartDay as WeekStartsOn }),
+    "yyyy-MM-dd"
+  );
+  const [thisWeekRow] = await db
+    .select({
+      production: sql<number>`count(*)::int`,
+      views: sql<number>`coalesce(sum(${productionItems.views}), 0)::bigint`,
+    })
+    .from(productionItems)
+    .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
+    .where(and(...conditions, gte(productionItems.publishedDate, thisWeekStart)));
+  const thisWeek = {
+    production: Number(thisWeekRow?.production ?? 0),
+    views: Number(thisWeekRow?.views ?? 0),
+  };
 
   return {
     periods,
@@ -939,6 +997,7 @@ export async function getContentReport(
     },
     items: reportItems,
     accountsById,
+    channelSummary,
     weekProgress: getWeekProgress(weekStartDay),
     weekStartDay,
     platforms: platformList,
@@ -951,6 +1010,7 @@ export async function getContentReport(
     primaryRowMeta,
     formatBars,
     weekOverWeek,
+    thisWeek,
     provenSummary,
   };
 }

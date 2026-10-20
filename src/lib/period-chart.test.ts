@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { capSeries, inProgressIndex, periodTrend, SERIES_SLOTS } from "./period-chart";
+import { capSeries, inProgressIndex, periodAxisLabel, periodTrend, SERIES_SLOTS } from "./period-chart";
 
 describe("inProgressIndex", () => {
   const periods = [
@@ -52,5 +52,15 @@ describe("capSeries", () => {
       "s3", "s4", "s5", "s6", "s7", "s8", "s9", "other",
     ]);
     expect(out.at(-1)!.total).toBe(0 + 1 + 2);
+  });
+});
+
+describe("periodAxisLabel", () => {
+  it("shows a week's start date instead of its ordinal", () => {
+    expect(periodAxisLabel({ label: "W37", start: "2026-10-19" })).toBe("Oct 19");
+  });
+  it("leaves monthly and daily labels alone", () => {
+    expect(periodAxisLabel({ label: "Oct 2026", start: "2026-10-01" })).toBe("Oct 2026");
+    expect(periodAxisLabel({ label: "10/19", start: "2026-10-19" })).toBe("10/19");
   });
 });

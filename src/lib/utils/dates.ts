@@ -8,8 +8,6 @@ import {
   addMonths,
   format,
   isAfter,
-  isBefore,
-  isEqual,
   differenceInDays,
   startOfQuarter,
   endOfQuarter,
@@ -67,10 +65,14 @@ export function buildPeriods(
       current = addMonths(current, 1);
     }
   } else {
+    // Labels key the metric maps, so a range spanning a year boundary
+    // needs the year in them or 10/20 of two years would collide.
+    const labelFormat =
+      startDate.getFullYear() === endDate.getFullYear() ? "M/d" : "M/d/yy";
     let current = startDate;
     while (!isAfter(current, endDate)) {
       periods.push({
-        label: format(current, "M/d"),
+        label: format(current, labelFormat),
         start: format(current, "yyyy-MM-dd"),
         end: format(current, "yyyy-MM-dd"),
       });
@@ -85,15 +87,10 @@ export function findPeriod(
   dateStr: string,
   periods: Period[]
 ): Period | undefined {
-  const d = new Date(dateStr + "T00:00:00");
-  return periods.find((p) => {
-    const start = new Date(p.start + "T00:00:00");
-    const end = new Date(p.end + "T00:00:00");
-    return (
-      (isAfter(d, start) || isEqual(d, start)) &&
-      (isBefore(d, end) || isEqual(d, end))
-    );
-  });
+  // yyyy-MM-dd compares correctly as a string; this runs once per report
+  // item, so no Date allocation per period.
+  const d = dateStr.slice(0, 10);
+  return periods.find((p) => p.start <= d && d <= p.end);
 }
 
 // Fractional position within the current week, honoring the brand's configured

@@ -6,27 +6,30 @@ function escapeCsv(value: string | number): string {
   return str;
 }
 
-export function exportChannelSummaryCsv(
-  items: ProductionItem[],
-  brand: string,
-  startDate: string,
-  endDate: string
-) {
-  type ChannelRow = {
-    brand: string;
-    platform: string;
-    handle: string;
-    posts: number;
-    views: number;
-    likes: number;
-    comments: number;
-    clicks: number;
-    leads: number;
-    hubspotLeads: number;
-    estimated: boolean;
-  };
+/** One CSV row per (brand, platform, handle). Computed server-side for the
+ *  dashboard (ContentReportData.channelSummary) so the report needn't ship
+ *  every item just for the export. */
+export type ChannelSummaryRow = {
+  brand: string;
+  platform: string;
+  handle: string;
+  posts: number;
+  views: number;
+  likes: number;
+  comments: number;
+  clicks: number;
+  leads: number;
+  hubspotLeads: number;
+  estimated: boolean;
+};
 
-  const grouped = new Map<string, ChannelRow>();
+type ChannelSummaryItem = Pick<
+  ProductionItem,
+  "views" | "likes" | "comments" | "clicks" | "leads" | "hubspotLeads" | "viewsEstimated"
+> & { account?: ProductionItem["account"] };
+
+export function summarizeChannels(items: ChannelSummaryItem[]): ChannelSummaryRow[] {
+  const grouped = new Map<string, ChannelSummaryRow>();
 
   for (const item of items) {
     const acct = item.account;
@@ -59,11 +62,27 @@ export function exportChannelSummaryCsv(
     }
   }
 
-  const rows = Array.from(grouped.values()).sort(
+  return Array.from(grouped.values()).sort(
     (a, b) =>
       a.brand.localeCompare(b.brand) || a.platform.localeCompare(b.platform)
   );
+}
 
+export function exportChannelSummaryCsv(
+  items: ProductionItem[],
+  brand: string,
+  startDate: string,
+  endDate: string
+) {
+  downloadChannelSummaryCsv(summarizeChannels(items), brand, startDate, endDate);
+}
+
+export function downloadChannelSummaryCsv(
+  rows: ChannelSummaryRow[],
+  brand: string,
+  startDate: string,
+  endDate: string
+) {
   const headers = [
     "Brand",
     "Platform",

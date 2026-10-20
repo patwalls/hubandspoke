@@ -35,3 +35,29 @@ test("content production card switches between table and chart views", async ({ 
   await view("Table").click();
   await expect(card.locator("table")).toBeVisible();
 });
+
+/**
+ * Wide ranges on /all are the ones that used to blow the web dyno's memory
+ * (the report shipped every item). Year to date must load, and a filter
+ * change must say it's updating rather than sit silent on stale data.
+ */
+test("year to date on /all loads and shows an updating state on filter change", async ({ page }) => {
+  test.setTimeout(90_000);
+  const jan1 = `${new Date().getFullYear()}-01-01`;
+  await page.goto(`/all?startDate=${jan1}&viewType=monthly`);
+  const card = page
+    .locator("div.rounded-lg", { has: page.getByText(/Content Production \(by/) })
+    .last();
+  await expect(card).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText("Failed to load dashboard data")).toHaveCount(0);
+
+  await page.route("**/api/reports/content**", async (route) => {
+    await new Promise((r) => setTimeout(r, 1000));
+    await route.continue();
+  });
+  await page.getByRole("button", { name: /Monthly/ }).first().click();
+  await page.getByText("Weekly", { exact: true }).click();
+  await expect(page.getByText("Updating report…")).toBeVisible();
+  await expect(page.getByText("Updating report…")).toHaveCount(0, { timeout: 45_000 });
+  await expect(page.getByText("Failed to load dashboard data")).toHaveCount(0);
+});

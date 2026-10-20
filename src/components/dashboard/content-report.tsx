@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { format, subDays } from "date-fns";
 import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
@@ -9,7 +9,7 @@ import type { ContentReportData } from "@/types";
 import { rehydrateReportAccounts, type HydratedContentReportData } from "@/lib/report-hydrate";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
-import { exportChannelSummaryCsv } from "@/lib/export-csv";
+import { downloadChannelSummaryCsv } from "@/lib/export-csv";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 
 const PLATFORM_TABS = [
@@ -117,7 +117,12 @@ export function ContentReport({ brand }: { brand: string }) {
     };
   }, [brand]);
 
+  // Filter changes fire overlapping requests; only the newest one may land,
+  // so a slow wide-range response can't overwrite a newer, narrower one.
+  const requestSeq = useRef(0);
   const fetchReport = useCallback(async () => {
+    const seq = ++requestSeq.current;
+    const isStale = () => seq !== requestSeq.current;
     setLoading(true);
     setFetchError(null);
     try {
@@ -133,9 +138,12 @@ export function ContentReport({ brand }: { brand: string }) {
         source: selectedSource,
         origin: selectedOrigin,
         provenOnly: provenOnly ? "1" : "0",
+        // Aggregates only — the dashboard never renders the item list.
+        items: "0",
       });
       const res = await fetch(`/api/reports/content?${params}`);
       const text = await res.text();
+      if (isStale()) return;
       const contentType = res.headers.get("content-type") || "";
       const looksJson = contentType.includes("application/json") || text.trim().startsWith("{");
 
@@ -164,11 +172,12 @@ export function ContentReport({ brand }: { brand: string }) {
       }
       setData(rehydrateReportAccounts(json as ContentReportData));
     } catch (err) {
+      if (isStale()) return;
       console.error("Failed to fetch report:", err);
       setFetchError(err instanceof Error ? err.message : "Failed to fetch report");
       setData(null);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }, [brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin, provenOnly]);
 
@@ -220,14 +229,12 @@ export function ContentReport({ brand }: { brand: string }) {
           brand={brand}
           weekOverWeek={data.weekOverWeek}
           provenSummary={data.provenSummary}
+          thisWeek={data.thisWeek}
         />
       ) : !fetchError ? (
         <div className="flex items-center justify-center py-12">
           <div className="flex items-center gap-2 text-muted-foreground">
-            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+            <Spinner />
             <span className="text-sm">Loading report...</span>
           </div>
         </div>
@@ -264,8 +271,24 @@ export function ContentReport({ brand }: { brand: string }) {
 
       {/* Primary breakdown table — grouped by the selected dimension */}
       {data ? (
-        <>
-          <div className="flex justify-end">
+        <div
+          className={`space-y-6 transition-opacity ${loading ? "opacity-50 pointer-events-none" : ""}`}
+          aria-busy={loading}
+        >
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {!loading && data.clampedStartDate && (
+              <p className="mr-auto text-xs text-muted-foreground">
+                Showing from {format(new Date(data.clampedStartDate + "T00:00:00"), "MMM d, yyyy")} —{" "}
+                {viewType === "daily" ? "Daily is capped at 1 year" : "Weekly is capped at 2 years"}.
+                Switch to Monthly for the full range.
+              </p>
+            )}
+            {loading && (
+              <div className="mr-auto flex items-center gap-2 text-sm text-muted-foreground" role="status">
+                <Spinner />
+                Updating report…
+              </div>
+            )}
             <div className="relative">
               <button
                 onClick={() => setShowExportConfirm((v) => !v)}
@@ -305,7 +328,7 @@ export function ContentReport({ brand }: { brand: string }) {
                     </button>
                     <button
                       onClick={() => {
-                        exportChannelSummaryCsv(data.items, brand, startDate, endDate);
+                        downloadChannelSummaryCsv(data.channelSummary ?? [], brand, startDate, endDate);
                         setShowExportConfirm(false);
                       }}
                       className="text-sm font-medium rounded-md bg-foreground text-background px-3 py-1.5 hover:opacity-90 transition-opacity"
@@ -332,8 +355,8 @@ export function ContentReport({ brand }: { brand: string }) {
             rowMeta={data.showingFormats ? undefined : data.primaryRowMeta}
             groupBy={data.showingFormats ? undefined : groupBy}
           />
-        </>
-      ) : !loading ? (
+        </div>
+      ) : !loading && !fetchError ? (
         <div className="text-center py-20">
           <p className="text-muted-foreground text-sm">
             No data available. Try syncing from Notion.
@@ -341,5 +364,14 @@ export function ContentReport({ brand }: { brand: string }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
   );
 }
