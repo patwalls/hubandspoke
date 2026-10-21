@@ -20,7 +20,7 @@ describe("story settings live on the template", () => {
 
   it("Daily Seinfeld picks ONE story (video or case study); the How-To has no per-section stories", () => {
     expect(storySections(DEFAULT_TEMPLATES["daily seinfeld"])).toEqual([{ key: "story", story: "any" }]);
-    expect(singleVideoSourceNote("How-To Newsletter - Futurepedia (pilot)")).toMatch(/ONE video.*@futurepedia_io or @SkillLeapAI/);
+    expect(singleVideoSourceNote("Futurepedia Newsletter")).toMatch(/ONE video.*@futurepedia_io or @SkillLeapAI.*@futurepedia_io → Kevin, @SkillLeapAI → Saj/);
     expect(singleVideoSourceNote("Sunday Breakfast")).toBeNull();
   });
 

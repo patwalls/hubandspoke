@@ -14,13 +14,14 @@ describe("newsletter schedules", () => {
     expect(upcomingSendDates([2, 4], 14, now)).toEqual(["2026-10-22", "2026-10-27", "2026-10-29", "2026-11-03"]);
   });
 
-  it("schedules Sunday Breakfast Sun, Daily Seinfeld Tue/Thu and one shared Tuesday How-To across both channels", () => {
+  it("schedules Sunday Breakfast Sun, Daily Seinfeld Tue/Thu, and one Futurepedia Newsletter (queue-triggered) for both channels", () => {
     expect(formatConfigFor("Sunday Breakfast").schedule?.days).toEqual([0]);
     expect(formatConfigFor("Daily Seinfeld").schedule?.days).toEqual([2, 4]);
-    expect(groupFormatNames("futurepedia-howto")).toHaveLength(2);
+    // The one-format newsletter plus the two retired pilots share the history group.
+    expect(groupFormatNames("futurepedia-howto")).toEqual(expect.arrayContaining(["futurepedia newsletter", "how-to newsletter - futurepedia (pilot)"]));
     const primaries = scheduledPrimaries().map((p) => p.formatName);
-    expect(primaries).toContain("how-to newsletter - futurepedia (pilot)");
-    expect(primaries).not.toContain("how-to newsletter - skill leap (pilot)");
+    expect(primaries).toContain("futurepedia newsletter");
+    expect(primaries).not.toContain("how-to newsletter - futurepedia (pilot)");
   });
 
   it("keys a slot by group + date and gives roundups the week before the send date", () => {

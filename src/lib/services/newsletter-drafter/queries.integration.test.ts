@@ -36,12 +36,12 @@ describe("single-video newsletter formats", () => {
     expect(listed?.some((v) => v.id === otherChannel.id)).toBe(false);
   });
 
-  it("requires a video, and only one from the format's channel", async () => {
+  it("requires a video, and only one from the format's channels", async () => {
     const fmt = await createTestFormat({ brand: "vitest-howto", name: HOW_TO });
     const foreign = await createTestProductionItem({ postType: "youtube_long" });
     expect(await createNewsletterDraft({ formatId: fmt.id, userId: null })).toEqual({ error: "Pick a video for this format" });
     expect(await createNewsletterDraft({ formatId: fmt.id, sourceItemId: foreign.id, userId: null })).toEqual({
-      error: "That video isn't from this format's channel",
+      error: "That video isn't from this format's channels",
     });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildUserTurn, type NewsletterAgentArgs } from "./agent";
-import { formatConfigFor } from "./format-config";
+import { formatConfigFor, voiceForChannel } from "./format-config";
 import { SPECIAL_MARKER } from "./special-compose";
 import { youtubeThumbnailUrl } from "./sources";
 
@@ -25,11 +25,15 @@ const video = {
 };
 
 describe("formatConfigFor", () => {
-  it("knows the How-To formats are single-video with a placeholder-on-miss Free Resource", () => {
-    const fp = formatConfigFor(" How-To Newsletter - Futurepedia (pilot) ");
-    expect(fp).toMatchObject({ kind: "single_video", sourceAccountHandle: "futurepedia_io", model: "claude-sonnet-5-5" });
+  it("Futurepedia Newsletter is one single-video format fed by both channels, voice by channel, queued per video", () => {
+    const fp = formatConfigFor(" Futurepedia Newsletter ");
+    expect(fp).toMatchObject({ kind: "single_video", model: "claude-sonnet-5-5", schedule: { group: "futurepedia-howto", trigger: { kind: "queue", maxPerWeek: 3 } } });
     expect(fp.promo).toMatchObject({ label: "Free Resource", onMiss: "placeholder", section: "Native Ad" });
-    expect(formatConfigFor("How-To Newsletter - Skill Leap (pilot)").sourceAccountHandle).toBe("SkillLeapAI");
+    expect(voiceForChannel("Futurepedia Newsletter", "futurepedia_io")).toEqual({ voice: "kevin", voiceName: "Kevin" });
+    expect(voiceForChannel("Futurepedia Newsletter", "skillleapai")).toEqual({ voice: "saj", voiceName: "Saj" });
+    expect(voiceForChannel("Futurepedia Newsletter", "Howfinity")).toBeNull();
+    // The retired pilots no longer queue editions.
+    expect(formatConfigFor("How-To Newsletter - Skill Leap (pilot)").schedule?.trigger).toBeUndefined();
   });
 
   it("keeps Sunday Breakfast a roundup whose Special falls back to the agent, and defaults others to plain roundups", () => {

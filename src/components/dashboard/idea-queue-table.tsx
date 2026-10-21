@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { TriageDialog } from "./triage-dialog";
+import { NewsletterItemEditor } from "./newsletter-item-editor";
+import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { ClipTriageDialog } from "./clip-triage-dialog";
 import { ClipDraftBadge } from "@/components/clip-editor/drafts";
 import { BulkKillDialog } from "./bulk-kill-dialog";
@@ -540,6 +542,9 @@ function IdeaQueueRow({
 }) {
   const [open, setOpen] = useState(false);
   const isClip = !!item.sourceClipIdeaId;
+  const flags = useFeatureFlags();
+  // Newsletter ideas open the newsletter editor (flagged); others still triage them.
+  const isNewsletter = item.postType === "newsletter" && !!flags?.newsletterDrafter;
   const [clipIdea, setClipIdea] = useState<ClipIdeaSummary | null>(null);
   const [clipIdeaError, setClipIdeaError] = useState<string | null>(null);
 
@@ -695,7 +700,9 @@ function IdeaQueueRow({
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
-        {isClip ? (
+        {isNewsletter ? (
+          <NewsletterItemEditor itemId={item.id} open={open} onOpenChange={setOpen} onDone={onDone} />
+        ) : isClip ? (
           <ClipTriageDialog
             open={open}
             onOpenChange={setOpen}

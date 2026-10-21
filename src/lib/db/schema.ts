@@ -2641,6 +2641,12 @@ export const newsletterDrafts = pgTable(
     /** null | pending | created | failed */
     hubspotStatus: text("hubspot_status"),
     hubspotError: text("hubspot_error"),
+    /**
+     * The queue item (production_items) this edition belongs to (2026-10-21):
+     * newsletters live in the regular queue — format = the newsletter format,
+     * pillar = the video (How-To) — and this row holds the editor's draft.
+     */
+    productionItemId: uuid("production_item_id").references(() => productionItems.id, { onDelete: "set null" }),
     /** beehiiv (Futurepedia) draft post this draft was pushed to (never published/scheduled by us). */
     beehiivPostId: text("beehiiv_post_id"),
     beehiivPostUrl: text("beehiiv_post_url"),
@@ -2652,6 +2658,7 @@ export const newsletterDrafts = pgTable(
   },
   (table) => [
     index("newsletter_drafts_brand_created_idx").on(table.brand, table.createdAt),
+    uniqueIndex("uniq_newsletter_drafts_production_item").on(table.productionItemId),
     uniqueIndex("newsletter_drafts_slot_key_uniq").on(table.slotKey).where(sql`${table.slotKey} IS NOT NULL`),
   ],
 );

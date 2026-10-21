@@ -157,23 +157,22 @@ export interface FormatVideoOption {
   hasTranscript: boolean;
 }
 
-async function sourceAccountId(formatName: string): Promise<string | null> {
-  const handle = formatConfigFor(formatName).sourceAccountHandle;
-  if (!handle) return null;
-  const [acct] = await db
+async function sourceAccountIds(formatName: string): Promise<string[]> {
+  const handles = (formatConfigFor(formatName).sources ?? []).map((x) => x.handle.toLowerCase());
+  if (!handles.length) return [];
+  const rows = await db
     .select({ id: accounts.id })
     .from(accounts)
-    .where(and(eq(accounts.platform, "youtube"), sql`lower(${accounts.handle}) = lower(${handle})`))
-    .limit(1);
-  return acct?.id ?? null;
+    .where(and(eq(accounts.platform, "youtube"), inArray(sql`lower(${accounts.handle})`, handles)));
+  return rows.map((r) => r.id);
 }
 
-/** Recent published long-form videos from a single_video format's source channel, newest first. */
+/** Recent published long-form videos from a single_video format's source channels, newest first. */
 export async function listFormatVideos(formatId: string): Promise<FormatVideoOption[] | null> {
   const [format] = await db.select({ name: formats.name }).from(formats).where(eq(formats.id, formatId)).limit(1);
   if (!format) return null;
-  const accountId = await sourceAccountId(format.name);
-  if (!accountId) return [];
+  const accountIds = await sourceAccountIds(format.name);
+  if (!accountIds.length) return [];
   const published = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
   const rows = await db
     .select({
@@ -188,7 +187,7 @@ export async function listFormatVideos(formatId: string): Promise<FormatVideoOpt
     .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
     .where(
       and(
-        eq(productionItems.accountId, accountId),
+        inArray(productionItems.accountId, accountIds),
         eq(productionItems.postType, "youtube_long"),
         eq(productionItems.status, "Published"),
         isNull(productionItems.deletedAt),
@@ -223,14 +222,14 @@ export async function createNewsletterDraft(args: {
   let sourceItemId: string | null = null;
   if (formatConfigFor(format.name).kind === "single_video") {
     if (!args.sourceItemId) return { error: "Pick a video for this format" };
-    // Only videos from the format's own channel are valid sources.
-    const accountId = await sourceAccountId(format.name);
+    // Only videos from the format's own channels are valid sources.
+    const accountIds = await sourceAccountIds(format.name);
     const [item] = await db
       .select({ accountId: productionItems.accountId })
       .from(productionItems)
       .where(eq(productionItems.id, args.sourceItemId))
       .limit(1);
-    if (!item || !accountId || item.accountId !== accountId) return { error: "That video isn't from this format's channel" };
+    if (!item || !item.accountId || !accountIds.includes(item.accountId)) return { error: "That video isn't from this format's channels" };
     sourceItemId = args.sourceItemId;
   }
   const w = computeWindow(args.days);

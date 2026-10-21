@@ -1,0 +1,3 @@
+ALTER TABLE "newsletter_drafts" ADD COLUMN "production_item_id" uuid;--> statement-breakpoint
+ALTER TABLE "newsletter_drafts" ADD CONSTRAINT "newsletter_drafts_production_item_id_production_items_id_fk" FOREIGN KEY ("production_item_id") REFERENCES "public"."production_items"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "uniq_newsletter_drafts_production_item" ON "newsletter_drafts" USING btree ("production_item_id");

@@ -10,7 +10,7 @@ import { newsletterModel, NewsletterCancelledError, runNewsletterAgent, storyKey
 import { blockedKeys, loadUsage, toStoredSources, usageGroupFor, withInferredSources } from "./usage";
 import { buildStoryPlan, withPlanDates } from "./story-plan";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
-import { formatConfigFor } from "./format-config";
+import { formatConfigFor, voiceForChannel } from "./format-config";
 import { findSpecial } from "./promo";
 import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getVideoTranscript, youtubeThumbnailUrl } from "./sources";
 import type { SourceVideo } from "./agent";
@@ -62,7 +62,7 @@ export async function loadRecentEditions(formatName: string, excludeDraftId: str
 }
 
 /** The picked video + its full transcript for a single_video draft. Throws a readable error when unusable. */
-export async function loadSourceVideo(sourceItemId: string | null): Promise<SourceVideo> {
+export async function loadSourceVideo(sourceItemId: string | null, formatName?: string): Promise<SourceVideo> {
   if (!sourceItemId) throw new Error("This format drafts from one video, but no video was picked.");
   const [v, t] = await Promise.all([
     getSingleVideo(sourceItemId),
@@ -72,6 +72,8 @@ export async function loadSourceVideo(sourceItemId: string | null): Promise<Sour
   if (!t) throw new Error(`"${v.title ?? "This video"}" has no transcript yet.`);
   return {
     productionItemId: v.productionItemId,
+    channelHandle: v.channelHandle,
+    voiceName: formatName ? (voiceForChannel(formatName, v.channelHandle)?.voiceName ?? null) : null,
     title: v.title,
     url: v.url,
     thumbnailUrl: youtubeThumbnailUrl(v.youtubeId),
@@ -124,7 +126,7 @@ export async function runNewsletterDraft(
     return !cur;
   };
   try {
-    const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId) : null;
+    const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId, row.formatName) : null;
     const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
     const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;
     const [pastIssues, special] = await Promise.all([

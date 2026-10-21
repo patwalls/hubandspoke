@@ -11,6 +11,7 @@ import { formats, newsletterDrafts, productionItems } from "@/lib/db/schema";
 import { createFuturepediaDraft } from "@/lib/beehiiv";
 import { buildBeehiivDraftRequest } from "@/lib/beehiiv-draft";
 import { templateFor } from "@/lib/newsletter-template";
+import { voiceForChannel } from "@/lib/services/newsletter-drafter/format-config";
 
 export interface BeehiivNewsletterCreateDraftPayload {
   newsletterDraftId: string;
@@ -32,6 +33,7 @@ export const beehiivNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       formatName: formats.name,
       formatTemplate: formats.newsletterTemplate,
       youtubeId: sql<string | null>`(SELECT ${productionItems.youtubeId} FROM ${productionItems} WHERE ${productionItems.id} = ${newsletterDrafts.sourceItemId})`,
+      channelHandle: sql<string | null>`(SELECT a.handle FROM ${productionItems} p JOIN accounts a ON a.id = p.account_id WHERE p.id = ${newsletterDrafts.sourceItemId})`,
     })
     .from(newsletterDrafts)
     .innerJoin(formats, eq(formats.id, newsletterDrafts.formatId))
@@ -61,6 +63,7 @@ export const beehiivNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       sections: row.sections,
       sponsor: row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null,
       thumbnailUrl: row.youtubeId ? `https://img.youtube.com/vi/${row.youtubeId}/maxresdefault.jpg` : null,
+      author: voiceForChannel(row.formatName, row.channelHandle)?.voice ?? null,
     });
     // Record the post the moment it exists, so a failed check below can never lead to a second post.
     const post = await createFuturepediaDraft(body, async (p) => {

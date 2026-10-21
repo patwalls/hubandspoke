@@ -100,7 +100,7 @@ export async function regenerateDraftSection(
       .from(brands)
       .where(eq(brands.slug, row.brand))
       .limit(1);
-    const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId) : null;
+    const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId, row.formatName) : null;
     const sponsor = row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null;
     const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
     const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;

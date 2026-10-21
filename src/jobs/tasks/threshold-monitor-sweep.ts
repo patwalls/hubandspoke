@@ -1,4 +1,6 @@
 import type { Task } from "graphile-worker";
+import { formatConfigFor } from "@/lib/services/newsletter-drafter/format-config";
+import { insertVideoEdition, planVideoEdition } from "@/lib/services/newsletter-drafter/slots";
 import { and, asc, eq, gt, gte, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
@@ -81,6 +83,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
         brand: productionItems.brand,
         accountId: productionItems.accountId,
         postType: productionItems.postType,
+        publishedAt: productionItems.publishedAt,
       })
       .from(productionItems)
       .where(
@@ -221,6 +224,22 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
           continue;
         }
 
+        // Video-triggered newsletters (the Futurepedia Newsletter): one edition
+        // per newly published LONG-FORM video (root formats otherwise fire on
+        // any post from their trigger accounts), skipping videos the team
+        // already sent or is drafting in beehiiv, with a Tue/Fri send date.
+        const newsletterTrigger = formatConfigFor(targetFormat.name).schedule?.trigger?.kind === "queue";
+        let edition: { sendDate: string; group: string } | null = null;
+        if (newsletterTrigger) {
+          if (item.postType !== "youtube_long") continue;
+          const plan = await planVideoEdition(targetFormat.name, { id: item.id, publishedAt: item.publishedAt });
+          if ("skip" in plan) {
+            helpers.logger.debug(`threshold-monitor-sweep skip item=${item.id} format=${targetFormat.name} reason=${plan.skip}`);
+            continue;
+          }
+          edition = plan;
+        }
+
         // Dedup: one trigger per (pillar, target format) pair.
         const dedupKey = `${item.id}|${targetFormat.id}`;
         if (triggerSet.has(dedupKey)) {
@@ -295,6 +314,21 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
               targetFormatId: targetFormat.id,
               viewsAtTrigger: item.views,
             });
+
+            // Newsletter: its edition (the editor's draft, send date) instead
+            // of a social-copy draft — the newsletter editor drafts it on demand.
+            if (edition) {
+              await insertVideoEdition({
+                group: edition.group,
+                sendDate: edition.sendDate,
+                brand: item.brand,
+                formatId: targetFormat.id,
+                pillarId: item.id,
+                productionItemId: created.id,
+              });
+              itemsCreated++;
+              continue;
+            }
 
             // Fire the Draft Algorithm so the editor lands on a populated
             // form. Skips internally if the inherited postType isn't in the

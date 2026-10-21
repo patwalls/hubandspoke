@@ -252,6 +252,8 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   ...Object.fromEntries(
     (
       [
+        // The one-format newsletter; its edition's author follows the video's channel (Kevin / Saj).
+        ["futurepedia newsletter", "kevin"],
         ["how-to newsletter - futurepedia (pilot)", "kevin"],
         ["how-to newsletter - skill leap (pilot)", "saj"],
       ] as const

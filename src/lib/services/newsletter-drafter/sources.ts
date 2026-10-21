@@ -6,7 +6,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import sanitizeHtml from "sanitize-html";
 import { db } from "@/lib/db";
-import { productionItems, transcripts } from "@/lib/db/schema";
+import { accounts, productionItems, transcripts } from "@/lib/db/schema";
 import { searchContent, type ContentResult } from "@/lib/services/starter-story-content";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import { isWithinWindow, type DraftWindow } from "./window";
@@ -90,6 +90,8 @@ export interface SingleVideo {
   youtubeId: string | null;
   publishedAt: string | null;
   accountId: string | null;
+  /** The channel the video is on (picks Kevin's vs Saj's voice). */
+  channelHandle: string | null;
 }
 
 export async function getSingleVideo(productionItemId: string): Promise<SingleVideo | null> {
@@ -102,6 +104,7 @@ export async function getSingleVideo(productionItemId: string): Promise<SingleVi
       youtubeId: productionItems.youtubeId,
       publishedAt: sql<string | null>`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`,
       accountId: productionItems.accountId,
+      channelHandle: sql<string | null>`(SELECT ${accounts.handle} FROM ${accounts} WHERE ${accounts.id} = ${productionItems.accountId})`,
     })
     .from(productionItems)
     .where(eq(productionItems.id, productionItemId))
@@ -114,6 +117,7 @@ export async function getSingleVideo(productionItemId: string): Promise<SingleVi
     youtubeId: r.youtubeId,
     publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
     accountId: r.accountId,
+    channelHandle: r.channelHandle,
   };
 }
 

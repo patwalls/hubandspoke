@@ -273,6 +273,10 @@ export interface NewsletterAgentArgs {
 
 export interface SourceVideo {
   productionItemId: string;
+  /** The channel it's on; with the format's sources this picks the voice (Kevin / Saj). */
+  channelHandle?: string | null;
+  /** The voice this edition is written in, from the video's channel (one-format newsletters). */
+  voiceName?: string | null;
   title: string | null;
   url: string | null;
   thumbnailUrl: string | null;
@@ -420,6 +424,11 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
     const v = args.video;
     parts.push(
       `Draft the "${args.formatName}" issue for this video. Today is ${today}.${sendLine}`,
+      ...(v.voiceName
+        ? [
+            `VOICE: this video is from ${v.channelHandle ? `@${v.channelHandle}` : "the channel"}, so write the whole issue in ${v.voiceName}'s voice (the Skill's "${v.voiceName}'s voice" reference) and sign the intro '- ${v.voiceName}'. Ignore the other voice in the Skill.`,
+          ]
+        : []),
       [
         `VIDEO: "${v.title ?? "Untitled"}"`,
         `URL (use for the 'Watch The Full Video' link, the only YouTube link): ${v.url ?? "(none)"}`,

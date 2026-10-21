@@ -67,6 +67,8 @@ export function buildBeehiivDraftRequest(args: {
   sections: NewsletterSection[];
   sponsor: ComposeSponsor | null;
   thumbnailUrl: string | null;
+  /** Kevin or Saj from the video's channel (one-format newsletters); else the template's author. */
+  author?: "kevin" | "saj" | null;
 }): Record<string, unknown> {
   if (!args.template.beehiiv) throw new Error("this format has no beehiiv setup");
   const md = (key: string) => {
@@ -95,7 +97,7 @@ export function buildBeehiivDraftRequest(args: {
     post_template_id: HOWTO_BASE_TEMPLATE_ID,
     blocks: nonEmpty,
     status: "draft",
-    guest_author_ids: [HOWTO_AUTHOR_IDS[args.template.beehiiv.author]],
+    guest_author_ids: [HOWTO_AUTHOR_IDS[args.author ?? args.template.beehiiv.author]],
     thumbnail_image_url: args.thumbnailUrl ?? undefined,
     recipients: { email: { tier_ids: ["free"], exclude_segment_ids: [SKILL_LEAP_MEMBERS_SEGMENT_ID] }, web: { tier_ids: ["free"] } },
     email_settings: {

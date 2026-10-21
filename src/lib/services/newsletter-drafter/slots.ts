@@ -16,11 +16,12 @@
 // Idempotent: rows are keyed by slot_key "<group>:<YYYY-MM-DD>" (unique), so
 // the daily sweep and every page load can call ensureSlots safely.
 
-import { and, desc, eq, gte, inArray, isNotNull, isNull, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { accounts, formats, newsletterDrafts, newsletterIssueHistory, productionItems, transcripts } from "@/lib/db/schema";
+import { accounts, formatChannels, formats, newsletterDrafts, newsletterIssueHistory, productionItems, transcripts } from "@/lib/db/schema";
 import { formatConfigFor, groupFormatNames, scheduledPrimaries, upcomingSendDates, type NewsletterSchedule } from "./format-config";
 import { findSpecial } from "./promo";
+import { resolveEditor } from "@/lib/services/assignees";
 
 export const SLOT_HORIZON_DAYS = 14;
 /** How far back a How-To slot looks for its suggested video. */
@@ -43,10 +44,11 @@ interface GroupFormat {
   id: string;
   name: string;
   brand: string;
-  accountId: string | null;
+  /** The format's source channels (single_video): account id + handle. */
+  channels: { accountId: string; handle: string }[];
 }
 
-/** Every format row in a schedule group, with its source channel's account id. */
+/** Every format row in a schedule group, with its source channels' account ids. */
 async function loadGroupFormats(group: string): Promise<GroupFormat[]> {
   const names = groupFormatNames(group);
   if (names.length === 0) return [];
@@ -56,18 +58,30 @@ async function loadGroupFormats(group: string): Promise<GroupFormat[]> {
     .where(inArray(sql`lower(${formats.name})`, names));
   const out: GroupFormat[] = [];
   for (const r of rows) {
-    const handle = formatConfigFor(r.name).sourceAccountHandle;
-    let accountId: string | null = null;
-    if (handle) {
+    const handles = (formatConfigFor(r.name).sources ?? []).map((x) => x.handle);
+    const channels: GroupFormat["channels"] = [];
+    for (const handle of handles) {
       const [a] = await db
         .select({ id: accounts.id })
         .from(accounts)
         .where(and(eq(accounts.platform, "youtube"), sql`lower(${accounts.handle}) = lower(${handle})`))
         .limit(1);
-      accountId = a?.id ?? null;
+      if (a) channels.push({ accountId: a.id, handle });
     }
-    out.push({ ...r, accountId });
+    out.push({ ...r, channels });
   }
+  return out;
+}
+
+/**
+ * account id → the format a video from it sits on. The group's primary format
+ * wins when several formats share a channel (the one-format newsletter over
+ * the retired per-channel pilots).
+ */
+function formatsByAccount(groupFormats: GroupFormat[]): Map<string, { formatId: string; formatName: string; handle: string }> {
+  const out = new Map<string, { formatId: string; formatName: string; handle: string }>();
+  const ordered = [...groupFormats].sort((a, b) => Number(!!formatConfigFor(b.name).schedule?.primary) - Number(!!formatConfigFor(a.name).schedule?.primary));
+  for (const f of ordered) for (const c of f.channels) if (!out.has(c.accountId)) out.set(c.accountId, { formatId: f.id, formatName: f.name, handle: c.handle });
   return out;
 }
 
@@ -141,7 +155,7 @@ async function ensureVideoEditions(
   primary: GroupFormat,
   now: Date,
 ): Promise<number> {
-  const byAccount = new Map(groupFormats.filter((f) => f.accountId).map((f) => [f.accountId!, f.id]));
+  const byAccount = new Map([...formatsByAccount(groupFormats)].map(([k, v]) => [k, v.formatId]));
   if (!schedule.trigger || byAccount.size === 0) return 0;
   const slotRows = await db
     .select({
@@ -216,13 +230,79 @@ async function ensureVideoEditions(
   return created;
 }
 
+/**
+ * Queue-triggered newsletters (`trigger.kind === "queue"`): the regular queue's
+ * threshold sweep creates the production item for a newly published video;
+ * this says whether that video should get an edition and on which send date.
+ * Skips videos the team already sent or is drafting in beehiiv, and videos
+ * that already have an edition here. Read-only.
+ */
+export async function planVideoEdition(
+  formatName: string,
+  pillar: { id: string; publishedAt: Date | string | null },
+  now: Date = new Date(),
+): Promise<{ sendDate: string; group: string } | { skip: string }> {
+  const schedule = formatConfigFor(formatName).schedule;
+  if (!schedule?.trigger) return { skip: "not a video-triggered newsletter" };
+  if (!pillar.publishedAt) return { skip: "no publish date" };
+  if (new Date(pillar.publishedAt).getTime() < now.getTime() - VIDEO_LOOKBACK_DAYS * DAY_MS) return { skip: "published too long ago" };
+  const slotRows = await db
+    .select({ sendDate: newsletterDrafts.sendDate, sourceItemId: newsletterDrafts.sourceItemId })
+    .from(newsletterDrafts)
+    .where(like(newsletterDrafts.slotKey, `${schedule.group}:%`));
+  const history = await db
+    .select({ sentDate: newsletterIssueHistory.sentDate, keys: newsletterIssueHistory.sourceKeys })
+    .from(newsletterIssueHistory)
+    .where(eq(newsletterIssueHistory.scheduleGroup, schedule.group));
+  const used = new Set([
+    ...slotRows.map((r) => r.sourceItemId).filter(Boolean),
+    ...history.flatMap((h) => h.keys).filter((k) => k.startsWith("video:")).map((k) => k.slice("video:".length)),
+  ]);
+  if (used.has(pillar.id)) return { skip: "this video already has an edition (here or in beehiiv)" };
+  const today = easternDate(now);
+  const taken = new Set([
+    ...slotRows.filter((r) => r.sourceItemId && r.sendDate).map((r) => r.sendDate!),
+    ...history.map((h) => h.sentDate!).filter((d) => d && d >= addDays(today, -7)),
+  ]);
+  return { sendDate: videoSendDate(easternDate(pillar.publishedAt), today, schedule.days, schedule.trigger.maxPerWeek, taken), group: schedule.group };
+}
+
+/** The edition (editor draft) for a queue item created by planVideoEdition's sweep. */
+export async function insertVideoEdition(args: {
+  group: string;
+  sendDate: string;
+  brand: string;
+  formatId: string;
+  pillarId: string;
+  productionItemId: string;
+}): Promise<boolean> {
+  const w = slotWindow(args.sendDate);
+  const inserted = await db
+    .insert(newsletterDrafts)
+    .values({
+      brand: args.brand,
+      formatId: args.formatId,
+      status: "idea",
+      slotKey: slotKeyFor(args.group, args.sendDate),
+      sendDate: args.sendDate,
+      windowStart: w.start,
+      windowEnd: w.end,
+      sourceItemId: args.pillarId,
+      sourcePinned: true,
+      productionItemId: args.productionItemId,
+    })
+    .onConflictDoNothing()
+    .returning({ id: newsletterDrafts.id });
+  return inserted.length > 0;
+}
+
 /** The newest unused long-form video with a transcript from the group's channels, before `sendDate`. */
 async function suggestVideo(
   groupFormats: GroupFormat[],
   sendDate: string,
   used: Set<string>,
 ): Promise<{ itemId: string; formatId: string } | null> {
-  const byAccount = new Map(groupFormats.filter((f) => f.accountId).map((f) => [f.accountId!, f.id]));
+  const byAccount = new Map([...formatsByAccount(groupFormats)].map(([k, v]) => [k, v.formatId]));
   if (byAccount.size === 0) return null;
   const end = new Date(`${sendDate}T00:00:00Z`);
   const start = new Date(end.getTime() - SUGGEST_LOOKBACK_DAYS * DAY_MS);
@@ -248,14 +328,17 @@ async function suggestVideo(
 }
 
 /** Create any missing slots for the next SLOT_HORIZON_DAYS, and suggest videos for How-To slots without one. */
-export async function ensureSlots(now: Date = new Date()): Promise<{ created: number; suggested: number }> {
+export async function ensureSlots(now: Date = new Date()): Promise<{ created: number; suggested: number; queueItems: number }> {
   let created = 0;
   let suggested = 0;
+  let queueItems = 0;
   for (const { formatName, schedule } of scheduledPrimaries()) {
     const groupFormats = await loadGroupFormats(schedule.group);
     const primary = groupFormats.find((f) => f.name.trim().toLowerCase() === formatName);
     if (!primary) continue; // the format doesn't exist in this DB
     const singleVideo = formatConfigFor(primary.name).kind === "single_video";
+    // Queue-triggered newsletters are created by the regular queue's threshold sweep (planVideoEdition).
+    if (schedule.trigger?.kind === "queue") continue;
     if (schedule.trigger?.kind === "video") {
       created += await ensureVideoEditions(schedule, groupFormats, primary, now);
       continue;
@@ -307,8 +390,59 @@ export async function ensureSlots(now: Date = new Date()): Promise<{ created: nu
         if (pick) used.add(pick.itemId);
       }
     }
+    // Scheduled newsletters (Sunday Breakfast, Daily Seinfeld) live in the regular queue too.
+    if (!singleVideo) queueItems += await ensureSlotQueueItems(schedule.group, primary, now);
   }
-  return { created, suggested };
+  return { created, suggested, queueItems };
+}
+
+/**
+ * Each upcoming slot of a scheduled newsletter gets its queue item
+ * (production_items: status Idea, format = the newsletter format, the format's
+ * channel as account, no pillar — an issue covers several stories), linked
+ * from the slot's `production_item_id`. Idempotent; a race with a concurrent
+ * sweep drops the loser's item.
+ */
+async function ensureSlotQueueItems(group: string, format: GroupFormat, now: Date): Promise<number> {
+  const today = easternDate(now);
+  const rows = await db
+    .select({ id: newsletterDrafts.id, sendDate: newsletterDrafts.sendDate })
+    .from(newsletterDrafts)
+    .where(and(like(newsletterDrafts.slotKey, `${group}:%`), isNull(newsletterDrafts.productionItemId), gte(newsletterDrafts.sendDate, today)));
+  if (!rows.length) return 0;
+  const [channel] = await db
+    .select({ accountId: formatChannels.accountId, postType: formatChannels.postType })
+    .from(formatChannels)
+    .where(eq(formatChannels.formatId, format.id))
+    .orderBy(asc(formatChannels.createdAt), asc(formatChannels.id))
+    .limit(1);
+  const editorUserId = await resolveEditor({ brand: format.brand, format: format.name });
+  let n = 0;
+  for (const r of rows) {
+    const label = new Date(`${r.sendDate}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+    const [item] = await db
+      .insert(productionItems)
+      .values({
+        brand: format.brand,
+        title: `${format.name} — ${label}`,
+        status: "Idea",
+        format: format.name,
+        sourceType: "original",
+        accountId: channel?.accountId ?? null,
+        postType: channel?.postType ?? "newsletter",
+        createdVia: "newsletter-slots-sweep",
+        editorUserId,
+      })
+      .returning({ id: productionItems.id });
+    const linked = await db
+      .update(newsletterDrafts)
+      .set({ productionItemId: item.id, updatedAt: new Date() })
+      .where(and(eq(newsletterDrafts.id, r.id), isNull(newsletterDrafts.productionItemId)))
+      .returning({ id: newsletterDrafts.id });
+    if (linked.length) n++;
+    else await db.delete(productionItems).where(eq(productionItems.id, item.id));
+  }
+  return n;
 }
 
 /** Re-check the Asana promo for every upcoming idea slot, so cards show sponsor status ahead of drafting. */
@@ -365,7 +499,7 @@ export async function listSlotVideoOptions(draftId: string): Promise<SlotVideoOp
   const group = formatConfigFor(row.formatName).schedule?.group;
   if (!group) return [];
   const groupFormats = await loadGroupFormats(group);
-  const byAccount = new Map(groupFormats.filter((f) => f.accountId).map((f) => [f.accountId!, f]));
+  const byAccount = formatsByAccount(groupFormats);
   if (byAccount.size === 0) return [];
   const published = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
   const rows = await db
@@ -402,11 +536,16 @@ export async function listSlotVideoOptions(draftId: string): Promise<SlotVideoOp
       title: r.title,
       url: r.publishedLink ?? r.youtubeUrl,
       publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
-      channel: formatConfigFor(f.name).sourceAccountHandle ?? f.name,
-      formatId: f.id,
+      channel: f.handle,
+      formatId: f.formatId,
       usedBySlot: usedBy.get(r.id) && usedBy.get(r.id) !== row.slotKey ? usedBy.get(r.id)! : null,
     };
   });
+}
+
+async function formatNameOf(formatId: string): Promise<string | null> {
+  const [f] = await db.select({ name: formats.name }).from(formats).where(eq(formats.id, formatId)).limit(1);
+  return f?.name ?? null;
 }
 
 /** Point a How-To slot at another video; the slot moves to that video's channel's format. */
@@ -418,8 +557,16 @@ export async function setSlotVideo(draftId: string, itemId: string): Promise<{ o
     .update(newsletterDrafts)
     .set({ sourceItemId: pick.id, formatId: pick.formatId, sourcePinned: true, updatedAt: new Date() })
     .where(and(eq(newsletterDrafts.id, draftId), inArray(newsletterDrafts.status, ["idea", "failed", "ready"])))
-    .returning({ id: newsletterDrafts.id });
-  return row ? { ok: true } : { error: "This draft can't change video while it's drafting" };
+    .returning({ id: newsletterDrafts.id, productionItemId: newsletterDrafts.productionItemId });
+  if (!row) return { error: "This draft can't change video while it's drafting" };
+  // The queue item's pillar follows the edition's video.
+  if (row.productionItemId) {
+    await db
+      .update(productionItems)
+      .set({ pillarContentItemId: pick.id, format: (await formatNameOf(pick.formatId)) ?? undefined, updatedAt: new Date() })
+      .where(eq(productionItems.id, row.productionItemId));
+  }
+  return { ok: true };
 }
 
 /** Upcoming slots + recent ad-hoc/past drafts for the board. */
