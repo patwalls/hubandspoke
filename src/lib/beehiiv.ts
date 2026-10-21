@@ -14,11 +14,25 @@
 
 const BASE_URL = "https://api.beehiiv.com/v2";
 
-/** The only post templates a draft may start from: Kevin's (Futurepedia channel) and Saj's (Skill Leap channel). */
+/** The Kevin / Saj templates our drafts copy the look of (read-only references; we never post into them). */
 export const HOWTO_POST_TEMPLATE_IDS = {
   kevin: "post_template_76011007-958d-4538-89dc-40bbe45f87a1",
   saj: "post_template_b3286956-4e4e-40a2-a465-090aacde5aec",
 } as const;
+/**
+ * The only template a draft may be created from: an EMPTY one ("New
+ * template" — just beehiiv's standard footer), so the post holds exactly the
+ * blocks we send. beehiiv's API can't fill a template's placeholders, so the
+ * Kevin/Saj cards are rebuilt as native blocks (beehiiv-draft.ts).
+ */
+export const HOWTO_BASE_TEMPLATE_ID = "post_template_c3dd4220-7ca4-4163-97e2-9f8082bcc5a3";
+/** The guest authors shown on each edition. */
+export const HOWTO_AUTHOR_IDS = {
+  kevin: "guest_925e71d0-7b16-4fe1-80c0-5190b91d3ef1",
+  saj: "guest_dcb6e333-05bb-4f6d-819b-9773d0d6be95",
+} as const;
+/** "How was Futurepedia today?" — the feedback poll both templates use. */
+export const HOWTO_POLL_ID = "poll_2384fd00-6ac7-4f5e-be32-128d163b5cba";
 
 /** The Futurepedia publication: both the Kevin (Futurepedia) and Saj (Skill Leap) How-To editions go out from it. */
 export const FUTUREPEDIA_PUBLICATION_ID = "pub_535435b5-116b-4462-b22b-4fdd5f71a1b7";
@@ -141,7 +155,8 @@ const DRAFT_FIELDS = new Set([
   "title",
   "subtitle",
   "post_template_id",
-  "body_content",
+  "blocks",
+  "guest_author_ids",
   "status",
   "recipients",
   "email_settings",
@@ -151,6 +166,23 @@ const DRAFT_FIELDS = new Set([
 ]);
 const EMAIL_SETTINGS = new Set(["email_subject_line", "email_preview_text", "display_title_in_email", "display_subtitle_in_email"]);
 const WEB_SETTINGS = new Set(["slug", "display_title_on_web", "display_subtitle_on_web"]);
+/** Content blocks a draft may carry: no ads, embeds, RSS or paywalls, and no per-block audience targeting. */
+const DRAFT_BLOCK_TYPES = new Set(["section", "heading", "paragraph", "list", "image", "button", "poll"]);
+
+function assertSafeBlocks(blocks: unknown, no: (why: string) => never, depth = 0): void {
+  if (!Array.isArray(blocks) || blocks.length === 0) no("blocks must be a non-empty list");
+  for (const b of blocks as unknown[]) {
+    if (!b || typeof b !== "object") no("each block must be an object");
+    const block = b as Record<string, unknown>;
+    if (!DRAFT_BLOCK_TYPES.has(block.type as string)) no(`block type not allowed: ${String(block.type)}`);
+    if ("visibility_settings" in block) no("blocks may not carry visibility_settings (audience targeting)");
+    if (block.type === "poll" && block.poll_id !== HOWTO_POLL_ID) no("only the How-To feedback poll is allowed");
+    if (block.type === "section") {
+      if (depth > 0) no("sections can't be nested");
+      assertSafeBlocks(block.blocks, no, depth + 1);
+    }
+  }
+}
 
 /**
  * Throws unless `body` can only make an UNSENT DRAFT: status is exactly
@@ -159,7 +191,7 @@ const WEB_SETTINGS = new Set(["slug", "display_title_on_web", "display_subtitle_
  * excludes Skill Leap members and adds no segment. Exported for tests.
  */
 export function assertSafeDraftCreate(body: unknown): void {
-  const no = (why: string) => {
+  const no = (why: string): never => {
     throw new BeehiivError(403, `Blocked beehiiv draft: ${why}`);
   };
   if (!body || typeof body !== "object" || Array.isArray(body)) return no("body must be an object");
@@ -167,7 +199,12 @@ export function assertSafeDraftCreate(body: unknown): void {
   const extra = Object.keys(b).filter((k) => !DRAFT_FIELDS.has(k));
   if (extra.length) no(`fields not allowed: ${extra.join(", ")}`);
   if (b.status !== "draft") no(`status must be "draft" (got ${JSON.stringify(b.status)})`);
-  if (!Object.values(HOWTO_POST_TEMPLATE_IDS).includes(b.post_template_id as never)) no("post_template_id must be the Kevin or Saj template");
+  if (b.post_template_id !== HOWTO_BASE_TEMPLATE_ID) no("post_template_id must be the empty How-To base template");
+  assertSafeBlocks(b.blocks, no);
+  const authors = b.guest_author_ids;
+  if (authors !== undefined && (!Array.isArray(authors) || authors.length !== 1 || !Object.values(HOWTO_AUTHOR_IDS).includes(authors[0]))) {
+    no("guest_author_ids must be exactly Kevin or Saj");
+  }
   if (typeof b.title !== "string" || !b.title.trim()) no("title is required");
   const sub = (key: string, allowed: Set<string>) => {
     const v = b[key];

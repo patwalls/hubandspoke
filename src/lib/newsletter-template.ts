@@ -86,12 +86,13 @@ export const hubspotMappingSchema = z.object({
 export type HubspotMapping = z.infer<typeof hubspotMappingSchema>;
 
 /**
- * Where a draft goes in beehiiv (Futurepedia): the post template it starts
- * from — Kevin's for Futurepedia-channel editions, Saj's for Skill Leap. The
- * push (beehiiv-draft.ts) only ever creates an unsent draft.
+ * Where a draft goes in beehiiv (Futurepedia): whose edition it is — Kevin
+ * (Futurepedia channel) or Saj (Skill Leap). The push (beehiiv-draft.ts)
+ * rebuilds the Kevin/Saj template's cards as native blocks under that author;
+ * it only ever creates an unsent draft.
  */
 export const beehiivMappingSchema = z.object({
-  postTemplateId: z.string().regex(/^post_template_[0-9a-f-]{36}$/, "a beehiiv post template id"),
+  author: z.enum(["kevin", "saj"]),
 });
 export type BeehiivMapping = z.infer<typeof beehiivMappingSchema>;
 
@@ -249,17 +250,18 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
     ],
   },
   ...Object.fromEntries(
-    [
-      // beehiiv post templates "Kevin Template" / "Saj Template" (publication pub_535435b5…).
-      ["how-to newsletter - futurepedia (pilot)", "post_template_76011007-958d-4538-89dc-40bbe45f87a1"],
-      ["how-to newsletter - skill leap (pilot)", "post_template_b3286956-4e4e-40a2-a465-090aacde5aec"],
-    ].map(([name, postTemplateId]) => [
+    (
+      [
+        ["how-to newsletter - futurepedia (pilot)", "kevin"],
+        ["how-to newsletter - skill leap (pilot)", "saj"],
+      ] as const
+    ).map(([name, author]) => [
       name,
       {
         version: 1 as const,
         style: NEUTRAL_STYLE,
         hubspot: null,
-        beehiiv: { postTemplateId },
+        beehiiv: { author },
         sections: [
           s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer."),
           s("article", null, "The article headline as an H2 (the how-to, benefit-first), the video thumbnail as a Markdown image, then the one-line concrete example."),

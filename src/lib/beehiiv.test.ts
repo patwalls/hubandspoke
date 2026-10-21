@@ -3,7 +3,9 @@ import {
   assertAllowedBeehiivCall,
   assertSafeDraftCreate,
   FUTUREPEDIA_PUBLICATION_ID as FP,
-  HOWTO_POST_TEMPLATE_IDS,
+  HOWTO_AUTHOR_IDS,
+  HOWTO_BASE_TEMPLATE_ID,
+  HOWTO_POLL_ID,
   SKILL_LEAP_MEMBERS_SEGMENT_ID as SEG,
 } from "./beehiiv";
 
@@ -48,8 +50,9 @@ describe("assertSafeDraftCreate: a create can only ever make an unsent draft", (
   const safe = {
     title: "Turn Meeting Notes Into a Plan",
     subtitle: "A 10-minute workflow",
-    post_template_id: HOWTO_POST_TEMPLATE_IDS.kevin,
-    body_content: "<p>Hi</p>",
+    post_template_id: HOWTO_BASE_TEMPLATE_ID,
+    blocks: [{ type: "section", blocks: [{ type: "paragraph", plaintext: "Hi" }] }, { type: "poll", poll_id: HOWTO_POLL_ID }],
+    guest_author_ids: [HOWTO_AUTHOR_IDS.kevin],
     status: "draft",
     recipients: { email: { tier_ids: ["free"], exclude_segment_ids: [SEG] }, web: { tier_ids: ["free"] } },
     email_settings: { email_subject_line: "Turn Meeting Notes Into a Plan", email_preview_text: "x", display_title_in_email: false, display_subtitle_in_email: false },
@@ -57,9 +60,19 @@ describe("assertSafeDraftCreate: a create can only ever make an unsent draft", (
   };
   const refuses = (patch: Record<string, unknown>, why: RegExp) => expect(() => assertSafeDraftCreate({ ...safe, ...patch })).toThrow(why);
 
-  it("accepts a draft from Kevin's or Saj's template that excludes Skill Leap members", () => {
+  it("accepts a draft from the empty base template, by Kevin or Saj, that excludes Skill Leap members", () => {
     expect(() => assertSafeDraftCreate(safe)).not.toThrow();
-    expect(() => assertSafeDraftCreate({ ...safe, post_template_id: HOWTO_POST_TEMPLATE_IDS.saj })).not.toThrow();
+    expect(() => assertSafeDraftCreate({ ...safe, guest_author_ids: [HOWTO_AUTHOR_IDS.saj] })).not.toThrow();
+  });
+
+  it("refuses raw HTML, risky block types, per-block audience targeting and other authors or polls", () => {
+    refuses({ body_content: "<p>x</p>" }, /not allowed: body_content/);
+    refuses({ blocks: [{ type: "html", html: "<p>x</p>" }] }, /block type not allowed: html/);
+    refuses({ blocks: [{ type: "advertisement" }] }, /block type not allowed: advertisement/);
+    refuses({ blocks: [{ type: "paragraph", plaintext: "x", visibility_settings: { include_segment_ids: ["seg_x"] } }] }, /visibility_settings/);
+    refuses({ blocks: [{ type: "section", blocks: [{ type: "section", blocks: [] }] }] }, /nested/);
+    refuses({ blocks: [{ type: "poll", poll_id: "poll_other" }] }, /feedback poll/);
+    refuses({ guest_author_ids: ["guest_someone"] }, /Kevin or Saj/);
   });
 
   it("refuses anything that publishes or schedules", () => {
@@ -71,7 +84,7 @@ describe("assertSafeDraftCreate: a create can only ever make an unsent draft", (
   });
 
   it("refuses other templates and an audience that doesn't exclude Skill Leap members or adds a segment", () => {
-    refuses({ post_template_id: "post_template_00000000-0000-0000-0000-000000000000" }, /Kevin or Saj template/);
+    refuses({ post_template_id: "post_template_00000000-0000-0000-0000-000000000000" }, /empty How-To base template/);
     refuses({ recipients: undefined }, /recipients are required/);
     refuses({ recipients: { email: { tier_ids: ["free"], exclude_segment_ids: [] } } }, /Skill Leap members segment must be excluded/);
     refuses({ recipients: { email: { tier_ids: ["free"], exclude_segment_ids: [SEG], include_segment_ids: ["seg_x"] } } }, /no segment may be added/);

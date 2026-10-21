@@ -1,7 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { assertSafeDraftCreate, HOWTO_POST_TEMPLATE_IDS, SKILL_LEAP_MEMBERS_SEGMENT_ID } from "@/lib/beehiiv";
+import { assertSafeDraftCreate, HOWTO_AUTHOR_IDS, HOWTO_BASE_TEMPLATE_ID, SKILL_LEAP_MEMBERS_SEGMENT_ID } from "@/lib/beehiiv";
+import { inlineRuns, markdownToBlocks } from "@/lib/beehiiv-blocks";
 import { DEFAULT_TEMPLATES } from "@/lib/newsletter-template";
-import { beehiivSlug, buildBeehiivDraftRequest, unboldHeadings } from "./beehiiv-draft";
+import { beehiivSlug, buildBeehiivDraftRequest, toolFromWhy } from "./beehiiv-draft";
+
+type B = Record<string, unknown> & { type: string; blocks?: B[] };
+
+describe("markdown → beehiiv blocks", () => {
+  it("turns bold, italic and links into formatted runs", () => {
+    expect(inlineRuns("Hi **you** and *them*, [read](https://x.com)")).toEqual([
+      { text: "Hi " },
+      { text: "you", styling: ["bold"] },
+      { text: " and " },
+      { text: "them", styling: ["italic"] },
+      { text: ", " },
+      { text: "read", link: { href: "https://x.com", target: "_blank" } },
+    ]);
+    expect(inlineRuns("keep snake_case_words")).toEqual([{ text: "keep snake_case_words" }]);
+  });
+
+  it("makes headings, bullet lists, images and (when asked) link-only lines into buttons", () => {
+    const blocks = markdownToBlocks("## Title\n- ✅ **One** thing\n- two\n![thumb](https://img/x.jpg)\n[Watch The Full Video ->](https://youtu.be/x)", { buttons: true });
+    expect(blocks.map((b) => b.type)).toEqual(["heading", "list", "image", "button"]);
+    expect(blocks[3]).toMatchObject({ text: "Watch The Full Video →", href: "https://youtu.be/x" });
+    expect(markdownToBlocks("[Grab the guide →](https://g.com)")[0].type).toBe("paragraph");
+    expect(markdownToBlocks("Hey\n- Saj").map((b) => b.type)).toEqual(["paragraph", "paragraph"]);
+  });
+});
 
 describe("beehiiv draft request", () => {
   it("slugs the subject + send date the team's way", () => {
@@ -9,37 +34,61 @@ describe("beehiiv draft request", () => {
     expect(beehiivSlug("Notes → A Plan, Fast!", "2026-10-27")).toBe("notes-a-plan-fast-10-27-2026");
   });
 
-  it("strips bold from headings only", () => {
-    expect(unboldHeadings("<h2><strong>Title</strong></h2><p><strong>keep</strong></p>")).toBe("<h2>Title</h2><p><strong>keep</strong></p>");
+  it("reads the tool off the Why section for the card label", () => {
+    expect(toolFromWhy("### Why **Claude** Works\nbecause")).toBe("Claude");
+    expect(toolFromWhy("nothing")).toBeNull();
   });
 
-  it("builds a request the safety guard accepts: Kevin template, draft, Skill Leap excluded, display flags off", () => {
-    const template = DEFAULT_TEMPLATES["how-to newsletter - futurepedia (pilot)"];
-    const body = buildBeehiivDraftRequest({
-      template,
-      subject: "Turn Meeting Notes Into a Plan",
-      previewText: "A 10-minute workflow",
-      sendDate: "2026-10-27",
-      sections: template.sections.map((s) => ({ key: s.key, markdown: `**${s.key}** text` })),
-      sponsor: { copy: "Get the free guide", landingUrl: "https://example.com/guide" },
-      thumbnailUrl: "https://img.youtube.com/vi/abcdefghijk/maxresdefault.jpg",
-    });
+  const template = DEFAULT_TEMPLATES["how-to newsletter - skill leap (pilot)"];
+  const body = buildBeehiivDraftRequest({
+    template,
+    subject: "Turn Meeting Notes Into a Plan",
+    previewText: "A 10-minute workflow",
+    sendDate: "2026-10-27",
+    sections: [
+      { key: "intro", markdown: "Hey friends\n- Saj\n[Grab our free guide →](https://g.com)" },
+      { key: "article", markdown: "## Turn Notes Into a Plan\n![thumb](https://img.youtube.com/vi/x/maxresdefault.jpg)\nOne line." },
+      { key: "why", markdown: "### Why Claude Works\n- ✅ **Fast**" },
+      { key: "steps", markdown: "1. **Open** it" },
+      { key: "steps_continued", markdown: "4. **Ship** it\n[Watch The Full Video ->](https://youtu.be/x)" },
+      { key: "use_cases", markdown: "- 📊 **Ops:** x" },
+      { key: "bonus_tips", markdown: "- **Batch:** y" },
+    ],
+    sponsor: { copy: "Get the free guide", landingUrl: "https://example.com/guide" },
+    thumbnailUrl: null,
+  }) as Record<string, unknown> & { blocks: B[] };
+
+  it("passes the safety guard: a draft from the empty base template, Saj as author, Skill Leap excluded", () => {
     expect(() => assertSafeDraftCreate(JSON.parse(JSON.stringify(body)))).not.toThrow();
     expect(body).toMatchObject({
       status: "draft",
-      post_template_id: HOWTO_POST_TEMPLATE_IDS.kevin,
-      email_settings: { display_title_in_email: false, display_subtitle_in_email: false, email_subject_line: "Turn Meeting Notes Into a Plan" },
+      post_template_id: HOWTO_BASE_TEMPLATE_ID,
+      guest_author_ids: [HOWTO_AUTHOR_IDS.saj],
+      email_settings: { display_title_in_email: false, display_subtitle_in_email: false },
       web_settings: { slug: "turn-meeting-notes-into-a-plan-10-27-2026" },
     });
     expect((body.recipients as { email: { exclude_segment_ids: string[] } }).email.exclude_segment_ids).toEqual([SKILL_LEAP_MEMBERS_SEGMENT_ID]);
-    expect(body.body_content).toContain("<h3>Free Resource</h3>");
-    expect(body.body_content).toContain("Get the free guide");
     expect(body).not.toHaveProperty("scheduled_at");
+    expect(body).not.toHaveProperty("body_content");
   });
 
-  it("Saj's format starts from Saj's template", () => {
-    const template = DEFAULT_TEMPLATES["how-to newsletter - skill leap (pilot)"];
-    const body = buildBeehiivDraftRequest({ template, subject: "S", previewText: null, sendDate: "2026-10-30", sections: [], sponsor: null, thumbnailUrl: null });
-    expect(body.post_template_id).toBe(HOWTO_POST_TEMPLATE_IDS.saj);
+  it("rebuilds the template's cards in order, labelled like the template", () => {
+    const cards = body.blocks.filter((b) => b.type === "section");
+    const label = (c: B) => {
+      const h = c.blocks![0] as { formattedText?: { text: string }[]; text?: string };
+      return h.formattedText?.[0].text ?? h.text;
+    };
+    expect(cards.map((c) => (c.blocks![0].type === "heading" ? label(c) : "(intro)"))).toEqual([
+      "(intro)",
+      "Claude Guide",
+      "Free Resource",
+      "Claude Guide Continued",
+      "Use Cases",
+      "Bonus Tips",
+      "How was Futurepedia today?",
+    ]);
+    expect(body.blocks[0]).toMatchObject({ type: "image" }); // masthead
+    expect(cards[3].blocks!.at(-1)).toMatchObject({ type: "button", href: "https://youtu.be/x" });
+    expect(cards[2].blocks!.at(-1)).toMatchObject({ type: "button", href: "https://example.com/guide" });
   });
 });
