@@ -62,10 +62,16 @@ export const beehiivNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       sponsor: row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null,
       thumbnailUrl: row.youtubeId ? `https://img.youtube.com/vi/${row.youtubeId}/maxresdefault.jpg` : null,
     });
-    const post = await createFuturepediaDraft(body);
+    // Record the post the moment it exists, so a failed check below can never lead to a second post.
+    const post = await createFuturepediaDraft(body, async (p) => {
+      await db
+        .update(newsletterDrafts)
+        .set({ beehiivPostId: p.id, beehiivPostUrl: p.editUrl, updatedAt: new Date() })
+        .where(eq(newsletterDrafts.id, row.id));
+    });
     await db
       .update(newsletterDrafts)
-      .set({ beehiivPostId: post.id, beehiivPostUrl: post.editUrl, beehiivStatus: "created", beehiivError: null, updatedAt: new Date() })
+      .set({ beehiivStatus: "created", beehiivError: null, updatedAt: new Date() })
       .where(eq(newsletterDrafts.id, row.id));
     helpers.logger.info(`beehiiv-newsletter-create-draft: ${row.id} → beehiiv draft ${post.id}`);
   } catch (err) {

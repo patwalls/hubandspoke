@@ -70,6 +70,30 @@ async function syncBeehiivHistory(since: Date): Promise<number> {
     (await db.select({ id: newsletterDrafts.beehiivPostId }).from(newsletterDrafts).where(isNotNull(newsletterDrafts.beehiivPostId))).map((r) => r.id!),
   );
   let n = 0;
+  // The team's own beehiiv DRAFTS too (their Claude-skill flow still runs in parallel): a video they're already
+  // drafting must not get a second edition here, and the send date in its slug is taken. Stored once, as origin
+  // "beehiiv-draft" with sent_date from the slug's -MM-DD-YYYY. Our own pushed drafts are skipped.
+  for (let page = 1; page <= 4; page++) {
+    const r = await listFuturepediaPosts({ page, limit: 50, status: "draft" });
+    for (const p of r.data) {
+      if (have.has(`beehiiv:${p.id}`) || ours.has(p.id)) continue;
+      const html = (await getFuturepediaPost(p.id, ["free_email_content"])).content?.free?.email ?? "";
+      if (!isHowToEdition(html)) continue;
+      const m = (p.slug ?? "").match(/-(\d{2})-(\d{2})-(\d{4})$/);
+      await upsert({
+        brand: "futurepedia",
+        scheduleGroup: "futurepedia-howto",
+        externalId: `beehiiv:${p.id}`,
+        origin: "beehiiv-draft",
+        name: p.title ?? null,
+        subject: (p.subject_line as string | undefined) ?? p.title ?? null,
+        sentDate: m ? `${m[3]}-${m[1]}-${m[2]}` : null,
+        sourceKeys: await videoKeysForYoutubeIds(extractStoryRefs(html).youtubeIds),
+      });
+      n++;
+    }
+    if (page >= r.total_pages) break;
+  }
   for (let page = 1; page <= 20; page++) {
     const r = await listFuturepediaPosts({ page, limit: 50, status: "confirmed" });
     for (const p of r.data) {

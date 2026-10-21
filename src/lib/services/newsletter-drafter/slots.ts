@@ -90,12 +90,6 @@ async function committedVideoIds(group: string): Promise<Set<string>> {
   return new Set(rows.map((r) => r.id!).filter(Boolean));
 }
 
-/** Videos an edition the team already sent used (beehiiv history, matched by the video link). */
-async function historyVideoIds(group: string): Promise<Set<string>> {
-  const rows = await db.select({ keys: newsletterIssueHistory.sourceKeys }).from(newsletterIssueHistory).where(eq(newsletterIssueHistory.scheduleGroup, group));
-  return new Set(rows.flatMap((r) => r.keys).filter((k) => k.startsWith("video:")).map((k) => k.slice("video:".length)));
-}
-
 /** YYYY-MM-DD of an instant in US Eastern (sends go out 9:30am ET). */
 export function easternDate(iso: string | Date): string {
   return new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -150,15 +144,35 @@ async function ensureVideoEditions(
   const byAccount = new Map(groupFormats.filter((f) => f.accountId).map((f) => [f.accountId!, f.id]));
   if (!schedule.trigger || byAccount.size === 0) return 0;
   const slotRows = await db
-    .select({ id: newsletterDrafts.id, sendDate: newsletterDrafts.sendDate, sourceItemId: newsletterDrafts.sourceItemId, status: newsletterDrafts.status })
+    .select({
+      id: newsletterDrafts.id,
+      sendDate: newsletterDrafts.sendDate,
+      sourceItemId: newsletterDrafts.sourceItemId,
+      status: newsletterDrafts.status,
+      pinned: newsletterDrafts.sourcePinned,
+    })
     .from(newsletterDrafts)
     .where(like(newsletterDrafts.slotKey, `${schedule.group}:%`));
   const today = easternDate(now);
   // Empty future slots from the old fixed-Tuesday schedule: nothing to send, so drop them.
-  const empty = slotRows.filter((r) => r.status === "idea" && !r.sourceItemId && r.sendDate && r.sendDate >= today).map((r) => r.id);
-  if (empty.length) await db.delete(newsletterDrafts).where(inArray(newsletterDrafts.id, empty));
-  const used = new Set([...slotRows.map((r) => r.sourceItemId!).filter(Boolean), ...(await historyVideoIds(schedule.group))]);
-  const taken = new Set(slotRows.filter((r) => r.sourceItemId && r.sendDate).map((r) => r.sendDate!));
+  const history = await db
+    .select({ sentDate: newsletterIssueHistory.sentDate, keys: newsletterIssueHistory.sourceKeys })
+    .from(newsletterIssueHistory)
+    .where(eq(newsletterIssueHistory.scheduleGroup, schedule.group));
+  const historyVideos = new Set(history.flatMap((h) => h.keys).filter((k) => k.startsWith("video:")).map((k) => k.slice("video:".length)));
+  // Drop undrafted future slots that have nothing to send: empty ones from the old fixed-Tuesday schedule, and
+  // ones whose video the team already sent or is drafting in beehiiv (a hand-picked video is kept).
+  const stale = slotRows
+    .filter((r) => r.status === "idea" && r.sendDate && r.sendDate >= today && (!r.sourceItemId || (!r.pinned && historyVideos.has(r.sourceItemId))))
+    .map((r) => r.id);
+  if (stale.length) await db.delete(newsletterDrafts).where(inArray(newsletterDrafts.id, stale));
+  const live = slotRows.filter((r) => !stale.includes(r.id));
+  const used = new Set([...live.map((r) => r.sourceItemId!).filter(Boolean), ...historyVideos]);
+  // Dates already taken: our editions, plus sends the team has (or is drafting) in beehiiv.
+  const taken = new Set([
+    ...live.filter((r) => r.sourceItemId && r.sendDate).map((r) => r.sendDate!),
+    ...history.map((h) => h.sentDate!).filter((d) => d && d >= addDays(today, -7)),
+  ]);
 
   const published = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
   const videos = await db

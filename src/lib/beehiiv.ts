@@ -269,17 +269,30 @@ export function beehiivEditUrl(postId: string): string {
 
 /**
  * Create ONE unsent draft post, then read it back and confirm beehiiv saved
- * it as a draft with no publish date. Never retried (a retry after a create
- * that went through would leave a second draft; drafts can't be deleted from
- * here). Throws loudly if the read-back isn't a draft.
+ * it as a draft. Never retried (a retry after a create that went through
+ * would leave a second draft; drafts can't be deleted from here).
+ * `onCreated` runs as soon as beehiiv returns the id — before the read-back —
+ * so the caller records the post even if the check below fails.
+ * beehiiv's read right after a create can come back without a status yet, so
+ * the read-back polls (~10s) until it has one; a status other than "draft" is
+ * a loud error.
  */
-export async function createFuturepediaDraft(body: Record<string, unknown>): Promise<{ id: string; editUrl: string }> {
+export async function createFuturepediaDraft(
+  body: Record<string, unknown>,
+  onCreated?: (post: { id: string; editUrl: string }) => Promise<void>,
+): Promise<{ id: string; editUrl: string }> {
   const created = await beehiivFetch<{ data: BeehiivPost }>("POST", `/publications/${FUTUREPEDIA_PUBLICATION_ID}/posts`, body);
   const id = created.data?.id;
   if (!id || !/^post_/.test(id)) throw new BeehiivError(502, "beehiiv didn't return a post id");
-  const check = await getFuturepediaPost(id);
-  if (check.status !== "draft") {
-    throw new BeehiivError(500, `beehiiv saved post ${id} as "${check.status}", not draft — check it in beehiiv NOW (${beehiivEditUrl(id)})`);
+  const post = { id, editUrl: beehiivEditUrl(id) };
+  await onCreated?.(post);
+  let status: string | undefined;
+  for (let i = 0; i < 6 && !status; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 2000));
+    status = (await getFuturepediaPost(id)).status || undefined;
   }
-  return { id, editUrl: beehiivEditUrl(id) };
+  if (status !== "draft") {
+    throw new BeehiivError(500, `beehiiv post ${id} reads back as "${status ?? "no status yet"}", not draft — check it in beehiiv (${post.editUrl})`);
+  }
+  return post;
 }
