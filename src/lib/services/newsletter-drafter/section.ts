@@ -5,11 +5,11 @@
 // Heroku's 30s router limit; the editor polls the draft until the key leaves
 // `regenerating`.
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
-import { regenerateSection, storyKeyOf } from "./agent";
+import { NewsletterCancelledError, regenerateSection, storyKeyOf } from "./agent";
 import { blockedKeys, loadUsage, usageGroupFor, withInferredSources } from "./usage";
 import { formatConfigFor } from "./format-config";
 import { loadSourceVideo } from "./run";
@@ -30,6 +30,16 @@ export function newStoryExclusions(sections: NewsletterSection[], key: string): 
     if (sec.key === key) for (const t of sec.tried ?? []) out.add(t);
   }
   return out;
+}
+
+/** The section is still waiting on this run (Cancel removes it from `regenerating`). */
+async function stillWanted(id: string, key: string): Promise<boolean> {
+  const [cur] = await db
+    .select({ id: newsletterDrafts.id })
+    .from(newsletterDrafts)
+    .where(and(eq(newsletterDrafts.id, id), sql`jsonb_exists(${newsletterDrafts.regenerating}, ${key})`))
+    .limit(1);
+  return !!cur;
 }
 
 async function clearRegenerating(id: string, key: string, error: string | null) {
@@ -60,6 +70,7 @@ export async function regenerateDraftSection(
       notes: newsletterDrafts.notes,
       sections: newsletterDrafts.sections,
       sources: newsletterDrafts.sources,
+      regenerating: newsletterDrafts.regenerating,
       sourceItemId: newsletterDrafts.sourceItemId,
       specialCopy: newsletterDrafts.specialCopy,
       specialSource: newsletterDrafts.specialSource,
@@ -72,6 +83,8 @@ export async function regenerateDraftSection(
     .where(eq(newsletterDrafts.id, newsletterDraftId))
     .limit(1);
   if (!row) return { ok: false, reason: "not_found" };
+  // Cancelled before it started (the editor took the key out of `regenerating`).
+  if (!row.regenerating.includes(sectionKey)) return { ok: false, reason: "cancelled" };
   const template = templateFor(row.formatName, row.formatTemplate);
   if (!template || row.status !== "ready") {
     await clearRegenerating(row.id, sectionKey, null);
@@ -121,6 +134,7 @@ export async function regenerateDraftSection(
       newStoryExclude: exclude,
       storyPlan,
       log: opts.log,
+      shouldStop: async () => !(await stillWanted(row.id, sectionKey)),
       currentIssue: composeIssue(template, row.sections, sponsor),
       sourcesNote: video ? null : row.sources.map((x) => `- ${x.kind}: ${x.title ?? ""} ${x.url ?? ""}`).join("\n") || null,
       signal: opts.signal,
@@ -141,10 +155,11 @@ export async function regenerateDraftSection(
         revision: sql`${newsletterDrafts.revision} + 1`,
         updatedAt: new Date(),
       })
-      .where(eq(newsletterDrafts.id, row.id));
+      .where(and(eq(newsletterDrafts.id, row.id), sql`jsonb_exists(${newsletterDrafts.regenerating}, ${sectionKey})`));
     await clearRegenerating(row.id, sectionKey, null);
     return { ok: true };
   } catch (err) {
+    if (err instanceof NewsletterCancelledError) return { ok: false, reason: "cancelled" };
     if (opts.signal?.aborted) throw err;
     await clearRegenerating(row.id, sectionKey, `Regenerating "${sectionKey}" failed: ${(err as Error).message}`.slice(0, 2000));
     return { ok: false, reason: (err as Error).message };

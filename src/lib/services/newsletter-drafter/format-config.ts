@@ -54,6 +54,12 @@ export interface NewsletterFormatConfig {
   storyPlan?: StoryPlanConfig;
 }
 
+/**
+ * Paid runs (draft, regenerate, Find new story) wait this long in the queue
+ * before the first model call, so Cancel right after a mis-click costs nothing.
+ */
+export const NEWSLETTER_START_DELAY_MS = 10_000;
+
 const STARTER_STORY_PROMO_PROJECT = "1213468297418521"; // MEDIA | Starter Story Promo Calendar
 const FUTUREPEDIA_PROMO_PROJECT = "1213986172831893"; // MEDIA | Futurepedia Promo Calendar
 

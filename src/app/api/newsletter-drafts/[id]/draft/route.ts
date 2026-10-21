@@ -5,6 +5,7 @@ import { requireFeature } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { newsletterDrafts } from "@/lib/db/schema";
 import { enqueue } from "@/jobs/enqueue";
+import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -14,8 +15,9 @@ const Body = z.object({ notes: z.string().max(4000).nullable().optional() }).opt
 
 /**
  * Draft (or redraft) a slot: flip it to `drafting` and enqueue the agent run.
- * Opening an undrafted slot in the editor calls this; so does Redraft. One
- * paid model run per call, so it only fires from an explicit open/click.
+ * The editor's Draft / Redraft / Try again buttons call this (opening a slot
+ * does NOT). One paid model run per call; it waits NEWSLETTER_START_DELAY_MS
+ * in the queue so Cancel (`…/cancel`) right after a mis-click is free.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
@@ -38,6 +40,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (!row) return NextResponse.json({ error: "Already drafting, or not found" }, { status: 409 });
   // Two attempts: the retry only does work after a deploy abort; a real
   // failure marks the row `failed` first, so the retry is a no-op.
-  await enqueue("newsletter-draft", { newsletterDraftId: id }, { jobKey: `newsletter-draft:${id}`, maxAttempts: 2 });
+  await enqueue("newsletter-draft", { newsletterDraftId: id }, {
+    jobKey: `newsletter-draft:${id}`,
+    maxAttempts: 2,
+    runAt: new Date(Date.now() + NEWSLETTER_START_DELAY_MS),
+  });
   return NextResponse.json({ ok: true }, { status: 202 });
 }

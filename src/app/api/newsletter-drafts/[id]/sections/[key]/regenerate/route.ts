@@ -5,6 +5,7 @@ import { requireFeature } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { newsletterDrafts } from "@/lib/db/schema";
 import { enqueue } from "@/jobs/enqueue";
+import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 import { getNewsletterDraft } from "@/lib/services/newsletter-drafter/queries";
 
 interface RouteContext {
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   await enqueue(
     "newsletter-section-regenerate",
     { newsletterDraftId: id, sectionKey: key, instruction: parsed.data.instruction?.trim() || null, newStory: !!parsed.data.newStory },
-    { jobKey: `newsletter-section:${id}:${key}`, maxAttempts: 1 },
+    { jobKey: `newsletter-section:${id}:${key}`, maxAttempts: 1, runAt: new Date(Date.now() + NEWSLETTER_START_DELAY_MS) },
   );
   return NextResponse.json({ ok: true }, { status: 202 });
 }

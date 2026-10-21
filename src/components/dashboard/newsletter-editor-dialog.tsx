@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { ExternalLink, Loader2, RefreshCw, Shuffle, Sparkles } from "lucide-react";
+import { ExternalLink, Loader2, RefreshCw, Shuffle, Sparkles, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import { startVisibleInterval } from "@/lib/visible-interval";
 import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 import { EmailPreview } from "@/components/dashboard/email-preview";
 import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
+import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
 export interface EditorDraft {
   id: string;
@@ -51,6 +52,7 @@ export interface EditorDraft {
   hubspotStatus: string | null;
   hubspotEmailUrl: string | null;
   hubspotError: string | null;
+  updatedAt: string;
   /** Per section with a story: how often this newsletter ran it before. */
   sectionUsage?: Record<string, { count: number; lastDate: string | null; label: string; published?: string | null }>;
 }
@@ -84,7 +86,6 @@ export function NewsletterEditorDialog({
 }) {
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const startedRef = useRef(false);
 
   const load = useCallback(async (): Promise<EditorDraft | null> => {
     const res = await fetch(`/api/newsletter-drafts/${draftId}`);
@@ -111,17 +112,6 @@ export function NewsletterEditorDialog({
       cancelled = true;
     };
   }, [open, draftId]);
-
-  // Opening an undrafted slot starts its draft (one paid run per explicit open).
-  // A How-To slot with no video waits for the editor to pick one.
-  const shouldStart = open && draft?.status === "idea" && !(draft.kind === "single_video" && !draft.sourceItemId);
-  useEffect(() => {
-    if (!shouldStart || startedRef.current) return;
-    startedRef.current = true;
-    void fetch(`/api/newsletter-drafts/${draftId}/draft`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-      .then(() => load())
-      .then(() => onChanged());
-  }, [shouldStart, draftId, load, onChanged]);
 
   const busy = draft?.status === "drafting" || (draft?.regenerating.length ?? 0) > 0 || draft?.hubspotStatus === "pending";
   useEffect(() => {
@@ -247,6 +237,10 @@ function Workspace({
     await post(`/api/newsletter-drafts/${draft.id}/sections/${key}/regenerate`, { instruction: instruction || null, newStory }, `regen:${key}`);
   }
 
+  async function cancelRun(section?: string) {
+    await post(`/api/newsletter-drafts/${draft.id}/cancel`, section ? { section } : {}, section ? `cancel:${section}` : "cancel");
+  }
+
   async function special(action: "verbatim" | "rewrite" | "refresh") {
     if (dirty && !(await save())) return;
     await post(`/api/newsletter-drafts/${draft.id}/special`, { action }, `special:${action}`);
@@ -319,17 +313,10 @@ function Workspace({
             Draft
           </Button>
         </div>
-      ) : draft.status === "idea" || draft.status === "drafting" ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-          <Sparkles className="size-6 animate-pulse text-pink-500" />
-          <span className="text-sm font-medium text-foreground">Drafting {draft.formatName}…</span>
-          <span className="max-w-md text-center text-xs">
-            {draft.kind === "single_video"
-              ? "Reading the video's transcript, writing every section of the template, then reviewing its own draft."
-              : "Reading this week's videos and case studies, writing every section of the template, then reviewing its own draft."}{" "}
-            Usually a few minutes. You can close this and come back.
-          </span>
-        </div>
+      ) : draft.status === "idea" ? (
+        <IdeaPanel draft={draft} disabled={busyAction !== null} drafting={busyAction === "draft"} onDraft={() => post(`/api/newsletter-drafts/${draft.id}/draft`, {}, "draft")} />
+      ) : draft.status === "drafting" ? (
+        <DraftingPanel draft={draft} cancelling={busyAction === "cancel"} onCancel={() => cancelRun()} />
       ) : draft.status === "failed" ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-sm">
           <span className="font-medium text-destructive">The draft failed</span>
@@ -394,6 +381,7 @@ function Workspace({
                     source={draft.kind === "roundup" ? (sections.find((x) => x.key === sec.key)?.source ?? null) : null}
                     usage={draft.sectionUsage?.[sec.key] ?? null}
                     onFindNewStory={draft.kind === "roundup" ? (instruction) => regenerate(sec.key, instruction, true) : undefined}
+                    onCancel={() => cancelRun(sec.key)}
                   />
                 ),
               )
@@ -452,6 +440,67 @@ function Workspace({
   );
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A clock that ticks every second while mounted (keeps Date.now() out of render). */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  return now;
+}
+
+/** An undrafted slot: nothing runs until the editor clicks Draft (one paid run). */
+function IdeaPanel({ draft, disabled, drafting, onDraft }: { draft: EditorDraft; disabled: boolean; drafting: boolean; onDraft: () => void }) {
+  const now = useNow();
+  const daysOut = draft.sendDate ? Math.floor((Date.parse(`${draft.sendDate}T12:00:00Z`) - now) / DAY_MS) : 0;
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">
+      <Sparkles className="size-6 text-pink-500" />
+      <span className="font-medium text-foreground">Not drafted yet</span>
+      <span className="max-w-md text-xs">
+        {draft.kind === "single_video"
+          ? "Drafting reads the video's transcript, writes every section of the template, then reviews its own draft."
+          : "Drafting reads this week's videos and case studies, writes every section of the template, then reviews its own draft."}{" "}
+        One Claude run, usually a few minutes.
+      </span>
+      {daysOut > 7 && (
+        <span className="max-w-md rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
+          This issue sends {fmtDate(draft.sendDate)}, {daysOut} days from now. Most of its stories probably aren&apos;t published yet, so a
+          draft now would likely need redrafting closer to the date.
+        </span>
+      )}
+      <Button onClick={onDraft} disabled={disabled}>
+        {drafting && <Loader2 className="animate-spin" />}
+        Draft this issue
+      </Button>
+    </div>
+  );
+}
+
+/** A run in progress: a free cancel window first (the job waits in the queue), then the run itself. */
+function DraftingPanel({ draft, cancelling, onCancel }: { draft: EditorDraft; cancelling: boolean; onCancel: () => void }) {
+  const now = useNow();
+  const left = Math.ceil((Date.parse(draft.updatedAt) + NEWSLETTER_START_DELAY_MS - now) / 1000);
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-muted-foreground">
+      <Sparkles className="size-6 animate-pulse text-pink-500" />
+      <span className="text-sm font-medium text-foreground">{left > 0 ? `Starting in ${left}s…` : `Drafting ${draft.formatName}…`}</span>
+      <span className="max-w-md text-xs">
+        {left > 0
+          ? "Cancel now and nothing runs (no charge)."
+          : "Usually a few minutes. You can close this and come back. Cancel stops it at the end of its current step; you're only charged for the steps already done."}
+      </span>
+      <Button variant="outline" size="sm" onClick={onCancel} disabled={cancelling}>
+        {cancelling ? <Loader2 className="animate-spin" /> : <X />}
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
 function SectionEditor({
   label,
   hint,
@@ -463,6 +512,7 @@ function SectionEditor({
   source,
   usage,
   onFindNewStory,
+  onCancel,
 }: {
   label: string;
   hint: string;
@@ -474,6 +524,7 @@ function SectionEditor({
   source?: NewsletterSection["source"];
   usage?: { count: number; lastDate: string | null; label: string; published?: string | null } | null;
   onFindNewStory?: (instruction: string) => void;
+  onCancel?: () => void;
 }) {
   const [instruction, setInstruction] = useState("");
   return (
@@ -483,8 +534,14 @@ function SectionEditor({
           {label}
         </span>
         {regenerating && (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="size-3 animate-spin" /> Regenerating…
+            {onCancel && (
+              <Button size="xs" variant="ghost" onClick={onCancel} title="Stop this rewrite. Free in the first few seconds; after that it stops at the end of its current step.">
+                <X />
+                Cancel
+              </Button>
+            )}
           </span>
         )}
       </div>

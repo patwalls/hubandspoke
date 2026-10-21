@@ -87,7 +87,7 @@ function issueLine(row: BoardRow): { text: string; muted: boolean } {
 }
 
 function ActionButton({ row, onOpen }: { row: BoardRow; onOpen: () => void }) {
-  const label = row.status === "idea" ? "Draft" : row.status === "failed" ? "Retry" : "Open";
+  const label = row.status === "failed" ? "Retry" : "Open";
   return (
     <Button
       size="xs"
@@ -96,7 +96,7 @@ function ActionButton({ row, onOpen }: { row: BoardRow; onOpen: () => void }) {
         e.stopPropagation();
         onOpen();
       }}
-      title={row.status === "idea" ? "Drafts the issue (one Claude run)" : undefined}
+      title={row.status === "idea" ? "Opens the issue; nothing is drafted until you click Draft there" : undefined}
     >
       {label}
     </Button>
@@ -185,6 +185,14 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
     void load();
   }, [load]);
 
+  // "This week" = send dates through this Sunday (the week Sunday Breakfast closes).
+  const [weekEnd] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + ((7 - d.getDay()) % 7));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const thisWeek = (upcoming ?? []).filter((r) => !r.sendDate || r.sendDate <= weekEnd);
+  const later = (upcoming ?? []).filter((r) => r.sendDate && r.sendDate > weekEnd);
   const anyDrafting = [...(upcoming ?? []), ...past].some((r) => r.status === "drafting");
   useEffect(() => {
     if (!anyDrafting || openId) return;
@@ -211,8 +219,8 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold">Newsletters</h1>
           <p className="text-sm text-muted-foreground">
-            The next two weeks of scheduled issues. Draft one to write it into its template, edit or regenerate any section, then
-            send it on to the email tool.
+            This week&apos;s issues, then the next ones. Open an issue and click Draft to write it into its template (nothing runs
+            until you do), edit or regenerate any section, then send it on to the email tool.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
@@ -228,7 +236,22 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
       ) : upcoming.length === 0 ? (
         <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No scheduled newsletters for this brand.</p>
       ) : (
-        <IssueTable rows={upcoming} onOpen={setOpenId} groupByDate={false} />
+        <>
+          <div className="flex flex-col gap-2">
+            <h2 className="text-sm font-medium">This week</h2>
+            {thisWeek.length ? (
+              <IssueTable rows={thisWeek} onOpen={setOpenId} groupByDate={false} />
+            ) : (
+              <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Nothing left to send this week.</p>
+            )}
+          </div>
+          {later.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <h2 className="text-sm font-medium text-muted-foreground">Upcoming</h2>
+              <IssueTable rows={later} onOpen={setOpenId} groupByDate={false} />
+            </div>
+          )}
+        </>
       )}
 
       <OneOffDraft brand={brand} onCreated={(id) => { void load(); setOpenId(id); }} />

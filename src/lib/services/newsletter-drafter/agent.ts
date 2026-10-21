@@ -243,6 +243,8 @@ export interface NewsletterAgentArgs {
   blocked?: Set<string>;
   /** Roundups with a story plan (story-plan.ts): the suggested lineup, given to the agent (not enforced). */
   storyPlan?: StoryPlan | null;
+  /** Checked before every model call; true = the editor cancelled, stop (throws NewsletterCancelledError). */
+  shouldStop?: () => Promise<boolean>;
   /** Worker logger, e.g. helpers.logger.info: one line per turn with the tools called. */
   log?: (msg: string) => void;
   signal?: AbortSignal;
@@ -266,6 +268,9 @@ export interface NewsletterAgentResult {
 }
 
 export class NewsletterAgentError extends Error {}
+
+/** The editor cancelled the run (no more model calls; nothing is written). */
+export class NewsletterCancelledError extends Error {}
 
 function buildSystem(args: NewsletterAgentArgs): Anthropic.Beta.BetaTextBlockParam[] {
   const role = (
@@ -487,6 +492,7 @@ async function runLoop<T>(spec: LoopSpec<T>): Promise<{ value: T; model: string;
   let nudged = false;
 
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
+    if (await args.shouldStop?.()) throw new NewsletterCancelledError("cancelled by the editor");
     // Non-streaming on purpose: on the worker dyno Sentry's Anthropic
     // integration (src/jobs/instrument.ts) swaps a streamed response for its
     // own async generator, which has no `.controller`, and the SDK's

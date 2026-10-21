@@ -3,10 +3,10 @@
 // Called by the `newsletter-draft` worker task. Idempotent: a row that is no
 // longer `drafting` is left alone, so a retry after success is a no-op.
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
-import { NEWSLETTER_MODEL, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
+import { NEWSLETTER_MODEL, NewsletterCancelledError, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
 import { blockedKeys, loadUsage, toStoredSources, usageGroupFor, withInferredSources } from "./usage";
 import { buildStoryPlan, withPlanDates } from "./story-plan";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
@@ -66,6 +66,7 @@ export async function runNewsletterDraft(
       notes: newsletterDrafts.notes,
       sendDate: newsletterDrafts.sendDate,
       sourceItemId: newsletterDrafts.sourceItemId,
+      updatedAt: newsletterDrafts.updatedAt,
       formatName: formats.name,
       formatInstructions: formats.instructions,
       formatTemplate: formats.newsletterTemplate,
@@ -86,6 +87,13 @@ export async function runNewsletterDraft(
 
   const config = formatConfigFor(row.formatName);
   const template = templateFor(row.formatName, row.formatTemplate);
+  // This run owns the row only while it's still `drafting` with the same
+  // updated_at it started from: Cancel (and a later Redraft) both move it.
+  const ours = and(eq(newsletterDrafts.id, row.id), eq(newsletterDrafts.status, "drafting"), eq(newsletterDrafts.updatedAt, row.updatedAt));
+  const shouldStop = async () => {
+    const [cur] = await db.select({ id: newsletterDrafts.id }).from(newsletterDrafts).where(ours).limit(1);
+    return !cur;
+  };
   try {
     const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId) : null;
     const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
@@ -123,6 +131,7 @@ export async function runNewsletterDraft(
       storyPlan,
       model: config.model,
       log: opts.log,
+      shouldStop,
       signal: opts.signal,
     });
     const s = result.submission;
@@ -131,7 +140,7 @@ export async function runNewsletterDraft(
       ? [{ kind: "video" as const, productionItemId: video.productionItemId, title: video.title, url: video.url }]
       : toStoredSources(s.sources);
     const sections = template ? withPlanDates(withInferredSources(toStoredSections(s.sections ?? []), sources), storyPlan) : [];
-    await db
+    const saved = await db
       .update(newsletterDrafts)
       .set({
         status: "ready",
@@ -155,16 +164,19 @@ export async function runNewsletterDraft(
         error: null,
         updatedAt: new Date(),
       })
-      .where(eq(newsletterDrafts.id, row.id));
+      .where(ours)
+      .returning({ id: newsletterDrafts.id });
+    if (!saved.length) return { ok: false, skipped: "cancelled" };
     return { ok: true, turns: result.turns, sources: sources.length };
   } catch (err) {
+    if (err instanceof NewsletterCancelledError) return { ok: false, skipped: "cancelled" };
     // An abort (deploy SIGTERM) leaves the row `drafting` so graphile's retry
     // picks it up; any other failure is final and shown on the page.
     if (opts.signal?.aborted) throw err;
     await db
       .update(newsletterDrafts)
       .set({ status: "failed", error: (err as Error).message.slice(0, 2000), model: config.model ?? NEWSLETTER_MODEL, updatedAt: new Date() })
-      .where(eq(newsletterDrafts.id, row.id));
+      .where(ours);
     throw err;
   }
 }
