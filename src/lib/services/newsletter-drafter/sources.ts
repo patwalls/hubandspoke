@@ -75,6 +75,23 @@ export async function getVideoTranscript(
   return { text: truncated ? full.slice(0, budget) : full, truncated };
 }
 
+/**
+ * The transcript with a [M:SS] timestamp on every line (the How-To drafter
+ * tags each screenshot placeholder with the moment it shows, so Hub & Spoke
+ * can grab that frame from the archived video). Falls back to plain text.
+ */
+export async function getTimestampedTranscript(
+  productionItemId: string,
+  budget: number,
+): Promise<{ text: string; truncated: boolean; timestamped: boolean } | null> {
+  const t = await getTranscriptForPrompt(productionItemId);
+  if (!t) return null;
+  const timestamped = !!t.segmentsMarkdown.trim();
+  const full = timestamped ? t.segmentsMarkdown : t.fullText;
+  const truncated = full.length > budget;
+  return { text: truncated ? full.slice(0, budget) : full, truncated, timestamped };
+}
+
 /** A How-To issue is written from one whole video, so allow a much longer transcript. */
 export const SINGLE_VIDEO_TRANSCRIPT_BUDGET = 200_000;
 

@@ -13,6 +13,7 @@
 // excluded, headings never bold.
 import { HOWTO_AUTHOR_IDS, HOWTO_BASE_TEMPLATE_ID, HOWTO_POLL_ID, SKILL_LEAP_MEMBERS_SEGMENT_ID } from "@/lib/beehiiv";
 import { markdownToBlocks, type Block } from "@/lib/beehiiv-blocks";
+import { applyScreenshots, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
 import { sponsorBlock, type ComposeSponsor, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 /** A layout card: a bordered section (the Kevin/Saj templates alternate navy and blue borders). */
@@ -61,13 +62,19 @@ export function buildBeehiivDraftRequest(args: {
   thumbnailUrl: string | null;
   /** Kevin or Saj from the video's channel (one-format newsletters); else the template's author. */
   author?: "kevin" | "saj" | null;
+  /** Picked screenshot frames (newsletter_drafts.screenshots) and the public link for each, by frame id. */
+  screenshots?: Record<string, ChosenScreenshot> | null;
+  screenshotUrls?: Record<string, string> | null;
 }): Record<string, unknown> {
   if (!args.template.beehiiv) throw new Error("this format has no beehiiv setup");
-  const md = (key: string) => {
+  const rawMd = (key: string) => {
     const sec = args.template.sections.find((s) => s.key === key);
     if (sec?.kind === "sponsor" && args.sponsor?.copy) return sponsorBlock(args.sponsor.copy, args.sponsor.landingUrl);
     return args.sections.find((x) => x.key === key)?.markdown ?? "";
   };
+  // Picked screenshots replace their placeholders as image lines (→ image blocks).
+  const md = (key: string) => applyScreenshots(key, rawMd(key), args.screenshots, (c) => args.screenshotUrls?.[c.frameId] ?? null);
+
   const layout = args.template.beehiiv.layout;
   const tool = toolFromWhy(md("why")) ?? "AI";
   const sectionByKey = new Map(args.template.sections.map((sec) => [sec.key, sec]));

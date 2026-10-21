@@ -335,7 +335,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
           s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer."),
           s("article", null, "The article headline as an H2 (the how-to, benefit-first), the video thumbnail as a Markdown image, then the one-line concrete example."),
           s("why", null, "An H3 'Why [Tool] Works', a benefit-first line, then 3 to 5 ✅ bullets each led by a bolded action verb."),
-          s("steps", "How We Did It", "The first half of the 4 to 6 numbered steps: one action each, action bolded, a concrete business impact, italic [Screenshot: …] placeholders.", { headingLevel: 3 }),
+          s("steps", "How We Did It", "The first half of the 4 to 6 numbered steps: one action each, action bolded, a concrete business impact, italic *[Screenshot @ M:SS: …]* placeholders (the moment in the video it shows).", { headingLevel: 3 }),
           s("free_resource", "Free Resource", "The offer: headline, 2 to 3 sentence body, 3 to 5 Key Takeaways bullets and the CTA link.", { kind: "sponsor", boxColor: "#f1f5f9" }),
           s("steps_continued", "How We Did It (continued)", "The rest of the numbered steps (continue the numbering), then the line [Watch The Full Video ->](VIDEO_URL).", { headingLevel: 3 }),
           s("use_cases", "Use Cases", "3 to 5 bullets: a fitting emoji, a bold role label, then the point.", { headingLevel: 3 }),

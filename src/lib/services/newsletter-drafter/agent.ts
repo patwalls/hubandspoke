@@ -283,6 +283,8 @@ export interface SourceVideo {
   publishedAt: string | null;
   transcript: string;
   truncated: boolean;
+  /** Each transcript line starts with its [M:SS] timestamp. */
+  timestamped?: boolean;
 }
 
 export interface NewsletterAgentResult {
@@ -437,7 +439,12 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
       ]
         .filter(Boolean)
         .join("\n"),
-      `TRANSCRIPT${v.truncated ? " (truncated — very long video)" : ""}:\n${v.transcript}`,
+      `TRANSCRIPT${v.truncated ? " (truncated — very long video)" : ""}${v.timestamped ? " (each line starts with its [M:SS] timestamp in the video)" : ""}:\n${v.transcript}`,
+      ...(v.timestamped
+        ? [
+            "SCREENSHOT PLACEHOLDERS: write each one on its own line as *[Screenshot @ M:SS: what the screen shows]*, where M:SS is the transcript timestamp of the moment that screen is on camera (the step being shown, not when it's first mentioned). Hub & Spoke grabs that frame from the video, so pick the moment the thing is visible.",
+          ]
+        : []),
     );
     if (args.recentEditions?.length) {
       parts.push(

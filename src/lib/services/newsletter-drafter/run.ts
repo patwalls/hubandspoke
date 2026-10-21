@@ -13,7 +13,7 @@ import { advanceNewsletterItem } from "./queue-status";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
 import { formatConfigFor, voiceForChannel } from "./format-config";
 import { findSpecial } from "./promo";
-import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getVideoTranscript, youtubeThumbnailUrl } from "./sources";
+import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getTimestampedTranscript, youtubeThumbnailUrl } from "./sources";
 import type { SourceVideo } from "./agent";
 
 export type NewsletterDraftRunResult =
@@ -67,7 +67,7 @@ export async function loadSourceVideo(sourceItemId: string | null, formatName?: 
   if (!sourceItemId) throw new Error("This format drafts from one video, but no video was picked.");
   const [v, t] = await Promise.all([
     getSingleVideo(sourceItemId),
-    getVideoTranscript(sourceItemId, SINGLE_VIDEO_TRANSCRIPT_BUDGET),
+    getTimestampedTranscript(sourceItemId, SINGLE_VIDEO_TRANSCRIPT_BUDGET),
   ]);
   if (!v) throw new Error("The picked video no longer exists.");
   if (!t) throw new Error(`"${v.title ?? "This video"}" has no transcript yet.`);
@@ -81,6 +81,7 @@ export async function loadSourceVideo(sourceItemId: string | null, formatName?: 
     publishedAt: v.publishedAt,
     transcript: t.text,
     truncated: t.truncated,
+    timestamped: t.timestamped,
   };
 }
 

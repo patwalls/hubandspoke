@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 import { EmailPreview } from "@/components/dashboard/email-preview";
+import { ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
+import { applyScreenshots } from "@/lib/newsletter-screenshots";
 import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
 import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
@@ -58,6 +60,8 @@ export interface EditorDraft {
   updatedAt: string;
   /** Per section with a story: how often this newsletter ran it before. */
   sectionUsage?: Record<string, { count: number; lastDate: string | null; label: string; published?: string | null }>;
+  /** Preview links for picked screenshot frames, by placeholder key. */
+  screenshotPreviews?: Record<string, string>;
 }
 
 interface VideoOption {
@@ -162,6 +166,8 @@ function Workspace({
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  // How-To screenshot placeholders → frames from the video (only once there's a written draft).
+  const shots = useScreenshots(draft.id, draft.kind === "single_video" && draft.status === "ready", draft.screenshotPreviews ?? {});
   const seenRevision = useRef(draft.revision);
   const seenStatus = useRef(draft.status);
 
@@ -410,7 +416,11 @@ function Workspace({
                     usage={draft.sectionUsage?.[sec.key] ?? null}
                     onFindNewStory={draft.kind === "roundup" ? (instruction) => regenerate(sec.key, instruction, true) : undefined}
                     onCancel={() => cancelRun(sec.key)}
-                  />
+                  >
+                    {draft.kind === "single_video" && (
+                      <ScreenshotPicker sectionKey={sec.key} markdown={sections.find((x) => x.key === sec.key)?.markdown ?? ""} shots={shots} />
+                    )}
+                  </SectionEditor>
                 ),
               )
             ) : (
@@ -450,7 +460,7 @@ function Workspace({
                 </div>
                 <EmailPreview
                   template={draft.template}
-                  sections={sections}
+                  sections={sections.map((x) => ({ ...x, markdown: applyScreenshots(x.key, x.markdown, shots.chosen, shots.urlFor) }))}
                   sponsor={specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null}
                   />
               </>
@@ -541,6 +551,7 @@ function SectionEditor({
   usage,
   onFindNewStory,
   onCancel,
+  children,
 }: {
   label: string;
   hint: string;
@@ -553,6 +564,8 @@ function SectionEditor({
   usage?: { count: number; lastDate: string | null; label: string; published?: string | null } | null;
   onFindNewStory?: (instruction: string) => void;
   onCancel?: () => void;
+  /** Extra controls under the section (the How-To's screenshot picker). */
+  children?: React.ReactNode;
 }) {
   const [instruction, setInstruction] = useState("");
   return (
@@ -596,6 +609,7 @@ function SectionEditor({
         </div>
       )}
       <Textarea className="min-h-28 font-mono text-xs" value={value} onChange={(e) => onChange(e.target.value)} disabled={regenerating} />
+      {children}
       <div className="flex items-center gap-2">
         <Input
           className="h-7 text-xs"

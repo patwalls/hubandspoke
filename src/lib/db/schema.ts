@@ -1,3 +1,4 @@
+import type { ChosenScreenshot } from "@/lib/newsletter-screenshots";
 import {
   pgTable,
   uuid,
@@ -2641,6 +2642,8 @@ export const newsletterDrafts = pgTable(
     /** null | pending | created | failed */
     hubspotStatus: text("hubspot_status"),
     hubspotError: text("hubspot_error"),
+    /** Frames chosen for the How-To's screenshot placeholders, keyed by ScreenshotMark.key (newsletter-screenshots.ts). */
+    screenshots: jsonb("screenshots").$type<Record<string, ChosenScreenshot>>().notNull().default({}),
     /**
      * The queue item (production_items) this edition belongs to (2026-10-21):
      * newsletters live in the regular queue — format = the newsletter format,

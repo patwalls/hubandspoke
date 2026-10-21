@@ -133,4 +133,24 @@ describe("beehiiv draft request", () => {
     expect(out.blocks.some((b) => b.type === "poll" || (b.blocks ?? []).some((x) => x.type === "poll"))).toBe(false);
     expect(out.blocks.filter((b) => b.type === "image")).toHaveLength(1); // masthead only
   });
+
+  it("puts a picked screenshot in as an image where its placeholder was; unpicked ones stay text", () => {
+    const template = DEFAULT_TEMPLATES["how-to newsletter - skill leap (pilot)"];
+    const out = buildBeehiivDraftRequest({
+      template,
+      subject: "S",
+      previewText: null,
+      sendDate: "2026-10-30",
+      sections: [{ key: "steps", markdown: "1. **Open Skills**\n*[Screenshot @ 4:32: the Skills page]*\n*[Screenshot @ 5:10: the result]*" }],
+      sponsor: null,
+      thumbnailUrl: null,
+      screenshots: { "steps:the skills page": { frameId: "f1", sec: 272, bucket: "www.starterstory.com", key: "k.jpg" } },
+      screenshotUrls: { f1: "https://s3.us-east-1.amazonaws.com/www.starterstory.com/k.jpg" },
+    }) as { blocks: B[] };
+    const guide = out.blocks.filter((b) => b.type === "section")[0].blocks!;
+    expect(guide).toContainEqual(expect.objectContaining({ type: "image", imageUrl: "https://s3.us-east-1.amazonaws.com/www.starterstory.com/k.jpg" }));
+    expect(JSON.stringify(guide)).toContain("[Screenshot @ 5:10: the result]");
+    expect(JSON.stringify(guide)).not.toContain("[Screenshot @ 4:32");
+  });
 });
+

@@ -39,7 +39,12 @@ export function BeehiivPreview({
   const md = (key: string) => {
     const sec = secByKey.get(key);
     if (sec?.kind === "sponsor" && sponsor?.copy?.trim()) return sponsorBlock(sponsor.copy, sponsor.landingUrl);
-    return (byKey.get(key) ?? "").trim();
+    // Same rules as the push (beehiiv-blocks.ts): every line is its own paragraph, and
+    // "- Saj" / "- Kevin" is the intro's sign-off, not a list.
+    return (byKey.get(key) ?? "")
+      .trim()
+      .replace(/^- (Saj|Kevin)$/gm, "\\- $1")
+      .replace(/\n(?!\n)/g, "\n\n");
   };
   const tool = toolFromWhy(md("why")) ?? (showHints ? "[Tool]" : "AI");
   const placed = new Set(layout.cards.flatMap((c) => c.sections.map((x) => x.key)));
