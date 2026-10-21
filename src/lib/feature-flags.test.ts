@@ -69,6 +69,7 @@ describe("resolveFeatureFlags", () => {
       newsletterDrafter: false,
     });
     expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterDrafter).toBe(true);
+    expect(resolveFeatureFlags({ email: "patrickswalls@gmail.com" }, {}).newsletterDrafter).toBe(true);
     expect(resolveFeatureFlags(null, {})).toEqual({ clipEditor: false, designEditor: false, newsletterDrafter: false });
   });
 });
