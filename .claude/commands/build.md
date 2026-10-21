@@ -39,12 +39,15 @@ ScheduleWakeup or sleep; the lap just ends. Optional focus: **$ARGUMENTS**.
   Build in `~/code/hubandspoke-build`:
   ```
   cd ~/code/hubandspoke && ship sync hubandspoke
-  [ -d ~/code/hubandspoke-build ] || git worktree add ~/code/hubandspoke-build main
   cd ~/code/hubandspoke-build && git checkout -q --detach main   # then: git checkout -b app-loop/<slug>
   ```
-  Its `node_modules`: `npm ci --no-audit --no-fund` when missing or when `package-lock.json`
-  changed (registry.npmjs.org is reachable). Run every command from the worktree. Branches made
-  there are refs of the same repo, so `ship … --branch` finds them.
+  The worktree was made outside the sandbox (2026-10-21) — the sandbox can write in it but cannot
+  create it; if it is ever missing, use `git worktree add --detach /tmp/hs-build/wt main` for this
+  lap and say so in `--blocked`. Lap 1 left one at `/tmp/hs-build/wt`: once its branch is shipped,
+  `git -C ~/code/hubandspoke worktree remove --force /tmp/hs-build/wt`.
+  Its `node_modules`: `npm ci --no-audit --no-fund --cache /tmp/hs-build/npm-cache` only when
+  `package-lock.json` changed (the default npm cache is read-only here). Run every command from the
+  worktree. Branches made there are refs of the same repo, so `ship … --branch` finds them.
 - Read `CLAUDE.md` and the three docs it names (`docs/features.md`, `docs/automation.md`,
   `docs/conventions.md`) before building — they are the rules (docs updated in the same commit,
   LLMs not regex for content meaning, tests by default, migrations via drizzle-kit).
