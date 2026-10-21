@@ -35,7 +35,9 @@ export interface ClipIdeaDroughtGap {
  * `format_trigger_sources`, derivative via the parent's `format_channels`
  * (matched on account + post_type) — but produced ZERO clip_ideas for that
  * format. That combination is this bug's exact fingerprint: the writer ran and
- * came up empty, rather than "not published" or "not processed yet".
+ * came up empty, rather than "not published" or "not processed yet". The
+ * route (format + its wire) must also predate the pillar's last generation
+ * activity — a format added after the run was never offered to the writer.
  *
  * Excludes any (pillar, format) already recorded in `clip_idea_drought_alerts`
  * so each gap alerts exactly once, never a daily repeat.
@@ -46,7 +48,15 @@ export async function findClipIdeaDroughts(
   const rows = (await db.execute(sql`
     WITH pillars AS (
       SELECT pi.id, pi.title, pi.brand, pi.account_id, pi.post_type,
-             pi.published_date
+             pi.published_date,
+             -- Latest sign the writer ran for this pillar: section detection
+             -- (pass 1) or any hook written (pass 2, incl. hooks-only regens).
+             GREATEST(
+               (SELECT max(cs.created_at) FROM clip_sections cs
+                 WHERE cs.pillar_id = pi.id),
+               (SELECT max(ci.created_at) FROM clip_ideas ci
+                 WHERE ci.source_production_item_id = pi.id)
+             ) AS last_generated_at
       FROM production_items pi
       WHERE pi.post_type = 'youtube_long'
         AND pi.source_type = 'original'
@@ -61,8 +71,12 @@ export async function findClipIdeaDroughts(
         )
     ),
     routed AS (
+      -- routed_at = when this route came to exist: the later of the format's
+      -- creation and the wire (trigger source / parent channel) that routes
+      -- the pillar to it.
       -- Root clippable formats wired to the pillar's account.
-      SELECT p.id AS pillar_id, f.id AS format_id, f.name AS format_name
+      SELECT p.id AS pillar_id, f.id AS format_id, f.name AS format_name,
+             GREATEST(f.created_at, fts.created_at) AS routed_at
       FROM pillars p
       JOIN format_trigger_sources fts ON fts.source_account_id = p.account_id
       JOIN formats f ON f.id = fts.format_id
@@ -71,7 +85,7 @@ export async function findClipIdeaDroughts(
       WHERE p.account_id IS NOT NULL
       UNION
       -- Derivative clippable formats via the direct parent's channels.
-      SELECT p.id, f.id, f.name
+      SELECT p.id, f.id, f.name, GREATEST(f.created_at, fc.created_at)
       FROM pillars p
       JOIN formats f ON f.parent_format_id IS NOT NULL AND f.is_clippable_format
       JOIN formats par ON par.id = f.parent_format_id
@@ -81,7 +95,7 @@ export async function findClipIdeaDroughts(
       WHERE p.account_id IS NOT NULL
       UNION
       -- Accountless pillars route brand-wide (mirrors getClippableFormats).
-      SELECT p.id, f.id, f.name
+      SELECT p.id, f.id, f.name, f.created_at
       FROM pillars p
       JOIN formats f ON f.brand = p.brand AND f.is_clippable_format
       WHERE p.account_id IS NULL
@@ -99,7 +113,12 @@ export async function findClipIdeaDroughts(
     FROM pillars p
     JOIN routed r ON r.pillar_id = p.id
     LEFT JOIN accounts a ON a.id = p.account_id
-    WHERE NOT EXISTS (
+    -- The route must predate the writer's last run. A format created (or
+    -- wired to the channel) after generation never had the writer run for it
+    -- — that's "not processed yet", not a drought (2026-10-21: Futurepedia X
+    -- Quotables was created a day after the Oct 19 pillar's run and alerted).
+    WHERE r.routed_at <= p.last_generated_at
+      AND NOT EXISTS (
         SELECT 1 FROM clip_ideas ci
         WHERE ci.source_production_item_id = p.id
           AND ci.target_format = r.format_name

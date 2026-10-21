@@ -45,6 +45,7 @@ import {
   clipEdits,
   clipIdeas,
   clipRenders,
+  clipSections,
   contentDrafts,
   descriptLayoutPacks,
   designDocs,
@@ -335,6 +336,7 @@ export interface CreateTestFormatOptions {
   ctaFixedUrl?: string | null;
   /** A stored design template — the design editor can draft this format. */
   designTemplate?: (typeof formats.$inferInsert)["designTemplate"];
+  createdAt?: Date;
 }
 
 /**
@@ -360,6 +362,7 @@ export async function createTestFormat(
       ctaStrategy: opts.ctaStrategy ?? null,
       ctaFixedUrl: opts.ctaFixedUrl ?? null,
       designTemplate: opts.designTemplate ?? null,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning();
   trackCleanup("formats", row.id);
@@ -584,6 +587,31 @@ export async function createTestClipIdea(
     })
     .returning();
   trackCleanup("clipIdeas", row.id);
+  return row;
+}
+
+/**
+ * Insert a live `clip_sections` row (pass-1 output). No cleanup tracking —
+ * it cascade-deletes with its pillar.
+ */
+export async function createTestClipSection(opts: {
+  pillarId: string;
+  createdAt?: Date;
+}): Promise<typeof clipSections.$inferSelect> {
+  const [row] = await db
+    .insert(clipSections)
+    .values({
+      pillarId: opts.pillarId,
+      batchId: randomUUID(),
+      startSec: "0",
+      endSec: "60",
+      transcriptAnchorQuote: "vitest anchor quote with at least eight words in it",
+      topic: "vitest topic",
+      summary: "vitest summary",
+      generatedBy: "vitest",
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+    })
+    .returning();
   return row;
 }
 

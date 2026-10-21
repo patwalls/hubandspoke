@@ -206,6 +206,8 @@ export function extractCrossPostRulesSection(skill: string): string | null {
  * `extras-schema` for any per-idea fields beyond the core hook/section
  * shape — e.g. `quotables: string[3]` for the X Quotables format.
  *
+ * Repeated headings are joined in order (see the body).
+ *
  * Returns `null` when the section is missing — the agent then falls back to
  * its hardcoded default block (current Reels-style narrator-overlay hook,
  * 30-60s runtime, no extras). This back-compat path keeps the original
@@ -213,16 +215,22 @@ export function extractCrossPostRulesSection(skill: string): string | null {
  * been extended with the new section.
  */
 export function extractClipIdeaSection(skill: string): string | null {
-  const match = CLIP_IDEA_SECTION_HEADING.exec(skill);
-  if (!match) return null;
-  const afterHeadingStart = match.index + match[0].length;
-  const remainder = skill.slice(afterHeadingStart);
-  const nextHeading = ANY_HEADING_AT_LEVEL_OR_HIGHER.exec(remainder);
-  const section = nextHeading
-    ? remainder.slice(0, nextHeading.index)
-    : remainder;
-  const trimmed = section.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  // A skill can carry the heading more than once — an editor appends a
+  // rewrite below the original instead of replacing it. Every block is
+  // joined in order; reading only the first silently hid futurepedia's
+  // tutorial rewrite from the writer, which kept judging Kevin/Saj demos
+  // against founder-interview rules (0 X Quotables ideas, 2026-10-10/21).
+  const heading = new RegExp(CLIP_IDEA_SECTION_HEADING.source, "gim");
+  const sections: string[] = [];
+  for (const match of skill.matchAll(heading)) {
+    const remainder = skill.slice(match.index + match[0].length);
+    const nextHeading = ANY_HEADING_AT_LEVEL_OR_HIGHER.exec(remainder);
+    const section = (
+      nextHeading ? remainder.slice(0, nextHeading.index) : remainder
+    ).trim();
+    if (section.length > 0) sections.push(section);
+  }
+  return sections.length > 0 ? sections.join("\n\n") : null;
 }
 
 const EXTRAS_SCHEMA_FENCE = /```extras-schema\s*\n([\s\S]*?)\n```/i;
