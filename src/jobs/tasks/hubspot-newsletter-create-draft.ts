@@ -5,15 +5,26 @@
 // Never publishes, schedules or sends. See docs/automation.md →
 // hubspot-newsletter-create-draft.
 import type { Task } from "graphile-worker";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { formats, newsletterDrafts } from "@/lib/db/schema";
+import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { createDraftEmailFromTemplate } from "@/lib/hubspot-marketing-email";
 import { markdownToEmailHtml } from "@/lib/newsletter-email-html";
 import { blockMarkdown, templateFor } from "@/lib/newsletter-template";
 
 export interface HubspotNewsletterCreateDraftPayload {
   newsletterDraftId: string;
+}
+
+/**
+ * The HubSpot email's name, matching the team's convention for issues built
+ * by hand: "Starter Story | Newsletter | October 25" (the send date; today
+ * when unset). Pure — exported for tests.
+ */
+export function hubspotEmailName(brandLabel: string, sendDate: string | null, now: Date = new Date()): string {
+  const d = sendDate ? new Date(`${sendDate}T12:00:00Z`) : now;
+  const date = d.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+  return `${brandLabel} | Newsletter | ${date}`;
 }
 
 export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers) => {
@@ -33,6 +44,8 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       createdAt: newsletterDrafts.createdAt,
       formatName: formats.name,
       formatTemplate: formats.newsletterTemplate,
+      brand: newsletterDrafts.brand,
+      brandLabel: sql<string | null>`(SELECT ${brands.label} FROM ${brands} WHERE ${brands.slug} = ${newsletterDrafts.brand})`,
     })
     .from(newsletterDrafts)
     .innerJoin(formats, eq(formats.id, newsletterDrafts.formatId))
@@ -61,7 +74,7 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
   try {
     const email = await createDraftEmailFromTemplate({
       templateEmailId: template.hubspot.templateEmailId,
-      name: `${row.formatName} — ${row.subject} (${row.sendDate ?? new Date().toISOString().slice(0, 10)}) · Hub & Spoke draft`,
+      name: hubspotEmailName(row.brandLabel ?? row.brand, row.sendDate),
       subject: row.subject,
       previewText: row.previewText,
       blockHtml,
