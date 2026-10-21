@@ -371,6 +371,7 @@ export function SectionTabs({
           { href: `/${currentBrand}/production`, label: "In Production" },
           { href: `/${currentBrand}/queue`, label: "Queue" },
           { href: `/${currentBrand}/scheduled`, label: "Scheduled" },
+          { href: `/${currentBrand}/publish`, label: "Publish" },
           { href: `/${currentBrand}/formats`, label: "Formats" },
           { href: `/${currentBrand}/accounts`, label: "Accounts" },
           ...(flags?.newsletterDrafter

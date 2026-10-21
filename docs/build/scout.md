@@ -4,6 +4,37 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-21 — lap 1 (project lap: publish-day, milestone 1)
+
+**Learned**
+- 12 people acted in 30 days. The daily curator did ~3,100 actions; ~1,000 of them are
+  "mark published": status + link + date, ~11 posts a day, almost all cross-posts across ~6
+  platforms per pillar. The heaviest editor does ~50 a month.
+- Status-only users (four people, 12–23 status changes each) mostly move Assigned → Review and
+  Review → Ready To Publish.
+- Only 1 day of usage_events so far: one person opened /production. It's too early to call any
+  screen unused.
+- Pipeline: items created fell to 205 this week (Mon–Wed only, partial). The kill spike on
+  Oct 12 (98) was a one-off. Clip renders are at 28 so far this week, against 44 last week.
+- Friction: no failed renders. Sentry: nothing user-facing besides an info-level HTTP overhead
+  event. Slow p95 tails (/api/repost-queue 9s, /api/cross-post-queue 8s, /[brand]/queue 5s)
+  look like cold starts, since p50 is under 125 ms. Watch them, but that's the ops loop's job.
+
+**Outward**
+- Buffer notification publishing: you post natively and the post lands in "Sent", with no
+  paste-back. https://support.buffer.com/hc/en-us/articles/360039027053
+- Airtable calendars: status + URL field per record, which is our chore exactly.
+  https://draft.dev/learn/airtable-content-calendar
+- Lesson: make the record appear by itself (detection), or else make the paste-back one
+  keystroke on one screen.
+
+**Candidates**
+- → building: **Publish screen**: paste link + Enter per row for every Ready To Publish post.
+  source: usage (the curator's ~11 manual publishes a day)
+- Curator keyboard triage of the cross-post queue (261 created + 65 dismissed / 30 days, one at a
+  time). source: usage
+- Re-render friction in the clip editor (still open from the baseline). source: usage
+
 ## 2026-10-21 — baseline (written when the loop was created)
 
 **People** (content_events, 30 days; usage_events starts today so screens are empty for now):
@@ -31,5 +62,7 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-21 Publish screen (`/[brand]/publish`, project publish-day milestone 1). Card
+  `2026-10-21-publish-screen`.
 - 2026-10-21 What's new pop-up + usage tracking (interactive session, not the loop) — the
   foundation this loop reads and writes. Card `2026-10-21-whats-new`.
