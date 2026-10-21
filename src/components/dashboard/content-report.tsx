@@ -264,10 +264,7 @@ export function ContentReport({ brand }: { brand: string }) {
         onEndDateChange={(v) => filters.set("endDate", v)}
         onDateRangeChange={(s, e) => filters.setMany({ startDate: s, endDate: e })}
         onViewTypeChange={(v) => filters.set("viewType", v)}
-        onPlatformKeyChange={(v) => filters.set("platform", v)}
-        onAccountChange={(v) => filters.set("accountId", v)}
-        onPostTypeChange={(v) => filters.set("postType", v)}
-        onChannelsChange={(v) => filters.set("channels", v)}
+        onScopeChange={(patch) => filters.setMany(patch)}
         onFormatChange={(v) => filters.set("format", v)}
         onSourceChange={(v) => filters.set("source", v)}
         onOriginChange={(v) => filters.set("origin", v)}

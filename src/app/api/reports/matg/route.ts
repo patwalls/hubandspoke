@@ -7,7 +7,7 @@ import {
   summarizeProvenStatuses,
 } from "@/lib/services/format-proven";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
-import { channelFilterCondition, getBrandSettings } from "@/lib/db/queries";
+import { getBrandSettings, reportFilterConditions } from "@/lib/db/queries";
 import { format, subDays } from "date-fns";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
@@ -89,22 +89,18 @@ export async function GET(request: NextRequest) {
         sql`${productionItems.platform}::jsonb @> ${JSON.stringify([platformFilter])}::jsonb`
       );
     }
-    // New-world filters (prefer these over the legacy string filter above).
-    if (accountIdFilter !== "all") {
-      conditions.push(eq(productionItems.accountId, accountIdFilter));
-    }
-    if (platformKeyFilter !== "all") {
-      conditions.push(eq(accounts.platform, platformKeyFilter));
-    }
-    if (postTypeFilter !== "all") {
-      conditions.push(eq(productionItems.postType, postTypeFilter));
-    }
-    const channelsCond = channelFilterCondition(channelsFilter);
-    if (channelsCond) conditions.push(channelsCond);
-
-    if (formatFilter !== "all") {
-      conditions.push(eq(productionItems.format, formatFilter));
-    }
+    // New-world multi-select filters (prefer these over the legacy string
+    // filter above). Shared with getContentReport.
+    conditions.push(
+      ...reportFilterConditions({
+        accountId: accountIdFilter,
+        platformKey: platformKeyFilter,
+        postType: postTypeFilter,
+        channels: channelsFilter,
+        format: formatFilter,
+        source: sourceFilter,
+      })
+    );
 
     // Proven-format gate. Computed brand-wide on a 180-day window so the
     // headline tile and the chart filter share a definition. Skipping the
@@ -120,21 +116,6 @@ export async function GET(request: NextRequest) {
       } else {
         conditions.push(inArray(productionItems.format, provenNames));
       }
-    }
-
-    // Source filter classifies by sourceType (original / repurposed /
-    // repost / cross_post). NULL is treated as "original" since that's
-    // the historical default.
-    if (sourceFilter === "original") {
-      conditions.push(
-        sql`(${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')`
-      );
-    } else if (sourceFilter === "repurposed") {
-      conditions.push(eq(productionItems.sourceType, "repurposed"));
-    } else if (sourceFilter === "repost") {
-      conditions.push(eq(productionItems.sourceType, "repost"));
-    } else if (sourceFilter === "cross_post") {
-      conditions.push(eq(productionItems.sourceType, "cross_post"));
     }
 
     // Origin filter — see getContentReport in src/lib/db/queries.ts for the

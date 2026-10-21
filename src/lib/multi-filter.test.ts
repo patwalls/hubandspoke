@@ -1,40 +1,80 @@
 import { describe, it, expect } from "vitest";
-import { parseChannelFilter, serializeChannelFilter } from "./multi-filter";
+import {
+  multiFilterAllows,
+  parseAccountFilter,
+  parseChannelFilter,
+  parseMultiFilter,
+  serializeMultiFilter,
+} from "./multi-filter";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 
-describe("parseChannelFilter", () => {
+describe("parseMultiFilter", () => {
   it("treats all / empty as no filter", () => {
-    expect(parseChannelFilter("all")).toBeNull();
-    expect(parseChannelFilter("")).toBeNull();
-    expect(parseChannelFilter(null)).toBeNull();
+    expect(parseMultiFilter("all")).toBeNull();
+    expect(parseMultiFilter("")).toBeNull();
+    expect(parseMultiFilter(null)).toBeNull();
+    expect(parseMultiFilter(" , ")).toBeNull();
+    expect(parseMultiFilter("!")).toBeNull();
   });
 
-  it("parses account|postType pairs, including no-post-type channels", () => {
-    expect(parseChannelFilter(`${A}|instagram_reel,${B}|`)).toEqual([
-      { accountId: A, postType: "instagram_reel" },
-      { accountId: B, postType: null },
-    ]);
+  it("keeps legacy single values working", () => {
+    expect(parseMultiFilter("youtube_long")).toEqual({ mode: "include", items: ["youtube_long"] });
+    expect(parseMultiFilter("100% Real")).toEqual({ mode: "include", items: ["100% Real"] });
   });
 
-  it("drops malformed account ids and duplicates", () => {
-    expect(parseChannelFilter(`nope|x,${A}|x,${A}|x`)).toEqual([
-      { accountId: A, postType: "x" },
-    ]);
-    expect(parseChannelFilter("'; drop table|x")).toBeNull();
+  it("reads a leading ! as exclude mode", () => {
+    expect(parseMultiFilter("!youtube_long")).toEqual({ mode: "exclude", items: ["youtube_long"] });
   });
 });
 
-describe("serializeChannelFilter", () => {
-  const all = [`${A}|x`, `${B}|`];
+describe("serializeMultiFilter", () => {
+  const all = ["a", "b", "c", "d"];
 
   it("collapses empty and full selections to all", () => {
-    expect(serializeChannelFilter([], all)).toBe("all");
-    expect(serializeChannelFilter([`${B}|`, `${A}|x`], all)).toBe("all");
+    expect(serializeMultiFilter([], all)).toBe("all");
+    expect(serializeMultiFilter(["d", "c", "b", "a"], all)).toBe("all");
   });
 
-  it("joins a partial selection", () => {
-    expect(serializeChannelFilter([`${A}|x`], all)).toBe(`${A}|x`);
+  it("writes whichever list is shorter", () => {
+    expect(serializeMultiFilter(["a"], all)).toBe("a");
+    expect(serializeMultiFilter(["a", "b", "c"], all)).toBe("!d");
+  });
+
+  it("round-trips values with commas, percents and a leading !", () => {
+    const opts = ["Tips, tricks", "100%", "!bang", "x", "y"];
+    for (const picked of [["Tips, tricks", "100%"], ["!bang", "x", "y", "100%"]]) {
+      const f = parseMultiFilter(serializeMultiFilter(picked, opts));
+      expect(opts.filter((o) => multiFilterAllows(f, o)).sort()).toEqual([...picked].sort());
+    }
+  });
+});
+
+describe("parseAccountFilter", () => {
+  it("drops non-UUID ids", () => {
+    expect(parseAccountFilter(`${A},nope`)).toEqual({ mode: "include", items: [A] });
+    expect(parseAccountFilter("nope")).toBeNull();
+  });
+});
+
+describe("parseChannelFilter", () => {
+  it("parses account|postType pairs in either mode", () => {
+    expect(parseChannelFilter(`${A}|instagram_reel,${B}|`)).toEqual({
+      mode: "include",
+      channels: [
+        { accountId: A, postType: "instagram_reel" },
+        { accountId: B, postType: null },
+      ],
+    });
+    expect(parseChannelFilter(`!${A}|youtube_long`)).toEqual({
+      mode: "exclude",
+      channels: [{ accountId: A, postType: "youtube_long" }],
+    });
+  });
+
+  it("drops malformed account ids", () => {
+    expect(parseChannelFilter(`nope|x,${A}|x`)?.channels).toEqual([{ accountId: A, postType: "x" }]);
+    expect(parseChannelFilter("'; drop table|x")).toBeNull();
   });
 });

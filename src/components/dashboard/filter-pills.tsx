@@ -22,7 +22,13 @@ import {
 import { getQuickRange } from "@/lib/utils/dates";
 import { PLATFORM_META, POST_TYPE_SHORT_LABEL, toPlatform } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
-import { channelKey, parseChannelFilter, serializeChannelFilter } from "@/lib/multi-filter";
+import {
+  channelKey,
+  multiFilterAllows,
+  parseMultiFilter,
+  serializeMultiFilter,
+  type MultiFilter,
+} from "@/lib/multi-filter";
 
 export interface FilterAccount {
   id: string;
@@ -31,6 +37,13 @@ export interface FilterAccount {
   avatarUrl: string | null;
   brandSlug: string;
   brandLabel: string;
+}
+
+export interface ScopePatch {
+  platform?: string;
+  accountId?: string;
+  postType?: string;
+  channels?: string;
 }
 
 interface FilterPillsProps {
@@ -44,17 +57,20 @@ interface FilterPillsProps {
   /** Whether to offer "Brand" as a group-by option. Only meaningful on the
    *  cross-brand /all view; hidden on single-brand dashboards. */
   showBrandGroup?: boolean;
-  /** Canonical platform key (youtube, instagram, …) or "all". Replaces the
-   *  legacy channel-string platform filter. */
+  /** Platform, Account, Post type, Channels, Format and Source are all
+   *  multi-select: each value is "all" or a comma-separated list
+   *  (src/lib/multi-filter.ts).
+   *  Platform: canonical platform keys (youtube, instagram, …). */
   selectedPlatformKey: string;
-  /** accounts.id or "all". */
+  /** accounts.id list. */
   selectedAccountId: string;
-  /** Canonical post_type or "all". */
+  /** Canonical post_type list. */
   selectedPostType: string;
-  /** "all" or comma-separated `<accountId>|<postType>` channel keys. The
-   *  Channels pill only renders when `onChannelsChange` is supplied. */
-  selectedChannels?: string;
+  /** `<accountId>|<postType>` channel keys. */
+  selectedChannels: string;
+  /** Format names. */
   selectedFormat: string;
+  /** sourceType values (original / repurposed / cross_post / repost). */
   selectedSource: string;
   /** When true, items whose format isn't currently proven are excluded
    *  from the report aggregations. Defaults to false. */
@@ -83,10 +99,12 @@ interface FilterPillsProps {
   onDateRangeChange?: (startDate: string, endDate: string) => void;
   onViewTypeChange: (v: string) => void;
   onGroupByChange?: (v: string) => void;
-  onPlatformKeyChange: (v: string) => void;
-  onAccountChange: (v: string) => void;
-  onPostTypeChange: (v: string) => void;
-  onChannelsChange?: (v: string) => void;
+  /** Platform / Account / Post type / Channels cascade into each other, so
+   *  a change to one can prune the others. All of it arrives as ONE patch
+   *  (keyed by URL param) so consumers can write it atomically:
+   *    (patch) => filters.setMany(patch)
+   *  — separate `set()` calls race (see onDateRangeChange). */
+  onScopeChange: (patch: ScopePatch) => void;
   onFormatChange: (v: string) => void;
   onSourceChange: (v: string) => void;
   onProvenOnlyChange?: (v: boolean) => void;
@@ -176,10 +194,15 @@ function PillContent({
   label,
   value,
   icon,
+  reserve,
 }: {
   label?: string;
   value: string;
   icon?: React.ReactNode;
+  /** Text whose width the value slot always reserves (stacked invisibly
+   *  under the value), so the pill doesn't resize — and the filter row
+   *  doesn't re-wrap — as the value changes. */
+  reserve?: string;
 }) {
   return (
     <>
@@ -190,9 +213,18 @@ function PillContent({
         </>
       )}
       {icon}
-      <span className="text-foreground font-medium truncate max-w-[20rem]">
-        {value}
-      </span>
+      {reserve ? (
+        <span className="grid max-w-[10rem] text-foreground font-medium">
+          <span aria-hidden className="invisible col-start-1 row-start-1 truncate">
+            {reserve}
+          </span>
+          <span className="col-start-1 row-start-1 truncate">{value}</span>
+        </span>
+      ) : (
+        <span className="text-foreground font-medium truncate max-w-[20rem]">
+          {value}
+        </span>
+      )}
       <ChevronDownIcon className="h-3.5 w-3.5 text-muted-foreground" />
     </>
   );
@@ -389,107 +421,101 @@ export function SelectPill({
   );
 }
 
-interface ChannelOption {
-  key: string;
-  account: FilterAccount;
-  postType: PostType | null;
+interface MultiOption {
+  value: string;
+  label: string;
+  icon?: React.ReactNode;
+  /** Small right-aligned tag, e.g. the post type on a channel row. */
+  meta?: string;
 }
 
-/** Every (account, post type) pair the accounts can publish to — one row
- *  per pair, same shape as the format page's Accounts picker. */
-function buildChannelOptions(accounts: FilterAccount[]): ChannelOption[] {
-  const out: ChannelOption[] = [];
-  const sorted = [...accounts].sort(
-    (a, b) => a.platform.localeCompare(b.platform) || a.handle.localeCompare(b.handle)
-  );
-  for (const a of sorted) {
-    const postTypes = PLATFORM_META[toPlatform(a.platform)].postTypes;
-    const pts: (PostType | null)[] = postTypes.length ? postTypes : [null];
-    for (const pt of pts) {
-      out.push({ key: channelKey({ accountId: a.id, postType: pt }), account: a, postType: pt });
-    }
-  }
-  return out;
-}
-
-function channelLabel(o: ChannelOption): string {
-  return o.postType ? `@${o.account.handle} · ${POST_TYPE_SHORT_LABEL[o.postType]}` : `@${o.account.handle}`;
-}
-
-/** Multi-select checklist of channels. "all" shows every row ticked, so
- *  excluding one channel (e.g. YouTube long form) is a single click. */
-function ChannelsPill({
+/** Checklist dropdown shared by every multi-select filter. `value` is "all"
+ *  or a comma-separated list (src/lib/multi-filter.ts). "All" shows every
+ *  row ticked, so excluding one option is a single click; "Only" on a row
+ *  picks just that one. Stays open while toggling, and the pill keeps a
+ *  steady width so the popover doesn't jump. */
+function MultiSelectPill({
+  label,
+  allLabel,
   value,
   options,
   onChange,
+  searchPlaceholder = "Search…",
 }: {
+  label: string;
+  allLabel: string;
   value: string;
-  options: ChannelOption[];
+  options: MultiOption[];
   onChange: (v: string) => void;
+  searchPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const optionKeys = options.map((o) => o.key);
-  const parsed = parseChannelFilter(value);
-  const parsedKeys = parsed?.map(channelKey);
-  const selected = parsedKeys ? optionKeys.filter((k) => parsedKeys.includes(k)) : optionKeys;
-  const isAll = !parsedKeys || selected.length === optionKeys.length;
+  const optionValues = options.map((o) => o.value);
+  const parsed = parseMultiFilter(value);
+  const selected = optionValues.filter((v) => multiFilterAllows(parsed, v));
+  const isAll = !parsed || selected.length === optionValues.length;
 
-  const toggle = (key: string) => {
-    const next = selected.includes(key)
-      ? selected.filter((k) => k !== key)
-      : [...selected, key];
-    onChange(serializeChannelFilter(next, optionKeys));
-  };
+  const set = (next: string[]) => onChange(serializeMultiFilter(next, optionValues));
+  const toggle = (v: string) =>
+    set(selected.includes(v) ? selected.filter((s) => s !== v) : [...selected, v]);
 
-  const excluded = options.filter((o) => !selected.includes(o.key));
-  let summary: string;
+  let summary = allLabel;
   let icon: React.ReactNode | undefined;
-  if (isAll || selected.length === 0) {
-    summary = "All channels";
-  } else if (selected.length === 1) {
-    const only = options.find((o) => o.key === selected[0])!;
-    summary = channelLabel(only);
-    icon = <PlatformIcon platform={only.account.platform} size={12} />;
-  } else if (excluded.length === 1 && options.length > 2) {
-    summary = `All except ${channelLabel(excluded[0])}`;
-  } else {
-    summary = `${selected.length} channels`;
+  if (!isAll && selected.length === 1) {
+    const only = options.find((o) => o.value === selected[0])!;
+    summary = only.meta ? `${only.label} · ${only.meta}` : only.label;
+    icon = only.icon;
+  } else if (!isAll && selected.length > 1) {
+    summary = `${selected.length} of ${options.length}`;
   }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger className={PILL_TRIGGER_CLASSES}>
-        <PillContent label="Channels" value={summary} icon={icon} />
+        <PillContent label={label} value={summary} icon={icon} reserve={allLabel} />
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 p-0">
         <Command>
-          <CommandInput placeholder="Search accounts…" />
-          <CommandList>
-            <CommandEmpty>No accounts found.</CommandEmpty>
+          {options.length > 7 && <CommandInput placeholder={searchPlaceholder} />}
+          <CommandList className="max-h-[320px]">
+            <CommandEmpty>No matches.</CommandEmpty>
             <CommandGroup>
-              <CommandItem value="__all__ all channels" onSelect={() => onChange("all")}>
+              <CommandItem value={`__all__ ${allLabel}`} onSelect={() => onChange("all")}>
                 <span className="flex items-center gap-2 w-full">
-                  <ChannelCheckbox checked={isAll} />
-                  <span className="text-sm font-medium">All channels</span>
+                  <MultiCheckbox checked={isAll} />
+                  <span className="text-sm font-medium">{allLabel}</span>
                 </span>
               </CommandItem>
               {options.map((o) => {
-                const checked = isAll || selected.includes(o.key);
+                const checked = isAll || selected.includes(o.value);
                 return (
                   <CommandItem
-                    key={o.key}
-                    value={`${o.account.handle} ${o.account.platform} ${o.postType ?? ""} ${o.key}`}
-                    onSelect={() => toggle(o.key)}
+                    key={o.value}
+                    value={`${o.label} ${o.meta ?? ""} ${o.value}`}
+                    onSelect={() => toggle(o.value)}
+                    className="group"
                   >
-                    <span className="flex items-center gap-2 w-full">
-                      <ChannelCheckbox checked={checked} />
-                      <PlatformIcon platform={o.account.platform} size={13} />
-                      <span className="text-sm font-medium truncate">@{o.account.handle}</span>
-                      {o.postType && (
-                        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
-                          {POST_TYPE_SHORT_LABEL[o.postType]}
-                        </span>
-                      )}
+                    <span className="flex items-center gap-2 w-full min-w-0">
+                      <MultiCheckbox checked={checked} />
+                      {o.icon}
+                      <span className="text-sm truncate">{o.label}</span>
+                      <span className="ml-auto flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            set([o.value]);
+                          }}
+                          className="hidden group-hover:inline text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                        >
+                          Only
+                        </button>
+                        {o.meta && (
+                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                            {o.meta}
+                          </span>
+                        )}
+                      </span>
                     </span>
                   </CommandItem>
                 );
@@ -502,7 +528,7 @@ function ChannelsPill({
   );
 }
 
-function ChannelCheckbox({ checked }: { checked: boolean }) {
+function MultiCheckbox({ checked }: { checked: boolean }) {
   return (
     <span
       className={cn(
@@ -515,6 +541,72 @@ function ChannelCheckbox({ checked }: { checked: boolean }) {
   );
 }
 
+// Canonical post types per platform for the Post type pill.
+const POST_TYPE_OPTS = [
+  { value: "youtube_long", label: "YouTube video", platform: "youtube" },
+  { value: "youtube_shorts", label: "YouTube short", platform: "youtube" },
+  { value: "youtube_community", label: "YouTube community", platform: "youtube" },
+  { value: "instagram_reel", label: "Instagram reel", platform: "instagram" },
+  { value: "instagram_post", label: "Instagram post", platform: "instagram" },
+  { value: "instagram_story", label: "Instagram story", platform: "instagram" },
+  { value: "x", label: "X post", platform: "x" },
+  { value: "tiktok", label: "TikTok video", platform: "tiktok" },
+  { value: "linkedin", label: "LinkedIn post", platform: "linkedin" },
+  { value: "threads", label: "Threads post", platform: "threads" },
+  { value: "newsletter", label: "Newsletter", platform: "newsletter" },
+];
+
+interface ChannelOption {
+  key: string;
+  account: FilterAccount;
+  postType: PostType | null;
+}
+
+/** Every (account, post type) pair the given accounts publish to, narrowed
+ *  by a post-type selection — one row per pair, same shape as the format
+ *  page's Accounts picker. */
+function channelOptionsFor(accounts: FilterAccount[], postTypes: MultiFilter | null): ChannelOption[] {
+  const out: ChannelOption[] = [];
+  const sorted = [...accounts].sort(
+    (a, b) => a.platform.localeCompare(b.platform) || a.handle.localeCompare(b.handle)
+  );
+  for (const a of sorted) {
+    const pts = PLATFORM_META[toPlatform(a.platform)].postTypes;
+    for (const pt of pts.length ? pts : [null]) {
+      if (pt && !multiFilterAllows(postTypes, pt)) continue;
+      out.push({ key: channelKey({ accountId: a.id, postType: pt }), account: a, postType: pt });
+    }
+  }
+  return out;
+}
+
+/** Accounts the Platform (and optionally Account) filters let through. */
+function scopedAccounts(
+  accounts: FilterAccount[],
+  platforms: MultiFilter | null,
+  accountIds: MultiFilter | null
+): FilterAccount[] {
+  return accounts.filter(
+    (a) => multiFilterAllows(platforms, a.platform) && multiFilterAllows(accountIds, a.id)
+  );
+}
+
+function postTypeOptsFor(platforms: MultiFilter | null) {
+  return POST_TYPE_OPTS.filter((pt) => multiFilterAllows(platforms, pt.platform));
+}
+
+/** Re-express `value` against a new option list: keep whichever of the new
+ *  options it allowed. Selections that dropped out of scope fall away, and
+ *  a selection with nothing left collapses to "all". */
+function rescope(value: string, nextOptions: string[]): string {
+  const f = parseMultiFilter(value);
+  if (!f) return "all";
+  return serializeMultiFilter(
+    nextOptions.filter((o) => multiFilterAllows(f, o)),
+    nextOptions
+  );
+}
+
 export function FilterPills({
   startDate,
   endDate,
@@ -524,7 +616,7 @@ export function FilterPills({
   selectedPlatformKey,
   selectedAccountId,
   selectedPostType,
-  selectedChannels = "all",
+  selectedChannels,
   selectedFormat,
   selectedSource,
   provenOnly = false,
@@ -537,10 +629,7 @@ export function FilterPills({
   onDateRangeChange,
   onViewTypeChange,
   onGroupByChange,
-  onPlatformKeyChange,
-  onAccountChange,
-  onPostTypeChange,
-  onChannelsChange,
+  onScopeChange,
   onFormatChange,
   onSourceChange,
   onProvenOnlyChange,
@@ -548,8 +637,7 @@ export function FilterPills({
 }: FilterPillsProps) {
   // Canonical platforms — fixed list that the `accounts.platform` column
   // takes values from. Mirrors PLATFORM_META ordering in src/lib/platforms.ts.
-  const platformKeyOptions = [
-    { value: "all", label: "All platforms" },
+  const platformKeyOptions: MultiOption[] = [
     { value: "youtube", label: "YouTube", icon: <PlatformIcon platform="youtube" size={12} /> },
     { value: "instagram", label: "Instagram", icon: <PlatformIcon platform="instagram" size={12} /> },
     { value: "x", label: "X", icon: <PlatformIcon platform="x" size={12} /> },
@@ -560,66 +648,67 @@ export function FilterPills({
     { value: "other", label: "Other", icon: <PlatformIcon platform="other" size={12} /> },
   ];
 
-  // Accounts: always show the full list, but hide ones whose platform
-  // doesn't match the selected platform filter (cascade).
-  const visibleAccounts = selectedPlatformKey === "all"
-    ? accounts
-    : accounts.filter((a) => a.platform === selectedPlatformKey);
-  const accountOptions = [
-    { value: "all", label: "All accounts" },
-    ...visibleAccounts.map((a) => ({
-      value: a.id,
-      label: `@${a.handle}`,
-      icon: (
-        <AccountAvatar
-          avatarUrl={a.avatarUrl}
-          platform={a.platform}
-          handle={a.handle}
-          size={18}
-        />
-      ),
-    })),
-  ];
+  // Cascade: Platform narrows Accounts and Post types; all three narrow
+  // Channels. Each pill only offers options the pills before it allow.
+  const platforms = parseMultiFilter(selectedPlatformKey);
+  const accountOptions: MultiOption[] = scopedAccounts(accounts, platforms, null).map((a) => ({
+    value: a.id,
+    label: `@${a.handle}`,
+    icon: (
+      <AccountAvatar avatarUrl={a.avatarUrl} platform={a.platform} handle={a.handle} size={18} />
+    ),
+  }));
+  const postTypeOptions: MultiOption[] = postTypeOptsFor(platforms).map((pt) => ({
+    value: pt.value,
+    label: pt.label,
+    icon: <PlatformIcon platform={pt.platform} size={12} />,
+  }));
+  const channelOptions: MultiOption[] = channelOptionsFor(
+    scopedAccounts(accounts, platforms, parseMultiFilter(selectedAccountId)),
+    parseMultiFilter(selectedPostType)
+  ).map((o) => ({
+    value: o.key,
+    label: `@${o.account.handle}`,
+    icon: <PlatformIcon platform={o.account.platform} size={13} />,
+    meta: o.postType ? POST_TYPE_SHORT_LABEL[o.postType] : undefined,
+  }));
+  const formatOptions: MultiOption[] = formats.map((f) => ({ value: f, label: f }));
+  const sourceOptions: MultiOption[] = SOURCES.filter((o) => o.value !== "all");
 
-  // Post types: fixed canonical set; cascade by selected platform when one
-  // is picked (YouTube → long/short/community, etc.).
-  const POST_TYPE_OPTS = [
-    { value: "youtube_long", label: "YouTube video", platform: "youtube" },
-    { value: "youtube_shorts", label: "YouTube short", platform: "youtube" },
-    { value: "youtube_community", label: "YouTube community", platform: "youtube" },
-    { value: "instagram_reel", label: "Instagram reel", platform: "instagram" },
-    { value: "instagram_post", label: "Instagram post", platform: "instagram" },
-    { value: "instagram_story", label: "Instagram story", platform: "instagram" },
-    { value: "x", label: "X post", platform: "x" },
-    { value: "tiktok", label: "TikTok video", platform: "tiktok" },
-    { value: "linkedin", label: "LinkedIn post", platform: "linkedin" },
-    { value: "threads", label: "Threads post", platform: "threads" },
-    { value: "newsletter", label: "Newsletter", platform: "newsletter" },
-  ];
-  const visiblePostTypes = selectedPlatformKey === "all"
-    ? POST_TYPE_OPTS
-    : POST_TYPE_OPTS.filter((pt) => pt.platform === selectedPlatformKey);
-  const postTypeOptions = [
-    { value: "all", label: "All post types" },
-    ...visiblePostTypes.map((pt) => ({
-      value: pt.value,
-      label: pt.label,
-      icon: <PlatformIcon platform={pt.platform} size={12} />,
-    })),
-  ];
-
-  // Channels cascade off the Platform / Account / Post type pills so the
-  // list only offers pairs those filters would let through.
-  const channelOptions = buildChannelOptions(visibleAccounts).filter(
-    (o) =>
-      (selectedAccountId === "all" || o.account.id === selectedAccountId) &&
-      (selectedPostType === "all" || o.postType === selectedPostType)
-  );
-
-  const formatOptions = [
-    { value: "all", label: "All formats" },
-    ...formats.map((f) => ({ value: f, label: f })),
-  ];
+  // Apply a change to one scope filter, re-scoping the pills after it
+  // (Platform → Account / Post type → Channels) so they drop selections
+  // that no longer fit, and emit it all as one patch.
+  const changeScope = (patch: ScopePatch) => {
+    const current: Required<ScopePatch> = {
+      platform: selectedPlatformKey,
+      accountId: selectedAccountId,
+      postType: selectedPostType,
+      channels: selectedChannels,
+    };
+    const next = { ...current, ...patch };
+    const nextPlatforms = parseMultiFilter(next.platform);
+    if (patch.platform !== undefined) {
+      next.accountId = rescope(
+        next.accountId,
+        scopedAccounts(accounts, nextPlatforms, null).map((a) => a.id)
+      );
+      next.postType = rescope(next.postType, postTypeOptsFor(nextPlatforms).map((o) => o.value));
+    }
+    if (patch.channels === undefined) {
+      next.channels = rescope(
+        next.channels,
+        channelOptionsFor(
+          scopedAccounts(accounts, nextPlatforms, parseMultiFilter(next.accountId)),
+          parseMultiFilter(next.postType)
+        ).map((o) => o.key)
+      );
+    }
+    const changed: ScopePatch = {};
+    for (const k of Object.keys(current) as (keyof ScopePatch)[]) {
+      if (next[k] !== current[k]) changed[k] = next[k];
+    }
+    if (Object.keys(changed).length) onScopeChange(changed);
+  };
 
   // Group-by dimensions for the primary breakdown table. "Brand" is only
   // offered on the cross-brand /all view (single-brand grouping is a no-op).
@@ -650,51 +739,49 @@ export function FilterPills({
       {showViewType && (
         <SelectPill value={viewType} options={INTERVALS} onChange={onViewTypeChange} />
       )}
-      <SelectPill
+      <MultiSelectPill
         label="Platform"
+        allLabel="All platforms"
         value={selectedPlatformKey}
         options={platformKeyOptions}
-        onChange={(v) => {
-          onPlatformKeyChange(v);
-          // Reset dependent filters when the parent changes so they
-          // can't point at options that are no longer visible.
-          if (v !== "all") {
-            const acct = accounts.find((a) => a.id === selectedAccountId);
-            if (acct && acct.platform !== v) onAccountChange("all");
-            const pt = POST_TYPE_OPTS.find((p) => p.value === selectedPostType);
-            if (pt && pt.platform !== v) onPostTypeChange("all");
-          }
-        }}
+        onChange={(v) => changeScope({ platform: v })}
       />
-      <SelectPill
+      <MultiSelectPill
         label="Account"
+        allLabel="All accounts"
         value={selectedAccountId}
         options={accountOptions}
-        onChange={onAccountChange}
+        onChange={(v) => changeScope({ accountId: v })}
+        searchPlaceholder="Search accounts…"
       />
-      <SelectPill
+      <MultiSelectPill
         label="Post type"
+        allLabel="All post types"
         value={selectedPostType}
         options={postTypeOptions}
-        onChange={onPostTypeChange}
+        onChange={(v) => changeScope({ postType: v })}
       />
-      {onChannelsChange && (
-        <ChannelsPill
-          value={selectedChannels}
-          options={channelOptions}
-          onChange={onChannelsChange}
-        />
-      )}
-      <SelectPill
+      <MultiSelectPill
+        label="Channels"
+        allLabel="All channels"
+        value={selectedChannels}
+        options={channelOptions}
+        onChange={(v) => changeScope({ channels: v })}
+        searchPlaceholder="Search accounts…"
+      />
+      <MultiSelectPill
         label="Format"
+        allLabel="All formats"
         value={selectedFormat}
         options={formatOptions}
         onChange={onFormatChange}
+        searchPlaceholder="Search formats…"
       />
-      <SelectPill
+      <MultiSelectPill
         label="Source"
+        allLabel="All sources"
         value={selectedSource}
-        options={SOURCES}
+        options={sourceOptions}
         onChange={onSourceChange}
       />
       {onProvenOnlyChange && (

@@ -1,8 +1,13 @@
 import { db } from "@/lib/db";
 import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts, viewSnapshots, contentEvents } from "@/lib/db/schema";
 import { aliasedTable, getTableColumns } from "drizzle-orm";
-import { and, eq, gte, lte, isNotNull, isNull, inArray, or, sql, min } from "drizzle-orm";
-import { parseChannelFilter } from "@/lib/multi-filter";
+import { and, eq, gte, lte, isNotNull, isNull, inArray, notInArray, or, sql, min, type SQL, type Column } from "drizzle-orm";
+import {
+  parseAccountFilter,
+  parseChannelFilter,
+  parseMultiFilter,
+  type MultiFilter,
+} from "@/lib/multi-filter";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
 import {
@@ -497,22 +502,79 @@ async function getWeekOverWeekComparison(args: {
   };
 }
 
-/** WHERE clause for the dashboard Channels filter: keep only the exact
- *  (account, post type) pairs listed. `undefined` when unfiltered. Shared by
- *  getContentReport and the legacy /api/reports/matg route. */
-export function channelFilterCondition(channels: string | null | undefined) {
-  const channelKeys = parseChannelFilter(channels);
-  if (!channelKeys) return undefined;
-  return or(
-    ...channelKeys.map((c) =>
-      and(
-        eq(productionItems.accountId, c.accountId),
-        c.postType
-          ? eq(productionItems.postType, c.postType)
-          : isNull(productionItems.postType)
+/** `col IN (…)` for include mode; for exclude mode `col IS NULL OR col NOT
+ *  IN (…)` — a bare NOT IN would also drop rows where the column is NULL. */
+function multiFilterSql(col: Column, f: MultiFilter): SQL {
+  return f.mode === "include"
+    ? inArray(col, f.items)
+    : or(isNull(col), notInArray(col, f.items))!;
+}
+
+/** Include: any of `conds`. Exclude: none of them (NULL-safe). */
+function anyOrNoneSql(mode: MultiFilter["mode"], conds: SQL[]): SQL {
+  const any = or(...conds)!;
+  return mode === "include" ? any : sql`NOT COALESCE(${any}, false)`;
+}
+
+/** WHERE clauses for the dashboard's multi-select filters (Account,
+ *  Platform, Post type, Channels, Format, Source). Each value is "all", an
+ *  include list or a `!`-prefixed exclude list (src/lib/multi-filter.ts);
+ *  filters are AND'd together. Shared by getContentReport and the legacy
+ *  /api/reports/matg route so the two can't drift. */
+export function reportFilterConditions(f: {
+  accountId?: string;
+  platformKey?: string;
+  postType?: string;
+  channels?: string;
+  format?: string;
+  source?: string;
+}): SQL[] {
+  const out: SQL[] = [];
+  const accountIds = parseAccountFilter(f.accountId);
+  if (accountIds) out.push(multiFilterSql(productionItems.accountId, accountIds));
+  const platformKeys = parseMultiFilter(f.platformKey);
+  if (platformKeys) out.push(multiFilterSql(accounts.platform, platformKeys));
+  const postTypes = parseMultiFilter(f.postType);
+  if (postTypes) out.push(multiFilterSql(productionItems.postType, postTypes));
+  const formatNames = parseMultiFilter(f.format);
+  if (formatNames) out.push(multiFilterSql(productionItems.format, formatNames));
+  const channels = parseChannelFilter(f.channels);
+  if (channels) {
+    out.push(
+      anyOrNoneSql(
+        channels.mode,
+        channels.channels.map(
+          (c) =>
+            and(
+              eq(productionItems.accountId, c.accountId),
+              c.postType
+                ? eq(productionItems.postType, c.postType)
+                : isNull(productionItems.postType)
+            )!
+        )
       )
-    )
+    );
+  }
+  // Source classifies by sourceType (original / repurposed / cross_post /
+  // repost). NULL is treated as "original" since that's the historical
+  // default. Unknown values are ignored.
+  const sources = parseMultiFilter(f.source);
+  const sourceItems = sources?.items.filter((v) =>
+    ["original", "repurposed", "repost", "cross_post"].includes(v)
   );
+  if (sources && sourceItems?.length) {
+    out.push(
+      anyOrNoneSql(
+        sources.mode,
+        sourceItems.map((v) =>
+          v === "original"
+            ? sql`(${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')`
+            : eq(productionItems.sourceType, v)
+        )
+      )
+    );
+  }
+  return out;
 }
 
 export async function getContentReport(
@@ -561,44 +623,16 @@ export async function getContentReport(
     conditions.unshift(eq(productionItems.brand, brand));
   }
 
-  // New-world filters. `accountId` picks a single account; `platformKey`
-  // scopes to one canonical platform (matched via the joined accounts row);
-  // `postType` scopes to one canonical post_type.
-  if (accountId && accountId !== "all") {
-    conditions.push(eq(productionItems.accountId, accountId));
-  }
-  if (platformKey && platformKey !== "all") {
-    conditions.push(eq(accounts.platform, platformKey));
-  }
-  if (postType && postType !== "all") {
-    conditions.push(eq(productionItems.postType, postType));
-  }
-  const channelsCond = channelFilterCondition(channels);
-  if (channelsCond) conditions.push(channelsCond);
+  // Account / platform / post type / channels / format / source — all
+  // multi-select lists. See reportFilterConditions.
+  conditions.push(
+    ...reportFilterConditions({ accountId, platformKey, postType, channels, format, source })
+  );
   // Legacy string filter, retained for URL back-compat.
   if (platform && platform !== "all") {
     conditions.push(
       sql`${productionItems.platform}::jsonb @> ${JSON.stringify([platform])}::jsonb`
     );
-  }
-
-  if (format !== "all") {
-    conditions.push(eq(productionItems.format, format));
-  }
-
-  // Source filter classifies by sourceType (original / repurposed /
-  // cross_post / repost). NULL is treated as "original" since that's the
-  // historical default.
-  if (source === "original") {
-    conditions.push(
-      sql`(${productionItems.sourceType} IS NULL OR ${productionItems.sourceType} = 'original')`
-    );
-  } else if (source === "repurposed") {
-    conditions.push(eq(productionItems.sourceType, "repurposed"));
-  } else if (source === "repost") {
-    conditions.push(eq(productionItems.sourceType, "repost"));
-  } else if (source === "cross_post") {
-    conditions.push(eq(productionItems.sourceType, "cross_post"));
   }
 
   // Proven-format status for this brand. Computed off the same 180-day
