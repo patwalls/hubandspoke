@@ -27,7 +27,21 @@ const PatchBody = z
     bodyMarkdown: z.string().max(100_000).optional(),
     specialCopy: z.string().max(20_000).optional(),
     sendDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-    sections: z.array(z.object({ key: z.string().min(1).max(40), markdown: z.string().max(20_000) })).max(20).optional(),
+    sections: z
+      .array(
+        z.object({
+          key: z.string().min(1).max(40),
+          markdown: z.string().max(20_000),
+          // Kept as-is from the loaded draft: the story the section covers + stories Find new story already offered.
+          source: z
+            .object({ kind: z.enum(["video", "case_study"]), key: z.string().max(300), title: z.string().max(500).nullable(), url: z.string().max(1000).nullable() })
+            .nullable()
+            .optional(),
+          tried: z.array(z.string().max(300)).max(50).optional(),
+        }),
+      )
+      .max(20)
+      .optional(),
     notes: z.string().max(4000).nullable().optional(),
     /** The revision the editor loaded; a stale save is refused. */
     revision: z.number().int().optional(),

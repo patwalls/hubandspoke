@@ -2514,6 +2514,33 @@ export type NewsletterDraftSource =
  * Where a newsletter draft's sponsored section ("The Special" in Sunday
  * Breakfast) came from: the promo-calendar Asana task for the send date.
  */
+/**
+ * Issues sent outside Hub & Spoke's drafter (built by hand in HubSpot, or the
+ * old Klaviyo-era issues) and which stories they linked — so the drafter's
+ * "don't repeat a story from the last few issues" rule and the editor's
+ * "N× before" badges see the whole history, not just Hub & Spoke drafts.
+ * Filled by the read-only `newsletter-history-sync` task.
+ */
+export const newsletterIssueHistory = pgTable(
+  "newsletter_issue_history",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    brand: text("brand").notNull(),
+    /** The schedule group the issue belongs to (format-config.ts), e.g. "sunday-breakfast". */
+    scheduleGroup: text("schedule_group").notNull(),
+    /** "hubspot:<email id>" or "item:<production_items.id>" — one row per issue. */
+    externalId: text("external_id").notNull().unique(),
+    origin: text("origin").notNull(),
+    name: text("name"),
+    subject: text("subject"),
+    sentDate: date("sent_date"),
+    /** Story keys the issue linked: "video:<production item id>" / "case:/stories/<slug>". */
+    sourceKeys: jsonb("source_keys").$type<string[]>().notNull().default([]),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("newsletter_issue_history_group_date_idx").on(table.scheduleGroup, table.sentDate)],
+);
+
 export interface NewsletterSpecialSource {
   taskGid: string;
   taskName: string;

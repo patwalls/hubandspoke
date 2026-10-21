@@ -81,10 +81,23 @@ export const newsletterTemplateSchema = z
 export type NewsletterTemplate = z.infer<typeof newsletterTemplateSchema>;
 export type NewsletterTemplateSection = z.infer<typeof sectionSchema>;
 
+/** The story a section is about (a course in Sunday Breakfast, Daily Seinfeld's story). */
+export interface SectionSource {
+  kind: "video" | "case_study";
+  /** Stable usage key: "video:<production item id>" or "case:/stories/<slug>". */
+  key: string;
+  title: string | null;
+  url: string | null;
+}
+
 /** One drafted section of an issue (stored on newsletter_drafts.sections). */
 export interface NewsletterSection {
   key: string;
   markdown: string;
+  /** The story this section covers, when it covers one. */
+  source?: SectionSource | null;
+  /** Story keys "Find new story" already offered for this section (never offered again this draft). */
+  tried?: string[];
 }
 
 export function parseNewsletterTemplate(raw: unknown): NewsletterTemplate | null {

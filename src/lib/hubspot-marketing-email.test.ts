@@ -39,6 +39,16 @@ describe("assertAllowedHubspotCall", () => {
     expect(() => assertAllowedHubspotCall("GET", "/marketing/v3/emails/123")).not.toThrow();
     expect(() => assertAllowedHubspotCall("post", "/marketing/v3/emails/clone")).not.toThrow();
     expect(() => assertAllowedHubspotCall("PATCH", "/marketing/v3/emails/123")).not.toThrow();
+    expect(() => assertAllowedHubspotCall("GET", "/marketing/v3/emails?limit=100&createdAfter=2026-06-01T00%3A00%3A00.000Z")).not.toThrow();
+    expect(() =>
+      assertAllowedHubspotCall("GET", "/marketing/v3/emails?limit=100&createdAfter=2026-06-01T00%3A00%3A00.000Z&after=Mg%3D%3D"),
+    ).not.toThrow();
+  });
+
+  it("only allows the email list as a read with limit + date + cursor — no other params or methods", () => {
+    expect(() => assertAllowedHubspotCall("GET", "/marketing/v3/emails?limit=100")).toThrow();
+    expect(() => assertAllowedHubspotCall("GET", "/marketing/v3/emails?limit=100&createdAfter=x&archived=true")).toThrow();
+    expect(() => assertAllowedHubspotCall("POST", "/marketing/v3/emails?limit=100&createdAfter=2026")).toThrow();
   });
 
   it("blocks sending, publishing, deleting and anything outside marketing emails", () => {

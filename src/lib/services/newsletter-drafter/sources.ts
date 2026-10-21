@@ -193,3 +193,47 @@ export async function getPastIssues(brand: string, formatName: string): Promise<
     };
   });
 }
+
+/**
+ * The brand's older published long-form videos (published before `before`),
+ * most-viewed first — candidates when a week is short on new stories. The
+ * caller filters out anything run recently (usage.ts).
+ */
+export async function listOlderVideos(brand: string, before: Date, limit = 120): Promise<RecentVideo[]> {
+  const effectivePublishedAt = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
+  const rows = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      publishedLink: productionItems.publishedLink,
+      youtubeUrl: productionItems.youtubeUrl,
+      publishedAt: sql<string | null>`${effectivePublishedAt}`,
+      views: productionItems.views,
+    })
+    .from(productionItems)
+    .innerJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
+    .where(
+      and(
+        eq(productionItems.brand, brand),
+        eq(productionItems.postType, "youtube_long"),
+        eq(productionItems.status, "Published"),
+        isNull(productionItems.deletedAt),
+        sql`${effectivePublishedAt} < ${before.toISOString()}::timestamptz`,
+      ),
+    )
+    .orderBy(sql`${productionItems.views} DESC NULLS LAST`)
+    .limit(limit);
+  return rows.map((r) => ({
+    productionItemId: r.id,
+    title: r.title,
+    url: r.publishedLink ?? r.youtubeUrl,
+    publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
+    views: r.views,
+    hasTranscript: true,
+  }));
+}
+
+/** Search the whole Starter Story case-study catalog by topic / business / founder (content API title search). */
+export async function searchCaseStudies(query: string): Promise<ContentResult[]> {
+  return (await searchContent({ q: query, limit: 25 })).filter((r) => r.url);
+}

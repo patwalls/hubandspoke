@@ -6,8 +6,9 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts, type NewsletterDraftSource } from "@/lib/db/schema";
-import { NEWSLETTER_MODEL, runNewsletterAgent, type NewsletterSubmission } from "./agent";
-import { composeIssue, templateFor } from "@/lib/newsletter-template";
+import { NEWSLETTER_MODEL, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
+import { blockedKeys, loadUsage, usageGroupFor } from "./usage";
+import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
 import { formatConfigFor } from "./format-config";
 import { findSpecial } from "./promo";
 import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getVideoTranscript, youtubeThumbnailUrl } from "./sources";
@@ -28,6 +29,18 @@ export function toStoredSources(sources: NewsletterSubmission["sources"]): Newsl
     }
   }
   return out;
+}
+
+/** Agent sections → stored sections, each story resolved to its usage key. Pure; exported for tests. */
+export function toStoredSections(sections: NonNullable<NewsletterSubmission["sections"]>): NewsletterSection[] {
+  return sections.map((sec) => {
+    const key = storyKeyOf(sec.source);
+    return {
+      key: sec.key,
+      markdown: sec.markdown,
+      source: key && sec.source ? { kind: sec.source.kind, key, title: sec.source.title ?? null, url: sec.source.url ?? null } : null,
+    };
+  });
 }
 
 /** The picked video + its full transcript for a single_video draft. Throws a readable error when unusable. */
@@ -86,6 +99,8 @@ export async function runNewsletterDraft(
   const template = templateFor(row.formatName, row.formatTemplate);
   try {
     const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId) : null;
+    const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
+    const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;
     const [pastIssues, special] = await Promise.all([
       getPastIssues(row.brand, row.formatName),
       findSpecial(row.formatName, row.sendDate),
@@ -107,6 +122,8 @@ export async function runNewsletterDraft(
       sponsoredPlaceholder: !sponsored && config.promo?.onMiss === "placeholder",
       video,
       template,
+      usage,
+      blocked,
       model: config.model,
       signal: opts.signal,
     });
@@ -122,10 +139,10 @@ export async function runNewsletterDraft(
         subjectOptions: s.subject_options,
         subject: s.subject,
         previewText: s.preview_text,
-        sections: template ? (s.sections ?? []) : [],
+        sections: template ? toStoredSections(s.sections ?? []) : [],
         // Templated: the composed issue (what the HubSpot push sends); free-form: the agent's body.
         bodyMarkdown: template
-          ? composeIssue(template, s.sections ?? [], sponsored ? { copy: sponsored.copy, landingUrl: sponsored.source.landingUrl } : null)
+          ? composeIssue(template, toStoredSections(s.sections ?? []), sponsored ? { copy: sponsored.copy, landingUrl: sponsored.source.landingUrl } : null)
           : (s.body_markdown ?? ""),
         revision: sql`${newsletterDrafts.revision} + 1`,
         regenerating: [],

@@ -11,12 +11,16 @@ interface RouteContext {
   params: Promise<{ id: string; key: string }>;
 }
 
-/** Regenerate one section (optionally with the editor's instruction) on the worker. The editor polls the draft. */
+/**
+ * Regenerate one section on the worker (optionally with the editor's
+ * instruction), or with `newStory: true` swap it to a different story that
+ * this newsletter hasn't run recently. The editor polls the draft.
+ */
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id, key } = await context.params;
-  const parsed = z.object({ instruction: z.string().max(1000).nullable().optional() }).safeParse(await request.json().catch(() => ({})));
+  const parsed = z.object({ instruction: z.string().max(1000).nullable().optional(), newStory: z.boolean().optional() }).safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   const draft = await getNewsletterDraft(id);
   if (!draft) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -29,7 +33,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .where(and(eq(newsletterDrafts.id, id), eq(newsletterDrafts.status, "ready")));
   await enqueue(
     "newsletter-section-regenerate",
-    { newsletterDraftId: id, sectionKey: key, instruction: parsed.data.instruction?.trim() || null },
+    { newsletterDraftId: id, sectionKey: key, instruction: parsed.data.instruction?.trim() || null, newStory: !!parsed.data.newStory },
     { jobKey: `newsletter-section:${id}:${key}`, maxAttempts: 1 },
   );
   return NextResponse.json({ ok: true }, { status: 202 });

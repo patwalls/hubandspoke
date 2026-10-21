@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { ExternalLink, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { ExternalLink, Loader2, RefreshCw, Shuffle, Sparkles } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +51,8 @@ export interface EditorDraft {
   hubspotStatus: string | null;
   hubspotEmailUrl: string | null;
   hubspotError: string | null;
+  /** Per section with a story: how often this newsletter ran it before. */
+  sectionUsage?: Record<string, { count: number; lastDate: string | null; label: string }>;
 }
 
 interface VideoOption {
@@ -240,9 +242,9 @@ function Workspace({
     }
   }
 
-  async function regenerate(key: string, instruction: string) {
+  async function regenerate(key: string, instruction: string, newStory = false) {
     if (dirty && !(await save())) return;
-    await post(`/api/newsletter-drafts/${draft.id}/sections/${key}/regenerate`, { instruction: instruction || null }, `regen:${key}`);
+    await post(`/api/newsletter-drafts/${draft.id}/sections/${key}/regenerate`, { instruction: instruction || null, newStory }, `regen:${key}`);
   }
 
   async function special(action: "verbatim" | "rewrite" | "refresh") {
@@ -389,6 +391,9 @@ function Workspace({
                     regenerating={draft.regenerating.includes(sec.key)}
                     disabled={busyAction !== null}
                     onRegenerate={(instruction) => regenerate(sec.key, instruction)}
+                    source={draft.kind === "roundup" ? (sections.find((x) => x.key === sec.key)?.source ?? null) : null}
+                    usage={draft.sectionUsage?.[sec.key] ?? null}
+                    onFindNewStory={draft.kind === "roundup" ? (instruction) => regenerate(sec.key, instruction, true) : undefined}
                   />
                 ),
               )
@@ -455,6 +460,9 @@ function SectionEditor({
   regenerating,
   disabled,
   onRegenerate,
+  source,
+  usage,
+  onFindNewStory,
 }: {
   label: string;
   hint: string;
@@ -463,6 +471,9 @@ function SectionEditor({
   regenerating: boolean;
   disabled: boolean;
   onRegenerate: (instruction: string) => void;
+  source?: NewsletterSection["source"];
+  usage?: { count: number; lastDate: string | null; label: string } | null;
+  onFindNewStory?: (instruction: string) => void;
 }) {
   const [instruction, setInstruction] = useState("");
   return (
@@ -477,6 +488,26 @@ function SectionEditor({
           </span>
         )}
       </div>
+      {source && (
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{source.kind === "video" ? "Video" : "Case study"}</span>
+          {source.url ? (
+            <a className="truncate text-primary underline" href={source.url} target="_blank" rel="noreferrer" title={source.title ?? source.url}>
+              {source.title ?? source.url}
+            </a>
+          ) : (
+            <span className="truncate">{source.title ?? source.key}</span>
+          )}
+          <span
+            className={cn(
+              "shrink-0 whitespace-nowrap",
+              !usage || usage.count === 0 ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground",
+            )}
+          >
+            · {usage?.label ?? "New"}
+          </span>
+        </div>
+      )}
       <Textarea className="min-h-28 font-mono text-xs" value={value} onChange={(e) => onChange(e.target.value)} disabled={regenerating} />
       <div className="flex items-center gap-2">
         <Input
@@ -498,6 +529,21 @@ function SectionEditor({
           <RefreshCw />
           Regenerate
         </Button>
+        {onFindNewStory && source && (
+          <Button
+            size="sm"
+            variant="outline"
+            title="Swap to a different video or case study this newsletter hasn't run recently"
+            onClick={() => {
+              onFindNewStory(instruction);
+              setInstruction("");
+            }}
+            disabled={disabled || regenerating}
+          >
+            <Shuffle />
+            Find new story
+          </Button>
+        )}
       </div>
     </div>
   );

@@ -9,15 +9,26 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
-import { regenerateSection } from "./agent";
+import { regenerateSection, storyKeyOf } from "./agent";
+import { blockedKeys, loadUsage, usageGroupFor } from "./usage";
 import { formatConfigFor } from "./format-config";
 import { loadSourceVideo } from "./run";
 
-/** Replace one section's markdown (or append it). Pure; exported for tests. */
-export function spliceSection(sections: NewsletterSection[], key: string, markdown: string): NewsletterSection[] {
+/** Replace one section (or append it), keeping its other fields. Pure; exported for tests. */
+export function spliceSection(sections: NewsletterSection[], key: string, markdown: string, patch: Partial<NewsletterSection> = {}): NewsletterSection[] {
   return sections.some((x) => x.key === key)
-    ? sections.map((x) => (x.key === key ? { key, markdown } : x))
-    : [...sections, { key, markdown }];
+    ? sections.map((x) => (x.key === key ? { ...x, ...patch, key, markdown } : x))
+    : [...sections, { key, markdown, ...patch }];
+}
+
+/** "Find new story" exclusions: this section's current + already-offered stories, and every other section's story. Pure; exported for tests. */
+export function newStoryExclusions(sections: NewsletterSection[], key: string): Set<string> {
+  const out = new Set<string>();
+  for (const sec of sections) {
+    if (sec.source?.key) out.add(sec.source.key);
+    if (sec.key === key) for (const t of sec.tried ?? []) out.add(t);
+  }
+  return out;
 }
 
 async function clearRegenerating(id: string, key: string, error: string | null) {
@@ -35,7 +46,7 @@ export async function regenerateDraftSection(
   newsletterDraftId: string,
   sectionKey: string,
   instruction: string | null,
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; newStory?: boolean } = {},
 ): Promise<{ ok: boolean; reason?: string }> {
   const [row] = await db
     .select({
@@ -75,6 +86,9 @@ export async function regenerateDraftSection(
       .limit(1);
     const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId) : null;
     const sponsor = row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null;
+    const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
+    const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;
+    const exclude = opts.newStory ? newStoryExclusions(row.sections, sectionKey) : null;
     const result = await regenerateSection({
       brand: row.brand,
       brandLabel: brand?.label ?? row.brand,
@@ -92,11 +106,21 @@ export async function regenerateDraftSection(
       sections: row.sections,
       sectionKey,
       instruction,
+      usage,
+      blocked,
+      newStoryExclude: exclude,
       currentIssue: composeIssue(template, row.sections, sponsor),
       sourcesNote: video ? null : row.sources.map((x) => `- ${x.kind}: ${x.title ?? ""} ${x.url ?? ""}`).join("\n") || null,
       signal: opts.signal,
     });
-    const sections = spliceSection(row.sections, sectionKey, result.markdown);
+    const prev = row.sections.find((x) => x.key === sectionKey);
+    const newKey = storyKeyOf(result.source);
+    const source =
+      newKey && result.source
+        ? { kind: result.source.kind, key: newKey, title: result.source.title ?? null, url: result.source.url ?? null }
+        : (prev?.source ?? null);
+    const tried = opts.newStory && prev?.source?.key ? [...new Set([...(prev.tried ?? []), prev.source.key])] : prev?.tried;
+    const sections = spliceSection(row.sections, sectionKey, result.markdown, { source, ...(tried ? { tried } : {}) });
     await db
       .update(newsletterDrafts)
       .set({

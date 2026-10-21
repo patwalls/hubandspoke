@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { accounts, formats, newsletterDrafts, productionItems, transcripts } from "@/lib/db/schema";
 import { templateFor } from "@/lib/newsletter-template";
 import { formatConfigFor } from "./format-config";
+import { loadUsage, usageGroupFor, usageLabel } from "./usage";
 import { computeWindow } from "./window";
 
 export interface NewsletterFormatOption {
@@ -106,11 +107,20 @@ export async function getNewsletterDraft(id: string) {
   if (!row) return null;
   const { formatTemplate, ...rest } = row;
   const config = formatConfigFor(row.formatName);
+  // "N× before" for every section's story (this draft excluded from its own counts).
+  const withSources = row.sections.filter((x) => x.source?.key);
+  const usage = withSources.length ? await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id }) : null;
+  const sectionUsage: Record<string, { count: number; lastDate: string | null; label: string }> = {};
+  for (const sec of withSources) {
+    const u = usage?.get(sec.source!.key);
+    sectionUsage[sec.key] = { count: u?.count ?? 0, lastDate: u?.lastDate ?? null, label: usageLabel(u) };
+  }
   return {
     ...rest,
     specialLabel: config.promo?.label ?? null,
     kind: config.kind,
     template: templateFor(row.formatName, formatTemplate),
+    sectionUsage,
   };
 }
 

@@ -49,6 +49,11 @@ const ALLOWED_CALLS: ReadonlyArray<{ method: string; path: RegExp; why: string }
   { method: "GET", path: /^\/marketing\/v3\/emails\/\d+$/, why: "read an email (the template, or the clone we just made)" },
   { method: "POST", path: /^\/marketing\/v3\/emails\/clone$/, why: "copy the template into a new unsent email" },
   { method: "PATCH", path: /^\/marketing\/v3\/emails\/\d+$/, why: "fill in the clone's name, subject and body" },
+  {
+    method: "GET",
+    path: /^\/marketing\/v3\/emails\?limit=\d{1,3}&createdAfter=[0-9A-Za-z:.%-]+(&after=[A-Za-z0-9%=_-]+)?$/,
+    why: "read past issues (read-only) to learn which stories they ran",
+  },
 ];
 
 /** Throws unless (method, path) is on the allowlist. Exported for tests. */
@@ -163,4 +168,33 @@ export async function createDraftEmailFromTemplate(args: {
     body: { name: args.name, subject: args.subject, content: { widgets } },
   });
   return { id: String(clone.id), editUrl: emailEditUrl(String(clone.id)) };
+}
+
+export interface HubspotEmailSummary extends HubspotEmail {
+  name?: string;
+  subject?: string;
+  state?: string;
+  businessUnitId?: string | number | null;
+  publishDate?: string | null;
+  publishedAt?: string | null;
+}
+
+/** Every email created after `createdAfterIso`, page by page (read-only). */
+export async function* listEmailsCreatedAfter(createdAfterIso: string): AsyncGenerator<HubspotEmailSummary> {
+  let after: string | null = null;
+  for (let page = 0; page < 50; page++) {
+    const qs: string = `limit=100&createdAfter=${encodeURIComponent(createdAfterIso)}${after ? `&after=${encodeURIComponent(after)}` : ""}`;
+    type Page = { results: HubspotEmailSummary[]; paging?: { next?: { after?: string } } };
+    const res: Page = await hubspotFetch<Page>(`/marketing/v3/emails?${qs}`, { method: "GET" });
+    for (const e of res.results) yield e;
+    after = res.paging?.next?.after ?? null;
+    if (!after) return;
+  }
+}
+
+/** All rich-text HTML in an email, concatenated (for link extraction). Pure. */
+export function emailRichTextHtml(email: HubspotEmail): string {
+  return Object.values(email.content?.widgets ?? {})
+    .map((w) => (typeof w.body?.html === "string" ? w.body.html : ""))
+    .join("\n");
 }

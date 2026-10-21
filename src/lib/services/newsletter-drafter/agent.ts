@@ -22,7 +22,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
 import { listLeadMagnets } from "@/lib/services/starter-story-content";
-import { getVideoTranscript, listRecentCaseStudies, listRecentVideos, type PastIssue } from "./sources";
+import { getVideoTranscript, listOlderVideos, listRecentCaseStudies, listRecentVideos, searchCaseStudies, type PastIssue } from "./sources";
+import { caseStudyKey, isEvergreenOk, RECENT_BLOCK_DAYS, EVERGREEN_MIN_DAYS, type StoryUsage } from "./usage";
 import { SPECIAL_MARKER } from "./special-compose";
 import { toolWindow, type DraftWindow } from "./window";
 
@@ -35,7 +36,13 @@ const CASE_STUDY_SITE = "https://www.starterstory.com/explore";
 
 const DaysInput = z.object({ days: z.number().int().min(1).max(31).nullable().optional() });
 const TranscriptInput = z.object({ production_item_id: z.string().uuid() });
-const SectionInput = z.object({ key: z.string().min(1), markdown: z.string() });
+const SourceInput = z.object({
+  kind: z.enum(["video", "case_study"]),
+  production_item_id: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+});
+const SectionInput = z.object({ key: z.string().min(1), markdown: z.string(), source: SourceInput.nullable().optional() });
 const SubmitInput = z.object({
   subject_options: z.array(z.string().min(1).max(120)).min(3).max(6),
   subject: z.string().min(1).max(120),
@@ -54,7 +61,15 @@ const SubmitInput = z.object({
     .max(30),
 });
 export type NewsletterSubmission = z.infer<typeof SubmitInput>;
-const SubmitSectionInput = z.object({ markdown: z.string().min(1) });
+const SubmitSectionInput = z.object({ markdown: z.string().min(1), source: SourceInput.nullable().optional() });
+export type SourceInputT = z.infer<typeof SourceInput>;
+
+/** The usage key for a declared story ("video:<id>" / "case:<path>"), or null. Pure; exported for tests. */
+export function storyKeyOf(src: SourceInputT | null | undefined): string | null {
+  if (!src) return null;
+  if (src.kind === "video") return src.production_item_id ? `video:${src.production_item_id}` : null;
+  return caseStudyKey(src.url);
+}
 
 const DAYS_SCHEMA = {
   type: "object" as const,
@@ -87,6 +102,16 @@ const SOURCE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     description:
       "List Starter Story case studies (founder interviews + breakdowns) published on starterstory.com in the window: title, URL, summary, business. Use web_fetch on a URL to read the full case study.",
     input_schema: DAYS_SCHEMA,
+  },
+  {
+    name: "list_older_videos",
+    description: `The brand's OLDER published long-form videos (before the window), most-viewed first, for when this week doesn't have enough new stories. Only returns ones this newsletter hasn't run in the last ${EVERGREEN_MIN_DAYS} days.`,
+    input_schema: { type: "object", properties: { limit: { type: ["integer", "null"], description: "How many (default 15, max 30)." } } },
+  },
+  {
+    name: "search_case_studies",
+    description: `Search ALL Starter Story case studies (interviews + breakdowns) by topic, business or founder, e.g. "AI app", "ecommerce", "newsletter". For when this week doesn't have enough new case studies. Each result says when this newsletter last ran it; anything run in the last ${RECENT_BLOCK_DAYS} days is blocked.`,
+    input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
   },
   {
     name: "list_lead_magnets",
@@ -133,7 +158,21 @@ function submitNewsletterTool(templated: boolean): Anthropic.Beta.BetaToolUnion 
                 type: "array",
                 items: {
                   type: "object",
-                  properties: { key: { type: "string" }, markdown: { type: "string" } },
+                  properties: {
+                    key: { type: "string" },
+                    markdown: { type: "string" },
+                    source: {
+                      type: ["object", "null"],
+                      description: "The ONE video or case study this section covers (null for sections that don't cover a story, e.g. intro, sign-off, sponsor).",
+                      properties: {
+                        kind: { type: "string", enum: ["video", "case_study"] },
+                        production_item_id: { type: ["string", "null"] },
+                        url: { type: ["string", "null"] },
+                        title: { type: ["string", "null"] },
+                      },
+                      required: ["kind"],
+                    },
+                  },
                   required: ["key", "markdown"],
                 },
               },
@@ -148,8 +187,24 @@ function submitNewsletterTool(templated: boolean): Anthropic.Beta.BetaToolUnion 
 
 const SUBMIT_SECTION_TOOL: Anthropic.Beta.BetaToolUnion = {
   name: "submit_section",
-  description: "Submit the rewritten section's Markdown (content only; its fixed heading, if any, is added for you).",
-  input_schema: { type: "object", properties: { markdown: { type: "string" } }, required: ["markdown"] },
+  description: "Submit the rewritten section's Markdown (content only; its fixed heading, if any, is added for you), and the story it covers.",
+  input_schema: {
+    type: "object",
+    properties: {
+      markdown: { type: "string" },
+      source: {
+        type: ["object", "null"],
+        properties: {
+          kind: { type: "string", enum: ["video", "case_study"] },
+          production_item_id: { type: ["string", "null"] },
+          url: { type: ["string", "null"] },
+          title: { type: ["string", "null"] },
+        },
+        required: ["kind"],
+      },
+    },
+    required: ["markdown"],
+  },
 };
 
 export interface NewsletterAgentArgs {
@@ -181,6 +236,10 @@ export interface NewsletterAgentArgs {
   video?: SourceVideo | null;
   /** Model override (format-config.ts); defaults to NEWSLETTER_MODEL. */
   model?: string;
+  /** Story usage for this newsletter (key → times run / last date), excluding this draft. */
+  usage?: Map<string, StoryUsage>;
+  /** Story keys run in the last RECENT_BLOCK_DAYS — never usable. */
+  blocked?: Set<string>;
   signal?: AbortSignal;
   client?: Anthropic;
 }
@@ -243,13 +302,37 @@ function buildSystem(args: NewsletterAgentArgs): Anthropic.Beta.BetaTextBlockPar
   ];
 }
 
+/** Usage fields every story in a tool result carries. */
+function usageFields(key: string | null, args: NewsletterAgentArgs) {
+  const u = key ? args.usage?.get(key) : undefined;
+  return {
+    story_key: key,
+    times_run_in_this_newsletter: u?.count ?? 0,
+    last_run: u?.lastDate ?? null,
+    blocked: key ? (args.blocked?.has(key) ?? false) : false,
+  };
+}
+
 async function runClientTool(name: string, input: unknown, args: NewsletterAgentArgs): Promise<string> {
   switch (name) {
     case "list_recent_videos": {
       const { days } = DaysInput.parse(input ?? {});
       const w = toolWindow(args.window, days);
-      const videos = await listRecentVideos(args.brand, w);
+      const videos = (await listRecentVideos(args.brand, w)).map((v) => ({ ...v, ...usageFields(`video:${v.productionItemId}`, args) }));
       return JSON.stringify({ window: { start: w.start.toISOString(), end: w.end.toISOString() }, videos });
+    }
+    case "list_older_videos": {
+      const { limit } = z.object({ limit: z.number().int().min(1).max(30).nullable().optional() }).parse(input ?? {});
+      const older = (await listOlderVideos(args.brand, args.window.start, 120))
+        .filter((v) => isEvergreenOk(args.usage?.get(`video:${v.productionItemId}`)) && !args.blocked?.has(`video:${v.productionItemId}`))
+        .slice(0, limit ?? 15)
+        .map((v) => ({ ...v, ...usageFields(`video:${v.productionItemId}`, args) }));
+      return JSON.stringify({ videos: older });
+    }
+    case "search_case_studies": {
+      const { query } = z.object({ query: z.string().min(2).max(100) }).parse(input);
+      const found = (await searchCaseStudies(query)).map((c) => ({ ...c, ...usageFields(caseStudyKey(c.url), args) }));
+      return JSON.stringify({ case_studies: found });
     }
     case "get_video_transcript": {
       const { production_item_id } = TranscriptInput.parse(input);
@@ -260,7 +343,7 @@ async function runClientTool(name: string, input: unknown, args: NewsletterAgent
     case "list_recent_case_studies": {
       const { days } = DaysInput.parse(input ?? {});
       const w = toolWindow(args.window, days);
-      const studies = await listRecentCaseStudies(w);
+      const studies = (await listRecentCaseStudies(w)).map((c) => ({ ...c, ...usageFields(caseStudyKey(c.url), args) }));
       return JSON.stringify({ window: { start: w.start.toISOString(), end: w.end.toISOString() }, case_studies: studies });
     }
     case "list_lead_magnets": {
@@ -274,6 +357,13 @@ async function runClientTool(name: string, input: unknown, args: NewsletterAgent
 
 const REVIEW_PROMPT =
   "Draft received. Now review it critically against the format Skill (including any review checklist it contains) and the past issues: voice, structure, length, subject line quality, factual accuracy against the sources you read, and that every link is real. Fix anything that falls short, then call submit_newsletter again with the complete revised issue (all fields, not a diff).";
+
+export const STORY_RULES = `STORY RULES (enforced — a submission that breaks them is rejected):
+- Every video and case study in the tool results carries times_run_in_this_newsletter, last_run and blocked. NEVER use a story marked blocked: it ran in this newsletter in the last ${RECENT_BLOCK_DAYS} days (e.g. a video that went out last Sunday morning is still inside this week's lookback).
+- Prefer this window's stories that haven't run before.
+- If the window doesn't have enough usable stories, fill the rest with OLDER ones: list_older_videos and search_case_studies only return stories not run in the last ${EVERGREEN_MIN_DAYS} days.
+- Never use the same story in two sections of one issue.
+- For every section that covers a video or case study, set its source (kind + production_item_id for a video, kind + url for a case study, + title).`;
 
 /** The template block of the first user turn. Exported for tests. */
 export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: boolean): string {
@@ -314,6 +404,7 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
     );
   }
   if (args.template) parts.push(describeTemplate(args.template, sponsorSupplied));
+  if (!args.video && args.usage) parts.push(STORY_RULES);
   if (sponsorSupplied) {
     const where =
       args.template && sponsorKey
@@ -341,6 +432,7 @@ export function submissionProblem(
   sub: NewsletterSubmission,
   template: NewsletterTemplate | null | undefined,
   sponsorSupplied: boolean,
+  blocked?: Set<string>,
 ): string | null {
   if (!template) {
     if (!sub.body_markdown || sub.body_markdown.trim().length < 200) return "body_markdown is missing or too short.";
@@ -358,6 +450,14 @@ export function submissionProblem(
     return !got.get(sec.key)?.trim();
   });
   if (missing.length) return `These sections are missing or empty: ${missing.map((sec) => sec.key).join(", ")}.`;
+  const seen = new Map<string, string>();
+  for (const sec of sub.sections ?? []) {
+    const k = storyKeyOf(sec.source);
+    if (!k) continue;
+    if (blocked?.has(k)) return `Section "${sec.key}" uses a story this newsletter ran in the last ${RECENT_BLOCK_DAYS} days (${k}). Pick a different one.`;
+    if (seen.has(k)) return `Sections "${seen.get(k)}" and "${sec.key}" use the same story (${k}). Use a different story for one of them.`;
+    seen.set(k, sec.key);
+  }
   return null;
 }
 
@@ -463,13 +563,14 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
     args,
     firstUserTurn: buildUserTurn(args),
     tools: args.video ? [submit] : [...SOURCE_TOOLS, submit],
+    // (SOURCE_TOOLS includes the older-story tools; their results honor args.usage / args.blocked.)
     submitTool: "submit_newsletter",
     accept: (input) => {
       const parsed = SubmitInput.safeParse(input);
       if (!parsed.success) {
         return { error: `Invalid submission: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}.` };
       }
-      const problem = submissionProblem(parsed.data, args.template, sponsorSupplied);
+      const problem = submissionProblem(parsed.data, args.template, sponsorSupplied, args.video ? undefined : args.blocked);
       return problem ? { error: problem } : { value: parsed.data };
     },
     reviewPrompt: REVIEW_PROMPT,
@@ -486,10 +587,14 @@ export interface RegenerateSectionArgs extends NewsletterAgentArgs {
   currentIssue: string;
   /** Sources the issue already used (roundups), so the rewrite stays grounded. */
   sourcesNote?: string | null;
+  /** "Find new story": swap the section to a different story, never one of these keys. */
+  newStoryExclude?: Set<string> | null;
 }
 
-/** Rewrite one section of an existing issue. Returns the new Markdown. */
-export async function regenerateSection(args: RegenerateSectionArgs): Promise<{ markdown: string; model: string }> {
+/** Rewrite one section of an existing issue (or, with newStoryExclude, swap it to a new story). */
+export async function regenerateSection(
+  args: RegenerateSectionArgs,
+): Promise<{ markdown: string; source: SourceInputT | null; model: string }> {
   const sec = args.template.sections.find((x) => x.key === args.sectionKey);
   if (!sec) throw new NewsletterAgentError(`unknown section ${args.sectionKey}`);
   const current = args.sections.find((x) => x.key === sec.key)?.markdown ?? "";
@@ -500,23 +605,32 @@ export async function regenerateSection(args: RegenerateSectionArgs): Promise<{ 
     args.sourcesNote ? `SOURCES THIS ISSUE USES:\n${args.sourcesNote}` : null,
     `Rewrite ONLY the section "${sec.key}"${sec.heading ? ` (heading "${sec.heading}", added for you)` : ""}. What it should contain: ${sec.hint}`,
     `Its current content:\n${current || "(empty)"}`,
-    args.instruction?.trim()
-      ? `The editor's instruction (follow it): ${args.instruction.trim()}`
-      : "Make it better: tighter, more specific, more on-voice, without changing what it's about.",
+    args.newStoryExclude
+      ? `FIND A NEW STORY: replace this section's video/case study with a DIFFERENT one and rewrite the section around it. Use the tools to find it: this window's stories first, then list_older_videos / search_case_studies. Never use a story marked blocked, and never any of these: ${[...args.newStoryExclude].join(", ") || "(none)"}. Set source to the story you chose.${args.instruction?.trim() ? ` The editor's steer: ${args.instruction.trim()}` : ""}`
+      : args.instruction?.trim()
+        ? `The editor's instruction (follow it): ${args.instruction.trim()}`
+        : "Make it better: tighter, more specific, more on-voice, without changing what it's about. Keep the same story.",
     "Keep it consistent with the rest of the issue (don't repeat other sections), follow the Skill's house rules, never invent facts or links, then call submit_section.",
   ]
     .filter(Boolean)
     .join("\n\n");
-  const r = await runLoop<string>({
+  const r = await runLoop<{ markdown: string; source: SourceInputT | null }>({
     args,
-    firstUserTurn: turn,
+    firstUserTurn: [args.video ? null : STORY_RULES, turn].filter(Boolean).join("\n\n"),
     tools: args.video ? [SUBMIT_SECTION_TOOL] : [...SOURCE_TOOLS, SUBMIT_SECTION_TOOL],
     submitTool: "submit_section",
     accept: (input) => {
       const parsed = SubmitSectionInput.safeParse(input);
-      return parsed.success ? { value: parsed.data.markdown } : { error: "markdown is required." };
+      if (!parsed.success) return { error: "markdown is required." };
+      const k = storyKeyOf(parsed.data.source);
+      if (args.newStoryExclude) {
+        if (!k) return { error: "Set source to the new story you chose." };
+        if (args.newStoryExclude.has(k)) return { error: `That story (${k}) is excluded — pick a different one.` };
+      }
+      if (k && args.blocked?.has(k)) return { error: `That story (${k}) ran in this newsletter in the last ${RECENT_BLOCK_DAYS} days. Pick a different one.` };
+      return { value: { markdown: parsed.data.markdown, source: parsed.data.source ?? null } };
     },
     reviewPrompt: null,
   });
-  return { markdown: r.value, model: r.model };
+  return { markdown: r.value.markdown, source: r.value.source, model: r.model };
 }

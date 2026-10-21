@@ -11,13 +11,15 @@ export interface NewsletterSectionRegeneratePayload {
   newsletterDraftId: string;
   sectionKey: string;
   instruction?: string | null;
+  /** "Find new story": swap the section to a different story. */
+  newStory?: boolean;
 }
 
 export const newsletterSectionRegenerateTask: Task = async (rawPayload, helpers) => {
-  const { newsletterDraftId, sectionKey, instruction } = rawPayload as NewsletterSectionRegeneratePayload;
+  const { newsletterDraftId, sectionKey, instruction, newStory } = rawPayload as NewsletterSectionRegeneratePayload;
   const t0 = Date.now();
-  const r = await regenerateDraftSection(newsletterDraftId, sectionKey, instruction ?? null, { signal: helpers.abortSignal });
+  const r = await regenerateDraftSection(newsletterDraftId, sectionKey, instruction ?? null, { signal: helpers.abortSignal, newStory: !!newStory });
   helpers.logger.info(
-    `newsletter-section-regenerate: ${newsletterDraftId}/${sectionKey} ${r.ok ? "done" : `skipped (${r.reason})`} in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+    `newsletter-section-regenerate: ${newsletterDraftId}/${sectionKey}${newStory ? " (new story)" : ""} ${r.ok ? "done" : `skipped (${r.reason})`} in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
   );
 };
