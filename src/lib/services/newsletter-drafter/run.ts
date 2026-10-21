@@ -3,10 +3,11 @@
 // Called by the `newsletter-draft` worker task. Idempotent: a row that is no
 // longer `drafting` is left alone, so a retry after success is a no-op.
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts, type NewsletterDraftSource } from "@/lib/db/schema";
 import { NEWSLETTER_MODEL, runNewsletterAgent, type NewsletterSubmission } from "./agent";
+import { composeIssue, templateFor } from "@/lib/newsletter-template";
 import { formatConfigFor } from "./format-config";
 import { findSpecial } from "./promo";
 import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getVideoTranscript, youtubeThumbnailUrl } from "./sources";
@@ -29,6 +30,26 @@ export function toStoredSources(sources: NewsletterSubmission["sources"]): Newsl
   return out;
 }
 
+/** The picked video + its full transcript for a single_video draft. Throws a readable error when unusable. */
+export async function loadSourceVideo(sourceItemId: string | null): Promise<SourceVideo> {
+  if (!sourceItemId) throw new Error("This format drafts from one video, but no video was picked.");
+  const [v, t] = await Promise.all([
+    getSingleVideo(sourceItemId),
+    getVideoTranscript(sourceItemId, SINGLE_VIDEO_TRANSCRIPT_BUDGET),
+  ]);
+  if (!v) throw new Error("The picked video no longer exists.");
+  if (!t) throw new Error(`"${v.title ?? "This video"}" has no transcript yet.`);
+  return {
+    productionItemId: v.productionItemId,
+    title: v.title,
+    url: v.url,
+    thumbnailUrl: youtubeThumbnailUrl(v.youtubeId),
+    publishedAt: v.publishedAt,
+    transcript: t.text,
+    truncated: t.truncated,
+  };
+}
+
 export async function runNewsletterDraft(
   newsletterDraftId: string,
   opts: { signal?: AbortSignal } = {},
@@ -45,6 +66,7 @@ export async function runNewsletterDraft(
       sourceItemId: newsletterDrafts.sourceItemId,
       formatName: formats.name,
       formatInstructions: formats.instructions,
+      formatTemplate: formats.newsletterTemplate,
     })
     .from(newsletterDrafts)
     .innerJoin(formats, eq(formats.id, newsletterDrafts.formatId))
@@ -61,26 +83,9 @@ export async function runNewsletterDraft(
     .limit(1);
 
   const config = formatConfigFor(row.formatName);
+  const template = templateFor(row.formatName, row.formatTemplate);
   try {
-    let video: SourceVideo | null = null;
-    if (config.kind === "single_video") {
-      if (!row.sourceItemId) throw new Error("This format drafts from one video, but no video was picked.");
-      const [v, t] = await Promise.all([
-        getSingleVideo(row.sourceItemId),
-        getVideoTranscript(row.sourceItemId, SINGLE_VIDEO_TRANSCRIPT_BUDGET),
-      ]);
-      if (!v) throw new Error("The picked video no longer exists.");
-      if (!t) throw new Error(`"${v.title ?? "This video"}" has no transcript yet.`);
-      video = {
-        productionItemId: v.productionItemId,
-        title: v.title,
-        url: v.url,
-        thumbnailUrl: youtubeThumbnailUrl(v.youtubeId),
-        publishedAt: v.publishedAt,
-        transcript: t.text,
-        truncated: t.truncated,
-      };
-    }
+    const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId) : null;
     const [pastIssues, special] = await Promise.all([
       getPastIssues(row.brand, row.formatName),
       findSpecial(row.formatName, row.sendDate),
@@ -101,6 +106,7 @@ export async function runNewsletterDraft(
       specialLabel: config.promo?.label ?? null,
       sponsoredPlaceholder: !sponsored && config.promo?.onMiss === "placeholder",
       video,
+      template,
       model: config.model,
       signal: opts.signal,
     });
@@ -116,7 +122,13 @@ export async function runNewsletterDraft(
         subjectOptions: s.subject_options,
         subject: s.subject,
         previewText: s.preview_text,
-        bodyMarkdown: s.body_markdown,
+        sections: template ? (s.sections ?? []) : [],
+        // Templated: the composed issue (what the HubSpot push sends); free-form: the agent's body.
+        bodyMarkdown: template
+          ? composeIssue(template, s.sections ?? [], sponsored ? { copy: sponsored.copy, landingUrl: sponsored.source.landingUrl } : null)
+          : (s.body_markdown ?? ""),
+        revision: sql`${newsletterDrafts.revision} + 1`,
+        regenerating: [],
         sources,
         specialCopy: sponsored?.copy ?? null,
         specialOriginal: sponsored?.copy ?? null,

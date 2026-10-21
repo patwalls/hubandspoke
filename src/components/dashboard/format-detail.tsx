@@ -57,6 +57,7 @@ import type { PostType } from "@/lib/platform-field-schemas";
 import { applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { FormatTemplatesSection } from "@/components/design-editor/format-templates-section";
+import { NewsletterTemplateSection } from "@/components/dashboard/newsletter-template-section";
 import { FormatStatusBadge } from "./format-status-badge";
 import { defaultCtaStrategy, usesCtaOffer } from "@/lib/cta-offer-brands";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
@@ -1618,6 +1619,8 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
           {data?.format && (
             <FormatTemplatesSection brand={brand} formatId={formatId} formatName={data.format.name} isClippableFormat={isClippableFormat} />
           )}
+
+          {data?.format && <NewsletterTemplateSection formatId={formatId} />}
 
           <PropertyRowSolo>
             <div className="px-3 py-3 space-y-2">

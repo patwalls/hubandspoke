@@ -27,6 +27,11 @@ import { designStyleExtractTask, type DesignStyleExtractPayload } from "./design
 import { designDraftTask, type DesignDraftPayload } from "./design-draft";
 import { newsletterDraftTask, type NewsletterDraftPayload } from "./newsletter-draft";
 import {
+  newsletterSectionRegenerateTask,
+  type NewsletterSectionRegeneratePayload,
+} from "./newsletter-section-regenerate";
+import { newsletterSlotsSweepTask } from "./newsletter-slots-sweep";
+import {
   hubspotNewsletterCreateDraftTask,
   type HubspotNewsletterCreateDraftPayload,
 } from "./hubspot-newsletter-create-draft";
@@ -138,6 +143,8 @@ export interface TaskPayloads {
   "design-style-extract": DesignStyleExtractPayload;
   "design-draft": DesignDraftPayload;
   "newsletter-draft": NewsletterDraftPayload;
+  "newsletter-section-regenerate": NewsletterSectionRegeneratePayload;
+  "newsletter-slots-sweep": Record<string, never>;
   "hubspot-newsletter-create-draft": HubspotNewsletterCreateDraftPayload;
   "diarize-transcript": DiarizeTranscriptPayload;
   "descript-derivative-create": DescriptDerivativeCreatePayload;
@@ -204,6 +211,8 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "design-style-extract": designStyleExtractTask,
   "design-draft": designDraftTask,
   "newsletter-draft": newsletterDraftTask,
+  "newsletter-section-regenerate": newsletterSectionRegenerateTask,
+  "newsletter-slots-sweep": newsletterSlotsSweepTask,
   "hubspot-newsletter-create-draft": hubspotNewsletterCreateDraftTask,
   "diarize-transcript": diarizeTranscriptTask,
   "descript-derivative-create": descriptDerivativeCreateTask,

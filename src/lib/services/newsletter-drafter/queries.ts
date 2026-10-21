@@ -3,6 +3,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, formats, newsletterDrafts, productionItems, transcripts } from "@/lib/db/schema";
+import { templateFor } from "@/lib/newsletter-template";
 import { formatConfigFor } from "./format-config";
 import { computeWindow } from "./window";
 
@@ -90,13 +91,27 @@ export async function getNewsletterDraft(id: string) {
       hubspotEmailUrl: newsletterDrafts.hubspotEmailUrl,
       hubspotError: newsletterDrafts.hubspotError,
       updatedAt: newsletterDrafts.updatedAt,
+      slotKey: newsletterDrafts.slotKey,
+      sections: newsletterDrafts.sections,
+      revision: newsletterDrafts.revision,
+      regenerating: newsletterDrafts.regenerating,
+      formatTemplate: formats.newsletterTemplate,
+      sourceTitle: sql<string | null>`(SELECT ${productionItems.title} FROM ${productionItems} WHERE ${productionItems.id} = ${newsletterDrafts.sourceItemId})`,
+      sourceUrl: sql<string | null>`(SELECT COALESCE(${productionItems.publishedLink}, ${productionItems.youtubeUrl}) FROM ${productionItems} WHERE ${productionItems.id} = ${newsletterDrafts.sourceItemId})`,
     })
     .from(newsletterDrafts)
     .innerJoin(formats, eq(formats.id, newsletterDrafts.formatId))
     .where(eq(newsletterDrafts.id, id))
     .limit(1);
   if (!row) return null;
-  return { ...row, specialLabel: formatConfigFor(row.formatName).promo?.label ?? null };
+  const { formatTemplate, ...rest } = row;
+  const config = formatConfigFor(row.formatName);
+  return {
+    ...rest,
+    specialLabel: config.promo?.label ?? null,
+    kind: config.kind,
+    template: templateFor(row.formatName, formatTemplate),
+  };
 }
 
 /** How far back the video picker looks for a single_video format. */

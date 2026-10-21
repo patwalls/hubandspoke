@@ -34,7 +34,9 @@ describe("formatConfigFor", () => {
 
   it("keeps Sunday Breakfast a roundup whose Special falls back to the agent, and defaults others to plain roundups", () => {
     expect(formatConfigFor("Sunday Breakfast")).toMatchObject({ kind: "roundup", promo: { label: "The Special", onMiss: "agent" } });
-    expect(formatConfigFor("Daily Seinfeld")).toEqual({ kind: "roundup" });
+    expect(formatConfigFor("Daily Seinfeld")).toMatchObject({ kind: "roundup" });
+    expect(formatConfigFor("Daily Seinfeld").promo).toBeUndefined();
+    expect(formatConfigFor("Playbook")).toEqual({ kind: "roundup" });
   });
 });
 

@@ -22,8 +22,22 @@ export interface PromoCalendarConfig {
   onMiss: "agent" | "placeholder";
 }
 
+/**
+ * When issues go out. Every format in the same `group` shares one slot per
+ * send date (the How-To is one Tuesday newsletter whose source video can come
+ * from either channel); slots are created on the group's `primary` format and
+ * move to the sibling format when a video from its channel is picked.
+ */
+export interface NewsletterSchedule {
+  group: string;
+  /** 0 = Sunday … 6 = Saturday. */
+  days: number[];
+  primary?: boolean;
+}
+
 export interface NewsletterFormatConfig {
   kind: "roundup" | "single_video";
+  schedule?: NewsletterSchedule;
   /** single_video: the YouTube account (handle) whose videos feed this format. */
   sourceAccountHandle?: string;
   /** Model override; defaults to the drafter's Opus model. */
@@ -36,19 +50,26 @@ const FUTUREPEDIA_PROMO_PROJECT = "1213986172831893"; // MEDIA | Futurepedia Pro
 
 /** Keyed by lowercase format name. Formats not listed are plain roundups. */
 const FORMAT_CONFIG: Record<string, NewsletterFormatConfig> = {
+  "daily seinfeld": {
+    kind: "roundup",
+    schedule: { group: "daily-seinfeld", days: [2, 4], primary: true },
+  },
   "sunday breakfast": {
     kind: "roundup",
+    schedule: { group: "sunday-breakfast", days: [0], primary: true },
     promo: { projectGid: STARTER_STORY_PROMO_PROJECT, section: "Native Ad", label: "The Special", onMiss: "agent" },
   },
   "how-to newsletter - futurepedia (pilot)": {
     kind: "single_video",
     sourceAccountHandle: "futurepedia_io",
+    schedule: { group: "futurepedia-howto", days: [2], primary: true },
     model: "claude-sonnet-5-5",
     promo: { projectGid: FUTUREPEDIA_PROMO_PROJECT, section: "Native Ad", label: "Free Resource", onMiss: "placeholder" },
   },
   "how-to newsletter - skill leap (pilot)": {
     kind: "single_video",
     sourceAccountHandle: "SkillLeapAI",
+    schedule: { group: "futurepedia-howto", days: [2] },
     model: "claude-sonnet-5-5",
     promo: { projectGid: FUTUREPEDIA_PROMO_PROJECT, section: "Native Ad", label: "Free Resource", onMiss: "placeholder" },
   },
@@ -58,4 +79,29 @@ const ROUNDUP: NewsletterFormatConfig = { kind: "roundup" };
 
 export function formatConfigFor(formatName: string): NewsletterFormatConfig {
   return FORMAT_CONFIG[formatName.trim().toLowerCase()] ?? ROUNDUP;
+}
+
+/** Lowercase names of every format in a schedule group. */
+export function groupFormatNames(group: string): string[] {
+  return Object.entries(FORMAT_CONFIG)
+    .filter(([, c]) => c.schedule?.group === group)
+    .map(([name]) => name);
+}
+
+/** Every scheduled group's primary format name (lowercase) + its schedule. */
+export function scheduledPrimaries(): Array<{ formatName: string; schedule: NewsletterSchedule }> {
+  return Object.entries(FORMAT_CONFIG)
+    .filter(([, c]) => c.schedule?.primary)
+    .map(([formatName, c]) => ({ formatName, schedule: c.schedule! }));
+}
+
+/** Upcoming send dates (YYYY-MM-DD, UTC calendar days) on `days`, from tomorrow through `horizonDays` ahead. Pure. */
+export function upcomingSendDates(days: number[], horizonDays: number, now: Date = new Date()): string[] {
+  const out: string[] = [];
+  const base = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  for (let i = 1; i <= horizonDays; i++) {
+    const d = new Date(base + i * 24 * 60 * 60 * 1000);
+    if (days.includes(d.getUTCDay())) out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
 }

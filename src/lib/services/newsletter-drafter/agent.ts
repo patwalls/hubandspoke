@@ -1,12 +1,18 @@
-// The newsletter drafter's agent loop. One Opus run per draft: the model
-// gathers its own material through tools (the window's published videos and
+// The newsletter drafter's agent loop. One run per draft: the model gathers
+// its material through tools (roundups: the window's published videos and
 // their transcripts, recent starterstory.com case studies via the content API
-// + web_fetch, the lead-magnet catalog for CTAs), writes the issue in the
-// format Skill's voice, and submits it through `submit_newsletter`. A second
-// pass then reviews that submission against the Skill and past issues and
-// submits the revised version — the "Claude reviews its own draft" step of
-// the original Claude-skill workflow, folded into the same conversation so
-// the cached prompt is reused.
+// + web_fetch, the lead-magnet catalog; single-video How-Tos: just the
+// transcript in the prompt), writes the issue in the format Skill's voice,
+// and submits it through `submit_newsletter` — one Markdown block per
+// template section when the format has a template (newsletter-template.ts),
+// else one free-form body. A second pass then reviews the submission against
+// the Skill and past issues and submits the revised version — the "Claude
+// reviews its own draft" step of the original Claude-skill workflow, folded
+// into the same conversation so the cached prompt is reused.
+//
+// `regenerateSection` reuses the same loop to rewrite ONE section of an
+// existing issue (the editor's per-section Regenerate), with the editor's
+// optional instruction, and submits it through `submit_section`.
 //
 // Manual loop (not the SDK tool runner) because the run has two phases keyed
 // off a client tool, needs `pause_turn` resumption for web_fetch, and must
@@ -14,6 +20,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
 import { listLeadMagnets } from "@/lib/services/starter-story-content";
 import { getVideoTranscript, listRecentCaseStudies, listRecentVideos, type PastIssue } from "./sources";
 import { SPECIAL_MARKER } from "./special-compose";
@@ -26,14 +33,15 @@ const MAX_TOKENS = 32_000;
 const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 const CASE_STUDY_SITE = "https://www.starterstory.com/explore";
 
-
 const DaysInput = z.object({ days: z.number().int().min(1).max(31).nullable().optional() });
 const TranscriptInput = z.object({ production_item_id: z.string().uuid() });
+const SectionInput = z.object({ key: z.string().min(1), markdown: z.string() });
 const SubmitInput = z.object({
   subject_options: z.array(z.string().min(1).max(120)).min(3).max(6),
   subject: z.string().min(1).max(120),
   preview_text: z.string().max(200),
-  body_markdown: z.string().min(200),
+  body_markdown: z.string().optional(),
+  sections: z.array(SectionInput).optional(),
   sources: z
     .array(
       z.object({
@@ -46,6 +54,7 @@ const SubmitInput = z.object({
     .max(30),
 });
 export type NewsletterSubmission = z.infer<typeof SubmitInput>;
+const SubmitSectionInput = z.object({ markdown: z.string().min(1) });
 
 const DAYS_SCHEMA = {
   type: "object" as const,
@@ -57,7 +66,7 @@ const DAYS_SCHEMA = {
   },
 };
 
-const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
+const SOURCE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: "list_recent_videos",
     description:
@@ -85,34 +94,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     input_schema: { type: "object", properties: {} },
   },
   {
-    name: "submit_newsletter",
-    description:
-      "Submit the finished issue. body_markdown is the full email body in Markdown (headings, links, lists). sources lists every video/case study the issue draws on.",
-    input_schema: {
-      type: "object",
-      properties: {
-        subject_options: { type: "array", items: { type: "string" }, description: "3-6 distinct subject lines, best first." },
-        subject: { type: "string", description: "The chosen subject line (normally subject_options[0])." },
-        preview_text: { type: "string", description: "Inbox preview text." },
-        body_markdown: { type: "string" },
-        sources: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              kind: { type: "string", enum: ["video", "case_study"] },
-              production_item_id: { type: ["string", "null"] },
-              url: { type: ["string", "null"] },
-              title: { type: ["string", "null"] },
-            },
-            required: ["kind"],
-          },
-        },
-      },
-      required: ["subject_options", "subject", "preview_text", "body_markdown", "sources"],
-    },
-  },
-  {
     type: "web_fetch_20260209",
     name: "web_fetch",
     allowed_domains: ["starterstory.com"],
@@ -120,10 +101,56 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   },
 ];
 
-/** single_video formats get only the submit tool: the transcript is in the prompt and nothing else is a valid source. */
-const SINGLE_VIDEO_TOOLS: Anthropic.Beta.BetaToolUnion[] = TOOLS.filter(
-  (t) => "name" in t && t.name === "submit_newsletter",
-);
+const SOURCES_SCHEMA = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      kind: { type: "string", enum: ["video", "case_study"] },
+      production_item_id: { type: ["string", "null"] },
+      url: { type: ["string", "null"] },
+      title: { type: ["string", "null"] },
+    },
+    required: ["kind"],
+  },
+};
+
+function submitNewsletterTool(templated: boolean): Anthropic.Beta.BetaToolUnion {
+  return {
+    name: "submit_newsletter",
+    description: templated
+      ? "Submit the finished issue: one Markdown block per template section (every key, in template order; don't repeat a section's fixed heading inside its markdown). sources lists every video/case study the issue draws on."
+      : "Submit the finished issue. body_markdown is the full email body in Markdown (headings, links, lists). sources lists every video/case study the issue draws on.",
+    input_schema: {
+      type: "object",
+      properties: {
+        subject_options: { type: "array", items: { type: "string" }, description: "3-6 distinct subject lines, best first." },
+        subject: { type: "string", description: "The chosen subject line (normally subject_options[0])." },
+        preview_text: { type: "string", description: "Inbox preview text." },
+        ...(templated
+          ? {
+              sections: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { key: { type: "string" }, markdown: { type: "string" } },
+                  required: ["key", "markdown"],
+                },
+              },
+            }
+          : { body_markdown: { type: "string" } }),
+        sources: SOURCES_SCHEMA,
+      },
+      required: ["subject_options", "subject", "preview_text", templated ? "sections" : "body_markdown", "sources"],
+    },
+  };
+}
+
+const SUBMIT_SECTION_TOOL: Anthropic.Beta.BetaToolUnion = {
+  name: "submit_section",
+  description: "Submit the rewritten section's Markdown (content only; its fixed heading, if any, is added for you).",
+  input_schema: { type: "object", properties: { markdown: { type: "string" } }, required: ["markdown"] },
+};
 
 export interface NewsletterAgentArgs {
   brand: string;
@@ -133,12 +160,15 @@ export interface NewsletterAgentArgs {
   formatInstructions: string | null;
   pastIssues: PastIssue[];
   window: DraftWindow;
+  /** The issue's sections. When set the agent submits one block per section. */
+  template?: NewsletterTemplate | null;
   /** Editor steer for this issue (e.g. the offer to pitch). */
   notes?: string | null;
   /** YYYY-MM-DD the issue goes out. */
   sendDate?: string | null;
   /** The sponsored section's copy from the promo calendar. When set the agent
-   *  leaves SPECIAL_MARKER in its place instead of writing it. */
+   *  doesn't write that section (templated: leaves it empty; free-form: leaves
+   *  SPECIAL_MARKER) — the copy is inserted afterwards. */
   sponsoredCopy?: string | null;
   /** The sponsor's landing page (the How-To's intro teaser links to it too). */
   sponsoredLandingUrl?: string | null;
@@ -147,7 +177,7 @@ export interface NewsletterAgentArgs {
   /** No promo matched and the format wants a marked placeholder instead of the agent's own pick. */
   sponsoredPlaceholder?: boolean;
   /** single_video formats: the one video this issue is written from. When set
-   *  the agent gets only submit_newsletter — no search, no web. */
+   *  the agent gets only the submit tool — no search, no web. */
   video?: SourceVideo | null;
   /** Model override (format-config.ts); defaults to NEWSLETTER_MODEL. */
   model?: string;
@@ -179,18 +209,16 @@ function buildSystem(args: NewsletterAgentArgs): Anthropic.Beta.BetaTextBlockPar
       ? [
           `You write the ${args.brandLabel} newsletter "${args.formatName}".`,
           "You draft one complete issue from ONE video, which an editor will review, then send from their email tool.",
-          "The video's transcript is in the first message. Every feature, button, setting, prompt pattern, price, limit and result you mention must come from that transcript. You design the scenario and the steps; you never invent capabilities. Where a detail is missing, keep it general and say so in the build note. Never invent links.",
-          "Follow the format Skill below exactly: it owns structure, section order, voice, length and house rules.",
-          "Write the body in Markdown.",
-          "When the issue is done, call submit_newsletter.",
+          "The video's transcript is in the first message. Every feature, button, setting, prompt pattern, price, limit and result you mention must come from that transcript. You design the scenario and the steps; you never invent capabilities. Where a detail is missing, keep it general. Never invent links.",
+          "Follow the format Skill below exactly: it owns voice, length and house rules. The issue template in the first message owns the section list.",
+          "Write in Markdown.",
         ]
       : [
           `You write the ${args.brandLabel} newsletter "${args.formatName}".`,
           "You draft one complete issue that an editor will review, then send from their email tool.",
           "Gather your own material with the tools: the brand's videos published in the window (read the transcripts of the ones you use) and recent case studies on starterstory.com (read the full page with web_fetch before writing about one). Never invent facts, numbers, quotes or links — everything in the issue must come from a transcript, a fetched page, or the lead-magnet list.",
-          "Follow the format Skill below exactly when it says how far back to look, what to include, structure, length and CTA rules. Where the Skill is silent, match the past issues.",
-          "Write the body in Markdown. Link every video and case study you mention with its real URL.",
-          "When the issue is done, call submit_newsletter.",
+          "Follow the format Skill below exactly when it says how far back to look, what to include, length and CTA rules. Where the Skill is silent, match the past issues.",
+          "Write in Markdown. Link every video and case study you mention with its real URL.",
         ]
   ).join("\n");
 
@@ -215,11 +243,7 @@ function buildSystem(args: NewsletterAgentArgs): Anthropic.Beta.BetaTextBlockPar
   ];
 }
 
-async function runClientTool(
-  name: string,
-  input: unknown,
-  args: NewsletterAgentArgs,
-): Promise<string> {
+async function runClientTool(name: string, input: unknown, args: NewsletterAgentArgs): Promise<string> {
   switch (name) {
     case "list_recent_videos": {
       const { days } = DaysInput.parse(input ?? {});
@@ -251,11 +275,24 @@ async function runClientTool(
 const REVIEW_PROMPT =
   "Draft received. Now review it critically against the format Skill (including any review checklist it contains) and the past issues: voice, structure, length, subject line quality, factual accuracy against the sources you read, and that every link is real. Fix anything that falls short, then call submit_newsletter again with the complete revised issue (all fields, not a diff).";
 
+/** The template block of the first user turn. Exported for tests. */
+export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: boolean): string {
+  const lines = template.sections.map((sec, i) => {
+    const heading = sec.heading ? `fixed heading "${sec.heading}" (added for you; don't repeat it)` : "no fixed heading (write your own if the section needs one)";
+    const sponsor =
+      sec.kind === "sponsor" && sponsorSupplied ? " — SUPPLIED BY THE PROMO CALENDAR: submit an empty string for this key" : "";
+    return `${i + 1}. key "${sec.key}" — ${heading}${sponsor}\n   ${sec.hint}`;
+  });
+  return `ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
+}
+
 /** The first user turn. Exported for tests. */
 export function buildUserTurn(args: NewsletterAgentArgs): string {
   const today = args.window.end.toISOString().slice(0, 10);
   const sendLine = args.sendDate ? ` The issue goes out on ${args.sendDate}.` : "";
   const label = args.specialLabel?.trim() || "the sponsored section";
+  const sponsorSupplied = !!args.sponsoredCopy?.trim();
+  const sponsorKey = args.template?.sections.find((sec) => sec.kind === "sponsor")?.key;
   const parts: string[] = [];
   if (args.video) {
     const v = args.video;
@@ -276,9 +313,14 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
       `Draft the next "${args.formatName}" issue. Today is ${today}.${sendLine} The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${today}. Case studies are listed at ${CASE_STUDY_SITE}.`,
     );
   }
-  if (args.sponsoredCopy?.trim()) {
+  if (args.template) parts.push(describeTemplate(args.template, sponsorSupplied));
+  if (sponsorSupplied) {
+    const where =
+      args.template && sponsorKey
+        ? `Leave section "${sponsorKey}" empty — the sponsor copy is inserted there.`
+        : `Write that section's heading where the Skill puts it, then on its own line exactly ${SPECIAL_MARKER} — the sponsor copy is inserted there.`;
     parts.push(
-      `This issue's sponsored section ("${label}") is supplied by the promo calendar — do NOT write its content and do not pick a lead magnet for it. Write that section's heading where the Skill puts it, then on its own line exactly ${SPECIAL_MARKER} — the sponsor copy is inserted there.${args.sponsoredLandingUrl ? ` Any other mention of the offer the Skill asks for (e.g. an intro teaser line) links to exactly ${args.sponsoredLandingUrl}.` : ""} For context only (don't repeat or paraphrase it elsewhere):\n${args.sponsoredCopy.trim()}`,
+      `This issue's sponsored section ("${label}") is supplied by the promo calendar — do NOT write its content and do not pick a lead magnet for it. ${where}${args.sponsoredLandingUrl ? ` Any other mention of the offer the Skill asks for (e.g. an intro teaser line) links to exactly ${args.sponsoredLandingUrl}.` : ""} For context only (don't repeat or paraphrase it elsewhere):\n${args.sponsoredCopy!.trim()}`,
     );
   } else if (args.sponsoredPlaceholder) {
     parts.push(
@@ -291,17 +333,51 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
   return parts.join("\n\n");
 }
 
-export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<NewsletterAgentResult> {
+/**
+ * Check a submission against the format's shape. Returns an error message
+ * for the model, or null when it's acceptable. Exported for tests.
+ */
+export function submissionProblem(
+  sub: NewsletterSubmission,
+  template: NewsletterTemplate | null | undefined,
+  sponsorSupplied: boolean,
+): string | null {
+  if (!template) {
+    if (!sub.body_markdown || sub.body_markdown.trim().length < 200) return "body_markdown is missing or too short.";
+    if (sponsorSupplied && !sub.body_markdown.includes(SPECIAL_MARKER)) {
+      return `body_markdown must contain ${SPECIAL_MARKER} on its own line where the sponsored section goes.`;
+    }
+    return null;
+  }
+  const got = new Map((sub.sections ?? []).map((sec) => [sec.key, sec.markdown]));
+  const expected = template.sections.map((sec) => sec.key);
+  const unknown = [...got.keys()].filter((k) => !expected.includes(k));
+  if (unknown.length) return `Unknown section keys: ${unknown.join(", ")}. Use exactly: ${expected.join(", ")}.`;
+  const missing = template.sections.filter((sec) => {
+    if (sec.kind === "sponsor" && sponsorSupplied) return false;
+    return !got.get(sec.key)?.trim();
+  });
+  if (missing.length) return `These sections are missing or empty: ${missing.map((sec) => sec.key).join(", ")}.`;
+  return null;
+}
+
+interface LoopSpec<T> {
+  args: NewsletterAgentArgs;
+  firstUserTurn: string;
+  tools: Anthropic.Beta.BetaToolUnion[];
+  submitTool: string;
+  /** Parse + check a submit call. Return the value, or an error for the model. */
+  accept: (input: unknown) => { value: T } | { error: string };
+  /** Tool-result text after the first accepted submission; null = done after one. */
+  reviewPrompt: string | null;
+}
+
+async function runLoop<T>(spec: LoopSpec<T>): Promise<{ value: T; model: string; turns: number }> {
+  const { args } = spec;
   const client = args.client ?? new Anthropic();
   const system = buildSystem(args);
-  const messages: Anthropic.Beta.BetaMessageParam[] = [
-    {
-      role: "user",
-      content: buildUserTurn(args),
-    },
-  ];
-
-  let phase: "draft" | "review" = "draft";
+  const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: spec.firstUserTurn }];
+  let reviewing = false;
   let nudged = false;
 
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
@@ -320,7 +396,7 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
         system,
-        tools: args.video ? SINGLE_VIDEO_TOOLS : TOOLS,
+        tools: spec.tools,
         messages,
       },
       { signal: args.signal, timeout: REQUEST_TIMEOUT_MS },
@@ -329,50 +405,33 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
     if (message.stop_reason === "refusal") {
       throw new NewsletterAgentError(`model refused (${message.stop_details?.category ?? "unknown"})`);
     }
-    if (message.stop_reason === "max_tokens") {
-      throw new NewsletterAgentError("model hit max_tokens before finishing");
-    }
+    if (message.stop_reason === "max_tokens") throw new NewsletterAgentError("model hit max_tokens before finishing");
 
     messages.push({ role: "assistant", content: message.content });
-
     if (message.stop_reason === "pause_turn") continue;
 
     const toolUses = message.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
     if (toolUses.length === 0) {
-      if (nudged) throw new NewsletterAgentError("model ended without calling submit_newsletter");
+      if (nudged) throw new NewsletterAgentError(`model ended without calling ${spec.submitTool}`);
       nudged = true;
-      messages.push({ role: "user", content: "Call submit_newsletter with the complete issue." });
+      messages.push({ role: "user", content: `Call ${spec.submitTool} with the complete result.` });
       continue;
     }
 
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
-    let accepted: NewsletterSubmission | null = null;
+    let accepted: { value: T } | null = null;
     for (const use of toolUses) {
-      if (use.name === "submit_newsletter") {
-        const parsed = SubmitInput.safeParse(use.input);
-        if (!parsed.success) {
-          results.push({
-            type: "tool_result",
-            tool_use_id: use.id,
-            is_error: true,
-            content: `Invalid submission: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. Fix and resubmit.`,
-          });
+      if (use.name === spec.submitTool) {
+        const r = spec.accept(use.input);
+        if ("error" in r) {
+          results.push({ type: "tool_result", tool_use_id: use.id, is_error: true, content: `${r.error} Fix and resubmit.` });
           continue;
         }
-        if (args.sponsoredCopy?.trim() && !parsed.data.body_markdown.includes(SPECIAL_MARKER)) {
-          results.push({
-            type: "tool_result",
-            tool_use_id: use.id,
-            is_error: true,
-            content: `body_markdown must contain ${SPECIAL_MARKER} on its own line where the sponsored section goes. Resubmit.`,
-          });
-          continue;
-        }
-        accepted = parsed.data;
+        accepted = r;
         results.push({
           type: "tool_result",
           tool_use_id: use.id,
-          content: phase === "draft" ? REVIEW_PROMPT : "Final version received.",
+          content: !reviewing && spec.reviewPrompt ? spec.reviewPrompt : "Final version received.",
         });
         continue;
       }
@@ -388,12 +447,76 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
       }
     }
 
-    if (accepted && phase === "review") {
-      return { submission: accepted, model: message.model, turns: turn };
-    }
-    if (accepted) phase = "review";
+    if (accepted && (reviewing || !spec.reviewPrompt)) return { value: accepted.value, model: message.model, turns: turn };
+    if (accepted) reviewing = true;
     messages.push({ role: "user", content: results });
   }
 
-  throw new NewsletterAgentError(`no final submission after ${MAX_TURNS} turns`);
+  throw new NewsletterAgentError(`no final ${spec.submitTool} after ${MAX_TURNS} turns`);
+}
+
+export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<NewsletterAgentResult> {
+  const templated = !!args.template;
+  const sponsorSupplied = !!args.sponsoredCopy?.trim();
+  const submit = submitNewsletterTool(templated);
+  const r = await runLoop<NewsletterSubmission>({
+    args,
+    firstUserTurn: buildUserTurn(args),
+    tools: args.video ? [submit] : [...SOURCE_TOOLS, submit],
+    submitTool: "submit_newsletter",
+    accept: (input) => {
+      const parsed = SubmitInput.safeParse(input);
+      if (!parsed.success) {
+        return { error: `Invalid submission: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}.` };
+      }
+      const problem = submissionProblem(parsed.data, args.template, sponsorSupplied);
+      return problem ? { error: problem } : { value: parsed.data };
+    },
+    reviewPrompt: REVIEW_PROMPT,
+  });
+  return { submission: r.value, model: r.model, turns: r.turns };
+}
+
+export interface RegenerateSectionArgs extends NewsletterAgentArgs {
+  template: NewsletterTemplate;
+  sections: NewsletterSection[];
+  sectionKey: string;
+  instruction?: string | null;
+  /** The issue as it stands (composed), so the rewrite fits around it. */
+  currentIssue: string;
+  /** Sources the issue already used (roundups), so the rewrite stays grounded. */
+  sourcesNote?: string | null;
+}
+
+/** Rewrite one section of an existing issue. Returns the new Markdown. */
+export async function regenerateSection(args: RegenerateSectionArgs): Promise<{ markdown: string; model: string }> {
+  const sec = args.template.sections.find((x) => x.key === args.sectionKey);
+  if (!sec) throw new NewsletterAgentError(`unknown section ${args.sectionKey}`);
+  const current = args.sections.find((x) => x.key === sec.key)?.markdown ?? "";
+  const base = buildUserTurn({ ...args, template: null, sponsoredCopy: null, sponsoredPlaceholder: false });
+  const turn = [
+    base,
+    `THE ISSUE AS IT STANDS:\n${args.currentIssue}`,
+    args.sourcesNote ? `SOURCES THIS ISSUE USES:\n${args.sourcesNote}` : null,
+    `Rewrite ONLY the section "${sec.key}"${sec.heading ? ` (heading "${sec.heading}", added for you)` : ""}. What it should contain: ${sec.hint}`,
+    `Its current content:\n${current || "(empty)"}`,
+    args.instruction?.trim()
+      ? `The editor's instruction (follow it): ${args.instruction.trim()}`
+      : "Make it better: tighter, more specific, more on-voice, without changing what it's about.",
+    "Keep it consistent with the rest of the issue (don't repeat other sections), follow the Skill's house rules, never invent facts or links, then call submit_section.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const r = await runLoop<string>({
+    args,
+    firstUserTurn: turn,
+    tools: args.video ? [SUBMIT_SECTION_TOOL] : [...SOURCE_TOOLS, SUBMIT_SECTION_TOOL],
+    submitTool: "submit_section",
+    accept: (input) => {
+      const parsed = SubmitSectionInput.safeParse(input);
+      return parsed.success ? { value: parsed.data.markdown } : { error: "markdown is required." };
+    },
+    reviewPrompt: null,
+  });
+  return { markdown: r.value, model: r.model };
 }

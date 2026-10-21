@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireFeature } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { newsletterDrafts } from "@/lib/db/schema";
 import { getNewsletterDraft } from "@/lib/services/newsletter-drafter/queries";
+import { composeIssue } from "@/lib/newsletter-template";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -26,6 +27,10 @@ const PatchBody = z
     bodyMarkdown: z.string().max(100_000).optional(),
     specialCopy: z.string().max(20_000).optional(),
     sendDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    sections: z.array(z.object({ key: z.string().min(1).max(40), markdown: z.string().max(20_000) })).max(20).optional(),
+    notes: z.string().max(4000).nullable().optional(),
+    /** The revision the editor loaded; a stale save is refused. */
+    revision: z.number().int().optional(),
   })
   .strict();
 
@@ -36,11 +41,27 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const parsed = PatchBody.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
-  const [updated] = await db
+  const { revision, ...fields } = parsed.data;
+  const current = await getNewsletterDraft(id);
+  if (!current) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (revision !== undefined && revision !== current.revision) {
+    return NextResponse.json({ error: "This draft changed since you opened it (a regenerate finished). Reload to see it.", draft: current }, { status: 409 });
+  }
+  // Keep the composed body in step with the sections (it's what the HubSpot push sends).
+  const sections = fields.sections ?? current.sections;
+  const specialCopy = fields.specialCopy ?? current.specialCopy;
+  const bodyMarkdown =
+    current.template && (fields.sections || fields.specialCopy !== undefined)
+      ? composeIssue(current.template, sections, specialCopy ? { copy: specialCopy, landingUrl: current.specialSource?.landingUrl ?? null } : null)
+      : fields.bodyMarkdown;
+  await db
     .update(newsletterDrafts)
-    .set({ ...parsed.data, updatedAt: new Date() })
-    .where(eq(newsletterDrafts.id, id))
-    .returning({ id: newsletterDrafts.id });
-  if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    .set({
+      ...fields,
+      ...(bodyMarkdown !== undefined ? { bodyMarkdown } : {}),
+      revision: sql`${newsletterDrafts.revision} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(newsletterDrafts.id, id));
   return NextResponse.json({ draft: await getNewsletterDraft(id) });
 }

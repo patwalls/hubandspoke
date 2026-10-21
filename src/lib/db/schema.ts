@@ -19,6 +19,7 @@ import { sql } from "drizzle-orm";
 import type { ClipEditDoc, ClipLook } from "@/lib/clip-editor/doc";
 import type { DesignDoc } from "@/lib/design-editor/doc";
 import type { DiarizationState, TranscriptSpeaker } from "@/lib/diarization/types";
+import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
 
 export const productionItems = pgTable(
   "production_items",
@@ -1339,6 +1340,10 @@ export const formats = pgTable(
     // built-in preset for the format, if any (templates.ts).
     designTemplate: jsonb("design_template").$type<DesignDoc>(),
     designTemplateUpdatedAt: timestamp("design_template_updated_at", { withTimezone: true }),
+    // Newsletter drafter (flag newsletterDrafter): the issue's ordered
+    // sections — see src/lib/newsletter-template.ts. Null = the built-in
+    // default for the format name (DEFAULT_TEMPLATES), or a free-form body.
+    newsletterTemplate: jsonb("newsletter_template").$type<NewsletterTemplate>(),
     // The format's CLIP LOOK for the in-app clip editor (flag `clipEditor`):
     // the style half of a ClipEditDoc — caption/hook layers, fonts, video
     // inset, aspect — that new clip edits for this format start from. What
@@ -2537,8 +2542,18 @@ export const newsletterDrafts = pgTable(
       .notNull()
       .references(() => formats.id, { onDelete: "cascade" }),
     accountId: uuid("account_id").references(() => accounts.id, { onDelete: "set null" }),
-    /** drafting | ready | failed */
+    /** idea (a scheduled slot, not drafted yet) | drafting | ready | failed */
     status: text("status").notNull().default("drafting"),
+    /** "<schedule group>:<send date>" for scheduled slots — one per group per day. Null = ad-hoc draft. */
+    slotKey: text("slot_key"),
+    /** The drafted sections, one per template section key (templated formats). */
+    sections: jsonb("sections").$type<NewsletterSection[]>().notNull().default([]),
+    /** Bumped on every save / regenerate; a stale save is refused (409). */
+    revision: integer("revision").notNull().default(0),
+    /** The editor picked this slot's source video by hand — the sweep stops re-suggesting. */
+    sourcePinned: boolean("source_pinned").notNull().default(false),
+    /** Section keys with a regenerate job in flight. */
+    regenerating: jsonb("regenerating").$type<string[]>().notNull().default([]),
     windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
     windowEnd: timestamp("window_end", { withTimezone: true }).notNull(),
     sources: jsonb("sources").$type<NewsletterDraftSource[]>().notNull().default([]),
@@ -2572,5 +2587,8 @@ export const newsletterDrafts = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("newsletter_drafts_brand_created_idx").on(table.brand, table.createdAt)],
+  (table) => [
+    index("newsletter_drafts_brand_created_idx").on(table.brand, table.createdAt),
+    uniqueIndex("newsletter_drafts_slot_key_uniq").on(table.slotKey).where(sql`${table.slotKey} IS NOT NULL`),
+  ],
 );

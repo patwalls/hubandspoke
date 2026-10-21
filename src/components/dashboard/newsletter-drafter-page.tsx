@@ -1,158 +1,239 @@
 "use client";
 
-// Newsletter drafter (feature flag `newsletterDrafter`). Pick a newsletter
-// format → "Draft newsletter" enqueues the agent run; the draft list polls
-// while anything is drafting. The detail pane edits subject / preview / body
-// (Markdown, with a rendered preview) and pushes the draft to HubSpot portal
-// 53 as an unsent email.
+// Newsletters board (feature flag `newsletterDrafter`): the next 2 weeks of
+// scheduled issues as cards (Sunday Breakfast Sun, Daily Seinfeld Tue/Thu,
+// Futurepedia How-To Tue — created by the slots sweep), plus recent drafts.
+// Clicking a card opens the newsletter editor, which drafts the issue into
+// the format's template on first open. Like the queue, but kept on its own
+// tab (and out of production_items) while the pilot is being tuned.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import { ExternalLink, Loader2 } from "lucide-react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { useCallback, useEffect, useState } from "react";
+import { Loader2, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
-import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
-import { composeBody } from "@/lib/services/newsletter-drafter/special-compose";
+import type { NewsletterSpecialSource } from "@/lib/db/schema";
+import { NewsletterEditorDialog } from "./newsletter-editor-dialog";
+
+interface BoardRow {
+  id: string;
+  status: "idea" | "drafting" | "ready" | "failed";
+  slotKey: string | null;
+  sendDate: string | null;
+  subject: string | null;
+  formatId: string;
+  formatName: string;
+  sourceItemId: string | null;
+  sourceTitle: string | null;
+  specialSource: NewsletterSpecialSource | null;
+  specialError: string | null;
+  hubspotStatus: string | null;
+  updatedAt: string;
+}
 
 interface FormatOption {
   id: string;
   name: string;
   hasSkill: boolean;
   kind: "roundup" | "single_video";
-  specialLabel: string | null;
 }
 
-interface VideoOption {
-  id: string;
-  title: string | null;
-  url: string | null;
-  publishedAt: string | null;
-  hasTranscript: boolean;
+const POLL_MS = 8_000;
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return "No date";
+  const d = iso.length === 10 ? new Date(`${iso}T12:00:00`) : new Date(iso);
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
-interface DraftSummary {
-  id: string;
-  formatId: string;
-  formatName: string;
-  status: "drafting" | "ready" | "failed";
-  subject: string | null;
-  windowStart: string;
-  windowEnd: string;
-  hubspotStatus: string | null;
-  createdAt: string;
-}
+const STATUS_LABEL: Record<BoardRow["status"], string> = { idea: "Not drafted", drafting: "Drafting", ready: "Ready", failed: "Failed" };
 
-interface DraftDetail extends DraftSummary {
-  sources: NewsletterDraftSource[];
-  subjectOptions: string[];
-  previewText: string | null;
-  bodyMarkdown: string | null;
-  model: string | null;
-  error: string | null;
-  hubspotEmailId: string | null;
-  hubspotEmailUrl: string | null;
-  hubspotError: string | null;
-  notes: string | null;
-  sendDate: string | null;
-  specialCopy: string | null;
-  specialOriginal: string | null;
-  specialMode: "verbatim" | "rewrite" | null;
-  specialSource: NewsletterSpecialSource | null;
-  specialError: string | null;
-  specialLabel: string | null;
-  sourceItemId: string | null;
-}
-
-const POLL_MS = 5_000;
-
-function localIsoDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Sunday Breakfast goes out on the next Sunday; everything else defaults to tomorrow. */
-function defaultSendDate(formatName: string | undefined, now = new Date()): string {
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (formatName?.trim().toLowerCase() === "sunday breakfast") d.setDate(d.getDate() + (7 - d.getDay() || 7));
-  else d.setDate(d.getDate() + 1);
-  return localIsoDate(d);
-}
-
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function StatusChip({ status }: { status: DraftSummary["status"] }) {
+function StatusChip({ row }: { row: BoardRow }) {
+  const inEmail = row.hubspotStatus === "created";
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-        status === "ready" && "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
-        status === "drafting" && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
-        status === "failed" && "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200",
+        inEmail && "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200",
+        !inEmail && row.status === "ready" && "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
+        !inEmail && row.status === "drafting" && "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
+        !inEmail && row.status === "failed" && "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200",
+        !inEmail && row.status === "idea" && "bg-muted text-muted-foreground",
       )}
     >
-      {status === "drafting" && <Loader2 className="size-3 animate-spin" />}
-      {status}
+      {row.status === "drafting" && <Loader2 className="size-3 animate-spin" />}
+      {inEmail ? "In email tool" : STATUS_LABEL[row.status]}
     </span>
   );
 }
 
-export function NewsletterDrafterPage({ brand }: { brand: string }) {
-  const [formats, setFormats] = useState<FormatOption[]>([]);
-  const [drafts, setDrafts] = useState<DraftSummary[]>([]);
-  const [formatId, setFormatId] = useState<string>("");
-  const [days, setDays] = useState<number>(7);
-  const [sendDate, setSendDate] = useState<string>("");
-  const [videos, setVideos] = useState<VideoOption[] | null>(null);
-  const [videoId, setVideoId] = useState<string>("");
-  const [notes, setNotes] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function SponsorBadge({ row }: { row: BoardRow }) {
+  if (row.specialSource) {
+    return (
+      <span className="text-xs text-emerald-700 dark:text-emerald-300" title={row.specialSource.taskName}>
+        Sponsor booked{row.specialSource.copyFrom === "focus_field" ? " (copy pending)" : ""}
+      </span>
+    );
+  }
+  if (row.specialError?.startsWith("No ")) return <span className="text-xs text-amber-700 dark:text-amber-300">No sponsor booked</span>;
+  return null;
+}
 
-  const loadList = useCallback(async () => {
-    const res = await fetch(`/api/newsletter-drafts?brand=${encodeURIComponent(brand)}`);
+function SlotCard({ row, onOpen }: { row: BoardRow; onOpen: () => void }) {
+  return (
+    <button type="button" onClick={onOpen} className="flex w-full flex-col gap-1.5 rounded-lg border bg-background p-3 text-left text-sm hover:border-primary hover:bg-muted/40">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium">{row.formatName}</span>
+        <StatusChip row={row} />
+      </div>
+      {row.subject && <span className="line-clamp-2 text-muted-foreground">{row.subject}</span>}
+      {row.sourceTitle && <span className="line-clamp-1 text-xs text-muted-foreground">Video: {row.sourceTitle}</span>}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">{fmtDate(row.sendDate)}</span>
+        <SponsorBadge row={row} />
+      </div>
+    </button>
+  );
+}
+
+export function NewsletterDrafterPage({ brand }: { brand: string }) {
+  const [upcoming, setUpcoming] = useState<BoardRow[] | null>(null);
+  const [past, setPast] = useState<BoardRow[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    const res = await fetch(`/api/newsletter-slots?brand=${encodeURIComponent(brand)}`);
     if (!res.ok) return;
-    const json = (await res.json()) as { formats: FormatOption[]; drafts: DraftSummary[] };
-    setFormats(json.formats);
-    setDrafts(json.drafts);
-    setFormatId((cur) => cur || (json.formats.find((f) => f.hasSkill) ?? json.formats[0])?.id || "");
+    const json = (await res.json()) as { upcoming: BoardRow[]; past: BoardRow[] };
+    setUpcoming(json.upcoming);
+    setPast(json.past);
   }, [brand]);
 
   useEffect(() => {
-    void loadList();
-  }, [loadList]);
+    void load();
+  }, [load]);
 
-  const anyDrafting = drafts.some((d) => d.status === "drafting");
+  const anyDrafting = [...(upcoming ?? []), ...past].some((r) => r.status === "drafting");
   useEffect(() => {
-    if (!anyDrafting) return;
-    return startVisibleInterval(() => void loadList(), POLL_MS);
-  }, [anyDrafting, loadList]);
+    if (!anyDrafting || openId) return;
+    return startVisibleInterval(() => void load(), POLL_MS);
+  }, [anyDrafting, openId, load]);
 
-  async function startDraft() {
-    if (!formatId) return;
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      const res = await fetch(`/api/newsletter-slots/refresh?brand=${encodeURIComponent(brand)}`, { method: "POST" });
+      if (res.ok) {
+        const json = (await res.json()) as { upcoming: BoardRow[]; past: BoardRow[] };
+        setUpcoming(json.upcoming);
+        setPast(json.past);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  // Group upcoming slots by send date.
+  const byDate = new Map<string, BoardRow[]>();
+  for (const r of upcoming ?? []) {
+    const k = r.sendDate ?? "";
+    byDate.set(k, [...(byDate.get(k) ?? []), r]);
+  }
+
+  return (
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold">Newsletters</h1>
+          <p className="text-sm text-muted-foreground">
+            The next two weeks of scheduled issues. Open one to draft it into its template, edit or regenerate any section, then
+            send it on to the email tool.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          Refresh sponsors
+        </Button>
+      </div>
+
+      {upcoming === null ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Loading…
+        </div>
+      ) : upcoming.length === 0 ? (
+        <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No scheduled newsletters for this brand.</p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[...byDate.entries()].map(([date, rows]) => (
+            <div key={date} className="flex flex-col gap-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{fmtDate(date)}</span>
+              {rows.map((r) => (
+                <SlotCard key={r.id} row={r} onOpen={() => setOpenId(r.id)} />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <OneOffDraft brand={brand} onCreated={(id) => { void load(); setOpenId(id); }} />
+
+      {past.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground">Past & one-off drafts</h2>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {past.map((r) => (
+              <SlotCard key={r.id} row={r} onOpen={() => setOpenId(r.id)} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {openId && (
+        <NewsletterEditorDialog
+          draftId={openId}
+          open={!!openId}
+          onOpenChange={(o) => !o && setOpenId(null)}
+          onChanged={() => void load()}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A draft outside the schedule (formats without slots, or an extra issue). Roundup formats only. */
+function OneOffDraft({ brand, onCreated }: { brand: string; onCreated: (id: string) => void }) {
+  const [formats, setFormats] = useState<FormatOption[]>([]);
+  const [formatId, setFormatId] = useState("");
+  const [sendDate, setSendDate] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void fetch(`/api/newsletter-drafts?brand=${encodeURIComponent(brand)}`)
+      .then((r) => (r.ok ? r.json() : { formats: [] }))
+      .then((j: { formats: FormatOption[] }) => {
+        const roundups = j.formats.filter((f) => f.kind === "roundup");
+        setFormats(roundups);
+        setFormatId(roundups.find((f) => f.hasSkill)?.id ?? roundups[0]?.id ?? "");
+      });
+  }, [brand]);
+
+  if (formats.length === 0) return null;
+
+  async function create() {
     setCreating(true);
     setError(null);
     try {
       const res = await fetch("/api/newsletter-drafts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          formatId,
-          days,
-          sendDate: sendDate || null,
-          notes: notes.trim() || null,
-          sourceItemId: isSingleVideo ? videoId || null : null,
-        }),
+        body: JSON.stringify({ formatId, sendDate: sendDate || null }),
       });
-      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't start the draft");
-      const { id } = (await res.json()) as { id: string };
-      setSelectedId(id);
-      setNotes("");
-      await loadList();
+      const json = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
+      if (!res.ok || !json.id) throw new Error(json.error ?? "Couldn't start the draft");
+      onCreated(json.id);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -160,55 +241,13 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
     }
   }
 
-  const selectedFormat = formats.find((f) => f.id === formatId);
-  // Re-default the send date whenever the format changes.
-  const selectedName = selectedFormat?.name;
-  useEffect(() => {
-    if (selectedName) setSendDate(defaultSendDate(selectedName));
-  }, [selectedName]);
-
-  // single_video formats (the How-To) draft from one picked video.
-  const isSingleVideo = selectedFormat?.kind === "single_video";
-  useEffect(() => {
-    if (!isSingleVideo || !formatId) {
-      setVideos(null);
-      setVideoId("");
-      return;
-    }
-    let cancelled = false;
-    setVideos(null);
-    void fetch(`/api/newsletter-drafts/videos?formatId=${formatId}`)
-      .then((res) => (res.ok ? res.json() : { videos: [] }))
-      .then((json: { videos: VideoOption[] }) => {
-        if (cancelled) return;
-        setVideos(json.videos);
-        setVideoId(json.videos.find((v) => v.hasTranscript)?.id ?? "");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isSingleVideo, formatId]);
-  const pickedVideo = videos?.find((v) => v.id === videoId);
-
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold">Newsletters</h1>
-        <p className="text-sm text-muted-foreground">
-          Draft an issue from recently published videos (roundups also pull starterstory.com case studies), or a How-To
-          from one video. Review it here, then send it on to the email tool.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border p-4">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium">Format</span>
-          <select
-            className="h-8 min-w-56 rounded-lg border border-input bg-background px-2 text-sm"
-            value={formatId}
-            onChange={(e) => setFormatId(e.target.value)}
-          >
-            {formats.length === 0 && <option value="">No newsletter formats</option>}
+    <details className="rounded-lg border p-3 text-sm">
+      <summary className="cursor-pointer font-medium">One-off draft</summary>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium">Format</span>
+          <select className="h-8 min-w-56 rounded-lg border border-input bg-background px-2 text-sm" value={formatId} onChange={(e) => setFormatId(e.target.value)}>
             {formats.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -217,417 +256,16 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium">Send date</span>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium">Send date (optional)</span>
           <Input type="date" className="w-40" value={sendDate} onChange={(e) => setSendDate(e.target.value)} />
         </label>
-        {isSingleVideo ? (
-          <label className="flex min-w-72 flex-col gap-1 text-sm">
-            <span className="font-medium">Video</span>
-            <select
-              className="h-8 max-w-md rounded-lg border border-input bg-background px-2 text-sm"
-              value={videoId}
-              onChange={(e) => setVideoId(e.target.value)}
-              disabled={!videos}
-            >
-              {!videos && <option value="">Loading videos…</option>}
-              {videos?.length === 0 && <option value="">No recent videos from this channel</option>}
-              {videos?.map((v) => (
-                <option key={v.id} value={v.id} disabled={!v.hasTranscript}>
-                  {v.publishedAt ? `${fmtDate(v.publishedAt)} · ` : ""}
-                  {v.title ?? "Untitled"}
-                  {v.hasTranscript ? "" : " (no transcript yet)"}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">Look back (days)</span>
-            <Input
-              type="number"
-              min={1}
-              max={31}
-              className="w-24"
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value) || 7)}
-            />
-          </label>
-        )}
-        <label className="flex min-w-72 flex-1 flex-col gap-1 text-sm">
-          <span className="font-medium">Notes for this issue (optional)</span>
-          <Input
-            placeholder="e.g. Pitch the iOS Bootcamp, enrollment closes Friday"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-        </label>
-        <Button onClick={startDraft} disabled={!formatId || creating || (isSingleVideo && !pickedVideo?.hasTranscript)}>
+        <Button size="sm" onClick={create} disabled={!formatId || creating}>
           {creating && <Loader2 className="animate-spin" />}
-          Draft newsletter
+          Draft
         </Button>
-        {selectedFormat && !selectedFormat.hasSkill && (
-          <span className="text-xs text-amber-700 dark:text-amber-300">
-            This format has no Skill yet, so the draft will lean on past issues only.
-          </span>
-        )}
-        {error && <span className="text-sm text-destructive">{error}</span>}
+        {error && <span className="text-xs text-destructive">{error}</span>}
       </div>
-
-      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium text-muted-foreground">Drafts</h2>
-          {drafts.length === 0 && <p className="text-sm text-muted-foreground">No drafts yet.</p>}
-          {drafts.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => setSelectedId(d.id)}
-              className={cn(
-                "flex flex-col gap-1 rounded-lg border p-3 text-left text-sm hover:bg-muted",
-                selectedId === d.id && "border-primary bg-muted",
-              )}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">{d.formatName}</span>
-                <StatusChip status={d.status} />
-              </div>
-              <span className="line-clamp-2 text-muted-foreground">{d.subject ?? (d.status === "failed" ? "Draft failed" : "Drafting…")}</span>
-              <span className="text-xs text-muted-foreground">
-                {fmtDate(d.windowStart)} – {fmtDate(d.windowEnd)} · created {fmtDate(d.createdAt)}
-                {d.hubspotStatus === "created" && " · in HubSpot"}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {selectedId ? (
-          <DraftPane key={selectedId} id={selectedId} onChanged={loadList} />
-        ) : (
-          <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-            Select a draft, or start a new one.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DraftPane({ id, onChanged }: { id: string; onChanged: () => Promise<void> }) {
-  const [draft, setDraft] = useState<DraftDetail | null>(null);
-  const [subject, setSubject] = useState("");
-  const [previewText, setPreviewText] = useState("");
-  const [body, setBody] = useState("");
-  const [specialCopy, setSpecialCopy] = useState("");
-  const [specialBusy, setSpecialBusy] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [pushing, setPushing] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    const res = await fetch(`/api/newsletter-drafts/${id}`);
-    if (!res.ok) return null;
-    const { draft: d } = (await res.json()) as { draft: DraftDetail };
-    setDraft((prev) => {
-      // Seed the editors on first load and when the draft lands (drafting →
-      // ready) — never on a HubSpot-status poll, which would wipe typing.
-      if (!prev || prev.status !== d.status) {
-        setSubject(d.subject ?? "");
-        setPreviewText(d.previewText ?? "");
-        setBody(d.bodyMarkdown ?? "");
-        setSpecialCopy(d.specialCopy ?? "");
-      }
-      return d;
-    });
-    return d;
-  }, [id]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const waiting = draft?.status === "drafting" || draft?.hubspotStatus === "pending";
-  useEffect(() => {
-    if (!waiting) return;
-    return startVisibleInterval(() => {
-      void load().then((d) => {
-        if (d && d.status !== "drafting" && d.hubspotStatus !== "pending") void onChanged();
-      });
-    }, POLL_MS);
-  }, [waiting, load, onChanged]);
-
-  const dirty = useMemo(
-    () =>
-      !!draft &&
-      (subject !== (draft.subject ?? "") ||
-        previewText !== (draft.previewText ?? "") ||
-        body !== (draft.bodyMarkdown ?? "") ||
-        specialCopy !== (draft.specialCopy ?? "")),
-    [draft, subject, previewText, body, specialCopy],
-  );
-
-  async function save() {
-    setSaving(true);
-    setMessage(null);
-    try {
-      const res = await fetch(`/api/newsletter-drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, previewText, bodyMarkdown: body, specialCopy }),
-      });
-      if (!res.ok) throw new Error("Couldn't save");
-      const { draft: d } = (await res.json()) as { draft: DraftDetail };
-      setDraft(d);
-      setMessage("Saved");
-      await onChanged();
-    } catch (e) {
-      setMessage((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function specialAction(action: "verbatim" | "rewrite" | "refresh") {
-    if (dirty && !window.confirm("You have unsaved edits. Discard them and continue?")) return;
-    setSpecialBusy(action);
-    setMessage(null);
-    try {
-      const res = await fetch(`/api/newsletter-drafts/${id}/special`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { draft?: DraftDetail; error?: string };
-      if (!res.ok || !json.draft) throw new Error(json.error ?? "Couldn't update The Special");
-      const d = json.draft;
-      setDraft(d);
-      setSubject(d.subject ?? "");
-      setPreviewText(d.previewText ?? "");
-      setBody(d.bodyMarkdown ?? "");
-      setSpecialCopy(d.specialCopy ?? "");
-    } catch (e) {
-      setMessage((e as Error).message);
-    } finally {
-      setSpecialBusy(null);
-    }
-  }
-
-  async function pushToHubspot() {
-    if (dirty) await save();
-    setPushing(true);
-    setMessage(null);
-    try {
-      const res = await fetch(`/api/newsletter-drafts/${id}/hubspot`, { method: "POST" });
-      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't start");
-      await load();
-    } catch (e) {
-      setMessage((e as Error).message);
-    } finally {
-      setPushing(false);
-    }
-  }
-
-  if (!draft) {
-    return (
-      <div className="flex items-center gap-2 rounded-lg border p-6 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" /> Loading…
-      </div>
-    );
-  }
-
-  if (draft.status === "drafting") {
-    return (
-      <div className="flex flex-col gap-2 rounded-lg border p-6 text-sm">
-        <div className="flex items-center gap-2 font-medium">
-          <Loader2 className="size-4 animate-spin" /> Drafting {draft.formatName}…
-        </div>
-        <p className="text-muted-foreground">
-          Claude is reading this window&apos;s videos and case studies, writing the issue, then reviewing its own draft. This
-          usually takes a few minutes. You can leave this page.
-        </p>
-      </div>
-    );
-  }
-
-  if (draft.status === "failed") {
-    return (
-      <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 p-6 text-sm">
-        <span className="font-medium text-destructive">The draft failed</span>
-        <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{draft.error}</pre>
-        <p className="text-muted-foreground">Start a new draft to try again.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-4 rounded-lg border p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm text-muted-foreground">
-          {draft.formatName} · {fmtDate(draft.windowStart)} – {fmtDate(draft.windowEnd)}
-          {draft.model && ` · ${draft.model}`}
-          {draft.sendDate && <div className="mt-1 text-xs">Sends {draft.sendDate}</div>}
-          {draft.notes && <div className="mt-1 text-xs">Notes: {draft.notes}</div>}
-        </div>
-        <div className="flex items-center gap-2">
-          {message && <span className="text-xs text-muted-foreground">{message}</span>}
-          <Button variant="outline" size="sm" onClick={save} disabled={!dirty || saving}>
-            {saving && <Loader2 className="animate-spin" />}
-            Save
-          </Button>
-          {draft.hubspotEmailUrl ? (
-            <a
-              href={draft.hubspotEmailUrl}
-              target="_blank"
-              rel="noreferrer"
-              className={buttonVariants({ size: "sm", variant: "secondary" })}
-            >
-              Open in HubSpot <ExternalLink />
-            </a>
-          ) : (
-            <Button size="sm" onClick={pushToHubspot} disabled={pushing || draft.hubspotStatus === "pending"}>
-              {(pushing || draft.hubspotStatus === "pending") && <Loader2 className="animate-spin" />}
-              Create HubSpot draft
-            </Button>
-          )}
-        </div>
-      </div>
-      {draft.hubspotStatus === "failed" && draft.hubspotError && (
-        <p className="rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">
-          HubSpot: {draft.hubspotError}
-        </p>
-      )}
-
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">Subject</span>
-        {draft.subjectOptions.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {draft.subjectOptions.map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => setSubject(opt)}
-                className={cn(
-                  "rounded-full border px-3 py-1 text-left text-xs hover:bg-muted",
-                  subject === opt && "border-primary bg-muted",
-                )}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        )}
-        <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
-      </div>
-
-      <label className="flex flex-col gap-2 text-sm">
-        <span className="font-medium">
-          Preview text <span className="font-normal text-muted-foreground">(set this in HubSpot after creating the draft)</span>
-        </span>
-        <Input value={previewText} onChange={(e) => setPreviewText(e.target.value)} />
-      </label>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <label className="flex flex-col gap-2 text-sm">
-          <span className="font-medium">Body (Markdown)</span>
-          <Textarea className="min-h-[520px] font-mono text-xs" value={body} onChange={(e) => setBody(e.target.value)} />
-        </label>
-        <div className="flex flex-col gap-2 text-sm">
-          <span className="font-medium">Preview</span>
-          <div className="newsletter-preview min-h-[520px] overflow-auto rounded-lg border bg-background p-4 text-sm leading-relaxed">
-            <ReactMarkdown
-              components={{
-                h1: (p) => <h1 className="mb-3 mt-4 text-xl font-semibold" {...p} />,
-                h2: (p) => <h2 className="mb-2 mt-4 text-lg font-semibold" {...p} />,
-                h3: (p) => <h3 className="mb-2 mt-3 font-semibold" {...p} />,
-                p: (p) => <p className="mb-3" {...p} />,
-                ul: (p) => <ul className="mb-3 list-disc pl-5" {...p} />,
-                ol: (p) => <ol className="mb-3 list-decimal pl-5" {...p} />,
-                a: (p) => <a className="text-primary underline" target="_blank" rel="noreferrer" {...p} />,
-                blockquote: (p) => <blockquote className="mb-3 border-l-2 pl-3 text-muted-foreground" {...p} />,
-                hr: () => <hr className="my-4" />,
-              }}
-            >
-              {composeBody(body, { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null })}
-            </ReactMarkdown>
-          </div>
-        </div>
-      </div>
-
-      {(draft.specialSource || draft.specialError) && (
-        <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-col gap-0.5">
-              <span className="font-medium">{draft.specialLabel ?? "The Special"} (from Asana)</span>
-              {draft.specialSource ? (
-                <a className="text-xs text-primary underline" href={draft.specialSource.taskUrl} target="_blank" rel="noreferrer">
-                  {draft.specialSource.taskName}
-                </a>
-              ) : null}
-              {draft.specialSource?.copyFrom === "focus_field" && (
-                <span className="text-xs text-amber-700 dark:text-amber-300">
-                  Placeholder: using the task&apos;s &quot;ad copy focus&quot; answer. Add a &quot;Final Newsletter Copy&quot;
-                  subtask in Asana to pull the real copy.
-                </span>
-              )}
-              {draft.specialError && <span className="text-xs text-destructive">{draft.specialError}</span>}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {draft.specialSource && (
-                <>
-                  <Button
-                    size="sm"
-                    variant={draft.specialMode === "verbatim" ? "secondary" : "outline"}
-                    onClick={() => specialAction("verbatim")}
-                    disabled={specialBusy !== null}
-                  >
-                    {specialBusy === "verbatim" && <Loader2 className="animate-spin" />}
-                    Use as written
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={draft.specialMode === "rewrite" ? "secondary" : "outline"}
-                    onClick={() => specialAction("rewrite")}
-                    disabled={specialBusy !== null}
-                  >
-                    {specialBusy === "rewrite" && <Loader2 className="animate-spin" />}
-                    {draft.specialMode === "rewrite" ? "Rewrite again" : "Rewrite in our voice"}
-                  </Button>
-                </>
-              )}
-              <Button size="sm" variant="ghost" onClick={() => specialAction("refresh")} disabled={specialBusy !== null}>
-                {specialBusy === "refresh" && <Loader2 className="animate-spin" />}
-                Refresh from Asana
-              </Button>
-            </div>
-          </div>
-          {draft.specialSource && (
-            <Textarea className="min-h-32 text-xs" value={specialCopy} onChange={(e) => setSpecialCopy(e.target.value)} />
-          )}
-          {draft.specialSource?.landingUrl && (
-            <span className="break-all text-xs text-muted-foreground">Landing page: {draft.specialSource.landingUrl}</span>
-          )}
-        </div>
-      )}
-
-      {draft.sources.length > 0 && (
-        <div className="flex flex-col gap-2 text-sm">
-          <span className="font-medium">Sources used</span>
-          <ul className="flex flex-col gap-1">
-            {draft.sources.map((s, i) => (
-              <li key={i} className="text-muted-foreground">
-                <span className="mr-2 rounded bg-muted px-1.5 py-0.5 text-xs">{s.kind === "video" ? "Video" : "Case study"}</span>
-                {s.url ? (
-                  <a className="text-primary underline" href={s.url} target="_blank" rel="noreferrer">
-                    {s.title ?? s.url}
-                  </a>
-                ) : (
-                  (s.title ?? "Untitled")
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+    </details>
   );
 }
