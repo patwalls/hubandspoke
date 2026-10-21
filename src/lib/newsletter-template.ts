@@ -148,9 +148,6 @@ const STARTER_STORY_STYLE: NewsletterStyle = styleSchema.parse({
 });
 const NEUTRAL_STYLE: NewsletterStyle = styleSchema.parse({});
 
-const COURSE_HINT =
-  "A bold linked-or-plain headline that leads with the money or the hook, then a 4 to 8 short-line teaser that ends with a link line to the piece (video or case study).";
-
 /** Templates used when a format has none saved (keyed by lowercase format name). */
 export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   "sunday breakfast": {
@@ -173,14 +170,32 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
       emailName: "{brand} | Newsletter | {Month} {D}",
     },
     sections: [
-      s("intro", null, "'Hey!' then 3 to 8 short personal lines from Pat about his week, ending with 'Welcome to Sunday Breakfast!!' (or similar).", { story: "none" }),
-      s("orange_juice", "The Orange Juice 🍊", `The week's flagship YouTube video: the newest one published that week. ${COURSE_HINT}`, { pillColor: "#fed7aa", story: "newest_video" }),
-      s("coffee", "The Coffee ☕", `The week's second-newest video. ${COURSE_HINT}`, { pillColor: "#fae8ff", story: "newest_video" }),
-      s("special", "The Special 🍽️", "The sponsored promo, or a lead magnet pitched like an ad when no sponsor is booked.", { kind: "sponsor", pillColor: "#fae8ff", boxColor: "#EBECFC" }),
-      s("eggs", "The Eggs 🍳", `The week's newest case study; if there isn't one, another recently published video that still fits. ${COURSE_HINT}`, { pillColor: "#fef9c3", story: "case_study" }),
-      s("toast", "The Toast 🍞", `Another of the week's case studies; else a recent video that still fits. ${COURSE_HINT}`, { pillColor: "#dcfce7", story: "case_study" }),
-      s("pancakes", "The Pancakes 🥞", `Another case study or recent video. A "same guy as before ^^^" follow-up to an earlier course is fine when it's true. ${COURSE_HINT}`, { pillColor: "#e0f2fe", story: "case_study" }),
-      s("signoff", null, "'That's it!', a one-line weekend wish, then 'Pat' and 'Founder, StarterStory.com' on their own lines. No footer.", { story: "none" }),
+      // Instructions hold only what's special about each section: how every
+      // course is written (headline, teaser, link line) lives in the Skill, and
+      // where each course's story comes from is its `story` setting.
+      s(
+        "intro",
+        null,
+        "'Hey!' on its own line, then 3 to 8 short personal lines from Pat about his week: something he's building, a trend he noticed, an event, or why this week's episode excited him. Don't summarize the email. End with 'Welcome to Sunday Breakfast!!' or 'Alright, let's get into Sunday Breakfast!'",
+        { story: "none" },
+      ),
+      s("orange_juice", "The Orange Juice 🍊", "The issue's flagship story: the subject line usually comes from this one.", { pillColor: "#fed7aa", story: "newest_video" }),
+      s("coffee", "The Coffee ☕", "", { pillColor: "#fae8ff", story: "newest_video" }),
+      s(
+        "special",
+        "The Special 🍽️",
+        "When no sponsor is booked: a free resource from list_lead_magnets that fits the week's theme, pitched like an ad: the problem, the resource, 2 to 3 dash bullets of what's inside, then a link line ('Grab the FREE guide here') to its real landing page.",
+        { kind: "sponsor", pillColor: "#fae8ff", boxColor: "#EBECFC" },
+      ),
+      s("eggs", "The Eggs 🍳", "", { pillColor: "#fef9c3", story: "case_study" }),
+      s("toast", "The Toast 🍞", "", { pillColor: "#dcfce7", story: "case_study" }),
+      s("pancakes", "The Pancakes 🥞", "A 'same guy as before ^^^' follow-up to an earlier course is fine when it's true.", { pillColor: "#e0f2fe", story: "case_study" }),
+      s(
+        "signoff",
+        null,
+        "'That's it!', 'I hope you have the BEST weekend and have a great week!', 'Pat' and 'Founder, StarterStory.com', each on its own line. No footer: the email template has it.",
+        { story: "none" },
+      ),
     ],
   },
   "daily seinfeld": {

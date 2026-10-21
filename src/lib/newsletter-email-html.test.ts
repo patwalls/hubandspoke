@@ -39,7 +39,7 @@ describe("renderEmailHtml", () => {
     expect(html).not.toContain("The week's flagship YouTube video"); // no hints in a draft
 
     const preview = renderEmailHtml({ template: t, sections: [], showHints: true });
-    expect(preview).toContain("flagship YouTube video"); // hint shown where content goes
+    expect(preview).toContain("flagship story"); // hint shown where content goes
   });
 
   it("escapes template text and drops raw HTML from section markdown", async () => {
