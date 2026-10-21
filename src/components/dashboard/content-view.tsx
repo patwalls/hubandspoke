@@ -53,6 +53,7 @@ export function ContentView({ brand }: ContentViewProps) {
     platform: { default: "all" },
     accountId: { default: "all" },
     postType: { default: "all" },
+    channels: { default: "all" },
     format: { default: "all" },
     source: { default: "all" },
     origin: { default: "all" },
@@ -65,6 +66,7 @@ export function ContentView({ brand }: ContentViewProps) {
     platform: selectedPlatformKey,
     accountId: selectedAccountId,
     postType: selectedPostType,
+    channels: selectedChannels,
     format: selectedFormat,
     source: selectedSource,
     origin: selectedOrigin,
@@ -141,6 +143,7 @@ export function ContentView({ brand }: ContentViewProps) {
         platformKey: selectedPlatformKey,
         accountId: selectedAccountId,
         postType: selectedPostType,
+        channels: selectedChannels,
         format: selectedFormat,
         source: selectedSource,
         origin: selectedOrigin,
@@ -161,7 +164,7 @@ export function ContentView({ brand }: ContentViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin]);
+  }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedChannels, selectedFormat, selectedSource, selectedOrigin]);
 
   useEffect(() => {
     fetchReport();
@@ -203,6 +206,7 @@ export function ContentView({ brand }: ContentViewProps) {
         selectedPlatformKey={selectedPlatformKey}
         selectedAccountId={selectedAccountId}
         selectedPostType={selectedPostType}
+        selectedChannels={selectedChannels}
         selectedFormat={selectedFormat}
         selectedSource={selectedSource}
         selectedOrigin={selectedOrigin}
@@ -216,6 +220,7 @@ export function ContentView({ brand }: ContentViewProps) {
         onPlatformKeyChange={(v) => filters.set("platform", v)}
         onAccountChange={(v) => filters.set("accountId", v)}
         onPostTypeChange={(v) => filters.set("postType", v)}
+        onChannelsChange={(v) => filters.set("channels", v)}
         onFormatChange={(v) => filters.set("format", v)}
         onSourceChange={(v) => filters.set("source", v)}
         onOriginChange={(v) => filters.set("origin", v)}

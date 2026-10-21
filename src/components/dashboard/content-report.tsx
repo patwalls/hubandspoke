@@ -45,6 +45,7 @@ export function ContentReport({ brand }: { brand: string }) {
     platform: { default: "all" },
     accountId: { default: "all" },
     postType: { default: "all" },
+    channels: { default: "all" },
     format: { default: "all" },
     source: { default: "all" },
     origin: { default: "all" },
@@ -58,6 +59,7 @@ export function ContentReport({ brand }: { brand: string }) {
     platform: selectedPlatformKey,
     accountId: selectedAccountId,
     postType: selectedPostType,
+    channels: selectedChannels,
     format: selectedFormat,
     source: selectedSource,
     origin: selectedOrigin,
@@ -134,6 +136,7 @@ export function ContentReport({ brand }: { brand: string }) {
         platformKey: selectedPlatformKey,
         accountId: selectedAccountId,
         postType: selectedPostType,
+        channels: selectedChannels,
         format: selectedFormat,
         source: selectedSource,
         origin: selectedOrigin,
@@ -179,7 +182,7 @@ export function ContentReport({ brand }: { brand: string }) {
     } finally {
       if (!isStale()) setLoading(false);
     }
-  }, [brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin, provenOnly]);
+  }, [brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedChannels, selectedFormat, selectedSource, selectedOrigin, provenOnly]);
 
   useEffect(() => {
     fetchReport();
@@ -250,6 +253,7 @@ export function ContentReport({ brand }: { brand: string }) {
         selectedPlatformKey={selectedPlatformKey}
         selectedAccountId={selectedAccountId}
         selectedPostType={selectedPostType}
+        selectedChannels={selectedChannels}
         selectedFormat={selectedFormat}
         selectedSource={selectedSource}
         selectedOrigin={selectedOrigin}
@@ -263,6 +267,7 @@ export function ContentReport({ brand }: { brand: string }) {
         onPlatformKeyChange={(v) => filters.set("platform", v)}
         onAccountChange={(v) => filters.set("accountId", v)}
         onPostTypeChange={(v) => filters.set("postType", v)}
+        onChannelsChange={(v) => filters.set("channels", v)}
         onFormatChange={(v) => filters.set("format", v)}
         onSourceChange={(v) => filters.set("source", v)}
         onOriginChange={(v) => filters.set("origin", v)}

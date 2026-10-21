@@ -38,6 +38,7 @@ export function MATGDashboard() {
     platform: { default: "all" },
     accountId: { default: "all" },
     postType: { default: "all" },
+    channels: { default: "all" },
     format: { default: "all" },
     source: { default: "all" },
     origin: { default: "all" },
@@ -50,6 +51,7 @@ export function MATGDashboard() {
     platform: selectedPlatformKey,
     accountId: selectedAccountId,
     postType: selectedPostType,
+    channels: selectedChannels,
     format: selectedFormat,
     source: selectedSource,
     origin: selectedOrigin,
@@ -97,6 +99,7 @@ export function MATGDashboard() {
         platformKey: selectedPlatformKey,
         accountId: selectedAccountId,
         postType: selectedPostType,
+        channels: selectedChannels,
         format: selectedFormat,
         source: selectedSource,
         origin: selectedOrigin,
@@ -107,7 +110,7 @@ export function MATGDashboard() {
     } catch (err) {
       console.error("Failed to fetch data:", err);
     }
-  }, [startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedFormat, selectedSource, selectedOrigin, provenOnly]);
+  }, [startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedChannels, selectedFormat, selectedSource, selectedOrigin, provenOnly]);
 
   useEffect(() => {
     fetchReport();
@@ -167,6 +170,7 @@ export function MATGDashboard() {
         selectedPlatformKey={selectedPlatformKey}
         selectedAccountId={selectedAccountId}
         selectedPostType={selectedPostType}
+        selectedChannels={selectedChannels}
         selectedFormat={selectedFormat}
         selectedSource={selectedSource}
         selectedOrigin={selectedOrigin}
@@ -180,6 +184,7 @@ export function MATGDashboard() {
         onPlatformKeyChange={(v) => filters.set("platform", v)}
         onAccountChange={(v) => filters.set("accountId", v)}
         onPostTypeChange={(v) => filters.set("postType", v)}
+        onChannelsChange={(v) => filters.set("channels", v)}
         onFormatChange={(v) => filters.set("format", v)}
         onSourceChange={(v) => filters.set("source", v)}
         onOriginChange={(v) => filters.set("origin", v)}

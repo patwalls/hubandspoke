@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
     platformKey: searchParams.get("platformKey") || "all",
     accountId: searchParams.get("accountId") || "all",
     postType: searchParams.get("postType") || "all",
+    channels: searchParams.get("channels") || "all",
     format: searchParams.get("format") || "all",
     source: searchParams.get("source") || "all",
     provenOnly: searchParams.get("provenOnly") === "1",

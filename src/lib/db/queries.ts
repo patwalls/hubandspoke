@@ -1,7 +1,8 @@
 import { db } from "@/lib/db";
 import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts, viewSnapshots, contentEvents } from "@/lib/db/schema";
 import { aliasedTable, getTableColumns } from "drizzle-orm";
-import { and, eq, gte, lte, isNotNull, isNull, inArray, sql, min } from "drizzle-orm";
+import { and, eq, gte, lte, isNotNull, isNull, inArray, or, sql, min } from "drizzle-orm";
+import { parseChannelFilter } from "@/lib/multi-filter";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
 import {
@@ -322,6 +323,9 @@ interface ReportParams {
   accountId?: string;
   /** Canonical post_type or "all". */
   postType?: string;
+  /** "all" or a comma-separated list of `<accountId>|<postType>` channel
+   *  keys (see src/lib/multi-filter.ts). Keeps only those exact pairs. */
+  channels?: string;
   format: string;
   source: string;
   /** When true, drop items whose format isn't currently "proven" per the
@@ -493,6 +497,24 @@ async function getWeekOverWeekComparison(args: {
   };
 }
 
+/** WHERE clause for the dashboard Channels filter: keep only the exact
+ *  (account, post type) pairs listed. `undefined` when unfiltered. Shared by
+ *  getContentReport and the legacy /api/reports/matg route. */
+export function channelFilterCondition(channels: string | null | undefined) {
+  const channelKeys = parseChannelFilter(channels);
+  if (!channelKeys) return undefined;
+  return or(
+    ...channelKeys.map((c) =>
+      and(
+        eq(productionItems.accountId, c.accountId),
+        c.postType
+          ? eq(productionItems.postType, c.postType)
+          : isNull(productionItems.postType)
+      )
+    )
+  );
+}
+
 export async function getContentReport(
   params: ReportParams
 ): Promise<ContentReportData> {
@@ -505,6 +527,7 @@ export async function getContentReport(
     platformKey,
     accountId,
     postType,
+    channels,
     format,
     source,
     provenOnly,
@@ -550,6 +573,8 @@ export async function getContentReport(
   if (postType && postType !== "all") {
     conditions.push(eq(productionItems.postType, postType));
   }
+  const channelsCond = channelFilterCondition(channels);
+  if (channelsCond) conditions.push(channelsCond);
   // Legacy string filter, retained for URL back-compat.
   if (platform && platform !== "all") {
     conditions.push(

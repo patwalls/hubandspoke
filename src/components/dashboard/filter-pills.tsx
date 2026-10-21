@@ -11,7 +11,18 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { getQuickRange } from "@/lib/utils/dates";
+import { PLATFORM_META, POST_TYPE_SHORT_LABEL, toPlatform } from "@/lib/platforms";
+import type { PostType } from "@/lib/platform-field-schemas";
+import { channelKey, parseChannelFilter, serializeChannelFilter } from "@/lib/multi-filter";
 
 export interface FilterAccount {
   id: string;
@@ -40,6 +51,9 @@ interface FilterPillsProps {
   selectedAccountId: string;
   /** Canonical post_type or "all". */
   selectedPostType: string;
+  /** "all" or comma-separated `<accountId>|<postType>` channel keys. The
+   *  Channels pill only renders when `onChannelsChange` is supplied. */
+  selectedChannels?: string;
   selectedFormat: string;
   selectedSource: string;
   /** When true, items whose format isn't currently proven are excluded
@@ -72,6 +86,7 @@ interface FilterPillsProps {
   onPlatformKeyChange: (v: string) => void;
   onAccountChange: (v: string) => void;
   onPostTypeChange: (v: string) => void;
+  onChannelsChange?: (v: string) => void;
   onFormatChange: (v: string) => void;
   onSourceChange: (v: string) => void;
   onProvenOnlyChange?: (v: boolean) => void;
@@ -374,6 +389,132 @@ export function SelectPill({
   );
 }
 
+interface ChannelOption {
+  key: string;
+  account: FilterAccount;
+  postType: PostType | null;
+}
+
+/** Every (account, post type) pair the accounts can publish to — one row
+ *  per pair, same shape as the format page's Accounts picker. */
+function buildChannelOptions(accounts: FilterAccount[]): ChannelOption[] {
+  const out: ChannelOption[] = [];
+  const sorted = [...accounts].sort(
+    (a, b) => a.platform.localeCompare(b.platform) || a.handle.localeCompare(b.handle)
+  );
+  for (const a of sorted) {
+    const postTypes = PLATFORM_META[toPlatform(a.platform)].postTypes;
+    const pts: (PostType | null)[] = postTypes.length ? postTypes : [null];
+    for (const pt of pts) {
+      out.push({ key: channelKey({ accountId: a.id, postType: pt }), account: a, postType: pt });
+    }
+  }
+  return out;
+}
+
+function channelLabel(o: ChannelOption): string {
+  return o.postType ? `@${o.account.handle} · ${POST_TYPE_SHORT_LABEL[o.postType]}` : `@${o.account.handle}`;
+}
+
+/** Multi-select checklist of channels. "all" shows every row ticked, so
+ *  excluding one channel (e.g. YouTube long form) is a single click. */
+function ChannelsPill({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: ChannelOption[];
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const optionKeys = options.map((o) => o.key);
+  const parsed = parseChannelFilter(value);
+  const parsedKeys = parsed?.map(channelKey);
+  const selected = parsedKeys ? optionKeys.filter((k) => parsedKeys.includes(k)) : optionKeys;
+  const isAll = !parsedKeys || selected.length === optionKeys.length;
+
+  const toggle = (key: string) => {
+    const next = selected.includes(key)
+      ? selected.filter((k) => k !== key)
+      : [...selected, key];
+    onChange(serializeChannelFilter(next, optionKeys));
+  };
+
+  const excluded = options.filter((o) => !selected.includes(o.key));
+  let summary: string;
+  let icon: React.ReactNode | undefined;
+  if (isAll || selected.length === 0) {
+    summary = "All channels";
+  } else if (selected.length === 1) {
+    const only = options.find((o) => o.key === selected[0])!;
+    summary = channelLabel(only);
+    icon = <PlatformIcon platform={only.account.platform} size={12} />;
+  } else if (excluded.length === 1 && options.length > 2) {
+    summary = `All except ${channelLabel(excluded[0])}`;
+  } else {
+    summary = `${selected.length} channels`;
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger className={PILL_TRIGGER_CLASSES}>
+        <PillContent label="Channels" value={summary} icon={icon} />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-0">
+        <Command>
+          <CommandInput placeholder="Search accounts…" />
+          <CommandList>
+            <CommandEmpty>No accounts found.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem value="__all__ all channels" onSelect={() => onChange("all")}>
+                <span className="flex items-center gap-2 w-full">
+                  <ChannelCheckbox checked={isAll} />
+                  <span className="text-sm font-medium">All channels</span>
+                </span>
+              </CommandItem>
+              {options.map((o) => {
+                const checked = isAll || selected.includes(o.key);
+                return (
+                  <CommandItem
+                    key={o.key}
+                    value={`${o.account.handle} ${o.account.platform} ${o.postType ?? ""} ${o.key}`}
+                    onSelect={() => toggle(o.key)}
+                  >
+                    <span className="flex items-center gap-2 w-full">
+                      <ChannelCheckbox checked={checked} />
+                      <PlatformIcon platform={o.account.platform} size={13} />
+                      <span className="text-sm font-medium truncate">@{o.account.handle}</span>
+                      {o.postType && (
+                        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {POST_TYPE_SHORT_LABEL[o.postType]}
+                        </span>
+                      )}
+                    </span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ChannelCheckbox({ checked }: { checked: boolean }) {
+  return (
+    <span
+      className={cn(
+        "w-4 h-4 rounded border flex items-center justify-center shrink-0",
+        checked ? "bg-primary border-primary" : "border-input"
+      )}
+    >
+      {checked && <CheckIcon className="w-3 h-3 text-primary-foreground" strokeWidth={3} />}
+    </span>
+  );
+}
+
 export function FilterPills({
   startDate,
   endDate,
@@ -383,6 +524,7 @@ export function FilterPills({
   selectedPlatformKey,
   selectedAccountId,
   selectedPostType,
+  selectedChannels = "all",
   selectedFormat,
   selectedSource,
   provenOnly = false,
@@ -398,6 +540,7 @@ export function FilterPills({
   onPlatformKeyChange,
   onAccountChange,
   onPostTypeChange,
+  onChannelsChange,
   onFormatChange,
   onSourceChange,
   onProvenOnlyChange,
@@ -465,6 +608,14 @@ export function FilterPills({
     })),
   ];
 
+  // Channels cascade off the Platform / Account / Post type pills so the
+  // list only offers pairs those filters would let through.
+  const channelOptions = buildChannelOptions(visibleAccounts).filter(
+    (o) =>
+      (selectedAccountId === "all" || o.account.id === selectedAccountId) &&
+      (selectedPostType === "all" || o.postType === selectedPostType)
+  );
+
   const formatOptions = [
     { value: "all", label: "All formats" },
     ...formats.map((f) => ({ value: f, label: f })),
@@ -527,6 +678,13 @@ export function FilterPills({
         options={postTypeOptions}
         onChange={onPostTypeChange}
       />
+      {onChannelsChange && (
+        <ChannelsPill
+          value={selectedChannels}
+          options={channelOptions}
+          onChange={onChannelsChange}
+        />
+      )}
       <SelectPill
         label="Format"
         value={selectedFormat}

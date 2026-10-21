@@ -7,7 +7,7 @@ import {
   summarizeProvenStatuses,
 } from "@/lib/services/format-proven";
 import { buildPeriods, findPeriod, getWeekProgress } from "@/lib/utils/dates";
-import { getBrandSettings } from "@/lib/db/queries";
+import { channelFilterCondition, getBrandSettings } from "@/lib/db/queries";
 import { format, subDays } from "date-fns";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import type { ContentReportData, MetricData, ProductionItem } from "@/types";
@@ -58,6 +58,7 @@ export async function GET(request: NextRequest) {
   const platformKeyFilter = searchParams.get("platformKey") || "all";
   const accountIdFilter = searchParams.get("accountId") || "all";
   const postTypeFilter = searchParams.get("postType") || "all";
+  const channelsFilter = searchParams.get("channels") || "all";
   const formatFilter = searchParams.get("format") || "all";
   const sourceFilter = searchParams.get("source") || "all";
   const provenOnly = searchParams.get("provenOnly") === "1";
@@ -98,6 +99,8 @@ export async function GET(request: NextRequest) {
     if (postTypeFilter !== "all") {
       conditions.push(eq(productionItems.postType, postTypeFilter));
     }
+    const channelsCond = channelFilterCondition(channelsFilter);
+    if (channelsCond) conditions.push(channelsCond);
 
     if (formatFilter !== "all") {
       conditions.push(eq(productionItems.format, formatFilter));
