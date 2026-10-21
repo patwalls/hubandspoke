@@ -5,7 +5,7 @@
 // uses. Rendered only for users with the `newsletterDrafter` flag; everyone
 // else gets the regular triage dialog.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Mail } from "lucide-react";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -24,6 +24,17 @@ export function NewsletterItemEditor({
 }) {
   const [draftId, setDraftId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Hold the caller's refresh until the editor closes: drafting moves the item
+  // Idea → Assigned, and refreshing the queue mid-edit would drop its row (and
+  // this editor with it). Refresh once, on close, if anything changed.
+  const changed = useRef(false);
+  const close = (o: boolean) => {
+    onOpenChange(o);
+    if (!o && changed.current) {
+      changed.current = false;
+      onDone();
+    }
+  };
 
   useEffect(() => {
     if (!open || draftId) return;
@@ -42,9 +53,19 @@ export function NewsletterItemEditor({
   }, [open, itemId, draftId]);
 
   if (!open) return null;
-  if (draftId) return <NewsletterEditorDialog draftId={draftId} open={open} onOpenChange={onOpenChange} onChanged={onDone} />;
+  if (draftId)
+    return (
+      <NewsletterEditorDialog
+        draftId={draftId}
+        open={open}
+        onOpenChange={close}
+        onChanged={() => {
+          changed.current = true;
+        }}
+      />
+    );
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-w-sm">
         <DialogTitle className="text-sm font-medium">Newsletter</DialogTitle>
         {error ? (
