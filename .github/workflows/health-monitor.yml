@@ -61,12 +61,16 @@ jobs:
       - name: Open or update the alert issue
         if: steps.probe.outputs.fail == '1'
         shell: bash
+        # Via env, not ${{ }} inside the script: the report holds ``` fences
+        # and endpoint JSON, which bash would otherwise run as commands.
+        env:
+          REPORT: ${{ steps.probe.outputs.report }}
         run: |
           set -euo pipefail
           title="Health monitor: hubandspoke is unhealthy"
           body="$(printf '%s\n\n%s\n\n%s\n' \
             "<!-- health-monitor -->Automated probe from \`.github/workflows/health-monitor.yml\` (runs every 5 min). Last failing run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            "${{ steps.probe.outputs.report }}" \
+            "$REPORT" \
             "Runbook: docs/automation.md → *Queue health and lock reconciliation*. The worker self-heals orphaned locks within a minute of boot; if this stays red, read \`heroku logs --dyno worker\` for \`lock-reconcile\` lines first. This issue closes itself when the probe goes green.")"
           num="$(gh issue list --repo "$GITHUB_REPOSITORY" --label health-monitor --state open --json number --jq '.[0].number // empty')"
           if [ -z "$num" ]; then
