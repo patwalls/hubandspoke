@@ -1011,6 +1011,16 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   (root via `format_trigger_sources`, derivative via parent's `format_channels`),
   but have **zero** `clip_ideas` rows for that format — meaning the pipeline ran
   and came up empty, not "video not yet processed".
+  **The route must predate the writer's last run (2026-10-21):** a (pillar,
+  format) is only a gap when `GREATEST(format.created_at, wire.created_at)` ≤
+  the pillar's last generation activity (`max(clip_sections.created_at,
+  clip_ideas.created_at)`). A clippable format created — or wired to the
+  channel — after the auto fan-out was never offered to the writer, so 0 ideas
+  is "not processed", not a drought. Nothing backfills a new format onto
+  already-processed videos: to fill one, enqueue `generate-clip-ideas` with
+  that `targetFormatId` (or the pillar's Regenerate button). Cause of the
+  2026-10-21 alert: Futurepedia X Quotables was created Oct 20, a day after
+  the Oct 19 pillar's run.
 - **Dedup:** one row per `(pillar_id, format_id)` in `clip_idea_drought_alerts`.
   Once a gap is recorded it never re-alerts, even if the gap persists. If
   ideas are later regenerated, the row stays — no false-positive repeat.
@@ -1033,7 +1043,15 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   futurepedia's X Quotables skill had been written for founder interviews
   ("This guy X who makes $80K/month… says:", quantified result required), so a
   pure-demo SkillLeapAI tutorial went 0/13. After rewriting the skill around
-  the creator's tested takeaways, regenerating gave 5 ideas.
+  the creator's tested takeaways, regenerating gave 5 ideas. **2026-10-21 — the
+  real cause:** that rewrite had been *appended* as a second `## Clip Idea
+  Generation` block, and `extractClipIdeaSection` returned only the first
+  (the founder-interview bullets), so the writer never saw it; the new
+  Futurepedia X Quotables format copied the same skill and went 0/12. The
+  extractor now joins every block with that heading, and the stale block was
+  removed from both futurepedia skills (Oct 19 pillar: 0 → 2 ideas). If
+  every reason cites rules the skill no longer seems to say, check for a
+  repeated heading.
 - **Brand scope:** the home cron only archives the brands in its env file
   (`BRANDS` in `~/.config/hubandspoke/yt-archive.env`). The watchdog mirrors
   that list in `DEFAULT_WATCH_BRANDS`, overridable without a deploy via the

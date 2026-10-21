@@ -217,6 +217,27 @@ Filler.`;
     expect(extractClipIdeaSection(skill)).toBeNull();
   });
 
+  it("joins every block when the heading repeats (futurepedia X Quotables, 2026-10-21)", () => {
+    // The tutorial rewrite was appended below the original block; reading
+    // only the first hid it from the writer and every section went ineligible.
+    const skill = `## Clip Idea Generation
+- Hook: name, achievement, and strategy/result.
+
+## Avoid
+Filler.
+
+## Clip Idea Generation
+**Who this channel is.** Solo AI-tools tutorials, not founder interviews.
+
+## Cross Post Rules
+Vertical.`;
+    const out = extractClipIdeaSection(skill);
+    expect(out).toContain("name, achievement");
+    expect(out).toContain("not founder interviews");
+    expect(out).not.toContain("Filler");
+    expect(out).not.toContain("Vertical");
+  });
+
   it("matches case-insensitively", () => {
     const skill = `## clip idea generation
 Hook style guidance.`;
