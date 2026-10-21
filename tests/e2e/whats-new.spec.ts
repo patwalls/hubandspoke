@@ -15,4 +15,8 @@ test("user menu opens the What's new list", async ({ page }) => {
   const list = page.getByRole("dialog", { name: "What's new" });
   await expect(list).toBeVisible();
   await expect(list.getByText("New improvements, every few days")).toBeVisible();
+  // The product loop's visual check (scripts/loop-e2e.sh) passes a path to look at.
+  // The modal hides the closing menu from the a11y tree, so wait on the DOM.
+  await expect(page.locator("[role=menu]")).toHaveCount(0);
+  if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
 });
