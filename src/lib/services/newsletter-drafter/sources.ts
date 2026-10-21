@@ -66,12 +66,55 @@ export async function listRecentVideos(brand: string, w: DraftWindow): Promise<R
 
 export async function getVideoTranscript(
   productionItemId: string,
+  budget: number = TRANSCRIPT_CHAR_BUDGET,
 ): Promise<{ text: string; truncated: boolean } | null> {
   const t = await getTranscriptForPrompt(productionItemId);
   if (!t) return null;
   const full = t.fullText || t.segmentsMarkdown;
-  const truncated = full.length > TRANSCRIPT_CHAR_BUDGET;
-  return { text: truncated ? full.slice(0, TRANSCRIPT_CHAR_BUDGET) : full, truncated };
+  const truncated = full.length > budget;
+  return { text: truncated ? full.slice(0, budget) : full, truncated };
+}
+
+/** A How-To issue is written from one whole video, so allow a much longer transcript. */
+export const SINGLE_VIDEO_TRANSCRIPT_BUDGET = 200_000;
+
+/** YouTube thumbnail for a video id (maxres; YouTube serves hqdefault-sized art when maxres is missing). Exported for tests. */
+export function youtubeThumbnailUrl(youtubeId: string | null): string | null {
+  return youtubeId ? `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg` : null;
+}
+
+export interface SingleVideo {
+  productionItemId: string;
+  title: string | null;
+  url: string | null;
+  youtubeId: string | null;
+  publishedAt: string | null;
+  accountId: string | null;
+}
+
+export async function getSingleVideo(productionItemId: string): Promise<SingleVideo | null> {
+  const [r] = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      publishedLink: productionItems.publishedLink,
+      youtubeUrl: productionItems.youtubeUrl,
+      youtubeId: productionItems.youtubeId,
+      publishedAt: sql<string | null>`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`,
+      accountId: productionItems.accountId,
+    })
+    .from(productionItems)
+    .where(eq(productionItems.id, productionItemId))
+    .limit(1);
+  if (!r) return null;
+  return {
+    productionItemId: r.id,
+    title: r.title,
+    url: r.publishedLink ?? r.youtubeUrl,
+    youtubeId: r.youtubeId,
+    publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
+    accountId: r.accountId,
+  };
 }
 
 /** Filter content-API results to the window. Exported for tests. */

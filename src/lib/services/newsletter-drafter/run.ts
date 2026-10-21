@@ -7,8 +7,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts, type NewsletterDraftSource } from "@/lib/db/schema";
 import { NEWSLETTER_MODEL, runNewsletterAgent, type NewsletterSubmission } from "./agent";
+import { formatConfigFor } from "./format-config";
 import { findSpecial } from "./promo";
-import { getPastIssues } from "./sources";
+import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getVideoTranscript, youtubeThumbnailUrl } from "./sources";
+import type { SourceVideo } from "./agent";
 
 export type NewsletterDraftRunResult =
   | { ok: true; turns: number; sources: number }
@@ -40,6 +42,7 @@ export async function runNewsletterDraft(
       windowEnd: newsletterDrafts.windowEnd,
       notes: newsletterDrafts.notes,
       sendDate: newsletterDrafts.sendDate,
+      sourceItemId: newsletterDrafts.sourceItemId,
       formatName: formats.name,
       formatInstructions: formats.instructions,
     })
@@ -57,7 +60,27 @@ export async function runNewsletterDraft(
     .where(eq(brands.slug, row.brand))
     .limit(1);
 
+  const config = formatConfigFor(row.formatName);
   try {
+    let video: SourceVideo | null = null;
+    if (config.kind === "single_video") {
+      if (!row.sourceItemId) throw new Error("This format drafts from one video, but no video was picked.");
+      const [v, t] = await Promise.all([
+        getSingleVideo(row.sourceItemId),
+        getVideoTranscript(row.sourceItemId, SINGLE_VIDEO_TRANSCRIPT_BUDGET),
+      ]);
+      if (!v) throw new Error("The picked video no longer exists.");
+      if (!t) throw new Error(`"${v.title ?? "This video"}" has no transcript yet.`);
+      video = {
+        productionItemId: v.productionItemId,
+        title: v.title,
+        url: v.url,
+        thumbnailUrl: youtubeThumbnailUrl(v.youtubeId),
+        publishedAt: v.publishedAt,
+        transcript: t.text,
+        truncated: t.truncated,
+      };
+    }
     const [pastIssues, special] = await Promise.all([
       getPastIssues(row.brand, row.formatName),
       findSpecial(row.formatName, row.sendDate),
@@ -74,10 +97,18 @@ export async function runNewsletterDraft(
       notes: row.notes,
       sendDate: row.sendDate,
       sponsoredCopy: sponsored?.copy ?? null,
+      sponsoredLandingUrl: sponsored?.source.landingUrl ?? null,
+      specialLabel: config.promo?.label ?? null,
+      sponsoredPlaceholder: !sponsored && config.promo?.onMiss === "placeholder",
+      video,
+      model: config.model,
       signal: opts.signal,
     });
     const s = result.submission;
-    const sources = toStoredSources(s.sources);
+    // The How-To's one source is the picked video, whatever the agent lists.
+    const sources = video
+      ? [{ kind: "video" as const, productionItemId: video.productionItemId, title: video.title, url: video.url }]
+      : toStoredSources(s.sources);
     await db
       .update(newsletterDrafts)
       .set({
@@ -104,7 +135,7 @@ export async function runNewsletterDraft(
     if (opts.signal?.aborted) throw err;
     await db
       .update(newsletterDrafts)
-      .set({ status: "failed", error: (err as Error).message.slice(0, 2000), model: NEWSLETTER_MODEL, updatedAt: new Date() })
+      .set({ status: "failed", error: (err as Error).message.slice(0, 2000), model: config.model ?? NEWSLETTER_MODEL, updatedAt: new Date() })
       .where(eq(newsletterDrafts.id, row.id));
     throw err;
   }

@@ -14,6 +14,8 @@ export type SpecialRewriteResult = { ok: true; copy: string } | { ok: false; fai
 
 export async function rewriteSpecial(args: {
   formatName: string;
+  /** What the section is called ("The Special", "Free Resource"). */
+  label: string;
   formatInstructions: string | null;
   sponsorCopy: string;
   landingUrl: string | null;
@@ -27,7 +29,7 @@ export async function rewriteSpecial(args: {
     .join("\n\n---\n\n");
 
   const system = [
-    `You rewrite the sponsored section of the "${args.formatName}" newsletter (in Sunday Breakfast it is "The Special") so it reads in the newsletter's own voice.`,
+    `You rewrite the sponsored section ("${args.label}") of the "${args.formatName}" newsletter so it reads in the newsletter's own voice.`,
     "Keep the offer, the product name, every factual claim and every number exactly as the sponsor gave them. Never add a claim, statistic, price, deadline or benefit the sponsor copy doesn't contain. If the sponsor copy is only a short brief or theme, write a short section that pitches it without inventing specifics.",
     args.landingUrl
       ? `End with one call-to-action line that links to exactly this URL: ${args.landingUrl}`

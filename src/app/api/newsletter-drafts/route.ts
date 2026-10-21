@@ -23,6 +23,7 @@ const CreateBody = z.object({
   days: z.number().int().min(1).max(31).nullable().optional(),
   notes: z.string().max(4000).nullable().optional(),
   sendDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  sourceItemId: z.string().uuid().nullable().optional(),
 });
 
 /** Start a draft: insert a `drafting` row and enqueue the agent run. */
@@ -36,9 +37,11 @@ export async function POST(request: NextRequest) {
     days: parsed.data.days,
     notes: parsed.data.notes,
     sendDate: parsed.data.sendDate,
+    sourceItemId: parsed.data.sourceItemId,
     userId: (guard.session.user.id as string | undefined) ?? null,
   });
   if (!created) return NextResponse.json({ error: "Format not found" }, { status: 404 });
+  if ("error" in created) return NextResponse.json({ error: created.error }, { status: 400 });
   // Two attempts: the retry only does work after a deploy abort (the row is
   // still `drafting`). A real failure marks the row `failed` first, so the
   // retry is a no-op instead of a second paid Opus run.

@@ -21,6 +21,16 @@ interface FormatOption {
   id: string;
   name: string;
   hasSkill: boolean;
+  kind: "roundup" | "single_video";
+  specialLabel: string | null;
+}
+
+interface VideoOption {
+  id: string;
+  title: string | null;
+  url: string | null;
+  publishedAt: string | null;
+  hasTranscript: boolean;
 }
 
 interface DraftSummary {
@@ -52,6 +62,8 @@ interface DraftDetail extends DraftSummary {
   specialMode: "verbatim" | "rewrite" | null;
   specialSource: NewsletterSpecialSource | null;
   specialError: string | null;
+  specialLabel: string | null;
+  sourceItemId: string | null;
 }
 
 const POLL_MS = 5_000;
@@ -94,6 +106,8 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
   const [formatId, setFormatId] = useState<string>("");
   const [days, setDays] = useState<number>(7);
   const [sendDate, setSendDate] = useState<string>("");
+  const [videos, setVideos] = useState<VideoOption[] | null>(null);
+  const [videoId, setVideoId] = useState<string>("");
   const [notes, setNotes] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -126,7 +140,13 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
       const res = await fetch("/api/newsletter-drafts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formatId, days, sendDate: sendDate || null, notes: notes.trim() || null }),
+        body: JSON.stringify({
+          formatId,
+          days,
+          sendDate: sendDate || null,
+          notes: notes.trim() || null,
+          sourceItemId: isSingleVideo ? videoId || null : null,
+        }),
       });
       if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't start the draft");
       const { id } = (await res.json()) as { id: string };
@@ -147,13 +167,36 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
     if (selectedName) setSendDate(defaultSendDate(selectedName));
   }, [selectedName]);
 
+  // single_video formats (the How-To) draft from one picked video.
+  const isSingleVideo = selectedFormat?.kind === "single_video";
+  useEffect(() => {
+    if (!isSingleVideo || !formatId) {
+      setVideos(null);
+      setVideoId("");
+      return;
+    }
+    let cancelled = false;
+    setVideos(null);
+    void fetch(`/api/newsletter-drafts/videos?formatId=${formatId}`)
+      .then((res) => (res.ok ? res.json() : { videos: [] }))
+      .then((json: { videos: VideoOption[] }) => {
+        if (cancelled) return;
+        setVideos(json.videos);
+        setVideoId(json.videos.find((v) => v.hasTranscript)?.id ?? "");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSingleVideo, formatId]);
+  const pickedVideo = videos?.find((v) => v.id === videoId);
+
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-xl font-semibold">Newsletters</h1>
         <p className="text-sm text-muted-foreground">
-          Draft an issue from recently published videos and starterstory.com case studies, review it here, then create it
-          as a draft email in HubSpot.
+          Draft an issue from recently published videos (roundups also pull starterstory.com case studies), or a How-To
+          from one video. Review it here, then send it on to the email tool.
         </p>
       </div>
 
@@ -178,17 +221,39 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
           <span className="font-medium">Send date</span>
           <Input type="date" className="w-40" value={sendDate} onChange={(e) => setSendDate(e.target.value)} />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium">Look back (days)</span>
-          <Input
-            type="number"
-            min={1}
-            max={31}
-            className="w-24"
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value) || 7)}
-          />
-        </label>
+        {isSingleVideo ? (
+          <label className="flex min-w-72 flex-col gap-1 text-sm">
+            <span className="font-medium">Video</span>
+            <select
+              className="h-8 max-w-md rounded-lg border border-input bg-background px-2 text-sm"
+              value={videoId}
+              onChange={(e) => setVideoId(e.target.value)}
+              disabled={!videos}
+            >
+              {!videos && <option value="">Loading videos…</option>}
+              {videos?.length === 0 && <option value="">No recent videos from this channel</option>}
+              {videos?.map((v) => (
+                <option key={v.id} value={v.id} disabled={!v.hasTranscript}>
+                  {v.publishedAt ? `${fmtDate(v.publishedAt)} · ` : ""}
+                  {v.title ?? "Untitled"}
+                  {v.hasTranscript ? "" : " (no transcript yet)"}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium">Look back (days)</span>
+            <Input
+              type="number"
+              min={1}
+              max={31}
+              className="w-24"
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value) || 7)}
+            />
+          </label>
+        )}
         <label className="flex min-w-72 flex-1 flex-col gap-1 text-sm">
           <span className="font-medium">Notes for this issue (optional)</span>
           <Input
@@ -197,7 +262,7 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
             onChange={(e) => setNotes(e.target.value)}
           />
         </label>
-        <Button onClick={startDraft} disabled={!formatId || creating}>
+        <Button onClick={startDraft} disabled={!formatId || creating || (isSingleVideo && !pickedVideo?.hasTranscript)}>
           {creating && <Loader2 className="animate-spin" />}
           Draft newsletter
         </Button>
@@ -492,7 +557,7 @@ function DraftPane({ id, onChanged }: { id: string; onChanged: () => Promise<voi
         <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-col gap-0.5">
-              <span className="font-medium">The Special (from Asana)</span>
+              <span className="font-medium">{draft.specialLabel ?? "The Special"} (from Asana)</span>
               {draft.specialSource ? (
                 <a className="text-xs text-primary underline" href={draft.specialSource.taskUrl} target="_blank" rel="noreferrer">
                   {draft.specialSource.taskName}

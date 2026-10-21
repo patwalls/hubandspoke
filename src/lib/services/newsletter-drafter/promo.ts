@@ -1,10 +1,10 @@
 // The newsletter drafter's sponsored section ("The Special" in Sunday
-// Breakfast), pulled from the brand's promo-calendar Asana project instead of
+// Breakfast, "Free Resource" in the How-To), pulled from the brand's promo-calendar Asana project instead of
 // written by the agent. The agent leaves SPECIAL_MARKER where the section
 // goes; the page and the HubSpot push swap in the stored copy, so the editor
 // can keep the copy exactly as written or rewrite it without redrafting.
 //
-// Which task: the project's task in PROMO section whose due date is the
+// Which calendar: format-config.ts. Which task: the project's task in that section whose due date is the
 // issue's send date. Which copy: the task's "Final Newsletter Copy" subtask
 // description when it exists (the process the promo team is adopting), else
 // the form's "What should we focus on in the ad copy?" answer — a pilot
@@ -12,6 +12,7 @@
 
 import { getSubtasks, getTask, listProjectTasks, parseAsanaFormNotes, type AsanaSubtask, type AsanaTaskSummary } from "@/lib/asana";
 import type { NewsletterSpecialSource } from "@/lib/db/schema";
+import { formatConfigFor, type PromoCalendarConfig } from "./format-config";
 
 export { SPECIAL_MARKER, composeBody, composeSpecialBlock } from "./special-compose";
 
@@ -19,19 +20,9 @@ export const FINAL_COPY_SUBTASK = "Final Newsletter Copy";
 const FOCUS_QUESTION = "What should we focus on in the ad copy?";
 const LANDING_QUESTION = "Which landing page URL should we use?";
 
-interface PromoCalendar {
-  projectGid: string;
-  section: string;
-}
-
-/** Newsletter formats whose sponsored section comes from Asana, by format name (lowercase). */
-const PROMO_CALENDARS: Record<string, PromoCalendar> = {
-  // MEDIA | Starter Story Promo Calendar → one "Native Ad" task per Sunday.
-  "sunday breakfast": { projectGid: "1213468297418521", section: "Native Ad" },
-};
-
-export function promoCalendarFor(formatName: string): PromoCalendar | null {
-  return PROMO_CALENDARS[formatName.trim().toLowerCase()] ?? null;
+/** The promo calendar for a format, or null when its sponsored section isn't pulled from Asana. */
+export function promoCalendarFor(formatName: string): PromoCalendarConfig | null {
+  return formatConfigFor(formatName).promo ?? null;
 }
 
 /** The task for `sendDate` (YYYY-MM-DD) in `section`. Exported for tests. */

@@ -1,0 +1,2 @@
+ALTER TABLE "newsletter_drafts" ADD COLUMN "source_item_id" uuid;--> statement-breakpoint
+ALTER TABLE "newsletter_drafts" ADD CONSTRAINT "newsletter_drafts_source_item_id_production_items_id_fk" FOREIGN KEY ("source_item_id") REFERENCES "public"."production_items"("id") ON DELETE set null ON UPDATE no action;

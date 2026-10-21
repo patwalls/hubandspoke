@@ -2559,6 +2559,8 @@ export const newsletterDrafts = pgTable(
     specialSource: jsonb("special_source").$type<NewsletterSpecialSource>(),
     /** Why no promo was attached (no task for the date, Asana error) — shown on the page. */
     specialError: text("special_error"),
+    /** single_video formats (the How-To): the one video this issue is written from. */
+    sourceItemId: uuid("source_item_id").references(() => productionItems.id, { onDelete: "set null" }),
     model: text("model"),
     error: text("error"),
     hubspotEmailId: text("hubspot_email_id"),

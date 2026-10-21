@@ -120,6 +120,11 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   },
 ];
 
+/** single_video formats get only the submit tool: the transcript is in the prompt and nothing else is a valid source. */
+const SINGLE_VIDEO_TOOLS: Anthropic.Beta.BetaToolUnion[] = TOOLS.filter(
+  (t) => "name" in t && t.name === "submit_newsletter",
+);
+
 export interface NewsletterAgentArgs {
   brand: string;
   brandLabel: string;
@@ -135,8 +140,29 @@ export interface NewsletterAgentArgs {
   /** The sponsored section's copy from the promo calendar. When set the agent
    *  leaves SPECIAL_MARKER in its place instead of writing it. */
   sponsoredCopy?: string | null;
+  /** The sponsor's landing page (the How-To's intro teaser links to it too). */
+  sponsoredLandingUrl?: string | null;
+  /** What the sponsored section is called ("The Special", "Free Resource"). */
+  specialLabel?: string | null;
+  /** No promo matched and the format wants a marked placeholder instead of the agent's own pick. */
+  sponsoredPlaceholder?: boolean;
+  /** single_video formats: the one video this issue is written from. When set
+   *  the agent gets only submit_newsletter — no search, no web. */
+  video?: SourceVideo | null;
+  /** Model override (format-config.ts); defaults to NEWSLETTER_MODEL. */
+  model?: string;
   signal?: AbortSignal;
   client?: Anthropic;
+}
+
+export interface SourceVideo {
+  productionItemId: string;
+  title: string | null;
+  url: string | null;
+  thumbnailUrl: string | null;
+  publishedAt: string | null;
+  transcript: string;
+  truncated: boolean;
 }
 
 export interface NewsletterAgentResult {
@@ -148,14 +174,25 @@ export interface NewsletterAgentResult {
 export class NewsletterAgentError extends Error {}
 
 function buildSystem(args: NewsletterAgentArgs): Anthropic.Beta.BetaTextBlockParam[] {
-  const role = [
-    `You write the ${args.brandLabel} newsletter "${args.formatName}".`,
-    "You draft one complete issue that an editor will review, then send from their email tool.",
-    "Gather your own material with the tools: the brand's videos published in the window (read the transcripts of the ones you use) and recent case studies on starterstory.com (read the full page with web_fetch before writing about one). Never invent facts, numbers, quotes or links — everything in the issue must come from a transcript, a fetched page, or the lead-magnet list.",
-    "Follow the format Skill below exactly when it says how far back to look, what to include, structure, length and CTA rules. Where the Skill is silent, match the past issues.",
-    "Write the body in Markdown. Link every video and case study you mention with its real URL.",
-    "When the issue is done, call submit_newsletter.",
-  ].join("\n");
+  const role = (
+    args.video
+      ? [
+          `You write the ${args.brandLabel} newsletter "${args.formatName}".`,
+          "You draft one complete issue from ONE video, which an editor will review, then send from their email tool.",
+          "The video's transcript is in the first message. Every feature, button, setting, prompt pattern, price, limit and result you mention must come from that transcript. You design the scenario and the steps; you never invent capabilities. Where a detail is missing, keep it general and say so in the build note. Never invent links.",
+          "Follow the format Skill below exactly: it owns structure, section order, voice, length and house rules.",
+          "Write the body in Markdown.",
+          "When the issue is done, call submit_newsletter.",
+        ]
+      : [
+          `You write the ${args.brandLabel} newsletter "${args.formatName}".`,
+          "You draft one complete issue that an editor will review, then send from their email tool.",
+          "Gather your own material with the tools: the brand's videos published in the window (read the transcripts of the ones you use) and recent case studies on starterstory.com (read the full page with web_fetch before writing about one). Never invent facts, numbers, quotes or links — everything in the issue must come from a transcript, a fetched page, or the lead-magnet list.",
+          "Follow the format Skill below exactly when it says how far back to look, what to include, structure, length and CTA rules. Where the Skill is silent, match the past issues.",
+          "Write the body in Markdown. Link every video and case study you mention with its real URL.",
+          "When the issue is done, call submit_newsletter.",
+        ]
+  ).join("\n");
 
   const context: string[] = [];
   if (args.brandGuidelines?.trim()) context.push(`## BRAND GUIDELINES\n${args.brandGuidelines.trim()}`);
@@ -214,14 +251,38 @@ async function runClientTool(
 const REVIEW_PROMPT =
   "Draft received. Now review it critically against the format Skill (including any review checklist it contains) and the past issues: voice, structure, length, subject line quality, factual accuracy against the sources you read, and that every link is real. Fix anything that falls short, then call submit_newsletter again with the complete revised issue (all fields, not a diff).";
 
-function buildUserTurn(args: NewsletterAgentArgs): string {
+/** The first user turn. Exported for tests. */
+export function buildUserTurn(args: NewsletterAgentArgs): string {
   const today = args.window.end.toISOString().slice(0, 10);
-  const parts = [
-    `Draft the next "${args.formatName}" issue. Today is ${today}.${args.sendDate ? ` The issue goes out on ${args.sendDate}.` : ""} The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${today}. Case studies are listed at ${CASE_STUDY_SITE}.`,
-  ];
+  const sendLine = args.sendDate ? ` The issue goes out on ${args.sendDate}.` : "";
+  const label = args.specialLabel?.trim() || "the sponsored section";
+  const parts: string[] = [];
+  if (args.video) {
+    const v = args.video;
+    parts.push(
+      `Draft the "${args.formatName}" issue for this video. Today is ${today}.${sendLine}`,
+      [
+        `VIDEO: "${v.title ?? "Untitled"}"`,
+        `URL (use for the 'Watch The Full Video' link, the only YouTube link): ${v.url ?? "(none)"}`,
+        v.thumbnailUrl ? `Thumbnail image (place it as a Markdown image under the first article headline): ${v.thumbnailUrl}` : null,
+        v.publishedAt ? `Published: ${v.publishedAt.slice(0, 10)}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      `TRANSCRIPT${v.truncated ? " (truncated — very long video)" : ""}:\n${v.transcript}`,
+    );
+  } else {
+    parts.push(
+      `Draft the next "${args.formatName}" issue. Today is ${today}.${sendLine} The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${today}. Case studies are listed at ${CASE_STUDY_SITE}.`,
+    );
+  }
   if (args.sponsoredCopy?.trim()) {
     parts.push(
-      `This issue's sponsored section (in Sunday Breakfast, "The Special") is supplied by the promo calendar — do NOT write it and do not pick a lead magnet for it. Write that section's heading where the Skill puts it, then on its own line exactly ${SPECIAL_MARKER} — the sponsor copy is inserted there. For context only (don't repeat or paraphrase it elsewhere):\n${args.sponsoredCopy.trim()}`,
+      `This issue's sponsored section ("${label}") is supplied by the promo calendar — do NOT write its content and do not pick a lead magnet for it. Write that section's heading where the Skill puts it, then on its own line exactly ${SPECIAL_MARKER} — the sponsor copy is inserted there.${args.sponsoredLandingUrl ? ` Any other mention of the offer the Skill asks for (e.g. an intro teaser line) links to exactly ${args.sponsoredLandingUrl}.` : ""} For context only (don't repeat or paraphrase it elsewhere):\n${args.sponsoredCopy.trim()}`,
+    );
+  } else if (args.sponsoredPlaceholder) {
+    parts.push(
+      `No sponsor is booked for this send date. Still write the "${label}" section in full and on-layout (headline, a 2 to 3 sentence body, 3 Key Takeaways bullets, and a CTA link to "#"), but make every piece an obvious italic placeholder, e.g. *[PLACEHOLDER: offer headline]*. Any intro teaser for the offer is a placeholder too. Never invent an offer, product or link.`,
     );
   }
   if (args.notes?.trim()) {
@@ -252,14 +313,14 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
     // for large max_tokens" guard.
     const message = await client.beta.messages.create(
       {
-        model: NEWSLETTER_MODEL,
+        model: args.model ?? NEWSLETTER_MODEL,
         max_tokens: MAX_TOKENS,
         thinking: { type: "adaptive" },
         output_config: { effort: "high" },
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
         system,
-        tools: TOOLS,
+        tools: args.video ? SINGLE_VIDEO_TOOLS : TOOLS,
         messages,
       },
       { signal: args.signal, timeout: REQUEST_TIMEOUT_MS },

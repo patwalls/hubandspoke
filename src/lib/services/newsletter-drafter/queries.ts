@@ -1,14 +1,18 @@
 // Reads + writes behind the newsletter drafter's API routes.
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { formats, newsletterDrafts, productionItems } from "@/lib/db/schema";
+import { accounts, formats, newsletterDrafts, productionItems, transcripts } from "@/lib/db/schema";
+import { formatConfigFor } from "./format-config";
 import { computeWindow } from "./window";
 
 export interface NewsletterFormatOption {
   id: string;
   name: string;
   hasSkill: boolean;
+  kind: "roundup" | "single_video";
+  /** The sponsored section's name when it comes from a promo calendar. */
+  specialLabel: string | null;
 }
 
 /**
@@ -35,7 +39,10 @@ export async function listNewsletterFormats(brand: string): Promise<NewsletterFo
       ),
     )
     .orderBy(formats.name);
-  return rows.map((r) => ({ id: r.id, name: r.name, hasSkill: !!r.instructions?.trim() }));
+  return rows.map((r) => {
+    const cfg = formatConfigFor(r.name);
+    return { id: r.id, name: r.name, hasSkill: !!r.instructions?.trim(), kind: cfg.kind, specialLabel: cfg.promo?.label ?? null };
+  });
 }
 
 const listColumns = {
@@ -71,6 +78,7 @@ export async function getNewsletterDraft(id: string) {
       bodyMarkdown: newsletterDrafts.bodyMarkdown,
       notes: newsletterDrafts.notes,
       sendDate: newsletterDrafts.sendDate,
+      sourceItemId: newsletterDrafts.sourceItemId,
       specialCopy: newsletterDrafts.specialCopy,
       specialOriginal: newsletterDrafts.specialOriginal,
       specialMode: newsletterDrafts.specialMode,
@@ -87,7 +95,68 @@ export async function getNewsletterDraft(id: string) {
     .innerJoin(formats, eq(formats.id, newsletterDrafts.formatId))
     .where(eq(newsletterDrafts.id, id))
     .limit(1);
-  return row ?? null;
+  if (!row) return null;
+  return { ...row, specialLabel: formatConfigFor(row.formatName).promo?.label ?? null };
+}
+
+/** How far back the video picker looks for a single_video format. */
+const VIDEO_PICKER_DAYS = 45;
+
+export interface FormatVideoOption {
+  id: string;
+  title: string | null;
+  url: string | null;
+  publishedAt: string | null;
+  hasTranscript: boolean;
+}
+
+async function sourceAccountId(formatName: string): Promise<string | null> {
+  const handle = formatConfigFor(formatName).sourceAccountHandle;
+  if (!handle) return null;
+  const [acct] = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.platform, "youtube"), sql`lower(${accounts.handle}) = lower(${handle})`))
+    .limit(1);
+  return acct?.id ?? null;
+}
+
+/** Recent published long-form videos from a single_video format's source channel, newest first. */
+export async function listFormatVideos(formatId: string): Promise<FormatVideoOption[] | null> {
+  const [format] = await db.select({ name: formats.name }).from(formats).where(eq(formats.id, formatId)).limit(1);
+  if (!format) return null;
+  const accountId = await sourceAccountId(format.name);
+  if (!accountId) return [];
+  const published = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
+  const rows = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      publishedLink: productionItems.publishedLink,
+      youtubeUrl: productionItems.youtubeUrl,
+      publishedAt: sql<string | null>`${published}`,
+      transcriptId: transcripts.id,
+    })
+    .from(productionItems)
+    .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
+    .where(
+      and(
+        eq(productionItems.accountId, accountId),
+        eq(productionItems.postType, "youtube_long"),
+        eq(productionItems.status, "Published"),
+        isNull(productionItems.deletedAt),
+        sql`${published} > now() - (${VIDEO_PICKER_DAYS} || ' days')::interval`,
+      ),
+    )
+    .orderBy(desc(published))
+    .limit(30);
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    url: r.publishedLink ?? r.youtubeUrl,
+    publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
+    hasTranscript: r.transcriptId != null,
+  }));
 }
 
 export async function createNewsletterDraft(args: {
@@ -95,14 +164,28 @@ export async function createNewsletterDraft(args: {
   days?: number | null;
   notes?: string | null;
   sendDate?: string | null;
+  sourceItemId?: string | null;
   userId: string | null;
-}): Promise<{ id: string; brand: string } | null> {
+}): Promise<{ id: string; brand: string } | { error: string } | null> {
   const [format] = await db
-    .select({ id: formats.id, brand: formats.brand })
+    .select({ id: formats.id, brand: formats.brand, name: formats.name })
     .from(formats)
     .where(eq(formats.id, args.formatId))
     .limit(1);
   if (!format) return null;
+  let sourceItemId: string | null = null;
+  if (formatConfigFor(format.name).kind === "single_video") {
+    if (!args.sourceItemId) return { error: "Pick a video for this format" };
+    // Only videos from the format's own channel are valid sources.
+    const accountId = await sourceAccountId(format.name);
+    const [item] = await db
+      .select({ accountId: productionItems.accountId })
+      .from(productionItems)
+      .where(eq(productionItems.id, args.sourceItemId))
+      .limit(1);
+    if (!item || !accountId || item.accountId !== accountId) return { error: "That video isn't from this format's channel" };
+    sourceItemId = args.sourceItemId;
+  }
   const w = computeWindow(args.days);
   const [created] = await db
     .insert(newsletterDrafts)
@@ -114,6 +197,7 @@ export async function createNewsletterDraft(args: {
       windowEnd: w.end,
       notes: args.notes?.trim() || null,
       sendDate: args.sendDate ?? null,
+      sourceItemId,
       createdByUserId: args.userId,
     })
     .returning({ id: newsletterDrafts.id });

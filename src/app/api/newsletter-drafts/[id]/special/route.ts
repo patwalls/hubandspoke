@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { formats, newsletterDrafts } from "@/lib/db/schema";
 import { getNewsletterDraft } from "@/lib/services/newsletter-drafter/queries";
 import { findSpecial } from "@/lib/services/newsletter-drafter/promo";
+import { formatConfigFor } from "@/lib/services/newsletter-drafter/format-config";
 import { getPastIssues } from "@/lib/services/newsletter-drafter/sources";
 import { rewriteSpecial } from "@/lib/services/newsletter-drafter/special-rewrite";
 
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const result = await rewriteSpecial({
     formatName: row.formatName,
+    label: formatConfigFor(row.formatName).promo?.label ?? "sponsored section",
     formatInstructions: row.formatInstructions,
     sponsorCopy: row.specialOriginal,
     landingUrl: row.specialSource?.landingUrl ?? null,
