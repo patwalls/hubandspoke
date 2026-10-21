@@ -52,7 +52,7 @@ export interface EditorDraft {
   hubspotEmailUrl: string | null;
   hubspotError: string | null;
   /** Per section with a story: how often this newsletter ran it before. */
-  sectionUsage?: Record<string, { count: number; lastDate: string | null; label: string }>;
+  sectionUsage?: Record<string, { count: number; lastDate: string | null; label: string; published?: string | null }>;
 }
 
 interface VideoOption {
@@ -472,7 +472,7 @@ function SectionEditor({
   disabled: boolean;
   onRegenerate: (instruction: string) => void;
   source?: NewsletterSection["source"];
-  usage?: { count: number; lastDate: string | null; label: string } | null;
+  usage?: { count: number; lastDate: string | null; label: string; published?: string | null } | null;
   onFindNewStory?: (instruction: string) => void;
 }) {
   const [instruction, setInstruction] = useState("");
@@ -498,13 +498,15 @@ function SectionEditor({
           ) : (
             <span className="truncate">{source.title ?? source.key}</span>
           )}
+          {usage?.published && <span className="shrink-0 whitespace-nowrap text-muted-foreground">· {usage.published}</span>}
           <span
             className={cn(
               "shrink-0 whitespace-nowrap",
               !usage || usage.count === 0 ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground",
             )}
+            title="Times this story has run in this newsletter (issues we have records of: HubSpot since late Aug 2026, Klaviyo before)"
           >
-            · {usage?.label ?? "New"}
+            · {usage?.label ?? "Never featured"}
           </span>
         </div>
       )}

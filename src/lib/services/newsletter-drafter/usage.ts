@@ -15,6 +15,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, newsletterDrafts, newsletterIssueHistory, productionItems, type NewsletterDraftSource } from "@/lib/db/schema";
 import type { NewsletterSection } from "@/lib/newsletter-template";
+import type { NewsletterSubmission } from "./agent";
 import { formatConfigFor, groupFormatNames } from "./format-config";
 
 /** Never reuse a story this newsletter ran within this many days of the new issue's send date. */
@@ -76,6 +77,19 @@ export function extractStoryRefs(html: string): { caseKeys: string[]; youtubeIds
     if (y) youtubeIds.add(y);
   }
   return { caseKeys: [...caseKeys], youtubeIds: [...youtubeIds] };
+}
+
+/** The agent's `sources` list → stored sources (drops entries without an id/URL). Pure; exported for tests. */
+export function toStoredSources(sources: NewsletterSubmission["sources"]): NewsletterDraftSource[] {
+  const out: NewsletterDraftSource[] = [];
+  for (const s of sources) {
+    if (s.kind === "video" && s.production_item_id) {
+      out.push({ kind: "video", productionItemId: s.production_item_id, title: s.title ?? null, url: s.url ?? null });
+    } else if (s.kind === "case_study" && s.url) {
+      out.push({ kind: "case_study", url: s.url, title: s.title ?? null });
+    }
+  }
+  return out;
 }
 
 /**
@@ -201,10 +215,19 @@ export function isEvergreenOk(u: StoryUsage | undefined, now: Date = new Date())
   return u.lastDate < cutoff;
 }
 
-/** Short label for a usage badge: "New" or "2× before · last Sep 14". Pure; exported for tests. */
+/** Short label for a usage badge: "Never featured" or "Featured 2× · last Sep 14". Pure; exported for tests. */
 export function usageLabel(u: StoryUsage | undefined): string {
-  if (!u || u.count === 0) return "New";
+  if (!u || u.count === 0) return "Never featured";
   const last = u.lastDate ? new Date(`${u.lastDate}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : null;
-  return `${u.count}× before${last ? ` · last ${last}` : ""}`;
+  return `Featured ${u.count}×${last ? ` · last ${last}` : ""}`;
+}
+
+/** "Published Oct 20" (this year) / "Published Apr 19, 2025", or null. Pure; exported for tests. */
+export function publishedLabel(iso: string | null | undefined, now: Date = new Date()): string | null {
+  if (!iso) return null;
+  const d = new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const sameYear = d.getUTCFullYear() === now.getUTCFullYear();
+  return `Published ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }), timeZone: "UTC" })}`;
 }
 

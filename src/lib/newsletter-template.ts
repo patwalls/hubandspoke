@@ -88,6 +88,8 @@ export interface SectionSource {
   key: string;
   title: string | null;
   url: string | null;
+  /** When the story was published (ISO), when known. */
+  publishedAt?: string | null;
 }
 
 /** One drafted section of an issue (stored on newsletter_drafts.sections). */

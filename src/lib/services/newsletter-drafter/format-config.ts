@@ -35,6 +35,14 @@ export interface NewsletterSchedule {
   primary?: boolean;
 }
 
+/** Roundups: which template sections get which kind of story (see story-plan.ts). */
+export interface StoryPlanConfig {
+  /** Sections that take the week's newest videos, in order (newest first). */
+  leadVideos: string[];
+  /** Sections that take the week's case studies (newest first), else a recent video. */
+  flex: string[];
+}
+
 export interface NewsletterFormatConfig {
   kind: "roundup" | "single_video";
   schedule?: NewsletterSchedule;
@@ -43,6 +51,7 @@ export interface NewsletterFormatConfig {
   /** Model override; defaults to the drafter's Opus model. */
   model?: string;
   promo?: PromoCalendarConfig;
+  storyPlan?: StoryPlanConfig;
 }
 
 const STARTER_STORY_PROMO_PROJECT = "1213468297418521"; // MEDIA | Starter Story Promo Calendar
@@ -58,6 +67,7 @@ const FORMAT_CONFIG: Record<string, NewsletterFormatConfig> = {
     kind: "roundup",
     schedule: { group: "sunday-breakfast", days: [0], primary: true },
     promo: { projectGid: STARTER_STORY_PROMO_PROJECT, section: "Native Ad", label: "The Special", onMiss: "agent" },
+    storyPlan: { leadVideos: ["orange_juice", "coffee"], flex: ["eggs", "toast", "pancakes"] },
   },
   "how-to newsletter - futurepedia (pilot)": {
     kind: "single_video",

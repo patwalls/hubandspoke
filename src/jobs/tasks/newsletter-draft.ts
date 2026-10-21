@@ -15,7 +15,7 @@ export interface NewsletterDraftPayload {
 export const newsletterDraftTask: Task = async (rawPayload, helpers) => {
   const { newsletterDraftId } = rawPayload as NewsletterDraftPayload;
   const t0 = Date.now();
-  const result = await runNewsletterDraft(newsletterDraftId, { signal: helpers.abortSignal });
+  const result = await runNewsletterDraft(newsletterDraftId, { signal: helpers.abortSignal, log: (m) => helpers.logger.info(m) });
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   if (result.ok) {
     helpers.logger.info(`newsletter-draft: ${newsletterDraftId} ready in ${secs}s (${result.turns} turns, ${result.sources} sources)`);

@@ -5,9 +5,10 @@
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { brands, formats, newsletterDrafts, type NewsletterDraftSource } from "@/lib/db/schema";
+import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { NEWSLETTER_MODEL, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
-import { blockedKeys, loadUsage, usageGroupFor, withInferredSources } from "./usage";
+import { blockedKeys, loadUsage, toStoredSources, usageGroupFor, withInferredSources } from "./usage";
+import { buildStoryPlan, withPlanDates } from "./story-plan";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
 import { formatConfigFor } from "./format-config";
 import { findSpecial } from "./promo";
@@ -19,18 +20,6 @@ export type NewsletterDraftRunResult =
   | { ok: false; skipped: string };
 
 /** Normalize the agent's declared sources into the stored shape. Exported for tests. */
-export function toStoredSources(sources: NewsletterSubmission["sources"]): NewsletterDraftSource[] {
-  const out: NewsletterDraftSource[] = [];
-  for (const s of sources) {
-    if (s.kind === "video" && s.production_item_id) {
-      out.push({ kind: "video", productionItemId: s.production_item_id, title: s.title ?? null, url: s.url ?? null });
-    } else if (s.kind === "case_study" && s.url) {
-      out.push({ kind: "case_study", url: s.url, title: s.title ?? null });
-    }
-  }
-  return out;
-}
-
 /** Agent sections → stored sections, each story resolved to its usage key. Pure; exported for tests. */
 export function toStoredSections(sections: NonNullable<NewsletterSubmission["sections"]>): NewsletterSection[] {
   return sections.map((sec) => {
@@ -65,7 +54,7 @@ export async function loadSourceVideo(sourceItemId: string | null): Promise<Sour
 
 export async function runNewsletterDraft(
   newsletterDraftId: string,
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; log?: (msg: string) => void } = {},
 ): Promise<NewsletterDraftRunResult> {
   const [row] = await db
     .select({
@@ -106,6 +95,13 @@ export async function runNewsletterDraft(
       findSpecial(row.formatName, row.sendDate),
     ]);
     const sponsored = special?.ok ? special : null;
+    // The suggested lineup (a hint for the agent; a content-API hiccup just drops it).
+    const storyPlan =
+      !video && config.storyPlan
+        ? await buildStoryPlan({ brand: row.brand, window: { start: row.windowStart, end: row.windowEnd }, cfg: config.storyPlan, blocked }).catch(
+            (err) => (opts.log?.(`newsletter-draft: story plan skipped (${(err as Error).message})`), null),
+          )
+        : null;
     const result = await runNewsletterAgent({
       brand: row.brand,
       brandLabel: brand?.label ?? row.brand,
@@ -124,7 +120,9 @@ export async function runNewsletterDraft(
       template,
       usage,
       blocked,
+      storyPlan,
       model: config.model,
+      log: opts.log,
       signal: opts.signal,
     });
     const s = result.submission;
@@ -132,7 +130,7 @@ export async function runNewsletterDraft(
     const sources = video
       ? [{ kind: "video" as const, productionItemId: video.productionItemId, title: video.title, url: video.url }]
       : toStoredSources(s.sources);
-    const sections = template ? withInferredSources(toStoredSections(s.sections ?? []), sources) : [];
+    const sections = template ? withPlanDates(withInferredSources(toStoredSections(s.sections ?? []), sources), storyPlan) : [];
     await db
       .update(newsletterDrafts)
       .set({

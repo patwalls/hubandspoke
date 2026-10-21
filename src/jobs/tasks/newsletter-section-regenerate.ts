@@ -18,7 +18,7 @@ export interface NewsletterSectionRegeneratePayload {
 export const newsletterSectionRegenerateTask: Task = async (rawPayload, helpers) => {
   const { newsletterDraftId, sectionKey, instruction, newStory } = rawPayload as NewsletterSectionRegeneratePayload;
   const t0 = Date.now();
-  const r = await regenerateDraftSection(newsletterDraftId, sectionKey, instruction ?? null, { signal: helpers.abortSignal, newStory: !!newStory });
+  const r = await regenerateDraftSection(newsletterDraftId, sectionKey, instruction ?? null, { signal: helpers.abortSignal, newStory: !!newStory, log: (m) => helpers.logger.info(m) });
   helpers.logger.info(
     `newsletter-section-regenerate: ${newsletterDraftId}/${sectionKey}${newStory ? " (new story)" : ""} ${r.ok ? "done" : `skipped (${r.reason})`} in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
   );

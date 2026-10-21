@@ -1,11 +1,11 @@
 // Reads + writes behind the newsletter drafter's API routes.
 
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, formats, newsletterDrafts, productionItems, transcripts } from "@/lib/db/schema";
 import { templateFor } from "@/lib/newsletter-template";
 import { formatConfigFor } from "./format-config";
-import { loadUsage, usageGroupFor, usageLabel, withInferredSources } from "./usage";
+import { loadUsage, publishedLabel, usageGroupFor, usageLabel, withInferredSources } from "./usage";
 import { computeWindow } from "./window";
 
 export interface NewsletterFormatOption {
@@ -112,10 +112,24 @@ export async function getNewsletterDraft(id: string) {
   // "N× before" for every section's story (this draft excluded from its own counts).
   const withSources = sections.filter((x) => x.source?.key);
   const usage = withSources.length ? await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id }) : null;
-  const sectionUsage: Record<string, { count: number; lastDate: string | null; label: string }> = {};
+  // Publish dates: videos from production_items (covers older drafts too); case studies from the stored source.
+  const videoIds = withSources.filter((x) => x.source!.kind === "video").map((x) => x.source!.key.slice("video:".length));
+  const videoDates = new Map<string, string | null>();
+  if (videoIds.length) {
+    const rows = await db
+      .select({
+        id: productionItems.id,
+        at: sql<string | null>`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`,
+      })
+      .from(productionItems)
+      .where(inArray(productionItems.id, videoIds));
+    for (const r of rows) videoDates.set(`video:${r.id}`, r.at ? new Date(r.at).toISOString() : null);
+  }
+  const sectionUsage: Record<string, { count: number; lastDate: string | null; label: string; published: string | null }> = {};
   for (const sec of withSources) {
     const u = usage?.get(sec.source!.key);
-    sectionUsage[sec.key] = { count: u?.count ?? 0, lastDate: u?.lastDate ?? null, label: usageLabel(u) };
+    const at = videoDates.get(sec.source!.key) ?? sec.source!.publishedAt ?? null;
+    sectionUsage[sec.key] = { count: u?.count ?? 0, lastDate: u?.lastDate ?? null, label: usageLabel(u), published: publishedLabel(at) };
   }
   return {
     ...rest,

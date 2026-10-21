@@ -13,6 +13,7 @@ import { regenerateSection, storyKeyOf } from "./agent";
 import { blockedKeys, loadUsage, usageGroupFor, withInferredSources } from "./usage";
 import { formatConfigFor } from "./format-config";
 import { loadSourceVideo } from "./run";
+import { buildStoryPlan, withPlanDates } from "./story-plan";
 
 /** Replace one section (or append it), keeping its other fields. Pure; exported for tests. */
 export function spliceSection(sections: NewsletterSection[], key: string, markdown: string, patch: Partial<NewsletterSection> = {}): NewsletterSection[] {
@@ -46,7 +47,7 @@ export async function regenerateDraftSection(
   newsletterDraftId: string,
   sectionKey: string,
   instruction: string | null,
-  opts: { signal?: AbortSignal; newStory?: boolean } = {},
+  opts: { signal?: AbortSignal; newStory?: boolean; log?: (msg: string) => void } = {},
 ): Promise<{ ok: boolean; reason?: string }> {
   const [row] = await db
     .select({
@@ -91,6 +92,13 @@ export async function regenerateDraftSection(
     const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
     const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;
     const exclude = opts.newStory ? newStoryExclusions(row.sections, sectionKey) : null;
+    // Find new story: the same suggested lineup as the draft, so the swap looks in the right place.
+    const storyPlan =
+      exclude && !video && config.storyPlan
+        ? await buildStoryPlan({ brand: row.brand, window: { start: row.windowStart, end: row.windowEnd }, cfg: config.storyPlan, blocked }).catch(
+            () => null,
+          )
+        : null;
     const result = await regenerateSection({
       brand: row.brand,
       brandLabel: brand?.label ?? row.brand,
@@ -111,6 +119,8 @@ export async function regenerateDraftSection(
       usage,
       blocked,
       newStoryExclude: exclude,
+      storyPlan,
+      log: opts.log,
       currentIssue: composeIssue(template, row.sections, sponsor),
       sourcesNote: video ? null : row.sources.map((x) => `- ${x.kind}: ${x.title ?? ""} ${x.url ?? ""}`).join("\n") || null,
       signal: opts.signal,
@@ -122,7 +132,7 @@ export async function regenerateDraftSection(
         ? { kind: result.source.kind, key: newKey, title: result.source.title ?? null, url: result.source.url ?? null }
         : (prev?.source ?? null);
     const tried = opts.newStory && prev?.source?.key ? [...new Set([...(prev.tried ?? []), prev.source.key])] : prev?.tried;
-    const sections = spliceSection(row.sections, sectionKey, result.markdown, { source, ...(tried ? { tried } : {}) });
+    const sections = withPlanDates(spliceSection(row.sections, sectionKey, result.markdown, { source, ...(tried ? { tried } : {}) }), storyPlan);
     await db
       .update(newsletterDrafts)
       .set({

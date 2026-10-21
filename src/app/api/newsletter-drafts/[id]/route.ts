@@ -34,7 +34,7 @@ const PatchBody = z
           markdown: z.string().max(20_000),
           // Kept as-is from the loaded draft: the story the section covers + stories Find new story already offered.
           source: z
-            .object({ kind: z.enum(["video", "case_study"]), key: z.string().max(300), title: z.string().max(500).nullable(), url: z.string().max(1000).nullable() })
+            .object({ kind: z.enum(["video", "case_study"]), key: z.string().max(300), title: z.string().max(500).nullable(), url: z.string().max(1000).nullable(), publishedAt: z.string().max(40).nullable().optional() })
             .nullable()
             .optional(),
           tried: z.array(z.string().max(300)).max(50).optional(),

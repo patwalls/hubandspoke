@@ -22,8 +22,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
 import { listLeadMagnets } from "@/lib/services/starter-story-content";
+import { describeStoryPlan, newStoryGuidance, type StoryPlan } from "./story-plan";
 import { getVideoTranscript, listOlderVideos, listRecentCaseStudies, listRecentVideos, searchCaseStudies, type PastIssue } from "./sources";
-import { caseStudyKey, isEvergreenOk, RECENT_BLOCK_DAYS, EVERGREEN_MIN_DAYS, type StoryUsage } from "./usage";
+import { caseStudyKey, EVERGREEN_MIN_DAYS, isEvergreenOk, RECENT_BLOCK_DAYS, type StoryUsage } from "./usage";
 import { SPECIAL_MARKER } from "./special-compose";
 import { toolWindow, type DraftWindow } from "./window";
 
@@ -240,6 +241,10 @@ export interface NewsletterAgentArgs {
   usage?: Map<string, StoryUsage>;
   /** Story keys run in the last RECENT_BLOCK_DAYS — never usable. */
   blocked?: Set<string>;
+  /** Roundups with a story plan (story-plan.ts): the suggested lineup, given to the agent (not enforced). */
+  storyPlan?: StoryPlan | null;
+  /** Worker logger, e.g. helpers.logger.info: one line per turn with the tools called. */
+  log?: (msg: string) => void;
   signal?: AbortSignal;
   client?: Anthropic;
 }
@@ -405,6 +410,7 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
   }
   if (args.template) parts.push(describeTemplate(args.template, sponsorSupplied));
   if (!args.video && args.usage) parts.push(STORY_RULES);
+  if (!args.video && args.storyPlan) parts.push(describeStoryPlan(args.storyPlan));
   if (sponsorSupplied) {
     const where =
       args.template && sponsorKey
@@ -511,6 +517,7 @@ async function runLoop<T>(spec: LoopSpec<T>): Promise<{ value: T; model: string;
     if (message.stop_reason === "pause_turn") continue;
 
     const toolUses = message.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
+    args.log?.(`newsletter agent turn ${turn}: ${toolUses.map((u) => u.name).join(", ") || message.stop_reason}`);
     if (toolUses.length === 0) {
       if (nudged) throw new NewsletterAgentError(`model ended without calling ${spec.submitTool}`);
       nudged = true;
@@ -571,6 +578,7 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
         return { error: `Invalid submission: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}.` };
       }
       const problem = submissionProblem(parsed.data, args.template, sponsorSupplied, args.video ? undefined : args.blocked);
+      if (problem) args.log?.(`newsletter agent submission rejected: ${problem}`);
       return problem ? { error: problem } : { value: parsed.data };
     },
     reviewPrompt: REVIEW_PROMPT,
@@ -598,7 +606,8 @@ export async function regenerateSection(
   const sec = args.template.sections.find((x) => x.key === args.sectionKey);
   if (!sec) throw new NewsletterAgentError(`unknown section ${args.sectionKey}`);
   const current = args.sections.find((x) => x.key === sec.key)?.markdown ?? "";
-  const base = buildUserTurn({ ...args, template: null, sponsoredCopy: null, sponsoredPlaceholder: false });
+  const base = buildUserTurn({ ...args, template: null, sponsoredCopy: null, sponsoredPlaceholder: false, storyPlan: null });
+  const where = args.newStoryExclude && args.storyPlan ? newStoryGuidance(args.storyPlan, sec.key, args.newStoryExclude) : null;
   const turn = [
     base,
     `THE ISSUE AS IT STANDS:\n${args.currentIssue}`,
@@ -606,7 +615,7 @@ export async function regenerateSection(
     `Rewrite ONLY the section "${sec.key}"${sec.heading ? ` (heading "${sec.heading}", added for you)` : ""}. What it should contain: ${sec.hint}`,
     `Its current content:\n${current || "(empty)"}`,
     args.newStoryExclude
-      ? `FIND A NEW STORY: replace this section's video/case study with a DIFFERENT one and rewrite the section around it. Use the tools to find it: this window's stories first, then list_older_videos / search_case_studies. Never use a story marked blocked, and never any of these: ${[...args.newStoryExclude].join(", ") || "(none)"}. Set source to the story you chose.${args.instruction?.trim() ? ` The editor's steer: ${args.instruction.trim()}` : ""}`
+      ? `FIND A NEW STORY: replace this section's video/case study with a DIFFERENT one and rewrite the section around it. ${where ?? "Use the tools to find it: this window's stories first, then list_older_videos / search_case_studies."} Never use a story marked blocked, and never any of these: ${[...args.newStoryExclude].join(", ") || "(none)"}. Set source to the story you chose.${args.instruction?.trim() ? ` The editor's steer: ${args.instruction.trim()}` : ""}`
       : args.instruction?.trim()
         ? `The editor's instruction (follow it): ${args.instruction.trim()}`
         : "Make it better: tighter, more specific, more on-voice, without changing what it's about. Keep the same story.",

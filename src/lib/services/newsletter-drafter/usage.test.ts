@@ -3,7 +3,7 @@ import { storyKeyOf, submissionProblem, type NewsletterSubmission } from "./agen
 import { groupFromEmailName } from "./history";
 import { toStoredSections } from "./run";
 import { newStoryExclusions } from "./section";
-import { blockedKeys, caseStudyKey, extractStoryRefs, isEvergreenOk, usageLabel, withInferredSources, youtubeIdFromUrl } from "./usage";
+import { blockedKeys, caseStudyKey, extractStoryRefs, isEvergreenOk, publishedLabel, usageLabel, withInferredSources, youtubeIdFromUrl } from "./usage";
 import { DEFAULT_TEMPLATES } from "@/lib/newsletter-template";
 
 describe("story keys from links", () => {
@@ -55,9 +55,13 @@ describe("recency rules", () => {
     expect(isEvergreenOk(undefined, now)).toBe(true);
   });
 
-  it("labels usage like the repost queue", () => {
-    expect(usageLabel(undefined)).toBe("New");
-    expect(usageLabel({ count: 2, lastDate: "2026-09-14" })).toBe("2× before · last Sep 14");
+  it("labels usage and publish dates in plain words", () => {
+    expect(usageLabel(undefined)).toBe("Never featured");
+    expect(usageLabel({ count: 2, lastDate: "2026-09-14" })).toBe("Featured 2× · last Sep 14");
+    const now = new Date("2026-10-21T12:00:00Z");
+    expect(publishedLabel("2026-10-20", now)).toBe("Published Oct 20");
+    expect(publishedLabel("2025-04-19T14:01:18.000Z", now)).toBe("Published Apr 19, 2025");
+    expect(publishedLabel(null, now)).toBeNull();
   });
 });
 
