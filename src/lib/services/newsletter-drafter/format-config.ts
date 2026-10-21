@@ -35,14 +35,6 @@ export interface NewsletterSchedule {
   primary?: boolean;
 }
 
-/** Roundups: which template sections get which kind of story (see story-plan.ts). */
-export interface StoryPlanConfig {
-  /** Sections that take the week's newest videos, in order (newest first). */
-  leadVideos: string[];
-  /** Sections that take the week's case studies (newest first), else a recent video. */
-  flex: string[];
-}
-
 export interface NewsletterFormatConfig {
   kind: "roundup" | "single_video";
   schedule?: NewsletterSchedule;
@@ -51,7 +43,16 @@ export interface NewsletterFormatConfig {
   /** Model override; defaults to the drafter's Opus model. */
   model?: string;
   promo?: PromoCalendarConfig;
-  storyPlan?: StoryPlanConfig;
+}
+
+/**
+ * Brands whose case studies the drafter can search (Starter Story's content
+ * API). Other brands' roundups draw on their own videos only, and the template
+ * editor hides the case-study story option for them.
+ */
+const CASE_STUDY_BRANDS = new Set(["starter-story"]);
+export function brandHasCaseStudies(brand: string): boolean {
+  return CASE_STUDY_BRANDS.has(brand);
 }
 
 /**
@@ -73,7 +74,6 @@ const FORMAT_CONFIG: Record<string, NewsletterFormatConfig> = {
     kind: "roundup",
     schedule: { group: "sunday-breakfast", days: [0], primary: true },
     promo: { projectGid: STARTER_STORY_PROMO_PROJECT, section: "Native Ad", label: "The Special", onMiss: "agent" },
-    storyPlan: { leadVideos: ["orange_juice", "coffee"], flex: ["eggs", "toast", "pancakes"] },
   },
   "how-to newsletter - futurepedia (pilot)": {
     kind: "single_video",
@@ -120,4 +120,19 @@ export function upcomingSendDates(days: number[], horizonDays: number, now: Date
     if (days.includes(d.getUTCDay())) out.push(d.toISOString().slice(0, 10));
   }
   return out;
+}
+
+/**
+ * single_video formats: where each issue's one video comes from, in words for
+ * the template editor (the slots sweep deals it; the issue's video picker
+ * overrides it). Null for roundups.
+ */
+export function singleVideoSourceNote(formatName: string): string | null {
+  const c = formatConfigFor(formatName);
+  if (c.kind !== "single_video") return null;
+  const handles = c.schedule
+    ? groupFormatNames(c.schedule.group).map((n) => FORMAT_CONFIG[n].sourceAccountHandle).filter(Boolean)
+    : [c.sourceAccountHandle].filter(Boolean);
+  const from = handles.length ? handles.map((h) => `@${h}`).join(" or ") : "this format's channel";
+  return `Each issue is written from ONE video: by default the newest published long-form video from ${from} that no other issue is using (switch it in the issue's video picker). Sections don't pick their own stories; the voice and rules come from the format's Skill and each section's instructions.`;
 }

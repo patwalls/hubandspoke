@@ -105,8 +105,8 @@ export async function runNewsletterDraft(
     const sponsored = special?.ok ? special : null;
     // The suggested lineup (a hint for the agent; a content-API hiccup just drops it).
     const storyPlan =
-      !video && config.storyPlan
-        ? await buildStoryPlan({ brand: row.brand, window: { start: row.windowStart, end: row.windowEnd }, cfg: config.storyPlan, blocked }).catch(
+      !video
+        ? await buildStoryPlan({ brand: row.brand, window: { start: row.windowStart, end: row.windowEnd }, template, blocked }).catch(
             (err) => (opts.log?.(`newsletter-draft: story plan skipped (${(err as Error).message})`), null),
           )
         : null;

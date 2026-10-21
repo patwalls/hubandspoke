@@ -23,6 +23,7 @@ import { z } from "zod";
 import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
 import { listLeadMagnets } from "@/lib/services/starter-story-content";
 import { describeStoryPlan, newStoryGuidance, type StoryPlan } from "./story-plan";
+import { brandHasCaseStudies } from "./format-config";
 import { getVideoTranscript, listOlderVideos, listRecentCaseStudies, listRecentVideos, searchCaseStudies, type PastIssue } from "./sources";
 import { caseStudyKey, EVERGREEN_MIN_DAYS, isEvergreenOk, RECENT_BLOCK_DAYS, type StoryUsage } from "./usage";
 import { SPECIAL_MARKER } from "./special-compose";
@@ -135,6 +136,14 @@ const SOURCE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     max_uses: 12,
   },
 ];
+
+/** Tools that read Starter Story's site / APIs (case studies, lead magnets, page fetches). */
+const STARTER_STORY_TOOLS = new Set(["list_recent_case_studies", "search_case_studies", "list_lead_magnets", "web_fetch"]);
+
+/** The source tools for a brand: brands without case studies get their own videos only. */
+export function sourceToolsFor(brand: string): Anthropic.Beta.BetaToolUnion[] {
+  return brandHasCaseStudies(brand) ? SOURCE_TOOLS : SOURCE_TOOLS.filter((t) => !("name" in t && STARTER_STORY_TOOLS.has(t.name)));
+}
 
 const SOURCES_SCHEMA = {
   type: "array",
@@ -294,7 +303,9 @@ function buildSystem(args: NewsletterAgentArgs): Anthropic.Beta.BetaTextBlockPar
       : [
           `You write the ${args.brandLabel} newsletter "${args.formatName}".`,
           "You draft one complete issue that an editor will review, then send from their email tool.",
-          "Gather your own material with the tools: the brand's videos published in the window (read the transcripts of the ones you use) and recent case studies on starterstory.com (read the full page with web_fetch before writing about one). Never invent facts, numbers, quotes or links — everything in the issue must come from a transcript, a fetched page, or the lead-magnet list.",
+          brandHasCaseStudies(args.brand)
+            ? "Gather your own material with the tools: the brand's videos published in the window (read the transcripts of the ones you use) and recent case studies on starterstory.com (read the full page with web_fetch before writing about one). Never invent facts, numbers, quotes or links — everything in the issue must come from a transcript, a fetched page, or the lead-magnet list."
+            : "Gather your own material with the tools: the brand's videos published in the window (read the transcripts of the ones you use). Never invent facts, numbers, quotes or links — everything in the issue must come from a transcript.",
           "Follow the format Skill below exactly when it says how far back to look, what to include, length and CTA rules. Where the Skill is silent, match the past issues.",
           "Write in Markdown. Link every video and case study you mention with its real URL.",
         ]
@@ -419,7 +430,7 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
     );
   } else {
     parts.push(
-      `Draft the next "${args.formatName}" issue. Today is ${today}.${sendLine} The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${today}. Case studies are listed at ${CASE_STUDY_SITE}.`,
+      `Draft the next "${args.formatName}" issue. Today is ${today}.${sendLine} The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${today}.${brandHasCaseStudies(args.brand) ? ` Case studies are listed at ${CASE_STUDY_SITE}.` : ""}`,
     );
   }
   if (args.template) parts.push(describeTemplate(args.template, sponsorSupplied));
@@ -584,7 +595,7 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
   const r = await runLoop<NewsletterSubmission>({
     args,
     firstUserTurn: buildUserTurn(args),
-    tools: args.video ? [submit] : [...SOURCE_TOOLS, submit],
+    tools: args.video ? [submit] : [...sourceToolsFor(args.brand), submit],
     // (SOURCE_TOOLS includes the older-story tools; their results honor args.usage / args.blocked.)
     submitTool: "submit_newsletter",
     accept: (input) => {
@@ -641,7 +652,7 @@ export async function regenerateSection(
   const r = await runLoop<{ markdown: string; source: SourceInputT | null }>({
     args,
     firstUserTurn: [args.video ? null : STORY_RULES, turn].filter(Boolean).join("\n\n"),
-    tools: args.video ? [SUBMIT_SECTION_TOOL] : [...SOURCE_TOOLS, SUBMIT_SECTION_TOOL],
+    tools: args.video ? [SUBMIT_SECTION_TOOL] : [...sourceToolsFor(args.brand), SUBMIT_SECTION_TOOL],
     submitTool: "submit_section",
     accept: (input) => {
       const parsed = SubmitSectionInput.safeParse(input);

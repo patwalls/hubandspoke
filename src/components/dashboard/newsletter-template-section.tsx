@@ -16,13 +16,22 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { EmailPreview } from "@/components/dashboard/email-preview";
-import type { NewsletterTemplate, NewsletterTemplateSection } from "@/lib/newsletter-template";
+import { STORY_KIND_LABELS, STORY_KINDS, type NewsletterTemplate, type NewsletterTemplateSection, type StoryKind } from "@/lib/newsletter-template";
+
+/** Story settings context from the template API. */
+interface StoryContext {
+  /** One-video formats: where each issue's video comes from (sections don't pick stories). */
+  singleVideoNote: string | null;
+  /** The brand has case studies to draw on (Starter Story). */
+  caseStudies: boolean;
+}
 
 export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
   const flags = useFeatureFlags();
   const enabled = !!flags?.newsletterDrafter;
   const [template, setTemplate] = useState<NewsletterTemplate | null>(null);
   const [isDefault, setIsDefault] = useState(true);
+  const [storyCtx, setStoryCtx] = useState<StoryContext>({ singleVideoNote: null, caseStudies: false });
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -30,11 +39,12 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
     if (!enabled) return;
     let cancelled = false;
     fetch(`/api/formats/${formatId}/newsletter-template`)
-      .then((r) => (r.ok ? (r.json() as Promise<{ template: NewsletterTemplate | null; isDefault: boolean }>) : null))
+      .then((r) => (r.ok ? (r.json() as Promise<{ template: NewsletterTemplate | null; isDefault: boolean } & StoryContext>) : null))
       .then((j) => {
         if (cancelled || !j) return;
         setTemplate(j.template);
         setIsDefault(j.isDefault);
+        setStoryCtx({ singleVideoNote: j.singleVideoNote, caseStudies: j.caseStudies });
       });
     return () => {
       cancelled = true;
@@ -95,6 +105,7 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
         <TemplateEditorDialog
           formatId={formatId}
           initial={template}
+          storyCtx={storyCtx}
           onClose={() => setEditing(false)}
           onSaved={(t) => {
             setTemplate(t);
@@ -125,11 +136,13 @@ function ColorField({ label, value, onChange, allowNone }: { label: string; valu
 function TemplateEditorDialog({
   formatId,
   initial,
+  storyCtx,
   onClose,
   onSaved,
 }: {
   formatId: string;
   initial: NewsletterTemplate;
+  storyCtx: StoryContext;
   onClose: () => void;
   onSaved: (t: NewsletterTemplate) => void;
 }) {
@@ -213,6 +226,10 @@ function TemplateEditorDialog({
 
             <section className="flex flex-col gap-2">
               <span className="text-sm font-medium">Sections</span>
+              <p className="rounded-md bg-muted/60 p-2 text-xs text-muted-foreground">
+                {storyCtx.singleVideoNote ??
+                  "Each section's Story setting says where the drafter looks for it (this week's newest videos, case studies, a recent video…); its instructions say what to pick and how to write it. It's the usual shape, not a quota, and a story this newsletter ran in the last 3 weeks is never reused."}
+              </p>
               {t.sections.map((sec, i) => (
                 <div key={i} className="rounded-md border">
                   <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm" onClick={() => setOpen(open === i ? null : i)}>
@@ -220,6 +237,9 @@ function TemplateEditorDialog({
                     {sec.pillColor && <span className="size-3 rounded-sm" style={{ background: sec.pillColor }} />}
                     <span className="flex-1 truncate">{sec.heading || <span className="text-muted-foreground">{sec.key.replace(/_/g, " ")} (no heading)</span>}</span>
                     {sec.kind === "sponsor" && <span className="rounded bg-amber-100 px-1.5 text-[10px] font-medium text-amber-800">Sponsor</span>}
+                    {!storyCtx.singleVideoNote && sec.kind !== "sponsor" && sec.story && sec.story !== "none" && (
+                      <span className="rounded bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">{STORY_KIND_LABELS[sec.story]}</span>
+                    )}
                   </button>
                   {open === i && (
                     <div className="flex flex-col gap-2 border-t px-3 py-3">
@@ -247,10 +267,26 @@ function TemplateEditorDialog({
                           </select>
                         </label>
                       </div>
+                      {!storyCtx.singleVideoNote && sec.kind !== "sponsor" && (
+                        <label className="flex flex-col gap-1 text-xs">
+                          <span className="text-muted-foreground">Story (where the drafter looks)</span>
+                          <select
+                            className="h-8 rounded-md border border-input bg-background px-1 text-xs"
+                            value={sec.story ?? "none"}
+                            onChange={(e) => setSec(i, { story: e.target.value as StoryKind })}
+                          >
+                            {STORY_KINDS.filter((k) => storyCtx.caseStudies || (k !== "case_study" && k !== "any")).map((k) => (
+                              <option key={k} value={k}>
+                                {STORY_KIND_LABELS[k]}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                       <ColorField label="Heading pill" value={sec.pillColor} allowNone onChange={(v) => setSec(i, { pillColor: v })} />
                       <ColorField label="Content box" value={sec.boxColor} allowNone onChange={(v) => setSec(i, { boxColor: v })} />
                       <label className="flex flex-col gap-1 text-xs">
-                        <span className="text-muted-foreground">What the drafter writes here</span>
+                        <span className="text-muted-foreground">Instructions: what the drafter picks and writes here</span>
                         <Textarea className="min-h-20 text-xs" value={sec.hint} onChange={(e) => setSec(i, { hint: e.target.value })} />
                       </label>
                       <div className="flex items-center gap-1">

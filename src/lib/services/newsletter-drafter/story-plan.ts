@@ -1,20 +1,26 @@
-// The usual story lineup for a roundup, worked out in code and handed to the
-// agent as a SUGGESTION (2026-10-21's first live Sunday Breakfast had five
-// videos, three from 2025, while two case studies from that week sat unused —
-// the agent never saw them side by side). Not enforced: the editor wants
-// "the general shape when those stories are available", not a quota.
+// The usual story lineup for a roundup, built from each template section's
+// `story` setting (Edit template → "Story") and handed to the agent as a
+// SUGGESTION. The template decides WHERE the drafter looks for each section;
+// the section's instructions (`hint`) and the format Skill decide WHAT it picks
+// and how it writes it. Only the no-repeat rule is enforced (agent.ts).
 //
-// Sunday Breakfast's usual shape (Sam 2026-10-21):
-//   - lead sections (Orange Juice, Coffee) = the two newest videos published
-//     that week, newest first; when the week is short, the newest recent ones
-//   - flex sections (Eggs, Toast, Pancakes) = that week's case studies, newest
-//     first (widened to 14 days, as the Skill says, when short); then another
-//     recently published video that still fits
-// Blocked stories (run in the last RECENT_BLOCK_DAYS) never enter the plan
-// (the no-repeat rule itself IS enforced, in agent.ts). The plan goes into the
-// agent's first turn; Find new story uses `newStoryGuidance`.
+// Why: 2026-10-21's first live Sunday Breakfast ran five videos, three from
+// 2025, while two case studies from that week sat unused — the agent never saw
+// the week's stories side by side. Sam: a suggestion "if those stories are
+// available", not a quota.
+//
+// Story kinds (STORY_KINDS in newsletter-template.ts):
+//   newest_video  the window's newest unused videos, dealt in section order
+//                 (topped up with the newest from the last 30 days)
+//   recent_video  another recent video
+//   case_study    the window's case studies newest first (widened to 14 days
+//                 when short), else a recent video — brands with case studies only
+//   any           a video or a case study, the drafter's pick
+//   none / unset  no story (intro, sign-off, sponsor)
+// Blocked stories (run in the last RECENT_BLOCK_DAYS) never enter the plan.
 
-import type { StoryPlanConfig } from "./format-config";
+import type { NewsletterTemplate, StoryKind } from "@/lib/newsletter-template";
+import { brandHasCaseStudies } from "./format-config";
 import { listRecentCaseStudies, listRecentVideos } from "./sources";
 import { caseStudyKey } from "./usage";
 import type { DraftWindow } from "./window";
@@ -22,7 +28,7 @@ import type { DraftWindow } from "./window";
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** "Recent" for a fallback video: published within this many days of the window's end. */
 export const RECENT_VIDEO_DAYS = 30;
-/** Case studies widen to this lookback when the window has fewer than the flex sections need. */
+/** Case studies widen to this lookback when the window has fewer than the sections need. */
 export const CASE_STUDY_WIDEN_DAYS = 14;
 
 export interface PlannedStory {
@@ -34,23 +40,36 @@ export interface PlannedStory {
   productionItemId?: string;
 }
 
+export interface PlannedSection {
+  sectionKey: string;
+  story: StoryKind;
+  /** The suggested pick, when the plan has one. */
+  pick: PlannedStory | null;
+}
+
 export interface StoryPlan {
-  lead: { sectionKey: string; story: PlannedStory | null }[];
-  flexKeys: string[];
+  sections: PlannedSection[];
   /** Usable case studies, newest first. */
   caseStudies: PlannedStory[];
-  /** Usable recent videos not given a lead section, newest first. */
+  /** Usable recent videos, newest first (this week's first). */
   videos: PlannedStory[];
+}
+
+/** Sections with a story setting, in template order. Pure; exported for tests. */
+export function storySections(template: NewsletterTemplate | null | undefined): { key: string; story: StoryKind }[] {
+  return (template?.sections ?? [])
+    .filter((s) => s.kind !== "sponsor" && s.story && s.story !== "none")
+    .map((s) => ({ key: s.key, story: s.story! }));
 }
 
 const byNewest = (a: PlannedStory, b: PlannedStory) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? "");
 
 /**
- * Assign stories to sections. Pure; exported for tests. `weekVideos` are the
- * window's videos, `recentVideos` the last RECENT_VIDEO_DAYS (may overlap).
+ * Deal stories to sections. Pure; exported for tests. `weekVideos` = the
+ * window's videos, `recentVideos` = the last RECENT_VIDEO_DAYS (may overlap).
  */
 export function planStories(
-  cfg: StoryPlanConfig,
+  sections: { key: string; story: StoryKind }[],
   input: { weekVideos: PlannedStory[]; recentVideos: PlannedStory[]; caseStudies: PlannedStory[]; blocked?: Set<string> },
 ): StoryPlan {
   const ok = (s: PlannedStory) => !input.blocked?.has(s.key);
@@ -61,29 +80,43 @@ export function planStories(
       seen.add(s.key);
       return true;
     });
-  // This week's first (newest first), then the newest recent ones.
-  const leadPool = [...uniq([...input.weekVideos].sort(byNewest)), ...uniq([...input.recentVideos].sort(byNewest))];
-  const lead = cfg.leadVideos.map((sectionKey, i) => ({ sectionKey, story: leadPool[i] ?? null }));
-  const caseSeen = new Set<string>();
-  const caseStudies = [...input.caseStudies]
-    .filter((c) => ok(c) && !caseSeen.has(c.key) && caseSeen.add(c.key))
-    .sort(byNewest);
-  return { lead, flexKeys: cfg.flex, caseStudies, videos: leadPool.slice(cfg.leadVideos.length) };
+  const videos = [...uniq([...input.weekVideos].sort(byNewest)), ...uniq([...input.recentVideos].sort(byNewest))];
+  const caseStudies = uniq([...input.caseStudies]).sort(byNewest);
+
+  const used = new Set<string>();
+  const next = (list: PlannedStory[]) => {
+    const s = list.find((x) => !used.has(x.key)) ?? null;
+    if (s) used.add(s.key);
+    return s;
+  };
+  // Newest-video sections first, so a later "recent video" fallback can't take the week's newest.
+  const picks = new Map<string, PlannedStory | null>();
+  for (const s of sections) if (s.story === "newest_video") picks.set(s.key, next(videos));
+  for (const s of sections) if (s.story === "case_study") picks.set(s.key, next(caseStudies) ?? next(videos));
+  for (const s of sections) if (s.story === "recent_video") picks.set(s.key, next(videos));
+  return {
+    sections: sections.map((s) => ({ sectionKey: s.key, story: s.story, pick: picks.get(s.key) ?? null })),
+    caseStudies,
+    videos,
+  };
 }
 
-/** Fetch the candidates and plan them. One DB query per lookback + one content-API call per lookback. */
+/** Fetch the candidates for the template's story settings and plan them. Null when no section has one. */
 export async function buildStoryPlan(args: {
   brand: string;
   window: DraftWindow;
-  cfg: StoryPlanConfig;
+  template: NewsletterTemplate | null | undefined;
   blocked?: Set<string>;
-}): Promise<StoryPlan> {
+}): Promise<StoryPlan | null> {
+  const sections = storySections(args.template);
+  if (!sections.length) return null;
   const end = args.window.end;
+  const wantsCases = brandHasCaseStudies(args.brand) && sections.some((s) => s.story === "case_study" || s.story === "any");
   const recentWindow = { start: new Date(end.getTime() - RECENT_VIDEO_DAYS * DAY_MS), end };
   const [week, recent, cases] = await Promise.all([
     listRecentVideos(args.brand, args.window),
     listRecentVideos(args.brand, recentWindow),
-    listRecentCaseStudies(args.window),
+    wantsCases ? listRecentCaseStudies(args.window) : Promise.resolve([]),
   ]);
   const toVideo = (v: (typeof week)[number]): PlannedStory => ({
     kind: "video",
@@ -98,81 +131,82 @@ export async function buildStoryPlan(args: {
     return key ? { kind: "case_study", key, title: c.title, url: c.url, publishedAt: c.publishedAt } : null;
   };
   let caseStudies = cases.map(toCase).filter((c): c is PlannedStory => !!c);
-  if (caseStudies.filter((c) => !args.blocked?.has(c.key)).length < args.cfg.flex.length) {
+  const caseSlots = sections.filter((s) => s.story === "case_study").length;
+  if (wantsCases && caseStudies.filter((c) => !args.blocked?.has(c.key)).length < caseSlots) {
     const wide = await listRecentCaseStudies({ start: new Date(end.getTime() - CASE_STUDY_WIDEN_DAYS * DAY_MS), end });
     caseStudies = wide.map(toCase).filter((c): c is PlannedStory => !!c);
   }
-  return planStories(args.cfg, { weekVideos: week.map(toVideo), recentVideos: recent.map(toVideo), caseStudies, blocked: args.blocked });
+  return planStories(sections, { weekVideos: week.map(toVideo), recentVideos: recent.map(toVideo), caseStudies, blocked: args.blocked });
 }
 
 function line(s: PlannedStory): string {
   const id = s.productionItemId ? `production_item_id ${s.productionItemId}, ` : "";
-  return `"${s.title ?? "Untitled"}" (${id}published ${s.publishedAt?.slice(0, 10) ?? "unknown"}, ${s.url ?? "no URL"})`;
+  return `"${s.title ?? "Untitled"}" (${s.kind === "video" ? "video" : "case study"}, ${id}published ${s.publishedAt?.slice(0, 10) ?? "unknown"}, ${s.url ?? "no URL"})`;
 }
 
-/** The plan block of the agent's first turn. Pure; exported for tests. */
+const USUALLY: Record<StoryKind, string> = {
+  newest_video: "usually the week's newest video",
+  recent_video: "usually a recent video",
+  case_study: "usually a case study (else a recent video)",
+  any: "a video or a case study, your pick",
+  none: "",
+};
+
+/** The lineup block of the agent's first turn. Pure; exported for tests. */
 export function describeStoryPlan(plan: StoryPlan): string {
   const out = [
-    "SUGGESTED STORY LINEUP (the usual shape of this newsletter when these stories are available — a starting point, not a quota; use your judgment and swap in whatever makes the stronger issue, as long as the story rules hold):",
+    "SUGGESTED STORY LINEUP (from the issue template: the usual shape of this newsletter when these stories are available — a starting point, not a quota; use your judgment and the section instructions, and swap in whatever makes the stronger issue, as long as the story rules hold):",
   ];
-  for (const { sectionKey, story } of plan.lead) {
-    out.push(
-      story
-        ? `- "${sectionKey}": usually the newest video — ${line(story)}.`
-        : `- "${sectionKey}": no recent video is free — pick the best one from list_older_videos.`,
-    );
+  for (const s of plan.sections) {
+    const tail = s.pick ? ` — suggested: ${line(s.pick)}` : s.story === "any" ? "" : " — nothing recent is free; see the tools";
+    out.push(`- "${s.sectionKey}": ${USUALLY[s.story]}${tail}.`);
   }
-  const n = Math.min(plan.flexKeys.length, plan.caseStudies.length);
-  const flex = plan.flexKeys.map((k) => `"${k}"`).join(", ");
-  if (plan.caseStudies.length) {
-    out.push(
-      `- ${flex}: usually this week's case studies, newest first (web_fetch one before writing about it):\n${plan.caseStudies
-        .slice(0, plan.flexKeys.length + 3)
-        .map((c, i) => `  ${i + 1}. ${line(c)}`)
-        .join("\n")}`,
-    );
-  }
-  if (n < plan.flexKeys.length) {
-    out.push(
-      plan.videos.length
-        ? `- ${n ? `Otherwise` : flex + ":"} a recently published video that still fits the issue, e.g.:\n${plan.videos
-            .slice(0, 6)
-            .map((v) => `  - ${line(v)}`)
-            .join("\n")}`
-        : `- ${n ? "Otherwise" : flex + ":"} no recent video is free — search_case_studies or list_older_videos.`,
-    );
-  }
-  out.push("- Prefer this lineup's recent stories over older ones from list_older_videos. Set each section's source to the story it covers.");
+  const picked = new Set(plan.sections.map((s) => s.pick?.key).filter(Boolean));
+  const extraCases = plan.caseStudies.filter((c) => !picked.has(c.key));
+  const extraVideos = plan.videos.filter((v) => !picked.has(v.key));
+  if (extraCases.length) out.push(`Other usable case studies, newest first:\n${extraCases.slice(0, 5).map((c) => `  - ${line(c)}`).join("\n")}`);
+  if (extraVideos.length) out.push(`Other usable recent videos, newest first:\n${extraVideos.slice(0, 5).map((v) => `  - ${line(v)}`).join("\n")}`);
+  out.push("Prefer these recent stories over older ones from list_older_videos. web_fetch a case study before writing about it. Set each section's source to the story it covers.");
   return out.join("\n");
 }
 
-/** Find new story: where to look for this section's replacement. Pure; exported for tests. */
+/** Find new story: where to look for this section's replacement, from its story setting. Pure; exported for tests. */
 export function newStoryGuidance(plan: StoryPlan, sectionKey: string, exclude: Set<string>): string | null {
-  const free = (list: PlannedStory[]) => list.filter((s) => !exclude.has(s.key));
-  const leadVideos = plan.lead.map((l) => l.story).filter((s): s is PlannedStory => !!s);
-  if (plan.lead.some((l) => l.sectionKey === sectionKey)) {
-    const videos = free([...leadVideos, ...plan.videos]);
-    return videos.length
-      ? `This section usually features a video: suggestions, newest first:\n${videos.slice(0, 6).map((v) => `- ${line(v)}`).join("\n")}`
-      : "This section usually features a video; no recent one is free — try list_older_videos.";
+  const sec = plan.sections.find((s) => s.sectionKey === sectionKey);
+  if (!sec) return null;
+  const list = (items: PlannedStory[]) =>
+    items
+      .filter((s) => !exclude.has(s.key))
+      .slice(0, 6)
+      .map((s) => `- ${line(s)}`)
+      .join("\n");
+  const videos = list(plan.videos);
+  const cases = list(plan.caseStudies);
+  switch (sec.story) {
+    case "newest_video":
+    case "recent_video":
+      return videos
+        ? `This section usually features a video. Suggestions, newest first:\n${videos}`
+        : "This section usually features a video; no recent one is free — try list_older_videos.";
+    case "case_study":
+      if (cases) return `This section usually features a case study. Suggestions, newest first (or a recent video if it fits better):\n${cases}`;
+      return videos
+        ? `No unused recent case study is left. Suggestions — a recent video that fits the issue:\n${videos}\nor search_case_studies for an older case study.`
+        : "No unused recent story is left: try search_case_studies, then list_older_videos.";
+    case "any":
+      return (
+        [cases && `Case studies:\n${cases}`, videos && `Videos:\n${videos}`].filter(Boolean).join("\n") ||
+        "Nothing recent is free: try search_case_studies or list_older_videos."
+      );
+    default:
+      return null;
   }
-  if (plan.flexKeys.includes(sectionKey)) {
-    const cases = free(plan.caseStudies);
-    const videos = free(plan.videos);
-    if (cases.length) return `This section usually features a case study when one is available: suggestions, newest first (web_fetch it before writing), or a recent video if it fits better:\n${cases.slice(0, 6).map((c) => `- ${line(c)}`).join("\n")}`;
-    return videos.length
-      ? `No unused recent case study is left: suggestions are a recently published video that fits the issue:\n${videos.slice(0, 6).map((v) => `- ${line(v)}`).join("\n")}\nor search_case_studies for an older case study.`
-      : "No unused recent story is left: try search_case_studies, then list_older_videos.";
-  }
-  return null;
 }
 
 /** Stamp publish dates the plan knows onto sections' sources (case studies have no date in our DB). Pure; exported for tests. */
 export function withPlanDates<T extends { source?: { key: string; publishedAt?: string | null } | null }>(sections: T[], plan: StoryPlan | null): T[] {
   if (!plan) return sections;
-  const dates = new Map(
-    [...plan.lead.map((l) => l.story).filter((s): s is PlannedStory => !!s), ...plan.caseStudies, ...plan.videos].map((s) => [s.key, s.publishedAt]),
-  );
+  const dates = new Map([...plan.caseStudies, ...plan.videos].map((s) => [s.key, s.publishedAt]));
   return sections.map((sec) =>
     sec.source && !sec.source.publishedAt && dates.get(sec.source.key) ? { ...sec, source: { ...sec.source, publishedAt: dates.get(sec.source.key) } } : sec,
   );

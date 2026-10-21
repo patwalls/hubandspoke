@@ -107,8 +107,8 @@ export async function regenerateDraftSection(
     const exclude = opts.newStory ? newStoryExclusions(row.sections, sectionKey) : null;
     // Find new story: the same suggested lineup as the draft, so the swap looks in the right place.
     const storyPlan =
-      exclude && !video && config.storyPlan
-        ? await buildStoryPlan({ brand: row.brand, window: { start: row.windowStart, end: row.windowEnd }, cfg: config.storyPlan, blocked }).catch(
+      exclude && !video
+        ? await buildStoryPlan({ brand: row.brand, window: { start: row.windowStart, end: row.windowEnd }, template, blocked }).catch(
             () => null,
           )
         : null;

@@ -4,6 +4,15 @@ import { requireFeature } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { formats } from "@/lib/db/schema";
 import { newsletterTemplateSchema, parseNewsletterTemplate, templateFor } from "@/lib/newsletter-template";
+import { brandHasCaseStudies, singleVideoSourceNote } from "@/lib/services/newsletter-drafter/format-config";
+
+/** What the editor needs for the Story settings: roundup vs one-video, and whether case studies exist for the brand. */
+function storyContext(f: { name: string; brand: string | null }) {
+  return {
+    singleVideoNote: singleVideoSourceNote(f.name),
+    caseStudies: brandHasCaseStudies(f.brand ?? ""),
+  };
+}
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -11,7 +20,7 @@ interface RouteContext {
 
 async function load(id: string) {
   const [f] = await db
-    .select({ name: formats.name, saved: formats.newsletterTemplate })
+    .select({ name: formats.name, brand: formats.brand, saved: formats.newsletterTemplate })
     .from(formats)
     .where(eq(formats.id, id))
     .limit(1);
@@ -25,7 +34,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const f = await load(id);
   if (!f) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({ template: templateFor(f.name, f.saved), isDefault: !parseNewsletterTemplate(f.saved) });
+  return NextResponse.json({ template: templateFor(f.name, f.saved), isDefault: !parseNewsletterTemplate(f.saved), ...storyContext(f) });
 }
 
 /** Save the format's template (validated). Applies to the next draft / section regenerate. */

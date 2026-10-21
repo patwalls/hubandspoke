@@ -32,6 +32,21 @@ export const styleSchema = z.object({
 });
 export type NewsletterStyle = z.infer<typeof styleSchema>;
 
+/**
+ * What kind of story a section features — where the drafter LOOKS for it
+ * (story-plan.ts builds the suggested lineup from these). The section's `hint`
+ * says what to pick among those and how to write it. A suggestion, not a quota.
+ */
+export const STORY_KINDS = ["none", "newest_video", "recent_video", "case_study", "any"] as const;
+export type StoryKind = (typeof STORY_KINDS)[number];
+export const STORY_KIND_LABELS: Record<StoryKind, string> = {
+  none: "No story (intro, sign-off…)",
+  newest_video: "Newest video of the week",
+  recent_video: "A recent video",
+  case_study: "Case study (else a recent video)",
+  any: "Video or case study",
+};
+
 export const sectionSchema = z.object({
   key: z
     .string()
@@ -43,6 +58,8 @@ export const sectionSchema = z.object({
   kind: z.enum(["text", "sponsor"]).default("text"),
   /** What goes in this section — read by the drafter. */
   hint: z.string().max(2000),
+  /** Roundups: what kind of story this section features (unset = none). */
+  story: z.enum(STORY_KINDS).optional(),
   /** Heading shown as a rounded colored pill (Sunday Breakfast's courses). Null = plain heading. */
   pillColor: color.nullable().default(null),
   /** Tinted box behind the section's content (e.g. the sponsor). */
@@ -111,11 +128,12 @@ const s = (
   key: string,
   heading: string | null,
   hint: string,
-  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor">> = {},
+  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story">> = {},
 ): NewsletterTemplateSection => ({
   key,
   heading,
   hint,
+  ...(extra.story ? { story: extra.story } : {}),
   headingLevel: extra.headingLevel ?? 2,
   kind: extra.kind ?? "text",
   pillColor: extra.pillColor ?? null,
@@ -155,14 +173,14 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
       emailName: "{brand} | Newsletter | {Month} {D}",
     },
     sections: [
-      s("intro", null, "'Hey!' then 3 to 8 short personal lines from Pat about his week, ending with 'Welcome to Sunday Breakfast!!' (or similar)."),
-      s("orange_juice", "The Orange Juice 🍊", `The week's flagship YouTube video. ${COURSE_HINT}`, { pillColor: "#fed7aa" }),
-      s("coffee", "The Coffee ☕", `A second video or a strong case study. ${COURSE_HINT}`, { pillColor: "#fae8ff" }),
+      s("intro", null, "'Hey!' then 3 to 8 short personal lines from Pat about his week, ending with 'Welcome to Sunday Breakfast!!' (or similar).", { story: "none" }),
+      s("orange_juice", "The Orange Juice 🍊", `The week's flagship YouTube video: the newest one published that week. ${COURSE_HINT}`, { pillColor: "#fed7aa", story: "newest_video" }),
+      s("coffee", "The Coffee ☕", `The week's second-newest video. ${COURSE_HINT}`, { pillColor: "#fae8ff", story: "newest_video" }),
       s("special", "The Special 🍽️", "The sponsored promo, or a lead magnet pitched like an ad when no sponsor is booked.", { kind: "sponsor", pillColor: "#fae8ff", boxColor: "#EBECFC" }),
-      s("eggs", "The Eggs 🍳", `A case study. ${COURSE_HINT}`, { pillColor: "#fef9c3" }),
-      s("toast", "The Toast 🍞", `A case study or video. ${COURSE_HINT}`, { pillColor: "#dcfce7" }),
-      s("pancakes", "The Pancakes 🥞", `A case study or video. ${COURSE_HINT}`, { pillColor: "#e0f2fe" }),
-      s("signoff", null, "'That's it!', a one-line weekend wish, then 'Pat' and 'Founder, StarterStory.com' on their own lines. No footer."),
+      s("eggs", "The Eggs 🍳", `The week's newest case study; if there isn't one, another recently published video that still fits. ${COURSE_HINT}`, { pillColor: "#fef9c3", story: "case_study" }),
+      s("toast", "The Toast 🍞", `Another of the week's case studies; else a recent video that still fits. ${COURSE_HINT}`, { pillColor: "#dcfce7", story: "case_study" }),
+      s("pancakes", "The Pancakes 🥞", `Another case study or recent video. A "same guy as before ^^^" follow-up to an earlier course is fine when it's true. ${COURSE_HINT}`, { pillColor: "#e0f2fe", story: "case_study" }),
+      s("signoff", null, "'That's it!', a one-line weekend wish, then 'Pat' and 'Founder, StarterStory.com' on their own lines. No footer.", { story: "none" }),
     ],
   },
   "daily seinfeld": {
