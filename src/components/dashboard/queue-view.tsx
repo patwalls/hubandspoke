@@ -44,6 +44,7 @@ export type QueueSource =
   | "cross_post"
   | "repost"
   | "history"
+  | "newsletters"
   | `clip:${string}`;
 
 export interface ClippableFormatTab {
@@ -78,6 +79,8 @@ const STATIC_SOURCE_TABS = [
   { value: "spoke" as const, label: "Repurposed", slug: "repurposed" },
   { value: "repurposed" as const, label: "Triggered", slug: "triggered" },
   // Per-clippable-format tabs get spliced in here at render time.
+  // Every newsletter idea (post_type newsletter) — not a clippable format; shown only when there are some.
+  { value: "newsletters" as const, label: "Newsletters", slug: "newsletters" },
   { value: "cross_post" as const, label: "Cross-post", slug: "cross-post" },
   { value: "repost" as const, label: "Repost", slug: "repost" },
   { value: "history" as const, label: "History", slug: "history" },
@@ -530,6 +533,7 @@ export function QueueView({
       cross_post: 0,
       repost: 0,
       history: 0,
+      newsletters: 0,
     };
     // One counter slot per dynamic clip-format tab.
     for (const f of clippableFormats) {
@@ -543,6 +547,7 @@ export function QueueView({
     }
     for (const item of baseFiltered) {
       counts.all += 1;
+      if (item.postType === "newsletter") counts.newsletters += 1;
       const source = item.sourceType ?? "original";
       if (source === "cross_post" || source === "repost") continue;
       // Repurposed rows fork on whether a clip-idea is attached:
@@ -578,6 +583,7 @@ export function QueueView({
 
   const filtered = baseFiltered.filter((item) => {
     if (selectedSource === "all") return true;
+    if (selectedSource === "newsletters") return item.postType === "newsletter";
     const source = item.sourceType ?? "original";
     // Triggered tab: repurposed rows without a clip-idea attached.
     if (selectedSource === "repurposed") {
@@ -643,6 +649,7 @@ export function QueueView({
         {sourceTabs.map((tab) => {
           const active = selectedSource === tab.value;
           const count = sourceCounts[tab.value] ?? 0;
+          if (tab.value === "newsletters" && count === 0 && !active) return null;
           const href = tab.slug
             ? `/${brand}/queue/${tab.slug}`
             : `/${brand}/queue`;

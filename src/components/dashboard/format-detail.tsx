@@ -239,6 +239,9 @@ function formatDate(d: string | null): string {
 const FORMAT_TAB_VALUES = ["details", "derivatives", "content"] as const;
 type FormatTab = (typeof FORMAT_TAB_VALUES)[number];
 
+
+/** Skills longer than this show in a scrollable box with an Expand button. */
+const SKILL_COLLAPSE_CHARS = 4000;
 export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -271,6 +274,8 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [editor, setEditor] = useState("");
   const [instructions, setInstructions] = useState("");
   const [preTemplateInstructions, setPreTemplateInstructions] = useState<string | null>(null);
+  // Long Skills (the Futurepedia Newsletter's is ~95k chars) show in a scrollable box until expanded.
+  const [skillExpanded, setSkillExpanded] = useState(false);
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
   const [isClippableFormat, setIsClippableFormat] = useState(false);
   const [labelsAsOriginal, setLabelsAsOriginal] = useState(false);
@@ -1671,8 +1676,13 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                 }}
                 rows={12}
                 placeholder="Teach Claude this format: what it is, why it works, how to pick the moment, what to avoid. Click &quot;Add template&quot; for the structure."
-                className="font-mono text-xs"
+                className={cn("font-mono text-xs", !skillExpanded && instructions.length > SKILL_COLLAPSE_CHARS && "max-h-80 overflow-y-auto")}
               />
+              {instructions.length > SKILL_COLLAPSE_CHARS && (
+                <button type="button" onClick={() => setSkillExpanded((v) => !v)} className="text-xs text-primary hover:underline">
+                  {skillExpanded ? "Collapse" : `Expand (${Math.round(instructions.length / 1000)}k characters)`}
+                </button>
+              )}
               <p className="text-xs text-muted-foreground">
                 A single skill definition. Claude reads it to generate clip ideas, run Descript edits, and write cross-post captions.
               </p>

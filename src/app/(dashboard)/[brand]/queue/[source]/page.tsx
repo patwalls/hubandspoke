@@ -19,6 +19,7 @@ const STATIC_SLUG_TO_SOURCE: Record<string, QueueSource> = {
   "cross-post": "cross_post",
   repost: "repost",
   history: "history",
+  newsletters: "newsletters",
 };
 
 const STATIC_SOURCE_LABEL: Record<string, string> = {
@@ -28,6 +29,7 @@ const STATIC_SOURCE_LABEL: Record<string, string> = {
   cross_post: "Cross-post",
   repost: "Repost",
   history: "History",
+  newsletters: "Newsletters",
 };
 
 export async function generateMetadata({
