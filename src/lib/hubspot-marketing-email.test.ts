@@ -23,9 +23,14 @@ describe("buildWidgets", () => {
     expect(Object.keys(out)).toHaveLength(4);
   });
 
-  it("fails loudly on a stale mapping: a missing block, or one that isn't rich text", () => {
+  it("fills a label module (Daily Seinfeld's Read Time) with plain text", () => {
+    const out = buildWidgets(email, { label: "<p>Read Time: 47 sec.</p>" }, null);
+    expect(out.label.body?.label_text).toBe("Read Time: 47 sec.");
+  });
+
+  it("fails loudly on a stale mapping: a missing block, or one that's neither rich text nor a label", () => {
     expect(() => buildWidgets(email, { gone: "<p>x</p>" }, null)).toThrow(/has no block gone/);
-    expect(() => buildWidgets(email, { label: "<p>x</p>" }, null)).toThrow(/isn't a rich-text block/);
+    expect(() => buildWidgets(email, { masthead: "<p>x</p>" }, null)).toThrow(/isn't a rich-text block or a label/);
   });
 });
 

@@ -10,21 +10,10 @@ import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { createDraftEmailFromTemplate } from "@/lib/hubspot-marketing-email";
 import { markdownToEmailHtml } from "@/lib/newsletter-email-html";
-import { blockMarkdown, templateFor } from "@/lib/newsletter-template";
+import { blockMarkdown, hubspotEmailName, templateFor } from "@/lib/newsletter-template";
 
 export interface HubspotNewsletterCreateDraftPayload {
   newsletterDraftId: string;
-}
-
-/**
- * The HubSpot email's name, matching the team's convention for issues built
- * by hand: "Starter Story | Newsletter | October 25" (the send date; today
- * when unset). Pure — exported for tests.
- */
-export function hubspotEmailName(brandLabel: string, sendDate: string | null, now: Date = new Date()): string {
-  const d = sendDate ? new Date(`${sendDate}T12:00:00Z`) : now;
-  const date = d.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
-  return `${brandLabel} | Newsletter | ${date}`;
 }
 
 export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers) => {
@@ -74,7 +63,7 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
   try {
     const email = await createDraftEmailFromTemplate({
       templateEmailId: template.hubspot.templateEmailId,
-      name: hubspotEmailName(row.brandLabel ?? row.brand, row.sendDate),
+      name: hubspotEmailName(template.hubspot.emailName, row.brandLabel ?? row.brand, row.sendDate),
       subject: row.subject,
       previewText: row.previewText,
       blockHtml,

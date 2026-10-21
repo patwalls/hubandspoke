@@ -58,8 +58,13 @@ export const sectionSchema = z.object({
  */
 export const hubspotMappingSchema = z.object({
   templateEmailId: z.string().regex(/^\d+$/, "the HubSpot email id (digits)"),
-  /** section key → HubSpot widget id of the rich-text block it fills. */
+  /** section key → HubSpot widget id of the block it fills (a rich-text block, or a label module like Daily Seinfeld's "Read Time"). */
   blocks: z.record(z.string(), z.string().min(1)),
+  /**
+   * The draft email's name in HubSpot. Tokens: {brand}, {Month} (October),
+   * {Mon} (Oct), {D} (25) — from the send date.
+   */
+  emailName: z.string().max(200).default("{brand} | Newsletter | {Month} {D}"),
 });
 export type HubspotMapping = z.infer<typeof hubspotMappingSchema>;
 
@@ -132,6 +137,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
         pancakes: "module_17900290904092",
         signoff: "module_17900290904092",
       },
+      emailName: "{brand} | Newsletter | {Month} {D}",
     },
     sections: [
       s("intro", null, "'Hey!' then 3 to 8 short personal lines from Pat about his week, ending with 'Welcome to Sunday Breakfast!!' (or similar)."),
@@ -147,9 +153,22 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   "daily seinfeld": {
     version: 1,
     style: { ...STARTER_STORY_STYLE, dividers: false },
-    hubspot: null,
+    // HubSpot account 20627419: "[TEMPLATE] Daily Seinfeld – Hub & Spoke (do
+    // not send)", a copy of the Oct 15 2026 issue. Block ids read off that email.
+    hubspot: {
+      templateEmailId: "225078360688",
+      blocks: {
+        read_time: "module_17873409641891",
+        hook: "module_17913969457581",
+        story: "module_17919070040741",
+        pitch: "module_17872589671611",
+      },
+      emailName: "{brand} | Daily | {Mon}. {D}",
+    },
     sections: [
-      s("story", null, "'Read time: N sec.' on the first line, then the one story or observation and its lesson, in short lines."),
+      s("read_time", null, "Exactly 'Read Time: N sec.' (or 'Read Time: 1 min. N sec.') for the whole email at ~200 words per minute. Nothing else."),
+      s("hook", null, "The opening: 2 to 6 short lines that set up the one story or observation (a founder, a message, a number, a contrarian claim)."),
+      s("story", null, "The heart of it in short lines: the story and its one lesson (ship fast, simplicity wins, distribution matters…)."),
       s("pitch", null, "The pivot from the lesson to the offer from the editor's notes (or a CTA to the episode/case study when there is none), the CTA link, then '– Pat'. No footer."),
     ],
   },
@@ -288,4 +307,15 @@ export function blockMarkdown(
     out[block] = out[block] ? `${out[block]}\n\n${md}` : md;
   }
   return out;
+}
+
+/** The HubSpot email name from the mapping's pattern + the send date (today when unset). Pure. */
+export function hubspotEmailName(pattern: string, brandLabel: string, sendDate: string | null, now: Date = new Date()): string {
+  const d = sendDate ? new Date(`${sendDate}T12:00:00Z`) : now;
+  const fmt = (o: Intl.DateTimeFormatOptions) => d.toLocaleDateString("en-US", { ...o, timeZone: "UTC" });
+  return pattern
+    .replace(/\{brand\}/g, brandLabel)
+    .replace(/\{Month\}/g, fmt({ month: "long" }))
+    .replace(/\{Mon\}/g, fmt({ month: "short" }))
+    .replace(/\{D\}/g, String(d.getUTCDate()));
 }

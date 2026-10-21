@@ -85,7 +85,7 @@ async function hubspotFetch<T>(path: string, init: { method: "GET" | "POST" | "P
 }
 
 interface Widget {
-  body?: { html?: string; path?: string; value?: string; [k: string]: unknown };
+  body?: { html?: string; path?: string; value?: string; label_text?: string; [k: string]: unknown };
   [k: string]: unknown;
 }
 export interface HubspotEmail {
@@ -103,6 +103,19 @@ export interface HubspotEmail {
  * rich-text block, so a stale mapping fails loudly instead of producing a
  * half-filled email. Pure — exported for tests.
  */
+/** Strip tags + decode the few entities markdownToEmailHtml emits (for label modules). */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function buildWidgets(
   email: HubspotEmail,
   blockHtml: Record<string, string>,
@@ -112,8 +125,14 @@ export function buildWidgets(
   for (const [id, html] of Object.entries(blockHtml)) {
     const w = widgets[id];
     if (!w) throw new HubspotEmailError(422, `template email ${email.id} has no block ${id} — update the format's HubSpot mapping`);
-    if (w.body?.path !== "@hubspot/rich_text") throw new HubspotEmailError(422, `block ${id} in template email ${email.id} isn't a rich-text block`);
-    widgets[id] = { ...w, body: { ...w.body, html } };
+    if (w.body?.path === "@hubspot/rich_text") {
+      widgets[id] = { ...w, body: { ...w.body, html } };
+    } else if (typeof w.body?.label_text === "string") {
+      // A label module (Daily Seinfeld's "Read Time"): plain text only.
+      widgets[id] = { ...w, body: { ...w.body, label_text: htmlToText(html) } };
+    } else {
+      throw new HubspotEmailError(422, `block ${id} in template email ${email.id} isn't a rich-text block or a label`);
+    }
   }
   if (previewText !== null && widgets.preview_text) {
     widgets.preview_text = { ...widgets.preview_text, body: { ...widgets.preview_text.body, value: previewText } };
