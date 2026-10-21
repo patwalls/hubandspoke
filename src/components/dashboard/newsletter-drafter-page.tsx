@@ -77,23 +77,93 @@ function SponsorBadge({ row }: { row: BoardRow }) {
     );
   }
   if (row.specialError?.startsWith("No ")) return <span className="text-xs text-amber-700 dark:text-amber-300">No sponsor booked</span>;
-  return null;
+  return <span className="text-xs text-muted-foreground">—</span>;
 }
 
-function SlotCard({ row, onOpen }: { row: BoardRow; onOpen: () => void }) {
+function issueLine(row: BoardRow): { text: string; muted: boolean } {
+  if (row.subject) return { text: row.subject, muted: false };
+  if (row.sourceTitle) return { text: `Video: ${row.sourceTitle}`, muted: true };
+  return { text: row.status === "idea" ? "Not drafted yet" : "—", muted: true };
+}
+
+function ActionButton({ row, onOpen }: { row: BoardRow; onOpen: () => void }) {
+  const label = row.status === "idea" ? "Draft" : row.status === "failed" ? "Retry" : "Open";
   return (
-    <button type="button" onClick={onOpen} className="flex w-full flex-col gap-1.5 rounded-lg border bg-background p-3 text-left text-sm hover:border-primary hover:bg-muted/40">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">{row.formatName}</span>
-        <StatusChip row={row} />
+    <Button
+      size="xs"
+      variant={row.status === "idea" ? "default" : "outline"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen();
+      }}
+      title={row.status === "idea" ? "Drafts the issue (one Claude run)" : undefined}
+    >
+      {label}
+    </Button>
+  );
+}
+
+/** Queue-style list of newsletter issues, with a date header between days when `groupByDate`. */
+function IssueTable({ rows, onOpen, groupByDate }: { rows: BoardRow[]; onOpen: (id: string) => void; groupByDate: boolean }) {
+  const startsDay = rows.map((r, i) => groupByDate && (i === 0 || rows[i - 1].sendDate !== r.sendDate));
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[880px] table-fixed text-xs">
+          <colgroup>
+            <col className="w-[120px]" />
+            <col className="w-[230px]" />
+            <col />
+            <col className="w-[150px]" />
+            <col className="w-[120px]" />
+            <col className="w-[84px]" />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-border bg-accent/50 text-left text-muted-foreground">
+              <th className="px-3 py-2.5 font-medium">Send date</th>
+              <th className="px-3 py-2.5 font-medium">Newsletter</th>
+              <th className="px-3 py-2.5 font-medium">Issue</th>
+              <th className="px-3 py-2.5 font-medium">Sponsor</th>
+              <th className="px-3 py-2.5 font-medium">Status</th>
+              <th className="px-3 py-2.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => {
+              const header = startsDay[i];
+              const issue = issueLine(row);
+              return [
+                header ? (
+                  <tr key={`h-${row.sendDate}`} className="border-b border-border/50 bg-muted/30">
+                    <td colSpan={6} className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {fmtDate(row.sendDate)}
+                    </td>
+                  </tr>
+                ) : null,
+                <tr key={row.id} onClick={() => onOpen(row.id)} className="cursor-pointer border-b border-border/50 transition-colors hover:bg-accent/30">
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">{fmtDate(row.sendDate)}</td>
+                  <td className="truncate px-3 py-2 text-sm font-medium" title={row.formatName}>
+                    {row.formatName}
+                  </td>
+                  <td className={cn("truncate px-3 py-2 text-sm", issue.muted && "text-muted-foreground")} title={issue.text}>
+                    {issue.text}
+                  </td>
+                  <td className="px-3 py-2">
+                    <SponsorBadge row={row} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <StatusChip row={row} />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <ActionButton row={row} onOpen={() => onOpen(row.id)} />
+                  </td>
+                </tr>,
+              ];
+            })}
+          </tbody>
+        </table>
       </div>
-      {row.subject && <span className="line-clamp-2 text-muted-foreground">{row.subject}</span>}
-      {row.sourceTitle && <span className="line-clamp-1 text-xs text-muted-foreground">Video: {row.sourceTitle}</span>}
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-muted-foreground">{fmtDate(row.sendDate)}</span>
-        <SponsorBadge row={row} />
-      </div>
-    </button>
+    </div>
   );
 }
 
@@ -135,20 +205,13 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
     }
   }
 
-  // Group upcoming slots by send date.
-  const byDate = new Map<string, BoardRow[]>();
-  for (const r of upcoming ?? []) {
-    const k = r.sendDate ?? "";
-    byDate.set(k, [...(byDate.get(k) ?? []), r]);
-  }
-
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold">Newsletters</h1>
           <p className="text-sm text-muted-foreground">
-            The next two weeks of scheduled issues. Open one to draft it into its template, edit or regenerate any section, then
+            The next two weeks of scheduled issues. Draft one to write it into its template, edit or regenerate any section, then
             send it on to the email tool.
           </p>
         </div>
@@ -165,16 +228,7 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
       ) : upcoming.length === 0 ? (
         <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No scheduled newsletters for this brand.</p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[...byDate.entries()].map(([date, rows]) => (
-            <div key={date} className="flex flex-col gap-2">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{fmtDate(date)}</span>
-              {rows.map((r) => (
-                <SlotCard key={r.id} row={r} onOpen={() => setOpenId(r.id)} />
-              ))}
-            </div>
-          ))}
-        </div>
+        <IssueTable rows={upcoming} onOpen={setOpenId} groupByDate={false} />
       )}
 
       <OneOffDraft brand={brand} onCreated={(id) => { void load(); setOpenId(id); }} />
@@ -182,11 +236,7 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
       {past.length > 0 && (
         <div className="flex flex-col gap-2">
           <h2 className="text-sm font-medium text-muted-foreground">Past & one-off drafts</h2>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {past.map((r) => (
-              <SlotCard key={r.id} row={r} onOpen={() => setOpenId(r.id)} />
-            ))}
-          </div>
+          <IssueTable rows={past} onOpen={setOpenId} groupByDate={false} />
         </div>
       )}
 

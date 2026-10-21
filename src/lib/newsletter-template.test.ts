@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TEMPLATES, composeIssue, parseNewsletterTemplate, templateFor, type NewsletterTemplate } from "./newsletter-template";
+import { DEFAULT_TEMPLATES, composeIssue, parseNewsletterTemplate, styleSchema, templateFor, type NewsletterTemplate } from "./newsletter-template";
 
+const sec = (key: string, heading: string | null, extra: Partial<NewsletterTemplate["sections"][number]> = {}) => ({
+  key,
+  heading,
+  headingLevel: 2 as const,
+  kind: "text" as const,
+  hint: "",
+  pillColor: null,
+  boxColor: null,
+  ...extra,
+});
 const T: NewsletterTemplate = {
   version: 1,
-  sections: [
-    { key: "intro", heading: null, headingLevel: 2, kind: "text", hint: "" },
-    { key: "special", heading: "The Special 🍽️", headingLevel: 2, kind: "sponsor", hint: "" },
-    { key: "tips", heading: "Bonus Tips", headingLevel: 3, kind: "text", hint: "" },
-  ],
+  style: styleSchema.parse({}),
+  sections: [sec("intro", null), sec("special", "The Special 🍽️", { kind: "sponsor" }), sec("tips", "Bonus Tips", { headingLevel: 3 })],
 };
 
 describe("newsletter templates", () => {

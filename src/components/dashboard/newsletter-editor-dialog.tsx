@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
+import { EmailPreview } from "@/components/dashboard/email-preview";
 import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
 
 export interface EditorDraft {
@@ -417,32 +418,28 @@ function Workspace({
             )}
           </div>
 
-          <div className="min-h-0 overflow-y-auto bg-muted/40 p-5">
-            <div className="mx-auto max-w-[640px] rounded-lg border bg-background p-6 shadow-sm">
-              <div className="mb-4 border-b pb-3">
-                <div className="text-sm font-semibold">{subject || "(no subject)"}</div>
-                <div className="text-xs text-muted-foreground">{previewText}</div>
+          <div className="min-h-0 overflow-y-auto bg-muted/40">
+            {draft.template ? (
+              <>
+                <div className="mx-auto max-w-[640px] px-5 pt-5">
+                  <div className="rounded-t-lg border border-b-0 bg-background px-4 py-2">
+                    <div className="text-sm font-semibold">{subject || "(no subject)"}</div>
+                    <div className="text-xs text-muted-foreground">{previewText}</div>
+                  </div>
+                </div>
+                <EmailPreview
+                  template={draft.template}
+                  sections={sections}
+                  sponsor={specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null}
+                  />
+              </>
+            ) : (
+              <div className="mx-auto max-w-[640px] p-5">
+                <div className="rounded-lg border bg-background p-6 text-sm leading-relaxed shadow-sm">
+                  <ReactMarkdown>{preview}</ReactMarkdown>
+                </div>
               </div>
-              <div className="text-sm leading-relaxed">
-                <ReactMarkdown
-                  components={{
-                    h1: (p) => <h1 className="mb-3 mt-5 text-xl font-semibold" {...p} />,
-                    h2: (p) => <h2 className="mb-2 mt-5 text-lg font-semibold" {...p} />,
-                    h3: (p) => <h3 className="mb-2 mt-4 font-semibold" {...p} />,
-                    p: (p) => <p className="mb-3" {...p} />,
-                    ul: (p) => <ul className="mb-3 list-disc pl-5" {...p} />,
-                    ol: (p) => <ol className="mb-3 list-decimal pl-5" {...p} />,
-                    a: (p) => <a className="text-primary underline" target="_blank" rel="noreferrer" {...p} />,
-                    // eslint-disable-next-line @next/next/no-img-element
-                    img: (p) => <img className="my-3 w-full rounded" alt={p.alt ?? ""} src={typeof p.src === "string" ? p.src : undefined} />,
-                    blockquote: (p) => <blockquote className="mb-3 border-l-2 pl-3 text-muted-foreground" {...p} />,
-                    hr: () => <hr className="my-4" />,
-                  }}
-                >
-                  {preview}
-                </ReactMarkdown>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}

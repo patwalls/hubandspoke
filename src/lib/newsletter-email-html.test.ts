@@ -15,3 +15,39 @@ describe("markdownToEmailHtml", () => {
     expect(html).not.toContain("javascript:");
   });
 });
+
+describe("renderEmailHtml", () => {
+  // Imported lazily so the markdownToEmailHtml tests above stay independent.
+  it("renders the masthead, colored pill headings, the sponsor box with promo copy, and hints in template previews", async () => {
+    const { renderEmailHtml } = await import("./newsletter-email-html");
+    const { DEFAULT_TEMPLATES } = await import("./newsletter-template");
+    const t = DEFAULT_TEMPLATES["sunday breakfast"];
+    const html = renderEmailHtml({
+      template: t,
+      sections: [{ key: "orange_juice", markdown: "**[$50K/Month App](https://x.example)**" }],
+      sponsor: { copy: "Free CRM", landingUrl: "https://lp.example" },
+      subject: "Hi",
+      previewText: "Starter Story Sunday Breakfast",
+    });
+    expect(html).toContain(t.style.mastheadImageUrl!);
+    expect(html).toContain("background:#fed7aa"); // Orange Juice pill
+    expect(html).toContain("The Orange Juice 🍊");
+    expect(html).toContain("background:#EBECFC"); // sponsor box
+    expect(html).toContain("Free CRM");
+    expect(html).toContain('href="https://lp.example"');
+    expect(html).toContain("Starter Story Sunday Breakfast"); // hidden preheader
+    expect(html).not.toContain("The week's flagship YouTube video"); // no hints in a draft
+
+    const preview = renderEmailHtml({ template: t, sections: [], showHints: true });
+    expect(preview).toContain("flagship YouTube video"); // hint shown where content goes
+  });
+
+  it("escapes template text and drops raw HTML from section markdown", async () => {
+    const { renderEmailHtml } = await import("./newsletter-email-html");
+    const { DEFAULT_TEMPLATES } = await import("./newsletter-template");
+    const t = { ...DEFAULT_TEMPLATES["daily seinfeld"], sections: [{ ...DEFAULT_TEMPLATES["daily seinfeld"].sections[0], heading: "<b>x</b>" }] };
+    const html = renderEmailHtml({ template: t, sections: [{ key: "story", markdown: "<script>alert(1)</script> hi" }] });
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
+    expect(html).not.toContain("<script");
+  });
+});
